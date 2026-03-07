@@ -4,7 +4,7 @@ import sys
 sys.path.insert(0, os.path.abspath('../..'))
 
 project = 'PROTEA'
-copyright = '2024, frapercan'
+copyright = '2025, frapercan'
 author = 'frapercan'
 
 extensions = [
@@ -23,7 +23,7 @@ html_title = 'PROTEA'
 html_theme = 'shibuya'
 
 autodoc_mock_imports = [
-    'yaml', 'requests', 'sqlalchemy', 'alembic', 'fastapi', 'psycopg',
+    'yaml', 'pika',
 ]
 
 master_doc = 'index'

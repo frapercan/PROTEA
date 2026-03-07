@@ -14,15 +14,12 @@ if TYPE_CHECKING:
 
 
 class Protein(Base):
-    """
-    Production-grade Protein schema for the ingestion phase.
+    """One row per UniProt accession, including isoforms (``<canonical>-<n>``).
 
-    Key points:
-    - One row per UniProt accession (including isoforms like X6R8D5-2).
-    - Isoforms grouped by canonical_accession.
-    - MANY proteins can point to the SAME Sequence (sequence dedup).
-      => protein.sequence_id MUST NOT be UNIQUE.
-    - Optional metadata relationship is view-only and joins by canonical_accession.
+    Isoforms are grouped by ``canonical_accession``. Many proteins can share
+    the same ``Sequence`` row — ``sequence_id`` is deliberately non-unique.
+    The ``uniprot_metadata`` relationship is view-only, joined by
+    ``canonical_accession``.
     """
 
     __tablename__ = "protein"
