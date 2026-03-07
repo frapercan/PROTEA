@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
-import os
 import yaml
 
 
@@ -14,7 +14,7 @@ class Settings:
     amqp_url: str
 
 
-def _load_yaml(path: Path) -> Dict[str, Any]:
+def _load_yaml(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     with path.open("r", encoding="utf-8") as f:
@@ -34,8 +34,8 @@ def load_settings(project_root: Path, *, env_prefix: str = "PROTEA_") -> Setting
     system_path = project_root / "protea" / "config" / "system.yaml"
     system = _load_yaml(system_path)
 
-    file_db_url: Optional[str] = system.get("database", {}).get("url")
-    file_amqp_url: Optional[str] = system.get("queue", {}).get("amqp_url")
+    file_db_url: str | None = system.get("database", {}).get("url")
+    file_amqp_url: str | None = system.get("queue", {}).get("amqp_url")
 
     db_url = (
         os.getenv(f"{env_prefix}DB_URL")

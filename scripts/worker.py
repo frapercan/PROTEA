@@ -9,6 +9,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import logging
+import time
 from pathlib import Path
 
 from protea.core.contracts.registry import OperationRegistry
@@ -16,9 +18,11 @@ from protea.core.operations.fetch_uniprot_metadata import FetchUniProtMetadataOp
 from protea.core.operations.insert_proteins import InsertProteinsOperation
 from protea.core.operations.ping import PingOperation
 from protea.infrastructure.queue.consumer import QueueConsumer
-from protea.infrastructure.settings import load_settings
 from protea.infrastructure.session import build_session_factory
+from protea.infrastructure.settings import load_settings
 from protea.workers.base_worker import BaseWorker, WorkerConfig
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 
 def main() -> None:
@@ -46,9 +50,16 @@ def main() -> None:
         requeue_on_failure=args.requeue_on_failure,
     )
 
-    print(f"Worker started. Listening on queue: {args.queue}")
-    print("Press Ctrl+C to stop.")
-    consumer.run()
+    logging.info("Worker started. queue=%s", args.queue)
+    while True:
+        try:
+            consumer.run()
+        except KeyboardInterrupt:
+            logging.info("Worker stopped.")
+            break
+        except Exception as exc:
+            logging.error("Consumer crashed: %s — reconnecting in 5s", exc)
+            time.sleep(5)
 
 
 if __name__ == "__main__":

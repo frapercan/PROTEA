@@ -11,8 +11,8 @@ from protea.core.contracts.registry import OperationRegistry
 from protea.core.operations.fetch_uniprot_metadata import FetchUniProtMetadataOperation
 from protea.core.operations.insert_proteins import InsertProteinsOperation
 from protea.core.operations.ping import PingOperation
-from protea.infrastructure.settings import load_settings
 from protea.infrastructure.session import build_session_factory
+from protea.infrastructure.settings import load_settings
 from protea.workers.base_worker import BaseWorker, WorkerConfig
 
 

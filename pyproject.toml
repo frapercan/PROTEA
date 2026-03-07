@@ -5,7 +5,7 @@ description = ""
 authors = [
     {name = "frapercan",email = "frapercan1@alum.us.es"}
 ]
-requires-python = "^3.12"
+requires-python = ">=3.12"
 dependencies = [
     "alembic (>=1.18.4,<2.0.0)",
     "pyyaml (>=6.0.3,<7.0.0)",
@@ -34,12 +34,32 @@ dev = [
     "sphinx-design (>=0.6.1)",
     "shibuya (>=2025.9.24)",
     "httpx (>=0.28.1,<0.29.0)",
+    "ruff (>=0.15.5,<0.16.0)",
+    "mypy (>=1.19.1,<2.0.0)",
 ]
 
 [tool.taskipy.tasks]
-lint     = "flake8 protea"
+lint     = "ruff check protea scripts && flake8 protea"
+format   = "ruff format protea scripts"
+typecheck = "mypy protea"
 coverage = "coverage run -m pytest tests && coverage report -m"
 html_docs = "make html -C docs"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501", "B008"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = false
+ignore_missing_imports = true
+disallow_untyped_defs = true
+warn_return_any = true
+warn_unused_ignores = true
 
 [tool.coverage.run]
 source = ["protea"]

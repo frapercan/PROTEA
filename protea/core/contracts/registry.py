@@ -1,14 +1,12 @@
 # protea/core/contracts/registry.py
 from __future__ import annotations
 
-from typing import Dict
-
 from protea.core.contracts.operation import Operation
 
 
 class OperationRegistry:
     def __init__(self) -> None:
-        self._ops: Dict[str, Operation] = {}
+        self._ops: dict[str, Operation] = {}
 
     def register(self, op: Operation) -> None:
         if op.name in self._ops:

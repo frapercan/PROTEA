@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy.orm import Session, sessionmaker
@@ -14,7 +14,7 @@ from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 @dataclass(frozen=True)
@@ -58,8 +58,8 @@ class BaseWorker:
             op = self._registry.get(job.operation)
 
             def emit(
-                event: str, message: Optional[str] = None,
-                fields: Optional[Dict[str, Any]] = None, level: str = "info"
+                event: str, message: str | None = None,
+                fields: dict[str, Any] | None = None, level: str = "info"
             ) -> None:
                 self._emit(session, job_id, event, message, fields or {}, level=level)
                 session.flush()
@@ -93,8 +93,8 @@ class BaseWorker:
         session: Session,
         job_id: UUID,
         event: str,
-        message: Optional[str],
-        fields: Dict[str, Any],
+        message: str | None,
+        fields: dict[str, Any],
         *,
         level: str,
     ) -> None:

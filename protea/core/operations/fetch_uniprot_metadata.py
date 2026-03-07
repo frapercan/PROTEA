@@ -4,9 +4,10 @@ import csv
 import gzip
 import random
 import time
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from io import BytesIO, StringIO
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any
 from urllib.parse import quote
 
 import requests
@@ -22,7 +23,7 @@ from protea.infrastructure.orm.models.protein.protein_metadata import ProteinUni
 class FetchUniProtMetadataPayload:
     search_criteria: str
     page_size: int = 500
-    total_limit: Optional[int] = None
+    total_limit: int | None = None
 
     timeout_seconds: int = 60
     compressed: bool = True
@@ -37,7 +38,7 @@ class FetchUniProtMetadataPayload:
     update_protein_core: bool = True
 
     @staticmethod
-    def from_dict(d: Dict[str, Any]) -> "FetchUniProtMetadataPayload":
+    def from_dict(d: dict[str, Any]) -> FetchUniProtMetadataPayload:
         sc = d.get("search_criteria")
         if not isinstance(sc, str) or not sc.strip():
             raise ValueError("payload.search_criteria must be a non-empty string")
@@ -106,7 +107,7 @@ class FetchUniProtMetadataOperation:
     UNIPROT_SEARCH_URL = "https://rest.uniprot.org/uniprotkb/search"
 
     # DB column -> TSV header
-    FIELD_MAP: Dict[str, str] = {
+    FIELD_MAP: dict[str, str] = {
         "absorption": "Absorption",
         "active_site": "Active site",
         "binding_site": "Binding site",
@@ -132,7 +133,7 @@ class FetchUniProtMetadataOperation:
         self._http_retries = 0
         self._http = requests.Session()
 
-    def execute(self, session: Session, payload: Dict[str, Any], *, emit: EmitFn) -> OperationResult:
+    def execute(self, session: Session, payload: dict[str, Any], *, emit: EmitFn) -> OperationResult:
         p = FetchUniProtMetadataPayload.from_dict(payload)
 
         t0 = time.perf_counter()
@@ -196,7 +197,7 @@ class FetchUniProtMetadataOperation:
 
     # ---------------- HTTP / paging ----------------
 
-    def _fetch_tsv_pages(self, p: FetchUniProtMetadataPayload, emit: EmitFn) -> Iterable[List[Dict[str, str]]]:
+    def _fetch_tsv_pages(self, p: FetchUniProtMetadataPayload, emit: EmitFn) -> Iterable[list[dict[str, str]]]:
         encoded_query = quote(p.search_criteria)
 
         fields = [
@@ -215,7 +216,7 @@ class FetchUniProtMetadataOperation:
         ]
         base_url = f"{self.UNIPROT_SEARCH_URL}?{'&'.join(params)}"
 
-        next_cursor: Optional[str] = None
+        next_cursor: str | None = None
         page = 0
 
         while True:
@@ -280,7 +281,7 @@ class FetchUniProtMetadataOperation:
                 return f.read().decode("utf-8", errors="replace")
         return resp.content.decode("utf-8", errors="replace")
 
-    def _extract_next_cursor(self, link_header: str) -> Optional[str]:
+    def _extract_next_cursor(self, link_header: str) -> str | None:
         if not link_header or 'rel="next"' not in link_header or "cursor=" not in link_header:
             return None
         try:
@@ -290,24 +291,24 @@ class FetchUniProtMetadataOperation:
 
     # ---------------- TSV / DB ----------------
 
-    def _parse_tsv(self, tsv_text: str) -> List[Dict[str, str]]:
+    def _parse_tsv(self, tsv_text: str) -> list[dict[str, str]]:
         reader = csv.DictReader(StringIO(tsv_text), delimiter="\t")
         return [{k: (v if v is not None else "") for k, v in row.items()} for row in reader]
 
     def _store_rows(
         self,
         session: Session,
-        rows: List[Dict[str, str]],
+        rows: list[dict[str, str]],
         p: FetchUniProtMetadataPayload,
         emit: EmitFn,
-    ) -> Tuple[int, int]:
+    ) -> tuple[int, int]:
         accessions = [r.get("Entry", "").strip() for r in rows if r.get("Entry")]
         canonicals = [Protein.parse_isoform(a)[0] for a in accessions]
         canonical_unique = list(dict.fromkeys([c for c in canonicals if c]))
 
         existing = self._load_existing_metadata(session, canonical_unique)
 
-        protein_map: Dict[str, Protein] = {}
+        protein_map: dict[str, Protein] = {}
         if p.update_protein_core and accessions:
             prot_rows = session.query(Protein).filter(Protein.accession.in_(accessions)).all()
             protein_map = {pr.accession: pr for pr in prot_rows}
@@ -380,8 +381,8 @@ class FetchUniProtMetadataOperation:
         session: Session,
         canonicals: Sequence[str],
         chunk_size: int = 5000,
-    ) -> Dict[str, ProteinUniProtMetadata]:
-        existing: Dict[str, ProteinUniProtMetadata] = {}
+    ) -> dict[str, ProteinUniProtMetadata]:
+        existing: dict[str, ProteinUniProtMetadata] = {}
         for chunk in _chunks(canonicals, chunk_size):
             rows = (
                 session.query(ProteinUniProtMetadata)

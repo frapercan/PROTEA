@@ -76,7 +76,7 @@ class QueueConsumer:
                 pass
             logger.info("Consumer stopped. queue=%s", self._queue_name)
 
-    def _handle_stop(self, *_) -> None:
+    def _handle_stop(self, *_: object) -> None:
         self._stop = True
         logger.info("Stop signal received. queue=%s", self._queue_name)
 

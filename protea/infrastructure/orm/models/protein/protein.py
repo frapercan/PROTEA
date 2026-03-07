@@ -1,18 +1,16 @@
-# protein_information_system/sql/model/entities/protein/protein.py
 from __future__ import annotations
 
-from sqlalchemy import (
-    Boolean,
-    Column,
-    DateTime,
-    ForeignKey,
-    Integer,
-    String,
-    func,
-)
-from sqlalchemy.orm import relationship
+from datetime import datetime
+from typing import TYPE_CHECKING
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from protea.infrastructure.orm.base import Base
+
+if TYPE_CHECKING:
+    from protea.infrastructure.orm.models.protein.protein_metadata import ProteinUniProtMetadata
+    from protea.infrastructure.orm.models.sequence.sequence import Sequence
 
 
 class Protein(Base):
@@ -30,42 +28,41 @@ class Protein(Base):
     __tablename__ = "protein"
 
     # UniProt Entry (accession). Isoforms: "<canonical>-<n>".
-    accession = Column(String, primary_key=True, nullable=False)
+    accession: Mapped[str] = mapped_column(String, primary_key=True, nullable=False)
 
     # UniProt Entry Name (NOT unique across isoforms)
-    entry_name = Column(String, nullable=True, index=True)
+    entry_name: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
 
     # Swiss-Prot reviewed vs TrEMBL
-    reviewed = Column(Boolean, nullable=True, index=True)
+    reviewed: Mapped[bool | None] = mapped_column(Boolean, nullable=True, index=True)
 
     # Isoform grouping (metadata is keyed by canonical_accession)
-    canonical_accession = Column(String, nullable=False, index=True)
-    isoform_index = Column(Integer, nullable=True)
-    is_canonical = Column(Boolean, nullable=False, default=True)
+    canonical_accession: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    isoform_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_canonical: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     # Core FASTA-header derived fields
-    taxonomy_id = Column(String, nullable=True, index=True)  # OX=
-    organism = Column(String, nullable=True)                 # OS=
-    gene_name = Column(String, nullable=True)                # GN=
-    length = Column(Integer, nullable=True)                  # len(sequence) or UniProt length
+    taxonomy_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)  # OX=
+    organism: Mapped[str | None] = mapped_column(String, nullable=True)                 # OS=
+    gene_name: Mapped[str | None] = mapped_column(String, nullable=True)                # GN=
+    length: Mapped[int | None] = mapped_column(Integer, nullable=True)                  # len(sequence) or UniProt length
 
     # MANY proteins can share one Sequence
-    sequence_id = Column(
+    sequence_id: Mapped[int | None] = mapped_column(
         Integer,
         ForeignKey("sequence.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
-        unique=False,  # IMPORTANT: do NOT make this unique
     )
 
-    created_at = Column(DateTime, nullable=False, server_default=func.now())
-    updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
 
     # Relationships
-    sequence = relationship("Sequence", back_populates="proteins", uselist=False)
+    sequence: Mapped[Sequence | None] = relationship("Sequence", back_populates="proteins", uselist=False)
 
     # Optional UniProt raw metadata (defined in another module). View-only join by canonical_accession.
-    uniprot_metadata = relationship(
+    uniprot_metadata: Mapped[ProteinUniProtMetadata | None] = relationship(
         "ProteinUniProtMetadata",
         primaryjoin="Protein.canonical_accession == foreign(ProteinUniProtMetadata.canonical_accession)",
         uselist=False,

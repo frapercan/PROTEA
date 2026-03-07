@@ -2,8 +2,6 @@
 # scripts/start_dev.sh
 # Start the full PROTEA dev stack: API + workers + frontend.
 # Run from the repository root: bash scripts/start_dev.sh
-set -e
-
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOG_DIR="$ROOT/logs"
 mkdir -p "$LOG_DIR"
@@ -43,6 +41,7 @@ echo "  Worker jobs started (PID $!)"
 # ── Frontend ──────────────────────────────────────────────────────────────────
 echo "[5/5] Starting frontend (port 3000)..."
 cd "$ROOT/apps/web"
+rm -rf .next  # clear Turbopack cache to avoid stale module errors
 npm run dev > "$LOG_DIR/frontend.log" 2>&1 &
 sleep 6
 curl -sf http://localhost:3000 -o /dev/null && echo "  Frontend OK" || echo "  Frontend FAILED — check logs/frontend.log"

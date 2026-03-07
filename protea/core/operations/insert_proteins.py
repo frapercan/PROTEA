@@ -4,9 +4,11 @@ import gzip
 import random
 import re
 import time
+from collections.abc import Iterable
+from collections.abc import Sequence as Seq
 from dataclasses import dataclass
 from io import BytesIO
-from typing import Any, Dict, Iterable, List, Optional, Sequence as Seq, Tuple
+from typing import Any
 from urllib.parse import quote
 
 import requests
@@ -22,7 +24,7 @@ from protea.infrastructure.orm.models.sequence.sequence import Sequence as Seque
 class InsertProteinsPayload:
     search_criteria: str
     page_size: int = 500
-    total_limit: Optional[int] = None
+    total_limit: int | None = None
 
     timeout_seconds: int = 60
     include_isoforms: bool = True
@@ -35,7 +37,7 @@ class InsertProteinsPayload:
     user_agent: str = "PROTEA/insert_proteins (contact: you@example.org)"
 
     @staticmethod
-    def from_dict(d: Dict[str, Any]) -> "InsertProteinsPayload":
+    def from_dict(d: dict[str, Any]) -> InsertProteinsPayload:
         sc = d.get("search_criteria")
         if not isinstance(sc, str) or not sc.strip():
             raise ValueError("payload.search_criteria must be a non-empty string")
@@ -107,7 +109,7 @@ class InsertProteinsOperation(Operation):
         self._http_retries = 0
         self._http = requests.Session()
 
-    def execute(self, session: Session, payload: Dict[str, Any], *, emit: EmitFn) -> OperationResult:
+    def execute(self, session: Session, payload: dict[str, Any], *, emit: EmitFn) -> OperationResult:
         p = InsertProteinsPayload.from_dict(payload)
 
         t0 = time.perf_counter()
@@ -195,7 +197,7 @@ class InsertProteinsOperation(Operation):
         )
 
     # ---- HTTP paging ----
-    def _fetch_fasta_pages(self, p: InsertProteinsPayload, emit: EmitFn) -> Iterable[List[Dict[str, Any]]]:
+    def _fetch_fasta_pages(self, p: InsertProteinsPayload, emit: EmitFn) -> Iterable[list[dict[str, Any]]]:
         encoded_query = quote(p.search_criteria)
         params = ["format=fasta", f"query={encoded_query}", f"size={p.page_size}"]
         if p.include_isoforms:
@@ -204,7 +206,7 @@ class InsertProteinsOperation(Operation):
             params.append("compressed=true")
 
         base_url = f"{self.UNIPROT_SEARCH_URL}?{'&'.join(params)}"
-        next_cursor: Optional[str] = None
+        next_cursor: str | None = None
         page = 0
 
         while True:
@@ -273,7 +275,7 @@ class InsertProteinsOperation(Operation):
                 return f.read().decode("utf-8", errors="replace")
         return content.decode("utf-8", errors="replace")
 
-    def _extract_next_cursor(self, link_header: str) -> Optional[str]:
+    def _extract_next_cursor(self, link_header: str) -> str | None:
         if not link_header or 'rel="next"' not in link_header or "cursor=" not in link_header:
             return None
         try:
@@ -282,10 +284,10 @@ class InsertProteinsOperation(Operation):
             return None
 
     # ---- FASTA parsing ----
-    def _parse_fasta(self, fasta_text: str) -> List[Dict[str, Any]]:
-        records: List[Dict[str, Any]] = []
-        header: Optional[str] = None
-        seq_lines: List[str] = []
+    def _parse_fasta(self, fasta_text: str) -> list[dict[str, Any]]:
+        records: list[dict[str, Any]] = []
+        header: str | None = None
+        seq_lines: list[str] = []
 
         def flush() -> None:
             nonlocal header, seq_lines
@@ -318,7 +320,7 @@ class InsertProteinsOperation(Operation):
         flush()
         return records
 
-    def _parse_header(self, header: str) -> Dict[str, Any]:
+    def _parse_header(self, header: str) -> dict[str, Any]:
         parts = header.split("|")
         reviewed = header.startswith("sp|")
 
@@ -359,13 +361,13 @@ class InsertProteinsOperation(Operation):
 
     # ---- DB storage ----
     def _store_records(
-        self, session: Session, records: List[Dict[str, Any]], emit: EmitFn
-    ) -> Tuple[int, int, int, int]:
+        self, session: Session, records: list[dict[str, Any]], emit: EmitFn
+    ) -> tuple[int, int, int, int]:
         if not records:
             return 0, 0, 0, 0
 
         # 1) Deduplicate sequences
-        hash_to_seq: Dict[str, str] = {}
+        hash_to_seq: dict[str, str] = {}
         for r in records:
             h = r["sequence_hash"]
             if h not in hash_to_seq:
@@ -403,7 +405,7 @@ class InsertProteinsOperation(Operation):
         # 3) Upsert proteins (insert new, conservative update existing)
         proteins_inserted = 0
         proteins_updated = 0
-        to_add: List[Protein] = []
+        to_add: list[Protein] = []
 
         for r in records:
             acc = r["accession"]
@@ -482,8 +484,8 @@ class InsertProteinsOperation(Operation):
 
         return proteins_inserted, proteins_updated, sequences_inserted, sequences_reused
 
-    def _load_existing_sequences(self, session: Session, hashes: Seq[str], chunk_size: int = 5000) -> Dict[str, int]:
-        existing: Dict[str, int] = {}
+    def _load_existing_sequences(self, session: Session, hashes: Seq[str], chunk_size: int = 5000) -> dict[str, int]:
+        existing: dict[str, int] = {}
         for chunk in _chunks(hashes, chunk_size):
             rows = (
                 session.query(SequenceModel.sequence_hash, SequenceModel.id)
@@ -496,8 +498,8 @@ class InsertProteinsOperation(Operation):
 
     def _load_existing_proteins(
         self, session: Session, accessions: Seq[str], chunk_size: int = 5000
-    ) -> Dict[str, Protein]:
-        existing: Dict[str, Protein] = {}
+    ) -> dict[str, Protein]:
+        existing: dict[str, Protein] = {}
         for chunk in _chunks(accessions, chunk_size):
             rows = session.query(Protein).filter(Protein.accession.in_(chunk)).all()
             for p in rows:

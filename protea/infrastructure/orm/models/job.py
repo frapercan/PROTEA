@@ -1,22 +1,23 @@
 from __future__ import annotations
 
 import enum
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import BigInteger, DateTime, Enum, ForeignKey, Index, Text
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from protea.infrastructure.orm.base import Base
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
-class JobStatus(str, enum.Enum):
+class JobStatus(enum.StrEnum):
     QUEUED = "queued"
     RUNNING = "running"
     SUCCEEDED = "succeeded"
@@ -38,20 +39,20 @@ class Job(Base):
         default=JobStatus.QUEUED,
     )
 
-    payload: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    meta: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    meta: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    progress_current: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
-    progress_total: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    progress_current: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    progress_total: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
-    error_code: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    events: Mapped[list["JobEvent"]] = relationship(
+    events: Mapped[list[JobEvent]] = relationship(
         "JobEvent",
         back_populates="job",
         cascade="all, delete-orphan",
@@ -78,11 +79,11 @@ class JobEvent(Base):
     ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
     level: Mapped[str] = mapped_column(Text, nullable=False, default="info")
     event: Mapped[str] = mapped_column(Text, nullable=False)
-    message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    fields: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    fields: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
 
-    job: Mapped["Job"] = relationship("Job", back_populates="events")
+    job: Mapped[Job] = relationship("Job", back_populates="events")
 
     __table_args__ = (
         Index("ix_job_event_job_id_ts_desc", "job_id", "ts"),

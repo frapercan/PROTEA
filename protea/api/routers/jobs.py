@@ -1,7 +1,7 @@
 # protea/api/routers/jobs.py
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -21,22 +21,22 @@ def get_session_factory(request: Request) -> sessionmaker[Session]:
     factory = getattr(request.app.state, "session_factory", None)
     if factory is None:
         raise RuntimeError("app.state.session_factory is not set")
-    return factory
+    return factory  # type: ignore[no-any-return]
 
 
 def get_amqp_url(request: Request) -> str:
     url = getattr(request.app.state, "amqp_url", None)
     if url is None:
         raise RuntimeError("app.state.amqp_url is not set")
-    return url
+    return url  # type: ignore[no-any-return]
 
 
 @router.post("")
 def create_job(
-    body: Dict[str, Any],
+    body: dict[str, Any],
     factory: sessionmaker[Session] = Depends(get_session_factory),
     amqp_url: str = Depends(get_amqp_url),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     operation = body.get("operation")
     queue_name = body.get("queue_name")
     payload = body.get("payload") or {}
@@ -59,19 +59,19 @@ def create_job(
 
 @router.get("")
 def list_jobs(
-    status: Optional[str] = Query(default=None),
-    operation: Optional[str] = Query(default=None),
+    status: str | None = Query(default=None),
+    operation: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=500),
     factory: sessionmaker[Session] = Depends(get_session_factory),
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     with session_scope(factory) as session:
         q = session.query(Job)
 
         if status is not None:
             try:
                 st = JobStatus(status)
-            except Exception:
-                raise HTTPException(status_code=400, detail=f"Unknown status: {status}")
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=f"Unknown status: {status}") from exc
             q = q.filter(Job.status == st)
 
         if operation is not None:
@@ -100,7 +100,7 @@ def list_jobs(
 def get_job(
     job_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     with session_scope(factory) as session:
         j = session.get(Job, job_id)
         if j is None:
@@ -128,7 +128,7 @@ def get_job_events(
     job_id: UUID,
     limit: int = Query(default=200, ge=1, le=2000),
     factory: sessionmaker[Session] = Depends(get_session_factory),
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     with session_scope(factory) as session:
         # quick existence check
         j = session.get(Job, job_id)
@@ -160,7 +160,7 @@ def get_job_events(
 def delete_job(
     job_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     with session_scope(factory) as session:
         j = session.get(Job, job_id)
         if j is None:
@@ -175,7 +175,7 @@ def delete_job(
 def cancel_job(
     job_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     with session_scope(factory) as session:
         j = session.get(Job, job_id)
         if j is None:
