@@ -1,0 +1,5 @@
+database:
+  url: postgresql+psycopg://usuario:clave@localhost:5432/BioData
+
+queue:
+  amqp_url: amqp://guest:guest@localhost:5672/

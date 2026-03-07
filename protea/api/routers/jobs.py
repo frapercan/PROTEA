@@ -156,6 +156,21 @@ def get_job_events(
         ]
 
 
+@router.delete("/{job_id}")
+def delete_job(
+    job_id: UUID,
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+) -> Dict[str, Any]:
+    with session_scope(factory) as session:
+        j = session.get(Job, job_id)
+        if j is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        if j.status == JobStatus.RUNNING:
+            raise HTTPException(status_code=409, detail="Cannot delete a running job")
+        session.delete(j)
+    return {"deleted": str(job_id)}
+
+
 @router.post("/{job_id}/cancel")
 def cancel_job(
     job_id: UUID,

@@ -16,6 +16,12 @@ All commands run from `repositories/PROTEA/`.
 # Install dependencies (including dev group)
 poetry install
 
+# Start the full dev stack (API + workers + frontend) in one shot
+bash scripts/start_dev.sh
+
+# Stop everything
+pkill -f "uvicorn protea|scripts/worker.py|next dev"
+
 # Run unit tests
 poetry run pytest
 
@@ -25,10 +31,10 @@ poetry run pytest --with-postgres
 # Run a single test
 poetry run pytest tests/test_jobs_pg.py::test_name -v
 
-# Initialize the database schema
+# Initialize the database schema (first time or after DB reset)
 poetry run python scripts/init_db.py
 
-# Execute a queued job manually by UUID (useful during development)
+# Execute a queued job manually by UUID
 poetry run python scripts/run_one_job.py <job_id_uuid>
 
 # Apply Alembic migrations
@@ -36,6 +42,26 @@ alembic upgrade head
 ```
 
 Settings load from `protea/config/system.yaml` and are overridden by env vars `PROTEA_DB_URL` and `PROTEA_AMQP_URL`.
+
+## Dev Stack
+
+Prerequisites: Postgres and RabbitMQ must be running before starting the stack.
+
+```
+protea/config/system.yaml       ← DB URL and AMQP URL (created manually, not committed)
+logs/api.log                    ← FastAPI logs
+logs/worker-ping.log            ← Worker for protea.ping queue
+logs/worker-jobs.log            ← Worker for protea.jobs queue (insert_proteins, fetch_uniprot_metadata)
+logs/frontend.log               ← Next.js dev server
+```
+
+**Queue routing:**
+- `protea.ping` → ping operation (smoke test)
+- `protea.jobs` → insert_proteins, fetch_uniprot_metadata
+
+The frontend (`apps/web/`) is a Next.js 16 app with Tailwind v4. API URL is configured in `apps/web/.env.local` (`NEXT_PUBLIC_API_URL=http://127.0.0.1:8000`).
+
+**Known issue:** Tailwind CSS resolution warnings appear in the Next.js dev server console (`Can't resolve 'tailwindcss'`). These are non-blocking — the app renders correctly. The `npm run build` produces clean output.
 
 ## Architecture
 
@@ -73,7 +99,7 @@ FastAPI router at `/jobs`. The `session_factory` is injected via `app.state.sess
 
 - `settings.py`: `load_settings(project_root)` reads `protea/config/system.yaml` then env overrides.
 - `session.py`: `build_session_factory(db_url)` and `session_scope(factory)` context manager (commit on success, rollback on exception).
-- Alembic is present but `target_metadata` is not yet wired — schema changes require manual migration authoring.
+- Alembic `env.py` is wired with `Base.metadata` and reads DB URL from `load_settings()`. Run `alembic revision --autogenerate -m "desc"` to generate migrations.
 
 ### Testing
 
