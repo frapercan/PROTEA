@@ -21,5 +21,9 @@ docs/build/
 .idea/
 .vscode/
 
+# Node
+node_modules/
+.next/
+
 # Misc
 *.log
