@@ -5,101 +5,43 @@ import gzip
 import random
 import time
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
 from io import BytesIO, StringIO
-from typing import Any
+from typing import Annotated, Any
 from urllib.parse import quote
 
 import requests
+from pydantic import Field, field_validator
 from requests import Response
 from sqlalchemy.orm import Session
 
-from protea.core.contracts.operation import EmitFn, OperationResult
+from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.orm.models.protein.protein_metadata import ProteinUniProtMetadata
 
+PositiveInt = Annotated[int, Field(gt=0)]
+NonNegativeFloat = Annotated[float, Field(ge=0.0)]
 
-@dataclass(frozen=True)
-class FetchUniProtMetadataPayload:
+
+class FetchUniProtMetadataPayload(ProteaPayload, frozen=True):
     search_criteria: str
-    page_size: int = 500
-    total_limit: int | None = None
-
-    timeout_seconds: int = 60
+    page_size: PositiveInt = 500
+    total_limit: PositiveInt | None = None
+    timeout_seconds: PositiveInt = 60
     compressed: bool = True
-
-    max_retries: int = 6
-    backoff_base_seconds: float = 0.8
-    backoff_max_seconds: float = 20.0
-    jitter_seconds: float = 0.4
+    max_retries: PositiveInt = 6
+    backoff_base_seconds: NonNegativeFloat = 0.8
+    backoff_max_seconds: NonNegativeFloat = 20.0
+    jitter_seconds: NonNegativeFloat = 0.4
     user_agent: str = "PROTEA/fetch_uniprot_metadata (contact: you@example.org)"
-
     commit_every_page: bool = True
     update_protein_core: bool = True
 
-    @staticmethod
-    def from_dict(d: dict[str, Any]) -> FetchUniProtMetadataPayload:
-        sc = d.get("search_criteria")
-        if not isinstance(sc, str) or not sc.strip():
-            raise ValueError("payload.search_criteria must be a non-empty string")
-
-        def _int(name: str, default: int) -> int:
-            v = d.get(name, default)
-            if not isinstance(v, int) or v <= 0:
-                raise ValueError(f"payload.{name} must be a positive int")
-            return v
-
-        page_size = _int("page_size", 500)
-
-        total_limit = d.get("total_limit", None)
-        if total_limit is not None and (not isinstance(total_limit, int) or total_limit <= 0):
-            raise ValueError("payload.total_limit must be a positive int or null")
-
-        timeout_seconds = _int("timeout_seconds", 60)
-
-        compressed = d.get("compressed", True)
-        if not isinstance(compressed, bool):
-            raise ValueError("payload.compressed must be bool")
-
-        max_retries = _int("max_retries", 6)
-
-        backoff_base_seconds = d.get("backoff_base_seconds", 0.8)
-        backoff_max_seconds = d.get("backoff_max_seconds", 20.0)
-        jitter_seconds = d.get("jitter_seconds", 0.4)
-        for name, v in [
-            ("backoff_base_seconds", backoff_base_seconds),
-            ("backoff_max_seconds", backoff_max_seconds),
-            ("jitter_seconds", jitter_seconds),
-        ]:
-            if not isinstance(v, (int, float)) or v < 0:
-                raise ValueError(f"payload.{name} must be >= 0")
-
-        commit_every_page = d.get("commit_every_page", True)
-        if not isinstance(commit_every_page, bool):
-            raise ValueError("payload.commit_every_page must be bool")
-
-        update_protein_core = d.get("update_protein_core", True)
-        if not isinstance(update_protein_core, bool):
-            raise ValueError("payload.update_protein_core must be bool")
-
-        user_agent = d.get("user_agent", "PROTEA/fetch_uniprot_metadata (contact: you@example.org)")
-        if not isinstance(user_agent, str) or not user_agent.strip():
-            raise ValueError("payload.user_agent must be a non-empty string")
-
-        return FetchUniProtMetadataPayload(
-            search_criteria=sc.strip(),
-            page_size=page_size,
-            total_limit=total_limit,
-            timeout_seconds=timeout_seconds,
-            compressed=compressed,
-            max_retries=max_retries,
-            backoff_base_seconds=float(backoff_base_seconds),
-            backoff_max_seconds=float(backoff_max_seconds),
-            jitter_seconds=float(jitter_seconds),
-            commit_every_page=commit_every_page,
-            update_protein_core=update_protein_core,
-            user_agent=user_agent.strip(),
-        )
+    @field_validator("search_criteria", "user_agent", mode="before")
+    @classmethod
+    def must_be_non_empty(cls, v: str) -> str:
+        if not isinstance(v, str) or not v.strip():
+            raise ValueError("must be a non-empty string")
+        return v.strip()
 
 
 class FetchUniProtMetadataOperation:
@@ -134,7 +76,7 @@ class FetchUniProtMetadataOperation:
         self._http = requests.Session()
 
     def execute(self, session: Session, payload: dict[str, Any], *, emit: EmitFn) -> OperationResult:
-        p = FetchUniProtMetadataPayload.from_dict(payload)
+        p = FetchUniProtMetadataPayload.model_validate(payload)
 
         t0 = time.perf_counter()
         emit("fetch_uniprot_metadata.start", None,

@@ -5,6 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 Level = Literal["info", "warning", "error"]
@@ -18,10 +19,10 @@ class OperationResult:
     progress_total: int | None = None
 
 
-class PayloadModel(Protocol):
-    @staticmethod
-    def from_dict(d: dict[str, Any]) -> Any:
-        ...
+class ProteaPayload(BaseModel, frozen=True):
+    """Base class for all operation payloads. Subclass and add fields with Pydantic validators."""
+
+    model_config = ConfigDict(strict=True)
 
 
 class Operation(Protocol):

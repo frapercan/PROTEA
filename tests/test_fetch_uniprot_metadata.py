@@ -40,7 +40,7 @@ def _capturing_emit():
 
 class TestFetchUniProtMetadataPayloadFromDict:
     def test_minimal_valid(self):
-        p = FetchUniProtMetadataPayload.from_dict({"search_criteria": "organism_id:9606"})
+        p = FetchUniProtMetadataPayload.model_validate({"search_criteria": "organism_id:9606"})
         assert p.search_criteria == "organism_id:9606"
         assert p.page_size == 500
         assert p.compressed is True
@@ -48,7 +48,7 @@ class TestFetchUniProtMetadataPayloadFromDict:
         assert p.update_protein_core is True
 
     def test_all_fields(self):
-        p = FetchUniProtMetadataPayload.from_dict({
+        p = FetchUniProtMetadataPayload.model_validate({
             "search_criteria": "organism_id:9606",
             "page_size": 100,
             "total_limit": 200,
@@ -72,34 +72,34 @@ class TestFetchUniProtMetadataPayloadFromDict:
 
     def test_missing_search_criteria_raises(self):
         with pytest.raises(ValueError, match="search_criteria"):
-            FetchUniProtMetadataPayload.from_dict({})
+            FetchUniProtMetadataPayload.model_validate({})
 
     def test_empty_search_criteria_raises(self):
         with pytest.raises(ValueError, match="search_criteria"):
-            FetchUniProtMetadataPayload.from_dict({"search_criteria": "   "})
+            FetchUniProtMetadataPayload.model_validate({"search_criteria": "   "})
 
     def test_invalid_page_size_raises(self):
         with pytest.raises(ValueError, match="page_size"):
-            FetchUniProtMetadataPayload.from_dict({"search_criteria": "q", "page_size": 0})
+            FetchUniProtMetadataPayload.model_validate({"search_criteria": "q", "page_size": 0})
 
     def test_invalid_total_limit_raises(self):
         with pytest.raises(ValueError, match="total_limit"):
-            FetchUniProtMetadataPayload.from_dict({"search_criteria": "q", "total_limit": -1})
+            FetchUniProtMetadataPayload.model_validate({"search_criteria": "q", "total_limit": -1})
 
     def test_null_total_limit_allowed(self):
-        p = FetchUniProtMetadataPayload.from_dict({"search_criteria": "q", "total_limit": None})
+        p = FetchUniProtMetadataPayload.model_validate({"search_criteria": "q", "total_limit": None})
         assert p.total_limit is None
 
     def test_invalid_compressed_raises(self):
         with pytest.raises(ValueError, match="compressed"):
-            FetchUniProtMetadataPayload.from_dict({"search_criteria": "q", "compressed": "yes"})
+            FetchUniProtMetadataPayload.model_validate({"search_criteria": "q", "compressed": "yes"})
 
     def test_negative_backoff_raises(self):
         with pytest.raises(ValueError, match="backoff_base_seconds"):
-            FetchUniProtMetadataPayload.from_dict({"search_criteria": "q", "backoff_base_seconds": -1.0})
+            FetchUniProtMetadataPayload.model_validate({"search_criteria": "q", "backoff_base_seconds": -1.0})
 
     def test_search_criteria_is_stripped(self):
-        p = FetchUniProtMetadataPayload.from_dict({"search_criteria": "  organism_id:9606  "})
+        p = FetchUniProtMetadataPayload.model_validate({"search_criteria": "  organism_id:9606  "})
         assert p.search_criteria == "organism_id:9606"
 
 

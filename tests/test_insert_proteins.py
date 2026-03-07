@@ -72,14 +72,14 @@ def _make_mock_session():
 
 class TestInsertProteinsPayloadFromDict:
     def test_minimal_valid(self):
-        p = InsertProteinsPayload.from_dict({"search_criteria": "organism_id:9606"})
+        p = InsertProteinsPayload.model_validate({"search_criteria": "organism_id:9606"})
         assert p.search_criteria == "organism_id:9606"
         assert p.page_size == 500
         assert p.include_isoforms is True
         assert p.total_limit is None
 
     def test_all_fields(self):
-        p = InsertProteinsPayload.from_dict({
+        p = InsertProteinsPayload.model_validate({
             "search_criteria": "organism_id:9606",
             "page_size": 100,
             "total_limit": 50,
@@ -94,26 +94,26 @@ class TestInsertProteinsPayloadFromDict:
 
     def test_missing_search_criteria_raises(self):
         with pytest.raises(ValueError, match="search_criteria"):
-            InsertProteinsPayload.from_dict({})
+            InsertProteinsPayload.model_validate({})
 
     def test_empty_search_criteria_raises(self):
         with pytest.raises(ValueError, match="search_criteria"):
-            InsertProteinsPayload.from_dict({"search_criteria": "  "})
+            InsertProteinsPayload.model_validate({"search_criteria": "  "})
 
     def test_invalid_page_size_raises(self):
         with pytest.raises(ValueError, match="page_size"):
-            InsertProteinsPayload.from_dict({"search_criteria": "q", "page_size": -1})
+            InsertProteinsPayload.model_validate({"search_criteria": "q", "page_size": -1})
 
     def test_invalid_total_limit_raises(self):
         with pytest.raises(ValueError, match="total_limit"):
-            InsertProteinsPayload.from_dict({"search_criteria": "q", "total_limit": 0})
+            InsertProteinsPayload.model_validate({"search_criteria": "q", "total_limit": 0})
 
     def test_null_total_limit_allowed(self):
-        p = InsertProteinsPayload.from_dict({"search_criteria": "q", "total_limit": None})
+        p = InsertProteinsPayload.model_validate({"search_criteria": "q", "total_limit": None})
         assert p.total_limit is None
 
     def test_search_criteria_stripped(self):
-        p = InsertProteinsPayload.from_dict({"search_criteria": "  q  "})
+        p = InsertProteinsPayload.model_validate({"search_criteria": "  q  "})
         assert p.search_criteria == "q"
 
 
