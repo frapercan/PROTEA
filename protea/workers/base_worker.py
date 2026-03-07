@@ -23,6 +23,17 @@ class WorkerConfig:
 
 
 class BaseWorker:
+    """
+    Executes queued jobs using a two-session pattern.
+
+    Session 1 (claim): transitions the job from QUEUED → RUNNING and commits.
+    Session 2 (execute): resolves the operation, runs it, and transitions to
+    SUCCEEDED or FAILED. Every state change is recorded as a JobEvent row.
+
+    This class is transport-agnostic: it receives a job_id and handles the
+    rest. The caller (QueueConsumer) is responsible for acking/nacking.
+    """
+
     def __init__(
         self, session_factory: sessionmaker[Session], registry: OperationRegistry, config: WorkerConfig
     ) -> None:
@@ -31,6 +42,12 @@ class BaseWorker:
         self._config = config
 
     def handle_job(self, job_id: UUID) -> None:
+        """
+        Claim and execute a single job identified by ``job_id``.
+
+        Silently returns if the job does not exist or is not in QUEUED status.
+        Re-raises any exception from the operation after recording FAILED status.
+        """
         # Claim + run with DB-backed state.
         session = self._factory()
         try:

@@ -11,7 +11,6 @@ import pytest
 
 from protea.infrastructure.session import build_session_factory, session_scope
 
-
 # ---------------------------------------------------------------------------
 # session_scope
 # ---------------------------------------------------------------------------

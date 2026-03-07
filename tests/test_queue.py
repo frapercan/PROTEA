@@ -5,14 +5,13 @@ Pika is fully mocked — no RabbitMQ server required.
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
 
 from protea.infrastructure.queue.consumer import QueueConsumer
 from protea.infrastructure.queue.publisher import publish_job
-
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -1,25 +1,23 @@
 from __future__ import annotations
 
-from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+import protea.infrastructure.orm.models  # noqa: F401 — registers all mappers
 from protea.core.operations.fetch_uniprot_metadata import (
     FetchUniProtMetadataOperation,
     FetchUniProtMetadataPayload,
 )
 from protea.infrastructure.orm.base import Base
-import protea.infrastructure.orm.models  # noqa: F401 — registers all mappers
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _noop_emit(event: str, message, fields: Dict[str, Any], level: str) -> None:
+def _noop_emit(event: str, message: str | None, fields: dict[str, object], level: str) -> None:
     pass
 
 
@@ -35,10 +33,10 @@ def _capturing_emit():
 
 
 # ---------------------------------------------------------------------------
-# Unit tests — FetchUniProtMetadataPayload.from_dict
+# Unit tests — FetchUniProtMetadataPayload
 # ---------------------------------------------------------------------------
 
-class TestFetchUniProtMetadataPayloadFromDict:
+class TestFetchUniProtMetadataPayload:
     def test_minimal_valid(self):
         p = FetchUniProtMetadataPayload.model_validate({"search_criteria": "organism_id:9606"})
         assert p.search_criteria == "organism_id:9606"

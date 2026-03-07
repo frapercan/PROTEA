@@ -10,7 +10,6 @@ from protea.core.contracts.operation import OperationResult
 from protea.core.contracts.registry import OperationRegistry
 from protea.core.operations.ping import PingOperation
 
-
 # ---------------------------------------------------------------------------
 # OperationRegistry
 # ---------------------------------------------------------------------------

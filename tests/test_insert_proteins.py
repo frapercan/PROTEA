@@ -5,20 +5,18 @@ Integration test uses a real Postgres via --with-postgres.
 """
 from __future__ import annotations
 
-from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+import protea.infrastructure.orm.models  # noqa: F401
 from protea.core.operations.insert_proteins import (
     InsertProteinsOperation,
     InsertProteinsPayload,
 )
 from protea.infrastructure.orm.base import Base
-import protea.infrastructure.orm.models  # noqa: F401
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -67,10 +65,10 @@ def _make_mock_session():
 
 
 # ---------------------------------------------------------------------------
-# Unit tests — InsertProteinsPayload.from_dict
+# Unit tests — InsertProteinsPayload
 # ---------------------------------------------------------------------------
 
-class TestInsertProteinsPayloadFromDict:
+class TestInsertProteinsPayload:
     def test_minimal_valid(self):
         p = InsertProteinsPayload.model_validate({"search_criteria": "organism_id:9606"})
         assert p.search_criteria == "organism_id:9606"

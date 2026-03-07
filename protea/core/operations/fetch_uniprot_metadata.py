@@ -45,6 +45,14 @@ class FetchUniProtMetadataPayload(ProteaPayload, frozen=True):
 
 
 class FetchUniProtMetadataOperation:
+    """Fetches functional annotations from UniProt (TSV) and upserts ProteinUniProtMetadata rows.
+
+    One metadata row is stored per canonical accession. Isoforms share the same
+    metadata record. Optionally updates core Protein fields (reviewed, organism,
+    gene_name, length) if they are missing. Uses the same cursor-based pagination
+    and backoff strategy as InsertProteinsOperation.
+    """
+
     name = "fetch_uniprot_metadata"
     UNIPROT_SEARCH_URL = "https://rest.uniprot.org/uniprotkb/search"
 

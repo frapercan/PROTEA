@@ -24,8 +24,8 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 def load_settings(project_root: Path, *, env_prefix: str = "PROTEA_") -> Settings:
     """
     Load settings from:
-      1) src/protea/config/system.yaml
-      2) environment variables override
+      1) protea/config/system.yaml (relative to project root)
+      2) environment variables (override YAML values)
 
     Expected env vars:
       - PROTEA_DB_URL

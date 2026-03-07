@@ -9,11 +9,10 @@ from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from protea.api.routers.jobs import router, get_session_factory, get_amqp_url
-from fastapi import FastAPI
-
+from protea.api.routers.jobs import router
 
 # ---------------------------------------------------------------------------
 # App fixture — minimal FastAPI app wired with mock state
@@ -85,7 +84,7 @@ class TestCreateJob:
         app = _make_app(factory)
 
         with patch("protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)), \
-             patch("protea.api.routers.jobs.publish_job") as mock_publish, \
+             patch("protea.api.routers.jobs.publish_job"), \
              patch("protea.api.routers.jobs.Job", return_value=job):
             c = TestClient(app)
             resp = c.post("/jobs", json={"operation": "ping", "queue_name": "test.q"})

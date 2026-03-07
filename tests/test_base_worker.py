@@ -4,8 +4,7 @@ Uses a mocked session factory and a fake Operation — no real DB needed.
 """
 from __future__ import annotations
 
-from typing import Any, Dict
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
@@ -14,7 +13,6 @@ from protea.core.contracts.operation import OperationResult
 from protea.core.contracts.registry import OperationRegistry
 from protea.infrastructure.orm.models.job import Job, JobStatus
 from protea.workers.base_worker import BaseWorker, WorkerConfig
-
 
 # ---------------------------------------------------------------------------
 # Helpers

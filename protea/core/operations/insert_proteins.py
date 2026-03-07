@@ -45,6 +45,14 @@ class InsertProteinsPayload(ProteaPayload, frozen=True):
 
 
 class InsertProteinsOperation(Operation):
+    """Fetches protein sequences from UniProt (FASTA) and upserts them into the DB.
+
+    Uses cursor-based pagination, exponential backoff with jitter, and MD5-based
+    sequence deduplication. Many proteins can share one Sequence row.
+    Isoforms (``<canonical>-<n>``) are stored as separate Protein rows grouped
+    by ``canonical_accession``.
+    """
+
     name = "insert_proteins"
     UNIPROT_SEARCH_URL = "https://rest.uniprot.org/uniprotkb/search"
 

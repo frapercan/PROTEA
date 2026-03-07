@@ -2,8 +2,8 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from protea.infrastructure.orm.base import Base
 import protea.infrastructure.orm.models  # noqa: F401
+from protea.infrastructure.orm.base import Base
 from protea.infrastructure.orm.models.job import Job, JobEvent
 
 
