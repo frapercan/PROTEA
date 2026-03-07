@@ -1,0 +1,11 @@
+[flake8]
+max-line-length = 120
+extend-ignore =
+    # whitespace before ':' — conflicts with black-style slice formatting
+    E203,
+    # FastAPI Depends() in function signatures is intentional
+    B008,
+per-file-ignores =
+    # side-effect imports for mapper registration
+    protea/infrastructure/orm/models/__init__.py: F401
+    alembic/env.py: F401

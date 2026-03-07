@@ -1,0 +1,16 @@
+operation: insert_proteins
+
+payload:
+  # UniProt query
+  search_criteria: "(reviewed:true)"
+
+  # null / omit => unlimited (NO uses 0)
+  total_limit: null
+
+  # Optional knobs
+  page_size: 500
+  timeout_seconds: 60
+
+  # FASTA options
+  include_isoforms: true
+  compressed: false

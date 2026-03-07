@@ -1,0 +1,22 @@
+operation: uniprot_metadata
+
+payload:
+  # UniProt query (igual que la del FASTA, normalmente)
+  search_criteria: "(reviewed:true)"
+
+  # Pagination
+  page_size: 500
+  total_limit: null
+
+  # HTTP
+  timeout_seconds: 60
+  compressed: true
+
+  # DB behavior
+  update_protein_core: true
+
+  # Robustness (opcionales; si no los pones, se usarán defaults del dataclass)
+  max_retries: 6
+  backoff_base_seconds: 0.8
+  backoff_max_seconds: 20.0
+  jitter_seconds: 0.4
