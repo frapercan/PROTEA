@@ -57,7 +57,9 @@ logs/frontend.log               ← Next.js dev server
 
 **Queue routing:**
 - `protea.ping` → ping operation (smoke test)
-- `protea.jobs` → insert_proteins, fetch_uniprot_metadata
+- `protea.jobs` → insert_proteins, fetch_uniprot_metadata, load_ontology_snapshot, load_goa_annotations, load_quickgo_annotations
+- `protea.embeddings` → compute_embeddings coordinator (serialized: one at a time, retries with 60s delay if GPU busy)
+- `protea.embeddings.batch` → compute_embeddings_batch (actual GPU inference)
 
 The frontend (`apps/web/`) is a Next.js 16 app with Tailwind v4. API URL is configured in `apps/web/.env.local` (`NEXT_PUBLIC_API_URL=http://127.0.0.1:8000`).
 
@@ -73,7 +75,10 @@ The frontend (`apps/web/`) is a Next.js 16 app with Tailwind v4. API URL is conf
 
 **Current operations** (`core/operations/`):
 - `insert_proteins` — paginates the UniProt REST API (FASTA format, cursor-based, exponential backoff + jitter), deduplicates sequences by MD5 hash, and upserts `Protein` + `Sequence` rows.
-- `fetch_uniprot_metadata` — fetches TSV annotations from UniProt and upserts `ProteinUniProtMetadata` by `canonical_accession`. Currently imports from `protein_information_system` (legacy — to be migrated).
+- `fetch_uniprot_metadata` — fetches TSV annotations from UniProt and upserts `ProteinUniProtMetadata` by `canonical_accession`. Fully migrated to PROTEA models — no legacy dependencies.
+- `load_ontology_snapshot` — downloads a GO OBO file and populates `OntologySnapshot` + `GOTerm` rows. Versioned by `obo_version` (unique constraint).
+- `load_goa_annotations` — bulk-loads GO annotations from a GAF file into `AnnotationSet` + `ProteinGOAnnotation` rows, filtered against canonical accessions already in the DB.
+- `load_quickgo_annotations` — streams GO annotations from the QuickGO bulk download API (TSV), with optional ECO→evidence code mapping, pagination, and per-page commits.
 - `ping` — smoke-test operation.
 
 ### Job Lifecycle (`protea/workers/base_worker.py`)
@@ -93,6 +98,10 @@ FastAPI router at `/jobs`. The `session_factory` is injected via `app.state.sess
 - **`Sequence`**: deduplicated by MD5 hash. Multiple `Protein` rows can reference the same `Sequence` — `sequence_id` is explicitly non-unique.
 - **`Protein`**: one row per UniProt accession (including isoforms `<canonical>-<n>`). Isoform parsing via `Protein.parse_isoform()`. Grouped by `canonical_accession`. Has a viewonly relationship to `ProteinUniProtMetadata`.
 - **`ProteinUniProtMetadata`**: raw UniProt functional annotations keyed by `canonical_accession`.
+- **`OntologySnapshot`**: one row per loaded OBO file release. Versioned by `obo_version` (unique).
+- **`GOTerm`**: one row per GO term per snapshot. `(go_id, ontology_snapshot_id)` is unique.
+- **`AnnotationSet`**: groups a batch of annotations by source (`quickgo`, `goa`) and ontology snapshot.
+- **`ProteinGOAnnotation`**: association between a protein accession and a GO term within an annotation set. Stores qualifier, evidence code, assigned_by, db_reference, with_from, annotation_date.
 - **`Job` / `JobEvent`**: job queue state machine and structured event log. `payload`, `meta`, and `fields` are PostgreSQL `JSONB`.
 
 ### Infrastructure (`protea/infrastructure/`)

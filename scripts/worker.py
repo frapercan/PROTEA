@@ -14,12 +14,14 @@ import time
 from pathlib import Path
 
 from protea.core.contracts.registry import OperationRegistry
+from protea.core.operations.compute_embeddings import ComputeEmbeddingsOperation, ComputeEmbeddingsBatchOperation
 from protea.core.operations.fetch_uniprot_metadata import FetchUniProtMetadataOperation
 from protea.core.operations.insert_proteins import InsertProteinsOperation
 from protea.core.operations.load_goa_annotations import LoadGOAAnnotationsOperation
 from protea.core.operations.load_ontology_snapshot import LoadOntologySnapshotOperation
 from protea.core.operations.load_quickgo_annotations import LoadQuickGOAnnotationsOperation
 from protea.core.operations.ping import PingOperation
+from protea.core.operations.predict_go_terms import PredictGOTermsOperation
 from protea.infrastructure.queue.consumer import QueueConsumer
 from protea.infrastructure.session import build_session_factory
 from protea.infrastructure.settings import load_settings
@@ -46,8 +48,11 @@ def main() -> None:
     registry.register(LoadOntologySnapshotOperation())
     registry.register(LoadQuickGOAnnotationsOperation())
     registry.register(LoadGOAAnnotationsOperation())
+    registry.register(ComputeEmbeddingsOperation())
+    registry.register(ComputeEmbeddingsBatchOperation())
+    registry.register(PredictGOTermsOperation())
 
-    worker = BaseWorker(factory, registry, WorkerConfig(worker_name="queue-worker"))
+    worker = BaseWorker(factory, registry, WorkerConfig(worker_name="queue-worker"), amqp_url=settings.amqp_url)
 
     consumer = QueueConsumer(
         amqp_url=settings.amqp_url,

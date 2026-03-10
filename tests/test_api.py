@@ -94,7 +94,7 @@ class TestCreateJob:
         assert "id" in body
         assert body["status"] == "queued"
 
-    def test_missing_operation_returns_400(self, session):
+    def test_missing_operation_returns_422(self, session):
         factory = MagicMock()
         app = _make_app(factory)
 
@@ -102,9 +102,9 @@ class TestCreateJob:
             c = TestClient(app, raise_server_exceptions=False)
             resp = c.post("/jobs", json={"queue_name": "test.q"})
 
-        assert resp.status_code == 400
+        assert resp.status_code == 422
 
-    def test_missing_queue_name_returns_400(self, session):
+    def test_missing_queue_name_returns_422(self, session):
         factory = MagicMock()
         app = _make_app(factory)
 
@@ -112,7 +112,7 @@ class TestCreateJob:
             c = TestClient(app, raise_server_exceptions=False)
             resp = c.post("/jobs", json={"operation": "ping"})
 
-        assert resp.status_code == 400
+        assert resp.status_code == 422
 
     def test_publish_job_called_after_commit(self, session):
         job = _make_job()

@@ -31,12 +31,13 @@ def _make_registry(op_name: str = "ping", result: OperationResult = None, raises
     return reg, op
 
 
-def _make_job(status=JobStatus.QUEUED, operation="ping"):
+def _make_job(status=JobStatus.QUEUED, operation="ping", parent_job_id=None):
     job = MagicMock(spec=Job)
     job.id = uuid4()
     job.status = status
     job.operation = operation
     job.payload = {}
+    job.parent_job_id = parent_job_id
     return job
 
 

@@ -81,6 +81,7 @@ class FetchUniProtMetadataOperation:
     def __init__(self) -> None:
         self._http_requests = 0
         self._http_retries = 0
+        self._total_results: int | None = None
         self._http = requests.Session()
 
     def execute(self, session: Session, payload: dict[str, Any], *, emit: EmitFn) -> OperationResult:
@@ -121,6 +122,8 @@ class FetchUniProtMetadataOperation:
                     "metadata_upserted_total": metadata_upserted,
                     "http_requests": self._http_requests,
                     "http_retries": self._http_retries,
+                    "_progress_current": total_rows,
+                    **({"_progress_total": p.total_limit or self._total_results} if (p.total_limit or self._total_results) else {}),
                 },
                 "info",
             )
@@ -175,6 +178,11 @@ class FetchUniProtMetadataOperation:
             emit("uniprot.fetch_page_start", None, {"page": page, "has_cursor": bool(next_cursor)}, "info")
 
             resp = self._get_with_retries(url, p, emit)
+            if self._total_results is None:
+                try:
+                    self._total_results = int(resp.headers.get("X-Total-Results", 0)) or None
+                except (ValueError, TypeError):
+                    pass
             text = self._decode_response(resp, p.compressed)
             rows = self._parse_tsv(text)
 

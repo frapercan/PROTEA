@@ -5,7 +5,7 @@ description = ""
 authors = [
     {name = "frapercan",email = "frapercan1@alum.us.es"}
 ]
-requires-python = ">=3.12"
+requires-python = ">=3.12,<4.0"
 dependencies = [
     "alembic (>=1.18.4,<2.0.0)",
     "pyyaml (>=6.0.3,<7.0.0)",
@@ -13,6 +13,14 @@ dependencies = [
     "fastapi (>=0.135.1,<0.136.0)",
     "requests (>=2.32.5,<3.0.0)",
     "pika (>=1.3.0,<2.0.0)",
+    "pgvector (>=0.4.2,<1.0.0)",
+    "numpy (>=1.26.0,<3.0.0)",
+    "transformers (>=4.40.0,<5.0.0)",
+    "torch (>=2.0.0)",
+    "sentencepiece (>=0.2.1,<0.3.0)",
+    "esm (>=3.2.1)",
+    "python-multipart (>=0.0.22,<0.0.23)",
+    "faiss-cpu (>=1.7.0)",
 ]
 
 

@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import logging
 import signal
+import time
 from uuid import UUID
 
 import pika
 from pika.adapters.blocking_connection import BlockingChannel
 from pika.spec import Basic, BasicProperties
 
+from protea.core.contracts.operation import RetryLaterError
 from protea.workers.base_worker import BaseWorker
 
 logger = logging.getLogger(__name__)
@@ -49,7 +51,13 @@ class QueueConsumer:
         signal.signal(signal.SIGINT, self._handle_stop)
         signal.signal(signal.SIGTERM, self._handle_stop)
 
-        connection = pika.BlockingConnection(pika.URLParameters(self._amqp_url))
+        # Use a long heartbeat so RabbitMQ does not close the connection
+        # while the worker is blocked inside a long operation (QuickGO, embeddings…).
+        # BlockingConnection cannot send heartbeats during op.execute(), so we
+        # give the broker up to 1 hour before it considers this consumer dead.
+        params = pika.URLParameters(self._amqp_url)
+        params.heartbeat = 3600
+        connection = pika.BlockingConnection(params)
         channel = connection.channel()
 
         channel.queue_declare(queue=self._queue_name, durable=True)
@@ -108,6 +116,20 @@ class QueueConsumer:
             self._worker.handle_job(job_id)
             channel.basic_ack(delivery_tag=method.delivery_tag)
             logger.info("Job acked. job_id=%s", job_id)
+        except RetryLaterError as exc:
+            # Job reset to QUEUED — ack current message, wait, re-publish.
+            # Use connection.sleep() (pika-native) to keep heartbeats alive during delay.
+            channel.basic_ack(delivery_tag=method.delivery_tag)
+            delay = exc.delay_seconds
+            logger.info("Job will retry in %ss. job_id=%s reason=%s", delay, job_id, exc)
+            channel.connection.sleep(delay)
+            channel.basic_publish(
+                exchange="",
+                routing_key=self._queue_name,
+                body=json.dumps({"job_id": str(job_id)}).encode(),
+                properties=pika.BasicProperties(delivery_mode=2),
+            )
+            logger.info("Job re-published. job_id=%s queue=%s", job_id, self._queue_name)
         except Exception as exc:
             logger.error("Job failed. job_id=%s error=%s", job_id, exc)
             channel.basic_nack(

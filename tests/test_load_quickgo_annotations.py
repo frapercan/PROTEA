@@ -136,7 +136,7 @@ class TestStoreBuffer:
         )
         assert inserted == 3
         assert skipped == 0
-        session.add_all.assert_called_once()
+        session.execute.assert_called_once()
 
     def test_eco_mapping_applied(self) -> None:
         op = self._op()
@@ -149,8 +149,10 @@ class TestStoreBuffer:
             eco_map=eco_map,
         )
         assert inserted == 1
-        added = session.add_all.call_args[0][0]
-        assert added[0].evidence_code == "IDA"
+        call_stmt = session.execute.call_args[0][0]
+        from sqlalchemy.dialects.postgresql import dialect as pg_dialect
+        compiled = call_stmt.compile(dialect=pg_dialect())
+        assert compiled.params["evidence_code_m0"] == "IDA"
 
     def test_raw_eco_stored_when_no_mapping(self) -> None:
         op = self._op()
@@ -162,5 +164,7 @@ class TestStoreBuffer:
             eco_map={},
         )
         assert inserted == 1
-        added = session.add_all.call_args[0][0]
-        assert added[0].evidence_code == "ECO:0000314"
+        call_stmt = session.execute.call_args[0][0]
+        from sqlalchemy.dialects.postgresql import dialect as pg_dialect
+        compiled = call_stmt.compile(dialect=pg_dialect())
+        assert compiled.params["evidence_code_m0"] == "ECO:0000314"

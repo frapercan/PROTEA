@@ -42,11 +42,14 @@ class LoadQuickGOAnnotationsPayload(ProteaPayload, frozen=True):
     reviewed: bool = True
     taxon_ids: list[int] | None = None
     aspects: list[str] | None = None
+    gene_product_ids: list[str] | None = None
+    use_db_accessions: bool = True
     eco_mapping_url: str | None = None
     page_size: PositiveInt = 10000
     timeout_seconds: PositiveInt = 300
     commit_every_page: bool = True
     total_limit: PositiveInt | None = None
+    gene_product_batch_size: PositiveInt = 200
 
     @field_validator("ontology_snapshot_id", "source_version", mode="before")
     @classmethod
@@ -90,10 +93,12 @@ class LoadQuickGOAnnotationsOperation:
             "taxon_ids": p.taxon_ids,
         }, "info")
 
-        canonical_accessions = self._load_accessions(session, emit)
+        canonical_accessions, protein_accessions = self._load_accessions(session, emit)
         if not canonical_accessions:
             emit("load_quickgo_annotations.no_proteins", None, {}, "warning")
             return OperationResult(result={"annotations_inserted": 0})
+
+        effective_gp_ids = list(canonical_accessions) if p.use_db_accessions else p.gene_product_ids
 
         go_term_map = self._load_go_term_map(session, snapshot_id, emit)
         eco_map = self._load_eco_mapping(p, emit)
@@ -121,7 +126,7 @@ class LoadQuickGOAnnotationsOperation:
         pages = 0
         buffer: list[dict[str, str]] = []
 
-        for record in self._stream_quickgo(p, emit):
+        for record in self._stream_quickgo(p, emit, gene_product_ids=effective_gp_ids):
             total_lines += 1
 
             if p.total_limit is not None and total_inserted >= p.total_limit:
@@ -135,7 +140,7 @@ class LoadQuickGOAnnotationsOperation:
                 pages += 1
                 inserted, skipped = self._store_buffer(
                     session, buffer, annotation_set.id,
-                    canonical_accessions, go_term_map, eco_map,
+                    protein_accessions, go_term_map, eco_map,
                 )
                 total_inserted += inserted
                 total_skipped += skipped
@@ -155,7 +160,7 @@ class LoadQuickGOAnnotationsOperation:
             pages += 1
             inserted, skipped = self._store_buffer(
                 session, buffer, annotation_set.id,
-                canonical_accessions, go_term_map, eco_map,
+                protein_accessions, go_term_map, eco_map,
             )
             total_inserted += inserted
             total_skipped += skipped
@@ -174,12 +179,20 @@ class LoadQuickGOAnnotationsOperation:
 
     # ── helpers ──────────────────────────────────────────────────────────────
 
-    def _load_accessions(self, session: Session, emit: EmitFn) -> set[str]:
+    def _load_accessions(self, session: Session, emit: EmitFn) -> tuple[set[str], set[str]]:
+        """Returns (canonical_accessions, protein_accessions).
+
+        canonical_accessions — used to build the QuickGO geneProductId filter.
+        protein_accessions   — actual protein.accession values; used for FK-safe
+                               filtering before insertion.
+        """
         emit("load_quickgo_annotations.load_accessions_start", None, {}, "info")
-        accessions = set(session.scalars(select(distinct(Protein.canonical_accession))))
+        canonical_accessions = set(session.scalars(select(distinct(Protein.canonical_accession))))
+        protein_accessions = set(session.scalars(select(distinct(Protein.accession))))
         emit("load_quickgo_annotations.load_accessions_done", None,
-             {"canonical_accessions": len(accessions)}, "info")
-        return accessions
+             {"canonical_accessions": len(canonical_accessions),
+              "protein_accessions": len(protein_accessions)}, "info")
+        return canonical_accessions, protein_accessions
 
     def _load_go_term_map(
         self, session: Session, snapshot_id: uuid.UUID, emit: EmitFn
@@ -215,7 +228,37 @@ class LoadQuickGOAnnotationsOperation:
         return mapping
 
     def _stream_quickgo(
-        self, p: LoadQuickGOAnnotationsPayload, emit: EmitFn
+        self, p: LoadQuickGOAnnotationsPayload, emit: EmitFn,
+        gene_product_ids: list[str] | None = None,
+    ) -> Iterator[dict[str, str]]:
+        effective_ids = gene_product_ids or p.gene_product_ids
+
+        # If no ID filter, do a single unbatched request
+        if not effective_ids:
+            yield from self._fetch_quickgo_page(p, emit, gp_ids=None, batch_index=0, total_batches=1)
+            return
+
+        # Batch accessions to avoid URL length limits (QuickGO returns 400 for very long URLs)
+        batches = [
+            effective_ids[i: i + p.gene_product_batch_size]
+            for i in range(0, len(effective_ids), p.gene_product_batch_size)
+        ]
+        total_batches = len(batches)
+        emit("load_quickgo_annotations.batching", None,
+             {"total_accessions": len(effective_ids), "total_batches": total_batches,
+              "batch_size": p.gene_product_batch_size}, "info")
+
+        for batch_index, batch in enumerate(batches):
+            yield from self._fetch_quickgo_page(p, emit, gp_ids=batch,
+                                                batch_index=batch_index, total_batches=total_batches)
+
+    def _fetch_quickgo_page(
+        self,
+        p: LoadQuickGOAnnotationsPayload,
+        emit: EmitFn,
+        gp_ids: list[str] | None,
+        batch_index: int,
+        total_batches: int,
     ) -> Iterator[dict[str, str]]:
         params: dict[str, Any] = {"geneProductType": "protein"}
         if p.reviewed:
@@ -223,13 +266,20 @@ class LoadQuickGOAnnotationsOperation:
         if p.taxon_ids:
             params["taxonId"] = ",".join(str(t) for t in p.taxon_ids)
         if p.aspects:
-            params["aspect"] = ",".join(p.aspects)
+            _aspect_map = {"F": "molecular_function", "P": "biological_process", "C": "cellular_component"}
+            params["aspect"] = ",".join(_aspect_map.get(a, a) for a in p.aspects)
+        if gp_ids:
+            params["geneProductId"] = ",".join(gp_ids)
 
         headers = {
             "Accept": "text/tsv",
             "User-Agent": "PROTEA/load_quickgo_annotations",
         }
-        emit("load_quickgo_annotations.download_start", None, {"params": params}, "info")
+        emit("load_quickgo_annotations.download_start", None,
+             {"batch": batch_index + 1, "of": total_batches,
+              "accessions_in_batch": len(gp_ids) if gp_ids else "all",
+              "_progress_current": batch_index + 1,
+              "_progress_total": total_batches}, "info")
 
         resp = requests.get(
             p.quickgo_base_url,
@@ -266,7 +316,7 @@ class LoadQuickGOAnnotationsOperation:
         go_term_map: dict[str, int],
         eco_map: dict[str, str],
     ) -> tuple[int, int]:
-        to_add: list[ProteinGOAnnotation] = []
+        to_add: list[dict] = []
         skipped = 0
 
         for row in records:
@@ -284,20 +334,27 @@ class LoadQuickGOAnnotationsOperation:
             eco_id = row.get("ECO ID", "").strip() or None
             evidence_code = (eco_map.get(eco_id, eco_id) if eco_id else None)
 
-            to_add.append(ProteinGOAnnotation(
-                annotation_set_id=annotation_set_id,
-                protein_accession=accession,
-                go_term_id=go_term_id,
-                qualifier=row.get("QUALIFIER", "").strip() or None,
-                evidence_code=evidence_code,
-                assigned_by=row.get("ASSIGNED BY", "").strip() or None,
-                db_reference=row.get("REFERENCE", "").strip() or None,
-                with_from=row.get("WITH/FROM", "").strip() or None,
-                annotation_date=row.get("DATE", "").strip() or None,
-            ))
+            to_add.append({
+                "annotation_set_id": annotation_set_id,
+                "protein_accession": accession,
+                "go_term_id": go_term_id,
+                "qualifier": row.get("QUALIFIER", "").strip() or None,
+                "evidence_code": evidence_code,
+                "assigned_by": row.get("ASSIGNED BY", "").strip() or None,
+                "db_reference": row.get("REFERENCE", "").strip() or None,
+                "with_from": row.get("WITH/FROM", "").strip() or None,
+                "annotation_date": row.get("DATE", "").strip() or None,
+            })
 
         if to_add:
-            session.add_all(to_add)
-            session.flush()
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+            chunk_size = 5000
+            for i in range(0, len(to_add), chunk_size):
+                chunk = to_add[i: i + chunk_size]
+                stmt = pg_insert(ProteinGOAnnotation.__table__).values(chunk)
+                stmt = stmt.on_conflict_do_nothing(
+                    constraint="uq_pga_set_protein_term_evidence"
+                )
+                session.execute(stmt)
 
         return len(to_add), skipped

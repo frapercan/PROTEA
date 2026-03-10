@@ -5,6 +5,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.requests import Request
 
@@ -13,6 +14,20 @@ from protea.infrastructure.queue.publisher import publish_job
 from protea.infrastructure.session import session_scope
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+
+
+class CreateJobRequest(BaseModel):
+    operation: str = Field(..., min_length=1)
+    queue_name: str = Field(..., min_length=1)
+    payload: dict[str, Any] = Field(default_factory=dict)
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("operation", "queue_name", mode="before")
+    @classmethod
+    def strip_and_require(cls, v: str) -> str:
+        if not isinstance(v, str) or not v.strip():
+            raise ValueError("must be a non-empty string")
+        return v.strip()
 
 
 # --- Dependency hook (wire this in your app factory) ---
@@ -33,27 +48,28 @@ def get_amqp_url(request: Request) -> str:
 
 @router.post("")
 def create_job(
-    body: dict[str, Any],
+    body: CreateJobRequest,
     factory: sessionmaker[Session] = Depends(get_session_factory),
     amqp_url: str = Depends(get_amqp_url),
 ) -> dict[str, Any]:
-    operation = body.get("operation")
-    queue_name = body.get("queue_name")
-    payload = body.get("payload") or {}
-    meta = body.get("meta") or {}
-
-    if not operation or not queue_name:
-        raise HTTPException(status_code=400, detail="operation and queue_name are required")
-
     with session_scope(factory) as session:
-        job = Job(operation=operation, queue_name=queue_name, payload=payload, meta=meta)
+        job = Job(
+            operation=body.operation,
+            queue_name=body.queue_name,
+            payload=body.payload,
+            meta=body.meta,
+        )
         session.add(job)
         session.flush()
         job_id = job.id
-        session.add(JobEvent(job_id=job_id, event="job.created", fields={"operation": operation, "queue": queue_name}))
+        session.add(JobEvent(
+            job_id=job_id,
+            event="job.created",
+            fields={"operation": body.operation, "queue": body.queue_name},
+        ))
 
     # Publish after commit so the worker always finds the row.
-    publish_job(amqp_url, queue_name, job_id)
+    publish_job(amqp_url, body.queue_name, job_id)
     return {"id": str(job_id), "status": "queued"}
 
 
@@ -61,11 +77,18 @@ def create_job(
 def list_jobs(
     status: str | None = Query(default=None),
     operation: str | None = Query(default=None),
+    include_children: bool = Query(default=False),
+    parent_job_id: UUID | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=500),
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> list[dict[str, Any]]:
     with session_scope(factory) as session:
         q = session.query(Job)
+
+        if parent_job_id is not None:
+            q = q.filter(Job.parent_job_id == parent_job_id)
+        elif not include_children:
+            q = q.filter(Job.parent_job_id.is_(None))
 
         if status is not None:
             try:
@@ -84,6 +107,7 @@ def list_jobs(
                 "operation": j.operation,
                 "queue_name": j.queue_name,
                 "status": j.status.value,
+                "parent_job_id": str(j.parent_job_id) if j.parent_job_id else None,
                 "created_at": j.created_at.isoformat(),
                 "started_at": j.started_at.isoformat() if j.started_at else None,
                 "finished_at": j.finished_at.isoformat() if j.finished_at else None,
@@ -186,4 +210,19 @@ def cancel_job(
 
         j.status = JobStatus.CANCELLED
         session.add(JobEvent(job_id=job_id, event="job.cancelled", fields={}))
-        return {"id": str(j.id), "status": j.status.value}
+
+        # Cancel any queued children so they are not picked up by a worker.
+        children = (
+            session.query(Job)
+            .filter(Job.parent_job_id == job_id, Job.status == JobStatus.QUEUED)
+            .all()
+        )
+        for child in children:
+            child.status = JobStatus.CANCELLED
+            session.add(JobEvent(
+                job_id=child.id,
+                event="job.cancelled",
+                fields={"reason": "parent_cancelled"},
+            ))
+
+        return {"id": str(j.id), "status": j.status.value, "children_cancelled": len(children)}

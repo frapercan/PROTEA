@@ -49,6 +49,13 @@ class Job(Base):
     progress_current: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     progress_total: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
+    parent_job_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("job.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     error_code: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 

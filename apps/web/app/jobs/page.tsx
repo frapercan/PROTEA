@@ -4,9 +4,8 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { listJobs, Job } from "@/lib/api";
 import { StatusBadge } from "@/components/StatusBadge";
-import { JobForm } from "@/components/JobForm";
-import { useRouter } from "next/navigation";
-
+import { SkeletonTableRow } from "@/components/Skeleton";
+import { useToast } from "@/components/Toast";
 const STATUS_OPTIONS = ["", "queued", "running", "succeeded", "failed", "cancelled"];
 
 function formatDate(iso?: string | null) {
@@ -14,48 +13,91 @@ function formatDate(iso?: string | null) {
   return new Date(iso).toLocaleString([], { dateStyle: "short", timeStyle: "medium" });
 }
 
+function InlineProgress({
+  current, total,
+}: {
+  current?: number | null;
+  total?: number | null;
+}) {
+  if (!current && !total) return null;
+  if (!total) {
+    return (
+      <div className="mt-1 flex items-center gap-2">
+        <div className="h-1.5 w-24 overflow-hidden rounded-full bg-gray-100">
+          <div className="h-1.5 w-8 rounded-full bg-blue-400 animate-pulse" />
+        </div>
+        <span className="text-xs text-gray-400">{(current ?? 0).toLocaleString()}</span>
+      </div>
+    );
+  }
+  const pct = Math.min(100, Math.round(((current ?? 0) / total) * 100));
+  return (
+    <div className="mt-1 flex items-center gap-2">
+      <div className="h-1.5 w-24 overflow-hidden rounded-full bg-gray-100">
+        <div
+          className="h-1.5 rounded-full bg-blue-400 transition-all duration-500"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <span className="text-xs text-gray-400">{pct}%</span>
+    </div>
+  );
+}
+
 export default function JobsPage() {
-  const router = useRouter();
+  const toast = useToast();
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("");
   const [error, setError] = useState("");
   const [autoRefresh, setAutoRefresh] = useState(false);
-  const [showForm, setShowForm] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  async function refresh(status = statusFilter) {
+  async function refresh(status = statusFilter, showLoader = false) {
+    if (showLoader) setLoading(true);
     try {
       setError("");
-      setJobs(await listJobs({ limit: 100, status: status || undefined }));
+      const all = await listJobs({ limit: 500, status: status || undefined });
+      setJobs(all.filter((j) => !j.parent_job_id && j.queue_name !== "protea.embeddings.batch"));
     } catch (e: any) {
-      setError(String(e));
+      const msg = String(e);
+      setError(msg);
+      toast(msg, "error");
+    } finally {
+      setLoading(false);
     }
   }
 
   useEffect(() => {
-    refresh();
+    refresh(statusFilter, true);
   }, [statusFilter]);
 
+  // Auto-refresh: faster when there are active jobs, slower otherwise
   useEffect(() => {
-    if (autoRefresh) {
-      intervalRef.current = setInterval(() => refresh(), 3000);
-    } else {
+    if (!autoRefresh) {
       if (intervalRef.current) clearInterval(intervalRef.current);
+      return;
     }
+    function schedule() {
+      const hasActive = jobs.some((j) => j.status === "running" || j.status === "queued");
+      return hasActive ? 3000 : 8000;
+    }
+    intervalRef.current = setInterval(() => refresh(), schedule());
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [autoRefresh, statusFilter]);
+  }, [autoRefresh, statusFilter, jobs]);
 
-  function onJobCreated(id: string) {
-    setShowForm(false);
-    router.push(`/jobs/${id}`);
-  }
+  const activeCount = jobs.filter((j) => j.status === "running" || j.status === "queued").length;
 
   return (
     <>
-      {showForm && <JobForm onCreated={onJobCreated} onClose={() => setShowForm(false)} />}
-
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-semibold">Jobs</h1>
+        {activeCount > 0 && (
+          <span className="flex items-center gap-1.5 rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700 border border-blue-100">
+            <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500" />
+            {activeCount} active
+          </span>
+        )}
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <select
@@ -64,7 +106,7 @@ export default function JobsPage() {
             className="rounded-md border bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             {STATUS_OPTIONS.map((s) => (
-              <option key={s} value={s}>{s ? s.toUpperCase() : "All statuses"}</option>
+              <option key={s} value={s}>{s ? s.charAt(0).toUpperCase() + s.slice(1) : "All statuses"}</option>
             ))}
           </select>
 
@@ -80,17 +122,10 @@ export default function JobsPage() {
           </label>
 
           <button
-            onClick={() => refresh()}
+            onClick={() => refresh(statusFilter)}
             className="rounded-md border bg-white px-3 py-1.5 text-sm hover:bg-gray-50"
           >
             Refresh
-          </button>
-
-          <button
-            onClick={() => setShowForm(true)}
-            className="rounded-md bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700"
-          >
-            + New Job
           </button>
         </div>
       </div>
@@ -102,32 +137,36 @@ export default function JobsPage() {
       )}
 
       <div className="mt-4 overflow-hidden rounded-lg border bg-white shadow-sm">
-        <div className="grid grid-cols-[140px_160px_1fr_180px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
+        <div className="grid grid-cols-[140px_180px_1fr_180px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
           <div>Status</div>
           <div>Operation</div>
           <div>Job ID</div>
           <div>Created</div>
         </div>
 
-        {jobs.map((j) => (
+        {loading && Array.from({ length: 5 }).map((_, i) => (
+          <SkeletonTableRow key={i} cols={4} />
+        ))}
+
+        {!loading && jobs.map((j) => (
           <Link
             key={j.id}
             href={`/jobs/${j.id}`}
-            className="grid grid-cols-[140px_160px_1fr_180px] gap-2 border-b px-4 py-3 text-sm hover:bg-blue-50 transition-colors last:border-0"
+            className="grid grid-cols-[140px_180px_1fr_180px] gap-2 border-b px-4 py-3 text-sm hover:bg-blue-50 transition-colors last:border-0 items-start"
           >
             <div><StatusBadge status={j.status} /></div>
-            <div className="text-gray-700 truncate">{j.operation}</div>
+            <div>
+              <span className="text-gray-700 truncate block">{j.operation}</span>
+              <InlineProgress current={j.progress_current} total={j.progress_total} />
+            </div>
             <div className="font-mono text-xs text-gray-400 truncate">{j.id}</div>
             <div className="text-gray-500 text-xs">{formatDate(j.created_at)}</div>
           </Link>
         ))}
 
-        {jobs.length === 0 && (
+        {!loading && jobs.length === 0 && (
           <div className="px-4 py-8 text-center text-sm text-gray-400">
-            No jobs found.{" "}
-            <button onClick={() => setShowForm(true)} className="text-blue-600 underline">
-              Create one
-            </button>
+            No jobs found.
           </div>
         )}
       </div>

@@ -204,11 +204,13 @@ class TestPublishJob:
         conn.channel.return_value = channel
         conn.is_open = True
 
-        with patch("protea.infrastructure.queue.publisher.pika.BlockingConnection", return_value=conn):
-            with pytest.raises(RuntimeError, match="broker down"):
+        with patch("protea.infrastructure.queue.publisher.pika.BlockingConnection", return_value=conn), \
+             patch("protea.infrastructure.queue.publisher.time.sleep"):
+            with pytest.raises(RuntimeError, match="Failed to publish job"):
                 publish_job("amqp://localhost/", "q", uuid4())
 
-        conn.close.assert_called_once()
+        # close() is called once per retry attempt (4 total: 1 initial + 3 retries)
+        assert conn.close.call_count == 4
 
     def test_declares_durable_queue(self):
         conn = MagicMock()

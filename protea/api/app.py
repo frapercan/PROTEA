@@ -4,9 +4,16 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware  # <-- ADD
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
+from protea.api.routers import admin as admin_router
+from protea.api.routers import annotations as annotations_router
+from protea.api.routers import embeddings as embeddings_router
 from protea.api.routers import jobs as jobs_router
+from protea.api.routers import maintenance as maintenance_router
+from protea.api.routers import proteins as proteins_router
+from protea.api.routers import query_sets as query_sets_router
 from protea.infrastructure.session import build_session_factory
 from protea.infrastructure.settings import load_settings
 
@@ -27,7 +34,6 @@ def create_app(project_root: Path | None = None) -> FastAPI:
         allow_origins=[
             "http://localhost:3000",
             "http://127.0.0.1:3000",
-            "http://192.168.1.136:3000",
         ],
         allow_credentials=True,
         allow_methods=["*"],
@@ -35,4 +41,14 @@ def create_app(project_root: Path | None = None) -> FastAPI:
     )
 
     app.include_router(jobs_router.router)
+    app.include_router(proteins_router.router)
+    app.include_router(annotations_router.router)
+    app.include_router(embeddings_router.router)
+    app.include_router(query_sets_router.router)
+    app.include_router(maintenance_router.router)
+    app.include_router(admin_router.router)
+
+    sphinx_build = project_root / "docs" / "build" / "html"
+    if sphinx_build.exists():
+        app.mount("/sphinx", StaticFiles(directory=sphinx_build, html=True), name="sphinx")
     return app
