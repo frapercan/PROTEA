@@ -52,15 +52,29 @@ def postgres_url(pytestconfig: pytest.Config) -> str:
     if not pytestconfig.getoption("--with-postgres"):
         pytest.skip("Pass --with-postgres to run integration tests with a temporary Postgres container.")
 
+    user = os.getenv("PROTEA_PG_USER", "usuario")
+    password = os.getenv("PROTEA_PG_PASSWORD", "clave")
+    db = os.getenv("PROTEA_PG_DB", "BioData")
+    host_port = os.getenv("PROTEA_PG_PORT")
+
+    # If all connection params are provided via env vars, assume an external DB
+    # is already running (e.g. a GitHub Actions service container) and skip Docker.
+    external_db = all([
+        os.getenv("PROTEA_PG_USER"),
+        os.getenv("PROTEA_PG_PASSWORD"),
+        os.getenv("PROTEA_PG_DB"),
+        host_port,
+    ])
+
+    if external_db:
+        url = f"postgresql+psycopg://{user}:{password}@localhost:{host_port}/{db}"
+        yield url
+        return
+
     if not _docker_exists():
         pytest.skip("Docker is not available; cannot start Postgres container.")
 
     image = os.getenv("PROTEA_PG_IMAGE", "pgvector/pgvector:pg16")
-    user = os.getenv("PROTEA_PG_USER", "usuario")
-    password = os.getenv("PROTEA_PG_PASSWORD", "clave")
-    db = os.getenv("PROTEA_PG_DB", "BioData")
-
-    host_port = os.getenv("PROTEA_PG_PORT")
     if host_port is None:
         host_port = str(55000 + (uuid.uuid4().int % 1000))
 
@@ -88,7 +102,6 @@ def postgres_url(pytestconfig: pytest.Config) -> str:
     try:
         _wait_ready(container, user, db, timeout_s=int(os.getenv("PROTEA_PG_TIMEOUT", "60")))
 
-        # Enable pgvector (optional, but harmless)
         subprocess.run(
             ["docker", "exec", container, "psql", "-U", user, "-d", db, "-c", "CREATE EXTENSION IF NOT EXISTS vector;"],
             text=True,
@@ -96,8 +109,6 @@ def postgres_url(pytestconfig: pytest.Config) -> str:
         )
 
         url = f"postgresql+psycopg://{user}:{password}@localhost:{host_port}/{db}"
-
-        # IMPORTANT: yield, not return (so cleanup happens after tests finish)
         yield url
 
     finally:
