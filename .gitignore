@@ -31,3 +31,7 @@ logs/pids/
 
 CLAUDE.md
 .claude/
+
+# Local data
+static/
+storage/
