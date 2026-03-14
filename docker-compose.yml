@@ -1,0 +1,94 @@
+services:
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: protea
+      POSTGRES_PASSWORD: protea
+      POSTGRES_DB: protea
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U protea"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: .
+    environment:
+      PROTEA_DB_URL: postgresql+psycopg://protea:protea@postgres/protea
+      PROTEA_AMQP_URL: amqp://guest:guest@rabbitmq/
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  worker-jobs:
+    build: .
+    environment:
+      PROTEA_DB_URL: postgresql+psycopg://protea:protea@postgres/protea
+      PROTEA_AMQP_URL: amqp://guest:guest@rabbitmq/
+    command: python scripts/worker.py --queue protea.jobs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  worker-embeddings:
+    build: .
+    environment:
+      PROTEA_DB_URL: postgresql+psycopg://protea:protea@postgres/protea
+      PROTEA_AMQP_URL: amqp://guest:guest@rabbitmq/
+    command: python scripts/worker.py --queue protea.embeddings
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  worker-predictions:
+    build: .
+    environment:
+      PROTEA_DB_URL: postgresql+psycopg://protea:protea@postgres/protea
+      PROTEA_AMQP_URL: amqp://guest:guest@rabbitmq/
+    command: python scripts/worker.py --queue protea.predictions.batch
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: apps/web
+    environment:
+      PROTEA_API_URL: http://api:8000
+      NEXT_PUBLIC_API_URL: /api-proxy
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:

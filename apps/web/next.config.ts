@@ -1,14 +1,17 @@
 import type { NextConfig } from "next";
 
+const apiUrl = process.env.PROTEA_API_URL ?? "http://localhost:8000";
+
 const nextConfig: NextConfig = {
+  output: "standalone",
   trailingSlash: true,
   async rewrites() {
     return [
-      { source: "/sphinx/", destination: "http://localhost:8000/sphinx/" },
-      { source: "/sphinx/:path*", destination: "http://localhost:8000/sphinx/:path*" },
+      { source: "/sphinx/", destination: `${apiUrl}/sphinx/` },
+      { source: "/sphinx/:path*", destination: `${apiUrl}/sphinx/:path*` },
       {
         source: "/api-proxy/:path*",
-        destination: "http://localhost:8000/:path*",
+        destination: `${apiUrl}/:path*`,
       },
     ];
   },
