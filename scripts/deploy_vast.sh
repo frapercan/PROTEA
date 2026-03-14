@@ -1,28 +1,31 @@
 #!/usr/bin/env bash
-# scripts/deploy_vast.sh — Push code updates to a running vast.ai instance
+# scripts/deploy_vast.sh — Deploy PROTEA to a vast.ai instance via Docker
 #
 # Usage:
-#   bash scripts/deploy_vast.sh <IP> <SSH_PORT> [BATCH_WORKERS]
+#   bash scripts/deploy_vast.sh <IP> <SSH_PORT> [GHCR_TOKEN]
 #
 # Examples:
 #   bash scripts/deploy_vast.sh 173.206.147.184 41624
-#   bash scripts/deploy_vast.sh 173.206.147.184 41624 2
+#   bash scripts/deploy_vast.sh 173.206.147.184 41624 ghp_xxxxx
 #
 # What it does:
-#   1. rsync code to /root/PROTEA (excludes venvs, node_modules, logs, local config)
-#   2. poetry install --without dev (only if pyproject.toml changed)
-#   3. npm install (only if package.json changed)
-#   4. alembic upgrade head
-#   5. restart the full PROTEA stack
+#   1. Sync docker-compose files to the remote (no source code needed)
+#   2. Login to ghcr.io on the remote
+#   3. Pull latest images from ghcr.io
+#   4. Run migrations and restart the stack (migrate service runs automatically)
+#
+# Requirements on the remote:
+#   - Docker with NVIDIA Container Toolkit (standard vast.ai images)
 
 set -euo pipefail
 
-IP="${1:?Usage: deploy_vast.sh <IP> <SSH_PORT> [BATCH_WORKERS]}"
-PORT="${2:?Usage: deploy_vast.sh <IP> <SSH_PORT> [BATCH_WORKERS]}"
-BATCH_WORKERS="${3:-1}"
+IP="${1:?Usage: deploy_vast.sh <IP> <SSH_PORT> [GHCR_TOKEN]}"
+PORT="${2:?Usage: deploy_vast.sh <IP> <SSH_PORT> [GHCR_TOKEN]}"
+GHCR_TOKEN="${3:-${GITHUB_TOKEN:-}}"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SSH="ssh -p $PORT root@$IP"
+
 GREEN="\033[32m"; YELLOW="\033[33m"; BOLD="\033[1m"; RESET="\033[0m"
 step() { printf "\n${BOLD}==> %s${RESET}\n" "$*"; }
 ok()   { printf "  ${GREEN}✓${RESET} %s\n" "$*"; }
@@ -37,51 +40,40 @@ if ! $SSH "echo ok" &>/dev/null; then
 fi
 ok "Connected to $IP:$PORT"
 
-# ── 1. Sync code ───────────────────────────────────────────────────────────────
-step "Syncing code → /root/PROTEA"
+# ── 1. Sync compose files (no source code needed) ─────────────────────────────
+step "Syncing compose files → /root/PROTEA"
+$SSH "mkdir -p /root/PROTEA/docker"
+rsync -az -e "ssh -p $PORT" \
+    "$ROOT/docker-compose.yml" \
+    "$ROOT/docker-compose.prod.yml" \
+    "root@$IP:/root/PROTEA/"
+rsync -az -e "ssh -p $PORT" \
+    "$ROOT/docker/init.sql" \
+    "root@$IP:/root/PROTEA/docker/"
+ok "Compose files synced"
 
-rsync -az --delete \
-    --exclude='.git/' \
-    --exclude='__pycache__/' \
-    --exclude='*.pyc' \
-    --exclude='*.egg-info/' \
-    --exclude='.venv/' \
-    --exclude='logs/' \
-    --exclude='node_modules/' \
-    --exclude='.next/' \
-    --exclude='storage/' \
-    --exclude='protea/config/system.yaml' \
-    --exclude='apps/web/.env.local' \
-    -e "ssh -p $PORT" \
-    "$ROOT/" "root@$IP:/root/PROTEA/"
+# ── 2. Login to ghcr.io ───────────────────────────────────────────────────────
+step "Logging in to ghcr.io"
+if [[ -n "$GHCR_TOKEN" ]]; then
+    $SSH "echo '$GHCR_TOKEN' | docker login ghcr.io -u frapercan --password-stdin"
+    ok "Logged in to ghcr.io"
+else
+    warn "No GHCR_TOKEN provided — assuming images are public or already logged in"
+fi
 
-ok "Code synced"
+# ── 3. Pull latest images ─────────────────────────────────────────────────────
+step "Pulling latest images from ghcr.io"
+$SSH "cd /root/PROTEA && docker compose -f docker-compose.yml -f docker-compose.prod.yml pull"
+ok "Images up to date"
 
-# ── 2. Install Python deps (only if pyproject.toml changed) ───────────────────
-step "Installing Python dependencies"
-$SSH "cd /root/PROTEA && export PATH=\$HOME/.local/bin:\$PATH && poetry install --without dev"
-ok "Python deps up to date"
-
-# ── 3. Install frontend deps (only if package.json changed) ───────────────────
-step "Installing frontend dependencies"
-$SSH "cd /root/PROTEA/apps/web && npm install --silent"
-ok "Frontend deps up to date"
-
-# ── 4. Run Alembic migrations ──────────────────────────────────────────────────
-step "Running database migrations"
-$SSH "cd /root/PROTEA && export PATH=\$HOME/.local/bin:\$PATH && poetry run alembic upgrade head"
-ok "Schema up to date"
-
-# ── 5. Restart stack ───────────────────────────────────────────────────────────
-step "Restarting PROTEA stack ($BATCH_WORKERS batch worker(s))"
-$SSH "cd /root/PROTEA && export PATH=\$HOME/.local/bin:\$PATH && bash scripts/manage.sh start $BATCH_WORKERS"
+# ── 4. Restart stack (migrate runs automatically before API/workers) ───────────
+step "Restarting PROTEA stack"
+$SSH "cd /root/PROTEA && docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d"
 ok "Stack restarted"
 
-# ── Done ───────────────────────────────────────────────────────────────────────
-FRONTEND_PORT=$($SSH "vastai show instance --raw 2>/dev/null | python3 -c \"import sys,json; p=json.load(sys.stdin).get('ports',{}); print(p.get('3000/tcp',[{'HostPort':'3000'}])[0]['HostPort'])\" 2>/dev/null || echo '3000'")
-
+# ── Done ──────────────────────────────────────────────────────────────────────
 printf "\n${BOLD}╔══════════════════════════════════════════════════╗${RESET}\n"
 printf "${BOLD}║           PROTEA deployed successfully           ║${RESET}\n"
 printf "${BOLD}╚══════════════════════════════════════════════════╝${RESET}\n\n"
-printf "  Logs:    $SSH 'bash /root/PROTEA/scripts/manage.sh logs'\n"
-printf "  Status:  $SSH 'bash /root/PROTEA/scripts/manage.sh status'\n\n"
+printf "  Logs:    $SSH 'cd /root/PROTEA && docker compose -f docker-compose.yml -f docker-compose.prod.yml logs -f'\n"
+printf "  Status:  $SSH 'cd /root/PROTEA && docker compose -f docker-compose.yml -f docker-compose.prod.yml ps'\n\n"
