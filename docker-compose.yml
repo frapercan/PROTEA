@@ -8,6 +8,7 @@ services:
       POSTGRES_DB: protea
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
       - "5432:5432"
     healthcheck:
@@ -30,6 +31,16 @@ services:
       timeout: 5s
       retries: 5
 
+  migrate:
+    build: .
+    environment:
+      PROTEA_DB_URL: postgresql+psycopg://protea:protea@postgres/protea
+    command: alembic upgrade head
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   api:
     build: .
     environment:
@@ -42,6 +53,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   worker-jobs:
     build: .
@@ -50,8 +63,8 @@ services:
       PROTEA_AMQP_URL: amqp://guest:guest@rabbitmq/
     command: python scripts/worker.py --queue protea.jobs
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       rabbitmq:
         condition: service_healthy
 
@@ -62,8 +75,8 @@ services:
       PROTEA_AMQP_URL: amqp://guest:guest@rabbitmq/
     command: python scripts/worker.py --queue protea.embeddings
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       rabbitmq:
         condition: service_healthy
 
@@ -74,8 +87,8 @@ services:
       PROTEA_AMQP_URL: amqp://guest:guest@rabbitmq/
     command: python scripts/worker.py --queue protea.predictions.batch
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       rabbitmq:
         condition: service_healthy
 
