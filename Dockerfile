@@ -13,10 +13,11 @@ RUN pip install --no-cache-dir poetry==2.1.0
 
 COPY pyproject.toml poetry.lock ./
 RUN poetry config virtualenvs.create false \
-    && poetry install --without dev --no-interaction --no-ansi
+    && poetry install --without dev --no-root --no-interaction --no-ansi
 
 # Copy source
 COPY protea/ ./protea/
+RUN poetry install --without dev --no-interaction --no-ansi
 COPY scripts/ ./scripts/
 COPY alembic/ ./alembic/
 COPY alembic.ini ./
