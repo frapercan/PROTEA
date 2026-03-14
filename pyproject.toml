@@ -47,6 +47,8 @@ httpx = ">=0.28.1,<0.29.0"
 ruff = ">=0.15.5,<0.16.0"
 mypy = ">=1.19.1,<2.0.0"
 pytest-cov = ">=7.0.0,<8.0.0"
+types-requests = "^2.32.4.20260107"
+types-pyyaml = "^6.0.12.20250915"
 
 [tool.taskipy.tasks]
 lint     = "ruff check protea scripts && flake8 protea"
