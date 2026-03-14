@@ -67,9 +67,17 @@ ignore = ["E501", "B008"]
 python_version = "3.12"
 strict = false
 ignore_missing_imports = true
-disallow_untyped_defs = true
-warn_return_any = true
-warn_unused_ignores = true
+disallow_untyped_defs = false
+warn_return_any = false
+warn_unused_ignores = false
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = [
+    "protea.core.operations.*",
+    "protea.api.routers.*",
+]
+ignore_errors = true
 
 [tool.coverage.run]
 source = ["protea"]

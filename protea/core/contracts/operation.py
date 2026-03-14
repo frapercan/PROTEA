@@ -50,7 +50,7 @@ class RetryLaterError(Exception):
         self.delay_seconds = delay_seconds
 
 
-class ProteaPayload(BaseModel, frozen=True):
+class ProteaPayload(BaseModel):
     """Immutable, strictly-typed base class for all operation payloads.
 
     Subclass and declare fields using Pydantic annotations.  Validation runs
@@ -59,7 +59,7 @@ class ProteaPayload(BaseModel, frozen=True):
     valid ``bool``).
     """
 
-    model_config = ConfigDict(strict=True)
+    model_config = ConfigDict(strict=True, frozen=True)
 
 
 class Operation(Protocol):
