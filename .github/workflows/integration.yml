@@ -46,6 +46,12 @@ jobs:
       - name: Install dependencies
         run: poetry install --with dev
 
+      - name: Install psql client
+        run: sudo apt-get install -y postgresql-client
+
+      - name: Enable pgvector extension
+        run: PGPASSWORD=protea psql -h localhost -U protea -d protea_test -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
       - name: Run integration tests
         env:
           PROTEA_PG_USER: protea
