@@ -104,16 +104,17 @@ class TestParseTerms:
 
 
 class TestLoadOntologySnapshotExecute:
-    def _mock_session(self, existing_snapshot=None):
+    def _mock_session(self, existing_snapshot=None, rel_count=0):
         session = MagicMock()
         session.get.return_value = existing_snapshot
         session.query.return_value.filter_by.return_value.first.return_value = existing_snapshot
+        session.query.return_value.filter.return_value.scalar.return_value = rel_count
         return session
 
     def test_idempotent_if_version_exists(self) -> None:
         existing = MagicMock()
         existing.id = "existing-uuid"
-        session = self._mock_session(existing_snapshot=existing)
+        session = self._mock_session(existing_snapshot=existing, rel_count=42)
 
         with patch.object(
             LoadOntologySnapshotOperation, "_download", return_value=_OBO_SAMPLE
@@ -156,4 +157,7 @@ class TestLoadOntologySnapshotExecute:
         assert result.result["terms_inserted"] == 4
         assert result.result["obo_version"] == "releases/2024-01-17"
         assert "skipped" not in result.result
-        session.add_all.assert_called_once()
+        # add_all is called twice: once for GOTerms, once for GOTermRelationships
+        assert session.add_all.call_count == 2
+        terms_call_args = session.add_all.call_args_list[0][0][0]
+        assert len(terms_call_args) == 4

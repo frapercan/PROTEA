@@ -9,9 +9,14 @@ import {
   getPredictionSetProteins,
   getProteinPredictions,
   getProteinAnnotations,
+  getGoSubgraph,
   getGoTermDistribution,
+  Prediction,
   ProteinAnnotation,
+  GoSubgraph,
 } from "@/lib/api";
+import dynamic from "next/dynamic";
+const GoGraph = dynamic(() => import("@/components/GoGraph"), { ssr: false });
 
 type Tab = "proteins" | "distribution";
 
@@ -41,7 +46,144 @@ function shortId(id: string) {
 
 const PAGE_SIZE = 50;
 
-type Prediction = { go_id: string; name: string | null; aspect: string | null; distance: number; ref_protein_accession: string; qualifier: string | null; evidence_code: string | null };
+const RELATION_COLORS: Record<string, string> = {
+  same:         "bg-blue-50 text-blue-700",
+  parent:       "bg-indigo-50 text-indigo-700",
+  child:        "bg-indigo-50 text-indigo-700",
+  ancestor:     "bg-violet-50 text-violet-700",
+  descendant:   "bg-violet-50 text-violet-700",
+  close:        "bg-green-50 text-green-700",
+  intermediate: "bg-yellow-50 text-yellow-700",
+  distant:      "bg-orange-50 text-orange-700",
+  "root-only":  "bg-gray-50 text-gray-500",
+  unrelated:    "bg-red-50 text-red-600",
+};
+
+function pct(v: number | null) {
+  if (v == null) return "—";
+  return `${(v * 100).toFixed(1)}%`;
+}
+
+function PredictionTable({ preds, annotatedGoIds }: { preds: Prediction[]; annotatedGoIds: Set<string> }) {
+  const hasAlignment = preds.some((p) => p.identity_nw != null);
+  const hasTaxonomy = preds.some((p) => p.taxonomic_relation != null);
+  const [expanded, setExpanded] = useState<number | null>(null);
+
+  // Column layout adapts to available features
+  const baseGrid = hasAlignment || hasTaxonomy
+    ? "grid-cols-[80px_1fr_100px_65px_70px_70px]"
+    : "grid-cols-[90px_1fr_110px_75px]";
+
+  return (
+    <div className="overflow-hidden rounded-md border bg-white">
+      <div className={`grid ${baseGrid} gap-1 border-b bg-gray-50 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400`}>
+        <div>GO ID</div>
+        <div>Name</div>
+        <div>Ref. Protein</div>
+        <div>Dist</div>
+        {hasAlignment && <><div>NW id%</div><div>SW id%</div></>}
+        {hasTaxonomy && !hasAlignment && <><div>Relation</div><div>Tax dist</div></>}
+      </div>
+      {preds.length === 0 ? (
+        <p className="px-3 py-3 text-xs text-gray-300">—</p>
+      ) : preds.map((pred, i) => (
+        <div key={i}>
+          <div
+            className={`grid ${baseGrid} gap-1 border-b px-3 py-2 text-xs last:border-0 items-center
+              ${annotatedGoIds.has(pred.go_id) ? "bg-green-50" : ""}
+              ${(hasAlignment || hasTaxonomy) ? "cursor-pointer hover:bg-blue-50/40" : ""}`}
+            onClick={() => (hasAlignment || hasTaxonomy) ? setExpanded(expanded === i ? null : i) : undefined}
+          >
+            <span className="font-mono text-blue-600">{pred.go_id}</span>
+            <span className="text-gray-700 truncate" title={pred.name ?? ""}>{pred.name ?? "—"}</span>
+            <Link
+              href={`/proteins/${pred.ref_protein_accession}`}
+              className="font-mono text-xs text-blue-500 hover:underline truncate"
+              title={pred.ref_protein_accession}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {pred.ref_protein_accession}
+            </Link>
+            <span className="font-mono text-gray-500">{pred.distance.toFixed(4)}</span>
+            {hasAlignment && (
+              <>
+                <span className="font-mono text-gray-600">{pct(pred.identity_nw)}</span>
+                <span className="font-mono text-gray-600">{pct(pred.identity_sw)}</span>
+              </>
+            )}
+            {hasTaxonomy && !hasAlignment && (
+              <>
+                <span className={`rounded px-1 py-0.5 text-xs font-medium ${RELATION_COLORS[pred.taxonomic_relation ?? ""] ?? "bg-gray-50 text-gray-500"}`}>
+                  {pred.taxonomic_relation ?? "—"}
+                </span>
+                <span className="font-mono text-gray-500">{pred.taxonomic_distance ?? "—"}</span>
+              </>
+            )}
+          </div>
+          {expanded === i && (hasAlignment || hasTaxonomy) && (
+            <div className="border-b bg-gray-50 px-4 py-3 text-xs text-gray-600 grid grid-cols-2 gap-4">
+              {hasAlignment && (
+                <div>
+                  <p className="font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Alignment</p>
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-gray-400">
+                        <th className="text-left font-medium pr-3 pb-1">Metric</th>
+                        <th className="text-right font-medium pr-3 pb-1">NW (global)</th>
+                        <th className="text-right font-medium pb-1">SW (local)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="font-mono">
+                      <tr><td className="pr-3 text-gray-500 font-sans">Identity</td><td className="text-right pr-3">{pct(pred.identity_nw)}</td><td className="text-right">{pct(pred.identity_sw)}</td></tr>
+                      <tr><td className="pr-3 text-gray-500 font-sans">Similarity</td><td className="text-right pr-3">{pct(pred.similarity_nw)}</td><td className="text-right">{pct(pred.similarity_sw)}</td></tr>
+                      <tr><td className="pr-3 text-gray-500 font-sans">Score</td><td className="text-right pr-3">{pred.alignment_score_nw?.toFixed(0) ?? "—"}</td><td className="text-right">{pred.alignment_score_sw?.toFixed(0) ?? "—"}</td></tr>
+                      <tr><td className="pr-3 text-gray-500 font-sans">Gaps</td><td className="text-right pr-3">{pct(pred.gaps_pct_nw)}</td><td className="text-right">{pct(pred.gaps_pct_sw)}</td></tr>
+                      <tr><td className="pr-3 text-gray-500 font-sans">Aln length</td><td className="text-right pr-3">{pred.alignment_length_nw ?? "—"}</td><td className="text-right">{pred.alignment_length_sw ?? "—"}</td></tr>
+                      <tr><td className="pr-3 text-gray-500 font-sans">Seq length</td><td className="text-right pr-3">{pred.length_query ?? "—"} (q)</td><td className="text-right">{pred.length_ref ?? "—"} (r)</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {hasTaxonomy && (
+                <div>
+                  <p className="font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Taxonomy</p>
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Relation</span>
+                      <span className={`rounded px-1.5 py-0.5 font-medium ${RELATION_COLORS[pred.taxonomic_relation ?? ""] ?? "bg-gray-50 text-gray-500"}`}>
+                        {pred.taxonomic_relation ?? "—"}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Distance</span>
+                      <span className="font-mono">{pred.taxonomic_distance ?? "—"}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Common ancestors</span>
+                      <span className="font-mono">{pred.taxonomic_common_ancestors ?? "—"}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">LCA taxid</span>
+                      <span className="font-mono">{pred.taxonomic_lca ?? "—"}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Query taxid</span>
+                      <span className="font-mono">{pred.query_taxonomy_id ?? "—"}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Ref taxid</span>
+                      <span className="font-mono">{pred.ref_taxonomy_id ?? "—"}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function ProteinDetail({
   accession,
@@ -50,6 +192,7 @@ function ProteinDetail({
   annotations,
   loading,
   onClose,
+  ontologySnapshotId,
 }: {
   accession: string;
   inDb: boolean;
@@ -57,7 +200,28 @@ function ProteinDetail({
   annotations: ProteinAnnotation[];
   loading: boolean;
   onClose: () => void;
+  ontologySnapshotId: string | null;
 }) {
+  const [subgraph, setSubgraph] = useState<GoSubgraph | null>(null);
+  const [loadingGraph, setLoadingGraph] = useState(false);
+  const [showGraph, setShowGraph] = useState(false);
+
+  async function toggleGraph() {
+    if (showGraph) { setShowGraph(false); return; }
+    setLoadingGraph(true);
+    setShowGraph(true);
+    try {
+      const allGoIds = Array.from(new Set([
+        ...predictions.map((p) => p.go_id),
+        ...annotations.map((a) => a.go_id),
+      ]));
+      setSubgraph(await getGoSubgraph(ontologySnapshotId!, allGoIds, 3));
+    } catch {
+      setShowGraph(false);
+    } finally {
+      setLoadingGraph(false);
+    }
+  }
   const annotatedGoIds = new Set(annotations.map((a) => a.go_id));
   const predictedGoIds = new Set(predictions.map((p) => p.go_id));
 
@@ -93,10 +257,26 @@ function ProteinDetail({
             {totalMatches} / {predictions.length} predicted match known annotations
           </span>
         )}
+        {ontologySnapshotId && predictions.length > 0 && (
+          <button onClick={toggleGraph} className="rounded border bg-white px-2 py-1 text-xs hover:bg-gray-50 ml-2">
+            {loadingGraph ? "Loading…" : showGraph ? "Hide graph" : "GO graph"}
+          </button>
+        )}
         <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg leading-none ml-2">×</button>
       </div>
 
       {loading && <p className="text-sm text-gray-400">Loading…</p>}
+
+      {showGraph && subgraph && (
+        <div className="mb-4">
+          <GoGraph
+            subgraph={subgraph}
+            predictedGoIds={predictedGoIds}
+            knownGoIds={annotatedGoIds}
+            height={400}
+          />
+        </div>
+      )}
 
       {!loading && predictions.length === 0 && annotations.length === 0 && (
         <p className="text-sm text-gray-400">No data found.</p>
@@ -114,20 +294,8 @@ function ProteinDetail({
             </div>
             <div className="grid grid-cols-2 gap-3">
               {/* Predictions */}
-              <div className="overflow-hidden rounded-md border bg-white">
-                <div className="grid grid-cols-[90px_1fr_75px] gap-1 border-b bg-gray-50 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                  <div>GO ID</div><div>Name</div><div>Distance</div>
-                </div>
-                {preds.length === 0 ? (
-                  <p className="px-3 py-3 text-xs text-gray-300">—</p>
-                ) : preds.map((pred, i) => (
-                  <div key={i} className={`grid grid-cols-[90px_1fr_75px] gap-1 border-b px-3 py-2 text-xs last:border-0 items-center ${annotatedGoIds.has(pred.go_id) ? "bg-green-50" : ""}`}>
-                    <span className="font-mono text-blue-600">{pred.go_id}</span>
-                    <span className="text-gray-700 truncate" title={pred.name ?? ""}>{pred.name ?? "—"}</span>
-                    <span className="font-mono text-gray-500">{pred.distance.toFixed(4)}</span>
-                  </div>
-                ))}
-              </div>
+              <PredictionTable preds={preds} annotatedGoIds={annotatedGoIds} />
+
 
               {/* Known annotations */}
               <div className="overflow-hidden rounded-md border bg-white">
@@ -152,11 +320,79 @@ function ProteinDetail({
   );
 }
 
+function DownloadButton({ setId }: { setId: string }) {
+  const [open, setOpen] = useState(false);
+  const [aspect, setAspect] = useState("");
+  const [maxDist, setMaxDist] = useState("");
+
+  const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "";
+
+  function buildUrl() {
+    const params = new URLSearchParams();
+    if (aspect) params.set("aspect", aspect);
+    if (maxDist) params.set("max_distance", maxDist);
+    const qs = params.toString();
+    return `${apiBase}/embeddings/prediction-sets/${setId}/predictions.tsv${qs ? `?${qs}` : ""}`;
+  }
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 rounded-md border bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+      >
+        ↓ Download TSV
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-10 z-20 w-64 rounded-lg border bg-white p-4 shadow-lg">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Download options</p>
+
+          <label className="block text-xs text-gray-600 mb-1">GO Aspect</label>
+          <select
+            value={aspect}
+            onChange={(e) => setAspect(e.target.value)}
+            className="w-full rounded border px-2 py-1.5 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="">All aspects</option>
+            <option value="F">F — Molecular Function</option>
+            <option value="P">P — Biological Process</option>
+            <option value="C">C — Cellular Component</option>
+          </select>
+
+          <label className="block text-xs text-gray-600 mb-1">Max distance</label>
+          <input
+            type="number"
+            min="0"
+            max="2"
+            step="0.01"
+            placeholder="e.g. 0.3 (no limit)"
+            value={maxDist}
+            onChange={(e) => setMaxDist(e.target.value)}
+            className="w-full rounded border px-2 py-1.5 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+
+          <a
+            href={buildUrl()}
+            download={`predictions_${setId.slice(0, 8)}.tsv`}
+            onClick={() => setOpen(false)}
+            className="block w-full rounded-md bg-blue-600 px-3 py-2 text-center text-sm font-medium text-white hover:bg-blue-700"
+          >
+            Download
+          </a>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 export default function PredictionSetDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: setId } = use(params);
   const toast = useToast();
   const [activeTab, setActiveTab] = useState<Tab>("proteins");
   const [annotationSetId, setAnnotationSetId] = useState<string | null>(null);
+  const [ontologySnapshotId, setOntologySnapshotId] = useState<string | null>(null);
 
   // Proteins tab
   const [proteins, setProteins] = useState<{ accession: string; go_count: number; min_distance: number | null; annotation_count: number; match_count: number; in_db: boolean }[]>([]);
@@ -183,7 +419,10 @@ export default function PredictionSetDetailPage({ params }: { params: Promise<{ 
 
   useEffect(() => {
     getPredictionSet(setId)
-      .then((ps) => setAnnotationSetId(ps.annotation_set_id))
+      .then((ps) => {
+        setAnnotationSetId(ps.annotation_set_id);
+        setOntologySnapshotId(ps.ontology_snapshot_id);
+      })
       .catch(() => {});
   }, [setId]);
 
@@ -257,11 +496,14 @@ export default function PredictionSetDetailPage({ params }: { params: Promise<{ 
 
   return (
     <>
-      <div className="mb-6">
-        <Link href="/functional-annotation" className="text-sm text-gray-400 hover:text-gray-600">← Functional Annotation</Link>
-        <h1 className="text-xl font-semibold mt-2">
-          Prediction Set <span className="font-mono text-base text-gray-500">{shortId(setId)}…</span>
-        </h1>
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <Link href="/functional-annotation" className="text-sm text-gray-400 hover:text-gray-600">← Functional Annotation</Link>
+          <h1 className="text-xl font-semibold mt-2">
+            Prediction Set <span className="font-mono text-base text-gray-500">{shortId(setId)}…</span>
+          </h1>
+        </div>
+        <DownloadButton setId={setId} />
       </div>
 
       <div className="flex gap-1 border-b mb-6">
@@ -360,6 +602,7 @@ export default function PredictionSetDetailPage({ params }: { params: Promise<{ 
                       annotations={knownAnnotations}
                       loading={loadingDetail}
                       onClose={() => setSelectedAccession(null)}
+                      ontologySnapshotId={ontologySnapshotId}
                     />
                   </div>
                 )}

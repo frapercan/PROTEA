@@ -83,7 +83,7 @@ async def create_query_set(
     try:
         content = raw.decode("utf-8")
     except UnicodeDecodeError:
-        raise HTTPException(status_code=422, detail="FASTA file must be UTF-8 encoded")
+        raise HTTPException(status_code=422, detail="FASTA file must be UTF-8 encoded") from None
 
     records = _parse_fasta(content)
     if not records:
@@ -112,7 +112,7 @@ async def create_query_set(
         for h, sid in existing:
             hash_to_seq_id[h] = sid
 
-        for (_, seq), h in zip(records, hashes):
+        for (_, seq), h in zip(records, hashes, strict=False):
             if h not in hash_to_seq_id:
                 new_seq = Sequence(sequence=seq, sequence_hash=h)
                 session.add(new_seq)
@@ -131,7 +131,7 @@ async def create_query_set(
                 sequence_id=hash_to_seq_id[h],
                 accession=acc,
             )
-            for (acc, _), h in zip(records, hashes)
+            for (acc, _), h in zip(records, hashes, strict=False)
         ]
         session.add_all(entries)
         session.flush()
@@ -141,10 +141,11 @@ async def create_query_set(
     return result
 
 
-@router.get("")
+@router.get("", summary="List query sets")
 def list_query_sets(
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> list[dict[str, Any]]:
+    """List all uploaded FASTA query sets with their entry counts, newest first."""
     with session_scope(factory) as session:
         rows = (
             session.query(QuerySet)
@@ -161,11 +162,12 @@ def list_query_sets(
         return [_query_set_to_dict(qs, counts.get(qs.id, 0)) for qs in rows]
 
 
-@router.get("/{query_set_id}")
+@router.get("/{query_set_id}", summary="Get query set details")
 def get_query_set(
     query_set_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
+    """Retrieve a query set with its full entry list (accessions and sequence IDs)."""
     with session_scope(factory) as session:
         qs = session.get(QuerySet, query_set_id)
         if qs is None:
@@ -191,11 +193,12 @@ def get_query_set(
         return result
 
 
-@router.delete("/{query_set_id}")
+@router.delete("/{query_set_id}", summary="Delete a query set")
 def delete_query_set(
     query_set_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
+    """Delete a query set and all its entries. Sequences are not deleted (they may be shared)."""
     with session_scope(factory) as session:
         qs = session.get(QuerySet, query_set_id)
         if qs is None:

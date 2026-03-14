@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from typing import Any, Literal, Protocol
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
@@ -34,7 +34,8 @@ class OperationResult:
     progress_current: int | None = None
     progress_total: int | None = None
     deferred: bool = False
-    publish_after_commit: list[tuple[str, "UUID"]] = field(default_factory=list)
+    publish_after_commit: list[tuple[str, UUID]] = field(default_factory=list)
+    publish_operations: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
 
 
 class RetryLaterError(Exception):
@@ -44,7 +45,7 @@ class RetryLaterError(Exception):
     message after ``delay_seconds``, leaving the GPU free for other work.
     """
 
-    def __init__(self, reason: str, delay_seconds: int = 60) -> None:
+    def __init__(self, reason: str, delay_seconds: int = 60) -> None:  # noqa: B042
         super().__init__(reason)
         self.delay_seconds = delay_seconds
 

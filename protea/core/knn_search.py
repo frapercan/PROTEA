@@ -31,12 +31,14 @@ sorted ascending by distance, length ≤ ``k`` (may be shorter if
 
 from __future__ import annotations
 
-import numpy as np
+from typing import Any
 
+import numpy as np
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def search_knn(
     query_embeddings: np.ndarray,
@@ -167,13 +169,11 @@ def _search_faiss(
 ) -> list[list[tuple[str, float]]]:
     """FAISS-based approximate or exact nearest-neighbour search."""
     try:
-        import faiss  # noqa: F401
+        import faiss
     except ImportError as exc:
         raise ImportError(
             "FAISS is not installed. Run `pip install faiss-cpu`."
         ) from exc
-
-    import faiss
 
     n_refs, dim = R.shape
 
@@ -202,10 +202,10 @@ def _search_faiss(
     raw_distances, indices = index.search(Q_f, k_search)
 
     results: list[list[tuple[str, float]]] = []
-    for dist_row, idx_row in zip(raw_distances, indices):
+    for dist_row, idx_row in zip(raw_distances, indices, strict=False):
         hits: list[tuple[str, float]] = []
         seen: set[str] = set()
-        for raw_d, idx in zip(dist_row, idx_row):
+        for raw_d, idx in zip(dist_row, idx_row, strict=False):
             if idx < 0:  # FAISS sentinel for "not enough neighbours"
                 continue
             # Convert inner product back to cosine distance
@@ -236,7 +236,7 @@ def _build_faiss_index(
     hnsw_m: int,
     hnsw_ef_search: int,
     use_ip: bool,
-) -> "faiss.Index":
+) -> Any:  # faiss.Index — lazy import
     import faiss
 
     faiss_metric = faiss.METRIC_INNER_PRODUCT if use_ip else faiss.METRIC_L2

@@ -17,10 +17,10 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
 class CreateJobRequest(BaseModel):
-    operation: str = Field(..., min_length=1)
-    queue_name: str = Field(..., min_length=1)
-    payload: dict[str, Any] = Field(default_factory=dict)
-    meta: dict[str, Any] = Field(default_factory=dict)
+    operation: str = Field(..., min_length=1, description="Registered operation name, e.g. `insert_proteins`.")
+    queue_name: str = Field(..., min_length=1, description="RabbitMQ queue to publish the job to, e.g. `protea.jobs`.")
+    payload: dict[str, Any] = Field(default_factory=dict, description="Operation-specific configuration object.")
+    meta: dict[str, Any] = Field(default_factory=dict, description="Optional free-form metadata stored alongside the job.")
 
     @field_validator("operation", "queue_name", mode="before")
     @classmethod
@@ -46,12 +46,17 @@ def get_amqp_url(request: Request) -> str:
     return url  # type: ignore[no-any-return]
 
 
-@router.post("")
+@router.post("", summary="Create and enqueue a job")
 def create_job(
     body: CreateJobRequest,
     factory: sessionmaker[Session] = Depends(get_session_factory),
     amqp_url: str = Depends(get_amqp_url),
 ) -> dict[str, Any]:
+    """Create a Job row and publish its ID to the specified RabbitMQ queue.
+
+    The job transitions `QUEUED → RUNNING → SUCCEEDED/FAILED` as the worker processes it.
+    Use `GET /jobs/{id}/events` to poll structured progress events in real time.
+    """
     with session_scope(factory) as session:
         job = Job(
             operation=body.operation,
@@ -73,7 +78,7 @@ def create_job(
     return {"id": str(job_id), "status": "queued"}
 
 
-@router.get("")
+@router.get("", summary="List jobs")
 def list_jobs(
     status: str | None = Query(default=None),
     operation: str | None = Query(default=None),
@@ -82,6 +87,11 @@ def list_jobs(
     limit: int = Query(default=50, ge=1, le=500),
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> list[dict[str, Any]]:
+    """List jobs with optional filtering.
+
+    By default only top-level jobs (no parent) are returned. Set `include_children=true`
+    or filter by `parent_job_id` to see batch sub-jobs from distributed pipelines.
+    """
     with session_scope(factory) as session:
         q = session.query(Job)
 
@@ -120,11 +130,12 @@ def list_jobs(
         ]
 
 
-@router.get("/{job_id}")
+@router.get("/{job_id}", summary="Get job details")
 def get_job(
     job_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
+    """Retrieve full details for a single job including its payload, meta, and progress counters."""
     with session_scope(factory) as session:
         j = session.get(Job, job_id)
         if j is None:
@@ -147,12 +158,17 @@ def get_job(
         }
 
 
-@router.get("/{job_id}/events")
+@router.get("/{job_id}/events", summary="List job events")
 def get_job_events(
     job_id: UUID,
     limit: int = Query(default=200, ge=1, le=2000),
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> list[dict[str, Any]]:
+    """Return the structured event log for a job (newest first).
+
+    Events include progress milestones, warnings, HTTP retries, and errors.
+    Useful for monitoring long-running operations such as `compute_embeddings` or `predict_go_terms`.
+    """
     with session_scope(factory) as session:
         # quick existence check
         j = session.get(Job, job_id)
@@ -180,11 +196,12 @@ def get_job_events(
         ]
 
 
-@router.delete("/{job_id}")
+@router.delete("/{job_id}", summary="Delete a job")
 def delete_job(
     job_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
+    """Permanently delete a job and its event log. Running jobs cannot be deleted (409)."""
     with session_scope(factory) as session:
         j = session.get(Job, job_id)
         if j is None:
@@ -195,11 +212,16 @@ def delete_job(
     return {"deleted": str(job_id)}
 
 
-@router.post("/{job_id}/cancel")
+@router.post("/{job_id}/cancel", summary="Cancel a job")
 def cancel_job(
     job_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
+    """Mark a job (and any queued child jobs) as CANCELLED.
+
+    Already-finished jobs (SUCCEEDED/FAILED) are returned as-is with no state change.
+    Note: workers processing a batch mid-flight will complete their current message before stopping.
+    """
     with session_scope(factory) as session:
         j = session.get(Job, job_id)
         if j is None:

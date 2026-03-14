@@ -25,16 +25,34 @@ def create_app(project_root: Path | None = None) -> FastAPI:
     settings = load_settings(project_root)
     factory = build_session_factory(settings.db_url)
 
-    app = FastAPI(title="ProTea API")
+    app = FastAPI(
+        title="PROTEA API",
+        version="0.1.0",
+        description=(
+            "**PROTEA** — Protein Representation and Ontology-Term Enrichment Analysis.\n\n"
+            "Manages the full pipeline from UniProt sequence ingestion through GPU embedding "
+            "computation (ESM-2, ESM3c, T5) to KNN-based GO term prediction.\n\n"
+            "All long-running operations are queued via RabbitMQ and tracked as `Job` rows "
+            "with a full event audit trail. Use `GET /jobs/{id}/events` to stream real-time progress."
+        ),
+        contact={"name": "PROTEA Team", "email": "contact@protea.example.org"},
+        openapi_tags=[
+            {"name": "jobs", "description": "Job queue lifecycle — create, monitor, and cancel operations."},
+            {"name": "proteins", "description": "UniProt protein lookup and aggregate statistics."},
+            {"name": "annotations", "description": "GO ontology snapshots, annotation sets, and GO subgraph queries."},
+            {"name": "embeddings", "description": "Embedding configs, GPU compute jobs, and prediction sets management."},
+            {"name": "query-sets", "description": "User-uploaded FASTA datasets for custom prediction queries."},
+            {"name": "maintenance", "description": "Housekeeping — identify and remove orphaned sequences or embeddings."},
+            {"name": "admin", "description": "Destructive admin operations (DB reset). Use with caution."},
+        ],
+    )
     app.state.session_factory = factory
     app.state.amqp_url = settings.amqp_url
+    app.state.artifacts_dir = settings.artifacts_dir
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            "http://localhost:3000",
-            "http://127.0.0.1:3000",
-        ],
+        allow_origins=["*"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -51,4 +69,9 @@ def create_app(project_root: Path | None = None) -> FastAPI:
     sphinx_build = project_root / "docs" / "build" / "html"
     if sphinx_build.exists():
         app.mount("/sphinx", StaticFiles(directory=sphinx_build, html=True), name="sphinx")
+
+    static_dir = project_root / "static"
+    if static_dir.exists():
+        app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
     return app

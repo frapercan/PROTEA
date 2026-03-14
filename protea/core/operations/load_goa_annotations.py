@@ -9,7 +9,7 @@ from typing import Annotated, Any
 
 import requests
 from pydantic import Field, field_validator
-from sqlalchemy import select, distinct
+from sqlalchemy import distinct, select
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
@@ -226,8 +226,9 @@ class LoadGOAAnnotationsOperation:
         valid_accessions: set[str],
         go_term_map: dict[str, int],
     ) -> tuple[int, int]:
-        to_add: list[ProteinGOAnnotation] = []
+        to_add: list[dict] = []
         skipped = 0
+        seen: set[tuple] = set()
 
         for rec in records:
             accession = rec["accession"].strip()
@@ -241,20 +242,34 @@ class LoadGOAAnnotationsOperation:
                 skipped += 1
                 continue
 
-            to_add.append(ProteinGOAnnotation(
-                annotation_set_id=annotation_set_id,
-                protein_accession=accession,
-                go_term_id=go_term_id,
-                qualifier=rec["qualifier"] or None,
-                evidence_code=rec["evidence_code"] or None,
-                assigned_by=rec["assigned_by"] or None,
-                db_reference=rec["db_reference"] or None,
-                with_from=rec["with_from"] or None,
-                annotation_date=rec["annotation_date"] or None,
-            ))
+            evidence_code = rec["evidence_code"] or None
+            dedup_key = (annotation_set_id, accession, go_term_id, evidence_code)
+            if dedup_key in seen:
+                skipped += 1
+                continue
+            seen.add(dedup_key)
+
+            to_add.append({
+                "annotation_set_id": annotation_set_id,
+                "protein_accession": accession,
+                "go_term_id": go_term_id,
+                "qualifier": rec["qualifier"] or None,
+                "evidence_code": evidence_code,
+                "assigned_by": rec["assigned_by"] or None,
+                "db_reference": rec["db_reference"] or None,
+                "with_from": rec["with_from"] or None,
+                "annotation_date": rec["annotation_date"] or None,
+            })
 
         if to_add:
-            session.add_all(to_add)
-            session.flush()
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+            chunk_size = 5000
+            for i in range(0, len(to_add), chunk_size):
+                chunk = to_add[i: i + chunk_size]
+                stmt = pg_insert(ProteinGOAnnotation.__table__).values(chunk)
+                stmt = stmt.on_conflict_do_nothing(
+                    constraint="uq_pga_set_protein_term_evidence"
+                )
+                session.execute(stmt)
 
         return len(to_add), skipped

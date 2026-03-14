@@ -51,9 +51,6 @@ export default function AnnotationsPage() {
   // Load QuickGO form
   const [qgoSnapshotId, setQgoSnapshotId] = useState("");
   const [qgoVersion, setQgoVersion] = useState("2025-03");
-  const [qgoReviewed, setQgoReviewed] = useState(true);
-  const [qgoTaxonIds, setQgoTaxonIds] = useState("");
-  const [qgoAspects, setQgoAspects] = useState<string[]>(["F", "P", "C"]);
   const [qgoResult, setQgoResult] = useState<{ id: string } | null>(null);
   const [qgoSubmitting, setQgoSubmitting] = useState(false);
 
@@ -105,12 +102,6 @@ export default function AnnotationsPage() {
     }
   }
 
-  function toggleAspect(a: string) {
-    setQgoAspects((prev) =>
-      prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]
-    );
-  }
-
   async function handleLoadSnapshot(e: React.FormEvent) {
     e.preventDefault();
     setSnapSubmitting(true);
@@ -158,16 +149,10 @@ export default function AnnotationsPage() {
     setQgoSubmitting(true);
     setQgoResult(null);
     try {
-      const payload: Record<string, any> = {
+      const payload = {
         ontology_snapshot_id: qgoSnapshotId,
         source_version: qgoVersion,
-        reviewed: qgoReviewed,
-        aspects: qgoAspects,
       };
-      const trimmed = qgoTaxonIds.trim();
-      if (trimmed) {
-        payload.taxon_ids = trimmed.split(",").map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n));
-      }
       const res = await createJob({ operation: "load_quickgo_annotations", queue_name: "protea.jobs", payload });
       setQgoResult(res);
       toast("Job queued", "success");
@@ -177,12 +162,6 @@ export default function AnnotationsPage() {
       setQgoSubmitting(false);
     }
   }
-
-  const ASPECT_LABELS: Record<string, string> = {
-    F: "Molecular Function",
-    P: "Biological Process",
-    C: "Cellular Component",
-  };
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "sets", label: "Annotation Sets" },
@@ -421,39 +400,6 @@ export default function AnnotationsPage() {
                   className={inputClass}
                 />
               </div>
-              <div>
-                <label className={labelClass}>
-                  Taxon IDs <span className="font-normal text-gray-400">(optional)</span>
-                </label>
-                <input
-                  type="text"
-                  value={qgoTaxonIds}
-                  onChange={(e) => setQgoTaxonIds(e.target.value)}
-                  placeholder="9606, 10090"
-                  className={inputClass}
-                />
-                <p className="mt-1 text-xs text-gray-400">Comma-separated — leave empty for all</p>
-              </div>
-              <div>
-                <label className={labelClass}>GO aspects</label>
-                <div className="flex flex-wrap gap-4">
-                  {["F", "P", "C"].map((a) => (
-                    <label key={a} className="flex items-center gap-1.5 text-sm cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={qgoAspects.includes(a)}
-                        onChange={() => toggleAspect(a)}
-                        className="rounded"
-                      />
-                      {ASPECT_LABELS[a]}
-                    </label>
-                  ))}
-                </div>
-              </div>
-              <label className="flex items-center gap-2 text-sm cursor-pointer">
-                <input type="checkbox" checked={qgoReviewed} onChange={(e) => setQgoReviewed(e.target.checked)} className="rounded" />
-                Reviewed proteins only
-              </label>
               {qgoResult && (
                 <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
                   Job queued:{" "}

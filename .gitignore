@@ -27,3 +27,8 @@ node_modules/
 
 # Misc
 *.log
+logs/pids/
+
+# Claude Code
+CLAUDE.md
+.claude/

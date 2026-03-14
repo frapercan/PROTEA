@@ -146,6 +146,154 @@ Always review auto-generated migrations before applying them to production.
 Alembic's ``autogenerate`` detects column additions and removals but may miss
 index changes or server-default modifications.
 
+Load a GO ontology snapshot
+---------------------------
+
+Download and parse a GO OBO file release. The ``obo_version`` extracted from
+the file header is used as the unique key — re-running with the same URL is
+safe (idempotent).
+
+.. code-block:: bash
+
+   curl -s -X POST http://127.0.0.1:8000/jobs \
+     -H "Content-Type: application/json" \
+     -d '{
+       "operation": "load_ontology_snapshot",
+       "queue_name": "protea.jobs",
+       "payload": {
+         "obo_url": "https://purl.obolibrary.org/obo/go.obo"
+       }
+     }'
+
+Load GOA annotations
+---------------------
+
+Load all UniProt-GOA annotations for a specific organism. Replace
+``<snapshot-uuid>`` with the ``ontology_snapshot_id`` returned by the
+``load_ontology_snapshot`` job.
+
+.. code-block:: bash
+
+   curl -s -X POST http://127.0.0.1:8000/jobs \
+     -H "Content-Type: application/json" \
+     -d '{
+       "operation": "load_goa_annotations",
+       "queue_name": "protea.jobs",
+       "payload": {
+         "ontology_snapshot_id": "<snapshot-uuid>",
+         "gaf_url": "https://ftp.ebi.ac.uk/pub/databases/GO/goa/UNIPROT/goa_uniprot_all.gaf.gz",
+         "source_version": "2024-01"
+       }
+     }'
+
+Load QuickGO annotations
+--------------------------
+
+Stream annotations from the QuickGO API for all proteins present in the DB:
+
+.. code-block:: bash
+
+   curl -s -X POST http://127.0.0.1:8000/jobs \
+     -H "Content-Type: application/json" \
+     -d '{
+       "operation": "load_quickgo_annotations",
+       "queue_name": "protea.jobs",
+       "payload": {
+         "ontology_snapshot_id": "<snapshot-uuid>",
+         "source_version": "quickgo-2024-01"
+       }
+     }'
+
+Upload a custom FASTA query set
+---------------------------------
+
+Use the ``/query-sets`` endpoint to upload a FASTA file for custom predictions.
+The returned ``id`` is used as ``query_set_id`` in subsequent jobs.
+
+.. code-block:: bash
+
+   curl -s -X POST http://127.0.0.1:8000/query-sets \
+     -F "file=@my_proteins.fasta" \
+     -F "name=My dataset" \
+     -F "description=Custom proteins for GO prediction" | python -m json.tool
+
+Compute sequence embeddings
+-----------------------------
+
+Compute ESM-2 embeddings for all proteins (or a specific query set).
+Replace ``<config-uuid>`` with the UUID of an ``EmbeddingConfig`` row.
+
+.. code-block:: bash
+
+   # Embed all proteins in the DB
+   curl -s -X POST http://127.0.0.1:8000/jobs \
+     -H "Content-Type: application/json" \
+     -d '{
+       "operation": "compute_embeddings",
+       "queue_name": "protea.embeddings",
+       "payload": {
+         "embedding_config_id": "<config-uuid>",
+         "device": "cuda",
+         "skip_existing": true
+       }
+     }'
+
+   # Embed only a FASTA query set
+   curl -s -X POST http://127.0.0.1:8000/jobs \
+     -H "Content-Type: application/json" \
+     -d '{
+       "operation": "compute_embeddings",
+       "queue_name": "protea.embeddings",
+       "payload": {
+         "embedding_config_id": "<config-uuid>",
+         "query_set_id": "<query-set-uuid>",
+         "device": "cuda"
+       }
+     }'
+
+The coordinator returns immediately (``deferred=True``). Progress is tracked
+on the parent job via ``progress_current`` / ``progress_total``.
+
+.. _knn-constraint:
+
+Predict GO terms
+-----------------
+
+Run KNN-based GO function transfer. All three UUID references must exist in
+the DB before submitting.
+
+.. code-block:: bash
+
+   curl -s -X POST http://127.0.0.1:8000/jobs \
+     -H "Content-Type: application/json" \
+     -d '{
+       "operation": "predict_go_terms",
+       "queue_name": "protea.jobs",
+       "payload": {
+         "embedding_config_id": "<config-uuid>",
+         "annotation_set_id": "<annotation-set-uuid>",
+         "ontology_snapshot_id": "<snapshot-uuid>",
+         "limit_per_entry": 5,
+         "distance_threshold": 0.3,
+         "search_backend": "numpy",
+         "compute_alignments": true,
+         "compute_taxonomy": false
+       }
+     }'
+
+Scale batch workers
+--------------------
+
+Add extra batch workers to a queue without restarting the full stack:
+
+.. code-block:: bash
+
+   bash scripts/manage.sh scale protea.embeddings.batch 2
+   bash scripts/manage.sh scale protea.predictions.batch 3
+
+Use ``bash scripts/manage.sh status`` to verify running workers and their
+memory consumption.
+
 Build the documentation locally
 --------------------------------
 

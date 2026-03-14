@@ -8,7 +8,7 @@ from typing import Annotated, Any
 
 import requests
 from pydantic import Field, field_validator
-from sqlalchemy import select, distinct
+from sqlalchemy import distinct, select
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
@@ -24,9 +24,8 @@ PositiveInt = Annotated[int, Field(gt=0)]
 class LoadQuickGOAnnotationsPayload(ProteaPayload, frozen=True):
     """Payload for loading GO annotations from the QuickGO bulk download endpoint.
 
-    QuickGO returns a single streamed TSV for a given set of filters (reviewed,
-    taxon, aspect…). The download is filtered in-stream against the canonical
-    accessions already present in the DB — no external accession list is needed.
+    QuickGO returns a single streamed TSV filtered by the canonical accessions
+    already present in the DB — no external accession list is needed.
 
     ``eco_mapping_url`` (optional) points to a GAF-ECO mapping file
     (space-separated: ``ECO:XXXXXXX  CODE``). When provided, ECO IDs are
@@ -39,9 +38,6 @@ class LoadQuickGOAnnotationsPayload(ProteaPayload, frozen=True):
     quickgo_base_url: str = (
         "https://www.ebi.ac.uk/QuickGO/services/annotation/downloadSearch"
     )
-    reviewed: bool = True
-    taxon_ids: list[int] | None = None
-    aspects: list[str] | None = None
     gene_product_ids: list[str] | None = None
     use_db_accessions: bool = True
     eco_mapping_url: str | None = None
@@ -89,8 +85,6 @@ class LoadQuickGOAnnotationsOperation:
         emit("load_quickgo_annotations.start", None, {
             "ontology_snapshot_id": p.ontology_snapshot_id,
             "source_version": p.source_version,
-            "reviewed": p.reviewed,
-            "taxon_ids": p.taxon_ids,
         }, "info")
 
         canonical_accessions, protein_accessions = self._load_accessions(session, emit)
@@ -109,9 +103,6 @@ class LoadQuickGOAnnotationsOperation:
             ontology_snapshot_id=snapshot_id,
             meta={
                 "quickgo_base_url": p.quickgo_base_url,
-                "reviewed": p.reviewed,
-                "taxon_ids": p.taxon_ids,
-                "aspects": p.aspects,
             },
         )
         session.add(annotation_set)
@@ -261,13 +252,6 @@ class LoadQuickGOAnnotationsOperation:
         total_batches: int,
     ) -> Iterator[dict[str, str]]:
         params: dict[str, Any] = {"geneProductType": "protein"}
-        if p.reviewed:
-            params["reviewed"] = "true"
-        if p.taxon_ids:
-            params["taxonId"] = ",".join(str(t) for t in p.taxon_ids)
-        if p.aspects:
-            _aspect_map = {"F": "molecular_function", "P": "biological_process", "C": "cellular_component"}
-            params["aspect"] = ",".join(_aspect_map.get(a, a) for a in p.aspects)
         if gp_ids:
             params["geneProductId"] = ",".join(gp_ids)
 
@@ -305,7 +289,7 @@ class LoadQuickGOAnnotationsOperation:
                     continue
                 if len(parts) < len(header):
                     continue
-                yield dict(zip(header, parts))
+                yield dict(zip(header, parts, strict=False))
 
     def _store_buffer(
         self,

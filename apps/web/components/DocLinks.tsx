@@ -13,12 +13,20 @@ export function DocLinks() {
         Swagger
       </a>
       <a
-        href={`${base}/sphinx`}
+        href="/sphinx/"
         target="_blank"
         rel="noopener noreferrer"
         className="hover:text-gray-900"
       >
         Docs
+      </a>
+      <a
+        href={`${base}/static/thesis.pdf`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="hover:text-gray-900"
+      >
+        Thesis
       </a>
     </>
   );

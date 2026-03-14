@@ -2,7 +2,7 @@ Data Model
 ==========
 
 All models use SQLAlchemy 2.x declarative style with ``Mapped[]`` type annotations.
-The schema is managed by Alembic.
+The schema is managed by Alembic (8 migrations to date).
 
 Protein and sequence deduplication
 ------------------------------------
@@ -42,27 +42,178 @@ Protein and sequence deduplication
    (functional description, EC numbers, pathways, kinetics, etc.) as ``Text`` fields.
    Isoforms inherit metadata via the ``canonical_accession`` join.
 
-   Fields mapped from the UniProt TSV response:
+GO ontology
+-----------
 
-   .. list-table::
-      :header-rows: 1
+.. code-block:: text
 
-      * - Column
-        - UniProt TSV header
-      * - ``function_cc``
-        - Function [CC]
-      * - ``catalytic_activity``
-        - Catalytic activity
-      * - ``ec_number``
-        - EC number
-      * - ``pathway``
-        - Pathway
-      * - ``kinetics``
-        - Kinetics
-      * - ``keywords``
-        - Keywords
-      * - *(+ 12 more)*
-        -
+   ┌──────────────────────────┐     1→N    ┌────────────────────────┐
+   │    OntologySnapshot      │──────────▶│        GOTerm          │
+   │──────────────────────────│           │────────────────────────│
+   │ id (UUID, PK)            │           │ id (PK)                │
+   │ obo_url                  │           │ go_id (e.g. GO:0003674)│
+   │ obo_version              │           │ name                   │
+   │ loaded_at                │           │ aspect (F/P/C)         │
+   └──────────────────────────┘           │ definition             │
+                                          │ is_obsolete            │
+                                          │ ontology_snapshot_id   │
+                                          └──────────┬─────────────┘
+                                                     │
+                                          ┌──────────▼─────────────┐
+                                          │  GOTermRelationship    │
+                                          │────────────────────────│
+                                          │ child_go_term_id (FK)  │
+                                          │ parent_go_term_id (FK) │
+                                          │ relation_type          │
+                                          │ ontology_snapshot_id   │
+                                          └────────────────────────┘
+
+**OntologySnapshot**
+   One row per loaded OBO file release, versioned by ``obo_version`` (unique constraint).
+   Idempotent load: if a snapshot already exists with its relationships, it is skipped.
+   If relationships are missing they are backfilled automatically.
+
+**GOTerm**
+   One row per GO term per snapshot. ``aspect`` is one of ``F`` (molecular function),
+   ``P`` (biological process), or ``C`` (cellular component).
+
+**GOTermRelationship**
+   Directed edge in the GO DAG. ``relation_type`` is one of ``is_a``, ``part_of``,
+   ``regulates``, ``positively_regulates``, ``negatively_regulates``.
+   Used by ``GET /annotations/snapshots/{id}/subgraph`` for BFS ancestor traversal.
+
+Annotation sets
+---------------
+
+.. code-block:: text
+
+   ┌──────────────────────┐     1→N    ┌────────────────────────────────┐
+   │    AnnotationSet     │──────────▶│     ProteinGOAnnotation        │
+   │──────────────────────│           │────────────────────────────────│
+   │ id (UUID, PK)        │           │ id (PK)                        │
+   │ source (goa/quickgo) │           │ protein_accession              │
+   │ source_version       │           │ go_term_id (FK → GOTerm)       │
+   │ ontology_snapshot_id │           │ annotation_set_id (FK)         │
+   │ job_id               │           │ qualifier                      │
+   │ created_at           │           │ evidence_code                  │
+   │ meta (JSONB)         │           │ assigned_by                    │
+   └──────────────────────┘           │ db_reference                   │
+                                      │ with_from                      │
+                                      │ annotation_date                │
+                                      └────────────────────────────────┘
+
+**AnnotationSet**
+   Groups a batch of protein GO annotations by source (``goa`` or ``quickgo``)
+   and ontology snapshot version.
+
+**ProteinGOAnnotation**
+   One row per (protein, GO term, annotation set) triple. Stores all GAF/QuickGO
+   evidence fields verbatim.
+
+Embeddings
+----------
+
+.. code-block:: text
+
+   ┌──────────────────────────┐     1→N    ┌──────────────────────────────┐
+   │    EmbeddingConfig       │──────────▶│      SequenceEmbedding       │
+   │──────────────────────────│           │──────────────────────────────│
+   │ id (UUID, PK)            │           │ id (PK)                      │
+   │ model_name               │           │ sequence_id (FK)             │
+   │ model_backend            │           │ embedding_config_id (FK)     │
+   │ layer_indices            │           │ embedding (VECTOR)           │
+   │ layer_agg                │           │ chunk_index_s (int)          │
+   │ pooling                  │           │ chunk_index_e (int, nullable)│
+   │ normalize                │           └──────────────────────────────┘
+   │ normalize_residues       │
+   │ max_length               │
+   │ use_chunking             │
+   │ chunk_size               │
+   │ chunk_overlap            │
+   │ description              │
+   │ created_at               │
+   └──────────────────────────┘
+
+**EmbeddingConfig**
+   Defines a reproducible embedding recipe (model, layer selection, pooling strategy,
+   chunking). Referenced by both ``SequenceEmbedding`` rows and ``PredictionSet`` rows
+   to ensure query and reference embeddings are always comparable.
+
+**SequenceEmbedding**
+   Stores a pgvector VECTOR for one (sequence, config, chunk) triple.
+   When chunking is disabled: ``chunk_index_s=0``, ``chunk_index_e=NULL``.
+   When chunking is enabled: each chunk is a separate row with its own start/end indices.
+
+   .. note::
+      KNN search is **never** performed at the DB layer. Embeddings are loaded into
+      numpy arrays and searched via ``protea.core.knn_search`` using numpy or FAISS.
+
+Query sets
+----------
+
+.. code-block:: text
+
+   ┌──────────────────────┐     1→N    ┌──────────────────────────────┐
+   │      QuerySet        │──────────▶│       QuerySetEntry          │
+   │──────────────────────│           │──────────────────────────────│
+   │ id (UUID, PK)        │           │ id (PK)                      │
+   │ name                 │           │ query_set_id (FK)            │
+   │ description          │           │ accession (original header)  │
+   │ created_at           │           │ sequence_id (FK → Sequence)  │
+   └──────────────────────┘           └──────────────────────────────┘
+
+**QuerySet**
+   User-uploaded FASTA dataset for custom prediction queries. Created via
+   ``POST /query-sets`` (multipart upload).
+
+**QuerySetEntry**
+   One row per FASTA entry. Preserves the original accession header from the FASTA file
+   and links to the deduplicated ``Sequence`` row (reuses existing sequences if the
+   amino-acid string is already in the DB).
+
+Predictions
+-----------
+
+.. code-block:: text
+
+   ┌──────────────────────────────┐     1→N    ┌───────────────────────────────────┐
+   │        PredictionSet         │──────────▶│          GOPrediction             │
+   │──────────────────────────────│           │───────────────────────────────────│
+   │ id (UUID, PK)                │           │ id (PK)                           │
+   │ embedding_config_id (FK)     │           │ prediction_set_id (FK)            │
+   │ annotation_set_id (FK)       │           │ protein_accession (query)         │
+   │ ontology_snapshot_id (FK)    │           │ go_term_id (FK)                   │
+   │ query_set_id (FK, nullable)  │           │ distance (cosine/L2)              │
+   │ limit_per_entry              │           │ ref_protein_accession             │
+   │ distance_threshold           │           │ qualifier, evidence_code          │
+   │ created_at                   │           │ ── alignment (NW) ──              │
+   └──────────────────────────────┘           │ identity_nw, similarity_nw        │
+                                              │ alignment_score_nw                │
+                                              │ gaps_pct_nw, alignment_length_nw  │
+                                              │ ── alignment (SW) ──              │
+                                              │ identity_sw, similarity_sw        │
+                                              │ alignment_score_sw                │
+                                              │ gaps_pct_sw, alignment_length_sw  │
+                                              │ ── lengths ──                     │
+                                              │ length_query, length_ref          │
+                                              │ ── taxonomy ──                    │
+                                              │ query_taxonomy_id                 │
+                                              │ ref_taxonomy_id                   │
+                                              │ taxonomic_lca                     │
+                                              │ taxonomic_distance                │
+                                              │ taxonomic_common_ancestors        │
+                                              │ taxonomic_relation                │
+                                              └───────────────────────────────────┘
+
+**PredictionSet**
+   Groups all GO predictions for one run of ``predict_go_terms``. References the
+   ``EmbeddingConfig``, ``AnnotationSet``, and ``OntologySnapshot`` used.
+   Optionally linked to a ``QuerySet`` when predictions were run from a FASTA upload.
+
+**GOPrediction**
+   One row per (query protein, GO term, reference protein) triple. The alignment and
+   taxonomy columns are ``NULL`` unless ``compute_alignments=true`` and/or
+   ``compute_taxonomy=true`` were set in the prediction payload.
 
 Job queue
 ---------
@@ -76,10 +227,11 @@ Job queue
    │ operation                  │           │ job_id (FK)              │
    │ queue_name                 │           │ event (str)              │
    │ status (enum)              │           │ message (str, nullable)  │
-   │ payload (JSONB)            │           │ fields (JSONB)           │
-   │ meta (JSONB)               │           │ level (info/warn/error)  │
-   │ progress_current           │           │ ts (timestamp)           │
-   │ progress_total             │           └──────────────────────────┘
+   │ parent_job_id (FK, null)   │           │ fields (JSONB)           │
+   │ payload (JSONB)            │           │ level (info/warn/error)  │
+   │ meta (JSONB)               │           │ ts (timestamp)           │
+   │ progress_current           │           └──────────────────────────┘
+   │ progress_total             │
    │ error_code                 │
    │ error_message              │
    │ created_at / started_at /  │
@@ -87,9 +239,9 @@ Job queue
    └────────────────────────────┘
 
 **Job**
-   Central entity of the job queue. The ``payload`` JSONB field contains operation-specific
-   parameters validated at execution time against the corresponding ``ProteaPayload`` model.
-   ``meta`` stores the final ``OperationResult.result`` dict on completion.
+   Central entity of the job queue. ``parent_job_id`` links child batch jobs to their
+   coordinator parent (used in distributed pipelines). ``progress_current`` /
+   ``progress_total`` track batch completion for progress bars.
 
 **JobEvent**
    Append-only audit log. Written by the ``emit`` callback during execution. The frontend

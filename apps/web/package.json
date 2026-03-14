@@ -9,6 +9,9 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@types/cytoscape": "^3.31.0",
+    "cytoscape": "^3.33.1",
+    "cytoscape-dagre": "^2.5.0",
     "next": "16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3"

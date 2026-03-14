@@ -11,7 +11,9 @@ from protea.infrastructure.orm.base import Base
 
 if TYPE_CHECKING:
     from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
-    from protea.infrastructure.orm.models.annotation.protein_go_annotation import ProteinGOAnnotation
+    from protea.infrastructure.orm.models.annotation.protein_go_annotation import (
+        ProteinGOAnnotation,
+    )
 
 
 class GOTerm(Base):

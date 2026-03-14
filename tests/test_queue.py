@@ -70,20 +70,23 @@ class TestOnMessage:
         self.channel.basic_ack.assert_called_once_with(delivery_tag=42)
         self.channel.basic_nack.assert_not_called()
 
-    def test_worker_failure_nacks_without_requeue_by_default(self):
+    def test_worker_failure_acks_before_execution(self):
+        # QueueConsumer ACKs before execution to avoid RabbitMQ consumer_timeout
+        # on long-running jobs. Failed jobs are recorded in the DB; no nack is sent.
         consumer = _consumer(_make_worker(raises=RuntimeError("boom")), requeue_on_failure=False)
 
         consumer._on_message(self.channel, _make_method(7), self.properties, _encode(uuid4()))
 
-        self.channel.basic_nack.assert_called_once_with(delivery_tag=7, requeue=False)
-        self.channel.basic_ack.assert_not_called()
+        self.channel.basic_ack.assert_called_once_with(delivery_tag=7)
+        self.channel.basic_nack.assert_not_called()
 
-    def test_worker_failure_nacks_with_requeue_when_configured(self):
+    def test_worker_failure_acks_before_execution_regardless_of_requeue_flag(self):
         consumer = _consumer(_make_worker(raises=RuntimeError("boom")), requeue_on_failure=True)
 
         consumer._on_message(self.channel, _make_method(3), self.properties, _encode(uuid4()))
 
-        self.channel.basic_nack.assert_called_once_with(delivery_tag=3, requeue=True)
+        self.channel.basic_ack.assert_called_once_with(delivery_tag=3)
+        self.channel.basic_nack.assert_not_called()
 
     def test_invalid_json_body_nacks_without_requeue(self):
         consumer = _consumer()
@@ -206,7 +209,7 @@ class TestPublishJob:
 
         with patch("protea.infrastructure.queue.publisher.pika.BlockingConnection", return_value=conn), \
              patch("protea.infrastructure.queue.publisher.time.sleep"):
-            with pytest.raises(RuntimeError, match="Failed to publish job"):
+            with pytest.raises(RuntimeError, match="Failed to publish to queue"):
                 publish_job("amqp://localhost/", "q", uuid4())
 
         # close() is called once per retry attempt (4 total: 1 initial + 3 retries)

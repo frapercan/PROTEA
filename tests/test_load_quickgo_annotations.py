@@ -69,21 +69,8 @@ class TestLoadQuickGOAnnotationsPayload:
             "ontology_snapshot_id": _SNAPSHOT_ID,
             "source_version": "2026-01-11",
         })
-        assert p.reviewed is True
-        assert p.taxon_ids is None
         assert p.eco_mapping_url is None
         assert p.page_size == 10000
-
-    def test_valid_with_filters(self) -> None:
-        p = LoadQuickGOAnnotationsPayload.model_validate({
-            "ontology_snapshot_id": _SNAPSHOT_ID,
-            "source_version": "2026-01-11",
-            "reviewed": True,
-            "taxon_ids": [9606, 10090],
-            "aspects": ["F", "P"],
-        })
-        assert p.taxon_ids == [9606, 10090]
-        assert p.aspects == ["F", "P"]
 
     def test_missing_snapshot_raises(self) -> None:
         with pytest.raises(Exception):

@@ -22,7 +22,7 @@ export type JobEvent = {
   fields: Record<string, any>;
 };
 
-function baseUrl(): string {
+export function baseUrl(): string {
   const u = process.env.NEXT_PUBLIC_API_URL;
   if (!u) throw new Error("NEXT_PUBLIC_API_URL is not set");
   return u.replace(/\/+$/, "");
@@ -229,6 +229,9 @@ export function launchPredictGoTerms(body: {
   faiss_nprobe?: number;
   faiss_hnsw_m?: number;
   faiss_hnsw_ef_search?: number;
+  // Feature engineering
+  compute_alignments?: boolean;
+  compute_taxonomy?: boolean;
 }) {
   return http<{ id: string; status: string }>(`/embeddings/predict`, {
     method: "POST",
@@ -256,12 +259,40 @@ export function getPredictionSetProteins(setId: string, params?: { search?: stri
   }>(`/embeddings/prediction-sets/${setId}/proteins?${q.toString()}`);
 }
 
+export type Prediction = {
+  go_id: string;
+  name: string | null;
+  aspect: string | null;
+  distance: number;
+  ref_protein_accession: string;
+  qualifier: string | null;
+  evidence_code: string | null;
+  // Alignment — NW
+  identity_nw: number | null;
+  similarity_nw: number | null;
+  alignment_score_nw: number | null;
+  gaps_pct_nw: number | null;
+  alignment_length_nw: number | null;
+  // Alignment — SW
+  identity_sw: number | null;
+  similarity_sw: number | null;
+  alignment_score_sw: number | null;
+  gaps_pct_sw: number | null;
+  alignment_length_sw: number | null;
+  // Lengths
+  length_query: number | null;
+  length_ref: number | null;
+  // Taxonomy
+  query_taxonomy_id: number | null;
+  ref_taxonomy_id: number | null;
+  taxonomic_lca: number | null;
+  taxonomic_distance: number | null;
+  taxonomic_common_ancestors: number | null;
+  taxonomic_relation: string | null;
+};
+
 export function getProteinPredictions(setId: string, accession: string) {
-  return http<{
-    go_id: string; name: string | null; aspect: string | null;
-    distance: number; ref_protein_accession: string;
-    qualifier: string | null; evidence_code: string | null;
-  }[]>(`/embeddings/prediction-sets/${setId}/proteins/${encodeURIComponent(accession)}`);
+  return http<Prediction[]>(`/embeddings/prediction-sets/${setId}/proteins/${encodeURIComponent(accession)}`);
 }
 
 export function getGoTermDistribution(setId: string) {
@@ -293,6 +324,16 @@ export function getProteinAnnotations(accession: string, annotationSetId?: strin
 
 export function deletePredictionSet(id: string) {
   return http<{ deleted: string; predictions_deleted: number }>(`/embeddings/prediction-sets/${id}`, { method: "DELETE" });
+}
+
+export type GoSubgraph = {
+  nodes: { id: number; go_id: string; name: string | null; aspect: string | null; is_query: boolean }[];
+  edges: { source: number; target: number; relation_type: string }[];
+};
+
+export function getGoSubgraph(snapshotId: string, goIds: string[], depth = 3) {
+  const q = new URLSearchParams({ go_ids: goIds.join(","), depth: String(depth) });
+  return http<GoSubgraph>(`/annotations/snapshots/${snapshotId}/subgraph?${q.toString()}`);
 }
 
 export function listAnnotationSets() {

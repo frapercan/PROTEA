@@ -138,5 +138,5 @@ class TestStoreBuffer:
         )
         assert inserted == 2
         assert skipped == 0
-        session.add_all.assert_called_once()
-        session.flush.assert_called_once()
+        # Uses bulk pg_insert().on_conflict_do_nothing() instead of add_all
+        session.execute.assert_called()

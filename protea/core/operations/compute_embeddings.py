@@ -9,7 +9,9 @@ from uuid import UUID
 
 import numpy as np
 from pydantic import Field, field_validator
-from sqlalchemy import select, update as sa_update
+from sqlalchemy import exists, select
+from sqlalchemy import update as sa_update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload, RetryLaterError
@@ -23,7 +25,8 @@ from protea.infrastructure.orm.models.sequence.sequence import Sequence
 
 PositiveInt = Annotated[int, Field(gt=0)]
 
-_BATCH_QUEUE = "protea.embeddings.batch"
+_BATCH_QUEUE  = "protea.embeddings.batch"
+_WRITE_QUEUE  = "protea.embeddings.write"
 
 
 # ---------------------------------------------------------------------------
@@ -50,9 +53,10 @@ class ChunkEmbedding:
 class ComputeEmbeddingsPayload(ProteaPayload, frozen=True):
     """Coordinator payload: decides *which* sequences to embed and how to batch.
 
-    The coordinator creates one child job per batch and publishes them to
-    ``protea.embeddings.batch``.  The actual model inference happens in
-    ``ComputeEmbeddingsBatchOperation``.
+    The coordinator publishes N ephemeral operation messages to
+    ``protea.embeddings.batch``.  Any worker consuming that queue picks up a
+    message and runs ``ComputeEmbeddingsBatchOperation`` — no child Job rows
+    are created in the DB.
 
     Fields
     ------
@@ -61,13 +65,13 @@ class ComputeEmbeddingsPayload(ProteaPayload, frozen=True):
     accessions : list[str] | None
         Restrict to proteins with these UniProt accessions.  None = all.
     sequences_per_job : int
-        How many sequences each child job processes.  Tune to GPU memory.
+        How many sequences each batch message processes.  Tune to GPU memory.
     device : str
-        Device passed down to each child job (``"cuda"`` or ``"cpu"``).
+        Device passed down to each batch worker (``"cuda"`` or ``"cpu"``).
     skip_existing : bool
         Skip sequences that already have an embedding for this config.
     batch_size : int
-        Model forward-pass batch size passed down to each child job.
+        Model forward-pass batch size inside each batch worker.
     """
 
     embedding_config_id: str
@@ -87,7 +91,7 @@ class ComputeEmbeddingsPayload(ProteaPayload, frozen=True):
 
 
 class ComputeEmbeddingsBatchPayload(ProteaPayload, frozen=True):
-    """Payload for a single batch child job created by the coordinator."""
+    """Payload for a single batch operation message published by the coordinator."""
 
     embedding_config_id: str
     sequence_ids: list[int]
@@ -169,7 +173,7 @@ class ComputeEmbeddingsOperation:
         sequence_ids = self._load_sequence_ids(session, p, config_id, emit)
         if not sequence_ids:
             emit("compute_embeddings.no_sequences", None, {}, "warning")
-            return OperationResult(result={"child_jobs": 0, "sequences": 0})
+            return OperationResult(result={"batches": 0, "sequences": 0})
 
         # Partition into batches and create one child Job per batch.
         batches = [
@@ -181,16 +185,15 @@ class ComputeEmbeddingsOperation:
         emit("compute_embeddings.dispatching", None, {
             "total_sequences": len(sequence_ids),
             "sequences_per_job": p.sequences_per_job,
-            "child_jobs": n_batches,
+            "batches": n_batches,
         }, "info")
 
-        child_job_ids: list[tuple[str, UUID]] = []
-        for batch_index, batch_seq_ids in enumerate(batches):
-            child = Job(
-                operation="compute_embeddings_batch",
-                queue_name=_BATCH_QUEUE,
-                parent_job_id=parent_job_id,
-                payload={
+        operations: list[tuple[str, dict]] = []
+        for batch_seq_ids in batches:
+            operations.append((_BATCH_QUEUE, {
+                "operation": "compute_embeddings_batch",
+                "job_id": str(parent_job_id),
+                "payload": {
                     "embedding_config_id": p.embedding_config_id,
                     "sequence_ids": batch_seq_ids,
                     "parent_job_id": str(parent_job_id),
@@ -198,23 +201,14 @@ class ComputeEmbeddingsOperation:
                     "skip_existing": p.skip_existing,
                     "batch_size": p.batch_size,
                 },
-                meta={"batch_index": batch_index, "total_batches": n_batches},
-            )
-            session.add(child)
-            session.flush()  # get child.id before commit
-            session.add(JobEvent(
-                job_id=child.id,
-                event="job.created",
-                fields={"parent_job_id": str(parent_job_id), "sequences": len(batch_seq_ids)},
-            ))
-            child_job_ids.append((_BATCH_QUEUE, child.id))
+            }))
 
         return OperationResult(
-            result={"child_jobs": n_batches, "sequences": len(sequence_ids)},
+            result={"batches": n_batches, "sequences": len(sequence_ids)},
             progress_current=0,
             progress_total=n_batches,
             deferred=True,
-            publish_after_commit=child_job_ids,
+            publish_operations=operations,
         )
 
     def _load_sequence_ids(
@@ -248,12 +242,11 @@ class ComputeEmbeddingsOperation:
             q = session.query(Sequence.id)
 
         if p.skip_existing:
-            embedded_ids = (
-                session.query(SequenceEmbedding.sequence_id)
-                .filter(SequenceEmbedding.embedding_config_id == config_id)
-                .subquery()
+            already_embedded = exists().where(
+                SequenceEmbedding.sequence_id == Sequence.id,
+                SequenceEmbedding.embedding_config_id == config_id,
             )
-            q = q.filter(Sequence.id.notin_(select(embedded_ids)))
+            q = q.filter(~already_embedded)
 
         ids = [row[0] for row in q.all()]
         emit("compute_embeddings.load_sequences_done", None,
@@ -298,6 +291,14 @@ class ComputeEmbeddingsBatchOperation:
         config_id = uuid.UUID(p.embedding_config_id)
         parent_job_id = UUID(p.parent_job_id)
 
+        # Skip processing if the parent job was cancelled or failed while this
+        # batch message was waiting in the queue.
+        parent = session.get(Job, parent_job_id)
+        if parent is not None and parent.status in (JobStatus.CANCELLED, JobStatus.FAILED):
+            emit("compute_embeddings_batch.skipped", None,
+                 {"reason": "parent_not_running", "parent_status": parent.status.value}, "warning")
+            return OperationResult(result={"skipped": True})
+
         config = session.get(EmbeddingConfig, config_id)
         if config is None:
             raise ValueError(f"EmbeddingConfig {p.embedding_config_id} not found")
@@ -312,89 +313,49 @@ class ComputeEmbeddingsBatchOperation:
 
         model, tokenizer = self._load_model(config, p.device, emit)
 
-        sequences_processed = 0
-        embeddings_stored = 0
-        sequences_skipped = 0
-
+        # Run inference only — no DB writes here.
+        write_sequences = []
         for i in range(0, len(sequences), p.batch_size):
-            batch = sequences[i: i + p.batch_size]
+            batch    = sequences[i: i + p.batch_size]
             seq_strs = [s.sequence for s in batch]
             batch_chunks = self._embed_batch(model, tokenizer, seq_strs, config, p.device)
-
-            for seq, chunks in zip(batch, batch_chunks):
-                if p.skip_existing:
-                    existing = session.query(SequenceEmbedding).filter_by(
-                        sequence_id=seq.id, embedding_config_id=config_id
-                    ).first()
-                    if existing is not None:
-                        sequences_skipped += 1
-                        continue
-                else:
-                    session.query(SequenceEmbedding).filter_by(
-                        sequence_id=seq.id, embedding_config_id=config_id
-                    ).delete()
-
-                for chunk in chunks:
-                    session.add(SequenceEmbedding(
-                        sequence_id=seq.id,
-                        embedding_config_id=config_id,
-                        chunk_index_s=chunk.chunk_index_s,
-                        chunk_index_e=chunk.chunk_index_e,
-                        embedding=chunk.vector.tolist(),
-                        embedding_dim=int(chunk.vector.shape[0]),
-                    ))
-                    embeddings_stored += 1
-
-                sequences_processed += 1
-
-            session.flush()
+            for seq, chunks in zip(batch, batch_chunks, strict=False):
+                write_sequences.append({
+                    "sequence_id": seq.id,
+                    "chunks": [
+                        {
+                            "chunk_index_s": c.chunk_index_s,
+                            "chunk_index_e": c.chunk_index_e,
+                            "vector":        c.vector.tolist(),
+                            "embedding_dim": int(c.vector.shape[0]),
+                        }
+                        for c in chunks
+                    ],
+                })
 
         elapsed = time.perf_counter() - t0
         emit("compute_embeddings_batch.done", None, {
-            "sequences_processed": sequences_processed,
-            "embeddings_stored": embeddings_stored,
-            "elapsed_seconds": elapsed,
+            "sequences_inferred": len(write_sequences),
+            "elapsed_seconds":    elapsed,
         }, "info")
 
-        # Atomically increment parent progress; last batch marks parent SUCCEEDED.
-        self._update_parent_progress(session, parent_job_id, emit)
-
+        # Hand off to the write worker — GPU is free to take the next batch.
         return OperationResult(
-            result={
-                "sequences_processed": sequences_processed,
-                "embeddings_stored": embeddings_stored,
-                "sequences_skipped": sequences_skipped,
-            },
-            progress_current=sequences_processed,
-            progress_total=len(sequences),
+            result={"sequences_inferred": len(write_sequences)},
+            publish_operations=[(_WRITE_QUEUE, {
+                "operation": "store_embeddings",
+                "job_id":    str(parent_job_id),
+                "payload": {
+                    "parent_job_id":      str(parent_job_id),
+                    "embedding_config_id": p.embedding_config_id,
+                    "skip_existing":      p.skip_existing,
+                    "sequences":          write_sequences,
+                },
+            })],
         )
 
-    def _update_parent_progress(
-        self, session: Session, parent_job_id: UUID, emit: EmitFn
-    ) -> None:
-        row = session.execute(
-            sa_update(Job)
-            .where(Job.id == parent_job_id)
-            .values(progress_current=Job.progress_current + 1)
-            .returning(Job.progress_current, Job.progress_total)
-        ).fetchone()
-
-        if row and row.progress_current >= row.progress_total:
-            session.execute(
-                sa_update(Job)
-                .where(Job.id == parent_job_id)
-                .values(status=JobStatus.SUCCEEDED, finished_at=utcnow())
-            )
-            session.add(JobEvent(
-                job_id=parent_job_id,
-                event="job.succeeded",
-                fields={"via": "last_batch_completed"},
-            ))
-            emit("compute_embeddings_batch.parent_succeeded", None,
-                 {"parent_job_id": str(parent_job_id)}, "info")
-
     def _load_model(self, config: EmbeddingConfig, device: str, emit: EmitFn) -> tuple[Any, Any]:
-        return _load_model(config, device, emit)
+        return _get_or_load_model(config, device, emit)
 
     def _embed_batch(
         self, model: Any, tokenizer: Any, sequences: list[str],
@@ -409,8 +370,136 @@ class ComputeEmbeddingsBatchOperation:
 
 
 # ---------------------------------------------------------------------------
-# Shared model loader
+# Write operation (CPU worker — no GPU required)
 # ---------------------------------------------------------------------------
+
+class StoreEmbeddingsPayload(ProteaPayload, frozen=True):
+    """Payload published by ComputeEmbeddingsBatchOperation after inference."""
+    parent_job_id:      str
+    embedding_config_id: str
+    skip_existing:      bool = True
+    sequences: list[dict[str, Any]]  # [{"sequence_id": int, "chunks": [...]}]
+
+
+class StoreEmbeddingsOperation:
+    """Writes pre-computed embeddings to the DB and updates parent job progress.
+
+    Runs on a CPU-only worker (protea.embeddings.write queue) so the GPU
+    worker is free to start the next inference batch immediately.
+    """
+
+    name = "store_embeddings"
+
+    def execute(
+        self, session: Session, payload: dict[str, Any], *, emit: EmitFn
+    ) -> OperationResult:
+        p = StoreEmbeddingsPayload.model_validate(payload)
+        config_id     = uuid.UUID(p.embedding_config_id)
+        parent_job_id = UUID(p.parent_job_id)
+
+        parent = session.get(Job, parent_job_id)
+        if parent is not None and parent.status in (JobStatus.CANCELLED, JobStatus.FAILED):
+            emit("store_embeddings.skipped", None,
+                 {"reason": "parent_not_running", "parent_status": parent.status.value}, "warning")
+            return OperationResult(result={"skipped": True})
+
+        embeddings_stored  = 0
+        sequences_skipped  = 0
+
+        rows_to_insert: list[dict] = []
+
+        for seq_data in p.sequences:
+            sequence_id = seq_data["sequence_id"]
+            chunks      = seq_data["chunks"]
+
+            if p.skip_existing:
+                existing = session.query(SequenceEmbedding).filter_by(
+                    sequence_id=sequence_id, embedding_config_id=config_id
+                ).first()
+                if existing is not None:
+                    sequences_skipped += 1
+                    continue
+            else:
+                session.query(SequenceEmbedding).filter_by(
+                    sequence_id=sequence_id, embedding_config_id=config_id
+                ).delete()
+
+            for chunk in chunks:
+                rows_to_insert.append({
+                    "sequence_id":        sequence_id,
+                    "embedding_config_id": config_id,
+                    "chunk_index_s":      chunk["chunk_index_s"],
+                    "chunk_index_e":      chunk.get("chunk_index_e"),
+                    "embedding":          chunk["vector"],
+                    "embedding_dim":      chunk["embedding_dim"],
+                })
+                embeddings_stored += 1
+
+        if rows_to_insert:
+            session.execute(
+                pg_insert(SequenceEmbedding).on_conflict_do_nothing(),
+                rows_to_insert,
+            )
+
+        emit("store_embeddings.done", None, {
+            "embeddings_stored": embeddings_stored,
+            "sequences_skipped": sequences_skipped,
+        }, "info")
+
+        self._update_parent_progress(session, parent_job_id, emit)
+
+        return OperationResult(result={
+            "embeddings_stored": embeddings_stored,
+            "sequences_skipped": sequences_skipped,
+        })
+
+    def _update_parent_progress(
+        self, session: Session, parent_job_id: UUID, emit: EmitFn
+    ) -> None:
+        row = session.execute(
+            sa_update(Job)
+            .where(Job.id == parent_job_id, Job.status == JobStatus.RUNNING)
+            .values(progress_current=Job.progress_current + 1)
+            .returning(Job.progress_current, Job.progress_total)
+        ).fetchone()
+
+        if row is None or row.progress_current < row.progress_total:
+            return
+
+        closed = session.execute(
+            sa_update(Job)
+            .where(Job.id == parent_job_id, Job.status == JobStatus.RUNNING)
+            .values(status=JobStatus.SUCCEEDED, finished_at=utcnow())
+            .returning(Job.id)
+        ).fetchone()
+
+        if closed:
+            session.add(JobEvent(
+                job_id=parent_job_id,
+                event="job.succeeded",
+                fields={"via": "last_batch_stored"},
+                level="info",
+            ))
+            emit("store_embeddings.parent_succeeded", None,
+                 {"parent_job_id": str(parent_job_id)}, "info")
+
+
+# ---------------------------------------------------------------------------
+# Shared model loader (with process-level cache)
+# ---------------------------------------------------------------------------
+
+# Keyed by (model_name, model_backend, device) — one entry per worker process.
+# Workers are long-lived processes, so the model is loaded once and reused for
+# all subsequent batch messages with the same config.
+_MODEL_CACHE: dict[tuple[str, str, str], tuple[Any, Any]] = {}
+
+
+def _get_or_load_model(config: EmbeddingConfig, device: str, emit: EmitFn) -> tuple[Any, Any]:
+    key = (config.model_name, config.model_backend, device)
+    if key not in _MODEL_CACHE:
+        _MODEL_CACHE[key] = _load_model(config, device, emit)
+    return _MODEL_CACHE[key]
+
 
 def _load_model(config: EmbeddingConfig, device: str, emit: EmitFn) -> tuple[Any, Any]:
     import torch
@@ -436,7 +525,7 @@ def _load_model(config: EmbeddingConfig, device: str, emit: EmitFn) -> tuple[Any
         model.to(device)
 
     elif config.model_backend == "t5":
-        from transformers import T5Tokenizer, T5EncoderModel
+        from transformers import T5EncoderModel, T5Tokenizer
         device_obj = torch.device(device)
         dtype = torch.float16 if device_obj.type == "cuda" else torch.float32
         tokenizer = T5Tokenizer.from_pretrained(config.model_name, do_lower_case=False)
@@ -637,7 +726,7 @@ def _embed_esm3c(
 
     with torch.no_grad():
         for seq_str in sequences:
-            protein = ESMProtein(sequence=seq_str)
+            protein = ESMProtein(sequence=seq_str[:config.max_length])
 
             with torch.autocast(
                 device_type=device_obj.type,

@@ -4,14 +4,13 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from uuid import UUID
-from sqlalchemy import func, distinct
+from sqlalchemy import distinct, func
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.requests import Request
 
-from protea.infrastructure.orm.models.annotation.protein_go_annotation import ProteinGOAnnotation
-from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
+from protea.infrastructure.orm.models.annotation.go_term import GOTerm
+from protea.infrastructure.orm.models.annotation.protein_go_annotation import ProteinGOAnnotation
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.orm.models.protein.protein_metadata import ProteinUniProtMetadata
@@ -29,14 +28,16 @@ def get_session_factory(request: Request) -> sessionmaker[Session]:
 
 # ── Stats ─────────────────────────────────────────────────────────────────────
 
-@router.get("/stats")
+@router.get("/stats", summary="Aggregate protein statistics")
 def get_protein_stats(
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
+    """Return aggregate counts: total proteins, canonical vs isoforms, reviewed,
+    and how many have metadata, embeddings, or GO annotations."""
     with session_scope(factory) as session:
         total = session.query(func.count(Protein.accession)).scalar() or 0
-        canonical = session.query(func.count(Protein.accession)).filter(Protein.is_canonical == True).scalar() or 0
-        reviewed = session.query(func.count(Protein.accession)).filter(Protein.reviewed == True).scalar() or 0
+        canonical = session.query(func.count(Protein.accession)).filter(Protein.is_canonical.is_(True)).scalar() or 0
+        reviewed = session.query(func.count(Protein.accession)).filter(Protein.reviewed.is_(True)).scalar() or 0
         with_metadata = session.query(func.count(distinct(Protein.canonical_accession))).join(
             ProteinUniProtMetadata,
             Protein.canonical_accession == ProteinUniProtMetadata.canonical_accession,
@@ -61,7 +62,7 @@ def get_protein_stats(
 
 # ── List ──────────────────────────────────────────────────────────────────────
 
-@router.get("")
+@router.get("", summary="List proteins")
 def list_proteins(
     search: str | None = Query(default=None),
     reviewed: bool | None = Query(default=None),
@@ -70,10 +71,11 @@ def list_proteins(
     offset: int = Query(default=0, ge=0),
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
+    """Paginated protein listing with optional full-text search across accession, entry name, gene name, and organism."""
     with session_scope(factory) as session:
         q = session.query(Protein)
         if canonical_only:
-            q = q.filter(Protein.is_canonical == True)
+            q = q.filter(Protein.is_canonical.is_(True))
         if reviewed is not None:
             q = q.filter(Protein.reviewed == reviewed)
         if search:
@@ -109,11 +111,13 @@ def list_proteins(
 
 # ── Detail ────────────────────────────────────────────────────────────────────
 
-@router.get("/{accession}")
+@router.get("/{accession}", summary="Get protein details")
 def get_protein(
     accession: str,
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
+    """Full details for one protein: core fields, UniProt functional metadata, embedding count,
+    GO annotation count, and accessions of known isoforms (if canonical)."""
     with session_scope(factory) as session:
         p = session.get(Protein, accession)
         if p is None:
@@ -138,7 +142,7 @@ def get_protein(
                 for row in session.query(Protein.accession)
                 .filter(
                     Protein.canonical_accession == p.canonical_accession,
-                    Protein.is_canonical == False,
+                    Protein.is_canonical.is_(False),
                 )
                 .order_by(Protein.isoform_index)
                 .all()
@@ -184,12 +188,14 @@ def get_protein(
 
 # ── Annotations ───────────────────────────────────────────────────────────────
 
-@router.get("/{accession}/annotations")
+@router.get("/{accession}/annotations", summary="List GO annotations for a protein")
 def get_protein_annotations(
     accession: str,
     annotation_set_id: str | None = Query(default=None),
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> list[dict[str, Any]]:
+    """Return all GO term annotations for a protein, joined with term details and annotation set source.
+    Optionally filter to a specific annotation set by UUID."""
     with session_scope(factory) as session:
         q = (
             session.query(ProteinGOAnnotation, GOTerm, AnnotationSet)
@@ -201,7 +207,7 @@ def get_protein_annotations(
             try:
                 q = q.filter(ProteinGOAnnotation.annotation_set_id == UUID(annotation_set_id))
             except ValueError:
-                raise HTTPException(status_code=422, detail="Invalid annotation_set_id")
+                raise HTTPException(status_code=422, detail="Invalid annotation_set_id") from None
         rows = q.order_by(GOTerm.aspect, GOTerm.name).all()
         return [
             {

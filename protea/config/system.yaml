@@ -3,3 +3,6 @@ database:
 
 queue:
   amqp_url: amqp://guest:guest@localhost:5672/
+
+storage:
+  artifacts_dir: storage/evaluation_artifacts

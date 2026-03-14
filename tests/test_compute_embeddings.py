@@ -500,7 +500,7 @@ class TestComputeEmbeddingsCoordinator:
                 emit=_noop_emit,
             )
 
-        assert result.result["child_jobs"] == 0
+        assert result.result["batches"] == 0
         assert result.deferred is False
 
     def test_dispatches_correct_number_of_child_jobs(self) -> None:
@@ -520,12 +520,12 @@ class TestComputeEmbeddingsCoordinator:
                 emit=_noop_emit,
             )
 
-        # ceil(10/4) = 3 child jobs
-        assert result.result["child_jobs"] == 3
+        # ceil(10/4) = 3 batches
+        assert result.result["batches"] == 3
         assert result.result["sequences"] == 10
         assert result.progress_total == 3
         assert result.deferred is True
-        assert len(result.publish_after_commit) == 3
+        assert len(result.publish_operations) == 3
 
 
 # ---------------------------------------------------------------------------
@@ -568,11 +568,11 @@ class TestComputeEmbeddingsBatchExecute:
             "_job_id": str(uuid.uuid4()),
         }
 
-    def test_sequences_are_embedded_and_stored(self) -> None:
+    def test_inference_publishes_write_operation(self) -> None:
         op = self._op()
         cfg = _mock_config()
         seqs = [self._make_sequence(1, "ACDEF"), self._make_sequence(2, "GHIKL")]
-        session = self._make_session(cfg, seqs, no_existing=True)
+        session = self._make_session(cfg, seqs)
 
         fake_vec = np.array([0.1, 0.2, 0.3], dtype=np.float32)
         fake_batch = [self._fake_chunks(fake_vec), self._fake_chunks(fake_vec)]
@@ -581,29 +581,18 @@ class TestComputeEmbeddingsBatchExecute:
              patch.object(op, "_embed_batch", return_value=fake_batch):
             result = op.execute(session, self._base_payload(cfg), emit=_noop_emit)
 
-        assert result.result["sequences_processed"] == 2
-        assert result.result["embeddings_stored"] == 2
+        assert result.result["sequences_inferred"] == 2
+        assert len(result.publish_operations) == 1
+        queue, msg = result.publish_operations[0]
+        assert queue == "protea.embeddings.write"
+        assert msg["operation"] == "store_embeddings"
+        assert len(msg["payload"]["sequences"]) == 2
 
-    def test_skip_existing_skips_already_embedded(self) -> None:
-        op = self._op()
-        cfg = _mock_config()
-        seqs = [self._make_sequence(1, "ACDEF")]
-        session = self._make_session(cfg, seqs, no_existing=False)
-
-        fake_vec = np.array([0.1, 0.2, 0.3], dtype=np.float32)
-
-        with patch.object(op, "_load_model", return_value=(MagicMock(), MagicMock())), \
-             patch.object(op, "_embed_batch", return_value=[self._fake_chunks(fake_vec)]):
-            result = op.execute(session, self._base_payload(cfg), emit=_noop_emit)
-
-        assert result.result["sequences_processed"] == 0
-        assert result.result["sequences_skipped"] == 1
-
-    def test_chunking_stores_multiple_rows_per_sequence(self) -> None:
+    def test_chunking_serializes_all_chunks(self) -> None:
         op = self._op()
         cfg = _mock_config(use_chunking=True)
         seqs = [self._make_sequence(1, "ACDEF")]
-        session = self._make_session(cfg, seqs, no_existing=True)
+        session = self._make_session(cfg, seqs)
 
         fake_vec = np.array([0.1, 0.2, 0.3], dtype=np.float32)
         three_chunks = [
@@ -616,25 +605,8 @@ class TestComputeEmbeddingsBatchExecute:
              patch.object(op, "_embed_batch", return_value=[three_chunks]):
             result = op.execute(session, self._base_payload(cfg), emit=_noop_emit)
 
-        assert result.result["sequences_processed"] == 1
-        assert result.result["embeddings_stored"] == 3
-
-    def test_skip_existing_false_overwrites_existing(self) -> None:
-        op = self._op()
-        cfg = _mock_config()
-        seqs = [self._make_sequence(1, "ACDEF")]
-        session = self._make_session(cfg, seqs, no_existing=False)
-
-        fake_vec = np.array([0.9, 0.8, 0.7], dtype=np.float32)
-        payload = {**self._base_payload(cfg), "skip_existing": False}
-
-        with patch.object(op, "_load_model", return_value=(MagicMock(), MagicMock())), \
-             patch.object(op, "_embed_batch", return_value=[self._fake_chunks(fake_vec)]):
-            result = op.execute(session, payload, emit=_noop_emit)
-
-        session.query.return_value.filter_by.return_value.delete.assert_called_once()
-        assert result.result["sequences_processed"] == 1
-        assert result.result["embeddings_stored"] == 1
+        _, msg = result.publish_operations[0]
+        assert len(msg["payload"]["sequences"][0]["chunks"]) == 3
 
 
 # ---------------------------------------------------------------------------

@@ -4,15 +4,15 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, String, Text, func
+from sqlalchemy import DateTime, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from protea.infrastructure.orm.base import Base
 
 if TYPE_CHECKING:
-    from protea.infrastructure.orm.models.annotation.go_term import GOTerm
     from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
+    from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 
 
 class OntologySnapshot(Base):

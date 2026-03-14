@@ -7,10 +7,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.requests import Request
 
-from protea.infrastructure.orm.models.sequence.sequence import Sequence
-from protea.infrastructure.orm.models.protein.protein import Protein
-from protea.infrastructure.orm.models.query.query_set import QuerySetEntry
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
+from protea.infrastructure.orm.models.sequence.sequence import Sequence
 from protea.infrastructure.session import session_scope
 
 router = APIRouter(prefix="/maintenance", tags=["maintenance"])

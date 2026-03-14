@@ -69,9 +69,9 @@ Start the dev stack
 
 .. code-block:: bash
 
-   bash scripts/start_dev.sh
+   bash scripts/manage.sh start [N]   # N = batch workers per pipeline (default 1)
 
-This starts four processes in the background:
+This starts all processes in the background and writes PIDs to ``logs/pids/``:
 
 .. list-table::
    :header-rows: 1
@@ -88,15 +88,33 @@ This starts four processes in the background:
    * - Worker — ``protea.jobs``
      - —
      - ``logs/worker-jobs.log``
+   * - Worker — ``protea.embeddings``
+     - —
+     - ``logs/worker-embeddings.log``
+   * - Worker — ``protea.embeddings.batch`` (×N)
+     - —
+     - ``logs/worker-embeddings-batch-*.log``
+   * - Worker — ``protea.embeddings.write`` (×N)
+     - —
+     - ``logs/worker-embeddings-write-*.log``
+   * - Worker — ``protea.predictions.batch`` (×N)
+     - —
+     - ``logs/worker-predictions-batch-*.log``
+   * - Worker — ``protea.predictions.write`` (×N)
+     - —
+     - ``logs/worker-predictions-write-*.log``
    * - Next.js frontend
      - http://127.0.0.1:3000
      - ``logs/frontend.log``
 
-Stop everything:
+Stack management commands:
 
 .. code-block:: bash
 
-   pkill -f "uvicorn protea|scripts/worker.py|next dev"
+   bash scripts/manage.sh stop               # stop all processes
+   bash scripts/manage.sh status             # show PID, RAM, running/dead per worker
+   bash scripts/manage.sh logs [name]        # tail logs (interactive picker or name fragment)
+   bash scripts/manage.sh scale <queue> [N]  # add N extra workers without restart
 
 Verify the installation
 -----------------------
@@ -112,6 +130,34 @@ Alternatively, use the API directly:
    curl -s -X POST http://127.0.0.1:8000/jobs \
      -H "Content-Type: application/json" \
      -d '{"operation":"ping","queue_name":"protea.ping","payload":{}}' | python -m json.tool
+
+Expose to the internet
+----------------------
+
+To share PROTEA with an external reviewer (e.g. a supervisor) without a
+public server, run:
+
+.. code-block:: bash
+
+   bash scripts/expose.sh
+
+The script uses **ngrok** with a free static domain
+(``protea.ngrok.app``).
+It opens a single tunnel to the Next.js frontend (:3000).
+API calls are transparently proxied through the frontend via the
+``/api-proxy/:path*`` rewrite rule in ``apps/web/next.config.ts``, so the
+API port (:8000) is never exposed directly.
+
+**Prerequisites:**
+
+1. Install ngrok: https://ngrok.com/download
+2. Authenticate once: ``ngrok config add-authtoken <TOKEN>``
+
+Press **Ctrl+C** to close the tunnel.
+
+.. note::
+   The stack must already be running (``bash scripts/manage.sh start``) before
+   calling ``expose.sh``.
 
 Run tests
 ---------

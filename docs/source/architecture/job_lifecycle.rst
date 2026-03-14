@@ -61,6 +61,70 @@ reflects the last committed state, and no session is left open across a long-run
    contention. More importantly, a crash in the execute phase leaves the claim phase committed
    (RUNNING is visible) while the result is not — which is the correct observable state.
 
+Parent-child job hierarchy
+--------------------------
+
+Coordinator operations (``compute_embeddings``, ``predict_go_terms``) split work across
+many parallel workers using a **parent-child pattern**:
+
+.. code-block:: text
+
+   Job (parent, RUNNING)
+   ├── publishes N batch messages to RabbitMQ (ephemeral, no DB row)
+   └── returns OperationResult(deferred=True)
+                │
+                ▼ each batch worker
+        processes one batch, publishes to write queue
+                │
+                ▼ write worker
+        inserts results, increments parent.progress_current
+        if progress_current == progress_total → marks parent SUCCEEDED
+
+The parent job stays in ``RUNNING`` state until the **last write worker** atomically
+increments the progress counter and detects completion. The ``Job`` model includes:
+
+- ``parent_job_id`` — FK to the coordinator job (``NULL`` for top-level jobs)
+- ``progress_current`` — batches completed so far
+- ``progress_total`` — total batches dispatched
+
+Deferred execution pattern
+---------------------------
+
+An operation can return ``OperationResult(deferred=True)`` to signal that the job
+should **not** be transitioned to SUCCEEDED immediately:
+
+.. code-block:: python
+
+   return OperationResult(
+       deferred=True,
+       result={"batches": n_batches},
+   )
+
+``BaseWorker`` detects this flag and skips the final SUCCEEDED transition. Responsibility
+for closing the job passes to the child workers through the progress tracking mechanism.
+
+This is used by all coordinator operations to allow the parent job to remain RUNNING
+while batch workers process their messages in parallel.
+
+RetryLaterError — deferring busy operations
+-------------------------------------------
+
+When a resource is unavailable (e.g., GPU already in use by another embedding job),
+an operation can raise ``RetryLaterError``:
+
+.. code-block:: python
+
+   raise RetryLaterError("GPU busy", delay_seconds=60)
+
+``BaseWorker`` catches this exception and:
+
+1. Resets the job status back to ``QUEUED``
+2. Writes a ``job.retry_later`` event with the reason and delay
+3. Re-publishes the job UUID to its queue after ``delay_seconds``
+
+This prevents multiple GPU-intensive jobs from running simultaneously without
+manual intervention.
+
 Event log
 ---------
 
@@ -75,11 +139,31 @@ The ``emit`` callback available to every operation writes a ``JobEvent`` with:
 
 The frontend polls ``GET /jobs/{id}/events`` to display this timeline in real time.
 
+Progress tracking
+-----------------
+
+Operations can report progress by including ``_progress_current`` and ``_progress_total``
+in any ``emit`` call fields dict, or by returning them in ``OperationResult``.
+``BaseWorker`` writes these values back to ``Job.progress_current`` and ``Job.progress_total``
+after each update, allowing the frontend to display a live progress bar.
+
+For distributed pipelines, the write workers use an atomic SQL update to increment
+the parent's ``progress_current`` and conditionally close the job:
+
+.. code-block:: sql
+
+   UPDATE job SET progress_current = progress_current + 1
+   WHERE id = :parent_id;
+
+   UPDATE job SET status = 'succeeded', finished_at = now()
+   WHERE id = :parent_id AND progress_current >= progress_total;
+
 Cancellation
 ------------
 
 ``POST /jobs/{id}/cancel`` transitions QUEUED or RUNNING jobs to CANCELLED. If the job is
 already in a terminal state (SUCCEEDED, FAILED, CANCELLED) the endpoint is a no-op.
+Any queued child jobs (status = QUEUED) are also cancelled atomically.
 
 .. note::
    Cancellation of a RUNNING job is a soft cancel — it marks the DB row as CANCELLED but

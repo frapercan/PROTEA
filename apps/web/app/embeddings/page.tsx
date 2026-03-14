@@ -368,7 +368,7 @@ export default function EmbeddingsPage() {
                     <input
                       type="number"
                       value={cfgMaxLength}
-                      onChange={(e) => setCfgMaxLength(parseInt(e.target.value, 10))}
+                      onChange={(e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v)) setCfgMaxLength(v); }}
                       min={1}
                       className={inputClass}
                     />
@@ -429,7 +429,7 @@ export default function EmbeddingsPage() {
                         <input
                           type="number"
                           value={cfgChunkSize}
-                          onChange={(e) => setCfgChunkSize(parseInt(e.target.value, 10))}
+                          onChange={(e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v)) setCfgChunkSize(v); }}
                           min={1}
                           className={inputClass}
                         />
@@ -439,7 +439,7 @@ export default function EmbeddingsPage() {
                         <input
                           type="number"
                           value={cfgChunkOverlap}
-                          onChange={(e) => setCfgChunkOverlap(parseInt(e.target.value, 10))}
+                          onChange={(e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v)) setCfgChunkOverlap(v); }}
                           min={0}
                           className={inputClass}
                         />
@@ -585,7 +585,7 @@ export default function EmbeddingsPage() {
                     <input
                       type="number"
                       value={cmpQueueBatchSize}
-                      onChange={(e) => setCmpQueueBatchSize(parseInt(e.target.value, 10))}
+                      onChange={(e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v)) setCmpQueueBatchSize(v); }}
                       min={1}
                       className={inputClass}
                     />
@@ -598,7 +598,7 @@ export default function EmbeddingsPage() {
                     <input
                       type="number"
                       value={cmpBatchSize}
-                      onChange={(e) => setCmpBatchSize(parseInt(e.target.value, 10))}
+                      onChange={(e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v)) setCmpBatchSize(v); }}
                       min={1}
                       className={inputClass}
                     />

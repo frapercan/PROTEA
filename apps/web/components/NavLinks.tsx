@@ -13,6 +13,7 @@ const NAV_GROUPS = [
   [
     { href: "/embeddings", label: "Embeddings" },
     { href: "/functional-annotation", label: "Functional Annotation" },
+    { href: "/evaluation", label: "Evaluation" },
   ],
   [
     { href: "/jobs", label: "Jobs" },

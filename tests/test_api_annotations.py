@@ -82,7 +82,8 @@ def client(session):
 class TestListSnapshots:
     def test_returns_list(self, session):
         s = _make_snapshot(_SNAPSHOT_ID)
-        session.query.return_value.order_by.return_value.all.return_value = [s]
+        # Router uses: session.query(...).outerjoin(...).order_by(...).all() → list of (snapshot, count) tuples
+        session.query.return_value.outerjoin.return_value.order_by.return_value.all.return_value = [(s, 42)]
 
         factory = MagicMock()
         app = _make_app(factory)
@@ -95,7 +96,7 @@ class TestListSnapshots:
         assert body[0]["obo_version"] == "releases/2024-01-17"
 
     def test_empty_list(self, session):
-        session.query.return_value.order_by.return_value.all.return_value = []
+        session.query.return_value.outerjoin.return_value.order_by.return_value.all.return_value = []
 
         factory = MagicMock()
         app = _make_app(factory)
@@ -196,9 +197,9 @@ class TestLoadOntologySnapshot:
 class TestListAnnotationSets:
     def test_returns_list(self, session):
         a = _make_annotation_set(_SET_ID, _SNAPSHOT_ID)
+        # Router uses: session.query(...).outerjoin(...).order_by(...).all() → list of (set, count) tuples
         q = MagicMock()
-        q.filter.return_value = q
-        q.order_by.return_value.all.return_value = [a]
+        q.outerjoin.return_value.order_by.return_value.all.return_value = [(a, 100)]
         session.query.return_value = q
 
         factory = MagicMock()
@@ -211,9 +212,9 @@ class TestListAnnotationSets:
         assert body[0]["source"] == "quickgo"
 
     def test_filter_by_source(self, session):
+        # With source filter: .outerjoin(...).filter(...).order_by(...).all()
         q = MagicMock()
-        q.filter.return_value = q
-        q.order_by.return_value.all.return_value = []
+        q.outerjoin.return_value.filter.return_value.order_by.return_value.all.return_value = []
         session.query.return_value = q
 
         factory = MagicMock()
@@ -222,7 +223,7 @@ class TestListAnnotationSets:
             resp = TestClient(app).get("/annotations/sets?source=goa")
 
         assert resp.status_code == 200
-        q.filter.assert_called()
+        q.outerjoin.return_value.filter.assert_called()
 
 
 # ---------------------------------------------------------------------------

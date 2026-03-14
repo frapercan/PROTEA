@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, Float, ForeignKey, String, UniqueConstraint
+from sqlalchemy import BigInteger, Float, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -55,6 +55,32 @@ class GOPrediction(Base):
     distance: Mapped[float] = mapped_column(Float, nullable=False)
     qualifier: Mapped[str | None] = mapped_column(String, nullable=True)
     evidence_code: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    # --- Alignment features (Needleman–Wunsch global) ---
+    identity_nw: Mapped[float | None] = mapped_column(Float, nullable=True)
+    similarity_nw: Mapped[float | None] = mapped_column(Float, nullable=True)
+    alignment_score_nw: Mapped[float | None] = mapped_column(Float, nullable=True)
+    gaps_pct_nw: Mapped[float | None] = mapped_column(Float, nullable=True)
+    alignment_length_nw: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # --- Alignment features (Smith–Waterman local) ---
+    identity_sw: Mapped[float | None] = mapped_column(Float, nullable=True)
+    similarity_sw: Mapped[float | None] = mapped_column(Float, nullable=True)
+    alignment_score_sw: Mapped[float | None] = mapped_column(Float, nullable=True)
+    gaps_pct_sw: Mapped[float | None] = mapped_column(Float, nullable=True)
+    alignment_length_sw: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # --- Sequence lengths (populated when alignments are computed) ---
+    length_query: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    length_ref: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # --- Taxonomy features ---
+    query_taxonomy_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ref_taxonomy_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    taxonomic_lca: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    taxonomic_distance: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    taxonomic_common_ancestors: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    taxonomic_relation: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     prediction_set: Mapped[PredictionSet] = relationship(
         "PredictionSet", back_populates="predictions"

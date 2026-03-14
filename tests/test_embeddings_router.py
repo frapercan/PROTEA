@@ -203,3 +203,142 @@ class TestDeleteEmbeddingConfig:
         session.get.return_value = None
         resp = client.delete(f"/embeddings/configs/{uuid4()}")
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# GET /embeddings/prediction-sets/{set_id}/predictions.tsv
+# ---------------------------------------------------------------------------
+
+def _make_prediction_set(ps_id=None):
+    ps = MagicMock()
+    ps.id = ps_id or uuid4()
+    ps.embedding_config_id = uuid4()
+    ps.annotation_set_id = uuid4()
+    ps.ontology_snapshot_id = uuid4()
+    ps.query_set_id = None
+    ps.limit_per_entry = 5
+    ps.distance_threshold = None
+    ps.created_at = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    return ps
+
+
+def _make_go_prediction(accession="P12345", distance=0.1):
+    pred = MagicMock()
+    pred.protein_accession = accession
+    pred.distance = distance
+    pred.ref_protein_accession = "QREF01"
+    pred.qualifier = "enables"
+    pred.evidence_code = "IDA"
+    # alignment — not computed
+    for col in ("identity_nw", "similarity_nw", "alignment_score_nw",
+                "gaps_pct_nw", "alignment_length_nw",
+                "identity_sw", "similarity_sw", "alignment_score_sw",
+                "gaps_pct_sw", "alignment_length_sw",
+                "length_query", "length_ref",
+                "query_taxonomy_id", "ref_taxonomy_id",
+                "taxonomic_lca", "taxonomic_distance",
+                "taxonomic_common_ancestors"):
+        setattr(pred, col, None)
+    pred.taxonomic_relation = None
+    return pred
+
+
+def _make_go_term(go_id="GO:0003824", name="catalytic activity", aspect="F"):
+    gt = MagicMock()
+    gt.go_id = go_id
+    gt.name = name
+    gt.aspect = aspect
+    return gt
+
+
+class TestDownloadPredictionsTSV:
+    def _get(self, client, session, set_id, rows, **params):
+        ps = _make_prediction_set(set_id)
+        session.get.return_value = ps
+
+        # yield_per returns the rows iterable
+        q = MagicMock()
+        q.filter.return_value = q
+        q.order_by.return_value = q
+        q.yield_per.return_value = iter(rows)
+        session.query.return_value.join.return_value.filter.return_value = q
+
+        return client.get(f"/embeddings/prediction-sets/{set_id}/predictions.tsv", params=params)
+
+    def test_returns_200_with_tsv_content_type(self, client, session):
+        set_id = uuid4()
+        pred = _make_go_prediction()
+        gt = _make_go_term()
+        resp = self._get(client, session, set_id, [(pred, gt)])
+
+        assert resp.status_code == 200
+        assert "tab-separated" in resp.headers["content-type"]
+
+    def test_content_disposition_has_filename(self, client, session):
+        set_id = uuid4()
+        resp = self._get(client, session, set_id, [])
+
+        disposition = resp.headers.get("content-disposition", "")
+        assert "attachment" in disposition
+        assert str(set_id) in disposition
+
+    def test_header_row_present(self, client, session):
+        set_id = uuid4()
+        resp = self._get(client, session, set_id, [])
+
+        lines = resp.text.splitlines()
+        assert lines[0].startswith("protein_accession\t")
+        assert "go_id" in lines[0]
+        assert "distance" in lines[0]
+
+    def test_data_row_values(self, client, session):
+        set_id = uuid4()
+        pred = _make_go_prediction("P12345", distance=0.2345)
+        gt = _make_go_term("GO:0003824", "catalytic activity", "F")
+        resp = self._get(client, session, set_id, [(pred, gt)])
+
+        lines = resp.text.splitlines()
+        assert len(lines) == 2  # header + 1 data row
+        row = lines[1].split("\t")
+        assert row[0] == "P12345"
+        assert row[1] == "GO:0003824"
+        assert row[2] == "catalytic activity"
+        assert row[3] == "F"
+        assert float(row[4]) == pytest.approx(0.2345, abs=1e-4)
+        assert row[5] == "QREF01"
+
+    def test_empty_predictions_returns_header_only(self, client, session):
+        set_id = uuid4()
+        resp = self._get(client, session, set_id, [])
+
+        lines = resp.text.splitlines()
+        assert len(lines) == 1
+
+    def test_null_alignment_fields_are_empty_string(self, client, session):
+        set_id = uuid4()
+        pred = _make_go_prediction()
+        gt = _make_go_term()
+        resp = self._get(client, session, set_id, [(pred, gt)])
+
+        row = resp.text.splitlines()[1].split("\t")
+        header = resp.text.splitlines()[0].split("\t")
+        identity_nw_idx = header.index("identity_nw")
+        assert row[identity_nw_idx] == ""
+
+    def test_prediction_set_not_found_returns_404(self, client, session):
+        # Both the preflight check and the generator use session.get → None
+        session.get.return_value = None
+        with patch("protea.api.routers.embeddings.session_scope", side_effect=lambda _: _mock_scope(session)):
+            resp = client.get(f"/embeddings/prediction-sets/{uuid4()}/predictions.tsv")
+        assert resp.status_code == 404
+
+    def test_multiple_rows_all_included(self, client, session):
+        set_id = uuid4()
+        rows = [(
+            _make_go_prediction(f"PROT{i}", distance=i * 0.1),
+            _make_go_term(f"GO:{i:07d}", f"term {i}", "P"),
+        ) for i in range(5)]
+        resp = self._get(client, session, set_id, rows)
+
+        lines = resp.text.splitlines()
+        assert len(lines) == 6  # 1 header + 5 data

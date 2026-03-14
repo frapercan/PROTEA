@@ -3,7 +3,9 @@
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { useToast } from "@/components/Toast";
-import { getProtein, getProteinAnnotations, ProteinDetail, ProteinAnnotation } from "@/lib/api";
+import { getProtein, getProteinAnnotations, getGoSubgraph, listOntologySnapshots, ProteinDetail, ProteinAnnotation, GoSubgraph } from "@/lib/api";
+import dynamic from "next/dynamic";
+const GoGraph = dynamic(() => import("@/components/GoGraph"), { ssr: false });
 
 type Tab = "overview" | "annotations";
 
@@ -46,6 +48,9 @@ export default function ProteinDetailPage({ params }: { params: Promise<{ access
   const [annotations, setAnnotations] = useState<ProteinAnnotation[]>([]);
   const [loadingAnnotations, setLoadingAnnotations] = useState(false);
   const [annotationsLoaded, setAnnotationsLoaded] = useState(false);
+  const [subgraph, setSubgraph] = useState<GoSubgraph | null>(null);
+  const [loadingGraph, setLoadingGraph] = useState(false);
+  const [showGraph, setShowGraph] = useState(false);
 
   useEffect(() => {
     getProtein(decodeURIComponent(accession))
@@ -62,6 +67,7 @@ export default function ProteinDetailPage({ params }: { params: Promise<{ access
         .catch((e: any) => toast(e.message ?? "Failed to load annotations", "error"))
         .finally(() => setLoadingAnnotations(false));
     }
+    if (activeTab !== "annotations") { setShowGraph(false); setSubgraph(null); }
   }, [activeTab]);
 
   if (loading) return <p className="text-sm text-gray-400 mt-8">Loading…</p>;
@@ -269,6 +275,36 @@ export default function ProteinDetailPage({ params }: { params: Promise<{ access
 
           {!loadingAnnotations && annotations.length > 0 && (
             <div className="space-y-6">
+              {/* GO Graph button */}
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={async () => {
+                    if (showGraph) { setShowGraph(false); return; }
+                    setLoadingGraph(true);
+                    setShowGraph(true);
+                    try {
+                      const snapshots = await listOntologySnapshots();
+                      if (!snapshots.length) return;
+                      const goIds = annotations.map((a) => a.go_id);
+                      // Use the snapshot from the first annotation set
+                      const snapshotId = snapshots[0].id;
+                      setSubgraph(await getGoSubgraph(snapshotId, goIds, 3));
+                    } catch (e: any) {
+                      toast(e.message ?? "Failed to load graph", "error");
+                      setShowGraph(false);
+                    } finally {
+                      setLoadingGraph(false);
+                    }
+                  }}
+                  className="rounded-md border bg-white px-3 py-1.5 text-sm hover:bg-gray-50"
+                >
+                  {showGraph ? "Hide GO Graph" : "Show GO Graph"}
+                </button>
+                {loadingGraph && <span className="text-xs text-gray-400">Loading graph…</span>}
+              </div>
+
+              {showGraph && subgraph && <GoGraph subgraph={subgraph} />}
+
               {/* Summary */}
               <div className="grid grid-cols-3 gap-3">
                 {(["F", "P", "C"] as const).map((asp) => (

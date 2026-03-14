@@ -60,6 +60,8 @@ export default function FunctionalAnnotationPage() {
   const [predFaissNprobe, setPredFaissNprobe] = useState(10);
   const [predFaissHnswM, setPredFaissHnswM] = useState(32);
   const [predFaissHnswEf, setPredFaissHnswEf] = useState(64);
+  const [predComputeAlignments, setPredComputeAlignments] = useState(false);
+  const [predComputeTaxonomy, setPredComputeTaxonomy] = useState(false);
   const [predResult, setPredResult] = useState<{ id: string; status: string } | null>(null);
   const [predError, setPredError] = useState("");
   const [predSubmitting, setPredSubmitting] = useState(false);
@@ -124,6 +126,8 @@ export default function FunctionalAnnotationPage() {
         faiss_nprobe: predFaissNprobe,
         faiss_hnsw_m: predFaissHnswM,
         faiss_hnsw_ef_search: predFaissHnswEf,
+        compute_alignments: predComputeAlignments,
+        compute_taxonomy: predComputeTaxonomy,
       });
       setPredResult(result);
       toast("Annotation job queued", "success");
@@ -268,6 +272,37 @@ export default function FunctionalAnnotationPage() {
                       placeholder="none"
                       className={inputClass}
                     />
+                  </div>
+                </div>
+
+                {/* Feature engineering */}
+                <div className="rounded-md border border-gray-200 bg-gray-50 p-4 space-y-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Feature Engineering <span className="font-normal normal-case text-gray-400">(opt-in — adds compute time)</span></p>
+                  <div className="flex flex-col gap-2">
+                    <label className="flex items-start gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={predComputeAlignments}
+                        onChange={(e) => setPredComputeAlignments(e.target.checked)}
+                        className="mt-0.5 rounded"
+                      />
+                      <span className="text-sm text-gray-700">
+                        Sequence alignments
+                        <span className="ml-1.5 text-xs text-gray-400">NW (global) + SW (local) via parasail/BLOSUM62</span>
+                      </span>
+                    </label>
+                    <label className="flex items-start gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={predComputeTaxonomy}
+                        onChange={(e) => setPredComputeTaxonomy(e.target.checked)}
+                        className="mt-0.5 rounded"
+                      />
+                      <span className="text-sm text-gray-700">
+                        Taxonomic distance
+                        <span className="ml-1.5 text-xs text-gray-400">LCA, distance and relation via NCBI taxonomy</span>
+                      </span>
+                    </label>
                   </div>
                 </div>
 

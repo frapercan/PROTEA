@@ -6,9 +6,8 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
-logger = logging.getLogger(__name__)
-
-from sqlalchemy import func, update as sa_update
+from sqlalchemy import func
+from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.core.contracts.operation import OperationResult, RetryLaterError
@@ -16,6 +15,8 @@ from protea.core.contracts.registry import OperationRegistry
 from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
 from protea.infrastructure.queue.publisher import publish_job
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import csv
 import gzip
-import random
 import time
 from collections.abc import Iterable, Sequence
 from io import BytesIO, StringIO
@@ -15,6 +14,7 @@ from requests import Response
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
+from protea.core.utils import UniProtHttpMixin, chunks
 from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.orm.models.protein.protein_metadata import ProteinUniProtMetadata
 
@@ -44,7 +44,7 @@ class FetchUniProtMetadataPayload(ProteaPayload, frozen=True):
         return v.strip()
 
 
-class FetchUniProtMetadataOperation:
+class FetchUniProtMetadataOperation(UniProtHttpMixin):
     """Fetches functional annotations from UniProt (TSV) and upserts ProteinUniProtMetadata rows.
 
     One metadata row is stored per canonical accession. Isoforms share the same
@@ -123,7 +123,8 @@ class FetchUniProtMetadataOperation:
                     "http_requests": self._http_requests,
                     "http_retries": self._http_retries,
                     "_progress_current": total_rows,
-                    **({"_progress_total": p.total_limit or self._total_results} if (p.total_limit or self._total_results) else {}),
+                    **({"_progress_total": p.total_limit or self._total_results}
+                       if (p.total_limit or self._total_results) else {}),
                 },
                 "info",
             )
@@ -193,59 +194,11 @@ class FetchUniProtMetadataOperation:
             if not next_cursor:
                 break
 
-    def _get_with_retries(self, url: str, p: FetchUniProtMetadataPayload, emit: EmitFn) -> Response:
-        headers = {"User-Agent": p.user_agent}
-        attempt = 0
-        while True:
-            attempt += 1
-            self._http_requests += 1
-            try:
-                resp = self._http.get(url, timeout=p.timeout_seconds, headers=headers)
-            except requests.RequestException as e:
-                if attempt > p.max_retries:
-                    raise
-                self._http_retries += 1
-                self._sleep_backoff(p, attempt, emit, reason=f"request_exception:{e.__class__.__name__}")
-                continue
-
-            if 200 <= resp.status_code < 300:
-                return resp
-
-            if resp.status_code in (429, 500, 502, 503, 504):
-                if attempt > p.max_retries:
-                    resp.raise_for_status()
-                self._http_retries += 1
-                retry_after = resp.headers.get("Retry-After")
-                if retry_after and retry_after.isdigit():
-                    wait_s = min(float(retry_after), p.backoff_max_seconds)
-                    emit("http.retry", None,
-                         {"attempt": attempt, "wait_seconds": wait_s, "reason": "retry_after"}, "warning")
-                    time.sleep(wait_s)
-                else:
-                    self._sleep_backoff(p, attempt, emit, reason=f"status_{resp.status_code}")
-                continue
-
-            resp.raise_for_status()
-
-    def _sleep_backoff(self, p: FetchUniProtMetadataPayload, attempt: int, emit: EmitFn, reason: str) -> None:
-        base = p.backoff_base_seconds * (2 ** (attempt - 1))
-        wait_s = min(base, p.backoff_max_seconds) + random.uniform(0.0, p.jitter_seconds)
-        emit("http.retry", None, {"attempt": attempt, "wait_seconds": wait_s, "reason": reason}, "warning")
-        time.sleep(wait_s)
-
     def _decode_response(self, resp: Response, compressed: bool) -> str:
         if compressed:
             with gzip.GzipFile(fileobj=BytesIO(resp.content)) as f:
                 return f.read().decode("utf-8", errors="replace")
         return resp.content.decode("utf-8", errors="replace")
-
-    def _extract_next_cursor(self, link_header: str) -> str | None:
-        if not link_header or 'rel="next"' not in link_header or "cursor=" not in link_header:
-            return None
-        try:
-            return link_header.split("cursor=")[-1].split(">")[0]
-        except Exception:
-            return None
 
     # ---------------- TSV / DB ----------------
 
@@ -341,7 +294,7 @@ class FetchUniProtMetadataOperation:
         chunk_size: int = 5000,
     ) -> dict[str, ProteinUniProtMetadata]:
         existing: dict[str, ProteinUniProtMetadata] = {}
-        for chunk in _chunks(canonicals, chunk_size):
+        for chunk in chunks(canonicals, chunk_size):
             rows = (
                 session.query(ProteinUniProtMetadata)
                 .filter(ProteinUniProtMetadata.canonical_accession.in_(chunk))
@@ -350,8 +303,3 @@ class FetchUniProtMetadataOperation:
             for m in rows:
                 existing[m.canonical_accession] = m
         return existing
-
-
-def _chunks(seq: Sequence[str], n: int) -> Iterable[Sequence[str]]:
-    for i in range(0, len(seq), n):
-        yield seq[i: i + n]

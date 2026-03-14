@@ -10,6 +10,8 @@ from protea.core.knn_search import _compute_distance_matrix, search_knn
 from protea.core.operations.predict_go_terms import (
     PredictGOTermsOperation,
     PredictGOTermsPayload,
+    PredictGOTermsBatchOperation,
+    PredictGOTermsBatchPayload,
 )
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
@@ -41,7 +43,7 @@ class TestPredictGOTermsPayload:
         })
         assert p.limit_per_entry == 5
         assert p.distance_threshold is None
-        assert p.batch_size == 256
+        assert p.batch_size == 1024
 
     def test_empty_embedding_config_id_raises(self) -> None:
         with pytest.raises(Exception):
@@ -90,7 +92,7 @@ class TestPredictGOTermsPayload:
         })
         assert p.limit_per_entry == 5
         assert p.distance_threshold is None
-        assert p.batch_size == 256
+        assert p.batch_size == 1024
 
 
 # ---------------------------------------------------------------------------
@@ -235,18 +237,20 @@ class TestSearchKnn:
 # ---------------------------------------------------------------------------
 
 class TestPredictBatch:
-    def _op(self) -> PredictGOTermsOperation:
-        return PredictGOTermsOperation()
+    def _op(self) -> PredictGOTermsBatchOperation:
+        return PredictGOTermsBatchOperation()
 
     def _payload(self, **kwargs):
         defaults = {
             "embedding_config_id": str(uuid.uuid4()),
             "annotation_set_id": _ANN_SET_ID,
-            "ontology_snapshot_id": _SNAPSHOT_ID,
+            "prediction_set_id": str(uuid.uuid4()),
+            "parent_job_id": str(uuid.uuid4()),
+            "query_accessions": [],
             "limit_per_entry": 2,
         }
         defaults.update(kwargs)
-        return PredictGOTermsPayload.model_validate(defaults)
+        return PredictGOTermsBatchPayload.model_validate(defaults)
 
     def _ref_data(self):
         return {
@@ -271,7 +275,7 @@ class TestPredictBatch:
         preds = op._predict_batch(["RQUERY"], query_embs, ref, pred_set_id, p)
 
         assert len(preds) >= 1
-        go_ids = {pr.go_term_id for pr in preds}
+        go_ids = {pr["go_term_id"] for pr in preds}
         assert 1 in go_ids
 
     def test_includes_self_as_first_reference(self) -> None:
@@ -284,7 +288,7 @@ class TestPredictBatch:
         query_embs = np.array([[1.0, 0.0, 0.0]], dtype=np.float32)
         preds = op._predict_batch(["P12345"], query_embs, ref, pred_set_id, p)
 
-        ref_accs = [pr.ref_protein_accession for pr in preds]
+        ref_accs = [pr["ref_protein_accession"] for pr in preds]
         assert "P12345" in ref_accs, "Self should be included as a reference neighbor"
         # Self-hit must be the first (closest) neighbor
         assert ref_accs[0] == "P12345"
@@ -308,7 +312,7 @@ class TestPredictBatch:
         query_embs = np.array([[0.7, 0.7, 0.0]], dtype=np.float32)
         preds = op._predict_batch(["RQUERY"], query_embs, ref, pred_set_id, p)
 
-        ref_accs = {pr.ref_protein_accession for pr in preds}
+        ref_accs = {pr["ref_protein_accession"] for pr in preds}
         assert len(ref_accs) == 1
 
 
@@ -325,6 +329,7 @@ class TestPredictGOTermsExecute:
             "embedding_config_id": str(uuid.uuid4()),
             "annotation_set_id": _ANN_SET_ID,
             "ontology_snapshot_id": _SNAPSHOT_ID,
+            "_job_id": str(uuid.uuid4()),
         }
 
     def test_missing_embedding_config_raises(self) -> None:
@@ -356,8 +361,8 @@ class TestPredictGOTermsExecute:
         session = MagicMock()
         session.get.side_effect = make_session_get()
 
-        empty = {"accessions": [], "embeddings": np.empty((0,))}
-        with patch.object(op, "_load_reference_data", return_value=empty):
+        # Coordinator returns early when there are no query accessions with embeddings
+        with patch.object(op, "_load_query_accessions", return_value=[]):
             result = op.execute(session, self._base_payload(), emit=_noop_emit)
 
-        assert result.result["predictions_inserted"] == 0
+        assert result.result["batches"] == 0
