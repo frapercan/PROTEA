@@ -29,6 +29,5 @@ node_modules/
 *.log
 logs/pids/
 
-# Claude Code
 CLAUDE.md
 .claude/
