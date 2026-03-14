@@ -6,6 +6,7 @@ Progressive consolidation of the **PIS** (protein-information-system) and **FANT
 [![Lint](https://github.com/frapercan/PROTEA/actions/workflows/lint.yml/badge.svg)](https://github.com/frapercan/PROTEA/actions/workflows/lint.yml)
 [![Tests](https://github.com/frapercan/PROTEA/actions/workflows/test.yml/badge.svg)](https://github.com/frapercan/PROTEA/actions/workflows/test.yml)
 [![Docs](https://github.com/frapercan/PROTEA/actions/workflows/docs.yml/badge.svg)](https://github.com/frapercan/PROTEA/actions/workflows/docs.yml)
+[![Documentation](https://readthedocs.org/projects/protea/badge/?version=latest)](https://protea.readthedocs.io/en/latest/)
 [![codecov](https://codecov.io/gh/frapercan/PROTEA/branch/main/graph/badge.svg)](https://codecov.io/gh/frapercan/PROTEA)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
 

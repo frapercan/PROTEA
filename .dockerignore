@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.coverage
+htmlcov/
+
+# Docs
+docs/build/
+
+# IDE
+.idea/
+.vscode/
+
+# Node
+apps/web/node_modules/
+apps/web/.next/
+
+# Logs
+logs/
+*.log
+
+# Git
+.git/
+.github/
+
+# Tests
+tests/
+
+# Misc
+CLAUDE.md
+.claude/
+.readthedocs.yaml
