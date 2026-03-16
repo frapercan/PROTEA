@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import React from "react";
+import { useTranslations } from "next-intl";
 
 const STORAGE_KEY = "protea_policy_accepted_v1";
 
 export function UsagePolicyModal() {
+  const t = useTranslations("components.usagePolicyModal");
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -26,29 +27,28 @@ export function UsagePolicyModal() {
       <div className="relative mx-4 w-full max-w-lg rounded-xl bg-white shadow-2xl">
         {/* Header */}
         <div className="border-b px-6 py-4">
-          <h2 className="text-lg font-semibold text-gray-900">Welcome to PROTEA</h2>
-          <p className="mt-0.5 text-sm text-gray-500">
-            Personal compute resources, openly shared — please read before continuing
-          </p>
+          <h2 className="text-lg font-semibold text-gray-900">{t("title")}</h2>
+          <p className="mt-0.5 text-sm text-gray-500">{t("subtitle")}</p>
         </div>
 
         {/* Body */}
         <div className="px-6 py-5 text-sm text-gray-700 space-y-3">
-          <p>
-            This platform runs on personal hardware shared freely for research purposes.
-            No registration or authorization is required. Please keep the following in mind:
-          </p>
+          <p>{t("intro")}</p>
           <ul className="space-y-2 list-none">
-            {RULES.map((rule, i) => (
-              <li key={i} className="flex gap-2">
+            {(["rule1", "rule2", "rule3", "rule4", "rule5", "rule6"] as const).map((key) => (
+              <li key={key} className="flex gap-2">
                 <span className="mt-0.5 flex-shrink-0 text-blue-600">•</span>
-                <span>{rule}</span>
+                <span>{key === "rule4" ? t.rich(key, {
+                  a: (chunks) => (
+                    <a href="https://github.com/frapercan/PROTEA" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-800">
+                      {chunks}
+                    </a>
+                  ),
+                }) : t(key)}</span>
               </li>
             ))}
           </ul>
-          <p className="text-xs text-gray-400 pt-1">
-            All data processed here is public. Thank you for using this responsibly.
-          </p>
+          <p className="text-xs text-gray-400 pt-1">{t("dataPublicNote")}</p>
         </div>
 
         {/* Footer */}
@@ -57,7 +57,7 @@ export function UsagePolicyModal() {
             onClick={accept}
             className="rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
           >
-            Got it, let&apos;s go
+            {t("accept")}
           </button>
         </div>
       </div>
@@ -65,11 +65,3 @@ export function UsagePolicyModal() {
   );
 }
 
-const RULES: React.ReactNode[] = [
-  "These are personal resources shared voluntarily. Please be mindful of the load you generate.",
-  "Before launching heavy or long-running jobs, reach out first — a quick message explaining your use case is much appreciated.",
-  "All processed data is public and open. Feel free to use and share results.",
-  <span>PROTEA is free and open source. Any individual or research institution can deploy their own instance — <a href="https://github.com/frapercan/PROTEA" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-800">source code on GitHub</a>.</span>,
-  "This service runs on a best-effort basis. The system may be taken down for maintenance or personal use at any time without prior notice.",
-  "If something breaks or behaves unexpectedly, please report it. Bug reports and feedback are genuinely appreciated.",
-];

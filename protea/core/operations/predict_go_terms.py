@@ -89,6 +89,119 @@ def _aspect_index_path(
     return _DISK_CACHE_DIR / f"{key}__{aspect}_indices.npy"
 
 
+def _anno_disk_cache_paths(
+    embedding_config_id: uuid.UUID,
+    annotation_set_id: uuid.UUID,
+    aspect: str,
+) -> tuple[Path, Path, Path, Path]:
+    """Return (gtids, quals, ecodes, offsets) paths for the annotation CSR cache."""
+    key = f"{embedding_config_id}__{annotation_set_id}__{aspect}"
+    base = _DISK_CACHE_DIR
+    return (
+        base / f"{key}_anno_gtids.npy",
+        base / f"{key}_anno_quals.npy",
+        base / f"{key}_anno_ecodes.npy",
+        base / f"{key}_anno_offsets.npy",
+    )
+
+
+def _build_anno_csr(
+    accessions: list[str],
+    go_map: dict[str, list[dict[str, Any]]],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Build a CSR-style annotation structure for the given accession list.
+
+    Returns (go_term_ids, qualifiers, evidence_codes, offsets) where
+    annotations for accessions[i] are at indices offsets[i]:offsets[i+1].
+    """
+    all_gtids: list[int] = []
+    all_quals: list[Any] = []
+    all_ecodes: list[Any] = []
+    offsets: list[int] = [0]
+    for acc in accessions:
+        for ann in go_map.get(acc, []):
+            all_gtids.append(ann["go_term_id"])
+            all_quals.append(ann.get("qualifier"))
+            all_ecodes.append(ann.get("evidence_code"))
+        offsets.append(len(all_gtids))
+    return (
+        np.array(all_gtids, dtype=np.int32),
+        np.array(all_quals, dtype=object),
+        np.array(all_ecodes, dtype=object),
+        np.array(offsets, dtype=np.int32),
+    )
+
+
+def _load_anno_csr_from_disk(
+    embedding_config_id: uuid.UUID,
+    annotation_set_id: uuid.UUID,
+    aspect: str,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
+    """Load annotation CSR arrays from disk. Returns None on miss or error."""
+    gtids_p, quals_p, ecodes_p, offsets_p = _anno_disk_cache_paths(
+        embedding_config_id, annotation_set_id, aspect
+    )
+    if not all(p.exists() for p in (gtids_p, quals_p, ecodes_p, offsets_p)):
+        return None
+    try:
+        return (
+            np.load(gtids_p),
+            np.load(quals_p, allow_pickle=True),
+            np.load(ecodes_p, allow_pickle=True),
+            np.load(offsets_p),
+        )
+    except Exception:
+        return None
+
+
+def _save_anno_csr_to_disk(
+    embedding_config_id: uuid.UUID,
+    annotation_set_id: uuid.UUID,
+    aspect: str,
+    gtids: np.ndarray,
+    quals: np.ndarray,
+    ecodes: np.ndarray,
+    offsets: np.ndarray,
+) -> None:
+    gtids_p, quals_p, ecodes_p, offsets_p = _anno_disk_cache_paths(
+        embedding_config_id, annotation_set_id, aspect
+    )
+    gtids_p.parent.mkdir(parents=True, exist_ok=True)
+    np.save(gtids_p, gtids)
+    np.save(quals_p, quals)
+    np.save(ecodes_p, ecodes)
+    np.save(offsets_p, offsets)
+
+
+def _csr_lookup(
+    query_accessions: set[str],
+    accessions: list[str],
+    acc_to_anno_idx: dict[str, int],
+    gtids: np.ndarray,
+    quals: np.ndarray,
+    ecodes: np.ndarray,
+    offsets: np.ndarray,
+) -> dict[str, list[dict[str, Any]]]:
+    """Return a go_map for query_accessions using the preloaded CSR annotation cache."""
+    go_map: dict[str, list[dict[str, Any]]] = {}
+    for acc in query_accessions:
+        idx = acc_to_anno_idx.get(acc)
+        if idx is None:
+            continue
+        start, end = int(offsets[idx]), int(offsets[idx + 1])
+        if start >= end:
+            continue
+        go_map[acc] = [
+            {
+                "go_term_id": int(gtids[j]),
+                "qualifier": quals[j] if quals[j] is not None else None,
+                "evidence_code": ecodes[j] if ecodes[j] is not None else None,
+            }
+            for j in range(start, end)
+        ]
+    return go_map
+
+
 def _load_from_disk_cache(
     embedding_config_id: uuid.UUID,
     annotation_set_id: uuid.UUID,
@@ -658,11 +771,17 @@ class PredictGOTermsBatchOperation:
 
         Disk layout::
 
-            {key}_embeddings.npy       ← unified, ~1 GB float16  (shared with non-aspect path)
-            {key}_accessions.npy       ← unified accession list   (shared)
-            {key}__P_indices.npy       ← int32 row indices, ~2 MB
+            {key}_embeddings.npy            ← unified, ~1 GB float16  (shared)
+            {key}_accessions.npy            ← unified accession list   (shared)
+            {key}__P_indices.npy            ← int32 row indices, ~2 MB
             {key}__F_indices.npy
             {key}__C_indices.npy
+            {key}__P_anno_gtids.npy         ← CSR annotation cache per aspect
+            {key}__P_anno_quals.npy
+            {key}__P_anno_ecodes.npy
+            {key}__P_anno_offsets.npy
+            {key}__F_anno_*.npy
+            {key}__C_anno_*.npy
         """
         emit(
             "predict_go_terms_batch.load_references_per_aspect_start",
@@ -688,32 +807,52 @@ class PredictGOTermsBatchOperation:
         result: dict[str, dict[str, Any]] = {}
         total_refs = 0
 
-        # Determine which aspects still need DB queries
+        # Determine which aspects still need DB queries (index or annotation cache missing)
         missing_aspects = [
             asp
             for asp in _ASPECTS
             if not _aspect_index_path(embedding_config_id, annotation_set_id, asp).exists()
+            or _load_anno_csr_from_disk(embedding_config_id, annotation_set_id, asp) is None
         ]
 
-        # Single-pass query for ALL missing aspects to avoid repeated table scans
-        # (5M+ annotation rows — scanning 3× would waste ~21 min)
+        # Single-pass query for ALL missing aspects: fetch full annotation rows
+        # (accession, aspect, go_term_id, qualifier, evidence_code) in one table scan.
+        # This replaces both the old index-only query and all per-batch IN queries.
         aspect_to_accset: dict[str, set[str]] = {asp: set() for asp in missing_aspects}
+        aspect_to_go_map: dict[str, dict[str, list[dict[str, Any]]]] = {
+            asp: {} for asp in missing_aspects
+        }
         if missing_aspects:
             rows = (
-                session.query(ProteinGOAnnotation.protein_accession, GOTerm.aspect)
+                session.query(
+                    ProteinGOAnnotation.protein_accession,
+                    GOTerm.aspect,
+                    ProteinGOAnnotation.go_term_id,
+                    ProteinGOAnnotation.qualifier,
+                    ProteinGOAnnotation.evidence_code,
+                )
                 .join(ProteinGOAnnotation.go_term)
                 .filter(
                     ProteinGOAnnotation.annotation_set_id == annotation_set_id,
                     GOTerm.aspect.in_(missing_aspects),
+                    (
+                        ProteinGOAnnotation.qualifier.is_(None)
+                        | ~ProteinGOAnnotation.qualifier.like("%NOT%")
+                    ),
                 )
-                .distinct()
-                .all()
+                .yield_per(50_000)
             )
-            for acc, asp in rows:
+            for acc, asp, go_term_id, qualifier, evidence_code in rows:
                 if asp in aspect_to_accset:
                     aspect_to_accset[asp].add(acc)
+                    aspect_to_go_map[asp].setdefault(acc, []).append({
+                        "go_term_id": go_term_id,
+                        "qualifier": qualifier,
+                        "evidence_code": evidence_code,
+                    })
 
             for asp in missing_aspects:
+                # Save embedding index array
                 idx_path = _aspect_index_path(embedding_config_id, annotation_set_id, asp)
                 indices = np.array(
                     [acc_to_idx[acc] for acc in aspect_to_accset[asp] if acc in acc_to_idx],
@@ -721,6 +860,15 @@ class PredictGOTermsBatchOperation:
                 )
                 idx_path.parent.mkdir(parents=True, exist_ok=True)
                 np.save(idx_path, indices)
+
+                # Save annotation CSR cache — zero DB queries during batch processing
+                asp_accessions = [unified["accessions"][i] for i in indices]
+                gtids, quals, ecodes, offsets = _build_anno_csr(
+                    asp_accessions, aspect_to_go_map[asp]
+                )
+                _save_anno_csr_to_disk(
+                    embedding_config_id, annotation_set_id, asp, gtids, quals, ecodes, offsets
+                )
 
         for aspect in _ASPECTS:
             idx_path = _aspect_index_path(embedding_config_id, annotation_set_id, aspect)
@@ -730,7 +878,23 @@ class PredictGOTermsBatchOperation:
             aspect_accessions = [unified["accessions"][i] for i in indices]
             aspect_embeddings = unified["embeddings"][indices]  # float16 copy, ~300 MB max
 
-            result[aspect] = {"accessions": aspect_accessions, "embeddings": aspect_embeddings}
+            anno_csr = _load_anno_csr_from_disk(embedding_config_id, annotation_set_id, aspect)
+            anno_data: dict[str, Any] = {}
+            if anno_csr is not None:
+                gtids, quals, ecodes, offsets = anno_csr
+                anno_data = {
+                    "anno_gtids": gtids,
+                    "anno_quals": quals,
+                    "anno_ecodes": ecodes,
+                    "anno_offsets": offsets,
+                    "acc_to_anno_idx": {acc: i for i, acc in enumerate(aspect_accessions)},
+                }
+
+            result[aspect] = {
+                "accessions": aspect_accessions,
+                "embeddings": aspect_embeddings,
+                **anno_data,
+            }
             total_refs += len(indices)
             emit(
                 "predict_go_terms_batch.load_references_per_aspect_done",
@@ -836,9 +1000,21 @@ class PredictGOTermsBatchOperation:
                 for ref_acc, _ in top_refs:
                     unique_neighbors_aspect.add(ref_acc)
 
-            go_map = self._load_annotations_for(
-                session, annotation_set_id, unique_neighbors_aspect, aspect=aspect
-            )
+            aspect_ref = ref_data_by_aspect[aspect]
+            if "anno_gtids" in aspect_ref:
+                go_map = _csr_lookup(
+                    unique_neighbors_aspect,
+                    aspect_ref["accessions"],
+                    aspect_ref["acc_to_anno_idx"],
+                    aspect_ref["anno_gtids"],
+                    aspect_ref["anno_quals"],
+                    aspect_ref["anno_ecodes"],
+                    aspect_ref["anno_offsets"],
+                )
+            else:
+                go_map = self._load_annotations_for(
+                    session, annotation_set_id, unique_neighbors_aspect, aspect=aspect
+                )
 
             for q_acc, top_refs in zip(valid_accessions, neighbors_by_aspect[aspect], strict=False):
                 seen_terms = seen_per_query[q_acc]

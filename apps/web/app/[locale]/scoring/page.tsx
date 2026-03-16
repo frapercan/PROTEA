@@ -23,6 +23,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { useToast } from "@/components/Toast";
 import {
   listScoringConfigs,
@@ -32,35 +33,8 @@ import {
   ScoringConfig,
 } from "@/lib/api";
 
-// ── Signal definitions ────────────────────────────────────────────────────────
-
-const SIGNALS: { key: string; label: string; hint: string }[] = [
-  {
-    key: "embedding_similarity",
-    label: "Embedding similarity",
-    hint: "1 − cosine_distance / 2 — always available, no flags required.",
-  },
-  {
-    key: "identity_nw",
-    label: "Identity NW",
-    hint: "Needleman-Wunsch global sequence identity [0, 1]. Requires compute_alignments=True.",
-  },
-  {
-    key: "identity_sw",
-    label: "Identity SW",
-    hint: "Smith-Waterman local sequence identity [0, 1]. Requires compute_alignments=True.",
-  },
-  {
-    key: "evidence_weight",
-    label: "Evidence weight",
-    hint: "Quality of the reference annotation's GO evidence code, resolved via the evidence-weight table below.",
-  },
-  {
-    key: "taxonomic_proximity",
-    label: "Taxonomic proximity",
-    hint: "1 / (1 + taxonomic_distance) — requires compute_taxonomy=True.",
-  },
-];
+type Signal = { key: string; label: string; hint: string };
+type EvidenceGroup = { label: string; description: string; codes: { code: string; label: string }[] };
 
 const DEFAULT_SIGNAL_WEIGHTS: Record<string, number> = {
   embedding_similarity: 1.0,
@@ -69,68 +43,6 @@ const DEFAULT_SIGNAL_WEIGHTS: Record<string, number> = {
   evidence_weight: 0.0,
   taxonomic_proximity: 0.0,
 };
-
-// ── Evidence-code definitions ─────────────────────────────────────────────────
-// Mirrors DEFAULT_EVIDENCE_WEIGHTS in scoring_config.py (single source of truth
-// for defaults; this table is used to initialise the form sliders).
-
-const EVIDENCE_CODE_GROUPS: {
-  label: string;
-  description: string;
-  codes: { code: string; label: string }[];
-}[] = [
-  {
-    label: "Experimental",
-    description:
-      "Annotations backed by direct experimental evidence. Highest confidence tier.",
-    codes: [
-      { code: "EXP", label: "Inferred from Experiment" },
-      { code: "IDA", label: "Direct Assay" },
-      { code: "IPI", label: "Physical Interaction" },
-      { code: "IMP", label: "Mutant Phenotype" },
-      { code: "IGI", label: "Genetic Interaction" },
-      { code: "IEP", label: "Expression Pattern" },
-      { code: "HTP", label: "High-Throughput (umbrella)" },
-      { code: "HDA", label: "HT Direct Assay" },
-      { code: "HMP", label: "HT Mutant Phenotype" },
-      { code: "HGI", label: "HT Genetic Interaction" },
-      { code: "HEP", label: "HT Expression Pattern" },
-      { code: "IC",  label: "Inferred by Curator" },
-      { code: "TAS", label: "Traceable Author Statement" },
-    ],
-  },
-  {
-    label: "Computational / Phylogenetic",
-    description:
-      "Annotations derived from sequence similarity, orthology, or phylogenetic inference.",
-    codes: [
-      { code: "ISS", label: "Sequence or Structural Similarity" },
-      { code: "ISO", label: "Sequence Orthology" },
-      { code: "ISA", label: "Sequence Alignment" },
-      { code: "ISM", label: "Sequence Model" },
-      { code: "IGC", label: "Genomic Context" },
-      { code: "IBA", label: "Biological aspect of Ancestor" },
-      { code: "IBD", label: "Biological aspect of Descendant" },
-      { code: "IKR", label: "Key Residues" },
-      { code: "IRD", label: "Rapid Divergence" },
-      { code: "RCA", label: "Reviewed Computational Analysis" },
-    ],
-  },
-  {
-    label: "Electronic",
-    description:
-      "Automated annotations (IEA) or non-traceable author statements (NAS). Lower confidence.",
-    codes: [
-      { code: "NAS", label: "Non-traceable Author Statement" },
-      { code: "IEA", label: "Inferred from Electronic Annotation" },
-    ],
-  },
-  {
-    label: "No data",
-    description: "Placeholder code indicating no biological data is available.",
-    codes: [{ code: "ND", label: "No biological Data" }],
-  },
-];
 
 /** System defaults — matches DEFAULT_EVIDENCE_WEIGHTS in scoring_config.py. */
 const SYSTEM_EVIDENCE_DEFAULTS: Record<string, number> = {
@@ -145,8 +57,8 @@ const SYSTEM_EVIDENCE_DEFAULTS: Record<string, number> = {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function allCodes(): string[] {
-  return EVIDENCE_CODE_GROUPS.flatMap((g) => g.codes.map((c) => c.code));
+function allCodes(groups: EvidenceGroup[]): string[] {
+  return groups.flatMap((g) => g.codes.map((c) => c.code));
 }
 
 // ── WeightBar ─────────────────────────────────────────────────────────────────
@@ -184,16 +96,21 @@ function WeightBar({
 
 function ConfigCard({
   config,
+  signals,
+  evidenceGroups,
   onDelete,
 }: {
   config: ScoringConfig;
+  signals: Signal[];
+  evidenceGroups: EvidenceGroup[];
   onDelete: (id: string) => void;
 }) {
+  const t = useTranslations("scoring");
   const [deleting, setDeleting] = useState(false);
   const [showEvidenceWeights, setShowEvidenceWeights] = useState(false);
 
   async function handleDelete() {
-    if (!confirm(`Delete scoring config "${config.name}"?`)) return;
+    if (!confirm(t("configCard.deleteConfirm", { name: config.name }))) return;
     setDeleting(true);
     try {
       await deleteScoringConfig(config.id);
@@ -216,7 +133,7 @@ function ConfigCard({
           </span>
           {hasCustomEvidence && (
             <span className="ml-1.5 rounded bg-amber-50 border border-amber-100 px-1.5 py-0.5 text-xs text-amber-700">
-              custom evidence weights
+              {t("configCard.customEvidenceWeights")}
             </span>
           )}
           {config.description && (
@@ -228,13 +145,13 @@ function ConfigCard({
           disabled={deleting}
           className="text-xs text-red-400 hover:text-red-600 disabled:opacity-40 shrink-0"
         >
-          {deleting ? "…" : "Delete"}
+          {deleting ? "…" : t("configCard.delete")}
         </button>
       </div>
 
       {/* Signal weights */}
       <div className="space-y-1.5">
-        {SIGNALS.map(({ key, label, hint }) => (
+        {signals.map(({ key, label, hint }) => (
           <WeightBar key={key} label={label} value={config.weights[key] ?? 0} hint={hint} />
         ))}
       </div>
@@ -245,13 +162,13 @@ function ConfigCard({
           onClick={() => setShowEvidenceWeights((v) => !v)}
           className="text-xs text-gray-400 hover:text-gray-600"
         >
-          {showEvidenceWeights ? "▲" : "▶"} Evidence-code weights{" "}
-          {hasCustomEvidence ? "(custom)" : "(system defaults)"}
+          {showEvidenceWeights ? t("configCard.collapse") : t("configCard.expand")} {t("configCard.evidenceCodeWeights")}{" "}
+          {hasCustomEvidence ? t("configCard.custom") : t("configCard.systemDefaults")}
         </button>
 
         {showEvidenceWeights && (
           <div className="mt-3 space-y-4">
-            {EVIDENCE_CODE_GROUPS.map((group) => (
+            {evidenceGroups.map((group) => (
               <div key={group.label}>
                 <p className="text-xs font-semibold text-gray-500 mb-1.5">
                   {group.label}
@@ -305,7 +222,16 @@ function ConfigCard({
 
 // ── NewConfigForm ─────────────────────────────────────────────────────────────
 
-function NewConfigForm({ onCreated }: { onCreated: (c: ScoringConfig) => void }) {
+function NewConfigForm({
+  signals,
+  evidenceGroups,
+  onCreated,
+}: {
+  signals: Signal[];
+  evidenceGroups: EvidenceGroup[];
+  onCreated: (c: ScoringConfig) => void;
+}) {
+  const t = useTranslations("scoring");
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [formula, setFormula] = useState("linear");
@@ -314,8 +240,6 @@ function NewConfigForm({ onCreated }: { onCreated: (c: ScoringConfig) => void })
   });
   const [description, setDescription] = useState("");
 
-  // Evidence weights — null means "use system defaults"; toggling the
-  // checkbox allocates the override dict with a copy of the defaults.
   const [useCustomEvidence, setUseCustomEvidence] = useState(false);
   const [evidenceWeights, setEvidenceWeights] = useState<Record<string, number>>({
     ...SYSTEM_EVIDENCE_DEFAULTS,
@@ -370,7 +294,7 @@ function NewConfigForm({ onCreated }: { onCreated: (c: ScoringConfig) => void })
         onClick={() => setOpen(true)}
         className="rounded-md border border-dashed border-gray-300 bg-white px-4 py-3 text-sm text-gray-500 hover:border-blue-400 hover:text-blue-600 w-full text-center"
       >
-        + New scoring config
+        {t("newConfigForm.newConfig")}
       </button>
     );
   }
@@ -382,38 +306,38 @@ function NewConfigForm({ onCreated }: { onCreated: (c: ScoringConfig) => void })
     >
       {/* ── Header ── */}
       <div className="flex items-center justify-between">
-        <span className="text-sm font-semibold text-gray-700">New config</span>
+        <span className="text-sm font-semibold text-gray-700">{t("newConfigForm.formTitle")}</span>
         <button
           type="button"
           onClick={() => { setOpen(false); reset(); }}
           className="text-gray-400 hover:text-gray-600 text-lg leading-none"
         >
-          ×
+          {t("newConfigForm.close")}
         </button>
       </div>
 
       {/* ── Name + formula ── */}
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Name</label>
+          <label className="block text-xs font-medium text-gray-600 mb-1">{t("newConfigForm.nameLabel")}</label>
           <input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="my_config"
+            placeholder={t("newConfigForm.namePlaceholder")}
             className="w-full rounded border px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             required
           />
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Formula</label>
+          <label className="block text-xs font-medium text-gray-600 mb-1">{t("newConfigForm.formulaLabel")}</label>
           <select
             value={formula}
             onChange={(e) => setFormula(e.target.value)}
             className="w-full rounded border px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
-            <option value="linear">linear</option>
-            <option value="evidence_weighted">evidence_weighted</option>
+            <option value="linear">{t("newConfigForm.linear")}</option>
+            <option value="evidence_weighted">{t("newConfigForm.evidenceWeighted")}</option>
           </select>
         </div>
       </div>
@@ -429,13 +353,13 @@ function NewConfigForm({ onCreated }: { onCreated: (c: ScoringConfig) => void })
 
       <div>
         <label className="block text-xs font-medium text-gray-600 mb-1">
-          Description <span className="font-normal text-gray-400">(optional)</span>
+          {t("newConfigForm.descriptionLabel")} <span className="font-normal text-gray-400">{t("newConfigForm.descriptionHelper")}</span>
         </label>
         <input
           type="text"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder="What this config is for…"
+          placeholder={t("newConfigForm.descriptionPlaceholder")}
           className="w-full rounded border px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
       </div>
@@ -443,10 +367,10 @@ function NewConfigForm({ onCreated }: { onCreated: (c: ScoringConfig) => void })
       {/* ── Signal weights ── */}
       <div>
         <label className="block text-xs font-medium text-gray-600 mb-2">
-          Signal weights
+          {t("newConfigForm.signalWeights")}
         </label>
         <div className="space-y-3">
-          {SIGNALS.map(({ key, label, hint }) => {
+          {signals.map(({ key, label, hint }) => {
             const val = weights[key] ?? 0;
             return (
               <div key={key} className="flex items-center gap-3" title={hint}>
@@ -482,19 +406,19 @@ function NewConfigForm({ onCreated }: { onCreated: (c: ScoringConfig) => void })
             className="accent-blue-500"
           />
           <label htmlFor="custom-evidence" className="text-xs font-medium text-gray-700 cursor-pointer">
-            Override per-evidence-code quality weights
+            {t("newConfigForm.overrideCheckbox")}
           </label>
         </div>
 
         {!useCustomEvidence && (
           <p className="text-xs text-gray-400">
-            Using system defaults — EXP/IDA → 1.0 · ISS/IBA → 0.7 · IEA → 0.3 · ND → 0.1
+            {t("newConfigForm.systemDefaultsNote")}
           </p>
         )}
 
         {useCustomEvidence && (
           <div className="space-y-5">
-            {EVIDENCE_CODE_GROUPS.map((group) => (
+            {evidenceGroups.map((group) => (
               <div key={group.label}>
                 <div className="flex items-center justify-between mb-1.5">
                   <div>
@@ -512,7 +436,7 @@ function NewConfigForm({ onCreated }: { onCreated: (c: ScoringConfig) => void })
                         }
                         className="rounded border px-1.5 py-0.5 text-xs text-gray-500 hover:bg-gray-50"
                       >
-                        {v === 0 ? "Off" : v === 1 ? "Max" : "0.5"}
+                        {v === 0 ? t("newConfigForm.off") : v === 1 ? t("newConfigForm.max") : t("newConfigForm.groupShortcut")}
                       </button>
                     ))}
                   </div>
@@ -568,7 +492,7 @@ function NewConfigForm({ onCreated }: { onCreated: (c: ScoringConfig) => void })
               onClick={() => setEvidenceWeights({ ...SYSTEM_EVIDENCE_DEFAULTS })}
               className="text-xs text-gray-400 hover:text-gray-600 underline"
             >
-              Reset all to system defaults
+              {t("newConfigForm.resetEvidenceWeights")}
             </button>
           </div>
         )}
@@ -581,14 +505,14 @@ function NewConfigForm({ onCreated }: { onCreated: (c: ScoringConfig) => void })
           disabled={saving || !name.trim()}
           className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40"
         >
-          {saving ? "Saving…" : "Save config"}
+          {saving ? t("newConfigForm.saving") : t("newConfigForm.saveConfig")}
         </button>
         <button
           type="button"
           onClick={() => { setOpen(false); reset(); }}
           className="rounded-md border px-4 py-2 text-sm text-gray-600 hover:bg-gray-50"
         >
-          Cancel
+          {t("newConfigForm.cancel")}
         </button>
       </div>
     </form>
@@ -598,10 +522,71 @@ function NewConfigForm({ onCreated }: { onCreated: (c: ScoringConfig) => void })
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function ScoringPage() {
+  const t = useTranslations("scoring");
   const [configs, setConfigs] = useState<ScoringConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingPresets, setLoadingPresets] = useState(false);
   const toast = useToast();
+
+  // Build translated signal and evidence-group arrays inside the component
+  const signals: Signal[] = [
+    { key: "embedding_similarity", label: t("signals.embeddingSimilarity"), hint: t("signals.embeddingSimilarityHint") },
+    { key: "identity_nw", label: t("signals.identityNw"), hint: t("signals.identityNwHint") },
+    { key: "identity_sw", label: t("signals.identitySw"), hint: t("signals.identitySwHint") },
+    { key: "evidence_weight", label: t("signals.evidenceWeight"), hint: t("signals.evidenceWeightHint") },
+    { key: "taxonomic_proximity", label: t("signals.taxonomicProximity"), hint: t("signals.taxonomicProximityHint") },
+  ];
+
+  const evidenceGroups: EvidenceGroup[] = [
+    {
+      label: t("newConfigForm.experimental"),
+      description: t("newConfigForm.experimentalDescription"),
+      codes: [
+        { code: "EXP", label: "Inferred from Experiment" },
+        { code: "IDA", label: "Direct Assay" },
+        { code: "IPI", label: "Physical Interaction" },
+        { code: "IMP", label: "Mutant Phenotype" },
+        { code: "IGI", label: "Genetic Interaction" },
+        { code: "IEP", label: "Expression Pattern" },
+        { code: "HTP", label: "High-Throughput (umbrella)" },
+        { code: "HDA", label: "HT Direct Assay" },
+        { code: "HMP", label: "HT Mutant Phenotype" },
+        { code: "HGI", label: "HT Genetic Interaction" },
+        { code: "HEP", label: "HT Expression Pattern" },
+        { code: "IC",  label: "Inferred by Curator" },
+        { code: "TAS", label: "Traceable Author Statement" },
+      ],
+    },
+    {
+      label: t("newConfigForm.computational"),
+      description: t("newConfigForm.computationalDescription"),
+      codes: [
+        { code: "ISS", label: "Sequence or Structural Similarity" },
+        { code: "ISO", label: "Sequence Orthology" },
+        { code: "ISA", label: "Sequence Alignment" },
+        { code: "ISM", label: "Sequence Model" },
+        { code: "IGC", label: "Genomic Context" },
+        { code: "IBA", label: "Biological aspect of Ancestor" },
+        { code: "IBD", label: "Biological aspect of Descendant" },
+        { code: "IKR", label: "Key Residues" },
+        { code: "IRD", label: "Rapid Divergence" },
+        { code: "RCA", label: "Reviewed Computational Analysis" },
+      ],
+    },
+    {
+      label: t("newConfigForm.electronic"),
+      description: t("newConfigForm.electronicDescription"),
+      codes: [
+        { code: "NAS", label: "Non-traceable Author Statement" },
+        { code: "IEA", label: "Inferred from Electronic Annotation" },
+      ],
+    },
+    {
+      label: t("newConfigForm.noData"),
+      description: t("newConfigForm.noDataDescription"),
+      codes: [{ code: "ND", label: "No biological Data" }],
+    },
+  ];
 
   useEffect(() => {
     listScoringConfigs()
@@ -634,31 +619,27 @@ export default function ScoringPage() {
       {/* ── Page header ── */}
       <div className="mb-6">
         <div className="flex items-center justify-between gap-4 mb-1">
-          <h1 className="text-xl font-semibold text-gray-900">Scoring Configs</h1>
+          <h1 className="text-xl font-semibold text-gray-900">{t("title")}</h1>
           <button
             onClick={handleLoadPresets}
             disabled={loadingPresets}
             className="rounded-md border bg-white px-3 py-1.5 text-sm text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-40 shrink-0"
           >
-            {loadingPresets ? "Loading…" : "Load presets"}
+            {loadingPresets ? t("presetsLoading") : t("loadPresets")}
           </button>
         </div>
         <p className="text-sm text-gray-500">
-          A ScoringConfig defines how raw prediction signals are combined into a
-          single [0, 1] confidence score — without re-running the KNN pipeline.
-          Two independent layers: <strong>signal weights</strong> (which signals
-          matter and how much) and <strong>evidence-code weights</strong> (the
-          quality value assigned to each GO evidence tier).
+          {t("description")}
         </p>
       </div>
 
       {/* ── Reference card ── */}
       <div className="mb-6 rounded-lg border bg-white p-4 shadow-sm">
         <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">
-          Available signals
+          {t("availableSignals")}
         </p>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 mb-4">
-          {SIGNALS.map(({ key, label, hint }) => (
+          {signals.map(({ key, label, hint }) => (
             <div key={key} className="flex items-start gap-2">
               <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-xs text-gray-700 shrink-0">
                 {label}
@@ -684,11 +665,15 @@ export default function ScoringPage() {
 
       {!loading && (
         <div className="space-y-3">
-          <NewConfigForm onCreated={(c) => setConfigs((prev) => [...prev, c])} />
+          <NewConfigForm
+            signals={signals}
+            evidenceGroups={evidenceGroups}
+            onCreated={(c) => setConfigs((prev) => [...prev, c])}
+          />
 
           {configs.length === 0 && (
             <p className="text-sm text-gray-400 text-center py-8">
-              No configs yet. Load the presets or create one above.
+              {t("noConfigs")}
             </p>
           )}
 
@@ -696,6 +681,8 @@ export default function ScoringPage() {
             <ConfigCard
               key={c.id}
               config={c}
+              signals={signals}
+              evidenceGroups={evidenceGroups}
               onDelete={(id) => setConfigs((prev) => prev.filter((x) => x.id !== id))}
             />
           ))}

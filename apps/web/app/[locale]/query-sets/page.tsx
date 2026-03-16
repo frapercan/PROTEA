@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { createQuerySet, deleteQuerySet, listQuerySets, QuerySet } from "@/lib/api";
 import { SkeletonTableRow } from "@/components/Skeleton";
 import { useToast } from "@/components/Toast";
+import { useTranslations } from "next-intl";
 
 function formatDate(iso?: string | null) {
   if (!iso) return "—";
@@ -11,6 +12,7 @@ function formatDate(iso?: string | null) {
 }
 
 export default function QuerySetsPage() {
+  const t = useTranslations("querySets");
   const toast = useToast();
   const [sets, setSets] = useState<QuerySet[]>([]);
   const [loading, setLoading] = useState(true);
@@ -71,7 +73,7 @@ export default function QuerySetsPage() {
   }
 
   async function handleDelete(id: string, name: string) {
-    if (!confirm(`Delete query set "${name}"? This cannot be undone.`)) return;
+    if (!confirm(t("deleteConfirm", { name }))) return;
     try {
       await deleteQuerySet(id);
       setSets((prev) => prev.filter((s) => s.id !== id));
@@ -98,12 +100,12 @@ export default function QuerySetsPage() {
   return (
     <>
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-semibold">Query Sets</h1>
+        <h1 className="text-xl font-semibold">{t("title")}</h1>
         <button
           onClick={openModal}
           className="rounded-md bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700"
         >
-          + Upload FASTA
+          {t("uploadFasta")}
         </button>
       </div>
 
@@ -116,9 +118,9 @@ export default function QuerySetsPage() {
       {/* List */}
       <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
         <div className="grid grid-cols-[1fr_100px_160px_80px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
-          <div>Name</div>
-          <div>Sequences</div>
-          <div>Created</div>
+          <div>{t("tableHeaders.name")}</div>
+          <div>{t("tableHeaders.sequences")}</div>
+          <div>{t("tableHeaders.created")}</div>
           <div></div>
         </div>
 
@@ -128,12 +130,12 @@ export default function QuerySetsPage() {
 
         {!loading && sets.length === 0 && (
           <div className="px-4 py-10 text-center">
-            <p className="text-sm text-gray-400 mb-2">No query sets yet.</p>
+            <p className="text-sm text-gray-400 mb-2">{t("noQuerySets")}</p>
             <button
               onClick={openModal}
               className="text-sm text-blue-600 underline"
             >
-              Upload a FASTA file to get started
+              {t("uploadFastaCta")}
             </button>
           </div>
         )}
@@ -158,7 +160,7 @@ export default function QuerySetsPage() {
                   onClick={(e) => { e.stopPropagation(); handleDelete(qs.id, qs.name); }}
                   className="rounded border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 transition-colors"
                 >
-                  Delete
+                  {t("delete")}
                 </button>
               </div>
             </div>
@@ -166,7 +168,7 @@ export default function QuerySetsPage() {
             {expandedId === qs.id && qs.entries && (
               <div className="border-t bg-gray-50 px-6 py-3">
                 <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
-                  Entries ({qs.entries.length})
+                  {t("expandedEntries.title")} {t("expandedEntries.count", { count: qs.entries.length })}
                 </p>
                 <div className="max-h-48 overflow-y-auto space-y-1">
                   {qs.entries.map((entry) => (
@@ -187,44 +189,44 @@ export default function QuerySetsPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-xl border bg-white shadow-xl flex flex-col max-h-[90vh]">
             <div className="flex items-center justify-between border-b px-5 py-4">
-              <h2 className="text-base font-semibold">Upload FASTA</h2>
+              <h2 className="text-base font-semibold">{t("uploadModal.title")}</h2>
               <button
                 onClick={() => setShowModal(false)}
                 className="text-gray-400 hover:text-gray-600 text-xl leading-none"
               >
-                ×
+                {t("uploadModal.close")}
               </button>
             </div>
 
             <form onSubmit={handleUpload} className="flex-1 overflow-y-auto p-5 space-y-4">
               <div>
                 <label className={labelClass}>
-                  Name <span className="text-red-500">*</span>
+                  {t("uploadModal.nameLabel")} <span className="text-red-500">{t("uploadModal.nameRequired")}</span>
                 </label>
                 <input
                   type="text"
                   value={uploadName}
                   onChange={(e) => setUploadName(e.target.value)}
-                  placeholder="e.g. human_novel_proteins"
+                  placeholder={t("uploadModal.namePlaceholder")}
                   required
                   className={inputClass}
                 />
               </div>
 
               <div>
-                <label className={labelClass}>Description (optional)</label>
+                <label className={labelClass}>{t("uploadModal.descriptionLabel")}</label>
                 <input
                   type="text"
                   value={uploadDescription}
                   onChange={(e) => setUploadDescription(e.target.value)}
-                  placeholder="Short description"
+                  placeholder={t("uploadModal.descriptionPlaceholder")}
                   className={inputClass}
                 />
               </div>
 
               <div>
                 <label className={labelClass}>
-                  FASTA file <span className="text-red-500">*</span>
+                  {t("uploadModal.fastaFileLabel")} <span className="text-red-500">{t("uploadModal.fastaFileRequired")}</span>
                 </label>
 
                 {/* Drag & drop zone */}
@@ -243,17 +245,17 @@ export default function QuerySetsPage() {
                 >
                   {uploadFile ? (
                     <>
-                      <span className="text-lg">✓</span>
+                      <span className="text-lg">{t("uploadModal.fileSelected")}</span>
                       <span className="font-medium">{uploadFile.name}</span>
                       <span className="text-xs opacity-70">
-                        {(uploadFile.size / 1024).toFixed(1)} KB — click to change
+                        {(uploadFile.size / 1024).toFixed(1)} KB — {t("uploadModal.clickToChange")}
                       </span>
                     </>
                   ) : (
                     <>
                       <span className="text-2xl">↑</span>
-                      <span>Drop FASTA here or <span className="underline">browse</span></span>
-                      <span className="text-xs opacity-60">.fasta · .fa · .faa · .txt</span>
+                      <span>{t("uploadModal.dragDrop")}</span>
+                      <span className="text-xs opacity-60">{t("uploadModal.supportedFormats")}</span>
                     </>
                   )}
                 </div>
@@ -282,14 +284,14 @@ export default function QuerySetsPage() {
                   onClick={() => setShowModal(false)}
                   className="rounded-md border px-4 py-2 text-sm hover:bg-gray-50"
                 >
-                  Cancel
+                  {t("uploadModal.cancel")}
                 </button>
                 <button
                   type="submit"
                   disabled={uploading}
                   className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
                 >
-                  {uploading ? "Uploading…" : "Upload"}
+                  {uploading ? t("uploadModal.uploading") : t("uploadModal.upload")}
                 </button>
               </div>
             </form>

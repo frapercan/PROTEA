@@ -13,6 +13,7 @@ import {
 } from "@/lib/api";
 import { useToast } from "@/components/Toast";
 import { SkeletonTableRow } from "@/components/Skeleton";
+import { useTranslations } from "next-intl";
 
 type Tab = "sets" | "snapshots" | "load-snapshot" | "load-goa" | "load-quickgo";
 
@@ -29,6 +30,7 @@ function shortId(id: string) {
 }
 
 export default function AnnotationsPage() {
+  const t = useTranslations("annotations");
   const toast = useToast();
   const [activeTab, setActiveTab] = useState<Tab>("sets");
 
@@ -112,8 +114,8 @@ export default function AnnotationsPage() {
     const s = sets.find((a) => a.id === id);
     const count = s?.annotation_count ?? 0;
     const msg = count > 0
-      ? `Delete this annotation set and its ${count.toLocaleString()} GO annotations? This cannot be undone.`
-      : "Delete this annotation set?";
+      ? t("setsTab.deleteConfirm", { count: count.toLocaleString() })
+      : t("setsTab.deleteConfirmNoAnnotations");
     if (!confirm(msg)) return;
     try {
       const r = await deleteAnnotationSet(id);
@@ -186,31 +188,31 @@ export default function AnnotationsPage() {
   }
 
   const tabs: { key: Tab; label: string }[] = [
-    { key: "sets", label: "Annotation Sets" },
-    { key: "snapshots", label: "Ontology Snapshots" },
-    { key: "load-snapshot", label: "Load Snapshot" },
-    { key: "load-goa", label: "Load GOA" },
-    { key: "load-quickgo", label: "Load QuickGO" },
+    { key: "sets", label: t("tabs.sets") },
+    { key: "snapshots", label: t("tabs.snapshots") },
+    { key: "load-snapshot", label: t("tabs.loadSnapshot") },
+    { key: "load-goa", label: t("tabs.loadGoa") },
+    { key: "load-quickgo", label: t("tabs.loadQuickgo") },
   ];
 
   return (
     <>
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-semibold">Annotations</h1>
+        <h1 className="text-xl font-semibold">{t("title")}</h1>
       </div>
 
       <div className="flex gap-1 border-b mb-6 overflow-x-auto">
-        {tabs.map((t) => (
+        {tabs.map((tab) => (
           <button
-            key={t.key}
-            onClick={() => setActiveTab(t.key)}
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === t.key
+              activeTab === tab.key
                 ? "border-blue-600 text-blue-600"
                 : "border-transparent text-gray-500 hover:text-gray-700"
             }`}
           >
-            {t.label}
+            {tab.label}
           </button>
         ))}
       </div>
@@ -219,19 +221,19 @@ export default function AnnotationsPage() {
       {activeTab === "sets" && (
         <div>
           <div className="flex items-center justify-between mb-3">
-            <p className="text-sm text-gray-500">{sets.length} annotation set{sets.length !== 1 ? "s" : ""}</p>
+            <p className="text-sm text-gray-500">{t("setsTab.annotationSets", { count: sets.length })}</p>
             <button onClick={loadSets} className="rounded-md border bg-white px-3 py-1.5 text-sm hover:bg-gray-50">
-              Refresh
+              {t("setsTab.refresh")}
             </button>
           </div>
           <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
             <div className="grid grid-cols-[80px_100px_140px_100px_1fr_160px_60px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
-              <div>ID</div><div>Source</div><div>Version</div><div>Annotations</div><div>Meta</div><div>Created</div><div></div>
+              <div>{t("setsTab.tableHeaders.id")}</div><div>{t("setsTab.tableHeaders.source")}</div><div>{t("setsTab.tableHeaders.version")}</div><div>{t("setsTab.tableHeaders.annotations")}</div><div>{t("setsTab.tableHeaders.meta")}</div><div>{t("setsTab.tableHeaders.created")}</div><div></div>
             </div>
             {loadingSets && Array.from({ length: 3 }).map((_, i) => <SkeletonTableRow key={i} cols={7} />)}
             {!loadingSets && sets.length === 0 && (
               <div className="px-4 py-8 text-center text-sm text-gray-400">
-                No annotation sets yet. Load GO annotations from the Load GOA or Load QuickGO tabs.
+                {t("setsTab.noSetsFound")}
               </div>
             )}
             {sets.map((a) => (
@@ -258,7 +260,7 @@ export default function AnnotationsPage() {
                     onClick={() => handleDeleteSet(a.id)}
                     className="rounded border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 transition-colors"
                   >
-                    Delete
+                    {t("setsTab.delete")}
                   </button>
                 </div>
               </div>
@@ -271,19 +273,19 @@ export default function AnnotationsPage() {
       {activeTab === "snapshots" && (
         <div>
           <div className="flex items-center justify-between mb-3">
-            <p className="text-sm text-gray-500">{snapshots.length} snapshot{snapshots.length !== 1 ? "s" : ""}</p>
+            <p className="text-sm text-gray-500">{t("snapshotsTab.snapshots", { count: snapshots.length })}</p>
             <button onClick={loadSnapshots} className="rounded-md border bg-white px-3 py-1.5 text-sm hover:bg-gray-50">
-              Refresh
+              {t("snapshotsTab.refresh")}
             </button>
           </div>
           <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
             <div className="grid grid-cols-[80px_160px_100px_minmax(160px,1fr)_160px] min-w-[700px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
-              <div>ID</div><div>Version</div><div>GO Terms</div><div>IA URL</div><div>Loaded</div>
+              <div>{t("snapshotsTab.tableHeaders.id")}</div><div>{t("snapshotsTab.tableHeaders.version")}</div><div>{t("snapshotsTab.tableHeaders.goTerms")}</div><div>{t("snapshotsTab.tableHeaders.iaUrl")}</div><div>{t("snapshotsTab.tableHeaders.loaded")}</div>
             </div>
             {loadingSnaps && Array.from({ length: 2 }).map((_, i) => <SkeletonTableRow key={i} cols={5} />)}
             {!loadingSnaps && snapshots.length === 0 && (
               <div className="px-4 py-8 text-center text-sm text-gray-400">
-                No ontology snapshots yet. Use the Load Snapshot tab.
+                {t("snapshotsTab.noSnapshotsFound")}
               </div>
             )}
             {snapshots.map((s) => (
@@ -311,25 +313,25 @@ export default function AnnotationsPage() {
                         disabled={iaSaving}
                         className="rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-700 disabled:opacity-50"
                       >
-                        Save
+                        {t("snapshotsTab.save")}
                       </button>
                       <button
                         onClick={() => setIaEditId(null)}
                         className="rounded border px-2 py-1 text-xs text-gray-500 hover:bg-gray-50"
                       >
-                        Cancel
+                        {t("snapshotsTab.cancel")}
                       </button>
                     </div>
                   ) : (
                     <button
                       onClick={() => { setIaEditId(s.id); setIaEditValue(s.ia_url ?? ""); }}
                       className="w-full text-left flex items-center gap-2 rounded px-1 py-0.5 hover:bg-gray-50 active:bg-gray-100 transition-colors"
-                      title="Tap to edit IA URL"
+                      title={t("snapshotsTab.editTooltip")}
                     >
                       {s.ia_url ? (
                         <span className="truncate text-xs text-gray-500 font-mono flex-1">{s.ia_url}</span>
                       ) : (
-                        <span className="text-xs text-amber-500 italic flex-1">not set</span>
+                        <span className="text-xs text-amber-500 italic flex-1">{t("snapshotsTab.notSet")}</span>
                       )}
                       <span className="shrink-0 text-gray-400 text-xs">✎</span>
                     </button>
@@ -346,11 +348,11 @@ export default function AnnotationsPage() {
       {activeTab === "load-snapshot" && (
         <div className="max-w-2xl">
           <div className="rounded-lg border bg-white p-6 shadow-sm">
-            <h2 className="text-base font-semibold mb-1">Load Ontology Snapshot</h2>
-            <p className="text-sm text-gray-500 mb-4">Downloads a GO OBO file and populates GOTerm rows.</p>
+            <h2 className="text-base font-semibold mb-1">{t("loadSnapshotTab.title")}</h2>
+            <p className="text-sm text-gray-500 mb-4">{t("loadSnapshotTab.description")}</p>
             <form onSubmit={handleLoadSnapshot} className="space-y-4">
               <div>
-                <label className={labelClass}>OBO URL</label>
+                <label className={labelClass}>{t("loadSnapshotTab.oboUrlLabel")}</label>
                 <input
                   type="text"
                   value={oboUrl}
@@ -369,7 +371,7 @@ export default function AnnotationsPage() {
               )}
               <div className="flex justify-end">
                 <button type="submit" disabled={snapSubmitting} className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50">
-                  {snapSubmitting ? "Launching…" : "Launch Job"}
+                  {snapSubmitting ? t("loadSnapshotTab.launching") : t("loadSnapshotTab.launchJob")}
                 </button>
               </div>
             </form>
@@ -381,40 +383,40 @@ export default function AnnotationsPage() {
       {activeTab === "load-goa" && (
         <div className="max-w-2xl">
           <div className="rounded-lg border bg-white p-6 shadow-sm">
-            <h2 className="text-base font-semibold mb-1">Load GOA Annotations</h2>
-            <p className="text-sm text-gray-500 mb-4">Bulk-loads GO annotations from a GAF file.</p>
+            <h2 className="text-base font-semibold mb-1">{t("loadGoaTab.title")}</h2>
+            <p className="text-sm text-gray-500 mb-4">{t("loadGoaTab.description")}</p>
             <form onSubmit={handleLoadGoa} className="space-y-4">
               <div>
-                <label className={labelClass}>Ontology Snapshot</label>
+                <label className={labelClass}>{t("loadGoaTab.snapshotLabel")}</label>
                 <select value={goaSnapshotId} onChange={(e) => setGoaSnapshotId(e.target.value)} required className={inputClass}>
-                  <option value="">— select snapshot —</option>
+                  <option value="">{t("loadGoaTab.selectSnapshot")}</option>
                   {snapshots.map((s) => (
                     <option key={s.id} value={s.id}>{s.obo_version} · {shortId(s.id)}…</option>
                   ))}
                 </select>
                 {snapshots.length === 0 && (
-                  <p className="mt-1 text-xs text-amber-600">No snapshots — run Load Snapshot first.</p>
+                  <p className="mt-1 text-xs text-amber-600">{t("loadGoaTab.noSnapshots")}</p>
                 )}
               </div>
               <div>
-                <label className={labelClass}>GAF URL</label>
+                <label className={labelClass}>{t("loadGoaTab.gafUrlLabel")}</label>
                 <input
                   type="text"
                   value={goaUrl}
                   onChange={(e) => setGoaUrl(e.target.value)}
                   required
-                  placeholder="https://current.geneontology.org/annotations/goa_human.gaf.gz"
+                  placeholder={t("loadGoaTab.gafUrlPlaceholder")}
                   className={inputClass}
                 />
               </div>
               <div>
-                <label className={labelClass}>Source version</label>
+                <label className={labelClass}>{t("loadGoaTab.sourceVersionLabel")}</label>
                 <input
                   type="text"
                   value={goaVersion}
                   onChange={(e) => setGoaVersion(e.target.value)}
                   required
-                  placeholder="2025-03"
+                  placeholder={t("loadGoaTab.sourceVersionPlaceholder")}
                   className={inputClass}
                 />
               </div>
@@ -428,7 +430,7 @@ export default function AnnotationsPage() {
               )}
               <div className="flex justify-end">
                 <button type="submit" disabled={goaSubmitting} className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50">
-                  {goaSubmitting ? "Launching…" : "Launch Job"}
+                  {goaSubmitting ? t("loadGoaTab.launching") : t("loadGoaTab.launchJob")}
                 </button>
               </div>
             </form>
@@ -440,29 +442,29 @@ export default function AnnotationsPage() {
       {activeTab === "load-quickgo" && (
         <div className="max-w-2xl">
           <div className="rounded-lg border bg-white p-6 shadow-sm">
-            <h2 className="text-base font-semibold mb-1">Load QuickGO Annotations</h2>
-            <p className="text-sm text-gray-500 mb-4">Streams GO annotations from the QuickGO bulk download API.</p>
+            <h2 className="text-base font-semibold mb-1">{t("loadQuickgoTab.title")}</h2>
+            <p className="text-sm text-gray-500 mb-4">{t("loadQuickgoTab.description")}</p>
             <form onSubmit={handleLoadQuickgo} className="space-y-4">
               <div>
-                <label className={labelClass}>Ontology Snapshot</label>
+                <label className={labelClass}>{t("loadQuickgoTab.snapshotLabel")}</label>
                 <select value={qgoSnapshotId} onChange={(e) => setQgoSnapshotId(e.target.value)} required className={inputClass}>
-                  <option value="">— select snapshot —</option>
+                  <option value="">{t("loadQuickgoTab.selectSnapshot")}</option>
                   {snapshots.map((s) => (
                     <option key={s.id} value={s.id}>{s.obo_version} · {shortId(s.id)}…</option>
                   ))}
                 </select>
                 {snapshots.length === 0 && (
-                  <p className="mt-1 text-xs text-amber-600">No snapshots — run Load Snapshot first.</p>
+                  <p className="mt-1 text-xs text-amber-600">{t("loadQuickgoTab.noSnapshots")}</p>
                 )}
               </div>
               <div>
-                <label className={labelClass}>Source version</label>
+                <label className={labelClass}>{t("loadQuickgoTab.sourceVersionLabel")}</label>
                 <input
                   type="text"
                   value={qgoVersion}
                   onChange={(e) => setQgoVersion(e.target.value)}
                   required
-                  placeholder="2025-03"
+                  placeholder={t("loadQuickgoTab.sourceVersionPlaceholder")}
                   className={inputClass}
                 />
               </div>
@@ -476,7 +478,7 @@ export default function AnnotationsPage() {
               )}
               <div className="flex justify-end">
                 <button type="submit" disabled={qgoSubmitting} className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50">
-                  {qgoSubmitting ? "Launching…" : "Launch Job"}
+                  {qgoSubmitting ? t("loadQuickgoTab.launching") : t("loadQuickgoTab.launchJob")}
                 </button>
               </div>
             </form>

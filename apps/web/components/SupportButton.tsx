@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { baseUrl } from "@/lib/api";
+import { useTranslations } from "next-intl";
 
 type SupportData = {
   count: number;
@@ -10,6 +11,7 @@ type SupportData = {
 };
 
 export function SupportButton() {
+  const t = useTranslations("components.supportButton");
   const [data, setData] = useState<SupportData | null>(null);
   const [open, setOpen] = useState(false);
   const [comment, setComment] = useState("");
@@ -63,7 +65,7 @@ export function SupportButton() {
           className="flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-2.5 sm:px-3 py-1.5 text-sm text-gray-600 hover:border-blue-300 hover:text-blue-600 transition-colors shadow-sm"
         >
           <span className="text-base leading-none">👍</span>
-          <span className="font-medium hidden sm:inline">Support</span>
+          <span className="font-medium hidden sm:inline">{t("support")}</span>
           {count !== null && (
             <span className="rounded-full bg-blue-50 px-1.5 py-0.5 text-xs font-semibold text-blue-600">
               {count.toLocaleString()}
@@ -71,7 +73,7 @@ export function SupportButton() {
           )}
         </button>
         <span className="pointer-events-none absolute bottom-full right-0 mb-2 z-20 hidden group-hover:block w-64 rounded-md border border-gray-200 bg-white px-3 py-2 text-xs text-gray-500 shadow-lg leading-relaxed">
-          Comments and metrics are public and visible to all visitors.
+          {t("tooltip")}
         </span>
       </div>
 
@@ -81,28 +83,28 @@ export function SupportButton() {
           <div className="p-4 space-y-3">
             {submitted ? (
               <p className="text-center text-sm font-medium text-green-600 py-2">
-                Thanks for the support! 🎉
+                {t("thanks")}
               </p>
             ) : (
               <>
-                <p className="text-sm font-semibold text-gray-800">Support the project!</p>
+                <p className="text-sm font-semibold text-gray-800">{t("projectSupport")}</p>
                 <textarea
                   value={comment}
                   onChange={(e) => setComment(e.target.value)}
-                  placeholder="Leave a comment (optional)…"
+                  placeholder={t("commentPlaceholder")}
                   maxLength={500}
                   rows={3}
                   className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
                 <p className="text-xs text-gray-400">
-                  Comments and metrics are public.
+                  {t("publicNote")}
                 </p>
                 <button
                   onClick={handleSubmit}
                   disabled={submitting}
                   className="w-full rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
                 >
-                  {submitting ? "Sending…" : "👍 Send thumbs up"}
+                  {submitting ? t("sending") : t("sendThumbsUp")}
                 </button>
               </>
             )}
@@ -112,9 +114,9 @@ export function SupportButton() {
           {data && data.comments?.length > 0 && (
             <div className="border-t border-gray-100 px-4 py-3 space-y-2 max-h-48 overflow-y-auto">
               <div className="flex items-center justify-between">
-                <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">Recent comments</p>
+                <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">{t("recentComments")}</p>
                 <Link href="/support" className="text-xs text-blue-500 hover:underline" onClick={() => setOpen(false)}>
-                  View all →
+                  {t("viewAll")}
                 </Link>
               </div>
               {data.comments.map((c) => (

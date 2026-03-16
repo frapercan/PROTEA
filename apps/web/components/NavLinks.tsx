@@ -4,30 +4,32 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
 import { DocLinks } from "./DocLinks";
-
-const NAV_GROUPS = [
-  [
-    { href: "/proteins", label: "Proteins" },
-    { href: "/annotations", label: "Annotations" },
-    { href: "/query-sets", label: "Query Sets" },
-  ],
-  [
-    { href: "/embeddings", label: "Embeddings" },
-    { href: "/functional-annotation", label: "Functional Annotation" },
-    { href: "/scoring", label: "Scoring" },
-    { href: "/evaluation", label: "Evaluation" },
-  ],
-  [
-    { href: "/jobs", label: "Jobs" },
-    { href: "/maintenance", label: "Maintenance" },
-  ],
-];
-
-const ALL_LINKS = NAV_GROUPS.flat();
+import { useTranslations } from "next-intl";
 
 export function NavLinks() {
+  const t = useTranslations("nav");
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+
+  const NAV_GROUPS = [
+    [
+      { href: "/proteins", label: t("proteins") },
+      { href: "/annotations", label: t("annotations") },
+      { href: "/query-sets", label: t("querySets") },
+    ],
+    [
+      { href: "/embeddings", label: t("embeddings") },
+      { href: "/functional-annotation", label: t("functionalAnnotation") },
+      { href: "/scoring", label: t("scoring") },
+      { href: "/evaluation", label: t("evaluation") },
+    ],
+    [
+      { href: "/jobs", label: t("jobs") },
+      { href: "/maintenance", label: t("maintenance") },
+    ],
+  ];
+
+  const ALL_LINKS = NAV_GROUPS.flat();
 
   // Close menu on route change
   useEffect(() => { setOpen(false); }, [pathname]);

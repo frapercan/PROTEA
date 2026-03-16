@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { useToast } from "@/components/Toast";
 import { SkeletonTableRow } from "@/components/Skeleton";
 import {
@@ -34,10 +35,10 @@ const inputClass = "w-full rounded-md border px-3 py-2 text-sm focus:outline-non
 const labelClass = "block text-sm font-medium text-gray-700 mb-1";
 
 export default function FunctionalAnnotationPage() {
+  const t = useTranslations("functionalAnnotation");
   const toast = useToast();
   const [activeTab, setActiveTab] = useState<Tab>("predict");
 
-  // Shared data
   const [configs, setConfigs] = useState<EmbeddingConfig[]>([]);
   const [annotationSets, setAnnotationSets] = useState<AnnotationSet[]>([]);
   const [ontologySnapshots, setOntologySnapshots] = useState<OntologySnapshot[]>([]);
@@ -45,7 +46,6 @@ export default function FunctionalAnnotationPage() {
   const [predictionSets, setPredictionSets] = useState<PredictionSet[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Predict form
   const [predConfigId, setPredConfigId] = useState("");
   const [predQuerySetId, setPredQuerySetId] = useState("");
   const [predAnnotationSetId, setPredAnnotationSetId] = useState("");
@@ -98,13 +98,8 @@ export default function FunctionalAnnotationPage() {
     }
   }
 
-  useEffect(() => {
-    loadAll();
-  }, []);
-
-  useEffect(() => {
-    if (activeTab === "results") loadResults();
-  }, [activeTab]);
+  useEffect(() => { loadAll(); }, []);
+  useEffect(() => { if (activeTab === "results") loadResults(); }, [activeTab]);
 
   async function handlePredictSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -132,7 +127,7 @@ export default function FunctionalAnnotationPage() {
         compute_taxonomy: predComputeTaxonomy,
       });
       setPredResult(result);
-      toast("Annotation job queued", "success");
+      toast(t("predictTab.launchAnnotationJob"), "success");
     } catch (err: any) {
       setPredError(String(err));
       toast(String(err), "error");
@@ -145,8 +140,8 @@ export default function FunctionalAnnotationPage() {
     const ps = predictionSets.find((p) => p.id === id);
     const count = ps?.prediction_count ?? 0;
     const msg = count > 0
-      ? `Delete this annotation set and its ${count.toLocaleString()} GO term assignments? This cannot be undone.`
-      : "Delete this annotation set?";
+      ? t("resultsTab.deleteConfirm", { count: count.toLocaleString() })
+      : t("resultsTab.deleteConfirmNoAssignments");
     if (!confirm(msg)) return;
     try {
       const r = await deletePredictionSet(id);
@@ -158,28 +153,28 @@ export default function FunctionalAnnotationPage() {
   }
 
   const tabs: { key: Tab; label: string }[] = [
-    { key: "predict", label: "Run Annotation" },
-    { key: "results", label: "Results" },
+    { key: "predict", label: t("tabs.predict") },
+    { key: "results", label: t("tabs.results") },
   ];
 
   return (
     <>
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-semibold">Functional Annotation</h1>
+        <h1 className="text-xl font-semibold">{t("title")}</h1>
       </div>
 
       <div className="flex gap-1 border-b mb-6 overflow-x-auto">
-        {tabs.map((t) => (
+        {tabs.map((tab) => (
           <button
-            key={t.key}
-            onClick={() => setActiveTab(t.key)}
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === t.key
+              activeTab === tab.key
                 ? "border-blue-600 text-blue-600"
                 : "border-transparent text-gray-500 hover:text-gray-700"
             }`}
           >
-            {t.label}
+            {tab.label}
           </button>
         ))}
       </div>
@@ -188,15 +183,15 @@ export default function FunctionalAnnotationPage() {
       {activeTab === "predict" && (
         <div className="max-w-2xl">
           <div className="rounded-lg border bg-white p-6 shadow-sm">
-            <h2 className="text-base font-semibold mb-4">GO Term Annotation by Embedding Similarity</h2>
+            <h2 className="text-base font-semibold mb-4">{t("predictTab.title")}</h2>
             {loading ? (
-              <p className="text-sm text-gray-400">Loading…</p>
+              <p className="text-sm text-gray-400">{t("predictTab.loading")}</p>
             ) : (
               <form onSubmit={handlePredictSubmit} className="space-y-4">
                 <div>
-                  <label className={labelClass}>Embedding Config</label>
+                  <label className={labelClass}>{t("predictTab.configLabel")}</label>
                   <select value={predConfigId} onChange={(e) => setPredConfigId(e.target.value)} required className={inputClass}>
-                    {configs.length === 0 && <option value="">— no configs available —</option>}
+                    {configs.length === 0 && <option value="">{t("predictTab.noConfigs")}</option>}
                     {configs.map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.description || c.model_name} ({shortId(c.id)})
@@ -207,10 +202,10 @@ export default function FunctionalAnnotationPage() {
 
                 <div>
                   <label className={labelClass}>
-                    Query Set <span className="font-normal text-gray-400">(optional — leave empty to annotate all)</span>
+                    {t("predictTab.querySetLabel")} <span className="font-normal text-gray-400">{t("predictTab.querySetHelper")}</span>
                   </label>
                   <select value={predQuerySetId} onChange={(e) => setPredQuerySetId(e.target.value)} className={inputClass}>
-                    <option value="">— all sequences —</option>
+                    <option value="">{t("predictTab.allSequences")}</option>
                     {querySets.map((qs) => (
                       <option key={qs.id} value={qs.id}>
                         {qs.name} ({qs.entry_count} seqs)
@@ -220,9 +215,9 @@ export default function FunctionalAnnotationPage() {
                 </div>
 
                 <div>
-                  <label className={labelClass}>Annotation Set</label>
+                  <label className={labelClass}>{t("predictTab.annotationSetLabel")}</label>
                   <select value={predAnnotationSetId} onChange={(e) => setPredAnnotationSetId(e.target.value)} required className={inputClass}>
-                    {annotationSets.length === 0 && <option value="">— no annotation sets available —</option>}
+                    {annotationSets.length === 0 && <option value="">{t("predictTab.noAnnotationSets")}</option>}
                     {annotationSets.map((a) => (
                       <option key={a.id} value={a.id}>
                         {a.source} {a.source_version ? `(${a.source_version})` : ""} — {shortId(a.id)}
@@ -232,9 +227,9 @@ export default function FunctionalAnnotationPage() {
                 </div>
 
                 <div>
-                  <label className={labelClass}>Ontology Snapshot</label>
+                  <label className={labelClass}>{t("predictTab.snapshotLabel")}</label>
                   <select value={predSnapshotId} onChange={(e) => setPredSnapshotId(e.target.value)} required className={inputClass}>
-                    {ontologySnapshots.length === 0 && <option value="">— no snapshots available —</option>}
+                    {ontologySnapshots.length === 0 && <option value="">{t("predictTab.noSnapshots")}</option>}
                     {ontologySnapshots.map((s) => (
                       <option key={s.id} value={s.id}>
                         {s.obo_version} — {shortId(s.id)}
@@ -245,7 +240,7 @@ export default function FunctionalAnnotationPage() {
 
                 <div className="grid grid-cols-3 gap-3">
                   <div>
-                    <label className={labelClass}>Limit per Entry</label>
+                    <label className={labelClass}>{t("predictTab.limitPerEntryLabel")}</label>
                     <input
                       type="number"
                       value={predLimitPerEntry}
@@ -255,7 +250,7 @@ export default function FunctionalAnnotationPage() {
                     />
                   </div>
                   <div>
-                    <label className={labelClass}>Batch Size</label>
+                    <label className={labelClass}>{t("predictTab.batchSizeLabel")}</label>
                     <input
                       type="number"
                       value={predBatchSize}
@@ -265,7 +260,7 @@ export default function FunctionalAnnotationPage() {
                     />
                   </div>
                   <div>
-                    <label className={labelClass}>Distance Threshold <span className="font-normal text-gray-400">(optional)</span></label>
+                    <label className={labelClass}>{t("predictTab.distanceThresholdLabel")} <span className="font-normal text-gray-400">{t("predictTab.distanceThresholdHelper")}</span></label>
                     <input
                       type="number"
                       step="any"
@@ -277,9 +272,9 @@ export default function FunctionalAnnotationPage() {
                   </div>
                 </div>
 
-                {/* Feature engineering */}
+                {/* KNN Strategy + Feature Engineering */}
                 <div className="rounded-md border border-gray-200 bg-gray-50 p-4 space-y-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">KNN Strategy</p>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{t("predictTab.knnStrategy")}</p>
                   <div className="flex flex-col gap-2 mb-4">
                     <label className="flex items-start gap-2 cursor-pointer">
                       <input
@@ -289,13 +284,15 @@ export default function FunctionalAnnotationPage() {
                         className="mt-0.5 rounded"
                       />
                       <span className="text-sm text-gray-700">
-                        Per-aspect KNN indices
-                        <span className="ml-1.5 text-xs text-gray-400">Separate BPO / MFO / CCO reference indices — improves recall for each aspect independently</span>
+                        {t("predictTab.aspectSeparatedKnn")}
+                        <span className="ml-1.5 text-xs text-gray-400">{t("predictTab.aspectSeparatedKnnHelper")}</span>
                       </span>
                     </label>
                   </div>
 
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Feature Engineering <span className="font-normal normal-case text-gray-400">(opt-in — adds compute time)</span></p>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    {t("predictTab.featureEngineering")} <span className="font-normal normal-case text-gray-400">{t("predictTab.featureEngineeringHelper")}</span>
+                  </p>
                   <div className="flex flex-col gap-2">
                     <label className="flex items-start gap-2 cursor-pointer">
                       <input
@@ -305,8 +302,8 @@ export default function FunctionalAnnotationPage() {
                         className="mt-0.5 rounded"
                       />
                       <span className="text-sm text-gray-700">
-                        Sequence alignments
-                        <span className="ml-1.5 text-xs text-gray-400">NW (global) + SW (local) via parasail/BLOSUM62</span>
+                        {t("predictTab.sequenceAlignments")}
+                        <span className="ml-1.5 text-xs text-gray-400">{t("predictTab.sequenceAlignmentsHelper")}</span>
                       </span>
                     </label>
                     <label className="flex items-start gap-2 cursor-pointer">
@@ -317,29 +314,29 @@ export default function FunctionalAnnotationPage() {
                         className="mt-0.5 rounded"
                       />
                       <span className="text-sm text-gray-700">
-                        Taxonomic distance
-                        <span className="ml-1.5 text-xs text-gray-400">LCA, distance and relation via NCBI taxonomy</span>
+                        {t("predictTab.taxonomicDistance")}
+                        <span className="ml-1.5 text-xs text-gray-400">{t("predictTab.taxonomicDistanceHelper")}</span>
                       </span>
                     </label>
                   </div>
                 </div>
 
-                {/* Search backend */}
+                {/* Search Backend */}
                 <div className="rounded-md border border-gray-200 bg-gray-50 p-4 space-y-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Search Backend</p>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{t("predictTab.searchBackend")}</p>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className={labelClass}>Backend</label>
+                      <label className={labelClass}>{t("predictTab.searchBackendLabel")}</label>
                       <select value={predSearchBackend} onChange={(e) => setPredSearchBackend(e.target.value)} className={inputClass}>
-                        <option value="numpy">numpy — exact</option>
-                        <option value="faiss">faiss — indexed</option>
+                        <option value="numpy">{t("predictTab.numpyBackend")}</option>
+                        <option value="faiss">{t("predictTab.faissBackend")}</option>
                       </select>
                     </div>
                     <div>
-                      <label className={labelClass}>Metric</label>
+                      <label className={labelClass}>{t("predictTab.metricLabel")}</label>
                       <select value={predMetric} onChange={(e) => setPredMetric(e.target.value)} className={inputClass}>
-                        <option value="cosine">cosine</option>
-                        <option value="l2">L2 (Euclidean²)</option>
+                        <option value="cosine">{t("predictTab.cosineSimilarity")}</option>
+                        <option value="l2">{t("predictTab.euclideanDistance")}</option>
                       </select>
                     </div>
                   </div>
@@ -347,21 +344,21 @@ export default function FunctionalAnnotationPage() {
                   {predSearchBackend === "faiss" && (
                     <>
                       <div>
-                        <label className={labelClass}>Index Type</label>
+                        <label className={labelClass}>{t("predictTab.indexTypeLabel")}</label>
                         <select value={predFaissIndex} onChange={(e) => setPredFaissIndex(e.target.value)} className={inputClass}>
-                          <option value="Flat">Flat — exact</option>
-                          <option value="IVFFlat">IVFFlat — approximate (&gt;100K refs)</option>
-                          <option value="HNSW">HNSW — approximate, graph-based</option>
+                          <option value="Flat">{t("predictTab.flatIndex")}</option>
+                          <option value="IVFFlat">{t("predictTab.ivfflatIndex")}</option>
+                          <option value="HNSW">{t("predictTab.hnswIndex")}</option>
                         </select>
                       </div>
                       {predFaissIndex === "IVFFlat" && (
                         <div className="grid grid-cols-2 gap-3">
                           <div>
-                            <label className={labelClass}>nlist</label>
+                            <label className={labelClass}>{t("predictTab.nlistLabel")}</label>
                             <input type="number" value={predFaissNlist} onChange={(e) => setPredFaissNlist(parseInt(e.target.value, 10))} min={1} className={inputClass} />
                           </div>
                           <div>
-                            <label className={labelClass}>nprobe</label>
+                            <label className={labelClass}>{t("predictTab.nprobeLabel")}</label>
                             <input type="number" value={predFaissNprobe} onChange={(e) => setPredFaissNprobe(parseInt(e.target.value, 10))} min={1} className={inputClass} />
                           </div>
                         </div>
@@ -369,11 +366,11 @@ export default function FunctionalAnnotationPage() {
                       {predFaissIndex === "HNSW" && (
                         <div className="grid grid-cols-2 gap-3">
                           <div>
-                            <label className={labelClass}>M</label>
+                            <label className={labelClass}>{t("predictTab.mLabel")}</label>
                             <input type="number" value={predFaissHnswM} onChange={(e) => setPredFaissHnswM(parseInt(e.target.value, 10))} min={2} className={inputClass} />
                           </div>
                           <div>
-                            <label className={labelClass}>efSearch</label>
+                            <label className={labelClass}>{t("predictTab.efSearchLabel")}</label>
                             <input type="number" value={predFaissHnswEf} onChange={(e) => setPredFaissHnswEf(parseInt(e.target.value, 10))} min={1} className={inputClass} />
                           </div>
                         </div>
@@ -403,7 +400,7 @@ export default function FunctionalAnnotationPage() {
                     disabled={predSubmitting || configs.length === 0}
                     className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
                   >
-                    {predSubmitting ? "Launching…" : "Launch Annotation Job"}
+                    {predSubmitting ? t("predictTab.launching") : t("predictTab.launchAnnotationJob")}
                   </button>
                 </div>
               </form>
@@ -420,19 +417,19 @@ export default function FunctionalAnnotationPage() {
               {predictionSets.length} annotation result{predictionSets.length !== 1 ? "s" : ""}
             </p>
             <button onClick={loadResults} className="rounded-md border bg-white px-3 py-1.5 text-sm hover:bg-gray-50">
-              Refresh
+              {t("resultsTab.refresh")}
             </button>
           </div>
 
           <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
             <div className="grid grid-cols-[80px_100px_100px_100px_90px_120px_160px_60px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
-              <div>ID</div>
-              <div>Config</div>
-              <div>Annotation Set</div>
-              <div>Snapshot</div>
-              <div>GO Terms</div>
-              <div>Dist. Threshold</div>
-              <div>Created</div>
+              <div>{t("resultsTab.tableHeaders.id")}</div>
+              <div>{t("resultsTab.tableHeaders.config")}</div>
+              <div>{t("resultsTab.tableHeaders.annotationSet")}</div>
+              <div>{t("resultsTab.tableHeaders.snapshot")}</div>
+              <div>{t("resultsTab.tableHeaders.goTerms")}</div>
+              <div>{t("resultsTab.tableHeaders.distanceThreshold")}</div>
+              <div>{t("resultsTab.tableHeaders.created")}</div>
               <div></div>
             </div>
 
@@ -459,7 +456,7 @@ export default function FunctionalAnnotationPage() {
                     onClick={() => handleDeleteResult(ps.id)}
                     className="rounded border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 transition-colors"
                   >
-                    Delete
+                    {t("resultsTab.delete")}
                   </button>
                 </div>
               </div>
@@ -467,7 +464,7 @@ export default function FunctionalAnnotationPage() {
 
             {predictionSets.length === 0 && (
               <div className="px-4 py-8 text-center text-sm text-gray-400">
-                No annotation results yet. Run an annotation job from the Run Annotation tab.
+                {t("resultsTab.noResults")}
               </div>
             )}
           </div>

@@ -3,17 +3,13 @@
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { useToast } from "@/components/Toast";
+import { useTranslations } from "next-intl";
 import { getProtein, getProteinAnnotations, getGoSubgraph, listOntologySnapshots, ProteinDetail, ProteinAnnotation, GoSubgraph } from "@/lib/api";
 import dynamic from "next/dynamic";
 const GoGraph = dynamic(() => import("@/components/GoGraph"), { ssr: false });
 
 type Tab = "overview" | "annotations";
 
-const ASPECT_LABELS: Record<string, string> = {
-  F: "Molecular Function",
-  P: "Biological Process",
-  C: "Cellular Component",
-};
 const ASPECT_COLORS: Record<string, string> = {
   F: "bg-purple-50 text-purple-700 border-purple-100",
   P: "bg-green-50 text-green-700 border-green-100",
@@ -41,6 +37,7 @@ function Field({ label, value }: { label: string; value?: string | null }) {
 
 export default function ProteinDetailPage({ params }: { params: Promise<{ accession: string }> }) {
   const { accession } = use(params);
+  const t = useTranslations("proteinDetail");
   const toast = useToast();
   const [protein, setProtein] = useState<ProteinDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -83,15 +80,15 @@ export default function ProteinDetailPage({ params }: { params: Promise<{ access
   }
 
   const tabs: { key: Tab; label: string }[] = [
-    { key: "overview", label: "Overview" },
-    { key: "annotations", label: `GO Annotations${protein.go_annotation_count > 0 ? ` (${protein.go_annotation_count.toLocaleString()})` : ""}` },
+    { key: "overview", label: t("tabs.overview") },
+    { key: "annotations", label: `${t("tabs.annotations")}${protein.go_annotation_count > 0 ? ` (${protein.go_annotation_count.toLocaleString()})` : ""}` },
   ];
 
   return (
     <>
       {/* Header */}
       <div className="mb-6">
-        <Link href="/proteins" className="text-sm text-gray-400 hover:text-gray-600">← Proteins</Link>
+        <Link href="/proteins" className="text-sm text-gray-400 hover:text-gray-600">{t("backToProteins")}</Link>
         <div className="flex items-start gap-4 mt-2">
           <div>
             <h1 className="text-2xl font-bold text-gray-900 font-mono">{protein.accession}</h1>
@@ -115,17 +112,17 @@ export default function ProteinDetailPage({ params }: { params: Promise<{ access
 
       {/* Tabs */}
       <div className="flex gap-1 border-b mb-6 overflow-x-auto">
-        {tabs.map((t) => (
+        {tabs.map((tab) => (
           <button
-            key={t.key}
-            onClick={() => setActiveTab(t.key)}
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === t.key
+              activeTab === tab.key
                 ? "border-blue-600 text-blue-600"
                 : "border-transparent text-gray-500 hover:text-gray-700"
             }`}
           >
-            {t.label}
+            {tab.label}
           </button>
         ))}
       </div>
@@ -136,41 +133,41 @@ export default function ProteinDetailPage({ params }: { params: Promise<{ access
           {/* Left: core info + coverage */}
           <div className="space-y-4">
             <div className="rounded-lg border bg-white p-4 shadow-sm space-y-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Identity</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{t("overviewTab.identity")}</p>
               <div className="space-y-2 text-sm">
                 {protein.gene_name && (
                   <div className="flex justify-between">
-                    <span className="text-gray-500">Gene</span>
+                    <span className="text-gray-500">{t("overviewTab.gene")}</span>
                     <span className="font-medium text-gray-900">{protein.gene_name}</span>
                   </div>
                 )}
                 {protein.organism && (
                   <div className="flex justify-between gap-4">
-                    <span className="text-gray-500 shrink-0">Organism</span>
+                    <span className="text-gray-500 shrink-0">{t("overviewTab.organism")}</span>
                     <span className="text-gray-800 text-right">{protein.organism}</span>
                   </div>
                 )}
                 {protein.taxonomy_id && (
                   <div className="flex justify-between">
-                    <span className="text-gray-500">Taxon ID</span>
+                    <span className="text-gray-500">{t("overviewTab.taxonId")}</span>
                     <span className="font-mono text-xs text-gray-700">{protein.taxonomy_id}</span>
                   </div>
                 )}
                 {protein.length && (
                   <div className="flex justify-between">
-                    <span className="text-gray-500">Length</span>
-                    <span className="text-gray-800">{protein.length.toLocaleString()} aa</span>
+                    <span className="text-gray-500">{t("overviewTab.length")}</span>
+                    <span className="text-gray-800">{protein.length.toLocaleString()} {t("overviewTab.aa")}</span>
                   </div>
                 )}
                 {protein.sequence_id && (
                   <div className="flex justify-between">
-                    <span className="text-gray-500">Sequence ID</span>
+                    <span className="text-gray-500">{t("overviewTab.sequenceId")}</span>
                     <span className="font-mono text-xs text-gray-600">{protein.sequence_id}</span>
                   </div>
                 )}
                 {!protein.is_canonical && (
                   <div className="flex justify-between">
-                    <span className="text-gray-500">Canonical</span>
+                    <span className="text-gray-500">{t("overviewTab.canonical")}</span>
                     <Link href={`/proteins/${protein.canonical_accession}`} className="font-mono text-xs text-blue-600 hover:underline">
                       {protein.canonical_accession}
                     </Link>
@@ -180,33 +177,33 @@ export default function ProteinDetailPage({ params }: { params: Promise<{ access
             </div>
 
             <div className="rounded-lg border bg-white p-4 shadow-sm space-y-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Coverage</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{t("overviewTab.coverage")}</p>
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Embeddings</span>
+                  <span className="text-gray-500">{t("overviewTab.embeddings")}</span>
                   <span className={protein.embedding_count > 0 ? "text-green-600 font-medium" : "text-gray-400"}>
-                    {protein.embedding_count > 0 ? `${protein.embedding_count} config${protein.embedding_count !== 1 ? "s" : ""}` : "none"}
+                    {protein.embedding_count > 0 ? `${protein.embedding_count} config${protein.embedding_count !== 1 ? "s" : ""}` : t("overviewTab.none")}
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-500">GO Annotations</span>
+                  <span className="text-gray-500">{t("overviewTab.goAnnotations")}</span>
                   <button
                     onClick={() => setActiveTab("annotations")}
                     className={protein.go_annotation_count > 0 ? "text-green-600 font-medium hover:underline" : "text-gray-400 cursor-default"}
                   >
-                    {protein.go_annotation_count > 0 ? protein.go_annotation_count.toLocaleString() : "none"}
+                    {protein.go_annotation_count > 0 ? protein.go_annotation_count.toLocaleString() : t("overviewTab.none")}
                   </button>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Metadata</span>
-                  <span className={meta ? "text-green-600 font-medium" : "text-gray-400"}>{meta ? "yes" : "none"}</span>
+                  <span className="text-gray-500">{t("overviewTab.metadata")}</span>
+                  <span className={meta ? "text-green-600 font-medium" : "text-gray-400"}>{meta ? t("overviewTab.yes") : t("overviewTab.none")}</span>
                 </div>
               </div>
             </div>
 
             {protein.isoforms.length > 0 && (
               <div className="rounded-lg border bg-white p-4 shadow-sm">
-                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Isoforms</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">{t("overviewTab.isoforms")}</p>
                 <div className="space-y-1">
                   {protein.isoforms.map((iso) => (
                     <Link key={iso} href={`/proteins/${iso}`} className="block font-mono text-xs text-blue-600 hover:underline">
@@ -224,27 +221,27 @@ export default function ProteinDetailPage({ params }: { params: Promise<{ access
               <>
                 {meta.function_cc && (
                   <div className="rounded-lg border bg-white p-4 shadow-sm">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Function</p>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">{t("overviewTab.function")}</p>
                     <p className="text-sm text-gray-800 whitespace-pre-wrap">{meta.function_cc}</p>
                   </div>
                 )}
                 <div className="rounded-lg border bg-white p-4 shadow-sm space-y-4">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Biochemistry</p>
-                  <Field label="EC Number" value={meta.ec_number} />
-                  <Field label="Catalytic Activity" value={meta.catalytic_activity} />
-                  <Field label="Cofactor" value={meta.cofactor} />
-                  <Field label="Activity Regulation" value={meta.activity_regulation} />
-                  <Field label="Pathway" value={meta.pathway} />
-                  <Field label="Absorption" value={meta.absorption} />
-                  <Field label="Kinetics" value={meta.kinetics} />
-                  <Field label="pH Dependence" value={meta.ph_dependence} />
-                  <Field label="Redox Potential" value={meta.redox_potential} />
-                  <Field label="Temperature Dependence" value={meta.temperature_dependence} />
-                  <Field label="Rhea ID" value={meta.rhea_id} />
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{t("overviewTab.biochemistry")}</p>
+                  <Field label={t("overviewTab.ecNumber")} value={meta.ec_number} />
+                  <Field label={t("overviewTab.catalyticActivity")} value={meta.catalytic_activity} />
+                  <Field label={t("overviewTab.cofactor")} value={meta.cofactor} />
+                  <Field label={t("overviewTab.activityRegulation")} value={meta.activity_regulation} />
+                  <Field label={t("overviewTab.pathway")} value={meta.pathway} />
+                  <Field label={t("overviewTab.absorption")} value={meta.absorption} />
+                  <Field label={t("overviewTab.kinetics")} value={meta.kinetics} />
+                  <Field label={t("overviewTab.phDependence")} value={meta.ph_dependence} />
+                  <Field label={t("overviewTab.redoxPotential")} value={meta.redox_potential} />
+                  <Field label={t("overviewTab.temperatureDependence")} value={meta.temperature_dependence} />
+                  <Field label={t("overviewTab.rheaId")} value={meta.rhea_id} />
                 </div>
                 {meta.keywords && (
                   <div className="rounded-lg border bg-white p-4 shadow-sm">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Keywords</p>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">{t("overviewTab.keywords")}</p>
                     <div className="flex flex-wrap gap-1.5">
                       {meta.keywords.split(";").map((kw) => kw.trim()).filter(Boolean).map((kw) => (
                         <span key={kw} className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600">{kw}</span>
@@ -255,7 +252,7 @@ export default function ProteinDetailPage({ params }: { params: Promise<{ access
               </>
             ) : (
               <div className="rounded-lg border bg-white p-8 shadow-sm text-center text-sm text-gray-400">
-                No functional metadata available. Use the Fetch Metadata tab to import from UniProt.
+                {t("overviewTab.noFunctionalMetadata")}
               </div>
             )}
           </div>
@@ -269,7 +266,7 @@ export default function ProteinDetailPage({ params }: { params: Promise<{ access
 
           {!loadingAnnotations && annotationsLoaded && annotations.length === 0 && (
             <div className="rounded-lg border bg-white p-8 text-center text-sm text-gray-400">
-              No GO annotations found for this protein.
+              {t("overviewTab.noGoAnnotations")}
             </div>
           )}
 
@@ -298,9 +295,9 @@ export default function ProteinDetailPage({ params }: { params: Promise<{ access
                   }}
                   className="rounded-md border bg-white px-3 py-1.5 text-sm hover:bg-gray-50"
                 >
-                  {showGraph ? "Hide GO Graph" : "Show GO Graph"}
+                  {showGraph ? t("overviewTab.hideGoGraph") : t("overviewTab.showGoGraph")}
                 </button>
-                {loadingGraph && <span className="text-xs text-gray-400">Loading graph…</span>}
+                {loadingGraph && <span className="text-xs text-gray-400">{t("overviewTab.loadingGraph")}</span>}
               </div>
 
               {showGraph && subgraph && <GoGraph subgraph={subgraph} />}
@@ -309,9 +306,9 @@ export default function ProteinDetailPage({ params }: { params: Promise<{ access
               <div className="grid grid-cols-3 gap-3">
                 {(["F", "P", "C"] as const).map((asp) => (
                   <div key={asp} className="rounded-lg border bg-white p-4 shadow-sm">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{ASPECT_LABELS[asp]}</p>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{t(`overviewTab.${asp === "F" ? "molecularFunction" : asp === "P" ? "biologicalProcess" : "cellularComponent"}`)}</p>
                     <p className="mt-1 text-2xl font-bold text-gray-900">{byAspect[asp].length}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">annotations</p>
+                    <p className="text-xs text-gray-400 mt-0.5">{t("overviewTab.annotations")}</p>
                   </div>
                 ))}
               </div>
@@ -323,16 +320,16 @@ export default function ProteinDetailPage({ params }: { params: Promise<{ access
                 return (
                   <div key={asp}>
                     <p className="text-sm font-semibold text-gray-700 mb-3">
-                      {ASPECT_LABELS[asp]}
+                      {t(`overviewTab.${asp === "F" ? "molecularFunction" : asp === "P" ? "biologicalProcess" : "cellularComponent"}`)}
                       <span className="ml-2 text-xs font-normal text-gray-400">{terms.length} term{terms.length !== 1 ? "s" : ""}</span>
                     </p>
                     <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
                       <div className="grid grid-cols-[100px_1fr_80px_100px_100px] gap-2 border-b bg-gray-50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                        <div>GO ID</div>
-                        <div>Name</div>
-                        <div>Evidence</div>
-                        <div>Qualifier</div>
-                        <div>Source</div>
+                        <div>{t("overviewTab.goTableHeaders.goId")}</div>
+                        <div>{t("overviewTab.goTableHeaders.name")}</div>
+                        <div>{t("overviewTab.goTableHeaders.evidence")}</div>
+                        <div>{t("overviewTab.goTableHeaders.qualifier")}</div>
+                        <div>{t("overviewTab.goTableHeaders.source")}</div>
                       </div>
                       {terms.map((ann, i) => (
                         <div key={i} className="grid grid-cols-[100px_1fr_80px_100px_100px] gap-2 border-b px-4 py-2.5 text-sm last:border-0 items-center">

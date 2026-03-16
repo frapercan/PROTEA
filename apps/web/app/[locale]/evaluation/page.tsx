@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { listAnnotationSets, listPredictionSets, listScoringConfigs, baseUrl } from "@/lib/api";
 import type { AnnotationSet, PredictionSet, ScoringConfig } from "@/lib/api";
 
@@ -125,27 +126,28 @@ function StatBadge({ label, value, tooltip }: { label: string; value: number | u
   );
 }
 
-const NS_LABELS: Record<string, string> = {
-  BPO: "Biological Process",
-  MFO: "Molecular Function",
-  CCO: "Cellular Component",
-};
-
 const SETTING_COLORS: Record<string, string> = {
   NK: "bg-purple-50 border-purple-200",
   LK: "bg-blue-50 border-blue-200",
   PK: "bg-green-50 border-green-200",
 };
 
-const SETTING_TOOLTIPS: Record<string, string> = {
-  NK: "No-Knowledge: proteins with no experimental annotations in any namespace at t0. Evaluated without -known.",
-  LK: "Limited-Knowledge: proteins annotated in some namespaces at t0 but not in the evaluated namespace. Evaluated without -known.",
-  PK: "Partial-Knowledge: proteins that already had annotations in the evaluated namespace at t0. Evaluated with -known (old terms excluded from scoring).",
-};
-
 function ResultsTable({ results }: { results: Record<string, SettingResults> }) {
+  const t = useTranslations("evaluation");
   const settings = ["NK", "LK", "PK"].filter((s) => results[s] && Object.keys(results[s]).length > 0);
-  if (settings.length === 0) return <p className="text-sm text-gray-400">No results computed.</p>;
+  if (settings.length === 0) return <p className="text-sm text-gray-400">{t("evaluationSetCard.noEvaluations")}</p>;
+
+  const NS_LABELS: Record<string, string> = {
+    BPO: t("resultMetrics.biologicalProcess"),
+    MFO: t("resultMetrics.molecularFunction"),
+    CCO: t("resultMetrics.cellularComponent"),
+  };
+
+  const SETTING_TOOLTIPS: Record<string, string> = {
+    NK: "No-Knowledge: proteins with no experimental annotations in any namespace at t0. Evaluated without -known.",
+    LK: "Limited-Knowledge: proteins annotated in some namespaces at t0 but not in the evaluated namespace. Evaluated without -known.",
+    PK: "Partial-Knowledge: proteins that already had annotations in the evaluated namespace at t0. Evaluated with -known (old terms excluded from scoring).",
+  };
 
   return (
     <div className="space-y-4">
@@ -164,23 +166,23 @@ function ResultsTable({ results }: { results: Record<string, SettingResults> }) 
                   <div className="text-xs font-medium text-gray-500 mb-2">{NS_LABELS[ns]}</div>
                   <div className="space-y-1 text-sm">
                     <div className="flex justify-between">
-                      <span className="text-gray-500">Fmax</span>
+                      <span className="text-gray-500">{t("resultMetrics.fmax")}</span>
                       <span className="font-semibold text-gray-900">{m.fmax.toFixed(3)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-500">Precision</span>
+                      <span className="text-gray-500">{t("resultMetrics.precision")}</span>
                       <span className="text-gray-700">{m.precision.toFixed(3)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-500">Recall</span>
+                      <span className="text-gray-500">{t("resultMetrics.recall")}</span>
                       <span className="text-gray-700">{m.recall.toFixed(3)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-500">Coverage</span>
+                      <span className="text-gray-500">{t("resultMetrics.coverage")}</span>
                       <span className="text-gray-700">{(m.coverage * 100).toFixed(1)}%</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-500">τ</span>
+                      <span className="text-gray-500">{t("resultMetrics.tau")}</span>
                       <span className="text-gray-700">{m.tau.toFixed(2)}</span>
                     </div>
                   </div>
@@ -211,6 +213,7 @@ function EvaluationSetCard({
   onSelect: () => void;
   onDeleted: () => void;
 }) {
+  const t = useTranslations("evaluation");
   const [results, setResults] = useState<EvaluationResult[]>([]);
   const [loadingResults, setLoadingResults] = useState(false);
   const [predSetId, setPredSetId] = useState("");
@@ -218,8 +221,6 @@ function EvaluationSetCard({
   const [scoringConfigId, setScoringConfigId] = useState("");
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState("");
-  // jobId is set after a successful submission so the user can navigate to
-  // the Jobs page to track progress.  Cleared when results refresh.
   const [pendingJobId, setPendingJobId] = useState<string | null>(null);
   const [pollingResults, setPollingResults] = useState(false);
 
@@ -229,21 +230,18 @@ function EvaluationSetCard({
     listResults(e.id).then(setResults).finally(() => setLoadingResults(false));
   }, [isSelected, e.id]);
 
-  // Poll for new results while a job is pending.  Stops automatically once a
-  // new result appears or after a fixed number of attempts.
   useEffect(() => {
     if (!pendingJobId) return;
 
     setPollingResults(true);
     let attempts = 0;
-    const MAX_ATTEMPTS = 30; // ~5 minutes at 10 s intervals
+    const MAX_ATTEMPTS = 30;
 
     const interval = setInterval(async () => {
       attempts++;
       try {
         const fresh = await listResults(e.id);
         if (fresh.length > results.length) {
-          // A new result appeared — stop polling and refresh.
           setResults(fresh);
           setPendingJobId(null);
           setPollingResults(false);
@@ -288,7 +286,6 @@ function EvaluationSetCard({
           body: JSON.stringify(body),
         },
       );
-      // Store the job ID so we can show a link and start polling.
       setPendingJobId(res.id ?? res.status ?? null);
     } catch (err: any) {
       setRunError(err.message ?? "Unknown error");
@@ -313,33 +310,33 @@ function EvaluationSetCard({
           <button
             onClick={async (ev) => {
               ev.stopPropagation();
-              if (!confirm("Delete this evaluation set and all its results?")) return;
+              if (!confirm(t("evaluationSetCard.deleteConfirm"))) return;
               await deleteEvaluationSet(e.id);
               onDeleted();
             }}
             className="rounded border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 transition-colors"
           >
-            Delete
+            {t("evaluationSetCard.delete")}
           </button>
         </div>
         <div className="mt-3 grid grid-cols-4 gap-2">
           <StatBadge
-            label="Delta proteins"
+            label={t("evaluationSetCard.deltaProteins")}
             value={e.stats.delta_proteins}
             tooltip="Proteins that gained ≥1 new experimental GO annotation between the old and new snapshot."
           />
           <StatBadge
-            label="NK proteins"
+            label={t("evaluationSetCard.nkProteins")}
             value={e.stats.nk_proteins}
             tooltip="No-Knowledge: proteins with no experimental annotations in any namespace at t0. All new annotations form the ground truth."
           />
           <StatBadge
-            label="LK proteins"
+            label={t("evaluationSetCard.lkProteins")}
             value={e.stats.lk_proteins}
             tooltip="Limited-Knowledge: proteins annotated in some namespaces at t0, but which gained new terms in a namespace where they had nothing. Only the new terms in that empty namespace are evaluated."
           />
           <StatBadge
-            label="PK proteins"
+            label={t("evaluationSetCard.pkProteins")}
             value={e.stats.pk_proteins}
             tooltip="Partial-Knowledge: proteins that already had annotations in a namespace at t0 and gained new terms in that same namespace. Only the novel terms are evaluated; old terms are excluded via -known. A protein can be LK in one namespace and PK in another simultaneously."
           />
@@ -352,33 +349,33 @@ function EvaluationSetCard({
           {/* Downloads */}
           <div>
             <p className="text-xs font-medium text-gray-500 mb-2">
-              Ground truth files
+              {t("evaluationSetCard.groundTruthFiles")}
               <InfoTooltip text="2-column TSV files (protein accession → GO term) used as input to the cafaeval evaluator. Each file contains only the novel experimental annotations for that category." />
             </p>
             <div className="flex flex-wrap gap-2">
               <DownloadLink
                 href={`${baseUrl()}/annotations/evaluation-sets/${e.id}/ground-truth-NK.tsv`}
-                label="NK"
+                label={t("evaluationSetCard.downloadNK")}
                 filename="ground_truth_NK.tsv"
               />
               <DownloadLink
                 href={`${baseUrl()}/annotations/evaluation-sets/${e.id}/ground-truth-LK.tsv`}
-                label="LK"
+                label={t("evaluationSetCard.downloadLK")}
                 filename="ground_truth_LK.tsv"
               />
               <DownloadLink
                 href={`${baseUrl()}/annotations/evaluation-sets/${e.id}/ground-truth-PK.tsv`}
-                label="PK"
+                label={t("evaluationSetCard.downloadPK")}
                 filename="ground_truth_PK.tsv"
               />
               <DownloadLink
                 href={`${baseUrl()}/annotations/evaluation-sets/${e.id}/known-terms.tsv`}
-                label="Known terms"
+                label={t("evaluationSetCard.downloadKnownTerms")}
                 filename="known_terms.tsv"
               />
             </div>
             <p className="text-xs text-gray-400 mt-1">
-              Known terms
+              {t("evaluationSetCard.downloadKnownTerms")}
               <InfoTooltip text="All experimental annotations from the old snapshot for PK proteins in the relevant namespace. Passed to cafaeval with -known to exclude them from scoring — this penalises methods that simply repeat prior annotations." />
               : passed to cafaeval as <code className="font-mono">-known</code> for the PK pass only.
             </p>
@@ -387,28 +384,28 @@ function EvaluationSetCard({
           {/* FASTA downloads */}
           <div>
             <p className="text-xs font-medium text-gray-500 mb-2">
-              Delta protein sequences (FASTA)
+              {t("evaluationSetCard.deltaProteinSequences")}
               <InfoTooltip text="Sequences of proteins that gained new experimental GO annotations (delta proteins). Download the full set or per-category subsets to compute embeddings and run predictions before evaluation." />
             </p>
             <div className="flex flex-wrap gap-2">
               <DownloadLink
                 href={`${baseUrl()}/annotations/evaluation-sets/${e.id}/delta-proteins.fasta?category=all`}
-                label="All delta (NK+LK+PK)"
+                label={t("evaluationSetCard.allDelta")}
                 filename={`delta_proteins_all_${e.id.slice(0, 8)}.fasta`}
               />
               <DownloadLink
                 href={`${baseUrl()}/annotations/evaluation-sets/${e.id}/delta-proteins.fasta?category=nk`}
-                label="NK only"
+                label={t("evaluationSetCard.nkOnly")}
                 filename={`delta_proteins_nk_${e.id.slice(0, 8)}.fasta`}
               />
               <DownloadLink
                 href={`${baseUrl()}/annotations/evaluation-sets/${e.id}/delta-proteins.fasta?category=lk`}
-                label="LK only"
+                label={t("evaluationSetCard.lkOnly")}
                 filename={`delta_proteins_lk_${e.id.slice(0, 8)}.fasta`}
               />
               <DownloadLink
                 href={`${baseUrl()}/annotations/evaluation-sets/${e.id}/delta-proteins.fasta?category=pk`}
-                label="PK only"
+                label={t("evaluationSetCard.pkOnly")}
                 filename={`delta_proteins_pk_${e.id.slice(0, 8)}.fasta`}
               />
             </div>
@@ -416,16 +413,16 @@ function EvaluationSetCard({
 
           {/* Run evaluation */}
           <div className="space-y-3">
-            <p className="text-xs font-medium text-gray-500">Run CAFA evaluator</p>
+            <p className="text-xs font-medium text-gray-500">{t("evaluationSetCard.runCafaEvaluator")}</p>
             <div className="grid grid-cols-3 gap-3">
               <div>
-                <label className={labelClass}>Prediction set</label>
+                <label className={labelClass}>{t("evaluationSetCard.predictionSetLabel")}</label>
                 <select
                   value={predSetId}
                   onChange={(ev) => setPredSetId(ev.target.value)}
                   className={selectClass}
                 >
-                  <option value="">— select —</option>
+                  <option value="">{t("generateSection.selectSet")}</option>
                   {predictionSets.map((p) => (
                     <option key={p.id} value={p.id}>{predLabel(p)}</option>
                   ))}
@@ -433,7 +430,7 @@ function EvaluationSetCard({
               </div>
               <div>
                 <label className={labelClass}>
-                  Scoring config (optional)
+                  {t("evaluationSetCard.scoringConfigLabel")}
                   <InfoTooltip text="Scoring formula applied to compute CAFA prediction scores. If omitted, falls back to 1 − cosine_distance / 2." />
                 </label>
                 <select
@@ -441,14 +438,14 @@ function EvaluationSetCard({
                   onChange={(ev) => setScoringConfigId(ev.target.value)}
                   className={selectClass}
                 >
-                  <option value="">— fallback (1−d/2) —</option>
+                  <option value="">{t("evaluationSetCard.fallbackFormula")}</option>
                   {scoringConfigs.map((c) => (
                     <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
                 </select>
               </div>
               <div>
-                <label className={labelClass}>Max distance (optional)</label>
+                <label className={labelClass}>{t("evaluationSetCard.maxDistanceLabel")}</label>
                 <input
                   type="number" min="0" max="2" step="0.05" placeholder="no limit"
                   value={maxDistance}
@@ -463,11 +460,10 @@ function EvaluationSetCard({
               </p>
             )}
 
-            {/* Success banner — shown after a job is successfully submitted */}
             {pendingJobId && (
               <div className="rounded border border-blue-200 bg-blue-50 px-3 py-2.5 text-sm text-blue-800 flex items-center justify-between gap-3">
                 <span>
-                  Job queued.{" "}
+                  {t("evaluationSetCard.jobQueued")}{" "}
                   {pollingResults
                     ? "Checking for results every 10 s…"
                     : "Results will appear below when the job completes."}
@@ -476,7 +472,7 @@ function EvaluationSetCard({
                   href={`/jobs/${pendingJobId}`}
                   className="shrink-0 rounded border border-blue-300 bg-white px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100 transition-colors"
                 >
-                  View job →
+                  {t("evaluationSetCard.viewJob")}
                 </a>
               </div>
             )}
@@ -486,7 +482,7 @@ function EvaluationSetCard({
               disabled={!predSetId || running}
               className={btnPrimary}
             >
-              {running ? "Queuing…" : "Run Evaluation (NK + LK + PK)"}
+              {running ? t("generateSection.generating") : t("evaluationSetCard.runEvaluation")}
             </button>
           </div>
 
@@ -494,9 +490,9 @@ function EvaluationSetCard({
           <div>
             <div className="flex items-center justify-between mb-3">
               <p className="text-xs font-medium text-gray-500">
-                Results
+                {t("evaluationSetCard.resultsHeading")}
                 {pollingResults && (
-                  <span className="ml-2 text-blue-500 animate-pulse">● polling</span>
+                  <span className="ml-2 text-blue-500 animate-pulse">{t("evaluationSetCard.pollingResults")}</span>
                 )}
               </p>
               <button
@@ -504,13 +500,13 @@ function EvaluationSetCard({
                 disabled={loadingResults}
                 className="text-xs text-gray-400 hover:text-gray-700 border rounded px-2 py-0.5 disabled:opacity-40"
               >
-                {loadingResults ? "Refreshing…" : "↻ Refresh"}
+                {loadingResults ? t("evaluationSetCard.refreshing") : t("evaluationSetCard.refreshResults")}
               </button>
             </div>
             {loadingResults ? (
               <p className="text-sm text-gray-400">Loading…</p>
             ) : results.length === 0 ? (
-              <p className="text-sm text-gray-400">No evaluations run yet.</p>
+              <p className="text-sm text-gray-400">{t("evaluationSetCard.noEvaluations")}</p>
             ) : (
               <div className="space-y-6">
                 {results.map((r) => {
@@ -522,15 +518,15 @@ function EvaluationSetCard({
                       <div className="flex items-start justify-between gap-2">
                         <div className="space-y-0.5 text-xs text-gray-500 min-w-0">
                           <div>
-                            <span className="font-medium text-gray-700">Prediction set: </span>
+                            <span className="font-medium text-gray-700">{t("evaluationSetCard.predictionSet")} </span>
                             {pred
                               ? <span title={r.prediction_set_id}>{r.prediction_set_id.slice(0, 8)}… · {new Date(pred.created_at).toLocaleDateString()}{pred.prediction_count != null ? ` · ${pred.prediction_count.toLocaleString()} preds.` : ""}</span>
                               : <span className="font-mono">{r.prediction_set_id.slice(0, 8)}…</span>
                             }
                           </div>
                           <div>
-                            <span className="font-medium text-gray-700">Scoring: </span>
-                            {sc ? sc.name : <span className="italic text-gray-400">fallback (1−d/2)</span>}
+                            <span className="font-medium text-gray-700">{t("evaluationSetCard.scoring")} </span>
+                            {sc ? sc.name : <span className="italic text-gray-400">{t("evaluationSetCard.fallbackFormula")}</span>}
                             {sc?.description && <InfoTooltip text={sc.description} />}
                           </div>
                           <div className="text-gray-400">{new Date(r.created_at).toLocaleString()}</div>
@@ -541,18 +537,18 @@ function EvaluationSetCard({
                             download={`cafaeval_${r.id.slice(0, 8)}.zip`}
                             className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-1 text-xs hover:bg-gray-50 transition-colors"
                           >
-                            ↓ Artifacts (.zip)
+                            {t("evaluationSetCard.artifactsDownload")}
                           </a>
                           <button
                             onClick={async () => {
-                              if (!confirm("Delete this evaluation result?")) return;
+                              if (!confirm(t("evaluationSetCard.deleteResultConfirm"))) return;
                               const res = await fetch(`${baseUrl()}/annotations/evaluation-sets/${e.id}/results/${r.id}`, { method: "DELETE" });
                               if (!res.ok) throw new Error(await res.text());
                               setResults((prev) => prev.filter((x) => x.id !== r.id));
                             }}
                             className="rounded-md border border-red-200 bg-white px-3 py-1 text-xs text-red-600 hover:bg-red-50 transition-colors"
                           >
-                            Delete
+                            {t("evaluationSetCard.resultDelete")}
                           </button>
                         </div>
                       </div>
@@ -570,6 +566,7 @@ function EvaluationSetCard({
 }
 
 export default function EvaluationPage() {
+  const t = useTranslations("evaluation");
   const [annotationSets, setAnnotationSets] = useState<AnnotationSet[]>([]);
   const [predictionSets, setPredictionSets] = useState<PredictionSet[]>([]);
   const [evaluationSets, setEvaluationSets] = useState<EvaluationSet[]>([]);
@@ -620,31 +617,30 @@ export default function EvaluationPage() {
 
   return (
     <div className="p-8 max-w-3xl space-y-10">
-      <h1 className="text-xl font-semibold text-gray-900">CAFA Evaluation</h1>
+      <h1 className="text-xl font-semibold text-gray-900">{t("title")}</h1>
 
       {/* ── Generate Evaluation Set ───────────────────────────────── */}
       <section className="rounded-lg border border-gray-200 p-6 space-y-5">
         <div>
-          <h2 className="text-base font-semibold text-gray-800">New Evaluation Set</h2>
+          <h2 className="text-base font-semibold text-gray-800">{t("generateSection.heading")}</h2>
           <p className="mt-1 text-sm text-gray-500">
-            Computes the delta between two GOA releases. Applies experimental evidence
-            filtering and NOT-qualifier propagation through the GO DAG.
+            {t("generateSection.description")}
           </p>
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className={labelClass}>Old GOA set (reference)</label>
+            <label className={labelClass}>{t("generateSection.oldSetLabel")}</label>
             <select value={oldSetId} onChange={(e) => setOldSetId(e.target.value)} className={selectClass}>
-              <option value="">— select —</option>
+              <option value="">{t("generateSection.selectSet")}</option>
               {goaSets.map((s) => (
                 <option key={s.id} value={s.id}>{setLabel(s)}</option>
               ))}
             </select>
           </div>
           <div>
-            <label className={labelClass}>New GOA set (ground truth)</label>
+            <label className={labelClass}>{t("generateSection.newSetLabel")}</label>
             <select value={newSetId} onChange={(e) => setNewSetId(e.target.value)} className={selectClass}>
-              <option value="">— select —</option>
+              <option value="">{t("generateSection.selectSet")}</option>
               {goaSets.map((s) => (
                 <option key={s.id} value={s.id}>{setLabel(s)}</option>
               ))}
@@ -652,20 +648,20 @@ export default function EvaluationPage() {
           </div>
         </div>
         {oldSetId && newSetId && oldSetId === newSetId && (
-          <p className="text-xs text-red-500">Old and new sets must be different.</p>
+          <p className="text-xs text-red-500">{t("generateSection.errorSameSets")}</p>
         )}
         {genError && (
           <p className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{genError}</p>
         )}
         <button onClick={handleGenerate} disabled={!canGenerate || generating} className={btnPrimary}>
-          {generating ? "Queuing…" : "Generate Evaluation Set"}
+          {generating ? t("generateSection.generating") : t("generateSection.generateEvaluationSet")}
         </button>
       </section>
 
       {/* ── Evaluation Sets ───────────────────────────────────────── */}
       {evaluationSets.length > 0 && (
         <section className="space-y-4">
-          <h2 className="text-base font-semibold text-gray-800">Evaluation Sets</h2>
+          <h2 className="text-base font-semibold text-gray-800">{t("evaluationSetsSection.heading")}</h2>
           {evaluationSets.map((e) => (
             <EvaluationSetCard
               key={e.id}
@@ -683,7 +679,7 @@ export default function EvaluationPage() {
 
       {/* ── Evaluator command reference ───────────────────────────── */}
       <section className="rounded-lg border border-gray-100 bg-gray-50 p-5">
-        <h2 className="text-sm font-semibold text-gray-700 mb-2">Manual evaluator command</h2>
+        <h2 className="text-sm font-semibold text-gray-700 mb-2">{t("manualEvaluatorSection.heading")}</h2>
         <pre className="text-xs text-gray-600 overflow-x-auto whitespace-pre-wrap leading-relaxed">
 {`python -m cafaeval go-basic.obo predictions/ ground_truth_NK.tsv -out_dir results/NK
 python -m cafaeval go-basic.obo predictions/ ground_truth_LK.tsv -out_dir results/LK

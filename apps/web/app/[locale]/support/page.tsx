@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { baseUrl } from "@/lib/api";
+import { useTranslations } from "next-intl";
 
 type Comment = { id: string; comment: string; created_at: string };
 type SupportData = { count: number; comments: Comment[] };
@@ -15,6 +16,7 @@ function timeAgo(iso: string): string {
 }
 
 export default function SupportPage() {
+  const t = useTranslations("support");
   const [data, setData] = useState<SupportData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -38,9 +40,9 @@ export default function SupportPage() {
       <div className="rounded-2xl border border-blue-100 bg-blue-50 px-8 py-10 text-center space-y-3">
         <div className="text-6xl">👍</div>
         <div className="text-5xl font-bold text-blue-700">{data.count.toLocaleString()}</div>
-        <div className="text-base text-blue-500 font-medium">people support this project</div>
+        <div className="text-base text-blue-500 font-medium">{t("hero.supportCount", { count: data.count })}</div>
         <div className="text-xs text-blue-400 pt-1">
-          {withComments} with comments · {anonymous} anonymous
+          {t("hero.withComments", { count: withComments })} · {t("hero.anonymous", { count: anonymous })}
         </div>
       </div>
 
@@ -48,7 +50,7 @@ export default function SupportPage() {
       {data.comments.length > 0 && (
         <section className="space-y-3">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-400">
-            What people are saying
+            {t("commentsSection.heading")}
           </h2>
           <div className="space-y-3">
             {data.comments.map((c) => (
@@ -65,7 +67,7 @@ export default function SupportPage() {
       )}
 
       {data.comments.length === 0 && (
-        <p className="text-center text-sm text-gray-400">No comments yet. Be the first!</p>
+        <p className="text-center text-sm text-gray-400">{t("commentsSection.noComments")}</p>
       )}
     </div>
   );

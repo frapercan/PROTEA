@@ -2,6 +2,18 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
+import { useToast } from "@/components/Toast";
+import { SkeletonTableRow } from "@/components/Skeleton";
+import {
+  listEmbeddingConfigs,
+  createEmbeddingConfig,
+  deleteEmbeddingConfig,
+  createJob,
+  listQuerySets,
+  EmbeddingConfig,
+  QuerySet,
+} from "@/lib/api";
 
 type ModelPreset = {
   value: string;
@@ -31,17 +43,6 @@ const MODEL_PRESETS: Record<string, ModelPreset[]> = {
     { value: "facebook/esm2_t33_650M_UR50D", label: "ESM-2 650M (auto backend)", layers: 33, defaultMaxLength: 1022 },
   ],
 };
-import { useToast } from "@/components/Toast";
-import { SkeletonTableRow } from "@/components/Skeleton";
-import {
-  listEmbeddingConfigs,
-  createEmbeddingConfig,
-  deleteEmbeddingConfig,
-  createJob,
-  listQuerySets,
-  EmbeddingConfig,
-  QuerySet,
-} from "@/lib/api";
 
 type Tab = "configs" | "compute";
 
@@ -55,6 +56,7 @@ function shortId(id: string) {
 }
 
 export default function EmbeddingsPage() {
+  const t = useTranslations("embeddings");
   const [activeTab, setActiveTab] = useState<Tab>("configs");
   const toast = useToast();
 
@@ -67,7 +69,7 @@ export default function EmbeddingsPage() {
   // New config form state
   const [showConfigForm, setShowConfigForm] = useState(false);
   const [cfgBackend, setCfgBackend] = useState("esm");
-  const [cfgModelPreset, setCfgModelPreset] = useState(MODEL_PRESETS.esm[3].value); // 650M default
+  const [cfgModelPreset, setCfgModelPreset] = useState(MODEL_PRESETS.esm[3].value);
   const [cfgModelCustom, setCfgModelCustom] = useState("");
   const cfgModelName = cfgModelPreset === "__custom__" ? cfgModelCustom : cfgModelPreset;
   const [cfgLayerIndices, setCfgLayerIndices] = useState("0");
@@ -93,7 +95,6 @@ export default function EmbeddingsPage() {
   const [cmpResult, setCmpResult] = useState<{ id: string; status: string } | null>(null);
   const [cmpError, setCmpError] = useState("");
   const [cmpSubmitting, setCmpSubmitting] = useState(false);
-
 
   async function loadAll() {
     setLoading(true);
@@ -162,8 +163,8 @@ export default function EmbeddingsPage() {
     const cfg = configs.find((c) => c.id === id);
     const count = cfg?.embedding_count ?? 0;
     const msg = count > 0
-      ? `Delete this embedding config and its ${count.toLocaleString()} stored embeddings? This cannot be undone.`
-      : "Delete this embedding config?";
+      ? t("configsTab.deleteConfirm", { count: count.toLocaleString() })
+      : t("configsTab.deleteConfirmNoEmbeddings");
     if (!confirm(msg)) return;
     try {
       await deleteEmbeddingConfig(id);
@@ -209,8 +210,8 @@ export default function EmbeddingsPage() {
   }
 
   const tabs: { key: Tab; label: string }[] = [
-    { key: "configs", label: "Configs" },
-    { key: "compute", label: "Compute" },
+    { key: "configs", label: t("tabs.configs") },
+    { key: "compute", label: t("tabs.compute") },
   ];
 
   const inputClass =
@@ -220,7 +221,7 @@ export default function EmbeddingsPage() {
   return (
     <>
       <div className="flex flex-wrap items-center gap-3 mb-4">
-        <h1 className="text-xl font-semibold">Embeddings</h1>
+        <h1 className="text-xl font-semibold">{t("title")}</h1>
       </div>
 
       {error && (
@@ -231,17 +232,17 @@ export default function EmbeddingsPage() {
 
       {/* Tab bar */}
       <div className="flex gap-1 border-b mb-6 overflow-x-auto">
-        {tabs.map((t) => (
+        {tabs.map((tab) => (
           <button
-            key={t.key}
-            onClick={() => setActiveTab(t.key)}
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === t.key
+              activeTab === tab.key
                 ? "border-blue-600 text-blue-600"
                 : "border-transparent text-gray-500 hover:text-gray-700"
             }`}
           >
-            {t.label}
+            {tab.label}
           </button>
         ))}
       </div>
@@ -250,30 +251,27 @@ export default function EmbeddingsPage() {
       {activeTab === "configs" && (
         <div>
           <div className="flex items-center justify-between mb-3">
-            <p className="text-sm text-gray-500">{configs.length} config{configs.length !== 1 ? "s" : ""}</p>
+            <p className="text-sm text-gray-500">{t("configsTab.configs", { count: configs.length })}</p>
             <button
               onClick={() => setShowConfigForm((v) => !v)}
               className="rounded-md bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700"
             >
-              {showConfigForm ? "Cancel" : "+ New Config"}
+              {showConfigForm ? t("configsTab.cancel") : t("configsTab.newConfig")}
             </button>
           </div>
 
           {showConfigForm && (
             <div className="mb-6 rounded-lg border bg-white p-5 shadow-sm">
-              <h2 className="text-base font-semibold mb-4">New Embedding Config</h2>
+              <h2 className="text-base font-semibold mb-4">{t("configsTab.newConfigForm.title")}</h2>
               <form onSubmit={handleCreateConfig} className="space-y-4">
                 {/* Layer indexing convention warning */}
                 <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  <strong>Layer indexing — reverse convention:</strong>{" "}
-                  <code>0</code> = last (most semantic) layer,{" "}
-                  <code>1</code> = penultimate, etc.
-                  This matches PIS / FANTASIA. Use <code>0</code> for the standard last-layer embedding.
+                  {t("configsTab.newConfigForm.layerIndexingWarning")}
                 </div>
 
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
-                    <label className={labelClass}>Model Backend</label>
+                    <label className={labelClass}>{t("configsTab.newConfigForm.modelBackendLabel")}</label>
                     <select
                       value={cfgBackend}
                       onChange={(e) => {
@@ -287,20 +285,18 @@ export default function EmbeddingsPage() {
                         } else {
                           setCfgModelPreset("__custom__");
                         }
-                        // Reset layer indices — each backend has a different
-                        // model depth; 0 is always safe (= last layer).
                         setCfgLayerIndices("0");
                       }}
                       className={inputClass}
                     >
-                      <option value="esm">esm — HuggingFace EsmModel (ESM-2)</option>
-                      <option value="esm3c">esm3c — ESM SDK ESMC (ESM3c) · FP16 on GPU</option>
-                      <option value="t5">t5 — HuggingFace T5EncoderModel (ProstT5…)</option>
-                      <option value="auto">auto — falls back to esm</option>
+                      <option value="esm">{t("configsTab.newConfigForm.modelBackendEsm")}</option>
+                      <option value="esm3c">{t("configsTab.newConfigForm.modelBackendEsm3c")}</option>
+                      <option value="t5">{t("configsTab.newConfigForm.modelBackendT5")}</option>
+                      <option value="auto">{t("configsTab.newConfigForm.modelBackendAuto")}</option>
                     </select>
                   </div>
                   <div>
-                    <label className={labelClass}>Model</label>
+                    <label className={labelClass}>{t("configsTab.newConfigForm.modelLabel")}</label>
                     <select
                       value={cfgModelPreset}
                       onChange={(e) => {
@@ -321,7 +317,7 @@ export default function EmbeddingsPage() {
                         type="text"
                         value={cfgModelCustom}
                         onChange={(e) => setCfgModelCustom(e.target.value)}
-                        placeholder="e.g. facebook/esm2_t33_650M_UR50D"
+                        placeholder={t("configsTab.newConfigForm.customModelPlaceholder")}
                         required
                         className={`${inputClass} mt-1 font-mono text-xs`}
                       />
@@ -334,37 +330,37 @@ export default function EmbeddingsPage() {
                   </div>
                   <div>
                     <label className={labelClass}>
-                      Layer Indices{" "}
-                      <span className="font-normal text-gray-400">(0 = last, 1 = penultimate…)</span>
+                      {t("configsTab.newConfigForm.layerIndicesLabel")}{" "}
+                      <span className="font-normal text-gray-400">{t("configsTab.newConfigForm.layerIndicesHelper")}</span>
                     </label>
                     <input
                       type="text"
                       value={cfgLayerIndices}
                       onChange={(e) => setCfgLayerIndices(e.target.value)}
-                      placeholder="0  or  0,1,2"
+                      placeholder={t("configsTab.newConfigForm.layerIndicesPlaceholder")}
                       required
                       className={inputClass}
                     />
                   </div>
                   <div>
-                    <label className={labelClass}>Layer Aggregation</label>
+                    <label className={labelClass}>{t("configsTab.newConfigForm.layerAggLabel")}</label>
                     <select value={cfgLayerAgg} onChange={(e) => setCfgLayerAgg(e.target.value)} className={inputClass}>
-                      <option value="mean">mean — element-wise average</option>
-                      <option value="last">last — only the last selected layer</option>
-                      <option value="concat">concat — concatenate all (dim × n_layers)</option>
+                      <option value="mean">{t("configsTab.newConfigForm.layerAggMean")}</option>
+                      <option value="last">{t("configsTab.newConfigForm.layerAggLast")}</option>
+                      <option value="concat">{t("configsTab.newConfigForm.layerAggConcat")}</option>
                     </select>
                   </div>
                   <div>
-                    <label className={labelClass}>Sequence Pooling</label>
+                    <label className={labelClass}>{t("configsTab.newConfigForm.poolingLabel")}</label>
                     <select value={cfgPooling} onChange={(e) => setCfgPooling(e.target.value)} className={inputClass}>
-                      <option value="mean">mean — mean over residues</option>
-                      <option value="max">max — max over residues</option>
-                      <option value="mean_max">mean_max — concat(mean, max) · dim × 2</option>
-                      <option value="cls">cls — CLS/BOS token at position 0</option>
+                      <option value="mean">{t("configsTab.newConfigForm.poolingMean")}</option>
+                      <option value="max">{t("configsTab.newConfigForm.poolingMax")}</option>
+                      <option value="mean_max">{t("configsTab.newConfigForm.poolingMeanMax")}</option>
+                      <option value="cls">{t("configsTab.newConfigForm.poolingCls")}</option>
                     </select>
                   </div>
                   <div>
-                    <label className={labelClass}>Max Length (tokens)</label>
+                    <label className={labelClass}>{t("configsTab.newConfigForm.maxLengthLabel")}</label>
                     <input
                       type="number"
                       value={cfgMaxLength}
@@ -374,7 +370,7 @@ export default function EmbeddingsPage() {
                     />
                   </div>
                   <div className="sm:col-span-2">
-                    <label className={labelClass}>Description (optional)</label>
+                    <label className={labelClass}>{t("configsTab.newConfigForm.descriptionLabel")}</label>
                     <input
                       type="text"
                       value={cfgDescription}
@@ -393,7 +389,7 @@ export default function EmbeddingsPage() {
                       className="rounded"
                     />
                     <label htmlFor="cfg-norm-residues" className="text-sm text-gray-700 cursor-pointer">
-                      Normalize residues (L2 per-residue before pooling)
+                      {t("configsTab.newConfigForm.normalizeResidues")}
                     </label>
                   </div>
                   <div className="flex items-center gap-2">
@@ -405,7 +401,7 @@ export default function EmbeddingsPage() {
                       className="rounded"
                     />
                     <label htmlFor="cfg-normalize" className="text-sm text-gray-700 cursor-pointer">
-                      Normalize final embedding (L2 after pooling)
+                      {t("configsTab.newConfigForm.normalizeFinal")}
                     </label>
                   </div>
 
@@ -419,13 +415,13 @@ export default function EmbeddingsPage() {
                       className="rounded"
                     />
                     <label htmlFor="cfg-chunking" className="text-sm text-gray-700 cursor-pointer">
-                      Enable chunking (long sequences → multiple embeddings per sequence)
+                      {t("configsTab.newConfigForm.enableChunking")}
                     </label>
                   </div>
                   {cfgUseChunking && (
                     <>
                       <div>
-                        <label className={labelClass}>Chunk Size (residues)</label>
+                        <label className={labelClass}>{t("configsTab.newConfigForm.chunkSizeLabel")}</label>
                         <input
                           type="number"
                           value={cfgChunkSize}
@@ -435,7 +431,7 @@ export default function EmbeddingsPage() {
                         />
                       </div>
                       <div>
-                        <label className={labelClass}>Chunk Overlap (residues)</label>
+                        <label className={labelClass}>{t("configsTab.newConfigForm.chunkOverlapLabel")}</label>
                         <input
                           type="number"
                           value={cfgChunkOverlap}
@@ -460,14 +456,14 @@ export default function EmbeddingsPage() {
                     onClick={() => setShowConfigForm(false)}
                     className="rounded-md border px-4 py-2 text-sm hover:bg-gray-50"
                   >
-                    Cancel
+                    {t("configsTab.cancel")}
                   </button>
                   <button
                     type="submit"
                     disabled={cfgSubmitting}
                     className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
                   >
-                    {cfgSubmitting ? "Creating…" : "Create Config"}
+                    {cfgSubmitting ? t("configsTab.newConfigForm.creating") : t("configsTab.newConfigForm.createConfig")}
                   </button>
                 </div>
               </form>
@@ -481,14 +477,14 @@ export default function EmbeddingsPage() {
           ) : (
             <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
               <div className="grid grid-cols-[1fr_140px_80px_100px_80px_80px_60px_160px_60px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                <div>Description</div>
-                <div>Model</div>
-                <div>Backend</div>
-                <div>Layers</div>
-                <div>Agg</div>
-                <div>Pool</div>
-                <div>Norm</div>
-                <div>Created</div>
+                <div>{t("configsTab.tableHeaders.description")}</div>
+                <div>{t("configsTab.tableHeaders.model")}</div>
+                <div>{t("configsTab.tableHeaders.backend")}</div>
+                <div>{t("configsTab.tableHeaders.layers")}</div>
+                <div>{t("configsTab.tableHeaders.agg")}</div>
+                <div>{t("configsTab.tableHeaders.pool")}</div>
+                <div>{t("configsTab.tableHeaders.norm")}</div>
+                <div>{t("configsTab.tableHeaders.created")}</div>
                 <div></div>
               </div>
               {configs.map((c) => (
@@ -519,9 +515,9 @@ export default function EmbeddingsPage() {
               ))}
               {configs.length === 0 && (
                 <div className="px-4 py-8 text-center text-sm text-gray-400">
-                  No embedding configs yet.{" "}
+                  {t("configsTab.noConfigs")}{" "}
                   <button onClick={() => setShowConfigForm(true)} className="text-blue-600 underline">
-                    Create one
+                    ↑
                   </button>
                 </div>
               )}
@@ -534,13 +530,13 @@ export default function EmbeddingsPage() {
       {activeTab === "compute" && (
         <div className="max-w-2xl">
           <div className="rounded-lg border bg-white p-6 shadow-sm">
-            <h2 className="text-base font-semibold mb-4">Compute Embeddings</h2>
+            <h2 className="text-base font-semibold mb-4">{t("computeTab.title")}</h2>
             {loading ? (
-              <p className="text-sm text-gray-400">Loading…</p>
+              <p className="text-sm text-gray-400">{t("computeTab.loading")}</p>
             ) : (
               <form onSubmit={handleComputeSubmit} className="space-y-4">
                 <div>
-                  <label className={labelClass}>Embedding Config</label>
+                  <label className={labelClass}>{t("computeTab.configLabel")}</label>
                   <select
                     value={cmpConfigId || configs[0]?.id || ""}
                     onChange={(e) => setCmpConfigId(e.target.value)}
@@ -548,7 +544,7 @@ export default function EmbeddingsPage() {
                     className={inputClass}
                   >
                     {configs.length === 0 && (
-                      <option value="">— no configs available —</option>
+                      <option value="">{t("computeTab.noConfigs")}</option>
                     )}
                     {configs.map((c) => (
                       <option key={c.id} value={c.id}>
@@ -560,14 +556,14 @@ export default function EmbeddingsPage() {
 
                 <div>
                   <label className={labelClass}>
-                    Query Set <span className="font-normal text-gray-400">(optional — leave empty to compute all)</span>
+                    {t("computeTab.querySetLabel")} <span className="font-normal text-gray-400">{t("computeTab.querySetHelper")}</span>
                   </label>
                   <select
                     value={cmpQuerySetId}
                     onChange={(e) => setCmpQuerySetId(e.target.value)}
                     className={inputClass}
                   >
-                    <option value="">— all sequences —</option>
+                    <option value="">{t("computeTab.allSequences")}</option>
                     {querySets.map((qs) => (
                       <option key={qs.id} value={qs.id}>
                         {qs.name} ({qs.entry_count} seqs)
@@ -579,8 +575,8 @@ export default function EmbeddingsPage() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className={labelClass}>
-                      Queue Batch Size{" "}
-                      <span className="font-normal text-gray-400">(seqs/job)</span>
+                      {t("computeTab.queueBatchSizeLabel")}{" "}
+                      <span className="font-normal text-gray-400">{t("computeTab.queueBatchSizeHelper")}</span>
                     </label>
                     <input
                       type="number"
@@ -592,8 +588,8 @@ export default function EmbeddingsPage() {
                   </div>
                   <div>
                     <label className={labelClass}>
-                      Model Batch Size{" "}
-                      <span className="font-normal text-gray-400">(seqs/forward)</span>
+                      {t("computeTab.modelBatchSizeLabel")}{" "}
+                      <span className="font-normal text-gray-400">{t("computeTab.modelBatchSizeHelper")}</span>
                     </label>
                     <input
                       type="number"
@@ -606,7 +602,7 @@ export default function EmbeddingsPage() {
                 </div>
 
                 <div>
-                  <label className={labelClass}>Device</label>
+                  <label className={labelClass}>{t("computeTab.deviceLabel")}</label>
                   <select
                     value={["cpu", "cuda", "cuda:0", "cuda:1"].includes(cmpDevice) ? cmpDevice : "custom"}
                     onChange={(e) => {
@@ -614,11 +610,11 @@ export default function EmbeddingsPage() {
                     }}
                     className={inputClass}
                   >
-                    <option value="cpu">cpu — CPU (FP32)</option>
-                    <option value="cuda">cuda — GPU default (FP16 for ESM3c/T5)</option>
-                    <option value="cuda:0">cuda:0 — GPU 0</option>
-                    <option value="cuda:1">cuda:1 — GPU 1</option>
-                    <option value="custom">custom…</option>
+                    <option value="cpu">{t("computeTab.deviceCpu")}</option>
+                    <option value="cuda">{t("computeTab.deviceCuda")}</option>
+                    <option value="cuda:0">{t("computeTab.deviceCuda0")}</option>
+                    <option value="cuda:1">{t("computeTab.deviceCuda1")}</option>
+                    <option value="custom">{t("computeTab.deviceCustom")}</option>
                   </select>
                   {(cmpDevice === "custom" || !["cpu", "cuda", "cuda:0", "cuda:1"].includes(cmpDevice)) && (
                     <input
@@ -640,7 +636,7 @@ export default function EmbeddingsPage() {
                     className="rounded"
                   />
                   <label htmlFor="cmp-skip-existing" className="text-sm text-gray-700 cursor-pointer">
-                    Skip existing embeddings
+                    {t("computeTab.skipExisting")}
                   </label>
                 </div>
 
@@ -665,7 +661,7 @@ export default function EmbeddingsPage() {
                     disabled={cmpSubmitting || configs.length === 0}
                     className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
                   >
-                    {cmpSubmitting ? "Launching…" : "Launch Compute Job"}
+                    {cmpSubmitting ? t("computeTab.launching") : t("computeTab.launchComputeJob")}
                   </button>
                 </div>
               </form>
@@ -673,7 +669,6 @@ export default function EmbeddingsPage() {
           </div>
         </div>
       )}
-
     </>
   );
 }

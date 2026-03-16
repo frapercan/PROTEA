@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useToast } from "@/components/Toast";
 import { SkeletonTableRow } from "@/components/Skeleton";
+import { useTranslations } from "next-intl";
 import {
   getProteinStats,
   listProteins,
@@ -19,10 +20,11 @@ const labelClass = "block text-sm font-medium text-gray-700 mb-1";
 const PAGE_SIZE = 50;
 
 function ReviewedBadge({ reviewed }: { reviewed?: boolean | null }) {
+  const t = useTranslations("proteins");
   if (reviewed === true)
-    return <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 border border-blue-100">Swiss-Prot</span>;
+    return <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 border border-blue-100">{t("sourceSwissProt")}</span>;
   if (reviewed === false)
-    return <span className="rounded-full bg-gray-50 px-2 py-0.5 text-xs font-medium text-gray-500 border border-gray-200">TrEMBL</span>;
+    return <span className="rounded-full bg-gray-50 px-2 py-0.5 text-xs font-medium text-gray-500 border border-gray-200">{t("sourceTrembl")}</span>;
   return <span className="text-gray-300 text-xs">—</span>;
 }
 
@@ -37,6 +39,7 @@ function StatCard({ label, value, sub }: { label: string; value: number; sub?: s
 }
 
 export default function ProteinsPage() {
+  const t = useTranslations("proteins");
   const toast = useToast();
   const [activeTab, setActiveTab] = useState<Tab>("browse");
 
@@ -155,30 +158,30 @@ export default function ProteinsPage() {
   const currentPage = Math.floor(offset / PAGE_SIZE) + 1;
 
   const tabs: { key: Tab; label: string }[] = [
-    { key: "browse", label: "Browse" },
-    { key: "stats", label: "Stats" },
-    { key: "insert", label: "Insert Proteins" },
-    { key: "metadata", label: "Fetch Metadata" },
+    { key: "browse", label: t("tabs.browse") },
+    { key: "stats", label: t("tabs.stats") },
+    { key: "insert", label: t("tabs.insert") },
+    { key: "metadata", label: t("tabs.metadata") },
   ];
 
   return (
     <>
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-semibold">Proteins</h1>
+        <h1 className="text-xl font-semibold">{t("title")}</h1>
       </div>
 
       <div className="flex gap-1 border-b mb-6 overflow-x-auto">
-        {tabs.map((t) => (
+        {tabs.map((tab) => (
           <button
-            key={t.key}
-            onClick={() => setActiveTab(t.key)}
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === t.key
+              activeTab === tab.key
                 ? "border-blue-600 text-blue-600"
                 : "border-transparent text-gray-500 hover:text-gray-700"
             }`}
           >
-            {t.label}
+            {tab.label}
           </button>
         ))}
       </div>
@@ -193,11 +196,11 @@ export default function ProteinsPage() {
                 type="text"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
-                placeholder="accession, gene, organism…"
+                placeholder={t("browseTab.searchPlaceholder")}
                 className="rounded-md border px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-full sm:w-64"
               />
               <button type="submit" className="rounded-md border bg-white px-3 py-1.5 text-sm hover:bg-gray-50">
-                Search
+                {t("browseTab.search")}
               </button>
               {search && (
                 <button
@@ -205,7 +208,7 @@ export default function ProteinsPage() {
                   onClick={() => { setSearchInput(""); setSearch(""); loadProteins(0, "", reviewedFilter, canonicalOnly); }}
                   className="rounded-md border bg-white px-3 py-1.5 text-sm hover:bg-gray-50 text-gray-500"
                 >
-                  Clear
+                  {t("browseTab.clear")}
                 </button>
               )}
             </form>
@@ -215,9 +218,9 @@ export default function ProteinsPage() {
               onChange={(e) => handleFilterChange(e.target.value as typeof reviewedFilter, canonicalOnly)}
               className="rounded-md border bg-white px-3 py-1.5 text-sm focus:outline-none"
             >
-              <option value="all">All proteins</option>
-              <option value="reviewed">Swiss-Prot only</option>
-              <option value="unreviewed">TrEMBL only</option>
+              <option value="all">{t("browseTab.allProteins")}</option>
+              <option value="reviewed">{t("browseTab.swissProt")}</option>
+              <option value="unreviewed">{t("browseTab.trembl")}</option>
             </select>
 
             <label className="flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer select-none">
@@ -227,28 +230,28 @@ export default function ProteinsPage() {
                 onChange={(e) => handleFilterChange(reviewedFilter, e.target.checked)}
                 className="rounded"
               />
-              Canonical only
+              {t("browseTab.canonicalOnly")}
             </label>
 
-            <span className="ml-auto text-sm text-gray-400">{total.toLocaleString()} proteins</span>
+            <span className="ml-auto text-sm text-gray-400">{t("browseTab.totalProteins", { count: total.toLocaleString() })}</span>
           </div>
 
           {/* Table */}
           <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
             <div className="grid grid-cols-[130px_140px_120px_1fr_80px_110px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
-              <div>Accession</div>
-              <div>Entry Name</div>
-              <div>Gene</div>
-              <div>Organism</div>
-              <div>Length</div>
-              <div>Source</div>
+              <div>{t("browseTab.tableHeaders.accession")}</div>
+              <div>{t("browseTab.tableHeaders.entryName")}</div>
+              <div>{t("browseTab.tableHeaders.gene")}</div>
+              <div>{t("browseTab.tableHeaders.organism")}</div>
+              <div>{t("browseTab.tableHeaders.length")}</div>
+              <div>{t("browseTab.tableHeaders.source")}</div>
             </div>
 
             {loadingBrowse && Array.from({ length: 8 }).map((_, i) => <SkeletonTableRow key={i} cols={6} />)}
 
             {!loadingBrowse && proteins.length === 0 && (
               <div className="px-4 py-12 text-center text-sm text-gray-400">
-                No proteins found. Use the Insert Proteins tab to import from UniProt.
+                {t("browseTab.noProteinsCta")}
               </div>
             )}
 
@@ -271,21 +274,21 @@ export default function ProteinsPage() {
           {/* Pagination */}
           {totalPages > 1 && (
             <div className="mt-4 flex items-center justify-between text-sm text-gray-500">
-              <span>Page {currentPage} of {totalPages}</span>
+              <span>{t("browseTab.pagination.page", { current: currentPage, total: totalPages })}</span>
               <div className="flex gap-2">
                 <button
                   onClick={() => loadProteins(offset - PAGE_SIZE)}
                   disabled={offset === 0}
                   className="rounded-md border bg-white px-3 py-1.5 hover:bg-gray-50 disabled:opacity-40"
                 >
-                  Previous
+                  {t("browseTab.pagination.previous")}
                 </button>
                 <button
                   onClick={() => loadProteins(offset + PAGE_SIZE)}
                   disabled={offset + PAGE_SIZE >= total}
                   className="rounded-md border bg-white px-3 py-1.5 hover:bg-gray-50 disabled:opacity-40"
                 >
-                  Next
+                  {t("browseTab.pagination.next")}
                 </button>
               </div>
             </div>
@@ -298,38 +301,38 @@ export default function ProteinsPage() {
         <div>
           <div className="flex justify-end mb-4">
             <button onClick={loadStats} className="rounded-md border bg-white px-3 py-1.5 text-sm hover:bg-gray-50">
-              Refresh
+              {t("statsTab.refresh")}
             </button>
           </div>
-          {loadingStats && <p className="text-sm text-gray-400">Loading…</p>}
+          {loadingStats && <p className="text-sm text-gray-400">{t("statsTab.loading")}</p>}
           {stats && (
             <div className="space-y-6">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Overview</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">{t("statsTab.overview")}</p>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  <StatCard label="Total Proteins" value={stats.total} />
-                  <StatCard label="Canonical" value={stats.canonical} sub={`${stats.isoforms.toLocaleString()} isoforms`} />
-                  <StatCard label="Swiss-Prot" value={stats.reviewed} sub="reviewed" />
-                  <StatCard label="TrEMBL" value={stats.unreviewed} sub="unreviewed" />
+                  <StatCard label={t("statsTab.totalProteins")} value={stats.total} />
+                  <StatCard label={t("statsTab.canonical")} value={stats.canonical} sub={t("statsTab.isoforms", { count: stats.isoforms.toLocaleString() })} />
+                  <StatCard label={t("statsTab.reviewed")} value={stats.reviewed} sub={t("statsTab.reviewedSub")} />
+                  <StatCard label={t("statsTab.unreviewed")} value={stats.unreviewed} sub={t("statsTab.unreviewedSub")} />
                 </div>
               </div>
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Coverage</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">{t("statsTab.coverage")}</p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   <StatCard
-                    label="With Metadata"
+                    label={t("statsTab.withMetadata")}
                     value={stats.with_metadata}
-                    sub={stats.canonical > 0 ? `${Math.round((stats.with_metadata / stats.canonical) * 100)}% of canonical` : undefined}
+                    sub={stats.canonical > 0 ? t("statsTab.metadataSub", { percent: Math.round((stats.with_metadata / stats.canonical) * 100) }) : undefined}
                   />
                   <StatCard
-                    label="With Embeddings"
+                    label={t("statsTab.withEmbeddings")}
                     value={stats.with_embeddings}
-                    sub={stats.total > 0 ? `${Math.round((stats.with_embeddings / stats.total) * 100)}% of total` : undefined}
+                    sub={stats.total > 0 ? t("statsTab.embeddingsSub", { percent: Math.round((stats.with_embeddings / stats.total) * 100) }) : undefined}
                   />
                   <StatCard
-                    label="With GO Annotations"
+                    label={t("statsTab.withGoAnnotations")}
                     value={stats.with_go_annotations}
-                    sub={stats.total > 0 ? `${Math.round((stats.with_go_annotations / stats.total) * 100)}% of total` : undefined}
+                    sub={stats.total > 0 ? t("statsTab.goAnnotationsSub", { percent: Math.round((stats.with_go_annotations / stats.total) * 100) }) : undefined}
                   />
                 </div>
               </div>
@@ -342,37 +345,37 @@ export default function ProteinsPage() {
       {activeTab === "insert" && (
         <div className="max-w-2xl">
           <div className="rounded-lg border bg-white p-6 shadow-sm">
-            <h2 className="text-base font-semibold mb-1">Insert Proteins from UniProt</h2>
-            <p className="text-sm text-gray-500 mb-4">Downloads FASTA sequences and upserts Protein + Sequence rows.</p>
+            <h2 className="text-base font-semibold mb-1">{t("insertTab.title")}</h2>
+            <p className="text-sm text-gray-500 mb-4">{t("insertTab.description")}</p>
             <form onSubmit={handleInsertSubmit} className="space-y-4">
               <div>
-                <label className={labelClass}>Search criteria</label>
+                <label className={labelClass}>{t("insertTab.searchCriteriaLabel")}</label>
                 <input type="text" value={searchCriteria} onChange={(e) => setSearchCriteria(e.target.value)} required className={inputClass} placeholder="organism_id:9606 AND reviewed:true" />
-                <p className="mt-1 text-xs text-gray-400">UniProt query — <code>reviewed:true</code> = Swiss-Prot only</p>
+                <p className="mt-1 text-xs text-gray-400">{t("insertTab.searchCriteriaHelper")}</p>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className={labelClass}>Page size</label>
+                  <label className={labelClass}>{t("insertTab.pageSizeLabel")}</label>
                   <input type="number" value={pageSize} onChange={(e) => setPageSize(parseInt(e.target.value, 10))} min={1} className={inputClass} />
                 </div>
                 <div>
-                  <label className={labelClass}>Total limit <span className="font-normal text-gray-400">(optional)</span></label>
+                  <label className={labelClass}>{t("insertTab.totalLimitLabel")} <span className="font-normal text-gray-400">{t("insertTab.totalLimitOptional")}</span></label>
                   <input type="number" value={totalLimit} onChange={(e) => setTotalLimit(e.target.value)} placeholder="all" className={inputClass} />
                 </div>
               </div>
               <label className="flex items-center gap-2 text-sm cursor-pointer">
                 <input type="checkbox" checked={includeIsoforms} onChange={(e) => setIncludeIsoforms(e.target.checked)} className="rounded" />
-                Include isoforms
+                {t("insertTab.includeIsoforms")}
               </label>
               {insertResult && (
                 <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
-                  Job queued:{" "}
+                  {t("insertTab.jobQueuedPrefix")}
                   <Link href={`/jobs/${insertResult.id}`} className="font-mono underline hover:text-green-900">{insertResult.id}</Link>
                 </div>
               )}
               <div className="flex justify-end">
                 <button type="submit" disabled={insertSubmitting} className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50">
-                  {insertSubmitting ? "Launching…" : "Launch Job"}
+                  {insertSubmitting ? t("insertTab.launching") : t("insertTab.launchJob")}
                 </button>
               </div>
             </form>
@@ -384,33 +387,33 @@ export default function ProteinsPage() {
       {activeTab === "metadata" && (
         <div className="max-w-2xl">
           <div className="rounded-lg border bg-white p-6 shadow-sm">
-            <h2 className="text-base font-semibold mb-1">Fetch UniProt Metadata</h2>
-            <p className="text-sm text-gray-500 mb-4">Downloads TSV annotations and upserts ProteinUniProtMetadata rows.</p>
+            <h2 className="text-base font-semibold mb-1">{t("metadataTab.title")}</h2>
+            <p className="text-sm text-gray-500 mb-4">{t("metadataTab.description")}</p>
             <form onSubmit={handleMetaSubmit} className="space-y-4">
               <div>
-                <label className={labelClass}>Search criteria</label>
+                <label className={labelClass}>{t("metadataTab.searchCriteriaLabel")}</label>
                 <input type="text" value={metaCriteria} onChange={(e) => setMetaCriteria(e.target.value)} required className={inputClass} placeholder="organism_id:9606 AND reviewed:true" />
-                <p className="mt-1 text-xs text-gray-400">UniProt query — <code>reviewed:true</code> = Swiss-Prot only</p>
+                <p className="mt-1 text-xs text-gray-400">{t("metadataTab.searchCriteriaHelper")}</p>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className={labelClass}>Page size</label>
+                  <label className={labelClass}>{t("metadataTab.pageSizeLabel")}</label>
                   <input type="number" value={metaPageSize} onChange={(e) => setMetaPageSize(parseInt(e.target.value, 10))} min={1} className={inputClass} />
                 </div>
                 <div>
-                  <label className={labelClass}>Total limit <span className="font-normal text-gray-400">(optional)</span></label>
+                  <label className={labelClass}>{t("metadataTab.totalLimitLabel")} <span className="font-normal text-gray-400">{t("metadataTab.totalLimitOptional")}</span></label>
                   <input type="number" value={metaLimit} onChange={(e) => setMetaLimit(e.target.value)} placeholder="all" className={inputClass} />
                 </div>
               </div>
               {metaResult && (
                 <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
-                  Job queued:{" "}
+                  {t("insertTab.jobQueuedPrefix")}
                   <Link href={`/jobs/${metaResult.id}`} className="font-mono underline hover:text-green-900">{metaResult.id}</Link>
                 </div>
               )}
               <div className="flex justify-end">
                 <button type="submit" disabled={metaSubmitting} className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50">
-                  {metaSubmitting ? "Launching…" : "Launch Job"}
+                  {metaSubmitting ? t("metadataTab.launching") : t("metadataTab.launchJob")}
                 </button>
               </div>
             </form>

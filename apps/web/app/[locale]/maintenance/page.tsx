@@ -10,6 +10,7 @@ import {
   type VacuumEmbeddingsPreview,
 } from "@/lib/api";
 import { useToast } from "@/components/Toast";
+import { useTranslations } from "next-intl";
 
 function StatRow({ label, value, highlight }: { label: string; value: number | null; highlight?: boolean }) {
   return (
@@ -33,6 +34,11 @@ function VacuumCard({
   onVacuum,
   loading,
   vacuuming,
+  labelClean,
+  labelToClean,
+  labelRefresh,
+  labelVacuum,
+  labelCleaning,
 }: {
   title: string;
   description: string;
@@ -44,6 +50,11 @@ function VacuumCard({
   onVacuum: () => void;
   loading: boolean;
   vacuuming: boolean;
+  labelClean: string;
+  labelToClean: string;
+  labelRefresh: string;
+  labelVacuum: string;
+  labelCleaning: string;
 }) {
   const hasOrphans = orphanValue !== null && orphanValue > 0;
   const pct = totalValue ? Math.round(((orphanValue ?? 0) / totalValue) * 100) : 0;
@@ -61,7 +72,7 @@ function VacuumCard({
               hasOrphans ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"
             }`}
           >
-            {hasOrphans ? `${orphanValue.toLocaleString()} to clean` : "Clean"}
+            {hasOrphans ? labelToClean : labelClean}
           </span>
         )}
       </div>
@@ -89,14 +100,14 @@ function VacuumCard({
           disabled={loading}
           className="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 transition-colors"
         >
-          {loading ? "Loading…" : "Refresh"}
+          {loading ? "Loading…" : labelRefresh}
         </button>
         <button
           onClick={onVacuum}
           disabled={vacuuming || !hasOrphans}
           className="px-3 py-1.5 text-sm bg-amber-500 text-white rounded hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
-          {vacuuming ? "Cleaning…" : `Vacuum ${orphanValue !== null ? `(${orphanValue.toLocaleString()})` : ""}`}
+          {vacuuming ? labelCleaning : `${labelVacuum} ${orphanValue !== null ? `(${orphanValue.toLocaleString()})` : ""}`}
         </button>
       </div>
     </div>
@@ -104,6 +115,7 @@ function VacuumCard({
 }
 
 export default function MaintenancePage() {
+  const t = useTranslations("maintenance");
   const toast = useToast();
 
   const [seqPreview, setSeqPreview] = useState<VacuumSequencesPreview | null>(null);
@@ -188,23 +200,26 @@ export default function MaintenancePage() {
   return (
     <main className="max-w-2xl mx-auto px-4 py-8 space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Maintenance</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Clean up orphaned data that accumulates over time. All operations are safe to run while the system is active.
-        </p>
+        <h1 className="text-2xl font-bold text-gray-900">{t("title")}</h1>
+        <p className="text-sm text-gray-500 mt-1">{t("description")}</p>
       </div>
 
       <VacuumCard
-        title="Orphan Sequences"
-        description="Sequences with no Protein and no QuerySet entry pointing to them. Deleting them also cascades to their embeddings."
-        orphanLabel="Orphan sequences"
+        title={t("orphanSequences.title")}
+        description={t("orphanSequences.description")}
+        orphanLabel={t("orphanSequences.orphanLabel")}
         orphanValue={seqPreview?.orphan_sequences ?? null}
         totalValue={seqPreview?.total_sequences ?? null}
+        labelClean={t("orphanSequences.clean")}
+        labelToClean={t("orphanSequences.toClean", { count: seqPreview?.orphan_sequences ?? 0 })}
+        labelRefresh={t("orphanSequences.refresh")}
+        labelVacuum={t("orphanSequences.vacuum")}
+        labelCleaning={t("unindexedEmbeddings.cleaning")}
         stats={
           <>
-            <StatRow label="Total sequences" value={seqPreview?.total_sequences ?? null} />
-            <StatRow label="Referenced sequences" value={seqPreview?.referenced_sequences ?? null} />
-            <StatRow label="Orphan sequences" value={seqPreview?.orphan_sequences ?? null} highlight />
+            <StatRow label={t("orphanSequences.totalSequences")} value={seqPreview?.total_sequences ?? null} />
+            <StatRow label={t("orphanSequences.referencedSequences")} value={seqPreview?.referenced_sequences ?? null} />
+            <StatRow label={t("orphanSequences.orphanLabel")} value={seqPreview?.orphan_sequences ?? null} highlight />
           </>
         }
         onPreview={loadSeqPreview}
@@ -214,16 +229,21 @@ export default function MaintenancePage() {
       />
 
       <VacuumCard
-        title="Unindexed Embeddings"
-        description="Embeddings for sequences not in the protein reference database (e.g. query proteins after prediction). Safe to delete once predictions have been generated."
-        orphanLabel="Unindexed embeddings"
+        title={t("unindexedEmbeddings.title")}
+        description={t("unindexedEmbeddings.description")}
+        orphanLabel={t("unindexedEmbeddings.orphanLabel")}
         orphanValue={embPreview?.unindexed_embeddings ?? null}
         totalValue={embPreview?.total_embeddings ?? null}
+        labelClean={t("unindexedEmbeddings.clean")}
+        labelToClean={t("unindexedEmbeddings.toClean", { count: embPreview?.unindexed_embeddings ?? 0 })}
+        labelRefresh={t("unindexedEmbeddings.refresh")}
+        labelVacuum={t("unindexedEmbeddings.vacuum")}
+        labelCleaning={t("unindexedEmbeddings.cleaning")}
         stats={
           <>
-            <StatRow label="Total embeddings" value={embPreview?.total_embeddings ?? null} />
-            <StatRow label="Indexed embeddings" value={embPreview?.indexed_embeddings ?? null} />
-            <StatRow label="Unindexed embeddings" value={embPreview?.unindexed_embeddings ?? null} highlight />
+            <StatRow label={t("unindexedEmbeddings.totalEmbeddings")} value={embPreview?.total_embeddings ?? null} />
+            <StatRow label={t("unindexedEmbeddings.indexedEmbeddings")} value={embPreview?.indexed_embeddings ?? null} />
+            <StatRow label={t("unindexedEmbeddings.orphanLabel")} value={embPreview?.unindexed_embeddings ?? null} highlight />
           </>
         }
         onPreview={loadEmbPreview}

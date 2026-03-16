@@ -7,6 +7,7 @@ import { cancelJob, deleteJob, getJob, getJobEvents, listJobs, JobEvent, Job } f
 import { StatusBadge } from "@/components/StatusBadge";
 import { EventTimeline } from "@/components/EventTimeline";
 import { useToast } from "@/components/Toast";
+import { useTranslations } from "next-intl";
 
 const TERMINAL = ["succeeded", "failed", "cancelled"];
 
@@ -59,6 +60,7 @@ function ProgressBar({
 
 export default function JobDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id: jobId } = use(params);
+  const t = useTranslations("jobs");
   const [job, setJob] = useState<any>(null);
   const [events, setEvents] = useState<JobEvent[]>([]);
   const [children, setChildren] = useState<Job[]>([]);
@@ -108,7 +110,7 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
   }, [job?.status]);
 
   async function onDelete() {
-    if (!confirm("Delete this job?")) return;
+    if (!confirm(t("jobDetail.deleteConfirm"))) return;
     try {
       setError("");
       await deleteJob(jobId);
@@ -139,31 +141,31 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
     <div>
       {/* Header */}
       <div className="flex flex-wrap items-center gap-3">
-        <Link href="/jobs" className="text-sm text-gray-500 hover:text-gray-800">← Jobs</Link>
-        <h1 className="text-xl font-semibold">Job Detail</h1>
+        <Link href="/jobs" className="text-sm text-gray-500 hover:text-gray-800">{t("jobDetail.backToJobs")}</Link>
+        <h1 className="text-xl font-semibold">{t("jobDetail.title")}</h1>
         {isLive && (
           <span className="flex items-center gap-1 text-xs text-blue-600">
             <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-blue-500" />
-            Live
+            {t("jobDetail.live")}
           </span>
         )}
         <div className="ml-auto flex gap-2">
           <button onClick={refresh} className="rounded-md border bg-white px-3 py-1.5 text-sm hover:bg-gray-50">
-            Refresh
+            {t("refresh")}
           </button>
           <button
             onClick={onCancel}
             disabled={isTerminal}
             className="rounded-md border px-3 py-1.5 text-sm hover:bg-gray-50 disabled:opacity-40"
           >
-            Cancel
+            {t("jobDetail.cancel")}
           </button>
           <button
             onClick={onDelete}
             disabled={isLive}
             className="rounded-md border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 disabled:opacity-40"
           >
-            Delete
+            {t("jobDetail.delete")}
           </button>
         </div>
       </div>
@@ -184,10 +186,10 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
           </div>
 
           <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
-            <div><span className="text-gray-500">Queue:</span> <span className="font-mono text-xs">{job.queue_name}</span></div>
-            <div><span className="text-gray-500">Created:</span> {formatDate(job.created_at)}</div>
-            <div><span className="text-gray-500">Started:</span> {formatDate(job.started_at)}</div>
-            <div><span className="text-gray-500">Finished:</span> {formatDate(job.finished_at)}</div>
+            <div><span className="text-gray-500">{t("jobDetail.queue")}</span> <span className="font-mono text-xs">{job.queue_name}</span></div>
+            <div><span className="text-gray-500">{t("jobDetail.created")}</span> {formatDate(job.created_at)}</div>
+            <div><span className="text-gray-500">{t("jobDetail.started")}</span> {formatDate(job.started_at)}</div>
+            <div><span className="text-gray-500">{t("jobDetail.finished")}</span> {formatDate(job.finished_at)}</div>
             {job.error_code && (
               <div className="col-span-2 text-red-600">
                 <span className="font-medium">{job.error_code}:</span> {job.error_message}
@@ -209,7 +211,7 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
 
           {job.payload && Object.keys(job.payload).length > 0 && (
             <details className="text-sm">
-              <summary className="cursor-pointer text-gray-500 hover:text-gray-700">Payload</summary>
+              <summary className="cursor-pointer text-gray-500 hover:text-gray-700">{t("jobDetail.payloadLabel")}</summary>
               <pre className="mt-1 rounded bg-gray-50 p-2 text-xs overflow-auto">{JSON.stringify(job.payload, null, 2)}</pre>
             </details>
           )}
@@ -221,7 +223,7 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
         <div className="mt-6">
           <div className="mb-3 flex items-center gap-4 flex-wrap">
             <h2 className="text-base font-semibold">
-              Child Jobs <span className="text-xs font-normal text-gray-400">({children.length})</span>
+              {t("jobDetail.childJobsTitle")} <span className="text-xs font-normal text-gray-400">{t("jobDetail.childJobsCount", { count: children.length })}</span>
             </h2>
             {(["running", "queued", "succeeded", "failed", "cancelled"] as const).map((s) => {
               const n = children.filter((c) => c.status === s).length;
@@ -231,9 +233,9 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
           </div>
           <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
             <div className="grid grid-cols-[120px_1fr_160px] gap-2 border-b bg-gray-50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
-              <div>Status</div>
-              <div>Job ID</div>
-              <div>Finished</div>
+              <div>{t("status")}</div>
+              <div>{t("jobId")}</div>
+              <div>{t("jobDetail.finished")}</div>
             </div>
             {[...children]
               .sort((a, b) => {
@@ -258,7 +260,7 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
       {/* Events */}
       <div className="mt-6">
         <h2 className="mb-3 text-base font-semibold">
-          Events <span className="text-xs font-normal text-gray-400">({events.length})</span>
+          {t("jobDetail.eventsTitle")} <span className="text-xs font-normal text-gray-400">{t("jobDetail.eventsCount", { count: events.length })}</span>
         </h2>
         <EventTimeline events={events} />
       </div>

@@ -6,6 +6,8 @@ import { listJobs, Job } from "@/lib/api";
 import { StatusBadge } from "@/components/StatusBadge";
 import { SkeletonTableRow } from "@/components/Skeleton";
 import { useToast } from "@/components/Toast";
+import { useTranslations } from "next-intl";
+
 const STATUS_OPTIONS = ["", "queued", "running", "succeeded", "failed", "cancelled"];
 
 function formatDate(iso?: string | null) {
@@ -45,6 +47,7 @@ function InlineProgress({
 }
 
 export default function JobsPage() {
+  const t = useTranslations("jobs");
   const toast = useToast();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
@@ -91,11 +94,11 @@ export default function JobsPage() {
   return (
     <>
       <div className="flex flex-wrap items-center gap-3">
-        <h1 className="text-xl font-semibold">Jobs</h1>
+        <h1 className="text-xl font-semibold">{t("title")}</h1>
         {activeCount > 0 && (
           <span className="flex items-center gap-1.5 rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700 border border-blue-100">
             <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500" />
-            {activeCount} active
+            {t("activeJobs", { count: activeCount })}
           </span>
         )}
 
@@ -106,7 +109,7 @@ export default function JobsPage() {
             className="rounded-md border bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             {STATUS_OPTIONS.map((s) => (
-              <option key={s} value={s}>{s ? s.charAt(0).toUpperCase() + s.slice(1) : "All statuses"}</option>
+              <option key={s} value={s}>{s ? s.charAt(0).toUpperCase() + s.slice(1) : t("allStatuses")}</option>
             ))}
           </select>
 
@@ -117,7 +120,7 @@ export default function JobsPage() {
               onChange={(e) => setAutoRefresh(e.target.checked)}
               className="rounded"
             />
-            Auto-refresh
+            {t("autoRefresh")}
             {autoRefresh && <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-green-500" />}
           </label>
 
@@ -125,7 +128,7 @@ export default function JobsPage() {
             onClick={() => refresh(statusFilter)}
             className="rounded-md border bg-white px-3 py-1.5 text-sm hover:bg-gray-50"
           >
-            Refresh
+            {t("refresh")}
           </button>
         </div>
       </div>
@@ -145,7 +148,7 @@ export default function JobsPage() {
           </div>
         ))}
         {!loading && jobs.length === 0 && (
-          <div className="rounded-lg border bg-white px-4 py-8 text-center text-sm text-gray-400 shadow-sm">No jobs found.</div>
+          <div className="rounded-lg border bg-white px-4 py-8 text-center text-sm text-gray-400 shadow-sm">{t("noJobsFound")}</div>
         )}
         {!loading && jobs.map((j) => (
           <Link key={j.id} href={`/jobs/${j.id}`} className="block rounded-lg border bg-white p-3 shadow-sm hover:border-blue-200 hover:bg-blue-50 transition-colors">
@@ -163,10 +166,10 @@ export default function JobsPage() {
       {/* Desktop table */}
       <div className="mt-4 hidden lg:block overflow-hidden rounded-lg border bg-white shadow-sm">
         <div className="grid grid-cols-[140px_180px_1fr_180px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
-          <div>Status</div>
-          <div>Operation</div>
-          <div>Job ID</div>
-          <div>Created</div>
+          <div>{t("status")}</div>
+          <div>{t("operation")}</div>
+          <div>{t("jobId")}</div>
+          <div>{t("created")}</div>
         </div>
 
         {loading && Array.from({ length: 5 }).map((_, i) => (
@@ -191,7 +194,7 @@ export default function JobsPage() {
 
         {!loading && jobs.length === 0 && (
           <div className="px-4 py-8 text-center text-sm text-gray-400">
-            No jobs found.
+            {t("noJobsFound")}
           </div>
         )}
       </div>

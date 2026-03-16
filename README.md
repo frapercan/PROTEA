@@ -39,7 +39,9 @@ PROTEA provides a unified backend for ingesting protein data from UniProt, compu
 
 ## Getting started
 
-### Docker (recommended)
+### Docker
+
+> **Not yet validated.** The Docker configuration exists but has not been tested end-to-end. It will likely need adjustments before it works out of the box — contributions welcome.
 
 ```bash
 git clone https://github.com/frapercan/PROTEA.git
@@ -52,7 +54,7 @@ Services available at:
 - API: http://localhost:8000
 - RabbitMQ management: http://localhost:15672 (guest/guest)
 
-### From source
+### From source (recommended)
 
 **Requirements:** Python 3.12, PostgreSQL 16 + pgvector, RabbitMQ 3.x
 
