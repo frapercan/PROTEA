@@ -40,13 +40,18 @@ def _publish(amqp_url: str, queue_name: str, body: bytes) -> None:
             if delay is not None:
                 logger.warning(
                     "publish failed (attempt %d), retrying in %ds. queue=%s error=%s",
-                    attempt, delay, queue_name, exc,
+                    attempt,
+                    delay,
+                    queue_name,
+                    exc,
                 )
                 time.sleep(delay)
             else:
                 logger.error(
                     "publish failed after %d attempts. queue=%s error=%s",
-                    attempt, queue_name, exc,
+                    attempt,
+                    queue_name,
+                    exc,
                 )
 
     raise RuntimeError(

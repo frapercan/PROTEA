@@ -72,5 +72,6 @@ class Operation(Protocol):
 
     name: str
 
-    def execute(self, session: Session, payload: dict[str, Any], *, emit: EmitFn) -> OperationResult:
-        ...
+    def execute(
+        self, session: Session, payload: dict[str, Any], *, emit: EmitFn
+    ) -> OperationResult: ...

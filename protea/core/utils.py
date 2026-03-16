@@ -60,7 +60,9 @@ class UniProtHttpMixin:
                 if attempt > p.max_retries:
                     raise
                 self._http_retries += 1
-                self._sleep_backoff(p, attempt, emit, reason=f"request_exception:{e.__class__.__name__}")
+                self._sleep_backoff(
+                    p, attempt, emit, reason=f"request_exception:{e.__class__.__name__}"
+                )
                 continue
 
             if 200 <= resp.status_code < 300:
@@ -73,8 +75,12 @@ class UniProtHttpMixin:
                 retry_after = resp.headers.get("Retry-After")
                 if retry_after and retry_after.isdigit():
                     wait_s = min(float(retry_after), p.backoff_max_seconds)
-                    emit("http.retry", None,
-                         {"attempt": attempt, "wait_seconds": wait_s, "reason": "retry_after"}, "warning")
+                    emit(
+                        "http.retry",
+                        None,
+                        {"attempt": attempt, "wait_seconds": wait_s, "reason": "retry_after"},
+                        "warning",
+                    )
                     time.sleep(wait_s)
                 else:
                     self._sleep_backoff(p, attempt, emit, reason=f"status_{resp.status_code}")
@@ -85,7 +91,12 @@ class UniProtHttpMixin:
     def _sleep_backoff(self, p: _HttpPayload, attempt: int, emit: EmitFn, reason: str) -> None:
         base = p.backoff_base_seconds * (2 ** (attempt - 1))
         wait_s = min(base, p.backoff_max_seconds) + random.uniform(0.0, p.jitter_seconds)
-        emit("http.retry", None, {"attempt": attempt, "wait_seconds": wait_s, "reason": reason}, "warning")
+        emit(
+            "http.retry",
+            None,
+            {"attempt": attempt, "wait_seconds": wait_s, "reason": reason},
+            "warning",
+        )
         time.sleep(wait_s)
 
     def _extract_next_cursor(self, link_header: str) -> str | None:

@@ -25,7 +25,9 @@ class GOTermRelationship(Base):
     __tablename__ = "go_term_relationship"
     __table_args__ = (
         UniqueConstraint(
-            "child_go_term_id", "parent_go_term_id", "relation_type",
+            "child_go_term_id",
+            "parent_go_term_id",
+            "relation_type",
             name="uq_go_term_relationship",
         ),
     )

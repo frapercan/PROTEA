@@ -28,6 +28,7 @@ evidence_weighted
     0.  This allows down-ranking IEA-sourced predictions regardless of how
     strong the embedding or alignment signals are.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -94,7 +95,7 @@ DEFAULT_EVIDENCE_WEIGHTS: dict[str, float] = {
     "HMP": 1.0,  # High-Throughput Mutant Phenotype
     "HGI": 1.0,  # High-Throughput Genetic Interaction
     "HEP": 1.0,  # High-Throughput Expression Pattern
-    "IC":  1.0,  # Inferred by Curator
+    "IC": 1.0,  # Inferred by Curator
     "TAS": 1.0,  # Traceable Author Statement
     # Computational / Phylogenetic — derived from sequence or phylogeny
     "ISS": 0.7,  # Inferred from Sequence or Structural Similarity
@@ -111,19 +112,38 @@ DEFAULT_EVIDENCE_WEIGHTS: dict[str, float] = {
     "NAS": 0.5,  # Non-traceable Author Statement
     "IEA": 0.3,  # Inferred from Electronic Annotation (automated, bulk)
     # No biological data — used only as a placeholder
-    "ND":  0.1,  # No biological Data available
+    "ND": 0.1,  # No biological Data available
 }
 
 #: Ordered grouping of evidence codes used for UI rendering and documentation.
 #: Preserves the biological meaning of each tier.
 EVIDENCE_CODE_GROUPS: dict[str, list[str]] = {
     "Experimental": [
-        "EXP", "IDA", "IPI", "IMP", "IGI", "IEP",
-        "HTP", "HDA", "HMP", "HGI", "HEP", "IC", "TAS",
+        "EXP",
+        "IDA",
+        "IPI",
+        "IMP",
+        "IGI",
+        "IEP",
+        "HTP",
+        "HDA",
+        "HMP",
+        "HGI",
+        "HEP",
+        "IC",
+        "TAS",
     ],
     "Computational / Phylogenetic": [
-        "ISS", "ISO", "ISA", "ISM", "IGC",
-        "IBA", "IBD", "IKR", "IRD", "RCA",
+        "ISS",
+        "ISO",
+        "ISA",
+        "ISM",
+        "IGC",
+        "IBA",
+        "IBD",
+        "IKR",
+        "IRD",
+        "RCA",
     ],
     "Electronic": ["NAS", "IEA"],
     "No data": ["ND"],
@@ -136,6 +156,7 @@ DEFAULT_EVIDENCE_WEIGHT_FALLBACK: float = 0.5
 # ---------------------------------------------------------------------------
 # ORM model
 # ---------------------------------------------------------------------------
+
 
 class ScoringConfig(Base):
     """Persistent scoring formula definition.
@@ -172,17 +193,11 @@ class ScoringConfig(Base):
 
     __tablename__ = "scoring_config"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    formula: Mapped[str] = mapped_column(
-        String(50), nullable=False, default=FORMULA_LINEAR
-    )
+    formula: Mapped[str] = mapped_column(String(50), nullable=False, default=FORMULA_LINEAR)
     weights: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    evidence_weights: Mapped[dict[str, Any] | None] = mapped_column(
-        JSONB, nullable=True
-    )
+    evidence_weights: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

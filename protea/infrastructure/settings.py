@@ -43,7 +43,9 @@ def load_settings(project_root: Path, *, env_prefix: str = "PROTEA_") -> Setting
         or file_db_url
         or "postgresql+psycopg://usuario:clave@localhost:5432/BioData"
     )
-    amqp_url = os.getenv(f"{env_prefix}AMQP_URL") or file_amqp_url or "amqp://guest:guest@localhost:5672/"
+    amqp_url = (
+        os.getenv(f"{env_prefix}AMQP_URL") or file_amqp_url or "amqp://guest:guest@localhost:5672/"
+    )
 
     raw_artifacts = (
         os.getenv(f"{env_prefix}ARTIFACTS_DIR")

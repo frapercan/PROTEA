@@ -104,11 +104,16 @@ class RunCafaEvaluationOperation:
         ann_old = session.get(AnnotationSet, eval_set.old_annotation_set_id)
         snapshot = session.get(OntologySnapshot, ann_old.ontology_snapshot_id)
 
-        emit("run_cafa_evaluation.start", None, {
-            "evaluation_set_id": str(eval_set_id),
-            "prediction_set_id": str(pred_set_id),
-            "obo_url": snapshot.obo_url,
-        }, "info")
+        emit(
+            "run_cafa_evaluation.start",
+            None,
+            {
+                "evaluation_set_id": str(eval_set_id),
+                "prediction_set_id": str(pred_set_id),
+                "obo_url": snapshot.obo_url,
+            },
+            "info",
+        )
 
         # ── 1. Compute evaluation data ────────────────────────────────────────
         emit("run_cafa_evaluation.computing_delta", None, {}, "info")
@@ -118,11 +123,16 @@ class RunCafaEvaluationOperation:
             eval_set.new_annotation_set_id,
             ann_old.ontology_snapshot_id,
         )
-        emit("run_cafa_evaluation.delta_done", None, {
-            "nk_proteins": data.nk_proteins,
-            "lk_proteins": data.lk_proteins,
-            "pk_proteins": data.pk_proteins,
-        }, "info")
+        emit(
+            "run_cafa_evaluation.delta_done",
+            None,
+            {
+                "nk_proteins": data.nk_proteins,
+                "lk_proteins": data.lk_proteins,
+                "pk_proteins": data.pk_proteins,
+            },
+            "info",
+        )
 
         if data.delta_proteins == 0:
             raise ValueError("No delta proteins found — cannot evaluate")
@@ -142,17 +152,12 @@ class RunCafaEvaluationOperation:
         result_id = uuid.uuid4()
 
         # ── 2. Prepare artifact directory (persistent) + temp dir for OBO ─────
-        artifacts_root = (
-            Path(p.artifacts_dir) / str(result_id)
-            if p.artifacts_dir
-            else None
-        )
+        artifacts_root = Path(p.artifacts_dir) / str(result_id) if p.artifacts_dir else None
         if artifacts_root is not None:
             artifacts_root.mkdir(parents=True, exist_ok=True)
 
         results: dict[str, Any] = {}
         with tempfile.TemporaryDirectory(prefix="protea_cafa_") as tmpdir:
-
             # Download OBO into temp dir (large file, not persisted)
             emit("run_cafa_evaluation.downloading_obo", None, {"url": snapshot.obo_url}, "info")
             obo_path = os.path.join(tmpdir, "go.obo")
@@ -171,11 +176,16 @@ class RunCafaEvaluationOperation:
             if ia_path:
                 emit("run_cafa_evaluation.ia_resolved", None, {"ia_path": ia_path}, "info")
             else:
-                emit("run_cafa_evaluation.ia_missing", None, {
-                    "warning": "No IA file available; cafaeval will use uniform IC=1 for all "
-                               "GO terms. Set ia_url on the OntologySnapshot or pass ia_file "
-                               "in the payload for information-content-weighted metrics.",
-                }, "warning")
+                emit(
+                    "run_cafa_evaluation.ia_missing",
+                    None,
+                    {
+                        "warning": "No IA file available; cafaeval will use uniform IC=1 for all "
+                        "GO terms. Set ia_url on the OntologySnapshot or pass ia_file "
+                        "in the payload for information-content-weighted metrics.",
+                    },
+                    "warning",
+                )
 
             # Write ground truth files
             gt_dir = str(artifacts_root) if artifacts_root else tmpdir
@@ -196,10 +206,22 @@ class RunCafaEvaluationOperation:
             os.makedirs(pred_dir, exist_ok=True)
             pred_path = os.path.join(pred_dir, "predictions.tsv")
             delta_proteins = set(data.nk) | set(data.lk) | set(data.pk)
-            emit("run_cafa_evaluation.writing_predictions", None, {
-                "delta_proteins": len(delta_proteins),
-            }, "info")
-            self._write_predictions(session, pred_set_id, delta_proteins, p.max_distance, pred_path, scoring_config_snapshot)
+            emit(
+                "run_cafa_evaluation.writing_predictions",
+                None,
+                {
+                    "delta_proteins": len(delta_proteins),
+                },
+                "info",
+            )
+            self._write_predictions(
+                session,
+                pred_set_id,
+                delta_proteins,
+                p.max_distance,
+                pred_path,
+                scoring_config_snapshot,
+            )
 
             # No-op commit: releases the DB connection back to the pool before
             # cafaeval forks worker processes via multiprocessing.Pool.  Forked
@@ -225,7 +247,9 @@ class RunCafaEvaluationOperation:
                     _old_sigint = signal.signal(signal.SIGINT, signal.SIG_DFL)
                     try:
                         df, dfs_best = cafa_eval(
-                            obo_path, pred_dir, gt_file,
+                            obo_path,
+                            pred_dir,
+                            gt_file,
                             ia=ia_path,
                             exclude=known_file,
                             prop="max",
@@ -241,19 +265,30 @@ class RunCafaEvaluationOperation:
                     # Persist full cafaeval output (PR curves + best metrics per metric type)
                     if artifacts_root is not None and df is not None:
                         from cafaeval.evaluation import write_results as _write_results
+
                         setting_dir = artifacts_root / setting
                         setting_dir.mkdir(exist_ok=True)
                         _write_results(df, dfs_best, str(setting_dir))
 
-                    emit("run_cafa_evaluation.setting_done", None, {
-                        "setting": setting,
-                        "namespaces": list(results[setting].keys()),
-                    }, "info")
+                    emit(
+                        "run_cafa_evaluation.setting_done",
+                        None,
+                        {
+                            "setting": setting,
+                            "namespaces": list(results[setting].keys()),
+                        },
+                        "info",
+                    )
                 except Exception as exc:
-                    emit("run_cafa_evaluation.setting_failed", None, {
-                        "setting": setting,
-                        "error": str(exc),
-                    }, "warning")
+                    emit(
+                        "run_cafa_evaluation.setting_failed",
+                        None,
+                        {
+                            "setting": setting,
+                            "error": str(exc),
+                        },
+                        "warning",
+                    )
                     results[setting] = {}
 
         # ── 3. Persist EvaluationResult ───────────────────────────────────────
@@ -267,21 +302,29 @@ class RunCafaEvaluationOperation:
         session.add(eval_result)
         session.flush()
 
-        emit("run_cafa_evaluation.done", None, {
-            "evaluation_result_id": str(result_id),
-            "settings_evaluated": list(results.keys()),
-            "artifacts_dir": str(artifacts_root) if artifacts_root else None,
-        }, "info")
-        return OperationResult(result={
-            "evaluation_result_id": str(result_id),
-            "results": results,
-        })
+        emit(
+            "run_cafa_evaluation.done",
+            None,
+            {
+                "evaluation_result_id": str(result_id),
+                "settings_evaluated": list(results.keys()),
+                "artifacts_dir": str(artifacts_root) if artifacts_root else None,
+            },
+            "info",
+        )
+        return OperationResult(
+            result={
+                "evaluation_result_id": str(result_id),
+                "results": results,
+            }
+        )
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _download_obo(self, url: str, dest: str) -> None:
         """Download OBO file to dest, decompressing gzip if needed."""
         import gzip
+
         resp = requests.get(url, stream=True, timeout=300)
         resp.raise_for_status()
         if url.endswith(".gz"):
@@ -308,7 +351,7 @@ class RunCafaEvaluationOperation:
         # Resolve local paths (absolute or file:// scheme) without HTTP.
         local_path: str | None = None
         if url.startswith("file://"):
-            local_path = url[len("file://"):]
+            local_path = url[len("file://") :]
         elif url.startswith("/"):
             local_path = url
 

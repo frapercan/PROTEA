@@ -40,9 +40,7 @@ class EvaluationResult(Base):
 
     __tablename__ = "evaluation_result"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     evaluation_set_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("evaluation_set.id", ondelete="CASCADE"),

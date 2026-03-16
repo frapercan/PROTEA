@@ -57,21 +57,23 @@ ECO_TO_CODE: dict[str, str] = {
 # Experimental evidence codes (used as ground truth in CAFA evaluation).
 # Only annotations with these codes are considered when building ground truth.
 # ---------------------------------------------------------------------------
-EXPERIMENTAL: frozenset[str] = frozenset({
-    "EXP",  # Inferred from Experiment
-    "IDA",  # Inferred from Direct Assay
-    "IPI",  # Inferred from Physical Interaction
-    "IMP",  # Inferred from Mutant Phenotype
-    "IGI",  # Inferred from Genetic Interaction
-    "IEP",  # Inferred from Expression Pattern
-    "HTP",  # High Throughput
-    "HDA",  # High Throughput Direct Assay
-    "HMP",  # High Throughput Mutant Phenotype
-    "HGI",  # High Throughput Genetic Interaction
-    "HEP",  # High Throughput Expression Pattern
-    "IC",   # Inferred by Curator
-    "TAS",  # Traceable Author Statement
-})
+EXPERIMENTAL: frozenset[str] = frozenset(
+    {
+        "EXP",  # Inferred from Experiment
+        "IDA",  # Inferred from Direct Assay
+        "IPI",  # Inferred from Physical Interaction
+        "IMP",  # Inferred from Mutant Phenotype
+        "IGI",  # Inferred from Genetic Interaction
+        "IEP",  # Inferred from Expression Pattern
+        "HTP",  # High Throughput
+        "HDA",  # High Throughput Direct Assay
+        "HMP",  # High Throughput Mutant Phenotype
+        "HGI",  # High Throughput Genetic Interaction
+        "HEP",  # High Throughput Expression Pattern
+        "IC",  # Inferred by Curator
+        "TAS",  # Traceable Author Statement
+    }
+)
 
 
 def normalize(code: str) -> str:

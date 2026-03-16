@@ -34,7 +34,7 @@ PositiveInt = Annotated[int, Field(gt=0)]
 
 _ANNOTATION_CHUNK_SIZE = 10_000
 _BATCH_QUEUE = "protea.predictions.batch"
-_WRITE_QUEUE  = "protea.predictions.write"
+_WRITE_QUEUE = "protea.predictions.write"
 # Rows fetched per round-trip when streaming reference embeddings from PostgreSQL.
 # At 1280 dims × 2 bytes (float16) × 2000 rows = ~5 MB per chunk — keeps Python
 # object pressure negligible while amortising cursor round-trips.
@@ -120,6 +120,7 @@ def _save_to_disk_cache(
 # Payloads
 # ---------------------------------------------------------------------------
 
+
 class PredictGOTermsPayload(ProteaPayload, frozen=True):
     """Payload for the predict_go_terms coordinator job."""
 
@@ -155,7 +156,9 @@ class PredictGOTermsPayload(ProteaPayload, frozen=True):
     # Memory cost: 3× the reference embedding array; search time: 3 KNN calls per batch.
     aspect_separated_knn: bool = True
 
-    @field_validator("embedding_config_id", "annotation_set_id", "ontology_snapshot_id", mode="before")
+    @field_validator(
+        "embedding_config_id", "annotation_set_id", "ontology_snapshot_id", mode="before"
+    )
     @classmethod
     def must_be_non_empty(cls, v: str) -> str:
         if not isinstance(v, str) or not v.strip():
@@ -198,6 +201,7 @@ class StorePredictionsPayload(ProteaPayload, frozen=True):
 # Coordinator
 # ---------------------------------------------------------------------------
 
+
 class PredictGOTermsOperation:
     """Coordinator: validates, creates PredictionSet, dispatches N batch messages.
 
@@ -219,8 +223,8 @@ class PredictGOTermsOperation:
         p = PredictGOTermsPayload.model_validate(payload)
         parent_job_id = UUID(payload["_job_id"])
 
-        embedding_config_id  = uuid.UUID(p.embedding_config_id)
-        annotation_set_id    = uuid.UUID(p.annotation_set_id)
+        embedding_config_id = uuid.UUID(p.embedding_config_id)
+        annotation_set_id = uuid.UUID(p.annotation_set_id)
         ontology_snapshot_id = uuid.UUID(p.ontology_snapshot_id)
 
         config = session.get(EmbeddingConfig, embedding_config_id)
@@ -231,17 +235,20 @@ class PredictGOTermsOperation:
         if session.get(OntologySnapshot, ontology_snapshot_id) is None:
             raise ValueError(f"OntologySnapshot {p.ontology_snapshot_id} not found")
 
-        emit("predict_go_terms.start", None, {
-            "embedding_config_id": p.embedding_config_id,
-            "model_name": config.model_name,
-            "annotation_set_id": p.annotation_set_id,
-            "limit_per_entry": p.limit_per_entry,
-            "search_backend": p.search_backend,
-        }, "info")
-
-        query_accessions = self._load_query_accessions(
-            session, p, embedding_config_id, emit
+        emit(
+            "predict_go_terms.start",
+            None,
+            {
+                "embedding_config_id": p.embedding_config_id,
+                "model_name": config.model_name,
+                "annotation_set_id": p.annotation_set_id,
+                "limit_per_entry": p.limit_per_entry,
+                "search_backend": p.search_backend,
+            },
+            "info",
         )
+
+        query_accessions = self._load_query_accessions(session, p, embedding_config_id, emit)
         if not query_accessions:
             emit("predict_go_terms.no_queries", None, {}, "warning")
             return OperationResult(result={"batches": 0, "queries": 0})
@@ -259,43 +266,53 @@ class PredictGOTermsOperation:
         session.flush()
 
         batches = [
-            query_accessions[i: i + p.batch_size]
+            query_accessions[i : i + p.batch_size]
             for i in range(0, len(query_accessions), p.batch_size)
         ]
         n_batches = len(batches)
 
-        emit("predict_go_terms.dispatching", None, {
-            "queries": len(query_accessions),
-            "batches": n_batches,
-            "prediction_set_id": str(prediction_set.id),
-        }, "info")
+        emit(
+            "predict_go_terms.dispatching",
+            None,
+            {
+                "queries": len(query_accessions),
+                "batches": n_batches,
+                "prediction_set_id": str(prediction_set.id),
+            },
+            "info",
+        )
 
         operations: list[tuple[str, dict[str, Any]]] = []
         for batch_accs in batches:
-            operations.append((_BATCH_QUEUE, {
-                "operation": "predict_go_terms_batch",
-                "job_id":    str(parent_job_id),
-                "payload": {
-                    "embedding_config_id":  p.embedding_config_id,
-                    "annotation_set_id":    p.annotation_set_id,
-                    "prediction_set_id":    str(prediction_set.id),
-                    "parent_job_id":        str(parent_job_id),
-                    "query_accessions":     batch_accs,
-                    "query_set_id":         p.query_set_id,
-                    "limit_per_entry":      p.limit_per_entry,
-                    "distance_threshold":   p.distance_threshold,
-                    "search_backend":       p.search_backend,
-                    "metric":               p.metric,
-                    "faiss_index_type":     p.faiss_index_type,
-                    "faiss_nlist":          p.faiss_nlist,
-                    "faiss_nprobe":         p.faiss_nprobe,
-                    "faiss_hnsw_m":         p.faiss_hnsw_m,
-                    "faiss_hnsw_ef_search": p.faiss_hnsw_ef_search,
-                    "compute_alignments":   p.compute_alignments,
-                    "compute_taxonomy":     p.compute_taxonomy,
-                    "aspect_separated_knn": p.aspect_separated_knn,
-                },
-            }))
+            operations.append(
+                (
+                    _BATCH_QUEUE,
+                    {
+                        "operation": "predict_go_terms_batch",
+                        "job_id": str(parent_job_id),
+                        "payload": {
+                            "embedding_config_id": p.embedding_config_id,
+                            "annotation_set_id": p.annotation_set_id,
+                            "prediction_set_id": str(prediction_set.id),
+                            "parent_job_id": str(parent_job_id),
+                            "query_accessions": batch_accs,
+                            "query_set_id": p.query_set_id,
+                            "limit_per_entry": p.limit_per_entry,
+                            "distance_threshold": p.distance_threshold,
+                            "search_backend": p.search_backend,
+                            "metric": p.metric,
+                            "faiss_index_type": p.faiss_index_type,
+                            "faiss_nlist": p.faiss_nlist,
+                            "faiss_nprobe": p.faiss_nprobe,
+                            "faiss_hnsw_m": p.faiss_hnsw_m,
+                            "faiss_hnsw_ef_search": p.faiss_hnsw_ef_search,
+                            "compute_alignments": p.compute_alignments,
+                            "compute_taxonomy": p.compute_taxonomy,
+                            "aspect_separated_knn": p.aspect_separated_knn,
+                        },
+                    },
+                )
+            )
 
         return OperationResult(
             result={
@@ -348,14 +365,14 @@ class PredictGOTermsOperation:
             rows = q.all()
 
         accessions = [r[0] for r in rows]
-        emit("predict_go_terms.load_queries_done", None,
-             {"queries": len(accessions)}, "info")
+        emit("predict_go_terms.load_queries_done", None, {"queries": len(accessions)}, "info")
         return accessions
 
 
 # ---------------------------------------------------------------------------
 # Batch worker
 # ---------------------------------------------------------------------------
+
 
 class PredictGOTermsBatchOperation:
     """CPU batch worker: KNN search + GO annotation transfer for one query chunk.
@@ -373,16 +390,20 @@ class PredictGOTermsBatchOperation:
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
         p = PredictGOTermsBatchPayload.model_validate(payload)
-        parent_job_id     = UUID(p.parent_job_id)
+        parent_job_id = UUID(p.parent_job_id)
         prediction_set_id = uuid.UUID(p.prediction_set_id)
         embedding_config_id = uuid.UUID(p.embedding_config_id)
-        annotation_set_id   = uuid.UUID(p.annotation_set_id)
+        annotation_set_id = uuid.UUID(p.annotation_set_id)
 
         # Skip if parent was cancelled/failed
         parent = session.get(Job, parent_job_id)
         if parent is not None and parent.status in (JobStatus.CANCELLED, JobStatus.FAILED):
-            emit("predict_go_terms_batch.skipped", None,
-                 {"parent_job_id": str(parent_job_id)}, "warning")
+            emit(
+                "predict_go_terms_batch.skipped",
+                None,
+                {"parent_job_id": str(parent_job_id)},
+                "warning",
+            )
             return OperationResult(result={"skipped": True})
 
         # --- reference cache (load once per process per config+annotation_set+mode) ---
@@ -394,11 +415,16 @@ class PredictGOTermsBatchOperation:
             if len(_REF_CACHE) >= _REF_CACHE_MAX:
                 evict_key = next(iter(_REF_CACHE))
                 del _REF_CACHE[evict_key]
-            emit("predict_go_terms_batch.loading_reference", None, {
-                "embedding_config_id": p.embedding_config_id,
-                "annotation_set_id": p.annotation_set_id,
-                "aspect_separated_knn": p.aspect_separated_knn,
-            }, "info")
+            emit(
+                "predict_go_terms_batch.loading_reference",
+                None,
+                {
+                    "embedding_config_id": p.embedding_config_id,
+                    "annotation_set_id": p.annotation_set_id,
+                    "aspect_separated_knn": p.aspect_separated_knn,
+                },
+                "info",
+            )
             if p.aspect_separated_knn:
                 _REF_CACHE[cache_key] = self._load_reference_data_per_aspect(
                     session, embedding_config_id, annotation_set_id, emit
@@ -419,8 +445,13 @@ class PredictGOTermsBatchOperation:
 
         if p.aspect_separated_knn:
             prediction_dicts = self._run_aspect_separated_knn(
-                session, valid_accessions, query_embeddings,
-                _REF_CACHE[cache_key], annotation_set_id, prediction_set_id, p,
+                session,
+                valid_accessions,
+                query_embeddings,
+                _REF_CACHE[cache_key],
+                annotation_set_id,
+                prediction_set_id,
+                p,
             )
         else:
             ref_data = _REF_CACHE[cache_key]
@@ -459,20 +490,24 @@ class PredictGOTermsBatchOperation:
             query_tax_ids: dict[str, int | None] = {}
 
             if p.compute_alignments:
-                ref_sequences   = self._load_sequences_for_proteins(session, unique_neighbors)
+                ref_sequences = self._load_sequences_for_proteins(session, unique_neighbors)
                 query_sequences = self._load_sequences_for_queries(session, p, valid_accessions)
 
             if p.compute_taxonomy:
-                ref_tax_ids   = self._load_taxonomy_ids_for_proteins(session, unique_neighbors)
+                ref_tax_ids = self._load_taxonomy_ids_for_proteins(session, unique_neighbors)
                 query_tax_ids = self._load_taxonomy_ids_for_queries(session, p, valid_accessions)
 
             ref_data_with_annotations = {
                 "accessions": ref_data["accessions"],
                 "embeddings": ref_embeddings_f32,
-                "go_map":     go_map,
+                "go_map": go_map,
             }
             prediction_dicts = self._predict_batch(
-                valid_accessions, query_embeddings, ref_data_with_annotations, prediction_set_id, p,
+                valid_accessions,
+                query_embeddings,
+                ref_data_with_annotations,
+                prediction_set_id,
+                p,
                 neighbors=neighbors,
                 ref_sequences=ref_sequences,
                 query_sequences=query_sequences,
@@ -482,23 +517,33 @@ class PredictGOTermsBatchOperation:
 
         elapsed = time.perf_counter() - t0
 
-        emit("predict_go_terms_batch.done", None, {
-            "queries": len(valid_accessions),
-            "predictions": len(prediction_dicts),
-            "elapsed_seconds": elapsed,
-        }, "info")
+        emit(
+            "predict_go_terms_batch.done",
+            None,
+            {
+                "queries": len(valid_accessions),
+                "predictions": len(prediction_dicts),
+                "elapsed_seconds": elapsed,
+            },
+            "info",
+        )
 
         return OperationResult(
             result={"predictions": len(prediction_dicts)},
-            publish_operations=[(_WRITE_QUEUE, {
-                "operation": "store_predictions",
-                "job_id":    str(parent_job_id),
-                "payload": {
-                    "parent_job_id":     str(parent_job_id),
-                    "prediction_set_id": str(prediction_set_id),
-                    "predictions":       prediction_dicts,
-                },
-            })],
+            publish_operations=[
+                (
+                    _WRITE_QUEUE,
+                    {
+                        "operation": "store_predictions",
+                        "job_id": str(parent_job_id),
+                        "payload": {
+                            "parent_job_id": str(parent_job_id),
+                            "prediction_set_id": str(prediction_set_id),
+                            "predictions": prediction_dicts,
+                        },
+                    },
+                )
+            ],
         )
 
     # ── helpers ──────────────────────────────────────────────────────────────
@@ -524,11 +569,16 @@ class PredictGOTermsBatchOperation:
 
         cached = _load_from_disk_cache(embedding_config_id, annotation_set_id)
         if cached is not None:
-            emit("predict_go_terms_batch.load_references_done", None, {
-                "references": len(cached["accessions"]),
-                "embeddings_mb": round(cached["embeddings"].nbytes / 1024 / 1024),
-                "source": "disk_cache",
-            }, "info")
+            emit(
+                "predict_go_terms_batch.load_references_done",
+                None,
+                {
+                    "references": len(cached["accessions"]),
+                    "embeddings_mb": round(cached["embeddings"].nbytes / 1024 / 1024),
+                    "source": "disk_cache",
+                },
+                "info",
+            )
             return cached
 
         annotated_accessions_sq = (
@@ -544,8 +594,10 @@ class PredictGOTermsBatchOperation:
                 (SequenceEmbedding.sequence_id == Protein.sequence_id)
                 & (SequenceEmbedding.embedding_config_id == embedding_config_id),
             )
-            .join(annotated_accessions_sq,
-                  Protein.accession == annotated_accessions_sq.c.protein_accession)
+            .join(
+                annotated_accessions_sq,
+                Protein.accession == annotated_accessions_sq.c.protein_accession,
+            )
         )
 
         # Count first so we can pre-allocate the numpy array and never build a
@@ -570,11 +622,16 @@ class PredictGOTermsBatchOperation:
 
         _save_to_disk_cache(embedding_config_id, annotation_set_id, accessions, embeddings)
 
-        emit("predict_go_terms_batch.load_references_done", None, {
-            "references": len(accessions),
-            "embeddings_mb": round(embeddings.nbytes / 1024 / 1024),
-            "source": "database",
-        }, "info")
+        emit(
+            "predict_go_terms_batch.load_references_done",
+            None,
+            {
+                "references": len(accessions),
+                "embeddings_mb": round(embeddings.nbytes / 1024 / 1024),
+                "source": "database",
+            },
+            "info",
+        )
 
         return {"accessions": accessions, "embeddings": embeddings}
 
@@ -607,16 +664,23 @@ class PredictGOTermsBatchOperation:
             {key}__F_indices.npy
             {key}__C_indices.npy
         """
-        emit("predict_go_terms_batch.load_references_per_aspect_start", None, {
-            "embedding_config_id": str(embedding_config_id),
-            "annotation_set_id": str(annotation_set_id),
-        }, "info")
+        emit(
+            "predict_go_terms_batch.load_references_per_aspect_start",
+            None,
+            {
+                "embedding_config_id": str(embedding_config_id),
+                "annotation_set_id": str(annotation_set_id),
+            },
+            "info",
+        )
 
         # ── step 1: unified embeddings (reuses existing disk cache or builds it once) ──
         unified = self._load_reference_data(session, embedding_config_id, annotation_set_id, emit)
         if not unified["accessions"]:
-            return {asp: {"accessions": [], "embeddings": np.empty((0,), dtype=np.float16)}
-                    for asp in _ASPECTS}
+            return {
+                asp: {"accessions": [], "embeddings": np.empty((0,), dtype=np.float16)}
+                for asp in _ASPECTS
+            }
 
         acc_to_idx: dict[str, int] = {acc: i for i, acc in enumerate(unified["accessions"])}
 
@@ -626,7 +690,8 @@ class PredictGOTermsBatchOperation:
 
         # Determine which aspects still need DB queries
         missing_aspects = [
-            asp for asp in _ASPECTS
+            asp
+            for asp in _ASPECTS
             if not _aspect_index_path(embedding_config_id, annotation_set_id, asp).exists()
         ]
 
@@ -667,15 +732,25 @@ class PredictGOTermsBatchOperation:
 
             result[aspect] = {"accessions": aspect_accessions, "embeddings": aspect_embeddings}
             total_refs += len(indices)
-            emit("predict_go_terms_batch.load_references_per_aspect_done", None, {
-                "aspect": aspect,
-                "references": len(indices),
-                "source": source,
-            }, "info")
+            emit(
+                "predict_go_terms_batch.load_references_per_aspect_done",
+                None,
+                {
+                    "aspect": aspect,
+                    "references": len(indices),
+                    "source": source,
+                },
+                "info",
+            )
 
-        emit("predict_go_terms_batch.load_references_per_aspect_all_done", None, {
-            "total_references": total_refs,
-        }, "info")
+        emit(
+            "predict_go_terms_batch.load_references_per_aspect_all_done",
+            None,
+            {
+                "total_references": total_refs,
+            },
+            "info",
+        )
         return result
 
     def _run_aspect_separated_knn(
@@ -686,7 +761,7 @@ class PredictGOTermsBatchOperation:
         ref_data_by_aspect: dict[str, dict[str, Any]],
         annotation_set_id: uuid.UUID,
         prediction_set_id: uuid.UUID,
-        p: "PredictGOTermsBatchPayload",
+        p: PredictGOTermsBatchPayload,
     ) -> list[dict[str, Any]]:
         """Run three independent KNN searches (one per GO aspect) and merge results.
 
@@ -742,11 +817,11 @@ class PredictGOTermsBatchOperation:
         query_tax_ids: dict[str, int | None] = {}
 
         if p.compute_alignments:
-            ref_sequences   = self._load_sequences_for_proteins(session, all_unique_neighbors)
+            ref_sequences = self._load_sequences_for_proteins(session, all_unique_neighbors)
             query_sequences = self._load_sequences_for_queries(session, p, valid_accessions)
 
         if p.compute_taxonomy:
-            ref_tax_ids   = self._load_taxonomy_ids_for_proteins(session, all_unique_neighbors)
+            ref_tax_ids = self._load_taxonomy_ids_for_proteins(session, all_unique_neighbors)
             query_tax_ids = self._load_taxonomy_ids_for_queries(session, p, valid_accessions)
 
         # Build predictions per aspect, merging into a single list.
@@ -793,25 +868,35 @@ class PredictGOTermsBatchOperation:
                             continue
                         seen_terms.add(go_term_id)
                         pred: dict[str, Any] = {
-                            "prediction_set_id":     str(prediction_set_id),
-                            "protein_accession":     q_acc,
-                            "go_term_id":            go_term_id,
+                            "prediction_set_id": str(prediction_set_id),
+                            "protein_accession": q_acc,
+                            "go_term_id": go_term_id,
                             "ref_protein_accession": ref_acc,
-                            "distance":              distance,
+                            "distance": distance,
                         }
                         if ann.get("qualifier"):
                             pred["qualifier"] = ann["qualifier"]
                         if ann.get("evidence_code"):
                             pred["evidence_code"] = ann["evidence_code"]
                         for key in (
-                            "identity_nw", "similarity_nw", "alignment_score_nw",
-                            "gaps_pct_nw", "alignment_length_nw",
-                            "identity_sw", "similarity_sw", "alignment_score_sw",
-                            "gaps_pct_sw", "alignment_length_sw",
-                            "length_query", "length_ref",
-                            "query_taxonomy_id", "ref_taxonomy_id",
-                            "taxonomic_lca", "taxonomic_distance",
-                            "taxonomic_common_ancestors", "taxonomic_relation",
+                            "identity_nw",
+                            "similarity_nw",
+                            "alignment_score_nw",
+                            "gaps_pct_nw",
+                            "alignment_length_nw",
+                            "identity_sw",
+                            "similarity_sw",
+                            "alignment_score_sw",
+                            "gaps_pct_sw",
+                            "alignment_length_sw",
+                            "length_query",
+                            "length_ref",
+                            "query_taxonomy_id",
+                            "ref_taxonomy_id",
+                            "taxonomic_lca",
+                            "taxonomic_distance",
+                            "taxonomic_common_ancestors",
+                            "taxonomic_relation",
                         ):
                             val = feats.get(key)
                             if val is not None:
@@ -846,25 +931,22 @@ class PredictGOTermsBatchOperation:
         accessions_list = list(accessions)
 
         for i in range(0, len(accessions_list), _ANNOTATION_CHUNK_SIZE):
-            chunk = accessions_list[i: i + _ANNOTATION_CHUNK_SIZE]
-            q = (
-                session.query(
-                    ProteinGOAnnotation.protein_accession,
-                    ProteinGOAnnotation.go_term_id,
-                    ProteinGOAnnotation.qualifier,
-                    ProteinGOAnnotation.evidence_code,
-                )
-                .filter(
-                    ProteinGOAnnotation.annotation_set_id == annotation_set_id,
-                    ProteinGOAnnotation.protein_accession.in_(chunk),
-                    # Exclude NOT-qualified annotations (e.g. 'NOT', 'NOT|involved_in').
-                    # qualifier IS NULL must be preserved explicitly because SQL LIKE
-                    # returns NULL for NULL inputs, which would silently drop those rows.
-                    (
-                        ProteinGOAnnotation.qualifier.is_(None)
-                        | ~ProteinGOAnnotation.qualifier.like("%NOT%")
-                    ),
-                )
+            chunk = accessions_list[i : i + _ANNOTATION_CHUNK_SIZE]
+            q = session.query(
+                ProteinGOAnnotation.protein_accession,
+                ProteinGOAnnotation.go_term_id,
+                ProteinGOAnnotation.qualifier,
+                ProteinGOAnnotation.evidence_code,
+            ).filter(
+                ProteinGOAnnotation.annotation_set_id == annotation_set_id,
+                ProteinGOAnnotation.protein_accession.in_(chunk),
+                # Exclude NOT-qualified annotations (e.g. 'NOT', 'NOT|involved_in').
+                # qualifier IS NULL must be preserved explicitly because SQL LIKE
+                # returns NULL for NULL inputs, which would silently drop those rows.
+                (
+                    ProteinGOAnnotation.qualifier.is_(None)
+                    | ~ProteinGOAnnotation.qualifier.like("%NOT%")
+                ),
             )
             if aspect is not None:
                 # Join go_term only when aspect filtering is requested to avoid
@@ -872,11 +954,13 @@ class PredictGOTermsBatchOperation:
                 q = q.join(ProteinGOAnnotation.go_term).filter(GOTerm.aspect == aspect)
             rows = q.all()
             for acc, go_term_id, qualifier, evidence_code in rows:
-                go_map.setdefault(acc, []).append({
-                    "go_term_id": go_term_id,
-                    "qualifier": qualifier,
-                    "evidence_code": evidence_code,
-                })
+                go_map.setdefault(acc, []).append(
+                    {
+                        "go_term_id": go_term_id,
+                        "qualifier": qualifier,
+                        "evidence_code": evidence_code,
+                    }
+                )
 
         return go_map
 
@@ -949,10 +1033,10 @@ class PredictGOTermsBatchOperation:
         Returns compact dicts — None-valued optional fields are omitted to reduce
         message size.
         """
-        ref_sequences   = ref_sequences   or {}
+        ref_sequences = ref_sequences or {}
         query_sequences = query_sequences or {}
-        ref_tax_ids     = ref_tax_ids     or {}
-        query_tax_ids   = query_tax_ids   or {}
+        ref_tax_ids = ref_tax_ids or {}
+        query_tax_ids = query_tax_ids or {}
 
         if neighbors is None:
             ref_emb = ref_data["embeddings"]
@@ -1009,25 +1093,35 @@ class PredictGOTermsBatchOperation:
                     seen_terms.add(go_term_id)
                     # Only include non-None optional fields to keep message compact
                     pred: dict[str, Any] = {
-                        "prediction_set_id":     str(prediction_set_id),
-                        "protein_accession":     q_acc,
-                        "go_term_id":            go_term_id,
+                        "prediction_set_id": str(prediction_set_id),
+                        "protein_accession": q_acc,
+                        "go_term_id": go_term_id,
                         "ref_protein_accession": ref_acc,
-                        "distance":              distance,
+                        "distance": distance,
                     }
                     if ann.get("qualifier"):
                         pred["qualifier"] = ann["qualifier"]
                     if ann.get("evidence_code"):
                         pred["evidence_code"] = ann["evidence_code"]
                     for key in (
-                        "identity_nw", "similarity_nw", "alignment_score_nw",
-                        "gaps_pct_nw", "alignment_length_nw",
-                        "identity_sw", "similarity_sw", "alignment_score_sw",
-                        "gaps_pct_sw", "alignment_length_sw",
-                        "length_query", "length_ref",
-                        "query_taxonomy_id", "ref_taxonomy_id",
-                        "taxonomic_lca", "taxonomic_distance",
-                        "taxonomic_common_ancestors", "taxonomic_relation",
+                        "identity_nw",
+                        "similarity_nw",
+                        "alignment_score_nw",
+                        "gaps_pct_nw",
+                        "alignment_length_nw",
+                        "identity_sw",
+                        "similarity_sw",
+                        "alignment_score_sw",
+                        "gaps_pct_sw",
+                        "alignment_length_sw",
+                        "length_query",
+                        "length_ref",
+                        "query_taxonomy_id",
+                        "ref_taxonomy_id",
+                        "taxonomic_lca",
+                        "taxonomic_distance",
+                        "taxonomic_common_ancestors",
+                        "taxonomic_relation",
                     ):
                         val = features.get(key)
                         if val is not None:
@@ -1044,7 +1138,7 @@ class PredictGOTermsBatchOperation:
         result: dict[str, str] = {}
         acc_list = list(accessions)
         for i in range(0, len(acc_list), _ANNOTATION_CHUNK_SIZE):
-            chunk = acc_list[i: i + _ANNOTATION_CHUNK_SIZE]
+            chunk = acc_list[i : i + _ANNOTATION_CHUNK_SIZE]
             rows = (
                 session.query(Protein.accession, Sequence.sequence)
                 .join(Protein.sequence)
@@ -1078,7 +1172,7 @@ class PredictGOTermsBatchOperation:
         result: dict[str, int | None] = {}
         acc_list = list(accessions)
         for i in range(0, len(acc_list), _ANNOTATION_CHUNK_SIZE):
-            chunk = acc_list[i: i + _ANNOTATION_CHUNK_SIZE]
+            chunk = acc_list[i : i + _ANNOTATION_CHUNK_SIZE]
             rows = (
                 session.query(Protein.accession, Protein.taxonomy_id)
                 .filter(Protein.accession.in_(chunk))
@@ -1098,7 +1192,7 @@ class PredictGOTermsBatchOperation:
         result: dict[str, int | None] = {acc: None for acc in acc_set}
         acc_list = list(acc_set)
         for i in range(0, len(acc_list), _ANNOTATION_CHUNK_SIZE):
-            chunk = acc_list[i: i + _ANNOTATION_CHUNK_SIZE]
+            chunk = acc_list[i : i + _ANNOTATION_CHUNK_SIZE]
             rows = (
                 session.query(Protein.accession, Protein.taxonomy_id)
                 .filter(Protein.accession.in_(chunk))
@@ -1112,6 +1206,7 @@ class PredictGOTermsBatchOperation:
 # ---------------------------------------------------------------------------
 # Write worker
 # ---------------------------------------------------------------------------
+
 
 class StorePredictionsOperation:
     """Write worker: bulk-inserts GOPrediction rows and updates parent job progress.
@@ -1128,13 +1223,14 @@ class StorePredictionsOperation:
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
         p = StorePredictionsPayload.model_validate(payload)
-        parent_job_id     = UUID(p.parent_job_id)
+        parent_job_id = UUID(p.parent_job_id)
         prediction_set_id = uuid.UUID(p.prediction_set_id)
 
         parent = session.get(Job, parent_job_id)
         if parent is not None and parent.status in (JobStatus.CANCELLED, JobStatus.FAILED):
-            emit("store_predictions.skipped", None,
-                 {"parent_job_id": str(parent_job_id)}, "warning")
+            emit(
+                "store_predictions.skipped", None, {"parent_job_id": str(parent_job_id)}, "warning"
+            )
             return OperationResult(result={"skipped": True})
 
         if p.predictions:
@@ -1142,48 +1238,51 @@ class StorePredictionsOperation:
                 pg_insert(GOPrediction).on_conflict_do_nothing(),
                 [
                     {
-                        "prediction_set_id":     prediction_set_id,
-                        "protein_accession":     pred["protein_accession"],
-                        "go_term_id":            pred["go_term_id"],
+                        "prediction_set_id": prediction_set_id,
+                        "protein_accession": pred["protein_accession"],
+                        "go_term_id": pred["go_term_id"],
                         "ref_protein_accession": pred["ref_protein_accession"],
-                        "distance":              pred["distance"],
-                        "qualifier":             pred.get("qualifier"),
-                        "evidence_code":         pred.get("evidence_code"),
-                        "identity_nw":           pred.get("identity_nw"),
-                        "similarity_nw":         pred.get("similarity_nw"),
-                        "alignment_score_nw":    pred.get("alignment_score_nw"),
-                        "gaps_pct_nw":           pred.get("gaps_pct_nw"),
-                        "alignment_length_nw":   pred.get("alignment_length_nw"),
-                        "identity_sw":           pred.get("identity_sw"),
-                        "similarity_sw":         pred.get("similarity_sw"),
-                        "alignment_score_sw":    pred.get("alignment_score_sw"),
-                        "gaps_pct_sw":           pred.get("gaps_pct_sw"),
-                        "alignment_length_sw":   pred.get("alignment_length_sw"),
-                        "length_query":          pred.get("length_query"),
-                        "length_ref":            pred.get("length_ref"),
-                        "query_taxonomy_id":     pred.get("query_taxonomy_id"),
-                        "ref_taxonomy_id":       pred.get("ref_taxonomy_id"),
-                        "taxonomic_lca":         pred.get("taxonomic_lca"),
-                        "taxonomic_distance":    pred.get("taxonomic_distance"),
+                        "distance": pred["distance"],
+                        "qualifier": pred.get("qualifier"),
+                        "evidence_code": pred.get("evidence_code"),
+                        "identity_nw": pred.get("identity_nw"),
+                        "similarity_nw": pred.get("similarity_nw"),
+                        "alignment_score_nw": pred.get("alignment_score_nw"),
+                        "gaps_pct_nw": pred.get("gaps_pct_nw"),
+                        "alignment_length_nw": pred.get("alignment_length_nw"),
+                        "identity_sw": pred.get("identity_sw"),
+                        "similarity_sw": pred.get("similarity_sw"),
+                        "alignment_score_sw": pred.get("alignment_score_sw"),
+                        "gaps_pct_sw": pred.get("gaps_pct_sw"),
+                        "alignment_length_sw": pred.get("alignment_length_sw"),
+                        "length_query": pred.get("length_query"),
+                        "length_ref": pred.get("length_ref"),
+                        "query_taxonomy_id": pred.get("query_taxonomy_id"),
+                        "ref_taxonomy_id": pred.get("ref_taxonomy_id"),
+                        "taxonomic_lca": pred.get("taxonomic_lca"),
+                        "taxonomic_distance": pred.get("taxonomic_distance"),
                         "taxonomic_common_ancestors": pred.get("taxonomic_common_ancestors"),
-                        "taxonomic_relation":    pred.get("taxonomic_relation"),
+                        "taxonomic_relation": pred.get("taxonomic_relation"),
                     }
                     for pred in p.predictions
                 ],
             )
 
-        emit("store_predictions.done", None, {
-            "predictions_inserted": len(p.predictions),
-            "parent_job_id": str(parent_job_id),
-        }, "info")
+        emit(
+            "store_predictions.done",
+            None,
+            {
+                "predictions_inserted": len(p.predictions),
+                "parent_job_id": str(parent_job_id),
+            },
+            "info",
+        )
 
         self._update_parent_progress(session, parent_job_id, emit)
 
         return OperationResult(result={"predictions_inserted": len(p.predictions)})
 
-    def _update_parent_progress(
-        self, session: Session, parent_job_id: UUID, emit: EmitFn
-    ) -> None:
+    def _update_parent_progress(self, session: Session, parent_job_id: UUID, emit: EmitFn) -> None:
         row = session.execute(
             sa_update(Job)
             .where(Job.id == parent_job_id, Job.status == JobStatus.RUNNING)
@@ -1202,11 +1301,17 @@ class StorePredictionsOperation:
         ).fetchone()
 
         if closed:
-            session.add(JobEvent(
-                job_id=parent_job_id,
-                event="job.succeeded",
-                fields={"via": "last_batch_stored"},
-                level="info",
-            ))
-            emit("store_predictions.parent_succeeded", None,
-                 {"parent_job_id": str(parent_job_id)}, "info")
+            session.add(
+                JobEvent(
+                    job_id=parent_job_id,
+                    event="job.succeeded",
+                    fields={"via": "last_batch_stored"},
+                    level="info",
+                )
+            )
+            emit(
+                "store_predictions.parent_succeeded",
+                None,
+                {"parent_job_id": str(parent_job_id)},
+                "info",
+            )

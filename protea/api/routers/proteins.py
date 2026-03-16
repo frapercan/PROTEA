@@ -28,6 +28,7 @@ def get_session_factory(request: Request) -> sessionmaker[Session]:
 
 # ── Stats ─────────────────────────────────────────────────────────────────────
 
+
 @router.get("/stats", summary="Aggregate protein statistics")
 def get_protein_stats(
     factory: sessionmaker[Session] = Depends(get_session_factory),
@@ -36,17 +37,37 @@ def get_protein_stats(
     and how many have metadata, embeddings, or GO annotations."""
     with session_scope(factory) as session:
         total = session.query(func.count(Protein.accession)).scalar() or 0
-        canonical = session.query(func.count(Protein.accession)).filter(Protein.is_canonical.is_(True)).scalar() or 0
-        reviewed = session.query(func.count(Protein.accession)).filter(Protein.reviewed.is_(True)).scalar() or 0
-        with_metadata = session.query(func.count(distinct(Protein.canonical_accession))).join(
-            ProteinUniProtMetadata,
-            Protein.canonical_accession == ProteinUniProtMetadata.canonical_accession,
-        ).scalar() or 0
-        with_embeddings = session.query(func.count(distinct(Protein.accession))).join(
-            SequenceEmbedding,
-            Protein.sequence_id == SequenceEmbedding.sequence_id,
-        ).scalar() or 0
-        with_go = session.query(func.count(distinct(ProteinGOAnnotation.protein_accession))).scalar() or 0
+        canonical = (
+            session.query(func.count(Protein.accession))
+            .filter(Protein.is_canonical.is_(True))
+            .scalar()
+            or 0
+        )
+        reviewed = (
+            session.query(func.count(Protein.accession)).filter(Protein.reviewed.is_(True)).scalar()
+            or 0
+        )
+        with_metadata = (
+            session.query(func.count(distinct(Protein.canonical_accession)))
+            .join(
+                ProteinUniProtMetadata,
+                Protein.canonical_accession == ProteinUniProtMetadata.canonical_accession,
+            )
+            .scalar()
+            or 0
+        )
+        with_embeddings = (
+            session.query(func.count(distinct(Protein.accession)))
+            .join(
+                SequenceEmbedding,
+                Protein.sequence_id == SequenceEmbedding.sequence_id,
+            )
+            .scalar()
+            or 0
+        )
+        with_go = (
+            session.query(func.count(distinct(ProteinGOAnnotation.protein_accession))).scalar() or 0
+        )
 
         return {
             "total": total,
@@ -61,6 +82,7 @@ def get_protein_stats(
 
 
 # ── List ──────────────────────────────────────────────────────────────────────
+
 
 @router.get("", summary="List proteins")
 def list_proteins(
@@ -111,6 +133,7 @@ def list_proteins(
 
 # ── Detail ────────────────────────────────────────────────────────────────────
 
+
 @router.get("/{accession}", summary="Get protein details")
 def get_protein(
     accession: str,
@@ -123,17 +146,25 @@ def get_protein(
         if p is None:
             raise HTTPException(status_code=404, detail="Protein not found")
 
-        meta = session.query(ProteinUniProtMetadata).filter(
-            ProteinUniProtMetadata.canonical_accession == p.canonical_accession
-        ).first()
+        meta = (
+            session.query(ProteinUniProtMetadata)
+            .filter(ProteinUniProtMetadata.canonical_accession == p.canonical_accession)
+            .first()
+        )
 
-        embedding_count = session.query(func.count(SequenceEmbedding.id)).filter(
-            SequenceEmbedding.sequence_id == p.sequence_id
-        ).scalar() if p.sequence_id else 0
+        embedding_count = (
+            session.query(func.count(SequenceEmbedding.id))
+            .filter(SequenceEmbedding.sequence_id == p.sequence_id)
+            .scalar()
+            if p.sequence_id
+            else 0
+        )
 
-        go_count = session.query(func.count(ProteinGOAnnotation.id)).filter(
-            ProteinGOAnnotation.protein_accession == accession
-        ).scalar()
+        go_count = (
+            session.query(func.count(ProteinGOAnnotation.id))
+            .filter(ProteinGOAnnotation.protein_accession == accession)
+            .scalar()
+        )
 
         isoforms = []
         if p.is_canonical:
@@ -182,11 +213,14 @@ def get_protein(
                 "rhea_id": meta.rhea_id,
                 "site": meta.site,
                 "features": meta.features,
-            } if meta else None,
+            }
+            if meta
+            else None,
         }
 
 
 # ── Annotations ───────────────────────────────────────────────────────────────
+
 
 @router.get("/{accession}/annotations", summary="List GO annotations for a protein")
 def get_protein_annotations(

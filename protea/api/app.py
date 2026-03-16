@@ -39,14 +39,35 @@ def create_app(project_root: Path | None = None) -> FastAPI:
         ),
         contact={"name": "PROTEA Team", "email": "contact@protea.example.org"},
         openapi_tags=[
-            {"name": "jobs", "description": "Job queue lifecycle — create, monitor, and cancel operations."},
+            {
+                "name": "jobs",
+                "description": "Job queue lifecycle — create, monitor, and cancel operations.",
+            },
             {"name": "proteins", "description": "UniProt protein lookup and aggregate statistics."},
-            {"name": "annotations", "description": "GO ontology snapshots, annotation sets, and GO subgraph queries."},
-            {"name": "embeddings", "description": "Embedding configs, GPU compute jobs, and prediction sets management."},
-            {"name": "query-sets", "description": "User-uploaded FASTA datasets for custom prediction queries."},
-            {"name": "maintenance", "description": "Housekeeping — identify and remove orphaned sequences or embeddings."},
-            {"name": "admin", "description": "Destructive admin operations (DB reset). Use with caution."},
-            {"name": "scoring", "description": "Scoring configs, scored prediction export, and CAFA metrics."},
+            {
+                "name": "annotations",
+                "description": "GO ontology snapshots, annotation sets, and GO subgraph queries.",
+            },
+            {
+                "name": "embeddings",
+                "description": "Embedding configs, GPU compute jobs, and prediction sets management.",
+            },
+            {
+                "name": "query-sets",
+                "description": "User-uploaded FASTA datasets for custom prediction queries.",
+            },
+            {
+                "name": "maintenance",
+                "description": "Housekeeping — identify and remove orphaned sequences or embeddings.",
+            },
+            {
+                "name": "admin",
+                "description": "Destructive admin operations (DB reset). Use with caution.",
+            },
+            {
+                "name": "scoring",
+                "description": "Scoring configs, scored prediction export, and CAFA metrics.",
+            },
             {"name": "support", "description": "Community thumbs-up and comments."},
         ],
     )

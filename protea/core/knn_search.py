@@ -92,7 +92,10 @@ def search_knn(
     """
     if backend == "faiss":
         return _search_faiss(
-            query_embeddings, ref_embeddings, ref_accessions, k,
+            query_embeddings,
+            ref_embeddings,
+            ref_accessions,
+            k,
             distance_threshold=distance_threshold,
             metric=metric,
             index_type=faiss_index_type,
@@ -103,7 +106,10 @@ def search_knn(
         )
     if backend == "numpy":
         return _search_numpy(
-            query_embeddings, ref_embeddings, ref_accessions, k,
+            query_embeddings,
+            ref_embeddings,
+            ref_accessions,
+            k,
             distance_threshold=distance_threshold,
             metric=metric,
         )
@@ -113,6 +119,7 @@ def search_knn(
 # ---------------------------------------------------------------------------
 # NumPy backend
 # ---------------------------------------------------------------------------
+
 
 def _search_numpy(
     Q: np.ndarray,
@@ -142,8 +149,8 @@ def _compute_distance_matrix(Q: np.ndarray, R: np.ndarray, metric: str) -> np.nd
         return 1.0 - (Q_n @ R_n.T)
     elif metric == "l2":
         # ||q - r||^2 = ||q||^2 + ||r||^2 - 2 q·r
-        Q2 = (Q ** 2).sum(axis=1, keepdims=True)
-        R2 = (R ** 2).sum(axis=1)
+        Q2 = (Q**2).sum(axis=1, keepdims=True)
+        R2 = (R**2).sum(axis=1)
         return np.maximum(0.0, Q2 + R2 - 2.0 * (Q @ R.T))
     else:
         raise ValueError(f"Unknown metric: {metric!r}. Choose 'cosine' or 'l2'.")
@@ -152,6 +159,7 @@ def _compute_distance_matrix(Q: np.ndarray, R: np.ndarray, metric: str) -> np.nd
 # ---------------------------------------------------------------------------
 # FAISS backend
 # ---------------------------------------------------------------------------
+
 
 def _search_faiss(
     Q: np.ndarray,
@@ -171,9 +179,7 @@ def _search_faiss(
     try:
         import faiss
     except ImportError as exc:
-        raise ImportError(
-            "FAISS is not installed. Run `pip install faiss-cpu`."
-        ) from exc
+        raise ImportError("FAISS is not installed. Run `pip install faiss-cpu`.") from exc
 
     n_refs, dim = R.shape
 
@@ -187,7 +193,9 @@ def _search_faiss(
         faiss.normalize_L2(R_f)
 
     index = _build_faiss_index(
-        R_f, dim, n_refs,
+        R_f,
+        dim,
+        n_refs,
         metric=metric,
         index_type=index_type,
         nlist=nlist,
@@ -242,20 +250,12 @@ def _build_faiss_index(
     faiss_metric = faiss.METRIC_INNER_PRODUCT if use_ip else faiss.METRIC_L2
 
     if index_type == "Flat":
-        index = (
-            faiss.IndexFlatIP(dim)
-            if use_ip
-            else faiss.IndexFlatL2(dim)
-        )
+        index = faiss.IndexFlatIP(dim) if use_ip else faiss.IndexFlatL2(dim)
 
     elif index_type == "IVFFlat":
         # nlist must be <= n_refs and >= 1
         effective_nlist = max(1, min(nlist, n_refs))
-        quantizer = (
-            faiss.IndexFlatIP(dim)
-            if use_ip
-            else faiss.IndexFlatL2(dim)
-        )
+        quantizer = faiss.IndexFlatIP(dim) if use_ip else faiss.IndexFlatL2(dim)
         index = faiss.IndexIVFFlat(quantizer, dim, effective_nlist, faiss_metric)
         index.train(R_f)
         index.nprobe = min(nprobe, effective_nlist)
@@ -266,8 +266,7 @@ def _build_faiss_index(
 
     else:
         raise ValueError(
-            f"Unknown faiss_index_type: {index_type!r}. "
-            "Choose 'Flat', 'IVFFlat', or 'HNSW'."
+            f"Unknown faiss_index_type: {index_type!r}. Choose 'Flat', 'IVFFlat', or 'HNSW'."
         )
 
     index.add(R_f)

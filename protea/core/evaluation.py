@@ -51,6 +51,7 @@ _NAMESPACES = ("F", "P", "C")
 # Data structures
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class EvaluationData:
     """Computed ground-truth delta between two annotation sets."""
@@ -113,18 +114,22 @@ class EvaluationData:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _load_children_map(session: Session, snapshot_id: uuid.UUID) -> dict[int, set[int]]:
     """Load GO DAG as {parent_go_term_id: {child_go_term_id}} for a snapshot.
 
     Only is_a and part_of relationships are used for NOT-propagation, matching
     the CAFA evaluation protocol.
     """
-    rows = session.execute(text("""
+    rows = session.execute(
+        text("""
         SELECT parent_go_term_id, child_go_term_id
         FROM go_term_relationship
         WHERE ontology_snapshot_id = :snap_id
           AND relation_type IN ('is_a', 'part_of')
-    """), {"snap_id": snapshot_id}).fetchall()
+    """),
+        {"snap_id": snapshot_id},
+    ).fetchall()
 
     children: dict[int, set[int]] = defaultdict(set)
     for parent_id, child_id in rows:
@@ -153,9 +158,12 @@ def _load_go_maps(
     aspect is 'F' (molecular function), 'P' (biological process), or
     'C' (cellular component).
     """
-    rows = session.execute(text("""
+    rows = session.execute(
+        text("""
         SELECT id, go_id, aspect FROM go_term WHERE ontology_snapshot_id = :snap_id
-    """), {"snap_id": snapshot_id}).fetchall()
+    """),
+        {"snap_id": snapshot_id},
+    ).fetchall()
     id_map = {db_id: go_id for db_id, go_id, _ in rows}
     aspect_map = {db_id: aspect for db_id, _, aspect in rows if aspect}
     return id_map, aspect_map
@@ -171,12 +179,15 @@ def _build_negative_keys(
     Collects NOT-qualified annotations from all given annotation sets and
     propagates them to all GO descendants via the DAG.
     """
-    not_rows = session.execute(text("""
+    not_rows = session.execute(
+        text("""
         SELECT DISTINCT protein_accession, go_term_id
         FROM protein_go_annotation
         WHERE annotation_set_id = ANY(:set_ids)
           AND qualifier LIKE '%NOT%'
-    """), {"set_ids": set_ids}).fetchall()
+    """),
+        {"set_ids": set_ids},
+    ).fetchall()
 
     negated_by_protein: dict[str, set[int]] = defaultdict(set)
     for protein_accession, go_term_id in not_rows:
@@ -205,13 +216,16 @@ def _load_experimental_annotations_by_ns(
     Returns {protein_accession: {aspect: {go_id}}} where aspect ∈ {'F', 'P', 'C'}.
     Terms without a known aspect are silently dropped.
     """
-    rows = session.execute(text("""
+    rows = session.execute(
+        text("""
         SELECT pga.protein_accession, pga.go_term_id
         FROM protein_go_annotation pga
         WHERE pga.annotation_set_id = :set_id
           AND pga.evidence_code = ANY(:exp_codes)
           AND (pga.qualifier IS NULL OR pga.qualifier NOT LIKE '%NOT%')
-    """), {"set_id": annotation_set_id, "exp_codes": _EXP_CODES}).fetchall()
+    """),
+        {"set_id": annotation_set_id, "exp_codes": _EXP_CODES},
+    ).fetchall()
 
     result: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
     for protein_accession, go_term_id in rows:
@@ -227,6 +241,7 @@ def _load_experimental_annotations_by_ns(
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def compute_evaluation_data(
     session: Session,
@@ -301,8 +316,7 @@ def compute_evaluation_data(
 
     # known = all old experimental annotations flattened (for reference download)
     known = {
-        p: {go for terms in ns_map.values() for go in terms}
-        for p, ns_map in old_by_ns.items()
+        p: {go for terms in ns_map.values() for go in terms} for p, ns_map in old_by_ns.items()
     }
 
     return EvaluationData(

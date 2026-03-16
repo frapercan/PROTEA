@@ -73,7 +73,9 @@ class LoadGOAAnnotationsOperation:
     _IDX_ASSIGNED_BY = 14
     _IDX_DATE = 13
 
-    def execute(self, session: Session, payload: dict[str, Any], *, emit: EmitFn) -> OperationResult:
+    def execute(
+        self, session: Session, payload: dict[str, Any], *, emit: EmitFn
+    ) -> OperationResult:
         p = LoadGOAAnnotationsPayload.model_validate(payload)
 
         snapshot_id = uuid.UUID(p.ontology_snapshot_id)
@@ -82,10 +84,15 @@ class LoadGOAAnnotationsOperation:
             raise ValueError(f"OntologySnapshot {p.ontology_snapshot_id} not found")
 
         t0 = time.perf_counter()
-        emit("load_goa_annotations.start", None, {
-            "gaf_url": p.gaf_url,
-            "ontology_snapshot_id": p.ontology_snapshot_id,
-        }, "info")
+        emit(
+            "load_goa_annotations.start",
+            None,
+            {
+                "gaf_url": p.gaf_url,
+                "ontology_snapshot_id": p.ontology_snapshot_id,
+            },
+            "info",
+        )
 
         canonical_accessions = self._load_accessions(session, emit)
         if not canonical_accessions:
@@ -103,8 +110,12 @@ class LoadGOAAnnotationsOperation:
         session.add(annotation_set)
         session.flush()
 
-        emit("load_goa_annotations.annotation_set_created", None,
-             {"annotation_set_id": str(annotation_set.id)}, "info")
+        emit(
+            "load_goa_annotations.annotation_set_created",
+            None,
+            {"annotation_set_id": str(annotation_set.id)},
+            "info",
+        )
 
         total_lines = 0
         total_inserted = 0
@@ -116,7 +127,12 @@ class LoadGOAAnnotationsOperation:
             total_lines += 1
 
             if p.total_limit is not None and total_inserted >= p.total_limit:
-                emit("load_goa_annotations.limit_reached", None, {"total_limit": p.total_limit}, "warning")
+                emit(
+                    "load_goa_annotations.limit_reached",
+                    None,
+                    {"total_limit": p.total_limit},
+                    "warning",
+                )
                 break
 
             buffer.append(record)
@@ -130,12 +146,17 @@ class LoadGOAAnnotationsOperation:
                 total_skipped += skipped
                 buffer.clear()
 
-                emit("load_goa_annotations.page_done", None, {
-                    "page": pages,
-                    "total_lines": total_lines,
-                    "total_inserted": total_inserted,
-                    "total_skipped": total_skipped,
-                }, "info")
+                emit(
+                    "load_goa_annotations.page_done",
+                    None,
+                    {
+                        "page": pages,
+                        "total_lines": total_lines,
+                        "total_inserted": total_inserted,
+                        "total_skipped": total_skipped,
+                    },
+                    "info",
+                )
 
                 if p.commit_every_page:
                     session.commit()
@@ -164,8 +185,12 @@ class LoadGOAAnnotationsOperation:
     def _load_accessions(self, session: Session, emit: EmitFn) -> set[str]:
         emit("load_goa_annotations.load_accessions_start", None, {}, "info")
         accessions = set(session.scalars(select(distinct(Protein.canonical_accession))))
-        emit("load_goa_annotations.load_accessions_done", None,
-             {"canonical_accessions": len(accessions)}, "info")
+        emit(
+            "load_goa_annotations.load_accessions_done",
+            None,
+            {"canonical_accessions": len(accessions)},
+            "info",
+        )
         return accessions
 
     def _load_go_term_map(
@@ -181,9 +206,7 @@ class LoadGOAAnnotationsOperation:
         emit("load_goa_annotations.load_go_terms_done", None, {"go_terms": len(mapping)}, "info")
         return mapping
 
-    def _stream_gaf(
-        self, p: LoadGOAAnnotationsPayload, emit: EmitFn
-    ) -> Iterator[dict[str, str]]:
+    def _stream_gaf(self, p: LoadGOAAnnotationsPayload, emit: EmitFn) -> Iterator[dict[str, str]]:
         emit("load_goa_annotations.download_start", None, {"gaf_url": p.gaf_url}, "info")
         resp = requests.get(p.gaf_url, stream=True, timeout=p.timeout_seconds)
         resp.raise_for_status()
@@ -249,27 +272,28 @@ class LoadGOAAnnotationsOperation:
                 continue
             seen.add(dedup_key)
 
-            to_add.append({
-                "annotation_set_id": annotation_set_id,
-                "protein_accession": accession,
-                "go_term_id": go_term_id,
-                "qualifier": rec["qualifier"] or None,
-                "evidence_code": evidence_code,
-                "assigned_by": rec["assigned_by"] or None,
-                "db_reference": rec["db_reference"] or None,
-                "with_from": rec["with_from"] or None,
-                "annotation_date": rec["annotation_date"] or None,
-            })
+            to_add.append(
+                {
+                    "annotation_set_id": annotation_set_id,
+                    "protein_accession": accession,
+                    "go_term_id": go_term_id,
+                    "qualifier": rec["qualifier"] or None,
+                    "evidence_code": evidence_code,
+                    "assigned_by": rec["assigned_by"] or None,
+                    "db_reference": rec["db_reference"] or None,
+                    "with_from": rec["with_from"] or None,
+                    "annotation_date": rec["annotation_date"] or None,
+                }
+            )
 
         if to_add:
             from sqlalchemy.dialects.postgresql import insert as pg_insert
+
             chunk_size = 5000
             for i in range(0, len(to_add), chunk_size):
-                chunk = to_add[i: i + chunk_size]
+                chunk = to_add[i : i + chunk_size]
                 stmt = pg_insert(ProteinGOAnnotation.__table__).values(chunk)
-                stmt = stmt.on_conflict_do_nothing(
-                    constraint="uq_pga_set_protein_term_evidence"
-                )
+                stmt = stmt.on_conflict_do_nothing(constraint="uq_pga_set_protein_term_evidence")
                 session.execute(stmt)
 
         return len(to_add), skipped

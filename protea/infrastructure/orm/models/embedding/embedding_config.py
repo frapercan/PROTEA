@@ -65,17 +65,13 @@ class EmbeddingConfig(Base):
 
     __tablename__ = "embedding_config"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     model_name: Mapped[str] = mapped_column(String, nullable=False, index=True)
     model_backend: Mapped[str] = mapped_column(String, nullable=False, default="esm")
     layer_indices: Mapped[list[Any]] = mapped_column(JSONB, nullable=False)
     layer_agg: Mapped[str] = mapped_column(String, nullable=False, default="mean")
     pooling: Mapped[str] = mapped_column(String, nullable=False, default="mean")
-    normalize_residues: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False
-    )
+    normalize_residues: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     normalize: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     max_length: Mapped[int] = mapped_column(Integer, nullable=False, default=1022)
     use_chunking: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
