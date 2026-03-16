@@ -446,9 +446,9 @@ export default function FunctionalAnnotationPage() {
                     {shortId(ps.id)}…
                   </Link>
                 </div>
-                <div className="font-mono text-xs text-gray-500" title={ps.embedding_config_id}>{shortId(ps.embedding_config_id)}</div>
-                <div className="font-mono text-xs text-gray-500" title={ps.annotation_set_id}>{shortId(ps.annotation_set_id)}</div>
-                <div className="font-mono text-xs text-gray-500" title={ps.ontology_snapshot_id}>{shortId(ps.ontology_snapshot_id)}</div>
+                <div className="text-xs text-gray-700" title={ps.embedding_config_id}>{ps.embedding_config_name ?? shortId(ps.embedding_config_id)}</div>
+                <div className="text-xs text-gray-700" title={ps.annotation_set_id}>{ps.annotation_set_label ?? shortId(ps.annotation_set_id)}</div>
+                <div className="text-xs text-gray-700" title={ps.ontology_snapshot_id}>{ps.ontology_snapshot_version ?? shortId(ps.ontology_snapshot_id)}</div>
                 <div className="text-gray-700">{ps.prediction_count ?? 0}</div>
                 <div className="text-gray-600">
                   {ps.distance_threshold != null ? ps.distance_threshold : <span className="text-gray-400">—</span>}

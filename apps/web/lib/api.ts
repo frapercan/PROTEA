@@ -108,8 +108,11 @@ export type EmbeddingConfig = {
 export type PredictionSet = {
   id: string;
   embedding_config_id: string;
+  embedding_config_name?: string;
   annotation_set_id: string;
+  annotation_set_label?: string;
   ontology_snapshot_id: string;
+  ontology_snapshot_version?: string;
   limit_per_entry: number;
   distance_threshold?: number | null;
   created_at: string;
