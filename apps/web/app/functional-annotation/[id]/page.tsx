@@ -11,10 +11,234 @@ import {
   getProteinAnnotations,
   getGoSubgraph,
   getGoTermDistribution,
+  listScoringConfigs,
+  getScoredTsvUrl,
+  createScoringConfig,
   Prediction,
   ProteinAnnotation,
   GoSubgraph,
+  ScoringConfig,
 } from "@/lib/api";
+
+// ── Scoring engine (mirrors protea/core/scoring.py) ──────────────────────────
+//
+// Evidence-code quality weights: same default table as the Python backend.
+// When a ScoringConfig carries custom `evidence_weights`, those overrides take
+// precedence; codes absent from the override still resolve via this table.
+
+const DEFAULT_EVIDENCE_WEIGHTS: Record<string, number> = {
+  // Experimental — direct biological evidence
+  EXP: 1.0, IDA: 1.0, IPI: 1.0, IMP: 1.0, IGI: 1.0, IEP: 1.0,
+  HTP: 1.0, HDA: 1.0, HMP: 1.0, HGI: 1.0, HEP: 1.0,
+  IC:  1.0, TAS: 1.0,
+  // Computational / Phylogenetic
+  ISS: 0.7, ISO: 0.7, ISA: 0.7, ISM: 0.7, IGC: 0.7,
+  IBA: 0.7, IBD: 0.7, IKR: 0.7, IRD: 0.7, RCA: 0.7,
+  // Electronic / author statement
+  NAS: 0.5,
+  IEA: 0.3,
+  // No biological data
+  ND: 0.1,
+};
+
+/** Fallback weight for codes not found in any lookup table. */
+const DEFAULT_EVIDENCE_WEIGHT_FALLBACK = 0.5;
+
+/**
+ * Resolve the quality weight for a single GO evidence code.
+ *
+ * Resolution order:
+ * 1. Config-level override (config.evidence_weights), if present.
+ * 2. Module-level DEFAULT_EVIDENCE_WEIGHTS table.
+ * 3. DEFAULT_EVIDENCE_WEIGHT_FALLBACK (0.5).
+ */
+function resolveEvidenceWeight(
+  code: string | null | undefined,
+  overrides: Record<string, number> | null | undefined,
+): number {
+  if (!code) return DEFAULT_EVIDENCE_WEIGHT_FALLBACK;
+  if (overrides && code in overrides) return overrides[code];
+  return DEFAULT_EVIDENCE_WEIGHTS[code] ?? DEFAULT_EVIDENCE_WEIGHT_FALLBACK;
+}
+
+/**
+ * Compute a [0, 1] confidence score for a prediction row.
+ *
+ * Mirrors the logic in `protea/core/scoring.py::compute_score()`, including
+ * the two-level evidence weight resolution so the UI score always matches
+ * the backend TSV export exactly.
+ */
+function computeScore(pred: Prediction, config: ScoringConfig): number {
+  const evWeight = resolveEvidenceWeight(pred.evidence_code, config.evidence_weights);
+
+  const signals: Record<string, number | null> = {
+    embedding_similarity: 1 - pred.distance / 2,
+    identity_nw: pred.identity_nw,
+    identity_sw: pred.identity_sw,
+    evidence_weight: pred.evidence_code != null ? evWeight : null,
+    taxonomic_proximity:
+      pred.taxonomic_distance != null ? 1 / (1 + pred.taxonomic_distance) : null,
+  };
+
+  let weightedSum = 0;
+  let totalWeight = 0;
+  for (const [signal, weight] of Object.entries(config.weights)) {
+    if (weight <= 0) continue;
+    const val = signals[signal];
+    if (val == null) continue;
+    weightedSum += weight * Math.max(0, Math.min(1, val));
+    totalWeight += weight;
+  }
+
+  if (totalWeight === 0) return 0;
+  let score = weightedSum / totalWeight;
+
+  if (config.formula === "evidence_weighted") {
+    score *= evWeight;
+  }
+
+  return score;
+}
+// ── Scoring signals ───────────────────────────────────────────────────────────
+
+const SIGNALS: { key: string; label: string; hint: string }[] = [
+  { key: "embedding_similarity", label: "Emb. similarity", hint: "1 − cosine_distance / 2, always available" },
+  { key: "identity_nw",          label: "Identity NW",     hint: "Global identity Needleman-Wunsch (requires compute_alignments)" },
+  { key: "identity_sw",          label: "Identity SW",     hint: "Local identity Smith-Waterman (requires compute_alignments)" },
+  { key: "evidence_weight",      label: "Evidence",        hint: "GO evidence code quality (EXP→1.0, IEA→0.3)" },
+  { key: "taxonomic_proximity",  label: "Tax. proximity",  hint: "1/(1+tax_dist) (requires compute_taxonomy)" },
+];
+
+const DEFAULT_CUSTOM_WEIGHTS: Record<string, number> = {
+  embedding_similarity: 1.0,
+  identity_nw: 0.0,
+  identity_sw: 0.0,
+  evidence_weight: 0.0,
+  taxonomic_proximity: 0.0,
+};
+
+export const CUSTOM_ID = "__custom__";
+
+// ── WeightPanel ───────────────────────────────────────────────────────────────
+
+function WeightPanel({
+  config,
+  isCustom,
+  customWeights,
+  customFormula,
+  onWeightChange,
+  onFormulaChange,
+  onSave,
+  saving,
+}: {
+  config?: ScoringConfig;
+  isCustom: boolean;
+  customWeights: Record<string, number>;
+  customFormula: string;
+  onWeightChange: (key: string, val: number) => void;
+  onFormulaChange: (f: string) => void;
+  onSave: (name: string) => void;
+  saving: boolean;
+}) {
+  const [saveName, setSaveName] = useState("");
+  const [showSaveForm, setShowSaveForm] = useState(false);
+
+  if (!isCustom && config) {
+    return (
+      <div className="flex flex-wrap items-center gap-1.5 text-xs max-w-sm">
+        <span className="rounded bg-blue-50 px-1.5 py-0.5 font-mono text-blue-700 border border-blue-100">
+          {config.formula}
+        </span>
+        {SIGNALS.map(({ key, label }) => {
+          const w = config.weights[key] ?? 0;
+          return (
+            <span
+              key={key}
+              title={`${label}: ${w}`}
+              className={`rounded px-1.5 py-0.5 font-mono ${w > 0 ? "bg-gray-100 text-gray-700" : "text-gray-300"}`}
+            >
+              {label} {w}
+            </span>
+          );
+        })}
+        {config.description && (
+          <span className="text-gray-400 italic ml-1">{config.description}</span>
+        )}
+      </div>
+    );
+  }
+
+  if (isCustom) {
+    return (
+      <div className="rounded-lg border bg-white p-3 shadow-sm w-72">
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Custom weights</span>
+          <select
+            value={customFormula}
+            onChange={(e) => onFormulaChange(e.target.value)}
+            className="rounded border px-1.5 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+          >
+            <option value="linear">linear</option>
+            <option value="evidence_weighted">evidence_weighted</option>
+          </select>
+        </div>
+        <div className="space-y-2">
+          {SIGNALS.map(({ key, label, hint }) => {
+            const val = customWeights[key] ?? 0;
+            return (
+              <div key={key} className="flex items-center gap-2" title={hint}>
+                <span className="text-xs text-gray-600 w-32 shrink-0">{label}</span>
+                <input
+                  type="range" min="0" max="1" step="0.05"
+                  value={val}
+                  onChange={(e) => onWeightChange(key, parseFloat(e.target.value))}
+                  className="flex-1 accent-blue-500"
+                />
+                <span className="font-mono text-xs text-gray-700 w-8 text-right">{val.toFixed(2)}</span>
+              </div>
+            );
+          })}
+        </div>
+        <div className="mt-3 border-t pt-2.5">
+          {!showSaveForm ? (
+            <button
+              onClick={() => setShowSaveForm(true)}
+              className="text-xs text-blue-600 hover:underline"
+            >
+              Save as named config…
+            </button>
+          ) : (
+            <div className="flex gap-1">
+              <input
+                type="text"
+                value={saveName}
+                onChange={(e) => setSaveName(e.target.value)}
+                placeholder="Config name"
+                className="flex-1 rounded border px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+              <button
+                onClick={() => { onSave(saveName); setShowSaveForm(false); setSaveName(""); }}
+                disabled={!saveName.trim() || saving}
+                className="rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-700 disabled:opacity-40"
+              >
+                {saving ? "…" : "OK"}
+              </button>
+              <button
+                onClick={() => { setShowSaveForm(false); setSaveName(""); }}
+                className="text-xs text-gray-400 hover:text-gray-600 px-1"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+}
+
 import dynamic from "next/dynamic";
 const GoGraph = dynamic(() => import("@/components/GoGraph"), { ssr: false });
 
@@ -64,19 +288,37 @@ function pct(v: number | null) {
   return `${(v * 100).toFixed(1)}%`;
 }
 
-function PredictionTable({ preds, annotatedGoIds }: { preds: Prediction[]; annotatedGoIds: Set<string> }) {
+function scoreColor(score: number): string {
+  // green for high scores, yellow for mid, red for low
+  if (score >= 0.75) return "text-green-700 font-semibold";
+  if (score >= 0.5) return "text-yellow-700";
+  return "text-red-500";
+}
+
+function PredictionTable({ preds, annotatedGoIds, scoringConfig }: { preds: Prediction[]; annotatedGoIds: Set<string>; scoringConfig?: ScoringConfig }) {
   const hasAlignment = preds.some((p) => p.identity_nw != null);
   const hasTaxonomy = preds.some((p) => p.taxonomic_relation != null);
+  const hasScore = !!scoringConfig;
   const [expanded, setExpanded] = useState<number | null>(null);
 
+  // Sort by score descending when a config is active
+  const sortedPreds = hasScore
+    ? [...preds].sort((a, b) => computeScore(b, scoringConfig!) - computeScore(a, scoringConfig!))
+    : preds;
+
   // Column layout adapts to available features
-  const baseGrid = hasAlignment || hasTaxonomy
-    ? "grid-cols-[80px_1fr_100px_65px_70px_70px]"
-    : "grid-cols-[90px_1fr_110px_75px]";
+  const baseGrid = hasScore
+    ? (hasAlignment || hasTaxonomy
+        ? "grid-cols-[60px_80px_1fr_100px_65px_70px_70px]"
+        : "grid-cols-[60px_90px_1fr_110px_75px]")
+    : (hasAlignment || hasTaxonomy
+        ? "grid-cols-[80px_1fr_100px_65px_70px_70px]"
+        : "grid-cols-[90px_1fr_110px_75px]");
 
   return (
     <div className="overflow-hidden rounded-md border bg-white">
       <div className={`grid ${baseGrid} gap-1 border-b bg-gray-50 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400`}>
+        {hasScore && <div>Score</div>}
         <div>GO ID</div>
         <div>Name</div>
         <div>Ref. Protein</div>
@@ -84,9 +326,9 @@ function PredictionTable({ preds, annotatedGoIds }: { preds: Prediction[]; annot
         {hasAlignment && <><div>NW id%</div><div>SW id%</div></>}
         {hasTaxonomy && !hasAlignment && <><div>Relation</div><div>Tax dist</div></>}
       </div>
-      {preds.length === 0 ? (
+      {sortedPreds.length === 0 ? (
         <p className="px-3 py-3 text-xs text-gray-300">—</p>
-      ) : preds.map((pred, i) => (
+      ) : sortedPreds.map((pred, i) => (
         <div key={i}>
           <div
             className={`grid ${baseGrid} gap-1 border-b px-3 py-2 text-xs last:border-0 items-center
@@ -94,6 +336,11 @@ function PredictionTable({ preds, annotatedGoIds }: { preds: Prediction[]; annot
               ${(hasAlignment || hasTaxonomy) ? "cursor-pointer hover:bg-blue-50/40" : ""}`}
             onClick={() => (hasAlignment || hasTaxonomy) ? setExpanded(expanded === i ? null : i) : undefined}
           >
+            {hasScore && (
+              <span className={`font-mono ${scoreColor(computeScore(pred, scoringConfig!))}`}>
+                {computeScore(pred, scoringConfig!).toFixed(3)}
+              </span>
+            )}
             <span className="font-mono text-blue-600">{pred.go_id}</span>
             <span className="text-gray-700 truncate" title={pred.name ?? ""}>{pred.name ?? "—"}</span>
             <Link
@@ -193,6 +440,7 @@ function ProteinDetail({
   loading,
   onClose,
   ontologySnapshotId,
+  scoringConfig,
 }: {
   accession: string;
   inDb: boolean;
@@ -201,6 +449,7 @@ function ProteinDetail({
   loading: boolean;
   onClose: () => void;
   ontologySnapshotId: string | null;
+  scoringConfig?: ScoringConfig;
 }) {
   const [subgraph, setSubgraph] = useState<GoSubgraph | null>(null);
   const [loadingGraph, setLoadingGraph] = useState(false);
@@ -294,7 +543,7 @@ function ProteinDetail({
             </div>
             <div className="grid grid-cols-2 gap-3">
               {/* Predictions */}
-              <PredictionTable preds={preds} annotatedGoIds={annotatedGoIds} />
+              <PredictionTable preds={preds} annotatedGoIds={annotatedGoIds} scoringConfig={scoringConfig} />
 
 
               {/* Known annotations */}
@@ -320,14 +569,15 @@ function ProteinDetail({
   );
 }
 
-function DownloadButton({ setId }: { setId: string }) {
+function DownloadButton({ setId, scoringConfigId, customBlocked }: { setId: string; scoringConfigId?: string; customBlocked?: boolean }) {
   const [open, setOpen] = useState(false);
   const [aspect, setAspect] = useState("");
   const [maxDist, setMaxDist] = useState("");
+  const [minScore, setMinScore] = useState("");
 
   const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "";
 
-  function buildUrl() {
+  function buildRawUrl() {
     const params = new URLSearchParams();
     if (aspect) params.set("aspect", aspect);
     if (maxDist) params.set("max_distance", maxDist);
@@ -335,10 +585,17 @@ function DownloadButton({ setId }: { setId: string }) {
     return `${apiBase}/embeddings/prediction-sets/${setId}/predictions.tsv${qs ? `?${qs}` : ""}`;
   }
 
+  function buildScoredUrl() {
+    return getScoredTsvUrl(setId, scoringConfigId!, minScore ? { minScore: parseFloat(minScore) } : undefined);
+  }
+
+  const isScored = !!scoringConfigId;
+
   return (
     <div className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
+        title={customBlocked ? "Guarda el config custom para descargar scored TSV" : undefined}
         className="flex items-center gap-1.5 rounded-md border bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
       >
         ↓ Download TSV
@@ -348,33 +605,62 @@ function DownloadButton({ setId }: { setId: string }) {
         <div className="absolute right-0 top-10 z-20 w-64 rounded-lg border bg-white p-4 shadow-lg">
           <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Download options</p>
 
-          <label className="block text-xs text-gray-600 mb-1">GO Aspect</label>
-          <select
-            value={aspect}
-            onChange={(e) => setAspect(e.target.value)}
-            className="w-full rounded border px-2 py-1.5 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="">All aspects</option>
-            <option value="F">F — Molecular Function</option>
-            <option value="P">P — Biological Process</option>
-            <option value="C">C — Cellular Component</option>
-          </select>
+          {!isScored && (
+            <>
+              <label className="block text-xs text-gray-600 mb-1">GO Aspect</label>
+              <select
+                value={aspect}
+                onChange={(e) => setAspect(e.target.value)}
+                className="w-full rounded border px-2 py-1.5 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">All aspects</option>
+                <option value="F">F — Molecular Function</option>
+                <option value="P">P — Biological Process</option>
+                <option value="C">C — Cellular Component</option>
+              </select>
 
-          <label className="block text-xs text-gray-600 mb-1">Max distance</label>
-          <input
-            type="number"
-            min="0"
-            max="2"
-            step="0.01"
-            placeholder="e.g. 0.3 (no limit)"
-            value={maxDist}
-            onChange={(e) => setMaxDist(e.target.value)}
-            className="w-full rounded border px-2 py-1.5 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
+              <label className="block text-xs text-gray-600 mb-1">Max distance</label>
+              <input
+                type="number"
+                min="0"
+                max="2"
+                step="0.01"
+                placeholder="e.g. 0.3 (no limit)"
+                value={maxDist}
+                onChange={(e) => setMaxDist(e.target.value)}
+                className="w-full rounded border px-2 py-1.5 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </>
+          )}
+
+          {customBlocked && (
+            <p className="text-xs text-amber-700 bg-amber-50 rounded px-2 py-1.5 mb-3">
+              Guarda el config custom para habilitar scored TSV
+            </p>
+          )}
+
+          {isScored && (
+            <>
+              <p className="text-xs text-blue-700 bg-blue-50 rounded px-2 py-1.5 mb-3">
+                Scored TSV — includes computed score column
+              </p>
+              <label className="block text-xs text-gray-600 mb-1">Min score</label>
+              <input
+                type="number"
+                min="0"
+                max="1"
+                step="0.01"
+                placeholder="e.g. 0.5 (no limit)"
+                value={minScore}
+                onChange={(e) => setMinScore(e.target.value)}
+                className="w-full rounded border px-2 py-1.5 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </>
+          )}
 
           <a
-            href={buildUrl()}
-            download={`predictions_${setId.slice(0, 8)}.tsv`}
+            href={isScored ? buildScoredUrl() : buildRawUrl()}
+            download={isScored ? `scored_${setId.slice(0, 8)}.tsv` : `predictions_${setId.slice(0, 8)}.tsv`}
             onClick={() => setOpen(false)}
             className="block w-full rounded-md bg-blue-600 px-3 py-2 text-center text-sm font-medium text-white hover:bg-blue-700"
           >
@@ -393,6 +679,13 @@ export default function PredictionSetDetailPage({ params }: { params: Promise<{ 
   const [activeTab, setActiveTab] = useState<Tab>("proteins");
   const [annotationSetId, setAnnotationSetId] = useState<string | null>(null);
   const [ontologySnapshotId, setOntologySnapshotId] = useState<string | null>(null);
+
+  // Scoring
+  const [scoringConfigs, setScoringConfigs] = useState<ScoringConfig[]>([]);
+  const [selectedConfigId, setSelectedConfigId] = useState<string>("");
+  const [customWeights, setCustomWeights] = useState<Record<string, number>>(DEFAULT_CUSTOM_WEIGHTS);
+  const [customFormula, setCustomFormula] = useState("linear");
+  const [savingCustom, setSavingCustom] = useState(false);
 
   // Proteins tab
   const [proteins, setProteins] = useState<{ accession: string; go_count: number; min_distance: number | null; annotation_count: number; match_count: number; in_db: boolean }[]>([]);
@@ -424,7 +717,15 @@ export default function PredictionSetDetailPage({ params }: { params: Promise<{ 
         setOntologySnapshotId(ps.ontology_snapshot_id);
       })
       .catch(() => {});
+    listScoringConfigs()
+      .then(setScoringConfigs)
+      .catch(() => {});
   }, [setId]);
+
+  const selectedConfig: ScoringConfig | undefined =
+    selectedConfigId === CUSTOM_ID
+      ? { id: CUSTOM_ID, name: "Custom", formula: customFormula, weights: customWeights, evidence_weights: null, created_at: "" }
+      : scoringConfigs.find((c) => c.id === selectedConfigId);
 
   async function loadProteins(offset = 0, search = proteinSearch) {
     setLoadingProteins(true);
@@ -503,10 +804,55 @@ export default function PredictionSetDetailPage({ params }: { params: Promise<{ 
             Prediction Set <span className="font-mono text-base text-gray-500">{shortId(setId)}…</span>
           </h1>
         </div>
-        <DownloadButton setId={setId} />
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
+              <label className="text-xs text-gray-500 whitespace-nowrap">Scoring</label>
+              <select
+                value={selectedConfigId}
+                onChange={(e) => setSelectedConfigId(e.target.value)}
+                className="rounded-md border bg-white px-2 py-1.5 text-sm text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Raw distance</option>
+                {scoringConfigs.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+                <option value={CUSTOM_ID}>Custom…</option>
+              </select>
+            </div>
+            <DownloadButton
+              setId={setId}
+              scoringConfigId={
+                selectedConfigId && selectedConfigId !== CUSTOM_ID ? selectedConfigId : undefined
+              }
+              customBlocked={selectedConfigId === CUSTOM_ID}
+            />
+          </div>
+          {selectedConfigId && (
+            <WeightPanel
+              config={selectedConfigId !== CUSTOM_ID ? selectedConfig : undefined}
+              isCustom={selectedConfigId === CUSTOM_ID}
+              customWeights={customWeights}
+              customFormula={customFormula}
+              onWeightChange={(key, val) => setCustomWeights((prev) => ({ ...prev, [key]: val }))}
+              onFormulaChange={setCustomFormula}
+              onSave={async (name) => {
+                setSavingCustom(true);
+                try {
+                  const saved = await createScoringConfig({ name, formula: customFormula, weights: customWeights });
+                  setScoringConfigs((prev) => [...prev, saved]);
+                  setSelectedConfigId(saved.id);
+                } finally {
+                  setSavingCustom(false);
+                }
+              }}
+              saving={savingCustom}
+            />
+          )}
+        </div>
       </div>
 
-      <div className="flex gap-1 border-b mb-6">
+      <div className="flex gap-1 border-b mb-6 overflow-x-auto">
         {tabs.map((t) => (
           <button
             key={t.key}
@@ -547,7 +893,7 @@ export default function PredictionSetDetailPage({ params }: { params: Promise<{ 
             <span className="ml-auto text-sm text-gray-400">{proteinTotal.toLocaleString()} proteins</span>
           </div>
 
-          <div className="overflow-hidden rounded-lg border bg-white shadow-sm">
+          <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
             <div className="grid grid-cols-[160px_90px_120px_90px_90px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
               <div>Accession</div>
               <div>Predicted</div>
@@ -603,6 +949,7 @@ export default function PredictionSetDetailPage({ params }: { params: Promise<{ 
                       loading={loadingDetail}
                       onClose={() => setSelectedAccession(null)}
                       ontologySnapshotId={ontologySnapshotId}
+                      scoringConfig={selectedConfig}
                     />
                   </div>
                 )}
@@ -653,7 +1000,7 @@ export default function PredictionSetDetailPage({ params }: { params: Promise<{ 
                       {ASPECT_LABELS[asp]}
                       <span className="ml-2 text-xs font-normal text-gray-400">top {terms.length} terms</span>
                     </p>
-                    <div className="overflow-hidden rounded-lg border bg-white shadow-sm">
+                    <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
                       {terms.map((t) => (
                         <div key={t.go_id} className="flex items-center gap-3 border-b px-4 py-2.5 last:border-0">
                           <span className="font-mono text-xs text-blue-600 w-24 shrink-0">{t.go_id}</span>

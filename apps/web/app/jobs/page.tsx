@@ -136,7 +136,32 @@ export default function JobsPage() {
         </pre>
       )}
 
-      <div className="mt-4 overflow-hidden rounded-lg border bg-white shadow-sm">
+      {/* Mobile card list */}
+      <div className="mt-4 lg:hidden space-y-2">
+        {loading && Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="rounded-lg border bg-white p-3 shadow-sm animate-pulse space-y-2">
+            <div className="h-4 bg-gray-200 rounded w-24" />
+            <div className="h-3 bg-gray-100 rounded w-40" />
+          </div>
+        ))}
+        {!loading && jobs.length === 0 && (
+          <div className="rounded-lg border bg-white px-4 py-8 text-center text-sm text-gray-400 shadow-sm">No jobs found.</div>
+        )}
+        {!loading && jobs.map((j) => (
+          <Link key={j.id} href={`/jobs/${j.id}`} className="block rounded-lg border bg-white p-3 shadow-sm hover:border-blue-200 hover:bg-blue-50 transition-colors">
+            <div className="flex items-start justify-between gap-2">
+              <StatusBadge status={j.status} />
+              <span className="text-xs text-gray-400">{formatDate(j.created_at)}</span>
+            </div>
+            <p className="mt-1.5 text-sm font-medium text-gray-800">{j.operation}</p>
+            <InlineProgress current={j.progress_current} total={j.progress_total} />
+            <p className="mt-1 font-mono text-xs text-gray-400 truncate">{j.id}</p>
+          </Link>
+        ))}
+      </div>
+
+      {/* Desktop table */}
+      <div className="mt-4 hidden lg:block overflow-hidden rounded-lg border bg-white shadow-sm">
         <div className="grid grid-cols-[140px_180px_1fr_180px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
           <div>Status</div>
           <div>Operation</div>

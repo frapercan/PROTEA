@@ -60,6 +60,7 @@ export default function FunctionalAnnotationPage() {
   const [predFaissNprobe, setPredFaissNprobe] = useState(10);
   const [predFaissHnswM, setPredFaissHnswM] = useState(32);
   const [predFaissHnswEf, setPredFaissHnswEf] = useState(64);
+  const [predAspectSeparatedKnn, setPredAspectSeparatedKnn] = useState(true);
   const [predComputeAlignments, setPredComputeAlignments] = useState(false);
   const [predComputeTaxonomy, setPredComputeTaxonomy] = useState(false);
   const [predResult, setPredResult] = useState<{ id: string; status: string } | null>(null);
@@ -126,6 +127,7 @@ export default function FunctionalAnnotationPage() {
         faiss_nprobe: predFaissNprobe,
         faiss_hnsw_m: predFaissHnswM,
         faiss_hnsw_ef_search: predFaissHnswEf,
+        aspect_separated_knn: predAspectSeparatedKnn,
         compute_alignments: predComputeAlignments,
         compute_taxonomy: predComputeTaxonomy,
       });
@@ -166,7 +168,7 @@ export default function FunctionalAnnotationPage() {
         <h1 className="text-xl font-semibold">Functional Annotation</h1>
       </div>
 
-      <div className="flex gap-1 border-b mb-6">
+      <div className="flex gap-1 border-b mb-6 overflow-x-auto">
         {tabs.map((t) => (
           <button
             key={t.key}
@@ -184,7 +186,7 @@ export default function FunctionalAnnotationPage() {
 
       {/* ── Run Annotation ── */}
       {activeTab === "predict" && (
-        <div className="max-w-lg">
+        <div className="max-w-2xl">
           <div className="rounded-lg border bg-white p-6 shadow-sm">
             <h2 className="text-base font-semibold mb-4">GO Term Annotation by Embedding Similarity</h2>
             {loading ? (
@@ -247,7 +249,7 @@ export default function FunctionalAnnotationPage() {
                     <input
                       type="number"
                       value={predLimitPerEntry}
-                      onChange={(e) => setPredLimitPerEntry(parseInt(e.target.value, 10))}
+                      onChange={(e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v)) setPredLimitPerEntry(v); }}
                       min={1}
                       className={inputClass}
                     />
@@ -277,6 +279,22 @@ export default function FunctionalAnnotationPage() {
 
                 {/* Feature engineering */}
                 <div className="rounded-md border border-gray-200 bg-gray-50 p-4 space-y-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">KNN Strategy</p>
+                  <div className="flex flex-col gap-2 mb-4">
+                    <label className="flex items-start gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={predAspectSeparatedKnn}
+                        onChange={(e) => setPredAspectSeparatedKnn(e.target.checked)}
+                        className="mt-0.5 rounded"
+                      />
+                      <span className="text-sm text-gray-700">
+                        Per-aspect KNN indices
+                        <span className="ml-1.5 text-xs text-gray-400">Separate BPO / MFO / CCO reference indices — improves recall for each aspect independently</span>
+                      </span>
+                    </label>
+                  </div>
+
                   <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Feature Engineering <span className="font-normal normal-case text-gray-400">(opt-in — adds compute time)</span></p>
                   <div className="flex flex-col gap-2">
                     <label className="flex items-start gap-2 cursor-pointer">
@@ -406,7 +424,7 @@ export default function FunctionalAnnotationPage() {
             </button>
           </div>
 
-          <div className="overflow-hidden rounded-lg border bg-white shadow-sm">
+          <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
             <div className="grid grid-cols-[80px_100px_100px_100px_90px_120px_160px_60px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
               <div>ID</div>
               <div>Config</div>

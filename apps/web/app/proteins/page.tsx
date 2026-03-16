@@ -167,7 +167,7 @@ export default function ProteinsPage() {
         <h1 className="text-xl font-semibold">Proteins</h1>
       </div>
 
-      <div className="flex gap-1 border-b mb-6">
+      <div className="flex gap-1 border-b mb-6 overflow-x-auto">
         {tabs.map((t) => (
           <button
             key={t.key}
@@ -194,7 +194,7 @@ export default function ProteinsPage() {
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 placeholder="accession, gene, organism…"
-                className="rounded-md border px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-64"
+                className="rounded-md border px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-full sm:w-64"
               />
               <button type="submit" className="rounded-md border bg-white px-3 py-1.5 text-sm hover:bg-gray-50">
                 Search
@@ -234,7 +234,7 @@ export default function ProteinsPage() {
           </div>
 
           {/* Table */}
-          <div className="overflow-hidden rounded-lg border bg-white shadow-sm">
+          <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
             <div className="grid grid-cols-[130px_140px_120px_1fr_80px_110px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
               <div>Accession</div>
               <div>Entry Name</div>
@@ -340,7 +340,7 @@ export default function ProteinsPage() {
 
       {/* ── Insert Proteins ── */}
       {activeTab === "insert" && (
-        <div className="max-w-lg">
+        <div className="max-w-2xl">
           <div className="rounded-lg border bg-white p-6 shadow-sm">
             <h2 className="text-base font-semibold mb-1">Insert Proteins from UniProt</h2>
             <p className="text-sm text-gray-500 mb-4">Downloads FASTA sequences and upserts Protein + Sequence rows.</p>
@@ -382,7 +382,7 @@ export default function ProteinsPage() {
 
       {/* ── Fetch Metadata ── */}
       {activeTab === "metadata" && (
-        <div className="max-w-lg">
+        <div className="max-w-2xl">
           <div className="rounded-lg border bg-white p-6 shadow-sm">
             <h2 className="text-base font-semibold mb-1">Fetch UniProt Metadata</h2>
             <p className="text-sm text-gray-500 mb-4">Downloads TSV annotations and upserts ProteinUniProtMetadata rows.</p>

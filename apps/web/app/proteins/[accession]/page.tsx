@@ -114,7 +114,7 @@ export default function ProteinDetailPage({ params }: { params: Promise<{ access
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 border-b mb-6">
+      <div className="flex gap-1 border-b mb-6 overflow-x-auto">
         {tabs.map((t) => (
           <button
             key={t.key}
@@ -326,7 +326,7 @@ export default function ProteinDetailPage({ params }: { params: Promise<{ access
                       {ASPECT_LABELS[asp]}
                       <span className="ml-2 text-xs font-normal text-gray-400">{terms.length} term{terms.length !== 1 ? "s" : ""}</span>
                     </p>
-                    <div className="overflow-hidden rounded-lg border bg-white shadow-sm">
+                    <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
                       <div className="grid grid-cols-[100px_1fr_80px_100px_100px] gap-2 border-b bg-gray-50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
                         <div>GO ID</div>
                         <div>Name</div>

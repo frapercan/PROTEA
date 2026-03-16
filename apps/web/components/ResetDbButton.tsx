@@ -45,7 +45,7 @@ export function ResetDbButton() {
           <div className="w-full max-w-sm rounded-xl border bg-white shadow-xl p-6">
             <h2 className="text-base font-semibold text-gray-900">Reset database?</h2>
             <p className="mt-2 text-sm text-gray-500">
-              Se borrarán <span className="font-medium text-red-600">todos los datos</span>: proteínas, anotaciones, embeddings, predicciones y jobs. Esta acción es irreversible.
+              This will permanently delete <span className="font-medium text-red-600">all data</span>: proteins, annotations, embeddings, predictions and jobs. This action cannot be undone.
             </p>
             <div className="mt-5 flex justify-end gap-2">
               <button
@@ -53,14 +53,14 @@ export function ResetDbButton() {
                 disabled={loading}
                 className="rounded-md border px-4 py-2 text-sm hover:bg-gray-50 disabled:opacity-50"
               >
-                Cancelar
+                Cancel
               </button>
               <button
                 onClick={handleReset}
                 disabled={loading}
                 className="rounded-md bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700 disabled:opacity-50"
               >
-                {loading ? "Reseteando…" : "Sí, resetear"}
+                {loading ? "Resetting…" : "Yes, reset"}
               </button>
             </div>
           </div>

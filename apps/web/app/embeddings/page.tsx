@@ -230,7 +230,7 @@ export default function EmbeddingsPage() {
       )}
 
       {/* Tab bar */}
-      <div className="flex gap-1 border-b mb-6">
+      <div className="flex gap-1 border-b mb-6 overflow-x-auto">
         {tabs.map((t) => (
           <button
             key={t.key}
@@ -475,11 +475,11 @@ export default function EmbeddingsPage() {
           )}
 
           {loading ? (
-            <div className="overflow-hidden rounded-lg border bg-white shadow-sm">
+            <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
               {Array.from({ length: 3 }).map((_, i) => <SkeletonTableRow key={i} cols={9} />)}
             </div>
           ) : (
-            <div className="overflow-hidden rounded-lg border bg-white shadow-sm">
+            <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
               <div className="grid grid-cols-[1fr_140px_80px_100px_80px_80px_60px_160px_60px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
                 <div>Description</div>
                 <div>Model</div>
@@ -532,7 +532,7 @@ export default function EmbeddingsPage() {
 
       {/* ── Compute Tab ── */}
       {activeTab === "compute" && (
-        <div className="max-w-lg">
+        <div className="max-w-2xl">
           <div className="rounded-lg border bg-white p-6 shadow-sm">
             <h2 className="text-base font-semibold mb-4">Compute Embeddings</h2>
             {loading ? (

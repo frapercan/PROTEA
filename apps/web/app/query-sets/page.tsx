@@ -114,7 +114,7 @@ export default function QuerySetsPage() {
       )}
 
       {/* List */}
-      <div className="overflow-hidden rounded-lg border bg-white shadow-sm">
+      <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
         <div className="grid grid-cols-[1fr_100px_160px_80px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
           <div>Name</div>
           <div>Sequences</div>

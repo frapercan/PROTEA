@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   listAnnotationSets,
   listOntologySnapshots,
+  setSnapshotIaUrl,
   deleteAnnotationSet,
   createJob,
   AnnotationSet,
@@ -35,6 +36,27 @@ export default function AnnotationsPage() {
   const [snapshots, setSnapshots] = useState<OntologySnapshot[]>([]);
   const [loadingSets, setLoadingSets] = useState(true);
   const [loadingSnaps, setLoadingSnaps] = useState(true);
+
+  // IA URL inline edit state: snapshotId → current input value (undefined = not editing)
+  const [iaEditId, setIaEditId] = useState<string | null>(null);
+  const [iaEditValue, setIaEditValue] = useState("");
+  const [iaSaving, setIaSaving] = useState(false);
+
+  async function handleSaveIa(snapshotId: string) {
+    setIaSaving(true);
+    try {
+      const result = await setSnapshotIaUrl(snapshotId, iaEditValue.trim() || null);
+      setSnapshots((prev) =>
+        prev.map((s) => (s.id === snapshotId ? { ...s, ia_url: result.ia_url } : s))
+      );
+      setIaEditId(null);
+      toast("IA URL saved", "success");
+    } catch (err: any) {
+      toast(String(err), "error");
+    } finally {
+      setIaSaving(false);
+    }
+  }
 
   // Load Snapshot form
   const [oboUrl, setOboUrl] = useState("http://purl.obolibrary.org/obo/go/go-basic.obo");
@@ -177,7 +199,7 @@ export default function AnnotationsPage() {
         <h1 className="text-xl font-semibold">Annotations</h1>
       </div>
 
-      <div className="flex gap-1 border-b mb-6">
+      <div className="flex gap-1 border-b mb-6 overflow-x-auto">
         {tabs.map((t) => (
           <button
             key={t.key}
@@ -202,7 +224,7 @@ export default function AnnotationsPage() {
               Refresh
             </button>
           </div>
-          <div className="overflow-hidden rounded-lg border bg-white shadow-sm">
+          <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
             <div className="grid grid-cols-[80px_100px_140px_100px_1fr_160px_60px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
               <div>ID</div><div>Source</div><div>Version</div><div>Annotations</div><div>Meta</div><div>Created</div><div></div>
             </div>
@@ -254,21 +276,65 @@ export default function AnnotationsPage() {
               Refresh
             </button>
           </div>
-          <div className="overflow-hidden rounded-lg border bg-white shadow-sm">
-            <div className="grid grid-cols-[80px_1fr_120px_200px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
-              <div>ID</div><div>Version</div><div>GO Terms</div><div>Loaded</div>
+          <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
+            <div className="grid grid-cols-[80px_160px_100px_minmax(160px,1fr)_160px] min-w-[700px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
+              <div>ID</div><div>Version</div><div>GO Terms</div><div>IA URL</div><div>Loaded</div>
             </div>
-            {loadingSnaps && Array.from({ length: 2 }).map((_, i) => <SkeletonTableRow key={i} cols={4} />)}
+            {loadingSnaps && Array.from({ length: 2 }).map((_, i) => <SkeletonTableRow key={i} cols={5} />)}
             {!loadingSnaps && snapshots.length === 0 && (
               <div className="px-4 py-8 text-center text-sm text-gray-400">
                 No ontology snapshots yet. Use the Load Snapshot tab.
               </div>
             )}
             {snapshots.map((s) => (
-              <div key={s.id} className="grid grid-cols-[80px_1fr_120px_200px] gap-2 border-b px-4 py-3 text-sm last:border-0 items-center">
+              <div key={s.id} className="grid grid-cols-[80px_160px_100px_minmax(160px,1fr)_160px] min-w-[700px] gap-2 border-b px-4 py-3 text-sm last:border-0 items-center">
                 <div className="font-mono text-xs text-gray-400" title={s.id}>{shortId(s.id)}</div>
                 <div className="font-medium text-gray-800">{s.obo_version}</div>
                 <div className="text-gray-700">{(s.go_term_count ?? 0).toLocaleString()}</div>
+                <div className="min-w-0">
+                  {iaEditId === s.id ? (
+                    <div className="flex items-center gap-1">
+                      <input
+                        autoFocus
+                        type="text"
+                        value={iaEditValue}
+                        onChange={(e) => setIaEditValue(e.target.value)}
+                        placeholder="https://…/IA_cafa6.tsv or file path"
+                        className="flex-1 min-w-0 rounded border px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleSaveIa(s.id);
+                          if (e.key === "Escape") setIaEditId(null);
+                        }}
+                      />
+                      <button
+                        onClick={() => handleSaveIa(s.id)}
+                        disabled={iaSaving}
+                        className="rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        Save
+                      </button>
+                      <button
+                        onClick={() => setIaEditId(null)}
+                        className="rounded border px-2 py-1 text-xs text-gray-500 hover:bg-gray-50"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => { setIaEditId(s.id); setIaEditValue(s.ia_url ?? ""); }}
+                      className="w-full text-left flex items-center gap-2 rounded px-1 py-0.5 hover:bg-gray-50 active:bg-gray-100 transition-colors"
+                      title="Tap to edit IA URL"
+                    >
+                      {s.ia_url ? (
+                        <span className="truncate text-xs text-gray-500 font-mono flex-1">{s.ia_url}</span>
+                      ) : (
+                        <span className="text-xs text-amber-500 italic flex-1">not set</span>
+                      )}
+                      <span className="shrink-0 text-gray-400 text-xs">✎</span>
+                    </button>
+                  )}
+                </div>
                 <div className="text-xs text-gray-400">{formatDate(s.loaded_at)}</div>
               </div>
             ))}
@@ -278,7 +344,7 @@ export default function AnnotationsPage() {
 
       {/* ── Load Ontology Snapshot ── */}
       {activeTab === "load-snapshot" && (
-        <div className="max-w-lg">
+        <div className="max-w-2xl">
           <div className="rounded-lg border bg-white p-6 shadow-sm">
             <h2 className="text-base font-semibold mb-1">Load Ontology Snapshot</h2>
             <p className="text-sm text-gray-500 mb-4">Downloads a GO OBO file and populates GOTerm rows.</p>
@@ -313,7 +379,7 @@ export default function AnnotationsPage() {
 
       {/* ── Load GOA Annotations ── */}
       {activeTab === "load-goa" && (
-        <div className="max-w-lg">
+        <div className="max-w-2xl">
           <div className="rounded-lg border bg-white p-6 shadow-sm">
             <h2 className="text-base font-semibold mb-1">Load GOA Annotations</h2>
             <p className="text-sm text-gray-500 mb-4">Bulk-loads GO annotations from a GAF file.</p>
@@ -372,7 +438,7 @@ export default function AnnotationsPage() {
 
       {/* ── Load QuickGO Annotations ── */}
       {activeTab === "load-quickgo" && (
-        <div className="max-w-lg">
+        <div className="max-w-2xl">
           <div className="rounded-lg border bg-white p-6 shadow-sm">
             <h2 className="text-base font-semibold mb-1">Load QuickGO Annotations</h2>
             <p className="text-sm text-gray-500 mb-4">Streams GO annotations from the QuickGO bulk download API.</p>

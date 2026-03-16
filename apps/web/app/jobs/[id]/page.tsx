@@ -229,7 +229,7 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
               return <span key={s} className="text-xs text-gray-500">{s}: <strong>{n}</strong></span>;
             })}
           </div>
-          <div className="overflow-hidden rounded-lg border bg-white shadow-sm">
+          <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
             <div className="grid grid-cols-[120px_1fr_160px] gap-2 border-b bg-gray-50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
               <div>Status</div>
               <div>Job ID</div>
