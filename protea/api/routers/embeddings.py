@@ -281,7 +281,9 @@ def predict_go_terms(
 
     Required body fields: `embedding_config_id`, `annotation_set_id`, `ontology_snapshot_id`.
     Optional: `query_set_id` (FASTA upload), `limit_per_entry`, `distance_threshold`,
-    `batch_size`, `search_backend`, `compute_alignments`, `compute_taxonomy`.
+    `batch_size`, `search_backend`, `compute_alignments`, `compute_taxonomy`,
+    `aspect_separated_knn` (bool, default false — builds one KNN index per GO aspect to
+    guarantee BPO/MFO/CCO coverage even when unified nearest neighbours carry only one aspect).
     """
     def _parse_uuid(key: str) -> UUID:
         raw = body.get(key)

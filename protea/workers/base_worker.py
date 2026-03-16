@@ -14,7 +14,7 @@ from protea.core.contracts.operation import OperationResult, RetryLaterError
 from protea.core.contracts.registry import OperationRegistry
 from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
-from protea.infrastructure.queue.publisher import publish_job
+from protea.infrastructure.queue.publisher import publish_job, publish_operation
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +140,11 @@ class BaseWorker:
                 if result.publish_after_commit and self._amqp_url:
                     for queue_name, child_job_id in result.publish_after_commit:
                         publish_job(self._amqp_url, queue_name, child_job_id)
+
+                # Publish ephemeral operation messages (e.g. embedding batches).
+                if result.publish_operations and self._amqp_url:
+                    for queue_name, op_payload in result.publish_operations:
+                        publish_operation(self._amqp_url, queue_name, op_payload)
 
             except RetryLaterError as e:
                 # Resource busy — reset to QUEUED so the consumer can re-publish.
