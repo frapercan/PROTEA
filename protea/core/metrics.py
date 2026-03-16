@@ -135,7 +135,7 @@ def compute_cafa_metrics(
     # AUC-PR: trapezoidal integration (recall on x-axis, precision on y-axis)
     recalls = [p.recall for p in curve]
     precisions = [p.precision for p in curve]
-    auc = float(abs(np.trapz(precisions, recalls)))
+    auc = float(abs(np.trapezoid(precisions, recalls)))
 
     return CAFAMetrics(
         category=category,
