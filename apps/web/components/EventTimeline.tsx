@@ -1,5 +1,8 @@
+"use client";
+
 import { Fragment } from "react";
 import { JobEvent } from "@/lib/api";
+import { useTranslations } from "next-intl";
 
 const LEVEL_STYLES: Record<string, string> = {
   info: "bg-blue-50 text-blue-700 border-blue-200",
@@ -31,8 +34,9 @@ function Fields({ fields }: { fields: Record<string, any> }) {
 }
 
 export function EventTimeline({ events }: { events: JobEvent[] }) {
+  const t = useTranslations("components.eventTimeline");
   if (events.length === 0) {
-    return <p className="text-sm text-gray-400">No events yet.</p>;
+    return <p className="text-sm text-gray-400">{t("noEvents")}</p>;
   }
 
   return (

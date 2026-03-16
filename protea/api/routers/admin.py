@@ -21,6 +21,7 @@ def reset_db(request: Request) -> dict:
 
     # 1. Drop + recreate schema using a raw connection (outside SQLAlchemy pool)
     import psycopg
+
     with psycopg.connect(settings.db_url.replace("+psycopg", ""), autocommit=True) as conn:
         conn.execute("DROP SCHEMA public CASCADE")
         conn.execute("CREATE SCHEMA public")

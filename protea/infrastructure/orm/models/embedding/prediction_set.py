@@ -28,9 +28,7 @@ class PredictionSet(Base):
 
     __tablename__ = "prediction_set"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     embedding_config_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("embedding_config.id", ondelete="RESTRICT"),

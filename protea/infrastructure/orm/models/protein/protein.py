@@ -40,9 +40,11 @@ class Protein(Base):
 
     # Core FASTA-header derived fields
     taxonomy_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)  # OX=
-    organism: Mapped[str | None] = mapped_column(String, nullable=True)                 # OS=
-    gene_name: Mapped[str | None] = mapped_column(String, nullable=True)                # GN=
-    length: Mapped[int | None] = mapped_column(Integer, nullable=True)                  # len(sequence) or UniProt length
+    organism: Mapped[str | None] = mapped_column(String, nullable=True)  # OS=
+    gene_name: Mapped[str | None] = mapped_column(String, nullable=True)  # GN=
+    length: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )  # len(sequence) or UniProt length
 
     # MANY proteins can share one Sequence
     sequence_id: Mapped[int | None] = mapped_column(
@@ -52,11 +54,17 @@ class Protein(Base):
         index=True,
     )
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+    )
 
     # Relationships
-    sequence: Mapped[Sequence | None] = relationship("Sequence", back_populates="proteins", uselist=False)
+    sequence: Mapped[Sequence | None] = relationship(
+        "Sequence", back_populates="proteins", uselist=False
+    )
 
     # Optional UniProt raw metadata (defined in another module). View-only join by canonical_accession.
     uniprot_metadata: Mapped[ProteinUniProtMetadata | None] = relationship(

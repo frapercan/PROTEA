@@ -66,11 +66,18 @@ class InsertProteinsOperation(UniProtHttpMixin, Operation):
         self._total_results: int | None = None
         self._http = requests.Session()
 
-    def execute(self, session: Session, payload: dict[str, Any], *, emit: EmitFn) -> OperationResult:
+    def execute(
+        self, session: Session, payload: dict[str, Any], *, emit: EmitFn
+    ) -> OperationResult:
         p = InsertProteinsPayload.model_validate(payload)
 
         t0 = time.perf_counter()
-        emit("insert_proteins.start", None, {"search_criteria": p.search_criteria, "page_size": p.page_size}, "info")
+        emit(
+            "insert_proteins.start",
+            None,
+            {"search_criteria": p.search_criteria, "page_size": p.page_size},
+            "info",
+        )
 
         pages = 0
         retrieved = 0
@@ -112,14 +119,19 @@ class InsertProteinsOperation(UniProtHttpMixin, Operation):
                     "http_requests": self._http_requests,
                     "http_retries": self._http_retries,
                     "_progress_current": retrieved,
-                    **({"_progress_total": p.total_limit or self._total_results}
-                       if (p.total_limit or self._total_results) else {}),
+                    **(
+                        {"_progress_total": p.total_limit or self._total_results}
+                        if (p.total_limit or self._total_results)
+                        else {}
+                    ),
                 },
                 "info",
             )
 
             if p.total_limit is not None and retrieved >= p.total_limit:
-                emit("insert_proteins.limit_reached", None, {"total_limit": p.total_limit}, "warning")
+                emit(
+                    "insert_proteins.limit_reached", None, {"total_limit": p.total_limit}, "warning"
+                )
                 break
 
         elapsed = time.perf_counter() - t0
@@ -157,7 +169,9 @@ class InsertProteinsOperation(UniProtHttpMixin, Operation):
         )
 
     # ---- HTTP paging ----
-    def _fetch_fasta_pages(self, p: InsertProteinsPayload, emit: EmitFn) -> Iterable[list[dict[str, Any]]]:
+    def _fetch_fasta_pages(
+        self, p: InsertProteinsPayload, emit: EmitFn
+    ) -> Iterable[list[dict[str, Any]]]:
         encoded_query = quote(p.search_criteria)
         params = ["format=fasta", f"query={encoded_query}", f"size={p.page_size}"]
         if p.include_isoforms:
@@ -172,7 +186,12 @@ class InsertProteinsOperation(UniProtHttpMixin, Operation):
         while True:
             page += 1
             url = base_url if not next_cursor else f"{base_url}&cursor={next_cursor}"
-            emit("uniprot.fetch_page_start", None, {"page": page, "has_cursor": bool(next_cursor)}, "info")
+            emit(
+                "uniprot.fetch_page_start",
+                None,
+                {"page": page, "has_cursor": bool(next_cursor)},
+                "info",
+            )
 
             resp = self._get_with_retries(url, p, emit)
             if self._total_results is None:
@@ -302,7 +321,9 @@ class InsertProteinsOperation(UniProtHttpMixin, Operation):
         if missing_hashes:
             emit("db.insert_sequences_start", None, {"rows": len(missing_hashes)}, "info")
 
-            new_sequences = [SequenceModel(sequence=hash_to_seq[h], sequence_hash=h) for h in missing_hashes]
+            new_sequences = [
+                SequenceModel(sequence=hash_to_seq[h], sequence_hash=h) for h in missing_hashes
+            ]
             session.add_all(new_sequences)
             session.flush()
 
@@ -398,7 +419,9 @@ class InsertProteinsOperation(UniProtHttpMixin, Operation):
 
         return proteins_inserted, proteins_updated, sequences_inserted, sequences_reused
 
-    def _load_existing_sequences(self, session: Session, hashes: Seq[str], chunk_size: int = 5000) -> dict[str, int]:
+    def _load_existing_sequences(
+        self, session: Session, hashes: Seq[str], chunk_size: int = 5000
+    ) -> dict[str, int]:
         existing: dict[str, int] = {}
         for chunk in chunks(hashes, chunk_size):
             rows = (

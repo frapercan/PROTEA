@@ -51,15 +51,18 @@ class GenerateEvaluationSetOperation:
         if new_set is None:
             raise ValueError(f"AnnotationSet {new_set_id} not found")
         if old_set.ontology_snapshot_id != new_set.ontology_snapshot_id:
-            raise ValueError(
-                "Both annotation sets must use the same ontology snapshot"
-            )
+            raise ValueError("Both annotation sets must use the same ontology snapshot")
 
-        emit("generate_evaluation_set.start", None, {
-            "old_annotation_set_id": str(old_set_id),
-            "new_annotation_set_id": str(new_set_id),
-            "ontology_snapshot_id": str(old_set.ontology_snapshot_id),
-        }, "info")
+        emit(
+            "generate_evaluation_set.start",
+            None,
+            {
+                "old_annotation_set_id": str(old_set_id),
+                "new_annotation_set_id": str(new_set_id),
+                "ontology_snapshot_id": str(old_set.ontology_snapshot_id),
+            },
+            "info",
+        )
 
         emit("generate_evaluation_set.computing_delta", None, {}, "info")
         data = compute_evaluation_data(

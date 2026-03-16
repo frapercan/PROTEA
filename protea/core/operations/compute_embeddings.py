@@ -25,13 +25,14 @@ from protea.infrastructure.orm.models.sequence.sequence import Sequence
 
 PositiveInt = Annotated[int, Field(gt=0)]
 
-_BATCH_QUEUE  = "protea.embeddings.batch"
-_WRITE_QUEUE  = "protea.embeddings.write"
+_BATCH_QUEUE = "protea.embeddings.batch"
+_WRITE_QUEUE = "protea.embeddings.write"
 
 
 # ---------------------------------------------------------------------------
 # Data container
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class ChunkEmbedding:
@@ -41,14 +42,16 @@ class ChunkEmbedding:
     DB columns: start is 0-based inclusive, end is exclusive.  When chunking
     is disabled, ``chunk_index_s=0`` and ``chunk_index_e=None`` (full sequence).
     """
+
     chunk_index_s: int
     chunk_index_e: int | None
-    vector: np.ndarray   # 1-D float32
+    vector: np.ndarray  # 1-D float32
 
 
 # ---------------------------------------------------------------------------
 # Payloads
 # ---------------------------------------------------------------------------
+
 
 class ComputeEmbeddingsPayload(ProteaPayload, frozen=True):
     """Coordinator payload: decides *which* sequences to embed and how to batch.
@@ -104,6 +107,7 @@ class ComputeEmbeddingsBatchPayload(ProteaPayload, frozen=True):
 # ---------------------------------------------------------------------------
 # Operation
 # ---------------------------------------------------------------------------
+
 
 class ComputeEmbeddingsOperation:
     """Computes protein language model embeddings using a stored EmbeddingConfig.
@@ -177,31 +181,41 @@ class ComputeEmbeddingsOperation:
 
         # Partition into batches and create one child Job per batch.
         batches = [
-            sequence_ids[i: i + p.sequences_per_job]
+            sequence_ids[i : i + p.sequences_per_job]
             for i in range(0, len(sequence_ids), p.sequences_per_job)
         ]
         n_batches = len(batches)
 
-        emit("compute_embeddings.dispatching", None, {
-            "total_sequences": len(sequence_ids),
-            "sequences_per_job": p.sequences_per_job,
-            "batches": n_batches,
-        }, "info")
+        emit(
+            "compute_embeddings.dispatching",
+            None,
+            {
+                "total_sequences": len(sequence_ids),
+                "sequences_per_job": p.sequences_per_job,
+                "batches": n_batches,
+            },
+            "info",
+        )
 
         operations: list[tuple[str, dict]] = []
         for batch_seq_ids in batches:
-            operations.append((_BATCH_QUEUE, {
-                "operation": "compute_embeddings_batch",
-                "job_id": str(parent_job_id),
-                "payload": {
-                    "embedding_config_id": p.embedding_config_id,
-                    "sequence_ids": batch_seq_ids,
-                    "parent_job_id": str(parent_job_id),
-                    "device": p.device,
-                    "skip_existing": p.skip_existing,
-                    "batch_size": p.batch_size,
-                },
-            }))
+            operations.append(
+                (
+                    _BATCH_QUEUE,
+                    {
+                        "operation": "compute_embeddings_batch",
+                        "job_id": str(parent_job_id),
+                        "payload": {
+                            "embedding_config_id": p.embedding_config_id,
+                            "sequence_ids": batch_seq_ids,
+                            "parent_job_id": str(parent_job_id),
+                            "device": p.device,
+                            "skip_existing": p.skip_existing,
+                            "batch_size": p.batch_size,
+                        },
+                    },
+                )
+            )
 
         return OperationResult(
             result={"batches": n_batches, "sequences": len(sequence_ids)},
@@ -249,8 +263,9 @@ class ComputeEmbeddingsOperation:
             q = q.filter(~already_embedded)
 
         ids = [row[0] for row in q.all()]
-        emit("compute_embeddings.load_sequences_done", None,
-             {"sequences_to_embed": len(ids)}, "info")
+        emit(
+            "compute_embeddings.load_sequences_done", None, {"sequences_to_embed": len(ids)}, "info"
+        )
         return ids
 
     def _embed_batch(
@@ -274,6 +289,7 @@ class ComputeEmbeddingsOperation:
 # Batch operation (child job)
 # ---------------------------------------------------------------------------
 
+
 class ComputeEmbeddingsBatchOperation:
     """Processes one batch of sequences for a parent compute_embeddings job.
 
@@ -295,8 +311,12 @@ class ComputeEmbeddingsBatchOperation:
         # batch message was waiting in the queue.
         parent = session.get(Job, parent_job_id)
         if parent is not None and parent.status in (JobStatus.CANCELLED, JobStatus.FAILED):
-            emit("compute_embeddings_batch.skipped", None,
-                 {"reason": "parent_not_running", "parent_status": parent.status.value}, "warning")
+            emit(
+                "compute_embeddings_batch.skipped",
+                None,
+                {"reason": "parent_not_running", "parent_status": parent.status.value},
+                "warning",
+            )
             return OperationResult(result={"skipped": True})
 
         config = session.get(EmbeddingConfig, config_id)
@@ -306,60 +326,81 @@ class ComputeEmbeddingsBatchOperation:
         sequences = session.query(Sequence).filter(Sequence.id.in_(p.sequence_ids)).all()
 
         t0 = time.perf_counter()
-        emit("compute_embeddings_batch.start", None, {
-            "sequences": len(sequences),
-            "parent_job_id": str(parent_job_id),
-        }, "info")
+        emit(
+            "compute_embeddings_batch.start",
+            None,
+            {
+                "sequences": len(sequences),
+                "parent_job_id": str(parent_job_id),
+            },
+            "info",
+        )
 
         model, tokenizer = self._load_model(config, p.device, emit)
 
         # Run inference only — no DB writes here.
         write_sequences = []
         for i in range(0, len(sequences), p.batch_size):
-            batch    = sequences[i: i + p.batch_size]
+            batch = sequences[i : i + p.batch_size]
             seq_strs = [s.sequence for s in batch]
             batch_chunks = self._embed_batch(model, tokenizer, seq_strs, config, p.device)
             for seq, chunks in zip(batch, batch_chunks, strict=False):
-                write_sequences.append({
-                    "sequence_id": seq.id,
-                    "chunks": [
-                        {
-                            "chunk_index_s": c.chunk_index_s,
-                            "chunk_index_e": c.chunk_index_e,
-                            "vector":        c.vector.tolist(),
-                            "embedding_dim": int(c.vector.shape[0]),
-                        }
-                        for c in chunks
-                    ],
-                })
+                write_sequences.append(
+                    {
+                        "sequence_id": seq.id,
+                        "chunks": [
+                            {
+                                "chunk_index_s": c.chunk_index_s,
+                                "chunk_index_e": c.chunk_index_e,
+                                "vector": c.vector.tolist(),
+                                "embedding_dim": int(c.vector.shape[0]),
+                            }
+                            for c in chunks
+                        ],
+                    }
+                )
 
         elapsed = time.perf_counter() - t0
-        emit("compute_embeddings_batch.done", None, {
-            "sequences_inferred": len(write_sequences),
-            "elapsed_seconds":    elapsed,
-        }, "info")
+        emit(
+            "compute_embeddings_batch.done",
+            None,
+            {
+                "sequences_inferred": len(write_sequences),
+                "elapsed_seconds": elapsed,
+            },
+            "info",
+        )
 
         # Hand off to the write worker — GPU is free to take the next batch.
         return OperationResult(
             result={"sequences_inferred": len(write_sequences)},
-            publish_operations=[(_WRITE_QUEUE, {
-                "operation": "store_embeddings",
-                "job_id":    str(parent_job_id),
-                "payload": {
-                    "parent_job_id":      str(parent_job_id),
-                    "embedding_config_id": p.embedding_config_id,
-                    "skip_existing":      p.skip_existing,
-                    "sequences":          write_sequences,
-                },
-            })],
+            publish_operations=[
+                (
+                    _WRITE_QUEUE,
+                    {
+                        "operation": "store_embeddings",
+                        "job_id": str(parent_job_id),
+                        "payload": {
+                            "parent_job_id": str(parent_job_id),
+                            "embedding_config_id": p.embedding_config_id,
+                            "skip_existing": p.skip_existing,
+                            "sequences": write_sequences,
+                        },
+                    },
+                )
+            ],
         )
 
     def _load_model(self, config: EmbeddingConfig, device: str, emit: EmitFn) -> tuple[Any, Any]:
         return _get_or_load_model(config, device, emit)
 
     def _embed_batch(
-        self, model: Any, tokenizer: Any, sequences: list[str],
-        config: EmbeddingConfig, device: str,
+        self,
+        model: Any,
+        tokenizer: Any,
+        sequences: list[str],
+        config: EmbeddingConfig,
+        device: str,
     ) -> list[list[ChunkEmbedding]]:
         if config.model_backend == "esm3c":
             return _embed_esm3c(model, sequences, config, device)
@@ -373,11 +414,13 @@ class ComputeEmbeddingsBatchOperation:
 # Write operation (CPU worker — no GPU required)
 # ---------------------------------------------------------------------------
 
+
 class StoreEmbeddingsPayload(ProteaPayload, frozen=True):
     """Payload published by ComputeEmbeddingsBatchOperation after inference."""
-    parent_job_id:      str
+
+    parent_job_id: str
     embedding_config_id: str
-    skip_existing:      bool = True
+    skip_existing: bool = True
     sequences: list[dict[str, Any]]  # [{"sequence_id": int, "chunks": [...]}]
 
 
@@ -394,28 +437,34 @@ class StoreEmbeddingsOperation:
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
         p = StoreEmbeddingsPayload.model_validate(payload)
-        config_id     = uuid.UUID(p.embedding_config_id)
+        config_id = uuid.UUID(p.embedding_config_id)
         parent_job_id = UUID(p.parent_job_id)
 
         parent = session.get(Job, parent_job_id)
         if parent is not None and parent.status in (JobStatus.CANCELLED, JobStatus.FAILED):
-            emit("store_embeddings.skipped", None,
-                 {"reason": "parent_not_running", "parent_status": parent.status.value}, "warning")
+            emit(
+                "store_embeddings.skipped",
+                None,
+                {"reason": "parent_not_running", "parent_status": parent.status.value},
+                "warning",
+            )
             return OperationResult(result={"skipped": True})
 
-        embeddings_stored  = 0
-        sequences_skipped  = 0
+        embeddings_stored = 0
+        sequences_skipped = 0
 
         rows_to_insert: list[dict] = []
 
         for seq_data in p.sequences:
             sequence_id = seq_data["sequence_id"]
-            chunks      = seq_data["chunks"]
+            chunks = seq_data["chunks"]
 
             if p.skip_existing:
-                existing = session.query(SequenceEmbedding).filter_by(
-                    sequence_id=sequence_id, embedding_config_id=config_id
-                ).first()
+                existing = (
+                    session.query(SequenceEmbedding)
+                    .filter_by(sequence_id=sequence_id, embedding_config_id=config_id)
+                    .first()
+                )
                 if existing is not None:
                     sequences_skipped += 1
                     continue
@@ -425,14 +474,16 @@ class StoreEmbeddingsOperation:
                 ).delete()
 
             for chunk in chunks:
-                rows_to_insert.append({
-                    "sequence_id":        sequence_id,
-                    "embedding_config_id": config_id,
-                    "chunk_index_s":      chunk["chunk_index_s"],
-                    "chunk_index_e":      chunk.get("chunk_index_e"),
-                    "embedding":          chunk["vector"],
-                    "embedding_dim":      chunk["embedding_dim"],
-                })
+                rows_to_insert.append(
+                    {
+                        "sequence_id": sequence_id,
+                        "embedding_config_id": config_id,
+                        "chunk_index_s": chunk["chunk_index_s"],
+                        "chunk_index_e": chunk.get("chunk_index_e"),
+                        "embedding": chunk["vector"],
+                        "embedding_dim": chunk["embedding_dim"],
+                    }
+                )
                 embeddings_stored += 1
 
         if rows_to_insert:
@@ -441,21 +492,26 @@ class StoreEmbeddingsOperation:
                 rows_to_insert,
             )
 
-        emit("store_embeddings.done", None, {
-            "embeddings_stored": embeddings_stored,
-            "sequences_skipped": sequences_skipped,
-        }, "info")
+        emit(
+            "store_embeddings.done",
+            None,
+            {
+                "embeddings_stored": embeddings_stored,
+                "sequences_skipped": sequences_skipped,
+            },
+            "info",
+        )
 
         self._update_parent_progress(session, parent_job_id, emit)
 
-        return OperationResult(result={
-            "embeddings_stored": embeddings_stored,
-            "sequences_skipped": sequences_skipped,
-        })
+        return OperationResult(
+            result={
+                "embeddings_stored": embeddings_stored,
+                "sequences_skipped": sequences_skipped,
+            }
+        )
 
-    def _update_parent_progress(
-        self, session: Session, parent_job_id: UUID, emit: EmitFn
-    ) -> None:
+    def _update_parent_progress(self, session: Session, parent_job_id: UUID, emit: EmitFn) -> None:
         row = session.execute(
             sa_update(Job)
             .where(Job.id == parent_job_id, Job.status == JobStatus.RUNNING)
@@ -474,14 +530,20 @@ class StoreEmbeddingsOperation:
         ).fetchone()
 
         if closed:
-            session.add(JobEvent(
-                job_id=parent_job_id,
-                event="job.succeeded",
-                fields={"via": "last_batch_stored"},
-                level="info",
-            ))
-            emit("store_embeddings.parent_succeeded", None,
-                 {"parent_job_id": str(parent_job_id)}, "info")
+            session.add(
+                JobEvent(
+                    job_id=parent_job_id,
+                    event="job.succeeded",
+                    fields={"via": "last_batch_stored"},
+                    level="info",
+                )
+            )
+            emit(
+                "store_embeddings.parent_succeeded",
+                None,
+                {"parent_job_id": str(parent_job_id)},
+                "info",
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -504,11 +566,16 @@ def _get_or_load_model(config: EmbeddingConfig, device: str, emit: EmitFn) -> tu
 def _load_model(config: EmbeddingConfig, device: str, emit: EmitFn) -> tuple[Any, Any]:
     import torch
 
-    emit("compute_embeddings.model_load_start", None,
-         {"model_name": config.model_name, "backend": config.model_backend}, "info")
+    emit(
+        "compute_embeddings.model_load_start",
+        None,
+        {"model_name": config.model_name, "backend": config.model_backend},
+        "info",
+    )
 
     if config.model_backend == "esm3c":
         from esm.models.esmc import ESMC
+
         device_obj = torch.device(device)
         dtype = torch.float16 if device_obj.type == "cuda" else torch.float32
         model = ESMC.from_pretrained(config.model_name)
@@ -519,6 +586,7 @@ def _load_model(config: EmbeddingConfig, device: str, emit: EmitFn) -> tuple[Any
 
     elif config.model_backend in ("esm", "auto"):
         from transformers import AutoTokenizer, EsmModel
+
         tokenizer = AutoTokenizer.from_pretrained(config.model_name)
         model = EsmModel.from_pretrained(config.model_name, output_hidden_states=True)
         model.eval()
@@ -526,6 +594,7 @@ def _load_model(config: EmbeddingConfig, device: str, emit: EmitFn) -> tuple[Any
 
     elif config.model_backend == "t5":
         from transformers import T5EncoderModel, T5Tokenizer
+
         device_obj = torch.device(device)
         dtype = torch.float16 if device_obj.type == "cuda" else torch.float32
         tokenizer = T5Tokenizer.from_pretrained(config.model_name, do_lower_case=False)
@@ -547,6 +616,7 @@ def _load_model(config: EmbeddingConfig, device: str, emit: EmitFn) -> tuple[Any
 # ---------------------------------------------------------------------------
 # Backend: ESM (HuggingFace EsmModel)
 # ---------------------------------------------------------------------------
+
 
 def _embed_esm(
     model: Any,
@@ -586,8 +656,7 @@ def _embed_esm(
             if config.pooling == "cls":
                 # CLS token at position 0 of the raw hidden states
                 layer_tensors_1d = [
-                    hidden_states[-(li + 1)][0, 0, :].float()
-                    for li in valid_layers
+                    hidden_states[-(li + 1)][0, 0, :].float() for li in valid_layers
                 ]
                 pooled = _aggregate_1d(layer_tensors_1d, config.layer_agg)
                 if config.normalize:
@@ -598,7 +667,7 @@ def _embed_esm(
                 # attention_mask.sum() = CLS + content + EOS
                 actual_len = int(tokens["attention_mask"].sum().item())
                 layer_tensors_2d = [
-                    hidden_states[-(li + 1)][0, 1:actual_len - 1, :].float()
+                    hidden_states[-(li + 1)][0, 1 : actual_len - 1, :].float()
                     for li in valid_layers
                 ]
                 residues = _aggregate_residue_layers(layer_tensors_2d, config.layer_agg)
@@ -615,6 +684,7 @@ def _embed_esm(
 # ---------------------------------------------------------------------------
 # Backend: T5 (HuggingFace T5EncoderModel)
 # ---------------------------------------------------------------------------
+
 
 def _embed_t5(
     model: Any,
@@ -664,9 +734,7 @@ def _embed_t5(
     del outputs
     torch.cuda.empty_cache()
 
-    valid_layers = _validate_layers(
-        config.layer_indices, hidden_states, "T5", "batch"
-    )
+    valid_layers = _validate_layers(config.layer_indices, hidden_states, "T5", "batch")
 
     results: list[list[ChunkEmbedding]] = []
     for i in range(len(sequences)):
@@ -674,18 +742,14 @@ def _embed_t5(
         actual_len = int(inputs["attention_mask"][i].sum().item())
 
         if config.pooling == "cls":
-            layer_tensors_1d = [
-                hidden_states[-(li + 1)][i, 0, :].float()
-                for li in valid_layers
-            ]
+            layer_tensors_1d = [hidden_states[-(li + 1)][i, 0, :].float() for li in valid_layers]
             pooled = _aggregate_1d(layer_tensors_1d, config.layer_agg)
             if config.normalize:
                 pooled = F.normalize(pooled.unsqueeze(0), p=2, dim=1).squeeze(0)
             results.append([ChunkEmbedding(0, None, pooled.cpu().numpy())])
         else:
             layer_tensors_2d = [
-                hidden_states[-(li + 1)][i, :actual_len, :].float()
-                for li in valid_layers
+                hidden_states[-(li + 1)][i, :actual_len, :].float() for li in valid_layers
             ]
             residues = _aggregate_residue_layers(layer_tensors_2d, config.layer_agg)
             if config.normalize_residues:
@@ -701,6 +765,7 @@ def _embed_t5(
 # ---------------------------------------------------------------------------
 # Backend: ESM3c (ESM SDK ESMC)
 # ---------------------------------------------------------------------------
+
 
 def _embed_esm3c(
     model: Any,
@@ -726,7 +791,7 @@ def _embed_esm3c(
 
     with torch.no_grad():
         for seq_str in sequences:
-            protein = ESMProtein(sequence=seq_str[:config.max_length])
+            protein = ESMProtein(sequence=seq_str[: config.max_length])
 
             with torch.autocast(
                 device_type=device_obj.type,
@@ -741,32 +806,24 @@ def _embed_esm3c(
 
             hs = logits_output.hidden_states
             if hs is None:
-                raise RuntimeError(
-                    f"ESM3c returned no hidden_states for sequence {seq_str[:20]!r}"
-                )
+                raise RuntimeError(f"ESM3c returned no hidden_states for sequence {seq_str[:20]!r}")
 
             # Normalise to a list of per-layer tensors [1, L, D]
             if isinstance(hs, torch.Tensor):
                 hs = [hs[i] for i in range(hs.shape[0])]
 
-            valid_layers = _validate_layers(
-                config.layer_indices, hs, "ESM3c", seq_str[:20]
-            )
+            valid_layers = _validate_layers(config.layer_indices, hs, "ESM3c", seq_str[:20])
 
             if config.pooling == "cls":
                 # BOS token at position 0 (before stripping)
-                layer_tensors_1d = [
-                    hs[-(li + 1)][0, 0, :].float() for li in valid_layers
-                ]
+                layer_tensors_1d = [hs[-(li + 1)][0, 0, :].float() for li in valid_layers]
                 pooled = _aggregate_1d(layer_tensors_1d, config.layer_agg)
                 if config.normalize:
                     pooled = F.normalize(pooled.unsqueeze(0), p=2, dim=1).squeeze(0)
                 results.append([ChunkEmbedding(0, None, pooled.cpu().numpy())])
             else:
                 # Strip BOS (0) and EOS (-1): positions [1:-1]
-                layer_tensors_2d = [
-                    hs[-(li + 1)][0, 1:-1, :].float() for li in valid_layers
-                ]
+                layer_tensors_2d = [hs[-(li + 1)][0, 1:-1, :].float() for li in valid_layers]
                 residues = _aggregate_residue_layers(layer_tensors_2d, config.layer_agg)
                 if config.normalize_residues:
                     residues = F.normalize(residues, p=2, dim=1)
@@ -781,6 +838,7 @@ def _embed_esm3c(
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
+
 
 def _validate_layers(
     layer_indices: list[int],
@@ -845,9 +903,7 @@ def _chunk_and_pool(residues: Any, config: EmbeddingConfig) -> list[ChunkEmbeddi
     import torch.nn.functional as F
 
     if config.use_chunking:
-        spans = _compute_chunk_spans(
-            residues.shape[0], config.chunk_size, config.chunk_overlap
-        )
+        spans = _compute_chunk_spans(residues.shape[0], config.chunk_size, config.chunk_overlap)
     else:
         spans = [(0, residues.shape[0])]
 
@@ -871,18 +927,18 @@ def _chunk_and_pool(residues: Any, config: EmbeddingConfig) -> list[ChunkEmbeddi
             pooled = F.normalize(pooled.unsqueeze(0), p=2, dim=1).squeeze(0)
 
         chunk_index_e = end if config.use_chunking else None
-        results.append(ChunkEmbedding(
-            chunk_index_s=start,
-            chunk_index_e=chunk_index_e,
-            vector=pooled.float().cpu().numpy(),
-        ))
+        results.append(
+            ChunkEmbedding(
+                chunk_index_s=start,
+                chunk_index_e=chunk_index_e,
+                vector=pooled.float().cpu().numpy(),
+            )
+        )
 
     return results
 
 
-def _compute_chunk_spans(
-    length: int, chunk_size: int, overlap: int
-) -> list[tuple[int, int]]:
+def _compute_chunk_spans(length: int, chunk_size: int, overlap: int) -> list[tuple[int, int]]:
     """Compute (start, end) spans for overlapping chunks over a sequence of ``length`` residues.
 
     Raises ``ValueError`` if ``overlap >= chunk_size`` — such a configuration

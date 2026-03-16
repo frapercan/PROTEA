@@ -65,6 +65,7 @@ def _query_set_to_dict(qs: QuerySet, entry_count: int) -> dict[str, Any]:
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
+
 @router.post("", status_code=201)
 async def create_query_set(
     file: UploadFile,
@@ -147,17 +148,15 @@ def list_query_sets(
 ) -> list[dict[str, Any]]:
     """List all uploaded FASTA query sets with their entry counts, newest first."""
     with session_scope(factory) as session:
-        rows = (
-            session.query(QuerySet)
-            .order_by(QuerySet.created_at.desc())
-            .all()
-        )
+        rows = session.query(QuerySet).order_by(QuerySet.created_at.desc()).all()
         counts = {
             qs_id: cnt
             for qs_id, cnt in session.query(
                 QuerySetEntry.query_set_id,
                 func.count(QuerySetEntry.id),
-            ).group_by(QuerySetEntry.query_set_id).all()
+            )
+            .group_by(QuerySetEntry.query_set_id)
+            .all()
         }
         return [_query_set_to_dict(qs, counts.get(qs.id, 0)) for qs in rows]
 
@@ -186,10 +185,7 @@ def get_query_set(
         )
 
         result = _query_set_to_dict(qs, entry_count)
-        result["entries"] = [
-            {"accession": acc, "sequence_id": seq_id}
-            for acc, seq_id in entries
-        ]
+        result["entries"] = [{"accession": acc, "sequence_id": seq_id} for acc, seq_id in entries]
         return result
 
 

@@ -29,6 +29,8 @@ from protea.infrastructure.orm.models.annotation.go_term_relationship import GOT
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.orm.models.annotation.protein_go_annotation import ProteinGOAnnotation
 from protea.infrastructure.orm.models.job import Job, JobEvent
+from protea.infrastructure.orm.models.protein.protein import Protein
+from protea.infrastructure.orm.models.sequence.sequence import Sequence
 from protea.infrastructure.queue.publisher import publish_job
 from protea.infrastructure.session import session_scope
 
@@ -60,6 +62,7 @@ def get_artifacts_dir(request: Request) -> Path:
 
 # ── Ontology Snapshots ────────────────────────────────────────────────────────
 
+
 @router.get("/snapshots", summary="List ontology snapshots")
 def list_snapshots(
     factory: sessionmaker[Session] = Depends(get_session_factory),
@@ -85,6 +88,7 @@ def list_snapshots(
                 "id": str(s.id),
                 "obo_url": s.obo_url,
                 "obo_version": s.obo_version,
+                "ia_url": s.ia_url,
                 "loaded_at": s.loaded_at.isoformat(),
                 "go_term_count": cnt or 0,
             }
@@ -113,8 +117,48 @@ def get_snapshot(
             "id": str(s.id),
             "obo_url": s.obo_url,
             "obo_version": s.obo_version,
+            "ia_url": s.ia_url,
             "loaded_at": s.loaded_at.isoformat(),
             "go_term_count": term_count,
+        }
+
+
+@router.patch("/snapshots/{snapshot_id}/ia-url", summary="Set IA URL on an ontology snapshot")
+def set_snapshot_ia_url(
+    snapshot_id: UUID,
+    body: dict[str, Any],
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+) -> dict[str, Any]:
+    """Associate an Information Accretion (IA) file URL with an existing ontology snapshot.
+
+    The IA file contains per-term information-content weights (two columns:
+    ``go_id``, ``ia_value``) and is published alongside each CAFA benchmark
+    (e.g. ``IA_cafa6.tsv``).  Once set, ``run_cafa_evaluation`` picks it up
+    automatically for every evaluation that uses this snapshot — no need to
+    pass ``ia_file`` in the job payload.
+
+    Pass ``{"ia_url": null}`` to clear the association (evaluations will fall
+    back to uniform IC=1).
+
+    This endpoint only touches ``ia_url``; the OBO file and GO term data are
+    not affected.
+    """
+    ia_url = body.get("ia_url")
+    if "ia_url" not in body:
+        raise HTTPException(
+            status_code=422, detail="Body must contain 'ia_url' key (string or null)"
+        )
+
+    with session_scope(factory) as session:
+        s = session.get(OntologySnapshot, snapshot_id)
+        if s is None:
+            raise HTTPException(status_code=404, detail="OntologySnapshot not found")
+        s.ia_url = ia_url or None
+        session.flush()
+        return {
+            "id": str(s.id),
+            "obo_version": s.obo_version,
+            "ia_url": s.ia_url,
         }
 
 
@@ -139,17 +183,20 @@ def load_ontology_snapshot(
         session.add(job)
         session.flush()
         job_id = job.id
-        session.add(JobEvent(
-            job_id=job_id,
-            event="job.created",
-            fields={"operation": "load_ontology_snapshot", "queue": _JOBS_QUEUE},
-        ))
+        session.add(
+            JobEvent(
+                job_id=job_id,
+                event="job.created",
+                fields={"operation": "load_ontology_snapshot", "queue": _JOBS_QUEUE},
+            )
+        )
 
     publish_job(amqp_url, _JOBS_QUEUE, job_id)
     return {"id": str(job_id), "status": "queued"}
 
 
 # ── Annotation Sets ───────────────────────────────────────────────────────────
+
 
 @router.get("/sets", summary="List annotation sets")
 def list_annotation_sets(
@@ -260,11 +307,13 @@ def load_goa_annotations(
         session.add(job)
         session.flush()
         job_id = job.id
-        session.add(JobEvent(
-            job_id=job_id,
-            event="job.created",
-            fields={"operation": "load_goa_annotations", "queue": _JOBS_QUEUE},
-        ))
+        session.add(
+            JobEvent(
+                job_id=job_id,
+                event="job.created",
+                fields={"operation": "load_goa_annotations", "queue": _JOBS_QUEUE},
+            )
+        )
 
     publish_job(amqp_url, _JOBS_QUEUE, job_id)
     return {"id": str(job_id), "status": "queued"}
@@ -288,11 +337,13 @@ def load_quickgo_annotations(
         session.add(job)
         session.flush()
         job_id = job.id
-        session.add(JobEvent(
-            job_id=job_id,
-            event="job.created",
-            fields={"operation": "load_quickgo_annotations", "queue": _JOBS_QUEUE},
-        ))
+        session.add(
+            JobEvent(
+                job_id=job_id,
+                event="job.created",
+                fields={"operation": "load_quickgo_annotations", "queue": _JOBS_QUEUE},
+            )
+        )
 
     publish_job(amqp_url, _JOBS_QUEUE, job_id)
     return {"id": str(job_id), "status": "queued"}
@@ -323,11 +374,13 @@ def generate_evaluation_set(
         session.add(job)
         session.flush()
         job_id = job.id
-        session.add(JobEvent(
-            job_id=job_id,
-            event="job.created",
-            fields={"operation": "generate_evaluation_set", "queue": _JOBS_QUEUE},
-        ))
+        session.add(
+            JobEvent(
+                job_id=job_id,
+                event="job.created",
+                fields={"operation": "generate_evaluation_set", "queue": _JOBS_QUEUE},
+            )
+        )
 
     publish_job(amqp_url, _JOBS_QUEUE, job_id)
     return {"id": str(job_id), "status": "queued"}
@@ -339,11 +392,7 @@ def list_evaluation_sets(
 ) -> list[dict[str, Any]]:
     """List all evaluation sets, newest first."""
     with session_scope(factory) as session:
-        rows = (
-            session.query(EvaluationSet)
-            .order_by(EvaluationSet.created_at.desc())
-            .all()
-        )
+        rows = session.query(EvaluationSet).order_by(EvaluationSet.created_at.desc()).all()
         return [
             {
                 "id": str(e.id),
@@ -355,6 +404,34 @@ def list_evaluation_sets(
             }
             for e in rows
         ]
+
+
+@router.delete("/evaluation-sets/{eval_id}", summary="Delete an evaluation set", status_code=204)
+def delete_evaluation_set(
+    eval_id: UUID,
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+    artifacts_dir: Path = Depends(get_artifacts_dir),
+) -> None:
+    """Delete an evaluation set and all its results. Cascades to EvaluationResult rows."""
+    with session_scope(factory) as session:
+        e = session.get(EvaluationSet, eval_id)
+        if e is None:
+            raise HTTPException(status_code=404, detail="EvaluationSet not found")
+        # Collect result IDs to clean up artifact dirs
+        result_ids = [
+            str(r.id)
+            for r in session.query(EvaluationResult)
+            .filter(EvaluationResult.evaluation_set_id == eval_id)
+            .all()
+        ]
+        session.delete(e)
+
+    import shutil
+
+    for rid in result_ids:
+        result_dir = artifacts_dir / rid
+        if result_dir.exists():
+            shutil.rmtree(result_dir, ignore_errors=True)
 
 
 @router.get("/evaluation-sets/{eval_id}", summary="Get evaluation set details")
@@ -399,7 +476,9 @@ def download_gt_nk(
         e = _eval_set_or_404(session, eval_id)
         ann_old = session.get(AnnotationSet, e.old_annotation_set_id)
         data = compute_evaluation_data(
-            session, e.old_annotation_set_id, e.new_annotation_set_id,
+            session,
+            e.old_annotation_set_id,
+            e.new_annotation_set_id,
             ann_old.ontology_snapshot_id,
         )
         lines = [
@@ -430,7 +509,9 @@ def download_gt_lk(
         e = _eval_set_or_404(session, eval_id)
         ann_old = session.get(AnnotationSet, e.old_annotation_set_id)
         data = compute_evaluation_data(
-            session, e.old_annotation_set_id, e.new_annotation_set_id,
+            session,
+            e.old_annotation_set_id,
+            e.new_annotation_set_id,
             ann_old.ontology_snapshot_id,
         )
         lines = [
@@ -448,17 +529,36 @@ def download_gt_lk(
 @router.get(
     "/evaluation-sets/{eval_id}/ground-truth-PK.tsv",
     response_class=StreamingResponse,
-    summary="Download PK ground truth (CAFA format, same as LK)",
+    summary="Download PK ground truth (CAFA format)",
 )
 def download_gt_pk(
     eval_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> StreamingResponse:
-    """Download Partial-Knowledge ground truth (identical to LK at annotation level).
-    Pass ``known-terms.tsv`` as ``-known`` to the CAFA evaluator for PK scoring.
+    """Download Partial-Knowledge ground truth: proteins that gained new terms in a
+    namespace where they already had experimental annotations at t0.
+    Use together with ``known-terms.tsv`` passed as ``-known`` to the CAFA evaluator.
     Format: ``protein_accession\\tgo_id`` (no header, 2 columns).
     """
-    return download_gt_lk(eval_id=eval_id, factory=factory)
+    with session_scope(factory) as session:
+        e = _eval_set_or_404(session, eval_id)
+        ann_old = session.get(AnnotationSet, e.old_annotation_set_id)
+        data = compute_evaluation_data(
+            session,
+            e.old_annotation_set_id,
+            e.new_annotation_set_id,
+            ann_old.ontology_snapshot_id,
+        )
+        lines = [
+            f"{protein}\t{go_id}\n"
+            for protein, go_ids in sorted(data.pk.items())
+            for go_id in sorted(go_ids)
+        ]
+    return StreamingResponse(
+        iter(lines),
+        media_type="text/tab-separated-values",
+        headers={"Content-Disposition": 'attachment; filename="ground_truth_PK.tsv"'},
+    )
 
 
 @router.get(
@@ -478,7 +578,9 @@ def download_known_terms(
         e = _eval_set_or_404(session, eval_id)
         ann_old = session.get(AnnotationSet, e.old_annotation_set_id)
         data = compute_evaluation_data(
-            session, e.old_annotation_set_id, e.new_annotation_set_id,
+            session,
+            e.old_annotation_set_id,
+            e.new_annotation_set_id,
             ann_old.ontology_snapshot_id,
         )
         lines = [
@@ -493,7 +595,89 @@ def download_known_terms(
     )
 
 
+@router.get(
+    "/evaluation-sets/{eval_id}/delta-proteins.fasta",
+    response_class=StreamingResponse,
+    summary="Download delta proteins as FASTA",
+)
+def download_delta_fasta(
+    eval_id: UUID,
+    category: str = Query(
+        default="all", description="Which proteins to include: `nk`, `lk`, or `all` (default)."
+    ),
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+) -> StreamingResponse:
+    """Download the amino-acid sequences of delta proteins (NK and/or LK) as FASTA.
+
+    Only proteins whose sequence is already stored in the database are included.
+    Header format: ``>ACCESSION entry_name OS=organism OX=taxonomy_id (NK|LK)``
+    """
+    with session_scope(factory) as session:
+        e = _eval_set_or_404(session, eval_id)
+        ann_old = session.get(AnnotationSet, e.old_annotation_set_id)
+        data = compute_evaluation_data(
+            session,
+            e.old_annotation_set_id,
+            e.new_annotation_set_id,
+            ann_old.ontology_snapshot_id,
+        )
+
+        # Collect requested accessions with their NK/LK/PK label
+        accession_label: dict[str, str] = {}
+        if category in ("nk", "all"):
+            for acc in data.nk:
+                accession_label[acc] = "NK"
+        if category in ("lk", "all"):
+            for acc in data.lk:
+                accession_label[acc] = "LK"
+        if category in ("pk", "all"):
+            for acc in data.pk:
+                accession_label.setdefault(acc, "PK")  # may also be LK in another ns
+
+        if not accession_label:
+            return StreamingResponse(
+                iter([]),
+                media_type="text/plain",
+                headers={
+                    "Content-Disposition": f'attachment; filename="delta_proteins_{category}.fasta"'
+                },
+            )
+
+        # Fetch proteins + sequences in one query
+        rows = (
+            session.query(Protein, Sequence)
+            .join(Sequence, Protein.sequence_id == Sequence.id)
+            .filter(Protein.accession.in_(list(accession_label.keys())))
+            .order_by(Protein.accession)
+            .all()
+        )
+
+        lines: list[str] = []
+        for protein, seq in rows:
+            label = accession_label.get(protein.accession, "")
+            parts = [protein.accession]
+            if protein.entry_name:
+                parts.append(protein.entry_name)
+            if protein.organism:
+                parts.append(f"OS={protein.organism}")
+            if protein.taxonomy_id:
+                parts.append(f"OX={protein.taxonomy_id}")
+            parts.append(f"({label})")
+            lines.append(f">{' '.join(parts)}\n")
+            # Wrap sequence at 60 chars per line (standard FASTA)
+            s = seq.sequence
+            for i in range(0, len(s), 60):
+                lines.append(s[i : i + 60] + "\n")
+
+    return StreamingResponse(
+        iter(lines),
+        media_type="text/plain",
+        headers={"Content-Disposition": f'attachment; filename="delta_proteins_{category}.fasta"'},
+    )
+
+
 # ── CAFA Evaluation Results ───────────────────────────────────────────────────
+
 
 @router.post(
     "/evaluation-sets/{eval_id}/run",
@@ -524,11 +708,13 @@ def run_cafa_evaluation(
         session.add(job)
         session.flush()
         job_id = job.id
-        session.add(JobEvent(
-            job_id=job_id,
-            event="job.created",
-            fields={"operation": "run_cafa_evaluation", "queue": _JOBS_QUEUE},
-        ))
+        session.add(
+            JobEvent(
+                job_id=job_id,
+                event="job.created",
+                fields={"operation": "run_cafa_evaluation", "queue": _JOBS_QUEUE},
+            )
+        )
 
     publish_job(amqp_url, _JOBS_QUEUE, job_id)
     return {"id": str(job_id), "status": "queued"}
@@ -565,7 +751,7 @@ def download_evaluation_metrics(
         return StreamingResponse(
             _rows(),
             media_type="text/tab-separated-values",
-            headers={"Content-Disposition": f"attachment; filename=\"metrics_{result_id}.tsv\""},
+            headers={"Content-Disposition": f'attachment; filename="metrics_{result_id}.tsv"'},
         )
 
 
@@ -599,7 +785,7 @@ def download_evaluation_artifacts(
     return StreamingResponse(
         _zip_stream(),
         media_type="application/zip",
-        headers={"Content-Disposition": f"attachment; filename=\"artifacts_{result_id}.zip\""},
+        headers={"Content-Disposition": f'attachment; filename="artifacts_{result_id}.zip"'},
     )
 
 
@@ -625,6 +811,7 @@ def list_evaluation_results(
                 "id": str(r.id),
                 "evaluation_set_id": str(r.evaluation_set_id),
                 "prediction_set_id": str(r.prediction_set_id),
+                "scoring_config_id": str(r.scoring_config_id) if r.scoring_config_id else None,
                 "job_id": str(r.job_id) if r.job_id else None,
                 "created_at": r.created_at.isoformat(),
                 "results": r.results,
@@ -633,7 +820,33 @@ def list_evaluation_results(
         ]
 
 
+@router.delete(
+    "/evaluation-sets/{eval_id}/results/{result_id}",
+    summary="Delete an evaluation result",
+    status_code=204,
+)
+def delete_evaluation_result(
+    eval_id: UUID,
+    result_id: UUID,
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+    artifacts_dir: Path = Depends(get_artifacts_dir),
+) -> None:
+    with session_scope(factory) as session:
+        result = session.get(EvaluationResult, result_id)
+        if result is None or result.evaluation_set_id != eval_id:
+            raise HTTPException(status_code=404, detail="EvaluationResult not found")
+        session.delete(result)
+
+    # Remove artifact directory if present (best-effort)
+    result_dir = artifacts_dir / str(result_id)
+    if result_dir.exists():
+        import shutil
+
+        shutil.rmtree(result_dir, ignore_errors=True)
+
+
 # ── GO subgraph ───────────────────────────────────────────────────────────────
+
 
 @router.get("/snapshots/{snapshot_id}/subgraph")
 def get_go_subgraph(
@@ -651,10 +864,14 @@ def get_go_subgraph(
         query_go_ids = {g.strip() for g in go_ids.split(",") if g.strip()}
 
         # Resolve initial term DB ids
-        seed_terms = session.query(GOTerm).filter(
-            GOTerm.ontology_snapshot_id == snapshot_id,
-            GOTerm.go_id.in_(query_go_ids),
-        ).all()
+        seed_terms = (
+            session.query(GOTerm)
+            .filter(
+                GOTerm.ontology_snapshot_id == snapshot_id,
+                GOTerm.go_id.in_(query_go_ids),
+            )
+            .all()
+        )
 
         if not seed_terms:
             return {"nodes": [], "edges": []}
@@ -668,18 +885,24 @@ def get_go_subgraph(
         for _ in range(depth):
             if not frontier:
                 break
-            rels = session.query(GOTermRelationship).filter(
-                GOTermRelationship.ontology_snapshot_id == snapshot_id,
-                GOTermRelationship.child_go_term_id.in_(frontier),
-            ).all()
+            rels = (
+                session.query(GOTermRelationship)
+                .filter(
+                    GOTermRelationship.ontology_snapshot_id == snapshot_id,
+                    GOTermRelationship.child_go_term_id.in_(frontier),
+                )
+                .all()
+            )
 
             parent_ids = {r.parent_go_term_id for r in rels} - visited_ids
             for r in rels:
-                all_edges.append({
-                    "source": r.child_go_term_id,
-                    "target": r.parent_go_term_id,
-                    "relation_type": r.relation_type,
-                })
+                all_edges.append(
+                    {
+                        "source": r.child_go_term_id,
+                        "target": r.parent_go_term_id,
+                        "relation_type": r.relation_type,
+                    }
+                )
 
             if parent_ids:
                 parents = session.query(GOTerm).filter(GOTerm.id.in_(parent_ids)).all()

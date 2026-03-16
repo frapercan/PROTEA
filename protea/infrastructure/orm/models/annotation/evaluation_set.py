@@ -31,9 +31,7 @@ class EvaluationSet(Base):
 
     __tablename__ = "evaluation_set"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     old_annotation_set_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("annotation_set.id", ondelete="RESTRICT"),

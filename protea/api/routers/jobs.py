@@ -17,10 +17,18 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
 class CreateJobRequest(BaseModel):
-    operation: str = Field(..., min_length=1, description="Registered operation name, e.g. `insert_proteins`.")
-    queue_name: str = Field(..., min_length=1, description="RabbitMQ queue to publish the job to, e.g. `protea.jobs`.")
-    payload: dict[str, Any] = Field(default_factory=dict, description="Operation-specific configuration object.")
-    meta: dict[str, Any] = Field(default_factory=dict, description="Optional free-form metadata stored alongside the job.")
+    operation: str = Field(
+        ..., min_length=1, description="Registered operation name, e.g. `insert_proteins`."
+    )
+    queue_name: str = Field(
+        ..., min_length=1, description="RabbitMQ queue to publish the job to, e.g. `protea.jobs`."
+    )
+    payload: dict[str, Any] = Field(
+        default_factory=dict, description="Operation-specific configuration object."
+    )
+    meta: dict[str, Any] = Field(
+        default_factory=dict, description="Optional free-form metadata stored alongside the job."
+    )
 
     @field_validator("operation", "queue_name", mode="before")
     @classmethod
@@ -31,6 +39,7 @@ class CreateJobRequest(BaseModel):
 
 
 # --- Dependency hook (wire this in your app factory) ---
+
 
 def get_session_factory(request: Request) -> sessionmaker[Session]:
     factory = getattr(request.app.state, "session_factory", None)
@@ -67,11 +76,13 @@ def create_job(
         session.add(job)
         session.flush()
         job_id = job.id
-        session.add(JobEvent(
-            job_id=job_id,
-            event="job.created",
-            fields={"operation": body.operation, "queue": body.queue_name},
-        ))
+        session.add(
+            JobEvent(
+                job_id=job_id,
+                event="job.created",
+                fields={"operation": body.operation, "queue": body.queue_name},
+            )
+        )
 
     # Publish after commit so the worker always finds the row.
     publish_job(amqp_url, body.queue_name, job_id)
@@ -241,10 +252,12 @@ def cancel_job(
         )
         for child in children:
             child.status = JobStatus.CANCELLED
-            session.add(JobEvent(
-                job_id=child.id,
-                event="job.cancelled",
-                fields={"reason": "parent_cancelled"},
-            ))
+            session.add(
+                JobEvent(
+                    job_id=child.id,
+                    event="job.cancelled",
+                    fields={"reason": "parent_cancelled"},
+                )
+            )
 
         return {"id": str(j.id), "status": j.status.value, "children_cancelled": len(children)}

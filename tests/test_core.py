@@ -182,3 +182,70 @@ class TestUniProtHttpMixin:
     def test_extract_next_cursor_no_cursor_param(self) -> None:
         obj = self._obj()
         assert obj._extract_next_cursor('<http://x?page=2>; rel="next"') is None
+
+
+# ---------------------------------------------------------------------------
+# evidence_codes — normalize and is_experimental
+# ---------------------------------------------------------------------------
+
+from protea.core.evidence_codes import normalize, is_experimental, ECO_TO_CODE, EXPERIMENTAL
+
+
+class TestNormalize:
+    def test_go_code_passthrough(self):
+        assert normalize("IDA") == "IDA"
+
+    def test_eco_id_to_go_code(self):
+        assert normalize("ECO:0000314") == "IDA"
+        assert normalize("ECO:0000501") == "IEA"
+
+    def test_unknown_code_passthrough(self):
+        assert normalize("UNKNOWN_CODE") == "UNKNOWN_CODE"
+
+    def test_all_eco_ids_resolve(self):
+        for eco, expected in ECO_TO_CODE.items():
+            assert normalize(eco) == expected
+
+
+class TestIsExperimental:
+    def test_experimental_go_code(self):
+        for code in EXPERIMENTAL:
+            assert is_experimental(code) is True
+
+    def test_non_experimental_code(self):
+        assert is_experimental("IEA") is False
+        assert is_experimental("ISS") is False
+        assert is_experimental("ND") is False
+
+    def test_eco_experimental(self):
+        # ECO:0000314 → IDA → experimental
+        assert is_experimental("ECO:0000314") is True
+
+    def test_eco_non_experimental(self):
+        # ECO:0000501 → IEA → not experimental
+        assert is_experimental("ECO:0000501") is False
+
+    def test_unknown_code_not_experimental(self):
+        assert is_experimental("BADCODE") is False
+
+
+# ---------------------------------------------------------------------------
+# RetryLaterError
+# ---------------------------------------------------------------------------
+
+from protea.core.contracts.operation import RetryLaterError
+
+
+class TestRetryLaterError:
+    def test_default_delay(self):
+        err = RetryLaterError("GPU busy")
+        assert err.delay_seconds == 60
+        assert str(err) == "GPU busy"
+
+    def test_custom_delay(self):
+        err = RetryLaterError("busy", delay_seconds=120)
+        assert err.delay_seconds == 120
+
+    def test_is_exception(self):
+        with pytest.raises(RetryLaterError):
+            raise RetryLaterError("test")

@@ -84,12 +84,18 @@ class FetchUniProtMetadataOperation(UniProtHttpMixin):
         self._total_results: int | None = None
         self._http = requests.Session()
 
-    def execute(self, session: Session, payload: dict[str, Any], *, emit: EmitFn) -> OperationResult:
+    def execute(
+        self, session: Session, payload: dict[str, Any], *, emit: EmitFn
+    ) -> OperationResult:
         p = FetchUniProtMetadataPayload.model_validate(payload)
 
         t0 = time.perf_counter()
-        emit("fetch_uniprot_metadata.start", None,
-             {"search_criteria": p.search_criteria, "page_size": p.page_size}, "info")
+        emit(
+            "fetch_uniprot_metadata.start",
+            None,
+            {"search_criteria": p.search_criteria, "page_size": p.page_size},
+            "info",
+        )
 
         pages = 0
         total_rows = 0
@@ -123,8 +129,11 @@ class FetchUniProtMetadataOperation(UniProtHttpMixin):
                     "http_requests": self._http_requests,
                     "http_retries": self._http_retries,
                     "_progress_current": total_rows,
-                    **({"_progress_total": p.total_limit or self._total_results}
-                       if (p.total_limit or self._total_results) else {}),
+                    **(
+                        {"_progress_total": p.total_limit or self._total_results}
+                        if (p.total_limit or self._total_results)
+                        else {}
+                    ),
                 },
                 "info",
             )
@@ -133,7 +142,12 @@ class FetchUniProtMetadataOperation(UniProtHttpMixin):
                 session.commit()
 
             if p.total_limit is not None and total_rows >= p.total_limit:
-                emit("fetch_uniprot_metadata.limit_reached", None, {"total_limit": p.total_limit}, "warning")
+                emit(
+                    "fetch_uniprot_metadata.limit_reached",
+                    None,
+                    {"total_limit": p.total_limit},
+                    "warning",
+                )
                 break
 
         elapsed = time.perf_counter() - t0
@@ -151,14 +165,37 @@ class FetchUniProtMetadataOperation(UniProtHttpMixin):
 
     # ---------------- HTTP / paging ----------------
 
-    def _fetch_tsv_pages(self, p: FetchUniProtMetadataPayload, emit: EmitFn) -> Iterable[list[dict[str, str]]]:
+    def _fetch_tsv_pages(
+        self, p: FetchUniProtMetadataPayload, emit: EmitFn
+    ) -> Iterable[list[dict[str, str]]]:
         encoded_query = quote(p.search_criteria)
 
         fields = [
-            "accession", "reviewed", "id", "protein_name", "gene_names", "organism_name", "length",
-            "absorption", "ft_act_site", "ft_binding", "cc_catalytic_activity", "cc_cofactor", "ft_dna_bind",
-            "ec", "cc_activity_regulation", "cc_function", "cc_pathway", "kinetics", "ph_dependence",
-            "redox_potential", "rhea", "ft_site", "temp_dependence", "keyword", "feature_count",
+            "accession",
+            "reviewed",
+            "id",
+            "protein_name",
+            "gene_names",
+            "organism_name",
+            "length",
+            "absorption",
+            "ft_act_site",
+            "ft_binding",
+            "cc_catalytic_activity",
+            "cc_cofactor",
+            "ft_dna_bind",
+            "ec",
+            "cc_activity_regulation",
+            "cc_function",
+            "cc_pathway",
+            "kinetics",
+            "ph_dependence",
+            "redox_potential",
+            "rhea",
+            "ft_site",
+            "temp_dependence",
+            "keyword",
+            "feature_count",
         ]
 
         params = [
@@ -176,7 +213,12 @@ class FetchUniProtMetadataOperation(UniProtHttpMixin):
         while True:
             page += 1
             url = base_url if not next_cursor else f"{base_url}&cursor={next_cursor}"
-            emit("uniprot.fetch_page_start", None, {"page": page, "has_cursor": bool(next_cursor)}, "info")
+            emit(
+                "uniprot.fetch_page_start",
+                None,
+                {"page": page, "has_cursor": bool(next_cursor)},
+                "info",
+            )
 
             resp = self._get_with_retries(url, p, emit)
             if self._total_results is None:

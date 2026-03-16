@@ -11,6 +11,7 @@ Performance notes:
 - Taxonomy lookups use an LRU cache over lineage queries (ete3 local SQLite).
   First call may trigger a DB download if the ete3 database is absent.
 """
+
 from __future__ import annotations
 
 from functools import lru_cache
@@ -18,12 +19,14 @@ from typing import Any
 
 try:
     import parasail  # type: ignore[import-untyped]
+
     _PARASAIL_AVAILABLE = True
 except ImportError:
     _PARASAIL_AVAILABLE = False
 
 try:
     from ete3 import NCBITaxa  # type: ignore[import-untyped]
+
     _ETE3_AVAILABLE = True
 except ImportError:
     _ETE3_AVAILABLE = False
@@ -33,6 +36,7 @@ except ImportError:
 # Alignment
 # ---------------------------------------------------------------------------
 
+
 def compute_nw(seq1: str, seq2: str, *, gap_open: int = 10, gap_extend: int = 1) -> dict[str, Any]:
     """Global alignment (Needleman–Wunsch) via parasail/BLOSUM62.
 
@@ -41,7 +45,9 @@ def compute_nw(seq1: str, seq2: str, *, gap_open: int = 10, gap_extend: int = 1)
         gaps_pct_nw, alignment_length_nw, length_query, length_ref
     """
     if not _PARASAIL_AVAILABLE:
-        raise RuntimeError("parasail is required for alignment features. Install it with: pip install parasail")
+        raise RuntimeError(
+            "parasail is required for alignment features. Install it with: pip install parasail"
+        )
 
     result = parasail.nw_trace_striped_32(seq1, seq2, gap_open, gap_extend, parasail.blosum62)
     return _parse_alignment(result, seq1, seq2, suffix="nw")
@@ -55,7 +61,9 @@ def compute_sw(seq1: str, seq2: str, *, gap_open: int = 10, gap_extend: int = 1)
         gaps_pct_sw, alignment_length_sw
     """
     if not _PARASAIL_AVAILABLE:
-        raise RuntimeError("parasail is required for alignment features. Install it with: pip install parasail")
+        raise RuntimeError(
+            "parasail is required for alignment features. Install it with: pip install parasail"
+        )
 
     result = parasail.sw_trace_striped_32(seq1, seq2, gap_open, gap_extend, parasail.blosum62)
     return _parse_alignment(result, seq1, seq2, suffix="sw")
@@ -76,7 +84,9 @@ def _parse_alignment(result: Any, seq1: str, seq2: str, suffix: str) -> dict[str
             f"alignment_length_{suffix}": 0.0,
         }
     else:
-        matches = sum(a == b for a, b in zip(aligned_q, aligned_r, strict=False) if a != "-" and b != "-")
+        matches = sum(
+            a == b for a, b in zip(aligned_q, aligned_r, strict=False) if a != "-" and b != "-"
+        )
         similarity = sum(c in "|:" for c in comp_line)
         gaps = aligned_q.count("-") + aligned_r.count("-")
         out = {
@@ -111,7 +121,9 @@ _ncbi: NCBITaxa | None = None
 def _get_ncbi() -> NCBITaxa:
     global _ncbi
     if not _ETE3_AVAILABLE:
-        raise RuntimeError("ete3 is required for taxonomy features. Install it with: pip install ete3")
+        raise RuntimeError(
+            "ete3 is required for taxonomy features. Install it with: pip install ete3"
+        )
     if _ncbi is None:
         _ncbi = NCBITaxa()
     return _ncbi

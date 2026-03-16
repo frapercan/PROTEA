@@ -32,7 +32,8 @@ def preview_orphan_sequences(
     """
     with session_scope(factory) as session:
         total = session.query(Sequence).count()
-        orphan_count = session.execute(text("""
+        orphan_count = session.execute(
+            text("""
             SELECT COUNT(*)
             FROM sequence s
             WHERE NOT EXISTS (
@@ -41,7 +42,8 @@ def preview_orphan_sequences(
             AND NOT EXISTS (
                 SELECT 1 FROM query_set_entry qse WHERE qse.sequence_id = s.id
             )
-        """)).scalar()
+        """)
+        ).scalar()
 
     return {
         "total_sequences": total,
@@ -63,7 +65,8 @@ def vacuum_sequences(
         # Collect IDs first to do a targeted delete (avoids full-table lock)
         orphan_ids = [
             row[0]
-            for row in session.execute(text("""
+            for row in session.execute(
+                text("""
                 SELECT s.id
                 FROM sequence s
                 WHERE NOT EXISTS (
@@ -72,7 +75,8 @@ def vacuum_sequences(
                 AND NOT EXISTS (
                     SELECT 1 FROM query_set_entry qse WHERE qse.sequence_id = s.id
                 )
-            """)).fetchall()
+            """)
+            ).fetchall()
         ]
 
         if not orphan_ids:
@@ -98,13 +102,15 @@ def preview_unindexed_embeddings(
     """
     with session_scope(factory) as session:
         total = session.query(SequenceEmbedding).count()
-        unindexed_count = session.execute(text("""
+        unindexed_count = session.execute(
+            text("""
             SELECT COUNT(*)
             FROM sequence_embedding se
             WHERE NOT EXISTS (
                 SELECT 1 FROM protein p WHERE p.sequence_id = se.sequence_id
             )
-        """)).scalar()
+        """)
+        ).scalar()
 
     return {
         "total_embeddings": total,
@@ -125,13 +131,15 @@ def vacuum_embeddings(
     with session_scope(factory) as session:
         unindexed_ids = [
             row[0]
-            for row in session.execute(text("""
+            for row in session.execute(
+                text("""
                 SELECT se.id
                 FROM sequence_embedding se
                 WHERE NOT EXISTS (
                     SELECT 1 FROM protein p WHERE p.sequence_id = se.sequence_id
                 )
-            """)).fetchall()
+            """)
+            ).fetchall()
         ]
 
         if not unindexed_ids:

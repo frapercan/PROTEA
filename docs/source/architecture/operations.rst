@@ -594,6 +594,143 @@ Smoke-test operation. Accepts no required payload fields, emits a single
 ``ping.pong`` event, and returns immediately. Used to verify end-to-end
 connectivity of the job queue without touching the protein data tables.
 
+generate_evaluation_set
+-----------------------
+
+**Operation name:** ``generate_evaluation_set`` — queue: ``protea.jobs``
+
+Computes the CAFA-style evaluation delta between two ``AnnotationSet`` rows
+(old → new) and stores an ``EvaluationSet`` row with summary statistics.
+Follows the CAFA5 evaluation protocol exactly.
+
+Payload fields
+~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 10 55
+
+   * - Field
+     - Default
+     - Description
+   * - ``old_annotation_set_id``
+     - *(required)*
+     - UUID of the older annotation set (t0, used as reference).
+   * - ``new_annotation_set_id``
+     - *(required)*
+     - UUID of the newer annotation set (t1, ground truth source).
+
+Both annotation sets must share the same ``ontology_snapshot_id``; the
+operation raises ``ValueError`` otherwise.
+
+Execution flow
+~~~~~~~~~~~~~~
+
+.. code-block:: text
+
+   1. validate payload; load AnnotationSet rows; assert same ontology snapshot
+   2. call compute_evaluation_data() — see protea.core.evaluation:
+      a. load GO DAG children map (is_a / part_of only)
+      b. build NOT-propagation exclusion set (negated terms + GO descendants)
+      c. load experimental annotations for old and new sets, filtered by
+         exclusion set and evidence codes (EXP, IDA, IMP, IGI, IEP, IPI, …)
+      d. classify per (protein, namespace) into NK / LK / PK:
+         - NK: protein had NO annotations in any namespace at t0
+         - LK: protein had annotations in some namespaces but not in namespace S;
+               novel terms in S are LK ground truth
+         - PK: protein had annotations in namespace S at t0 and gained new terms
+               in S; novel terms are PK ground truth, old terms go to pk_known
+   3. emit stats (delta_proteins, nk/lk/pk counts and annotations)
+   4. INSERT EvaluationSet row with stats stored in JSONB
+   5. return OperationResult(result={evaluation_set_id, ...stats})
+
+NK/LK/PK classification note
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Classification is per **(protein, namespace)**, not globally per protein.
+A protein that had MFO and BPO annotations at t0 and gains new CCO and BPO
+annotations at t1 will be **LK** in CCO (no prior CCO annotations) and **PK**
+in BPO (had prior BPO annotations) simultaneously. This matches the CAFA5
+evaluation protocol.
+
+Ground truth files are computed on-demand by the download endpoints (not
+stored in the DB) using the same ``compute_evaluation_data`` logic.
+
+run_cafa_evaluation
+-------------------
+
+**Operation name:** ``run_cafa_evaluation`` — queue: ``protea.jobs``
+
+Runs the ``cafaeval`` evaluator against NK, LK, and PK ground-truth settings
+for a given ``EvaluationSet`` × ``PredictionSet`` pair. Persists an
+``EvaluationResult`` row with per-namespace Fmax, precision, recall, τ, and
+coverage for each setting.
+
+Payload fields
+~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 10 60
+
+   * - Field
+     - Default
+     - Description
+   * - ``evaluation_set_id``
+     - *(required)*
+     - UUID of the ``EvaluationSet`` to evaluate against.
+   * - ``prediction_set_id``
+     - *(required)*
+     - UUID of the ``PredictionSet`` containing predictions to score.
+   * - ``max_distance``
+     - ``null``
+     - Discard predictions with cosine distance above this threshold before
+       scoring (range 0 – 2). ``null`` = no threshold.
+   * - ``artifacts_dir``
+     - ``null``
+     - Filesystem path where cafaeval output files (PR curves, TSVs) are
+       written. ``null`` = artifacts are written to a temp directory and
+       discarded after the job.
+
+Execution flow
+~~~~~~~~~~~~~~
+
+.. code-block:: text
+
+   1. load EvaluationSet + PredictionSet + OntologySnapshot from DB
+   2. compute_evaluation_data() — same delta as generate_evaluation_set
+   3. download OBO file from snapshot.obo_url to a temp directory
+   4. write ground-truth TSVs: gt_NK.tsv, gt_LK.tsv, gt_PK.tsv,
+      known_terms.tsv, pk_known_terms.tsv
+   5. write predictions in CAFA format (protein \\t go_id \\t score),
+      score = max(0, 1 - distance), filtered to delta proteins only
+   6. session.commit() — releases DB connection before cafaeval forks workers
+   7. for each setting in (NK, LK, PK):
+      a. NK pass: cafa_eval(obo, predictions/, gt_NK.tsv)
+      b. LK pass: cafa_eval(obo, predictions/, gt_LK.tsv)
+      c. PK pass: cafa_eval(obo, predictions/, gt_PK.tsv, exclude=pk_known_terms.tsv)
+      d. parse per-namespace Fmax / precision / recall / τ / coverage
+      e. if artifacts_dir: write cafaeval PR curves and metric TSVs
+   8. INSERT EvaluationResult row with results dict (NK → {BPO, MFO, CCO})
+   9. return OperationResult(result={evaluation_result_id, results})
+
+PK known-terms
+~~~~~~~~~~~~~~
+
+For the PK pass, ``pk_known_terms.tsv`` is passed to ``cafa_eval`` as the
+``-known`` (``exclude``) argument. This file contains all experimental
+annotations from the *old* snapshot for PK proteins in the relevant namespace.
+``cafaeval`` uses this to exclude known annotations from scoring — methods
+that simply repeat prior annotations receive no credit for PK predictions.
+
+SIGTERM handling
+~~~~~~~~~~~~~~~~
+
+``cafaeval`` uses Python ``multiprocessing.Pool`` internally. Before each
+``cafa_eval()`` call, the operation temporarily resets ``SIGTERM`` and
+``SIGINT`` handlers to defaults so that forked pool workers can be terminated
+cleanly. The original handlers are restored afterwards.
+
 Registering a new operation
 ----------------------------
 

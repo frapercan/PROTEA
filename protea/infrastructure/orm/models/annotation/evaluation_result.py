@@ -13,6 +13,7 @@ from protea.infrastructure.orm.base import Base
 if TYPE_CHECKING:
     from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
     from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
+    from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
     from protea.infrastructure.orm.models.job import Job
 
 
@@ -39,9 +40,7 @@ class EvaluationResult(Base):
 
     __tablename__ = "evaluation_result"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     evaluation_set_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("evaluation_set.id", ondelete="CASCADE"),
@@ -52,6 +51,12 @@ class EvaluationResult(Base):
         UUID(as_uuid=True),
         ForeignKey("prediction_set.id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
+    )
+    scoring_config_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("scoring_config.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
     )
     job_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -67,4 +72,5 @@ class EvaluationResult(Base):
 
     evaluation_set: Mapped[EvaluationSet] = relationship("EvaluationSet")
     prediction_set: Mapped[PredictionSet] = relationship("PredictionSet")
+    scoring_config: Mapped[ScoringConfig | None] = relationship("ScoringConfig")
     job: Mapped[Job | None] = relationship("Job")

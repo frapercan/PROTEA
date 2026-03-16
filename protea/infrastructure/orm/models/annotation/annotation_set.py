@@ -32,9 +32,7 @@ class AnnotationSet(Base):
 
     __tablename__ = "annotation_set"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     source: Mapped[str] = mapped_column(String, nullable=False, index=True)
     source_version: Mapped[str | None] = mapped_column(String, nullable=True)
     ontology_snapshot_id: Mapped[uuid.UUID] = mapped_column(

@@ -101,7 +101,8 @@ def _validate_embedding_config_body(body: dict[str, Any]) -> dict[str, Any]:
 
     # Cross-field: overlap must be strictly less than chunk_size
     if (
-        isinstance(chunk_size, int) and isinstance(chunk_overlap, int)
+        isinstance(chunk_size, int)
+        and isinstance(chunk_overlap, int)
         and chunk_overlap >= chunk_size
     ):
         errors.append(
@@ -151,23 +152,22 @@ def _config_to_dict(c: EmbeddingConfig, embedding_count: int | None = None) -> d
 
 # ── Embedding Configs ─────────────────────────────────────────────────────────
 
+
 @router.get("/configs", summary="List embedding configs")
 def list_embedding_configs(
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> list[dict[str, Any]]:
     """List all embedding configurations with their stored embedding counts, newest first."""
     with session_scope(factory) as session:
-        rows = (
-            session.query(EmbeddingConfig)
-            .order_by(EmbeddingConfig.created_at.desc())
-            .all()
-        )
+        rows = session.query(EmbeddingConfig).order_by(EmbeddingConfig.created_at.desc()).all()
         counts = {
             config_id: cnt
             for config_id, cnt in session.query(
                 SequenceEmbedding.embedding_config_id,
                 func.count(SequenceEmbedding.id),
-            ).group_by(SequenceEmbedding.embedding_config_id).all()
+            )
+            .group_by(SequenceEmbedding.embedding_config_id)
+            .all()
         }
         return [_config_to_dict(c, embedding_count=counts.get(c.id, 0)) for c in rows]
 
@@ -267,6 +267,7 @@ def delete_embedding_config(
 
 # ── Predict ───────────────────────────────────────────────────────────────────
 
+
 @router.post("/predict", summary="Trigger GO term prediction")
 def predict_go_terms(
     body: dict[str, Any],
@@ -281,8 +282,11 @@ def predict_go_terms(
 
     Required body fields: `embedding_config_id`, `annotation_set_id`, `ontology_snapshot_id`.
     Optional: `query_set_id` (FASTA upload), `limit_per_entry`, `distance_threshold`,
-    `batch_size`, `search_backend`, `compute_alignments`, `compute_taxonomy`.
+    `batch_size`, `search_backend`, `compute_alignments`, `compute_taxonomy`,
+    `aspect_separated_knn` (bool, default false — builds one KNN index per GO aspect to
+    guarantee BPO/MFO/CCO coverage even when unified nearest neighbours carry only one aspect).
     """
+
     def _parse_uuid(key: str) -> UUID:
         raw = body.get(key)
         try:
@@ -306,17 +310,20 @@ def predict_go_terms(
         session.add(job)
         session.flush()
         job_id = job.id
-        session.add(JobEvent(
-            job_id=job_id,
-            event="job.created",
-            fields={"operation": "predict_go_terms", "queue": _JOBS_QUEUE},
-        ))
+        session.add(
+            JobEvent(
+                job_id=job_id,
+                event="job.created",
+                fields={"operation": "predict_go_terms", "queue": _JOBS_QUEUE},
+            )
+        )
 
     publish_job(amqp_url, _JOBS_QUEUE, job_id)
     return {"id": str(job_id), "status": "queued"}
 
 
 # ── Prediction Sets ───────────────────────────────────────────────────────────
+
 
 @router.get("/prediction-sets", summary="List prediction sets")
 def list_prediction_sets(
@@ -325,29 +332,39 @@ def list_prediction_sets(
     """List the 100 most recent prediction sets with their GO prediction counts."""
     with session_scope(factory) as session:
         rows = (
-            session.query(PredictionSet)
+            session.query(PredictionSet, EmbeddingConfig, AnnotationSet, OntologySnapshot)
+            .join(EmbeddingConfig, PredictionSet.embedding_config_id == EmbeddingConfig.id)
+            .join(AnnotationSet, PredictionSet.annotation_set_id == AnnotationSet.id)
+            .join(OntologySnapshot, PredictionSet.ontology_snapshot_id == OntologySnapshot.id)
             .order_by(PredictionSet.created_at.desc())
             .limit(100)
             .all()
         )
         result = []
-        for ps in rows:
+        for ps, ec, ann, snap in rows:
             prediction_count = (
                 session.query(func.count(GOPrediction.id))
                 .filter(GOPrediction.prediction_set_id == ps.id)
                 .scalar()
             )
-            result.append({
-                "id": str(ps.id),
-                "embedding_config_id": str(ps.embedding_config_id),
-                "annotation_set_id": str(ps.annotation_set_id),
-                "ontology_snapshot_id": str(ps.ontology_snapshot_id),
-                "query_set_id": str(ps.query_set_id) if ps.query_set_id else None,
-                "limit_per_entry": ps.limit_per_entry,
-                "distance_threshold": ps.distance_threshold,
-                "created_at": ps.created_at.isoformat(),
-                "prediction_count": prediction_count,
-            })
+            result.append(
+                {
+                    "id": str(ps.id),
+                    "embedding_config_id": str(ps.embedding_config_id),
+                    "embedding_config_name": ec.model_name,
+                    "annotation_set_id": str(ps.annotation_set_id),
+                    "annotation_set_label": f"{ann.source} {ann.source_version}"
+                    if ann.source_version
+                    else ann.source,
+                    "ontology_snapshot_id": str(ps.ontology_snapshot_id),
+                    "ontology_snapshot_version": snap.obo_version,
+                    "query_set_id": str(ps.query_set_id) if ps.query_set_id else None,
+                    "limit_per_entry": ps.limit_per_entry,
+                    "distance_threshold": ps.distance_threshold,
+                    "created_at": ps.created_at.isoformat(),
+                    "prediction_count": prediction_count,
+                }
+            )
         return result
 
 
@@ -485,7 +502,9 @@ def list_prediction_set_proteins(
         }
 
 
-@router.get("/prediction-sets/{set_id}/proteins/{accession}", summary="Get predictions for one protein")
+@router.get(
+    "/prediction-sets/{set_id}/proteins/{accession}", summary="Get predictions for one protein"
+)
 def get_protein_predictions(
     set_id: UUID,
     accession: str,
@@ -547,7 +566,9 @@ def get_protein_predictions(
         ]
 
 
-@router.get("/prediction-sets/{set_id}/go-terms", summary="GO term distribution in a prediction set")
+@router.get(
+    "/prediction-sets/{set_id}/go-terms", summary="GO term distribution in a prediction set"
+)
 def get_go_term_distribution(
     set_id: UUID,
     limit: int = 50,
@@ -643,7 +664,9 @@ def download_predictions_tsv(
     set_id: UUID,
     accession: str | None = Query(None, description="Filter to a single query protein accession"),
     aspect: str | None = Query(None, description="Filter by GO aspect: F, P, or C"),
-    max_distance: float | None = Query(None, description="Only include predictions with distance ≤ this value"),
+    max_distance: float | None = Query(
+        None, description="Only include predictions with distance ≤ this value"
+    ),
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> StreamingResponse:
     """Stream all GO predictions for a prediction set as a tab-separated file.
@@ -688,34 +711,38 @@ def download_predictions_tsv(
             for pred, gt in q.yield_per(1000):
                 buf = io.StringIO()
                 writer = csv.writer(buf, delimiter="\t", lineterminator="\n")
-                writer.writerow([
-                    pred.protein_accession,
-                    gt.go_id,
-                    gt.name,
-                    gt.aspect,
-                    pred.distance,
-                    pred.ref_protein_accession,
-                    pred.qualifier or "",
-                    pred.evidence_code or "",
-                    _fmt(pred.identity_nw),
-                    _fmt(pred.similarity_nw),
-                    _fmt(pred.alignment_score_nw),
-                    _fmt(pred.gaps_pct_nw),
-                    _fmt(pred.alignment_length_nw),
-                    _fmt(pred.identity_sw),
-                    _fmt(pred.similarity_sw),
-                    _fmt(pred.alignment_score_sw),
-                    _fmt(pred.gaps_pct_sw),
-                    _fmt(pred.alignment_length_sw),
-                    pred.length_query if pred.length_query is not None else "",
-                    pred.length_ref if pred.length_ref is not None else "",
-                    pred.query_taxonomy_id if pred.query_taxonomy_id is not None else "",
-                    pred.ref_taxonomy_id if pred.ref_taxonomy_id is not None else "",
-                    pred.taxonomic_lca if pred.taxonomic_lca is not None else "",
-                    pred.taxonomic_distance if pred.taxonomic_distance is not None else "",
-                    pred.taxonomic_common_ancestors if pred.taxonomic_common_ancestors is not None else "",
-                    pred.taxonomic_relation or "",
-                ])
+                writer.writerow(
+                    [
+                        pred.protein_accession,
+                        gt.go_id,
+                        gt.name,
+                        gt.aspect,
+                        pred.distance,
+                        pred.ref_protein_accession,
+                        pred.qualifier or "",
+                        pred.evidence_code or "",
+                        _fmt(pred.identity_nw),
+                        _fmt(pred.similarity_nw),
+                        _fmt(pred.alignment_score_nw),
+                        _fmt(pred.gaps_pct_nw),
+                        _fmt(pred.alignment_length_nw),
+                        _fmt(pred.identity_sw),
+                        _fmt(pred.similarity_sw),
+                        _fmt(pred.alignment_score_sw),
+                        _fmt(pred.gaps_pct_sw),
+                        _fmt(pred.alignment_length_sw),
+                        pred.length_query if pred.length_query is not None else "",
+                        pred.length_ref if pred.length_ref is not None else "",
+                        pred.query_taxonomy_id if pred.query_taxonomy_id is not None else "",
+                        pred.ref_taxonomy_id if pred.ref_taxonomy_id is not None else "",
+                        pred.taxonomic_lca if pred.taxonomic_lca is not None else "",
+                        pred.taxonomic_distance if pred.taxonomic_distance is not None else "",
+                        pred.taxonomic_common_ancestors
+                        if pred.taxonomic_common_ancestors is not None
+                        else "",
+                        pred.taxonomic_relation or "",
+                    ]
+                )
                 yield buf.getvalue()
 
     filename = f"predictions_{set_id}.tsv"
@@ -740,9 +767,13 @@ def _fmt(v: float | None) -> str:
 )
 def download_predictions_cafa(
     set_id: UUID,
-    eval_id: UUID | None = Query(None, description="Filter to delta proteins from this EvaluationSet."),
+    eval_id: UUID | None = Query(
+        None, description="Filter to delta proteins from this EvaluationSet."
+    ),
     aspect: str | None = Query(None, description="Filter by GO aspect: F, P, or C"),
-    max_distance: float | None = Query(None, description="Only include predictions with distance ≤ this value"),
+    max_distance: float | None = Query(
+        None, description="Only include predictions with distance ≤ this value"
+    ),
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> StreamingResponse:
     """Stream predictions in CAFA format: ``protein_accession\\tgo_id\\tscore``.
@@ -771,7 +802,9 @@ def download_predictions_cafa(
                 raise HTTPException(status_code=404, detail="EvaluationSet not found")
             ann_old = _check.get(AnnotationSet, e.old_annotation_set_id)
             data = compute_evaluation_data(
-                _check, e.old_annotation_set_id, e.new_annotation_set_id,
+                _check,
+                e.old_annotation_set_id,
+                e.new_annotation_set_id,
                 ann_old.ontology_snapshot_id,
             )
             delta_proteins = set(data.nk) | set(data.lk)

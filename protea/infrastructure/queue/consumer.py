@@ -230,19 +230,26 @@ class OperationConsumer:
             channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
             return
 
-        logger.info("Dispatching operation. operation=%s queue=%s", operation_name, self._queue_name)
+        logger.info(
+            "Dispatching operation. operation=%s queue=%s", operation_name, self._queue_name
+        )
 
         op = self._registry.get(operation_name)
         session = self._factory()
         try:
-            def emit(event: str, message: str | None = None,
-                     fields: dict[str, Any] | None = None, level: str = "info") -> None:
+
+            def emit(
+                event: str,
+                message: str | None = None,
+                fields: dict[str, Any] | None = None,
+                level: str = "info",
+            ) -> None:
                 logger.info("operation.%s fields=%s", event, fields or {})
 
             result = op.execute(session, payload, emit=emit)
             session.commit()
             # Forward any downstream operation messages (e.g. GPU→write worker).
-            for queue_name, op_payload in (result.publish_operations or []):
+            for queue_name, op_payload in result.publish_operations or []:
                 publish_operation(self._amqp_url, queue_name, op_payload)
             channel.basic_ack(delivery_tag=method.delivery_tag)
             logger.info("Operation acked. operation=%s", operation_name)
@@ -253,11 +260,14 @@ class OperationConsumer:
             if "CUDA out of memory" in str(exc):
                 try:
                     import torch
+
                     torch.cuda.empty_cache()
                 except Exception:
                     pass
                 requeue = True
-                logger.warning("CUDA OOM — cache cleared, message requeued. operation=%s", operation_name)
+                logger.warning(
+                    "CUDA OOM — cache cleared, message requeued. operation=%s", operation_name
+                )
             else:
                 logger.error("Operation failed. operation=%s error=%s", operation_name, exc)
             try:

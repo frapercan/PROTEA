@@ -43,7 +43,9 @@ class LoadOntologySnapshotOperation:
 
     name = "load_ontology_snapshot"
 
-    def execute(self, session: Session, payload: dict[str, Any], *, emit: EmitFn) -> OperationResult:
+    def execute(
+        self, session: Session, payload: dict[str, Any], *, emit: EmitFn
+    ) -> OperationResult:
         p = LoadOntologySnapshotPayload.model_validate(payload)
 
         emit("load_ontology_snapshot.start", None, {"obo_url": p.obo_url}, "info")
@@ -58,9 +60,13 @@ class LoadOntologySnapshotOperation:
         existing = session.query(OntologySnapshot).filter_by(obo_version=obo_version).first()
         if existing is not None:
             from sqlalchemy import func as _func
-            rel_count = session.query(_func.count(GOTermRelationship.id)).filter(
-                GOTermRelationship.ontology_snapshot_id == existing.id
-            ).scalar() or 0
+
+            rel_count = (
+                session.query(_func.count(GOTermRelationship.id))
+                .filter(GOTermRelationship.ontology_snapshot_id == existing.id)
+                .scalar()
+                or 0
+            )
 
             if rel_count > 0:
                 emit(
@@ -69,21 +75,27 @@ class LoadOntologySnapshotOperation:
                     {"ontology_snapshot_id": str(existing.id), "obo_version": obo_version},
                     "info",
                 )
-                return OperationResult(result={
-                    "ontology_snapshot_id": str(existing.id),
-                    "obo_version": obo_version,
-                    "skipped": True,
-                })
+                return OperationResult(
+                    result={
+                        "ontology_snapshot_id": str(existing.id),
+                        "obo_version": obo_version,
+                        "skipped": True,
+                    }
+                )
 
             # Snapshot exists but has no relationships — backfill them
-            emit("load_ontology_snapshot.backfill_relationships", None,
-                 {"ontology_snapshot_id": str(existing.id)}, "info")
+            emit(
+                "load_ontology_snapshot.backfill_relationships",
+                None,
+                {"ontology_snapshot_id": str(existing.id)},
+                "info",
+            )
             terms = self._parse_terms(obo_text)
             go_id_to_db_id = {
                 go_id: db_id
-                for go_id, db_id in session.query(GOTerm.go_id, GOTerm.id).filter(
-                    GOTerm.ontology_snapshot_id == existing.id
-                ).all()
+                for go_id, db_id in session.query(GOTerm.go_id, GOTerm.id)
+                .filter(GOTerm.ontology_snapshot_id == existing.id)
+                .all()
             }
             relationships: list[GOTermRelationship] = []
             for t in terms:
@@ -94,22 +106,30 @@ class LoadOntologySnapshotOperation:
                     parent_db_id = go_id_to_db_id.get(parent_go_id)
                     if parent_db_id is None:
                         continue
-                    relationships.append(GOTermRelationship(
-                        child_go_term_id=child_db_id,
-                        parent_go_term_id=parent_db_id,
-                        relation_type=rel_type,
-                        ontology_snapshot_id=existing.id,
-                    ))
+                    relationships.append(
+                        GOTermRelationship(
+                            child_go_term_id=child_db_id,
+                            parent_go_term_id=parent_db_id,
+                            relation_type=rel_type,
+                            ontology_snapshot_id=existing.id,
+                        )
+                    )
             session.add_all(relationships)
             session.flush()
-            emit("load_ontology_snapshot.backfill_done", None,
-                 {"relationships_inserted": len(relationships)}, "info")
-            return OperationResult(result={
-                "ontology_snapshot_id": str(existing.id),
-                "obo_version": obo_version,
-                "skipped": False,
-                "relationships_inserted": len(relationships),
-            })
+            emit(
+                "load_ontology_snapshot.backfill_done",
+                None,
+                {"relationships_inserted": len(relationships)},
+                "info",
+            )
+            return OperationResult(
+                result={
+                    "ontology_snapshot_id": str(existing.id),
+                    "obo_version": obo_version,
+                    "skipped": False,
+                    "relationships_inserted": len(relationships),
+                }
+            )
 
         snapshot = OntologySnapshot(obo_url=p.obo_url, obo_version=obo_version)
         session.add(snapshot)
@@ -144,12 +164,14 @@ class LoadOntologySnapshotOperation:
                 parent_db_id = go_id_to_db_id.get(parent_go_id)
                 if parent_db_id is None:
                     continue
-                relationships.append(GOTermRelationship(
-                    child_go_term_id=child_db_id,
-                    parent_go_term_id=parent_db_id,
-                    relation_type=rel_type,
-                    ontology_snapshot_id=snapshot.id,
-                ))
+                relationships.append(
+                    GOTermRelationship(
+                        child_go_term_id=child_db_id,
+                        parent_go_term_id=parent_db_id,
+                        relation_type=rel_type,
+                        ontology_snapshot_id=snapshot.id,
+                    )
+                )
         session.add_all(relationships)
         session.flush()
 
@@ -166,13 +188,15 @@ class LoadOntologySnapshotOperation:
             },
             "info",
         )
-        return OperationResult(result={
-            "ontology_snapshot_id": str(snapshot.id),
-            "obo_version": obo_version,
-            "terms_inserted": len(go_terms),
-            "relationships_inserted": len(relationships),
-            "elapsed_seconds": elapsed,
-        })
+        return OperationResult(
+            result={
+                "ontology_snapshot_id": str(snapshot.id),
+                "obo_version": obo_version,
+                "terms_inserted": len(go_terms),
+                "relationships_inserted": len(relationships),
+                "elapsed_seconds": elapsed,
+            }
+        )
 
     def _download(self, p: LoadOntologySnapshotPayload, emit: EmitFn) -> str:
         emit("load_ontology_snapshot.download_start", None, {"url": p.obo_url}, "info")
@@ -196,8 +220,13 @@ class LoadOntologySnapshotOperation:
 
     # Relationship types to capture from OBO `relationship:` lines
     _RELATION_TYPES = {
-        "part_of", "regulates", "negatively_regulates", "positively_regulates",
-        "occurs_in", "capable_of", "capable_of_part_of",
+        "part_of",
+        "regulates",
+        "negatively_regulates",
+        "positively_regulates",
+        "occurs_in",
+        "capable_of",
+        "capable_of_part_of",
     }
 
     def _parse_terms(self, obo_text: str) -> list[dict[str, Any]]:
@@ -206,14 +235,16 @@ class LoadOntologySnapshotOperation:
 
         def flush() -> None:
             if "go_id" in current:
-                terms.append({
-                    "go_id": current["go_id"],
-                    "name": current.get("name"),
-                    "aspect": self._ASPECT_MAP.get(current.get("namespace", ""), None),
-                    "definition": current.get("definition"),
-                    "is_obsolete": current.get("is_obsolete", False),
-                    "relationships": current.get("relationships", []),
-                })
+                terms.append(
+                    {
+                        "go_id": current["go_id"],
+                        "name": current.get("name"),
+                        "aspect": self._ASPECT_MAP.get(current.get("namespace", ""), None),
+                        "definition": current.get("definition"),
+                        "is_obsolete": current.get("is_obsolete", False),
+                        "relationships": current.get("relationships", []),
+                    }
+                )
             current.clear()
 
         in_term = False
@@ -247,8 +278,12 @@ class LoadOntologySnapshotOperation:
                 current.setdefault("relationships", []).append(("is_a", parent_go_id))
             elif line.startswith("relationship:"):
                 # relationship: part_of GO:XXXXXXX ! label
-                parts = line[len("relationship:"):].strip().split()
-                if len(parts) >= 2 and parts[0] in self._RELATION_TYPES and parts[1].startswith("GO:"):
+                parts = line[len("relationship:") :].strip().split()
+                if (
+                    len(parts) >= 2
+                    and parts[0] in self._RELATION_TYPES
+                    and parts[1].startswith("GO:")
+                ):
                     current.setdefault("relationships", []).append((parts[0], parts[1]))
 
         flush()

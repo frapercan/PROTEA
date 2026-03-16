@@ -22,7 +22,7 @@ CYAN="\033[36m"; BOLD="\033[1m"; RESET="\033[0m"
 _start_bg() {
     local name="$1"; shift
     mkdir -p "$LOG_DIR" "$PID_DIR"
-    "$@" >> "$LOG_DIR/${name}.log" 2>&1 &
+    setsid "$@" >> "$LOG_DIR/${name}.log" 2>&1 &
     local pid=$!
     echo "$pid" > "$PID_DIR/${name}.pid"
     printf "  ${GREEN}✓${RESET} %-35s PID %s\n" "$name" "$pid"
@@ -33,7 +33,8 @@ _stop_pid() {
     if [[ -f "$pidfile" ]]; then
         local pid; pid=$(cat "$pidfile")
         if kill -0 "$pid" 2>/dev/null; then
-            kill -15 "$pid" 2>/dev/null   # SIGTERM — lets current job finish
+            # Kill the whole process group (setsid guarantees PID == PGID)
+            kill -15 -- -"$pid" 2>/dev/null || kill -15 "$pid" 2>/dev/null
             printf "  ${RED}✗${RESET} %-35s stopping (PID %s) — SIGTERM sent\n" "$name" "$pid"
         fi
         rm -f "$pidfile"
@@ -137,7 +138,8 @@ cmd_stop() {
 
     # Also catch any untracked worker.py processes (manual launches etc.)
     while IFS= read -r pid; do
-        kill -15 "$pid" 2>/dev/null && worker_pids+=("$pid")
+        kill -15 -- -"$pid" 2>/dev/null || kill -15 "$pid" 2>/dev/null
+        worker_pids+=("$pid")
     done < <(pgrep -f "scripts/worker.py" 2>/dev/null || true)
 
     # Force-kill API and frontend immediately (no long-running state)
@@ -146,14 +148,14 @@ cmd_stop() {
 
     # Wait up to 60 s for workers to finish current job, then force-kill
     if [[ ${#worker_pids[@]} -gt 0 ]]; then
-        printf "  Waiting up to 60s for workers to finish current jobs...\n"
-        local deadline=$(( $(date +%s) + 60 ))
+        printf "  Waiting up to 5s for workers to finish current jobs...\n"
+        local deadline=$(( $(date +%s) + 5 ))
         for pid in "${worker_pids[@]}"; do
             while kill -0 "$pid" 2>/dev/null && (( $(date +%s) < deadline )); do
                 sleep 2
             done
             if kill -0 "$pid" 2>/dev/null; then
-                kill -9 "$pid" 2>/dev/null
+                kill -9 -- -"$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null
                 printf "  ${YELLOW}⚠${RESET}  PID %s force-killed (job still running)\n" "$pid"
             fi
         done

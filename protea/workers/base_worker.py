@@ -14,7 +14,7 @@ from protea.core.contracts.operation import OperationResult, RetryLaterError
 from protea.core.contracts.registry import OperationRegistry
 from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
-from protea.infrastructure.queue.publisher import publish_job
+from protea.infrastructure.queue.publisher import publish_job, publish_operation
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +68,14 @@ class BaseWorker:
 
             job.status = JobStatus.RUNNING
             job.started_at = utcnow()
-            self._emit(session, job_id, "job.started", None, {"worker": self._config.worker_name}, level="info")
+            self._emit(
+                session,
+                job_id,
+                "job.started",
+                None,
+                {"worker": self._config.worker_name},
+                level="info",
+            )
             session.commit()
         finally:
             session.close()
@@ -87,16 +94,24 @@ class BaseWorker:
                 if parent is not None and parent.status == JobStatus.CANCELLED:
                     job.status = JobStatus.CANCELLED
                     job.finished_at = utcnow()
-                    self._emit(session, job_id, "job.cancelled", None,
-                               {"reason": "parent_cancelled"}, level="info")
+                    self._emit(
+                        session,
+                        job_id,
+                        "job.cancelled",
+                        None,
+                        {"reason": "parent_cancelled"},
+                        level="info",
+                    )
                     session.commit()
                     return
 
             op = self._registry.get(job.operation)
 
             def emit(
-                event: str, message: str | None = None,
-                fields: dict[str, Any] | None = None, level: str = "info"
+                event: str,
+                message: str | None = None,
+                fields: dict[str, Any] | None = None,
+                level: str = "info",
             ) -> None:
                 # Dedicated short-lived session that commits immediately so
                 # events are visible in real time, not just at job completion.
@@ -128,11 +143,25 @@ class BaseWorker:
 
                 if result.deferred:
                     # Coordinator job: children will mark it SUCCEEDED when done.
-                    self._emit(session, job_id, "job.dispatched", None, {"result": result.result}, level="info")
+                    self._emit(
+                        session,
+                        job_id,
+                        "job.dispatched",
+                        None,
+                        {"result": result.result},
+                        level="info",
+                    )
                 else:
                     job.status = JobStatus.SUCCEEDED
                     job.finished_at = utcnow()
-                    self._emit(session, job_id, "job.succeeded", None, {"result": result.result}, level="info")
+                    self._emit(
+                        session,
+                        job_id,
+                        "job.succeeded",
+                        None,
+                        {"result": result.result},
+                        level="info",
+                    )
 
                 session.commit()
 
@@ -141,12 +170,23 @@ class BaseWorker:
                     for queue_name, child_job_id in result.publish_after_commit:
                         publish_job(self._amqp_url, queue_name, child_job_id)
 
+                # Publish ephemeral operation messages (e.g. embedding batches).
+                if result.publish_operations and self._amqp_url:
+                    for queue_name, op_payload in result.publish_operations:
+                        publish_operation(self._amqp_url, queue_name, op_payload)
+
             except RetryLaterError as e:
                 # Resource busy — reset to QUEUED so the consumer can re-publish.
                 job.status = JobStatus.QUEUED
                 job.started_at = None
-                self._emit(session, job_id, "job.retry_later", str(e),
-                           {"delay_seconds": e.delay_seconds}, level="info")
+                self._emit(
+                    session,
+                    job_id,
+                    "job.retry_later",
+                    str(e),
+                    {"delay_seconds": e.delay_seconds},
+                    level="info",
+                )
                 session.commit()
                 raise  # consumer handles re-publish
 
@@ -155,7 +195,14 @@ class BaseWorker:
                 job.finished_at = utcnow()
                 job.error_code = e.__class__.__name__
                 job.error_message = str(e)
-                self._emit(session, job_id, "job.failed", str(e), {"error_code": job.error_code}, level="error")
+                self._emit(
+                    session,
+                    job_id,
+                    "job.failed",
+                    str(e),
+                    {"error_code": job.error_code},
+                    level="error",
+                )
                 if job.parent_job_id is not None:
                     self._maybe_fail_parent(session, job.parent_job_id)
                 try:
@@ -166,7 +213,8 @@ class BaseWorker:
                     # left permanently stuck in RUNNING.
                     logger.error(
                         "Execute session commit failed; using fallback session. job_id=%s error=%s",
-                        job_id, commit_exc,
+                        job_id,
+                        commit_exc,
                     )
                     self._force_fail_job(job_id, e)
                 raise
@@ -196,7 +244,8 @@ class BaseWorker:
         except Exception as exc:
             logger.error(
                 "Fallback session also failed; job may remain RUNNING. job_id=%s error=%s",
-                job_id, exc,
+                job_id,
+                exc,
             )
         finally:
             fallback.close()
@@ -231,9 +280,14 @@ class BaseWorker:
                 error_message="All child jobs failed or were cancelled",
             )
         )
-        self._emit(session, parent_job_id, "job.failed",
-                   "All child jobs failed or were cancelled",
-                   {"reason": "all_children_failed"}, level="error")
+        self._emit(
+            session,
+            parent_job_id,
+            "job.failed",
+            "All child jobs failed or were cancelled",
+            {"reason": "all_children_failed"},
+            level="error",
+        )
 
     @staticmethod
     def _emit(
@@ -245,4 +299,6 @@ class BaseWorker:
         *,
         level: str,
     ) -> None:
-        session.add(JobEvent(job_id=job_id, event=event, message=message, fields=fields, level=level))
+        session.add(
+            JobEvent(job_id=job_id, event=event, message=message, fields=fields, level=level)
+        )

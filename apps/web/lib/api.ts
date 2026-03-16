@@ -29,8 +29,19 @@ export function baseUrl(): string {
 }
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${baseUrl()}${path}`, { cache: "no-store", ...init });
-  if (!res.ok) throw new Error(await res.text());
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl()}${path}`, { cache: "no-store", ...init });
+  } catch (e: any) {
+    throw new Error(e?.message ?? "Network error");
+  }
+  if (!res.ok) {
+    const body = await res.text();
+    const msg = body.trimStart().startsWith("<")
+      ? `HTTP ${res.status} ${res.statusText}`
+      : body;
+    throw new Error(msg);
+  }
   return await res.json();
 }
 
@@ -97,8 +108,11 @@ export type EmbeddingConfig = {
 export type PredictionSet = {
   id: string;
   embedding_config_id: string;
+  embedding_config_name?: string;
   annotation_set_id: string;
+  annotation_set_label?: string;
   ontology_snapshot_id: string;
+  ontology_snapshot_version?: string;
   limit_per_entry: number;
   distance_threshold?: number | null;
   created_at: string;
@@ -120,6 +134,7 @@ export type OntologySnapshot = {
   id: string;
   obo_url: string;
   obo_version: string;
+  ia_url?: string | null;
   loaded_at: string;
   go_term_count?: number;
 };
@@ -232,6 +247,8 @@ export function launchPredictGoTerms(body: {
   // Feature engineering
   compute_alignments?: boolean;
   compute_taxonomy?: boolean;
+  // Per-aspect KNN indices
+  aspect_separated_knn?: boolean;
 }) {
   return http<{ id: string; status: string }>(`/embeddings/predict`, {
     method: "POST",
@@ -348,6 +365,13 @@ export function listOntologySnapshots() {
   return http<OntologySnapshot[]>(`/annotations/snapshots`);
 }
 
+export function setSnapshotIaUrl(snapshotId: string, iaUrl: string | null) {
+  return http<{ id: string; obo_version: string; ia_url: string | null }>(
+    `/annotations/snapshots/${snapshotId}/ia-url`,
+    { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ia_url: iaUrl }) }
+  );
+}
+
 export type QuerySet = {
   id: string;
   name: string;
@@ -395,6 +419,78 @@ export function previewVacuumEmbeddings() {
 
 export function runVacuumEmbeddings() {
   return http<{ deleted_embeddings: number }>(`/maintenance/vacuum-embeddings`, { method: "POST" });
+}
+
+// ---------------------------------------------------------------------------
+// Scoring
+// ---------------------------------------------------------------------------
+
+export type ScoringConfig = {
+  id: string;
+  name: string;
+  formula: string;
+  /** Signal weights (embedding_similarity, identity_nw, …) — all in [0, 1]. */
+  weights: Record<string, number>;
+  /**
+   * Optional per-GO-evidence-code quality overrides in [0, 1].
+   * When null the engine falls back to the system defaults
+   * (EXP/IDA → 1.0, ISS/IBA → 0.7, IEA → 0.3, ND → 0.1, …).
+   * Partial dicts are valid: absent codes still resolve via the system table.
+   */
+  evidence_weights: Record<string, number> | null;
+  description?: string | null;
+  created_at: string;
+};
+
+export function listScoringConfigs() {
+  return http<ScoringConfig[]>(`/scoring/configs`);
+}
+
+export function createScoringConfig(body: {
+  name: string;
+  formula: string;
+  weights: Record<string, number>;
+  /**
+   * Optional per-GO-evidence-code quality overrides.
+   * Omit or pass null to use system defaults.
+   * Keys must be valid GO evidence codes (EXP, IDA, IEA, …).
+   * Values must be floats in [0, 1].
+   */
+  evidence_weights?: Record<string, number> | null;
+  description?: string;
+}) {
+  return http<ScoringConfig>(`/scoring/configs`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteScoringConfig(id: string) {
+  const res = await fetch(`${baseUrl()}/scoring/configs/${id}`, {
+    cache: "no-store",
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(await res.text());
+}
+
+export function createPresetScoringConfigs() {
+  return http<{ created: string[] }>(`/scoring/configs/presets`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+}
+
+export function getScoredTsvUrl(
+  setId: string,
+  scoringConfigId: string,
+  params?: { minScore?: number },
+): string {
+  const q = new URLSearchParams();
+  q.set("scoring_config_id", scoringConfigId);
+  if (params?.minScore !== undefined) q.set("min_score", String(params.minScore));
+  return `${baseUrl()}/scoring/prediction-sets/${setId}/score.tsv?${q.toString()}`;
 }
 
 export async function createQuerySet(file: File, name: string, description?: string): Promise<QuerySet> {

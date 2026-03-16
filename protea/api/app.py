@@ -14,6 +14,8 @@ from protea.api.routers import jobs as jobs_router
 from protea.api.routers import maintenance as maintenance_router
 from protea.api.routers import proteins as proteins_router
 from protea.api.routers import query_sets as query_sets_router
+from protea.api.routers import scoring as scoring_router
+from protea.api.routers import support as support_router
 from protea.infrastructure.session import build_session_factory
 from protea.infrastructure.settings import load_settings
 
@@ -37,13 +39,36 @@ def create_app(project_root: Path | None = None) -> FastAPI:
         ),
         contact={"name": "PROTEA Team", "email": "contact@protea.example.org"},
         openapi_tags=[
-            {"name": "jobs", "description": "Job queue lifecycle — create, monitor, and cancel operations."},
+            {
+                "name": "jobs",
+                "description": "Job queue lifecycle — create, monitor, and cancel operations.",
+            },
             {"name": "proteins", "description": "UniProt protein lookup and aggregate statistics."},
-            {"name": "annotations", "description": "GO ontology snapshots, annotation sets, and GO subgraph queries."},
-            {"name": "embeddings", "description": "Embedding configs, GPU compute jobs, and prediction sets management."},
-            {"name": "query-sets", "description": "User-uploaded FASTA datasets for custom prediction queries."},
-            {"name": "maintenance", "description": "Housekeeping — identify and remove orphaned sequences or embeddings."},
-            {"name": "admin", "description": "Destructive admin operations (DB reset). Use with caution."},
+            {
+                "name": "annotations",
+                "description": "GO ontology snapshots, annotation sets, and GO subgraph queries.",
+            },
+            {
+                "name": "embeddings",
+                "description": "Embedding configs, GPU compute jobs, and prediction sets management.",
+            },
+            {
+                "name": "query-sets",
+                "description": "User-uploaded FASTA datasets for custom prediction queries.",
+            },
+            {
+                "name": "maintenance",
+                "description": "Housekeeping — identify and remove orphaned sequences or embeddings.",
+            },
+            {
+                "name": "admin",
+                "description": "Destructive admin operations (DB reset). Use with caution.",
+            },
+            {
+                "name": "scoring",
+                "description": "Scoring configs, scored prediction export, and CAFA metrics.",
+            },
+            {"name": "support", "description": "Community thumbs-up and comments."},
         ],
     )
     app.state.session_factory = factory
@@ -65,6 +90,8 @@ def create_app(project_root: Path | None = None) -> FastAPI:
     app.include_router(query_sets_router.router)
     app.include_router(maintenance_router.router)
     app.include_router(admin_router.router)
+    app.include_router(scoring_router.router)
+    app.include_router(support_router.router)
 
     sphinx_build = project_root / "docs" / "build" / "html"
     if sphinx_build.exists():

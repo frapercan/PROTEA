@@ -11,3 +11,4 @@ job lifecycle, and extension points.
    job_lifecycle
    data_model
    operations
+   evaluation
