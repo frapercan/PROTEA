@@ -13,6 +13,7 @@ from protea.infrastructure.orm.base import Base
 if TYPE_CHECKING:
     from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
     from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
+    from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
     from protea.infrastructure.orm.models.job import Job
 
 
@@ -54,6 +55,12 @@ class EvaluationResult(Base):
         nullable=False,
         index=True,
     )
+    scoring_config_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("scoring_config.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     job_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("job.id", ondelete="SET NULL"),
@@ -67,4 +74,5 @@ class EvaluationResult(Base):
 
     evaluation_set: Mapped[EvaluationSet] = relationship("EvaluationSet")
     prediction_set: Mapped[PredictionSet] = relationship("PredictionSet")
+    scoring_config: Mapped[ScoringConfig | None] = relationship("ScoringConfig")
     job: Mapped[Job | None] = relationship("Job")
