@@ -120,4 +120,4 @@ PROTEA is the natural evolution of two prior systems developed at **Ana Rojas' L
 
 PROTEA was designed to unify and supersede both systems under a single, maintainable codebase — removing the tight coupling between infrastructure, orchestration, and domain logic that accumulated across those projects.
 
-The evaluation pipeline and scoring methodology are directly informed by our participation in **CAFA6** (Critical Assessment of protein Function Annotation, 6th edition). The competition provided real-world benchmarking experience that shaped PROTEA's prediction and evaluation architecture, including the integration of [cafaeval](https://github.com/claradepaolis/CAFA-evaluator-PK) for standardised GO term prediction assessment.
+The evaluation pipeline and scoring methodology are directly informed by following the **CAFA** (Critical Assessment of protein Function Annotation) competition series. This benchmarking framework shaped PROTEA's prediction and evaluation architecture, including the integration of [cafaeval](https://github.com/claradepaolis/CAFA-evaluator-PK) for standardised GO term prediction assessment.
