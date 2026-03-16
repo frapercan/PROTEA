@@ -120,10 +120,46 @@ traversals across a batch.
    :undoc-members:
    :show-inheritance:
 
+Evaluation
+----------
+
+``protea.core.evaluation`` implements the CAFA5 evaluation protocol for
+computing the ground-truth delta between two annotation snapshots.
+
+The module's central data structure is ``EvaluationData``, a frozen dataclass
+that holds the NK, LK, PK, known, and pk_known annotation dictionaries.
+Each dictionary maps a protein accession to a set of GO term IDs.
+
+``EvaluationData`` fields:
+
+- ``nk`` — delta annotations for No-Knowledge proteins (no prior annotations
+  in any namespace at t0).
+- ``lk`` — delta annotations for Limited-Knowledge proteins (had annotations
+  in some namespaces but gained new terms in a previously empty namespace).
+- ``pk`` — novel annotations for Partial-Knowledge proteins (gained new terms
+  in a namespace where they already had annotations).
+- ``pk_known`` — old experimental annotations for PK proteins in the
+  relevant namespaces; passed as ``-known`` to ``cafaeval`` to exclude them
+  from scoring.
+- ``known`` — all old experimental annotations flattened across namespaces;
+  available for download via the reference endpoint.
+
+The public entry point is ``compute_evaluation_data(session,
+old_annotation_set_id, new_annotation_set_id, ontology_snapshot_id)``.
+It loads the GO DAG for NOT-propagation, builds a per-namespace annotation
+map for both old and new sets, and classifies each (protein, namespace) pair
+into NK, LK, or PK. The same protein can appear in multiple categories across
+different namespaces simultaneously (e.g., LK in CCO and PK in BPO).
+
+.. automodule:: protea.core.evaluation
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Operations
 ----------
 
-PROTEA ships eight operations, all registered at worker startup in
+PROTEA ships ten operations, all registered at worker startup in
 ``scripts/worker.py``. Each operation is a class that implements the
 ``Operation`` protocol: a ``name`` string and an ``execute`` method.
 Operations are stateless with respect to infrastructure — they receive a
@@ -221,6 +257,30 @@ transactions.
    is closed by the last write worker.
 
 .. automodule:: protea.core.operations.predict_go_terms
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+**generate_evaluation_set**
+   Computes the NK/LK/PK evaluation delta between two annotation sets using
+   the CAFA5 protocol (experimental evidence only, NOT-propagation through the
+   GO DAG, per-namespace classification). Stores an ``EvaluationSet`` row with
+   summary statistics. Ground-truth files are generated on-demand by the
+   download endpoints.
+
+.. automodule:: protea.core.operations.generate_evaluation_set
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+**run_cafa_evaluation**
+   Runs ``cafaeval`` for NK, LK, and PK settings against a given prediction
+   set. Downloads the OBO file, writes ground-truth and prediction TSVs, calls
+   ``cafa_eval()`` three times (NK and LK without ``-known``, PK with
+   ``pk_known_terms.tsv`` as ``-known``), and persists an ``EvaluationResult``
+   row with per-namespace Fmax, precision, recall, τ, and coverage.
+
+.. automodule:: protea.core.operations.run_cafa_evaluation
    :members:
    :undoc-members:
    :show-inheritance:

@@ -35,3 +35,7 @@ CLAUDE.md
 # Local data
 static/
 storage/
+
+# Large embedding caches and test artifacts
+data/ref_cache/
+apps/web/test-results/
