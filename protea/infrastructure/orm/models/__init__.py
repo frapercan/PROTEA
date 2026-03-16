@@ -7,8 +7,8 @@ from .annotation.ontology_snapshot import OntologySnapshot  # noqa: F401
 from .annotation.protein_go_annotation import ProteinGOAnnotation  # noqa: F401
 from .embedding.embedding_config import EmbeddingConfig  # noqa: F401
 from .embedding.go_prediction import GOPrediction  # noqa: F401
-from .embedding.scoring_config import ScoringConfig  # noqa: F401
 from .embedding.prediction_set import PredictionSet  # noqa: F401
+from .embedding.scoring_config import ScoringConfig  # noqa: F401
 from .embedding.sequence_embedding import SequenceEmbedding  # noqa: F401
 from .job import Job, JobEvent  # noqa: F401
 from .protein.protein import Protein  # noqa: F401

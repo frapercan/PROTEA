@@ -26,20 +26,21 @@ API validates that:
 Partial overrides are allowed: codes absent from the submitted dict will
 continue to use the system default at score-computation time.
 """
+
 from __future__ import annotations
 
 import uuid
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.requests import Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy.orm import Session
 
 from protea.core.evaluation import compute_evaluation_data
 from protea.core.metrics import compute_cafa_metrics
-from protea.core.scoring import compute_score, score_predictions
+from protea.core.scoring import compute_score
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
@@ -148,6 +149,7 @@ _PRESET_CONFIGS: list[dict[str, Any]] = [
 # FastAPI dependency
 # ---------------------------------------------------------------------------
 
+
 def get_session_factory(request: Request):
     return request.app.state.session_factory
 
@@ -155,6 +157,7 @@ def get_session_factory(request: Request):
 # ---------------------------------------------------------------------------
 # Request / response models
 # ---------------------------------------------------------------------------
+
 
 class ScoringConfigCreate(BaseModel):
     """Request body for POST /scoring/configs.
@@ -181,9 +184,7 @@ class ScoringConfigCreate(BaseModel):
 
     name: str = Field(..., min_length=1, max_length=255)
     formula: str = Field("linear")
-    weights: dict[str, float] = Field(
-        default_factory=lambda: dict(DEFAULT_WEIGHTS)
-    )
+    weights: dict[str, float] = Field(default_factory=lambda: dict(DEFAULT_WEIGHTS))
     evidence_weights: dict[str, float] | None = Field(
         default=None,
         description=(
@@ -197,9 +198,7 @@ class ScoringConfigCreate(BaseModel):
 
     @field_validator("evidence_weights")
     @classmethod
-    def validate_evidence_weights(
-        cls, v: dict[str, float] | None
-    ) -> dict[str, float] | None:
+    def validate_evidence_weights(cls, v: dict[str, float] | None) -> dict[str, float] | None:
         """Ensure all keys are known GO codes and all values are in [0, 1]."""
         if v is None:
             return None
@@ -207,14 +206,11 @@ class ScoringConfigCreate(BaseModel):
         unknown = set(v.keys()) - known_codes
         if unknown:
             raise ValueError(
-                f"Unknown evidence codes: {sorted(unknown)}. "
-                f"Valid codes: {sorted(known_codes)}"
+                f"Unknown evidence codes: {sorted(unknown)}. Valid codes: {sorted(known_codes)}"
             )
         out_of_range = {k: val for k, val in v.items() if not (0.0 <= val <= 1.0)}
         if out_of_range:
-            raise ValueError(
-                f"Evidence weights must be in [0, 1]. Out-of-range: {out_of_range}"
-            )
+            raise ValueError(f"Evidence weights must be in [0, 1]. Out-of-range: {out_of_range}")
         return v
 
 
@@ -264,15 +260,12 @@ def _snapshot(c: ScoringConfig) -> ScoringConfig:
 # ScoringConfig CRUD
 # ---------------------------------------------------------------------------
 
+
 @router.get("/configs", response_model=list[ScoringConfigResponse])
 def list_scoring_configs(factory=Depends(get_session_factory)):
     """Return all stored ScoringConfigs ordered by creation time."""
     with session_scope(factory) as session:
-        configs = (
-            session.query(ScoringConfig)
-            .order_by(ScoringConfig.created_at)
-            .all()
-        )
+        configs = session.query(ScoringConfig).order_by(ScoringConfig.created_at).all()
         return [_to_response(c) for c in configs]
 
 
@@ -325,9 +318,7 @@ def create_preset_configs(factory=Depends(get_session_factory)):
     """
     created: list[str] = []
     with session_scope(factory) as session:
-        existing_names = {
-            row[0] for row in session.query(ScoringConfig.name).all()
-        }
+        existing_names = {row[0] for row in session.query(ScoringConfig.name).all()}
         for preset in _PRESET_CONFIGS:
             if preset["name"] in existing_names:
                 continue
@@ -365,6 +356,7 @@ def delete_scoring_config(
 # ---------------------------------------------------------------------------
 # Scored TSV endpoint
 # ---------------------------------------------------------------------------
+
 
 @router.get("/prediction-sets/{set_id}/score.tsv")
 def download_scored_predictions(
@@ -404,11 +396,23 @@ def download_scored_predictions(
         config_snap = _snapshot(config)
 
     def _generate() -> Iterator[bytes]:
-        header = "\t".join([
-            "protein_accession", "go_id", "score", "distance",
-            "ref_protein_accession", "evidence_code", "qualifier",
-            "identity_nw", "identity_sw", "taxonomic_distance",
-        ]) + "\n"
+        header = (
+            "\t".join(
+                [
+                    "protein_accession",
+                    "go_id",
+                    "score",
+                    "distance",
+                    "ref_protein_accession",
+                    "evidence_code",
+                    "qualifier",
+                    "identity_nw",
+                    "identity_sw",
+                    "taxonomic_distance",
+                ]
+            )
+            + "\n"
+        )
         yield header.encode()
 
         with session_scope(factory) as session:
@@ -432,18 +436,25 @@ def download_scored_predictions(
                 if min_score is not None and score < min_score:
                     continue
 
-                row = "\t".join([
-                    pred.protein_accession,
-                    go_id,
-                    str(score),
-                    str(pred.distance) if pred.distance is not None else "",
-                    pred.ref_protein_accession or "",
-                    pred.evidence_code or "",
-                    pred.qualifier or "",
-                    str(pred.identity_nw) if pred.identity_nw is not None else "",
-                    str(pred.identity_sw) if pred.identity_sw is not None else "",
-                    str(pred.taxonomic_distance) if pred.taxonomic_distance is not None else "",
-                ]) + "\n"
+                row = (
+                    "\t".join(
+                        [
+                            pred.protein_accession,
+                            go_id,
+                            str(score),
+                            str(pred.distance) if pred.distance is not None else "",
+                            pred.ref_protein_accession or "",
+                            pred.evidence_code or "",
+                            pred.qualifier or "",
+                            str(pred.identity_nw) if pred.identity_nw is not None else "",
+                            str(pred.identity_sw) if pred.identity_sw is not None else "",
+                            str(pred.taxonomic_distance)
+                            if pred.taxonomic_distance is not None
+                            else "",
+                        ]
+                    )
+                    + "\n"
+                )
                 yield row.encode()
 
     filename = f"scored_{set_id}_{scoring_config_id}.tsv"
@@ -457,6 +468,7 @@ def download_scored_predictions(
 # ---------------------------------------------------------------------------
 # CAFA metrics endpoint
 # ---------------------------------------------------------------------------
+
 
 @router.get("/prediction-sets/{set_id}/metrics")
 def compute_metrics(

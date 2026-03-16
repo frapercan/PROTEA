@@ -15,12 +15,14 @@ CAFA protocol summary
 Note: This implementation uses exact GO term matching (no DAG propagation).
 Ancestor propagation is intentionally left for a future iteration.
 """
+
 from __future__ import annotations
 
-import numpy as np
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
+
+import numpy as np
 
 from protea.core.evaluation import EvaluationData
 
@@ -39,13 +41,13 @@ class PRPoint:
 class CAFAMetrics:
     """CAFA evaluation results for one (PredictionSet, ScoringConfig, category) triple."""
 
-    category: str                          # "nk" or "lk"
+    category: str  # "nk" or "lk"
     fmax: float
     threshold_at_fmax: float
     auc_pr: float
-    n_ground_truth_proteins: int           # proteins in the chosen NK/LK category
-    n_predicted_proteins: int              # proteins that received at least 1 prediction
-    n_predictions: int                     # total scored predictions passed in
+    n_ground_truth_proteins: int  # proteins in the chosen NK/LK category
+    n_predicted_proteins: int  # proteins that received at least 1 prediction
+    n_predictions: int  # total scored predictions passed in
     curve: list[PRPoint] = field(default_factory=list)
 
     def summary(self) -> dict[str, Any]:
@@ -125,8 +127,11 @@ def compute_cafa_metrics(
         rc = (rc_num / sum(len(v) for v in ground_truth.values())) if n_gt > 0 else 0.0
         f1 = (2 * pr * rc / (pr + rc)) if (pr + rc) > 0 else 0.0
 
-        curve.append(PRPoint(threshold=round(t, 4), precision=round(pr, 6),
-                             recall=round(rc, 6), f1=round(f1, 6)))
+        curve.append(
+            PRPoint(
+                threshold=round(t, 4), precision=round(pr, 6), recall=round(rc, 6), f1=round(f1, 6)
+            )
+        )
 
         if f1 > best_f:
             best_f = f1

@@ -22,6 +22,7 @@ changing the IEA weight from 0.3 to 0.0 — without having to redeclare every
 other code.  The resolution order ensures backwards compatibility: configs
 stored without ``evidence_weights`` behave identically to older configs.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -34,10 +35,10 @@ from protea.infrastructure.orm.models.embedding.scoring_config import (
     ScoringConfig,
 )
 
-
 # ---------------------------------------------------------------------------
 # Evidence-code weight resolution
 # ---------------------------------------------------------------------------
+
 
 def evidence_weight(
     code: str | None,
@@ -82,6 +83,7 @@ def evidence_weight(
 # ---------------------------------------------------------------------------
 # Score computation
 # ---------------------------------------------------------------------------
+
 
 def compute_score(pred: dict[str, Any], config: ScoringConfig) -> float:
     """Compute a [0, 1] confidence score for a single GOPrediction dict.
@@ -166,6 +168,7 @@ def compute_score(pred: dict[str, Any], config: ScoringConfig) -> float:
 # Batch helper
 # ---------------------------------------------------------------------------
 
+
 def score_predictions(
     predictions: list[dict[str, Any]],
     config: ScoringConfig,
@@ -185,9 +188,6 @@ def score_predictions(
     A new list with a ``score`` key added to each item, sorted by score in
     descending order.  The original list is not modified.
     """
-    scored = [
-        {**p, "score": compute_score(p, config)}
-        for p in predictions
-    ]
+    scored = [{**p, "score": compute_score(p, config)} for p in predictions]
     scored.sort(key=lambda x: x["score"], reverse=True)
     return scored
