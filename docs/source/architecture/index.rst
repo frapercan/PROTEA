@@ -12,3 +12,4 @@ job lifecycle, and extension points.
    data_model
    operations
    evaluation
+   /adr/index
