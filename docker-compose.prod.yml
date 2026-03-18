@@ -1,7 +1,7 @@
 # Production overrides: pull pre-built images from ghcr.io instead of building locally.
 # Use with: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
-# The worker-embeddings service gets GPU access via the NVIDIA container runtime.
+# The worker-embeddings-batch service gets GPU access via the NVIDIA container runtime.
 
 services:
   migrate:
@@ -15,6 +15,9 @@ services:
 
   worker-embeddings:
     image: ghcr.io/frapercan/protea:latest
+
+  worker-embeddings-batch:
+    image: ghcr.io/frapercan/protea:latest
     deploy:
       resources:
         reservations:
@@ -22,8 +25,19 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+        limits:
+          memory: 8G
 
-  worker-predictions:
+  worker-embeddings-write:
+    image: ghcr.io/frapercan/protea:latest
+
+  worker-predictions-batch:
+    image: ghcr.io/frapercan/protea:latest
+
+  worker-predictions-write:
+    image: ghcr.io/frapercan/protea:latest
+
+  worker-reaper:
     image: ghcr.io/frapercan/protea:latest
 
   frontend:

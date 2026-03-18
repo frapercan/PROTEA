@@ -36,17 +36,26 @@ from protea.infrastructure.queue.consumer import OperationConsumer, QueueConsume
 from protea.infrastructure.session import build_session_factory
 from protea.infrastructure.settings import load_settings
 from protea.workers.base_worker import BaseWorker, WorkerConfig
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-# Suppress pika's verbose connection lifecycle messages
-logging.getLogger("pika").setLevel(logging.WARNING)
+from protea.workers.stale_job_reaper import StaleJobReaper
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="PROTEA queue worker")
     parser.add_argument("--queue", default="protea.jobs", help="Queue name to consume")
     parser.add_argument("--requeue-on-failure", action="store_true")
+    parser.add_argument(
+        "--log-format",
+        choices=["json", "text"],
+        default="json",
+        help="Log output format (default: json)",
+    )
     args = parser.parse_args()
+
+    from protea.infrastructure.logging import configure_logging
+
+    configure_logging(json=(args.log_format == "json"))
+    # Suppress pika's verbose connection lifecycle messages
+    logging.getLogger("pika").setLevel(logging.WARNING)
 
     project_root = Path(__file__).resolve().parents[1]
     settings = load_settings(project_root)
@@ -78,6 +87,13 @@ def main() -> None:
         "protea.predictions.write",
     }
 
+    # Special mode: stale job reaper (no queue, just periodic DB check).
+    if args.queue == "reaper":
+        reaper = StaleJobReaper(factory, timeout_seconds=3600)
+        logging.info("Stale job reaper started. timeout=3600s interval=60s")
+        reaper.run(interval_seconds=60)
+        return
+
     if args.queue in _OPERATION_QUEUES:
         consumer: QueueConsumer | OperationConsumer = OperationConsumer(
             amqp_url=settings.amqp_url,
@@ -94,6 +110,15 @@ def main() -> None:
             worker=worker,
             requeue_on_failure=args.requeue_on_failure,
         )
+
+    # Pre-warm taxonomy DB for prediction workers that may need it.
+    if args.queue in ("protea.predictions.batch", "protea.jobs"):
+        try:
+            from protea.core.feature_engineering import warmup_taxonomy_db
+
+            warmup_taxonomy_db()
+        except Exception as exc:
+            logging.warning("Taxonomy DB warmup skipped: %s", exc)
 
     logging.info("Worker started. queue=%s", args.queue)
     while True:

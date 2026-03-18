@@ -13,10 +13,21 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from protea.core.contracts.operation import RetryLaterError
 from protea.core.contracts.registry import OperationRegistry
+from protea.infrastructure.orm.models.job import JobEvent
 from protea.infrastructure.queue.publisher import publish_operation
 from protea.workers.base_worker import BaseWorker
 
 logger = logging.getLogger(__name__)
+
+_DLX_NAME = "protea.dlx"
+_DLQ_NAME = "protea.dead-letter"
+
+
+def _setup_dead_letter(channel: BlockingChannel) -> None:
+    """Declare the dead-letter exchange and queue (idempotent)."""
+    channel.exchange_declare(exchange=_DLX_NAME, exchange_type="fanout", durable=True)
+    channel.queue_declare(queue=_DLQ_NAME, durable=True)
+    channel.queue_bind(queue=_DLQ_NAME, exchange=_DLX_NAME)
 
 
 class QueueConsumer:
@@ -63,7 +74,12 @@ class QueueConsumer:
         connection = pika.BlockingConnection(params)
         channel = connection.channel()
 
-        channel.queue_declare(queue=self._queue_name, durable=True)
+        _setup_dead_letter(channel)
+        channel.queue_declare(
+            queue=self._queue_name,
+            durable=True,
+            arguments={"x-dead-letter-exchange": _DLX_NAME},
+        )
         channel.basic_qos(prefetch_count=self._prefetch_count)
         channel.basic_consume(
             queue=self._queue_name,
@@ -182,7 +198,12 @@ class OperationConsumer:
         connection = pika.BlockingConnection(params)
         channel = connection.channel()
 
-        channel.queue_declare(queue=self._queue_name, durable=True)
+        _setup_dead_letter(channel)
+        channel.queue_declare(
+            queue=self._queue_name,
+            durable=True,
+            arguments={"x-dead-letter-exchange": _DLX_NAME},
+        )
         channel.basic_qos(prefetch_count=self._prefetch_count)
         channel.basic_consume(
             queue=self._queue_name,
@@ -234,6 +255,14 @@ class OperationConsumer:
             "Dispatching operation. operation=%s queue=%s", operation_name, self._queue_name
         )
 
+        parent_job_id: UUID | None = None
+        raw_job_id = data.get("job_id")
+        if raw_job_id:
+            try:
+                parent_job_id = UUID(raw_job_id)
+            except (ValueError, TypeError):
+                pass
+
         op = self._registry.get(operation_name)
         session = self._factory()
         try:
@@ -245,6 +274,32 @@ class OperationConsumer:
                 level: str = "info",
             ) -> None:
                 logger.info("operation.%s fields=%s", event, fields or {})
+                if parent_job_id is not None:
+                    event_session = self._factory()
+                    try:
+                        event_session.add(
+                            JobEvent(
+                                job_id=parent_job_id,
+                                event=f"child.{event}",
+                                message=message,
+                                fields=fields or {},
+                                level=level,
+                            )
+                        )
+                        event_session.commit()
+                    except Exception as emit_exc:
+                        logger.warning(
+                            "Failed to write child event to parent job. "
+                            "parent_job_id=%s error=%s",
+                            parent_job_id,
+                            emit_exc,
+                        )
+                        try:
+                            event_session.rollback()
+                        except Exception:
+                            pass
+                    finally:
+                        event_session.close()
 
             result = op.execute(session, payload, emit=emit)
             session.commit()
@@ -270,6 +325,30 @@ class OperationConsumer:
                 )
             else:
                 logger.error("Operation failed. operation=%s error=%s", operation_name, exc)
+                # Record failure event on parent job so it's visible in the UI.
+                if parent_job_id is not None:
+                    err_session = self._factory()
+                    try:
+                        err_session.add(
+                            JobEvent(
+                                job_id=parent_job_id,
+                                event="child.failed",
+                                message=str(exc)[:2000],
+                                fields={
+                                    "operation": operation_name,
+                                    "error_code": exc.__class__.__name__,
+                                },
+                                level="error",
+                            )
+                        )
+                        err_session.commit()
+                    except Exception:
+                        try:
+                            err_session.rollback()
+                        except Exception:
+                            pass
+                    finally:
+                        err_session.close()
             try:
                 session.rollback()
             except Exception:

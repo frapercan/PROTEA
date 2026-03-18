@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, Float, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import BigInteger, Float, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -31,6 +31,7 @@ class GOPrediction(Base):
             "go_term_id",
             name="uq_go_prediction_set_protein_term",
         ),
+        Index("ix_go_prediction_set_accession", "prediction_set_id", "protein_accession"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)

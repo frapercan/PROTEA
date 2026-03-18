@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -82,6 +82,32 @@ def create_app(project_root: Path | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.get("/health", tags=["health"])
+    def health_check() -> dict[str, str]:
+        """Liveness probe — returns 200 if the API process is up."""
+        return {"status": "ok"}
+
+    @app.get("/health/ready", tags=["health"])
+    def readiness_check() -> dict[str, str]:
+        """Readiness probe — verifies database and RabbitMQ connections."""
+        from sqlalchemy import text
+
+        from protea.infrastructure.session import session_scope
+
+        with session_scope(factory) as session:
+            session.execute(text("SELECT 1"))
+
+        # Check RabbitMQ connectivity
+        import pika
+
+        try:
+            conn = pika.BlockingConnection(pika.URLParameters(settings.amqp_url))
+            conn.close()
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail=f"RabbitMQ unreachable: {exc}")
+
+        return {"status": "ready"}
 
     app.include_router(jobs_router.router)
     app.include_router(proteins_router.router)
