@@ -181,7 +181,7 @@ export type ProteinStats = {
 };
 
 export function getProteinStats() {
-  return http<ProteinStats>(`/proteins/stats`);
+  return http<ProteinStats>(`/proteins/stats/`);
 }
 
 export function listProteins(params?: {
@@ -306,6 +306,12 @@ export type Prediction = {
   taxonomic_distance: number | null;
   taxonomic_common_ancestors: number | null;
   taxonomic_relation: string | null;
+  // Re-ranker features
+  vote_count: number | null;
+  k_position: number | null;
+  go_term_frequency: number | null;
+  ref_annotation_density: number | null;
+  neighbor_distance_std: number | null;
 };
 
 export function getProteinPredictions(setId: string, accession: string) {
@@ -493,6 +499,127 @@ export function getScoredTsvUrl(
   return `${baseUrl()}/scoring/prediction-sets/${setId}/score.tsv?${q.toString()}`;
 }
 
+// ---------------------------------------------------------------------------
+// Re-ranker
+// ---------------------------------------------------------------------------
+
+export type RerankerModel = {
+  id: string;
+  name: string;
+  prediction_set_id: string | null;
+  evaluation_set_id: string | null;
+  category: string;
+  aspect: string | null;
+  metrics: Record<string, any>;
+  feature_importance: Record<string, number>;
+  created_at: string;
+};
+
+export function listRerankers() {
+  return http<RerankerModel[]>(`/scoring/rerankers`);
+}
+
+export function getReranker(id: string) {
+  return http<RerankerModel>(`/scoring/rerankers/${id}`);
+}
+
+export function trainReranker(body: {
+  name: string;
+  prediction_set_id: string;
+  evaluation_set_id: string;
+  category?: string;
+  aspect?: string | null;
+  neg_pos_ratio?: number | null;
+  extra_pairs?: { prediction_set_id: string; evaluation_set_id: string }[];
+}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5 * 60_000); // 5 min
+  return http<RerankerModel>(`/scoring/rerankers/train`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal: controller.signal,
+  }).finally(() => clearTimeout(timer));
+}
+
+export async function deleteReranker(id: string) {
+  const res = await fetch(`${baseUrl()}/scoring/rerankers/${id}`, {
+    cache: "no-store",
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(await res.text());
+}
+
+export function getRerankedTsvUrl(
+  setId: string,
+  rerankerId: string,
+  params?: { minScore?: number },
+): string {
+  const q = new URLSearchParams();
+  q.set("reranker_id", rerankerId);
+  if (params?.minScore !== undefined) q.set("min_score", String(params.minScore));
+  return `${baseUrl()}/scoring/prediction-sets/${setId}/rerank.tsv?${q.toString()}`;
+}
+
+export function getRerankerMetrics(
+  setId: string,
+  rerankerId: string,
+  evaluationSetId: string,
+  category: string = "nk",
+) {
+  const q = new URLSearchParams();
+  q.set("reranker_id", rerankerId);
+  q.set("evaluation_set_id", evaluationSetId);
+  q.set("category", category);
+  return http<Record<string, any>>(`/scoring/prediction-sets/${setId}/reranker-metrics?${q.toString()}`);
+}
+
+export function getTrainingDataTsvUrl(
+  setId: string,
+  evaluationSetId: string,
+  category: string = "nk",
+): string {
+  const q = new URLSearchParams();
+  q.set("evaluation_set_id", evaluationSetId);
+  q.set("category", category);
+  return `${baseUrl()}/scoring/prediction-sets/${setId}/training-data.tsv?${q.toString()}`;
+}
+
+// ---------------------------------------------------------------------------
+// Annotate (one-click pipeline)
+// ---------------------------------------------------------------------------
+
+export type AnnotateResult = {
+  query_set_id: string;
+  embedding_config_id: string;
+  annotation_set_id: string;
+  ontology_snapshot_id: string;
+  embedding_job_id: string;
+  predict_payload: Record<string, any>;
+  reranker_id: string | null;
+  sequence_count: number;
+};
+
+export async function annotateProteins(
+  input: { file?: File; fastaText?: string; name?: string },
+): Promise<AnnotateResult> {
+  const form = new FormData();
+  if (input.file) form.append("file", input.file);
+  if (input.fastaText) form.append("fasta_text", input.fastaText);
+  form.append("name", input.name ?? "Quick annotation");
+  const res = await fetch(`${baseUrl()}/annotate`, {
+    cache: "no-store",
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// Query sets (upload)
+// ---------------------------------------------------------------------------
+
 export async function createQuerySet(file: File, name: string, description?: string): Promise<QuerySet> {
   const form = new FormData();
   form.append("file", file);
@@ -501,4 +628,49 @@ export async function createQuerySet(file: File, name: string, description?: str
   const res = await fetch(`${baseUrl()}/query-sets`, { cache: "no-store", method: "POST", body: form });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// Showcase
+// ---------------------------------------------------------------------------
+
+export type ShowcaseAspectFmax = {
+  fmax: number;
+  method: string;
+  method_label: string;
+  evaluation_result_id: string;
+};
+
+export type ShowcaseMethodEntry = {
+  method: string;
+  label: string;
+  BPO: { fmax: number | null };
+  MFO: { fmax: number | null };
+  CCO: { fmax: number | null };
+};
+
+export type ShowcasePipelineStage = {
+  name: string;
+  count: number;
+  href: string;
+};
+
+export type ShowcaseData = {
+  protein_stats: { total: number; canonical: number };
+  best_fmax: Record<string, Record<string, ShowcaseAspectFmax>>;
+  method_comparison: Record<string, ShowcaseMethodEntry[]>;
+  counts: {
+    proteins: number;
+    sequences: number;
+    embeddings: number;
+    prediction_sets: number;
+    predictions: number;
+    reranker_models: number;
+    evaluations: number;
+  };
+  pipeline_stages: ShowcasePipelineStage[];
+};
+
+export function getShowcase() {
+  return http<ShowcaseData>("/showcase/");
 }

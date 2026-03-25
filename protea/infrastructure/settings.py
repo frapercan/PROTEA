@@ -13,6 +13,7 @@ class Settings:
     db_url: str
     amqp_url: str
     artifacts_dir: Path
+    admin_token: str
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -56,4 +57,10 @@ def load_settings(project_root: Path, *, env_prefix: str = "PROTEA_") -> Setting
     if not artifacts_dir.is_absolute():
         artifacts_dir = project_root / artifacts_dir
 
-    return Settings(db_url=db_url, amqp_url=amqp_url, artifacts_dir=artifacts_dir)
+    admin_token = (
+        os.getenv(f"{env_prefix}ADMIN_TOKEN")
+        or system.get("admin", {}).get("token")
+        or ""
+    )
+
+    return Settings(db_url=db_url, amqp_url=amqp_url, artifacts_dir=artifacts_dir, admin_token=admin_token)

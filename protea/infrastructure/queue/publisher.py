@@ -45,7 +45,11 @@ def _publish(amqp_url: str, queue_name: str, body: bytes) -> None:
         try:
             connection = _get_connection(amqp_url)
             channel = connection.channel()
-            channel.queue_declare(queue=queue_name, durable=True)
+            channel.queue_declare(
+                queue=queue_name,
+                durable=True,
+                arguments={"x-dead-letter-exchange": "protea.dlx"},
+            )
             channel.basic_publish(
                 exchange="",
                 routing_key=queue_name,

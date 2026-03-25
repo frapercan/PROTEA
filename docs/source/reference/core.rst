@@ -120,6 +120,73 @@ traversals across a batch.
    :undoc-members:
    :show-inheritance:
 
+Re-ranker
+---------
+
+``protea.core.reranker`` implements a LightGBM binary classifier that
+re-scores GO term predictions using 19 numeric features (embedding distance,
+NW/SW alignment metrics, sequence lengths, taxonomic distance, and 5
+aggregate re-ranker signals) plus 3 categorical features (qualifier,
+evidence code, taxonomic relation).
+
+The module provides:
+
+- ``prepare_dataset(df)`` — extracts and coerces feature columns.
+- ``train(df)`` — stratified train/val split with ``is_unbalance=True``,
+  returns a ``TrainResult`` with the model, validation metrics (AUC,
+  logloss, precision, recall, F1), and feature importance.
+- ``predict(model, df)`` — returns probability scores [0, 1].
+- ``model_to_string()`` / ``model_from_string()`` — serialization for DB
+  storage in the ``RerankerModel`` table.
+- ``load_training_tsv()`` — parses a training data TSV as produced by the
+  ``/scoring/prediction-sets/{id}/training-data.tsv`` endpoint.
+
+.. automodule:: protea.core.reranker
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Scoring
+-------
+
+``protea.core.scoring`` implements the scoring engine that applies weighted
+formulas to GO predictions. A ``ScoringConfig`` defines a set of weights for
+each feature column (embedding distance, alignment metrics, taxonomy, re-ranker
+features). The engine computes a composite score per prediction row and can
+stream scored results as TSV or compute CAFA-style metrics (Fmax, AUC-PR)
+against an evaluation set.
+
+.. automodule:: protea.core.scoring
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Metrics
+-------
+
+``protea.core.metrics`` implements CAFA-style precision-recall evaluation.
+Provides functions for computing Fmax (maximum F-measure over all thresholds),
+weighted precision/recall, and coverage for a set of predictions against
+ground-truth annotations.
+
+.. automodule:: protea.core.metrics
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Evidence codes
+--------------
+
+``protea.core.evidence_codes`` provides mappings between ECO (Evidence and
+Conclusion Ontology) identifiers and GO evidence codes used in GAF files.
+Used by the QuickGO annotation loader to resolve ECO IDs to standard
+three-letter evidence codes.
+
+.. automodule:: protea.core.evidence_codes
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Evaluation
 ----------
 
@@ -159,7 +226,7 @@ different namespaces simultaneously (e.g., LK in CCO and PK in BPO).
 Operations
 ----------
 
-PROTEA ships ten operations, all registered at worker startup in
+PROTEA ships sixteen registered operation instances at worker startup in
 ``scripts/worker.py``. Each operation is a class that implements the
 ``Operation`` protocol: a ``name`` string and an ``execute`` method.
 Operations are stateless with respect to infrastructure — they receive a
@@ -281,6 +348,19 @@ transactions.
    row with per-namespace Fmax, precision, recall, τ, and coverage.
 
 .. automodule:: protea.core.operations.run_cafa_evaluation
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+**train_reranker**
+   Trains a LightGBM binary classifier re-ranker from a PredictionSet +
+   EvaluationSet pair. Uses temporal holdout labels and 22 features (embedding
+   distance, alignment metrics, taxonomy, aggregate signals). Stores the
+   serialized model, validation metrics, and feature importance in a
+   ``RerankerModel`` row. ``TrainRerankerAutoOperation`` is a convenience
+   variant that auto-selects training parameters.
+
+.. automodule:: protea.core.operations.train_reranker
    :members:
    :undoc-members:
    :show-inheritance:

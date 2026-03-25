@@ -9,21 +9,22 @@ The reference is organised into four pages:
 
 :doc:`core`
    The domain layer: the ``Operation`` protocol and ``OperationRegistry``,
-   shared HTTP utilities, KNN search backends, feature engineering functions,
-   and all eight registered operations.
+   shared HTTP utilities, KNN search backends, feature engineering, scoring,
+   metrics, evaluation, re-ranker, and all registered operations.
 
 :doc:`infrastructure`
-   The persistence and messaging layer: SQLAlchemy ORM models, session
-   management, RabbitMQ publisher and consumer, and the configuration loader.
+   The persistence and messaging layer: SQLAlchemy ORM models (including
+   evaluation sets, scoring configs, and support entries), session management,
+   logging, RabbitMQ publisher and consumer, and the configuration loader.
 
 :doc:`api`
-   The HTTP API: FastAPI application factory, all six routers, and a
-   summary table of all 21 public endpoints.
+   The HTTP API: FastAPI application factory, all eleven routers, and a
+   complete endpoint summary table.
 
 :doc:`workers`
    The execution layer: ``BaseWorker`` (two-session job lifecycle),
-   worker entry points, and the ``QueueConsumer`` / ``OperationConsumer``
-   distinction.
+   ``StaleJobReaper``, worker entry points, and the ``QueueConsumer`` /
+   ``OperationConsumer`` distinction.
 
 .. toctree::
    :maxdepth: 2

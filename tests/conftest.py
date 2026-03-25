@@ -38,6 +38,12 @@ def _wait_ready(container: str, user: str, db: str, timeout_s: int = 60) -> None
         time.sleep(1)
 
 
+@pytest.fixture()
+def noop_emit():
+    """Shared no-op emit callback for operation tests."""
+    return lambda *_args, **_kwargs: None
+
+
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--with-postgres",

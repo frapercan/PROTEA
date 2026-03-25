@@ -75,6 +75,13 @@ class GOPrediction(Base):
     length_query: Mapped[int | None] = mapped_column(Integer, nullable=True)
     length_ref: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # --- Re-ranker features ---
+    vote_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    k_position: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    go_term_frequency: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ref_annotation_density: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    neighbor_distance_std: Mapped[float | None] = mapped_column(Float, nullable=True)
+
     # --- Taxonomy features ---
     query_taxonomy_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ref_taxonomy_id: Mapped[int | None] = mapped_column(Integer, nullable=True)

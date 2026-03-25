@@ -52,11 +52,11 @@ class TestLoadOntologySnapshotPayload:
         assert p.timeout_seconds == 120
 
     def test_empty_url_raises(self) -> None:
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             LoadOntologySnapshotPayload.model_validate({"obo_url": "   "})
 
     def test_missing_url_raises(self) -> None:
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             LoadOntologySnapshotPayload.model_validate({})
 
 
@@ -534,5 +534,5 @@ class TestLoadOntologySnapshotExecute:
 
     def test_invalid_payload_raises(self) -> None:
         op = LoadOntologySnapshotOperation()
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             op.execute(MagicMock(), {}, emit=_noop_emit)

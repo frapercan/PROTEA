@@ -9,14 +9,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
-from starlette.requests import Request
-
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
+from protea.api.deps import get_amqp_url, get_session_factory
 from protea.infrastructure.orm.models.job import Job, JobEvent
 from protea.infrastructure.queue.publisher import publish_job
 from protea.infrastructure.session import session_scope
@@ -28,20 +27,6 @@ _JOBS_QUEUE = "protea.jobs"
 _VALID_BACKENDS = {"esm", "esm3c", "t5", "auto"}
 _VALID_LAYER_AGG = {"mean", "last", "concat"}
 _VALID_POOLING = {"mean", "max", "cls", "mean_max"}
-
-
-def get_session_factory(request: Request) -> sessionmaker[Session]:
-    factory = getattr(request.app.state, "session_factory", None)
-    if factory is None:
-        raise RuntimeError("app.state.session_factory is not set")
-    return factory  # type: ignore[no-any-return]
-
-
-def get_amqp_url(request: Request) -> str:
-    url = getattr(request.app.state, "amqp_url", None)
-    if url is None:
-        raise RuntimeError("app.state.amqp_url is not set")
-    return url  # type: ignore[no-any-return]
 
 
 def _validate_embedding_config_body(body: dict[str, Any]) -> dict[str, Any]:
@@ -331,8 +316,17 @@ def list_prediction_sets(
 ) -> list[dict[str, Any]]:
     """List the 100 most recent prediction sets with their GO prediction counts."""
     with session_scope(factory) as session:
+        # Single query with a correlated subquery for counts (avoids N+1).
+        count_subq = (
+            session.query(func.count(GOPrediction.id))
+            .filter(GOPrediction.prediction_set_id == PredictionSet.id)
+            .correlate(PredictionSet)
+            .scalar_subquery()
+        )
         rows = (
-            session.query(PredictionSet, EmbeddingConfig, AnnotationSet, OntologySnapshot)
+            session.query(
+                PredictionSet, EmbeddingConfig, AnnotationSet, OntologySnapshot, count_subq
+            )
             .join(EmbeddingConfig, PredictionSet.embedding_config_id == EmbeddingConfig.id)
             .join(AnnotationSet, PredictionSet.annotation_set_id == AnnotationSet.id)
             .join(OntologySnapshot, PredictionSet.ontology_snapshot_id == OntologySnapshot.id)
@@ -341,12 +335,7 @@ def list_prediction_sets(
             .all()
         )
         result = []
-        for ps, ec, ann, snap in rows:
-            prediction_count = (
-                session.query(func.count(GOPrediction.id))
-                .filter(GOPrediction.prediction_set_id == ps.id)
-                .scalar()
-            )
+        for ps, ec, ann, snap, prediction_count in rows:
             result.append(
                 {
                     "id": str(ps.id),
@@ -362,7 +351,7 @@ def list_prediction_sets(
                     "limit_per_entry": ps.limit_per_entry,
                     "distance_threshold": ps.distance_threshold,
                     "created_at": ps.created_at.isoformat(),
-                    "prediction_count": prediction_count,
+                    "prediction_count": prediction_count or 0,
                 }
             )
         return result
@@ -561,6 +550,12 @@ def get_protein_predictions(
                 "taxonomic_distance": pred.taxonomic_distance,
                 "taxonomic_common_ancestors": pred.taxonomic_common_ancestors,
                 "taxonomic_relation": pred.taxonomic_relation,
+                # Re-ranker features
+                "vote_count": pred.vote_count,
+                "k_position": pred.k_position,
+                "go_term_frequency": pred.go_term_frequency,
+                "ref_annotation_density": pred.ref_annotation_density,
+                "neighbor_distance_std": pred.neighbor_distance_std,
             }
             for pred, gt in rows
         ]
@@ -652,6 +647,12 @@ _TSV_COLUMNS = [
     "taxonomic_distance",
     "taxonomic_common_ancestors",
     "taxonomic_relation",
+    # Re-ranker features
+    "vote_count",
+    "k_position",
+    "go_term_frequency",
+    "ref_annotation_density",
+    "neighbor_distance_std",
 ]
 
 
@@ -741,6 +742,13 @@ def download_predictions_tsv(
                         if pred.taxonomic_common_ancestors is not None
                         else "",
                         pred.taxonomic_relation or "",
+                        pred.vote_count if pred.vote_count is not None else "",
+                        pred.k_position if pred.k_position is not None else "",
+                        pred.go_term_frequency if pred.go_term_frequency is not None else "",
+                        pred.ref_annotation_density
+                        if pred.ref_annotation_density is not None
+                        else "",
+                        _fmt(pred.neighbor_distance_std),
                     ]
                 )
                 yield buf.getvalue()
@@ -811,28 +819,39 @@ def download_predictions_cafa(
 
     def _generate():
         with session_scope(factory) as session:
-            q = (
-                session.query(GOPrediction, GOTerm)
-                .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
+            # Deduplicate at the DB level: keep the lowest distance per
+            # (protein_accession, go_id) pair so we never need an unbounded
+            # `seen` set in Python — this preserves true streaming.
+            from sqlalchemy import func as sa_func
+
+            min_dist = (
+                session.query(
+                    GOPrediction.protein_accession,
+                    GOPrediction.go_term_id,
+                    sa_func.min(GOPrediction.distance).label("min_distance"),
+                )
                 .filter(GOPrediction.prediction_set_id == set_id)
+            )
+            if max_distance is not None:
+                min_dist = min_dist.filter(GOPrediction.distance <= max_distance)
+            min_dist = min_dist.group_by(
+                GOPrediction.protein_accession, GOPrediction.go_term_id
+            ).subquery()
+
+            q = (
+                session.query(min_dist.c.protein_accession, GOTerm.go_id, min_dist.c.min_distance)
+                .join(GOTerm, min_dist.c.go_term_id == GOTerm.id)
             )
             if aspect:
                 q = q.filter(GOTerm.aspect == aspect.upper())
-            if max_distance is not None:
-                q = q.filter(GOPrediction.distance <= max_distance)
             if delta_proteins is not None:
-                q = q.filter(GOPrediction.protein_accession.in_(delta_proteins))
+                q = q.filter(min_dist.c.protein_accession.in_(delta_proteins))
 
-            q = q.order_by(GOPrediction.protein_accession, GOTerm.go_id, GOPrediction.distance)
+            q = q.order_by(min_dist.c.protein_accession, GOTerm.go_id)
 
-            seen: set[tuple[str, str]] = set()
-            for pred, gt in q.yield_per(1000):
-                key = (pred.protein_accession, gt.go_id)
-                if key in seen:
-                    continue
-                seen.add(key)
-                score = max(0.0, 1.0 - pred.distance)
-                yield f"{pred.protein_accession}\t{gt.go_id}\t{score:.4f}\n"
+            for acc, go_id, dist in q.yield_per(1000):
+                score = max(0.0, 1.0 - dist)
+                yield f"{acc}\t{go_id}\t{score:.4f}\n"
 
     filename = f"predictions_cafa_{set_id}.tsv"
     return StreamingResponse(

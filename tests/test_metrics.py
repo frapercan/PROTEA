@@ -60,7 +60,7 @@ class TestDataclasses:
 class TestComputeCafaMetricsValidation:
     def test_invalid_category_raises(self):
         with pytest.raises(ValueError, match="category"):
-            compute_cafa_metrics([], _make_eval(), category="pk")
+            compute_cafa_metrics([], _make_eval(), category="invalid")
 
     def test_valid_nk_category(self):
         result = compute_cafa_metrics([], _make_eval(nk={"P1": {"GO:0001"}}), category="nk")

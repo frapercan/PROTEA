@@ -2,7 +2,7 @@ Data Model
 ==========
 
 All models use SQLAlchemy 2.x declarative style with ``Mapped[]`` type annotations.
-The schema is managed by Alembic (8 migrations to date).
+The schema is managed by Alembic (22 migrations to date).
 
 Protein and sequence deduplication
 ------------------------------------
@@ -213,7 +213,66 @@ Predictions
 **GOPrediction**
    One row per (query protein, GO term, reference protein) triple. The alignment and
    taxonomy columns are ``NULL`` unless ``compute_alignments=true`` and/or
-   ``compute_taxonomy=true`` were set in the prediction payload.
+   ``compute_taxonomy=true`` were set in the prediction payload. Five additional
+   re-ranker features (``vote_count``, ``k_position``, ``go_term_frequency``,
+   ``ref_annotation_density``, ``neighbor_distance_std``) are populated when
+   ``compute_reranker_features=true``.
+
+**RerankerModel**
+   Stores a trained LightGBM binary classifier. References the ``PredictionSet``
+   and ``EvaluationSet`` used for training. Contains the serialized model string,
+   validation metrics (JSONB), and feature importance (JSONB).
+
+**ScoringConfig**
+   Defines a named scoring recipe: a set of feature weights and parameters
+   that can be applied to any prediction set. Immutable once created.
+
+Evaluation
+----------
+
+.. code-block:: text
+
+   ┌──────────────────────────────┐     1→N    ┌───────────────────────────────────┐
+   │       EvaluationSet          │──────────▶│        EvaluationResult           │
+   │──────────────────────────────│           │───────────────────────────────────│
+   │ id (UUID, PK)                │           │ id (UUID, PK)                     │
+   │ old_annotation_set_id (FK)   │           │ evaluation_set_id (FK)            │
+   │ new_annotation_set_id (FK)   │           │ prediction_set_id (FK)            │
+   │ ontology_snapshot_id (FK)    │           │ scoring_config_id (FK, nullable)  │
+   │ stats (JSONB)                │           │ reranker_model_id (FK, nullable)  │
+   │ job_id (FK)                  │           │ results (JSONB)                   │
+   │ created_at                   │           │ max_distance (Float, nullable)    │
+   └──────────────────────────────┘           │ job_id (FK)                       │
+                                              │ created_at                        │
+                                              └───────────────────────────────────┘
+
+**EvaluationSet**
+   Stores the CAFA-style temporal holdout delta between two annotation sets
+   (old → new). The ``stats`` JSONB column contains NK/LK/PK protein and
+   annotation counts, delta protein count, and per-namespace breakdowns.
+
+**EvaluationResult**
+   Stores the output of running ``cafaeval`` against a prediction set for
+   a given evaluation set. The ``results`` JSONB column contains per-category
+   (NK/LK/PK) per-namespace (BPO/MFO/CCO) Fmax, precision, recall, τ, and
+   coverage. Optionally references a ``ScoringConfig`` or ``RerankerModel``
+   when predictions were scored or re-ranked before evaluation.
+
+Support
+-------
+
+.. code-block:: text
+
+   ┌──────────────────────────┐
+   │      SupportEntry        │
+   │──────────────────────────│
+   │ id (UUID, PK)            │
+   │ comment (Text, nullable) │
+   │ created_at               │
+   └──────────────────────────┘
+
+**SupportEntry**
+   Community feedback: a thumbs-up with an optional comment (max 500 chars).
 
 Job queue
 ---------

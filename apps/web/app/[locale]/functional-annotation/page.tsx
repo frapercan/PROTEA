@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useToast } from "@/components/Toast";
 import { SkeletonTableRow } from "@/components/Skeleton";
+import { ContextBanner } from "@/components/ContextBanner";
 import {
   listEmbeddingConfigs,
   launchPredictGoTerms,
@@ -163,6 +164,17 @@ export default function FunctionalAnnotationPage() {
         <h1 className="text-xl font-semibold">{t("title")}</h1>
       </div>
 
+      <ContextBanner
+        title="Predict GO terms by embedding similarity"
+        description="Uses KNN search to transfer GO annotations from similar proteins. Requires computed embeddings and a loaded annotation set."
+        prerequisites={!loading ? [
+          { label: `${configs.length} embedding config(s)`, met: configs.length > 0, href: "/embeddings" },
+          { label: `${annotationSets.length} annotation set(s)`, met: annotationSets.length > 0, href: "/annotations" },
+          { label: `${ontologySnapshots.length} ontology snapshot(s)`, met: ontologySnapshots.length > 0, href: "/annotations" },
+        ] : undefined}
+        nextStep={{ label: "Evaluation", href: "/evaluation" }}
+      />
+
       <div className="flex gap-1 border-b mb-6 overflow-x-auto">
         {tabs.map((tab) => (
           <button
@@ -238,7 +250,7 @@ export default function FunctionalAnnotationPage() {
                   </select>
                 </div>
 
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
                     <label className={labelClass}>{t("predictTab.limitPerEntryLabel")}</label>
                     <input
@@ -324,7 +336,7 @@ export default function FunctionalAnnotationPage() {
                 {/* Search Backend */}
                 <div className="rounded-md border border-gray-200 bg-gray-50 p-4 space-y-3">
                   <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{t("predictTab.searchBackend")}</p>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className={labelClass}>{t("predictTab.searchBackendLabel")}</label>
                       <select value={predSearchBackend} onChange={(e) => setPredSearchBackend(e.target.value)} className={inputClass}>
@@ -352,7 +364,7 @@ export default function FunctionalAnnotationPage() {
                         </select>
                       </div>
                       {predFaissIndex === "IVFFlat" && (
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div>
                             <label className={labelClass}>{t("predictTab.nlistLabel")}</label>
                             <input type="number" value={predFaissNlist} onChange={(e) => setPredFaissNlist(parseInt(e.target.value, 10))} min={1} className={inputClass} />
@@ -364,7 +376,7 @@ export default function FunctionalAnnotationPage() {
                         </div>
                       )}
                       {predFaissIndex === "HNSW" && (
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div>
                             <label className={labelClass}>{t("predictTab.mLabel")}</label>
                             <input type="number" value={predFaissHnswM} onChange={(e) => setPredFaissHnswM(parseInt(e.target.value, 10))} min={2} className={inputClass} />
@@ -422,13 +434,14 @@ export default function FunctionalAnnotationPage() {
           </div>
 
           <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
-            <div className="grid grid-cols-[80px_100px_100px_100px_90px_120px_160px_60px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
+            <div className="grid grid-cols-[80px_100px_100px_100px_90px_80px_50px_160px_60px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
               <div>{t("resultsTab.tableHeaders.id")}</div>
               <div>{t("resultsTab.tableHeaders.config")}</div>
               <div>{t("resultsTab.tableHeaders.annotationSet")}</div>
               <div>{t("resultsTab.tableHeaders.snapshot")}</div>
               <div>{t("resultsTab.tableHeaders.goTerms")}</div>
               <div>{t("resultsTab.tableHeaders.distanceThreshold")}</div>
+              <div>{t("resultsTab.tableHeaders.k")}</div>
               <div>{t("resultsTab.tableHeaders.created")}</div>
               <div></div>
             </div>
@@ -436,7 +449,7 @@ export default function FunctionalAnnotationPage() {
             {predictionSets.map((ps) => (
               <div
                 key={ps.id}
-                className="grid grid-cols-[80px_100px_100px_100px_90px_120px_160px_60px] gap-2 border-b px-4 py-3 text-sm last:border-0 items-center"
+                className="grid grid-cols-[80px_100px_100px_100px_90px_80px_50px_160px_60px] gap-2 border-b px-4 py-3 text-sm last:border-0 items-center"
               >
                 <div className="font-mono text-xs">
                   <Link href={`/functional-annotation/${ps.id}`} className="text-blue-600 hover:underline" title={ps.id}>
@@ -450,6 +463,7 @@ export default function FunctionalAnnotationPage() {
                 <div className="text-gray-600">
                   {ps.distance_threshold != null ? ps.distance_threshold : <span className="text-gray-400">—</span>}
                 </div>
+                <div className="text-gray-600">{ps.limit_per_entry}</div>
                 <div className="text-xs text-gray-400">{formatDate(ps.created_at)}</div>
                 <div className="flex justify-end">
                   <button

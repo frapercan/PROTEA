@@ -4,6 +4,7 @@ import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { useToast } from "@/components/Toast";
 import { useTranslations } from "next-intl";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { getProtein, getProteinAnnotations, getGoSubgraph, listOntologySnapshots, ProteinDetail, ProteinAnnotation, GoSubgraph } from "@/lib/api";
 import dynamic from "next/dynamic";
 const GoGraph = dynamic(() => import("@/components/GoGraph"), { ssr: false });
@@ -88,7 +89,7 @@ export default function ProteinDetailPage({ params }: { params: Promise<{ access
     <>
       {/* Header */}
       <div className="mb-6">
-        <Link href="/proteins" className="text-sm text-gray-400 hover:text-gray-600">{t("backToProteins")}</Link>
+        <Breadcrumbs />
         <div className="flex items-start gap-4 mt-2">
           <div>
             <h1 className="text-2xl font-bold text-gray-900 font-mono">{protein.accession}</h1>

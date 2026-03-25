@@ -63,14 +63,10 @@ operation routed to its queue.
    bash scripts/manage.sh start [N]
 
    # Start a single worker manually (for debugging)
-   poetry run python scripts/worker.py protea.jobs
+   poetry run python scripts/worker.py --queue protea.jobs
 
-   # Run a single queued job by UUID (bypasses RabbitMQ entirely)
-   poetry run python scripts/run_one_job.py <job-id>
-
-The ``run_one_job.py`` script loads the job from the database, executes it
-through ``BaseWorker``, and exits. No RabbitMQ connection is required. This
-is the recommended way to debug a failing job without re-queuing it.
+   # Start the stale job reaper (periodic cleanup process)
+   poetry run python scripts/worker.py --queue reaper
 
 QueueConsumer vs OperationConsumer
 -----------------------------------
@@ -100,3 +96,17 @@ selected by the queue configuration in ``scripts/worker.py``:
    - ``protea.embeddings.write`` — bulk pgvector insert
    - ``protea.predictions.batch`` — KNN search + GO transfer
    - ``protea.predictions.write`` — bulk GOPrediction insert
+
+Stale job reaper
+----------------
+
+The ``StaleJobReaper`` is a periodic background process that scans for jobs
+stuck in ``RUNNING`` status beyond a configurable timeout (default: 21 600
+seconds = 6 hours). It marks them as ``FAILED`` with error code
+``JobTimeout``. The reaper runs every 60 seconds and is started via
+``scripts/worker.py --queue reaper``.
+
+.. automodule:: protea.workers.stale_job_reaper
+   :members:
+   :undoc-members:
+   :show-inheritance:

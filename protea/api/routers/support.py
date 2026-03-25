@@ -4,8 +4,8 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
-from starlette.requests import Request
 
+from protea.api.deps import get_session_factory
 from protea.infrastructure.orm.models.support_entry import SupportEntry
 from protea.infrastructure.session import session_scope
 
@@ -14,10 +14,6 @@ router = APIRouter(prefix="/support", tags=["support"])
 _MAX_COMMENT_LENGTH = 500
 _RECENT_LIMIT = 20
 _PAGE_LIMIT = 100
-
-
-def get_session_factory(request: Request):
-    return request.app.state.session_factory
 
 
 class SupportCreate(BaseModel):

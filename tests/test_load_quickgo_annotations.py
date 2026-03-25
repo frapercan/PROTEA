@@ -74,11 +74,11 @@ class TestLoadQuickGOAnnotationsPayload:
         assert p.page_size == 10000
 
     def test_missing_snapshot_raises(self) -> None:
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             LoadQuickGOAnnotationsPayload.model_validate({"source_version": "2026-01"})
 
     def test_empty_source_version_raises(self) -> None:
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             LoadQuickGOAnnotationsPayload.model_validate({
                 "ontology_snapshot_id": _SNAPSHOT_ID,
                 "source_version": "",

@@ -15,6 +15,13 @@ decouples HTTP ingestion from computation, and a *two-session worker pattern* en
 robust, auditable state transitions. A React/Next.js frontend provides real-time visibility
 into job progress through structured event logs.
 
+The platform implements the full protein functional annotation pipeline: UniProt sequence
+ingestion, GO ontology and annotation loading, GPU-accelerated embedding computation
+(ESM-2, ESM3c, T5), KNN-based GO term prediction with optional pairwise alignment and
+taxonomic features, CAFA-style temporal holdout evaluation (NK/LK/PK), and LightGBM
+re-ranking. A scoring engine and one-click annotation endpoint make the system accessible
+to researchers without machine-learning infrastructure expertise.
+
 The platform is designed to accommodate continuous extension — new operations, new data
 sources, new models — without architectural regression. Computational efficiency is preserved
 at each migration step, with sequence deduplication by MD5 hash, cursor-based pagination,

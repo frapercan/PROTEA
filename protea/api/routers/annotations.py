@@ -13,8 +13,6 @@ from pydantic import ValidationError
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
-from starlette.requests import Request
-
 from protea.core.evaluation import compute_evaluation_data
 from protea.core.operations.generate_evaluation_set import GenerateEvaluationSetPayload
 from protea.core.operations.load_goa_annotations import LoadGOAAnnotationsPayload
@@ -32,32 +30,12 @@ from protea.infrastructure.orm.models.job import Job, JobEvent
 from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
 from protea.infrastructure.queue.publisher import publish_job
+from protea.api.deps import get_amqp_url, get_artifacts_dir, get_session_factory
 from protea.infrastructure.session import session_scope
 
 router = APIRouter(prefix="/annotations", tags=["annotations"])
 
 _JOBS_QUEUE = "protea.jobs"
-
-
-def get_session_factory(request: Request) -> sessionmaker[Session]:
-    factory = getattr(request.app.state, "session_factory", None)
-    if factory is None:
-        raise RuntimeError("app.state.session_factory is not set")
-    return factory  # type: ignore[no-any-return]
-
-
-def get_amqp_url(request: Request) -> str:
-    url = getattr(request.app.state, "amqp_url", None)
-    if url is None:
-        raise RuntimeError("app.state.amqp_url is not set")
-    return url  # type: ignore[no-any-return]
-
-
-def get_artifacts_dir(request: Request) -> Path:
-    d = getattr(request.app.state, "artifacts_dir", None)
-    if d is None:
-        raise RuntimeError("app.state.artifacts_dir is not set")
-    return d  # type: ignore[no-any-return]
 
 
 # ── Ontology Snapshots ────────────────────────────────────────────────────────
@@ -812,6 +790,8 @@ def list_evaluation_results(
                 "evaluation_set_id": str(r.evaluation_set_id),
                 "prediction_set_id": str(r.prediction_set_id),
                 "scoring_config_id": str(r.scoring_config_id) if r.scoring_config_id else None,
+                "reranker_model_id": str(r.reranker_model_id) if r.reranker_model_id else None,
+                "reranker_config": r.reranker_config,
                 "job_id": str(r.job_id) if r.job_id else None,
                 "created_at": r.created_at.isoformat(),
                 "results": r.results,

@@ -8,8 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session, sessionmaker
 
+from protea.api.deps import get_amqp_url, get_session_factory
 from protea.core.utils import utcnow
-from starlette.requests import Request
 
 from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
 from protea.infrastructure.queue.publisher import publish_job
@@ -38,23 +38,6 @@ class CreateJobRequest(BaseModel):
         if not isinstance(v, str) or not v.strip():
             raise ValueError("must be a non-empty string")
         return v.strip()
-
-
-# --- Dependency hook (wire this in your app factory) ---
-
-
-def get_session_factory(request: Request) -> sessionmaker[Session]:
-    factory = getattr(request.app.state, "session_factory", None)
-    if factory is None:
-        raise RuntimeError("app.state.session_factory is not set")
-    return factory  # type: ignore[no-any-return]
-
-
-def get_amqp_url(request: Request) -> str:
-    url = getattr(request.app.state, "amqp_url", None)
-    if url is None:
-        raise RuntimeError("app.state.amqp_url is not set")
-    return url  # type: ignore[no-any-return]
 
 
 @router.post("", summary="Create and enqueue a job")

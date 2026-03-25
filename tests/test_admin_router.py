@@ -13,6 +13,9 @@ from fastapi.testclient import TestClient
 
 from protea.api.routers.admin import router
 
+_TEST_TOKEN = "test-admin-secret"
+_AUTH_HEADER = {"Authorization": f"Bearer {_TEST_TOKEN}"}
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -43,13 +46,33 @@ def mock_psycopg():
 @pytest.fixture()
 def client(mock_psycopg):
     app = _make_app()
-    with TestClient(app) as c:
+    with TestClient(app) as c, patch("protea.api.routers.admin._ADMIN_TOKEN", _TEST_TOKEN):
         yield c, app, mock_psycopg
 
 
 # ---------------------------------------------------------------------------
 # POST /admin/reset-db
 # ---------------------------------------------------------------------------
+
+class TestResetDBAuth:
+    def test_no_token_configured_returns_403(self, mock_psycopg):
+        app = _make_app()
+        with TestClient(app) as c, patch("protea.api.routers.admin._ADMIN_TOKEN", ""):
+            resp = c.post("/admin/reset-db", headers=_AUTH_HEADER)
+            assert resp.status_code == 403
+            assert "disabled" in resp.json()["detail"]
+
+    def test_missing_header_returns_401(self, client):
+        c, *_ = client
+        resp = c.post("/admin/reset-db")
+        assert resp.status_code == 401
+
+    def test_wrong_token_returns_403(self, client):
+        c, *_ = client
+        resp = c.post("/admin/reset-db", headers={"Authorization": "Bearer wrong"})
+        assert resp.status_code == 403
+        assert "Invalid" in resp.json()["detail"]
+
 
 class TestResetDB:
     @patch("protea.api.routers.admin.build_session_factory")
@@ -64,7 +87,7 @@ class TestResetDB:
         mock_run.return_value = MagicMock(returncode=0)
         mock_build.return_value = MagicMock()
 
-        resp = c.post("/admin/reset-db")
+        resp = c.post("/admin/reset-db", headers=_AUTH_HEADER)
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
         mock_build.assert_called_once()
@@ -80,7 +103,7 @@ class TestResetDB:
 
         mock_run.return_value = MagicMock(returncode=1, stderr="migration error")
 
-        resp = c.post("/admin/reset-db")
+        resp = c.post("/admin/reset-db", headers=_AUTH_HEADER)
         assert resp.status_code == 200
         data = resp.json()
         assert data["ok"] is False
@@ -98,7 +121,7 @@ class TestResetDB:
 
         mock_run.return_value = MagicMock(returncode=0)
 
-        resp = c.post("/admin/reset-db")
+        resp = c.post("/admin/reset-db", headers=_AUTH_HEADER)
         assert resp.status_code == 200
         conn_ctx.execute.assert_any_call("DROP SCHEMA public CASCADE")
         conn_ctx.execute.assert_any_call("CREATE SCHEMA public")
@@ -114,7 +137,7 @@ class TestResetDB:
 
         mock_run.return_value = MagicMock(returncode=0)
 
-        resp = c.post("/admin/reset-db")
+        resp = c.post("/admin/reset-db", headers=_AUTH_HEADER)
         assert resp.status_code == 200
         # Verify psycopg.connect was called with the URL without +psycopg
         mock_psycopg_mod.connect.assert_called_once_with(

@@ -11,10 +11,7 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from protea.infrastructure.orm.base import Base
-
-
-def utcnow() -> datetime:
-    return datetime.now(UTC)
+from protea.core.utils import utcnow
 
 
 class JobStatus(enum.StrEnum):

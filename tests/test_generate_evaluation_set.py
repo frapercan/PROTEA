@@ -26,11 +26,11 @@ class TestGenerateEvaluationSetPayload:
         assert p.new_annotation_set_id == new
 
     def test_empty_old_raises(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             GenerateEvaluationSetPayload(old_annotation_set_id="  ", new_annotation_set_id=str(uuid.uuid4()))
 
     def test_empty_new_raises(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             GenerateEvaluationSetPayload(old_annotation_set_id=str(uuid.uuid4()), new_annotation_set_id="")
 
     def test_strips_whitespace(self):

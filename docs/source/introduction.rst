@@ -43,6 +43,26 @@ The goal of PROTEA is not a complete rewrite. PIS tables (``protein``, ``sequenc
 into this architecture as new capabilities are added. Each migration step must preserve or
 improve computational efficiency and must not introduce regressions in the data model.
 
+Current capabilities
+---------------------
+
+PROTEA currently provides sixteen registered operations spanning the full protein
+functional annotation pipeline:
+
+- **Data ingestion** — ``insert_proteins``, ``fetch_uniprot_metadata``,
+  ``load_ontology_snapshot``, ``load_goa_annotations``, ``load_quickgo_annotations``
+- **Embedding computation** — ``compute_embeddings`` (coordinator),
+  ``compute_embeddings_batch``, ``store_embeddings``
+- **GO term prediction** — ``predict_go_terms`` (coordinator),
+  ``predict_go_terms_batch``, ``store_predictions``
+- **Evaluation** — ``generate_evaluation_set``, ``run_cafa_evaluation``
+- **Re-ranking** — ``train_reranker``, ``train_reranker_auto``
+- **Diagnostics** — ``ping``
+
+A scoring engine applies weighted formulas or trained LightGBM re-rankers to
+prediction sets. A one-click ``/annotate`` endpoint automates the entire workflow
+from FASTA upload to GO term prediction.
+
 .. admonition:: Design principle
    :class: note
 

@@ -5,7 +5,7 @@ Fmax, AUC-PR, and the full precision-recall curve following the CAFA protocol.
 
 CAFA protocol summary
 ---------------------
-- Evaluate only on proteins present in the ground truth (NK or LK).
+- Evaluate only on proteins present in the ground truth (NK, LK, or PK).
 - At each score threshold t:
     precision(t) = mean over proteins-with-predictions of |pred ∩ true| / |pred|
     recall(t)    = mean over ALL ground-truth proteins of |pred ∩ true| / |true|
@@ -41,7 +41,7 @@ class PRPoint:
 class CAFAMetrics:
     """CAFA evaluation results for one (PredictionSet, ScoringConfig, category) triple."""
 
-    category: str  # "nk" or "lk"
+    category: str  # "nk", "lk", or "pk"
     fmax: float
     threshold_at_fmax: float
     auc_pr: float
@@ -79,18 +79,16 @@ def compute_cafa_metrics(
     evaluation_data:
         Ground truth from ``compute_evaluation_data()``.
     category:
-        ``"nk"`` (no-knowledge) or ``"lk"`` (limited-knowledge).
+        ``"nk"`` (no-knowledge), ``"lk"`` (limited-knowledge), or ``"pk"`` (prior-knowledge).
 
     Returns
     -------
     CAFAMetrics
     """
-    if category not in ("nk", "lk"):
-        raise ValueError(f"category must be 'nk' or 'lk', got {category!r}")
+    if category not in ("nk", "lk", "pk"):
+        raise ValueError(f"category must be 'nk', 'lk', or 'pk', got {category!r}")
 
-    ground_truth: dict[str, set[str]] = (
-        evaluation_data.nk if category == "nk" else evaluation_data.lk
-    )
+    ground_truth: dict[str, set[str]] = getattr(evaluation_data, category)
 
     # Group predictions by protein, keep only proteins in ground truth
     preds_by_protein: dict[str, list[tuple[float, str]]] = defaultdict(list)

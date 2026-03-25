@@ -75,14 +75,14 @@ class TestLoadGOAAnnotationsPayload:
         assert p.page_size == 10000
 
     def test_missing_required_raises(self) -> None:
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             LoadGOAAnnotationsPayload.model_validate({
                 "gaf_url": "https://example.org/goa.gaf.gz",
                 "source_version": "2024-03",
             })
 
     def test_empty_snapshot_id_raises(self) -> None:
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             LoadGOAAnnotationsPayload.model_validate({
                 "ontology_snapshot_id": "  ",
                 "gaf_url": "https://example.org/goa.gaf.gz",

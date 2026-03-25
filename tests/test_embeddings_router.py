@@ -240,6 +240,12 @@ def _make_go_prediction(accession="P12345", distance=0.1):
                 "taxonomic_common_ancestors"):
         setattr(pred, col, None)
     pred.taxonomic_relation = None
+    # re-ranker features
+    pred.vote_count = None
+    pred.k_position = None
+    pred.go_term_frequency = None
+    pred.ref_annotation_density = None
+    pred.neighbor_distance_std = None
     return pred
 
 
@@ -629,6 +635,16 @@ class TestPredictGoTerms:
 # ---------------------------------------------------------------------------
 
 class TestListPredictionSets:
+    @staticmethod
+    def _wire_list_query(session, rows):
+        """Wire the mock chain for the correlated-subquery list query."""
+        # query(PredictionSet, EmbeddingConfig, AnnotationSet, OntologySnapshot, count_subq)
+        #   .join(...).join(...).join(...).order_by(...).limit(...).all()
+        # The count subquery is built via session.query().filter().correlate().scalar_subquery()
+        # but all that matters for the mock is the final .all() result.
+        session.query.return_value.join.return_value.join.return_value.join.return_value \
+            .order_by.return_value.limit.return_value.all.return_value = rows
+
     def test_returns_list(self, client, session):
         ps = _make_prediction_set()
         ec = _make_config()
@@ -638,11 +654,7 @@ class TestListPredictionSets:
         snap = MagicMock()
         snap.obo_version = "2024-01-01"
 
-        # The join chain returns list of tuples
-        session.query.return_value.join.return_value.join.return_value.join.return_value \
-            .order_by.return_value.limit.return_value.all.return_value = [(ps, ec, ann, snap)]
-        # prediction count per set
-        session.query.return_value.filter.return_value.scalar.return_value = 100
+        self._wire_list_query(session, [(ps, ec, ann, snap, 100)])
 
         resp = client.get("/embeddings/prediction-sets")
         assert resp.status_code == 200
@@ -664,17 +676,14 @@ class TestListPredictionSets:
         snap = MagicMock()
         snap.obo_version = "2024-01-01"
 
-        session.query.return_value.join.return_value.join.return_value.join.return_value \
-            .order_by.return_value.limit.return_value.all.return_value = [(ps, ec, ann, snap)]
-        session.query.return_value.filter.return_value.scalar.return_value = 0
+        self._wire_list_query(session, [(ps, ec, ann, snap, 0)])
 
         resp = client.get("/embeddings/prediction-sets")
         assert resp.status_code == 200
         assert resp.json()[0]["annotation_set_label"] == "goa"
 
     def test_empty_list(self, client, session):
-        session.query.return_value.join.return_value.join.return_value.join.return_value \
-            .order_by.return_value.limit.return_value.all.return_value = []
+        self._wire_list_query(session, [])
         resp = client.get("/embeddings/prediction-sets")
         assert resp.status_code == 200
         assert resp.json() == []
@@ -914,14 +923,23 @@ class TestGoTermDistribution:
 
 class TestDownloadPredictionsCafa:
     def _get_cafa(self, client, session, set_id, rows, **params):
+        """Wire mocks for the CAFA download endpoint.
+
+        ``rows`` should be a list of (protein_accession, go_id, distance) tuples,
+        matching the subquery-based query output.
+        """
         ps = _make_prediction_set(set_id)
         session.get.return_value = ps
 
         q = MagicMock()
+        q.join.return_value = q
         q.filter.return_value = q
+        q.group_by.return_value = q
+        q.subquery.return_value = q
+        q.c = q  # subquery column access
         q.order_by.return_value = q
         q.yield_per.return_value = iter(rows)
-        session.query.return_value.join.return_value.filter.return_value = q
+        session.query.return_value = q
 
         return client.get(
             f"/embeddings/prediction-sets/{set_id}/predictions-cafa.tsv",
@@ -930,9 +948,8 @@ class TestDownloadPredictionsCafa:
 
     def test_returns_cafa_format(self, client, session):
         set_id = uuid4()
-        pred = _make_go_prediction("P12345", distance=0.3)
-        gt = _make_go_term("GO:0003824")
-        resp = self._get_cafa(client, session, set_id, [(pred, gt)])
+        # New format: (accession, go_id, distance) tuples
+        resp = self._get_cafa(client, session, set_id, [("P12345", "GO:0003824", 0.3)])
         assert resp.status_code == 200
         assert "tab-separated" in resp.headers["content-type"]
         lines = resp.text.splitlines()
@@ -944,16 +961,14 @@ class TestDownloadPredictionsCafa:
         assert float(parts[2]) == pytest.approx(0.7, abs=1e-3)
 
     def test_cafa_deduplicates_go_terms(self, client, session):
-        """Same (protein, GO term) pair should appear only once (best score)."""
+        """Deduplication now happens at DB level via GROUP BY + MIN(distance).
+        The query returns already-unique rows, so a single row is expected."""
         set_id = uuid4()
-        pred1 = _make_go_prediction("P12345", distance=0.2)
-        pred2 = _make_go_prediction("P12345", distance=0.5)
-        gt = _make_go_term("GO:0003824")
-        # Both have the same protein + GO id
-        resp = self._get_cafa(client, session, set_id, [(pred1, gt), (pred2, gt)])
+        # DB-level dedup means only the best (min distance) row is returned
+        resp = self._get_cafa(client, session, set_id, [("P12345", "GO:0003824", 0.2)])
         assert resp.status_code == 200
         lines = resp.text.splitlines()
-        assert len(lines) == 1  # deduplicated
+        assert len(lines) == 1
 
     def test_cafa_not_found_returns_404(self, client, session):
         session.get.return_value = None
@@ -970,24 +985,18 @@ class TestDownloadPredictionsCafa:
 
     def test_cafa_filter_by_aspect(self, client, session):
         set_id = uuid4()
-        pred = _make_go_prediction("P12345", distance=0.1)
-        gt = _make_go_term("GO:0003824", aspect="F")
-        resp = self._get_cafa(client, session, set_id, [(pred, gt)], aspect="F")
+        resp = self._get_cafa(client, session, set_id, [("P12345", "GO:0003824", 0.1)], aspect="F")
         assert resp.status_code == 200
 
     def test_cafa_filter_by_max_distance(self, client, session):
         set_id = uuid4()
-        pred = _make_go_prediction("P12345", distance=0.05)
-        gt = _make_go_term("GO:0003824")
-        resp = self._get_cafa(client, session, set_id, [(pred, gt)], max_distance=0.5)
+        resp = self._get_cafa(client, session, set_id, [("P12345", "GO:0003824", 0.05)], max_distance=0.5)
         assert resp.status_code == 200
 
     def test_cafa_score_clamps_at_zero(self, client, session):
         """When distance > 1.0 the score should be 0.0, not negative."""
         set_id = uuid4()
-        pred = _make_go_prediction("P12345", distance=2.5)
-        gt = _make_go_term("GO:0003824")
-        resp = self._get_cafa(client, session, set_id, [(pred, gt)])
+        resp = self._get_cafa(client, session, set_id, [("P12345", "GO:0003824", 2.5)])
         lines = resp.text.splitlines()
         assert len(lines) == 1
         score = float(lines[0].split("\t")[2])

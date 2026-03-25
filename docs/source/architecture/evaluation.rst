@@ -128,6 +128,143 @@ Data model
 
 See :doc:`../reference/infrastructure` for the full ORM schema.
 
+Benchmark: PROTEA vs external tools
+-------------------------------------
+
+PROTEA was benchmarked against two widely used function annotation tools
+using the temporal holdout GOA 220 → GOA 229 (NK: 2831, LK: 3410,
+PK: 15313 proteins). All evaluations use ``cafaeval`` with Information
+Accretion (IA) weighting from the CAFA6 benchmark.
+
+.. list-table:: Fmax (IA-weighted) — GOA 220 → 229
+   :header-rows: 1
+   :widths: 20 9 9 9 9 9 9 9 9 9
+
+   * - Method
+     - NK-BPO
+     - NK-MFO
+     - NK-CCO
+     - LK-BPO
+     - LK-MFO
+     - LK-CCO
+     - PK-BPO
+     - PK-MFO
+     - PK-CCO
+   * - Pannzer2 :sup:`†`
+     - 0.656
+     - 0.717
+     - 0.791
+     - 0.681
+     - 0.729
+     - 0.813
+     - 0.391
+     - 0.574
+     - 0.618
+   * - **PROTEA (re-ranker v3)**
+     - **0.431**
+     - **0.620**
+     - **0.692**
+     - **0.478**
+     - **0.607**
+     - **0.697**
+     - **0.201**
+     - **0.297**
+     - **0.339**
+   * - InterProScan 6 :sup:`†`
+     - 0.312
+     - 0.551
+     - 0.476
+     - 0.479
+     - 0.488
+     - 0.491
+     - 0.208
+     - 0.269
+     - 0.250
+   * - eggNOG-mapper 2.1.13 :sup:`†`
+     - 0.247
+     - 0.359
+     - 0.386
+     - 0.382
+     - 0.334
+     - 0.450
+     - 0.190
+     - 0.199
+     - 0.325
+
+:sup:`†` Subject to temporal data leakage — see below.
+
+Temporal data leakage
+~~~~~~~~~~~~~~~~~~~~~~
+
+Both Pannzer2 and eggNOG-mapper were executed in March 2026 against their
+**current** reference databases, which contain annotations published well
+after GOA 220 (the t0 snapshot). This means they have access to functional
+knowledge that is part of the ground truth.
+
+To quantify this leakage, we measured exact (protein, GO term) matches
+between each tool's predictions and the ground truth:
+
+.. list-table:: Exact match with ground truth
+   :header-rows: 1
+   :widths: 15 12 20 20
+
+   * - Category
+     - GT pairs
+     - Pannzer2 match
+     - eggNOG match
+   * - NK
+     - 6,953
+     - 4,339 (62.4%)
+     - 1,025 (14.7%)
+   * - LK
+     - 5,520
+     - 3,624 (65.7%)
+     - 1,087 (19.7%)
+   * - PK
+     - 27,541
+     - 12,410 (45.1%)
+     - 8,196 (29.8%)
+   * - **Total**
+     - **40,014**
+     - **20,373 (50.9%)**
+     - **10,308 (25.8%)**
+
+Pannzer2 exactly matches 62.4% of NK annotations — proteins that by
+definition had **no** experimental annotations at t0. This confirms that
+its reference database already contains the experimental evidence that
+appeared between GOA 220 and GOA 229.
+
+PROTEA is the only tool in this benchmark that enforces temporal integrity
+by design: the reference set is frozen at t0, the ground truth is computed
+as the delta, and all versions are tracked in the database. Pannzer2 and
+eggNOG-mapper numbers should be interpreted as an **optimistic upper
+bound** under data leakage, not as a fair comparison.
+
+.. note::
+   Running Pannzer2 or eggNOG-mapper against a frozen historical database
+   is not possible: the Pannzer2 web server does not offer version
+   selection, and eggNOG does not publish historical orthology snapshots.
+
+Evaluating external tools
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+External tools can be evaluated against the same ground truth using
+``scripts/evaluate_external_tool.py``:
+
+.. code-block:: bash
+
+   poetry run python scripts/evaluate_external_tool.py \
+       --evaluation-set-id <uuid> \
+       --tool emapper \
+       --input /path/to/annotations.emapper.annotations
+
+   poetry run python scripts/evaluate_external_tool.py \
+       --evaluation-set-id <uuid> \
+       --tool pannzer2 \
+       --input /path/to/anno.out
+
+Supported formats: ``emapper``, ``pannzer2``, ``interproscan``, ``blast``.
+
 Implementation reference
 -------------------------
 

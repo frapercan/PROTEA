@@ -11,12 +11,14 @@ from protea.core.operations.compute_embeddings import (
     ComputeEmbeddingsBatchOperation,
     ComputeEmbeddingsOperation,
     ComputeEmbeddingsPayload,
+    StoreEmbeddingsOperation,
     _aggregate_1d,
     _aggregate_residue_layers,
     _chunk_and_pool,
     _compute_chunk_spans,
     _validate_layers,
 )
+from protea.infrastructure.orm.models.job import JobStatus
 
 _noop_emit = lambda *_: None  # noqa: E731
 
@@ -64,11 +66,11 @@ class TestComputeEmbeddingsPayload:
         assert p.device == "cuda"
 
     def test_empty_embedding_config_id_raises(self) -> None:
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             ComputeEmbeddingsPayload.model_validate({"embedding_config_id": ""})
 
     def test_whitespace_embedding_config_id_raises(self) -> None:
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             ComputeEmbeddingsPayload.model_validate({"embedding_config_id": "   "})
 
     def test_optional_fields_override(self) -> None:
@@ -715,3 +717,184 @@ class TestBatchSizeConsistency:
                     results[i], ref[i], rtol=1e-5, atol=1e-6,
                     err_msg=f"T5 batch_size={batch_size}: mismatch at sequence {i}",
                 )
+
+
+# ---------------------------------------------------------------------------
+# StoreEmbeddingsOperation
+# ---------------------------------------------------------------------------
+
+class TestStoreEmbeddingsOperation:
+    def _op(self) -> StoreEmbeddingsOperation:
+        return StoreEmbeddingsOperation()
+
+    def _make_payload(self, n_sequences=2, skip_existing=True, **kw):
+        sequences = []
+        for i in range(n_sequences):
+            sequences.append({
+                "sequence_id": i + 1,
+                "chunks": [{
+                    "chunk_index_s": 0,
+                    "chunk_index_e": None,
+                    "vector": [0.1, 0.2, 0.3],
+                    "embedding_dim": 3,
+                }],
+            })
+        defaults = {
+            "parent_job_id": str(uuid.uuid4()),
+            "embedding_config_id": str(uuid.uuid4()),
+            "skip_existing": skip_existing,
+            "sequences": sequences,
+        }
+        defaults.update(kw)
+        return defaults
+
+    def test_stores_embeddings(self) -> None:
+        op = self._op()
+        session = MagicMock()
+        parent = MagicMock()
+        parent.status = JobStatus.RUNNING
+        session.get.return_value = parent
+        # No existing embeddings
+        session.query.return_value.filter_by.return_value.first.return_value = None
+        # Progress update
+        row = MagicMock()
+        row.progress_current = 1
+        row.progress_total = 5
+        session.execute.return_value.fetchone.return_value = row
+
+        result = op.execute(session, self._make_payload(), emit=_noop_emit)
+        assert result.result["embeddings_stored"] == 2
+        assert result.result["sequences_skipped"] == 0
+
+    def test_skips_existing_when_enabled(self) -> None:
+        op = self._op()
+        session = MagicMock()
+        parent = MagicMock()
+        parent.status = JobStatus.RUNNING
+        session.get.return_value = parent
+        # All existing
+        session.query.return_value.filter_by.return_value.first.return_value = MagicMock()
+        row = MagicMock()
+        row.progress_current = 1
+        row.progress_total = 5
+        session.execute.return_value.fetchone.return_value = row
+
+        result = op.execute(session, self._make_payload(skip_existing=True), emit=_noop_emit)
+        assert result.result["sequences_skipped"] == 2
+        assert result.result["embeddings_stored"] == 0
+
+    def test_deletes_existing_when_skip_disabled(self) -> None:
+        op = self._op()
+        session = MagicMock()
+        parent = MagicMock()
+        parent.status = JobStatus.RUNNING
+        session.get.return_value = parent
+        row = MagicMock()
+        row.progress_current = 1
+        row.progress_total = 5
+        session.execute.return_value.fetchone.return_value = row
+
+        result = op.execute(session, self._make_payload(skip_existing=False), emit=_noop_emit)
+        assert result.result["embeddings_stored"] == 2
+        # Should have called delete on existing rows
+        assert session.query.return_value.filter_by.return_value.delete.called
+
+    def test_skips_when_parent_cancelled(self) -> None:
+        op = self._op()
+        session = MagicMock()
+        parent = MagicMock()
+        parent.status = JobStatus.CANCELLED
+        session.get.return_value = parent
+
+        result = op.execute(session, self._make_payload(), emit=_noop_emit)
+        assert result.result["skipped"] is True
+
+    def test_skips_when_parent_failed(self) -> None:
+        op = self._op()
+        session = MagicMock()
+        parent = MagicMock()
+        parent.status = JobStatus.FAILED
+        session.get.return_value = parent
+
+        result = op.execute(session, self._make_payload(), emit=_noop_emit)
+        assert result.result["skipped"] is True
+
+    def test_last_batch_closes_parent(self) -> None:
+        op = self._op()
+        session = MagicMock()
+        parent = MagicMock()
+        parent.status = JobStatus.RUNNING
+        session.get.return_value = parent
+        session.query.return_value.filter_by.return_value.first.return_value = None
+
+        progress_row = MagicMock()
+        progress_row.progress_current = 3
+        progress_row.progress_total = 3
+        closed_row = MagicMock()
+        closed_row.id = uuid.uuid4()
+        session.execute.return_value.fetchone.side_effect = [progress_row, closed_row]
+
+        events = []
+        def capture_emit(event, msg, fields, level):
+            events.append(event)
+
+        result = op.execute(session, self._make_payload(n_sequences=1), emit=capture_emit)
+        assert "store_embeddings.parent_succeeded" in events
+
+    def test_multiple_chunks_per_sequence(self) -> None:
+        op = self._op()
+        session = MagicMock()
+        parent = MagicMock()
+        parent.status = JobStatus.RUNNING
+        session.get.return_value = parent
+        session.query.return_value.filter_by.return_value.first.return_value = None
+        row = MagicMock()
+        row.progress_current = 1
+        row.progress_total = 5
+        session.execute.return_value.fetchone.return_value = row
+
+        payload = self._make_payload(n_sequences=0)
+        payload["sequences"] = [{
+            "sequence_id": 1,
+            "chunks": [
+                {"chunk_index_s": 0, "chunk_index_e": 4, "vector": [0.1], "embedding_dim": 1},
+                {"chunk_index_s": 4, "chunk_index_e": 8, "vector": [0.2], "embedding_dim": 1},
+                {"chunk_index_s": 8, "chunk_index_e": 10, "vector": [0.3], "embedding_dim": 1},
+            ],
+        }]
+
+        result = op.execute(session, payload, emit=_noop_emit)
+        assert result.result["embeddings_stored"] == 3
+
+    def test_name(self) -> None:
+        assert StoreEmbeddingsOperation().name == "store_embeddings"
+
+
+# ---------------------------------------------------------------------------
+# Coordinator — GPU retry (RetryLaterError)
+# ---------------------------------------------------------------------------
+
+class TestComputeEmbeddingsRetryLogic:
+    def _op(self) -> ComputeEmbeddingsOperation:
+        return ComputeEmbeddingsOperation()
+
+    def test_gpu_busy_raises_retry_later(self) -> None:
+        from protea.core.contracts.operation import RetryLaterError
+
+        op = self._op()
+        cfg = _mock_config()
+        session = MagicMock()
+        session.get.return_value = cfg
+
+        # Simulate another running compute_embeddings job (GPU mutex)
+        other_job = MagicMock()
+        session.query.return_value.filter.return_value.first.return_value = other_job
+
+        payload = {
+            "embedding_config_id": str(cfg.id),
+            "_job_id": str(uuid.uuid4()),
+        }
+
+        with patch.object(op, "_load_sequence_ids", return_value=[1, 2, 3]):
+            with pytest.raises(RetryLaterError):
+                op.execute(session, payload, emit=_noop_emit)

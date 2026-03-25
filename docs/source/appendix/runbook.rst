@@ -89,9 +89,9 @@ Jobs stuck in RUNNING
 
 A job in ``RUNNING`` that is not progressing usually means the worker died.
 
-**Automatic detection**: the ``worker-reaper`` process checks every 60s
+**Automatic detection**: the ``worker-reaper`` process checks every 60 s
 and marks as ``FAILED`` (error code ``JobTimeout``) any job that has been
-in ``RUNNING`` for more than 1 hour.
+in ``RUNNING`` for more than 6 hours (21 600 s).
 
 **Manual intervention**:
 

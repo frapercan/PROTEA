@@ -82,19 +82,38 @@ RabbitMQ management
 -------------------
 
 The RabbitMQ management UI is available at http://localhost:15672 (default
-credentials ``guest`` / ``guest``). The two PROTEA queues are:
+credentials ``guest`` / ``guest``). The seven PROTEA queues are:
 
 .. list-table::
    :header-rows: 1
 
    * - Queue
-     - Durability
+     - Consumer
      - Operations
    * - ``protea.ping``
-     - durable
+     - QueueConsumer
      - ``ping``
    * - ``protea.jobs``
-     - durable
-     - ``insert_proteins``, ``fetch_uniprot_metadata``
+     - QueueConsumer
+     - ``insert_proteins``, ``fetch_uniprot_metadata``, ``load_ontology_snapshot``,
+       ``load_goa_annotations``, ``load_quickgo_annotations``,
+       ``compute_embeddings`` (coordinator), ``predict_go_terms`` (coordinator),
+       ``generate_evaluation_set``, ``run_cafa_evaluation``,
+       ``train_reranker``, ``train_reranker_auto``
+   * - ``protea.embeddings``
+     - QueueConsumer
+     - ``compute_embeddings`` coordinator (serialised, one at a time)
+   * - ``protea.embeddings.batch``
+     - OperationConsumer
+     - ``compute_embeddings_batch`` — GPU inference (ephemeral)
+   * - ``protea.embeddings.write``
+     - OperationConsumer
+     - ``store_embeddings`` — bulk pgvector insert (ephemeral)
+   * - ``protea.predictions.batch``
+     - OperationConsumer
+     - ``predict_go_terms_batch`` — KNN + GO transfer (ephemeral)
+   * - ``protea.predictions.write``
+     - OperationConsumer
+     - ``store_predictions`` — bulk GOPrediction insert (ephemeral)
 
 Queues are declared at worker startup and survive broker restarts.

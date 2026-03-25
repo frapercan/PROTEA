@@ -37,9 +37,11 @@ The Operation protocol
    in real time, visible on the frontend timeline.
 
 ``OperationResult``
-   Frozen dataclass with three fields: ``result`` (stored in ``Job.meta``),
-   and optional ``progress_current`` / ``progress_total`` written back to
-   the ``Job`` row for the progress bar.
+   Frozen dataclass with four fields: ``result`` (stored in ``Job.meta``),
+   optional ``progress_current`` / ``progress_total`` written back to
+   the ``Job`` row for the progress bar, and ``deferred`` (bool) which tells
+   ``BaseWorker`` that job completion will be signalled by child workers
+   rather than immediately.
 
 Payload validation
 ------------------
@@ -568,6 +570,11 @@ Payload fields
    * - ``compute_taxonomy``
      - ``false``
      - Compute taxonomic distance (ete3 NCBITaxa) for each prediction.
+   * - ``compute_reranker_features``
+     - ``false``
+     - Compute 5 aggregate re-ranker features per prediction: ``vote_count``,
+       ``k_position``, ``go_term_frequency``, ``ref_annotation_density``, and
+       ``neighbor_distance_std``.
 
 Reference cache
 ~~~~~~~~~~~~~~~
@@ -730,6 +737,43 @@ SIGTERM handling
 ``cafa_eval()`` call, the operation temporarily resets ``SIGTERM`` and
 ``SIGINT`` handlers to defaults so that forked pool workers can be terminated
 cleanly. The original handlers are restored afterwards.
+
+train_reranker
+--------------
+
+**Operation name:** ``train_reranker`` — queue: ``protea.jobs``
+
+Trains a LightGBM binary classifier that re-scores GO term predictions.
+Requires a ``PredictionSet`` (with feature engineering columns populated) and
+an ``EvaluationSet`` (temporal holdout delta) to derive binary labels.
+
+The training pipeline:
+
+1. Loads predictions and joins with ground-truth labels from the evaluation set.
+2. Prepares a feature matrix with 19 numeric and 3 categorical features.
+3. Trains with stratified train/validation split and ``is_unbalance=True``.
+4. Stores the serialized model, validation metrics (AUC, logloss, precision,
+   recall, F1), and feature importance in a ``RerankerModel`` row.
+
+Payload fields
+~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 10 60
+
+   * - Field
+     - Default
+     - Description
+   * - ``prediction_set_id``
+     - *(required)*
+     - UUID of the ``PredictionSet`` to use as training data.
+   * - ``evaluation_set_id``
+     - *(required)*
+     - UUID of the ``EvaluationSet`` providing ground-truth labels.
+
+**train_reranker_auto** is a convenience variant that auto-selects the most
+recent prediction set and evaluation set for training.
 
 Registering a new operation
 ----------------------------

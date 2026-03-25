@@ -32,6 +32,7 @@ from protea.core.operations.predict_go_terms import (
     StorePredictionsOperation,
 )
 from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationOperation
+from protea.core.operations.train_reranker import TrainRerankerAutoOperation, TrainRerankerOperation
 from protea.infrastructure.queue.consumer import OperationConsumer, QueueConsumer
 from protea.infrastructure.session import build_session_factory
 from protea.infrastructure.settings import load_settings
@@ -77,6 +78,8 @@ def main() -> None:
     registry.register(PredictGOTermsOperation())
     registry.register(PredictGOTermsBatchOperation())
     registry.register(StorePredictionsOperation())
+    registry.register(TrainRerankerOperation())
+    registry.register(TrainRerankerAutoOperation())
 
     # Queues that carry ephemeral operation messages (no DB Job row per message)
     # use OperationConsumer.  All other queues use the standard QueueConsumer.
@@ -89,8 +92,8 @@ def main() -> None:
 
     # Special mode: stale job reaper (no queue, just periodic DB check).
     if args.queue == "reaper":
-        reaper = StaleJobReaper(factory, timeout_seconds=3600)
-        logging.info("Stale job reaper started. timeout=3600s interval=60s")
+        reaper = StaleJobReaper(factory, timeout_seconds=21600)
+        logging.info("Stale job reaper started. timeout=21600s interval=60s")
         reaper.run(interval_seconds=60)
         return
 

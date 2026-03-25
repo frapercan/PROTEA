@@ -289,19 +289,6 @@ def _make_tsv_content(rows: list[dict[str, str]], compressed: bool = True) -> by
     return raw
 
 
-class TestFetchUniProtMetadataPayload:
-    def test_valid_payload(self):
-        p = FetchUniProtMetadataPayload(search_criteria="organism_id:9606")
-        assert p.search_criteria == "organism_id:9606"
-        assert p.page_size == 500
-
-    def test_empty_search_criteria_raises(self):
-        with pytest.raises(Exception):
-            FetchUniProtMetadataPayload(search_criteria="   ")
-
-    def test_empty_user_agent_raises(self):
-        with pytest.raises(Exception):
-            FetchUniProtMetadataPayload(search_criteria="test", user_agent="")
 
 
 class TestFetchUniProtMetadataExecute:

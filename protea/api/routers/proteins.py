@@ -6,8 +6,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import distinct, func
 from sqlalchemy.orm import Session, sessionmaker
-from starlette.requests import Request
 
+from protea.api.deps import get_session_factory
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.protein_go_annotation import ProteinGOAnnotation
@@ -17,13 +17,6 @@ from protea.infrastructure.orm.models.protein.protein_metadata import ProteinUni
 from protea.infrastructure.session import session_scope
 
 router = APIRouter(prefix="/proteins", tags=["proteins"])
-
-
-def get_session_factory(request: Request) -> sessionmaker[Session]:
-    factory = getattr(request.app.state, "session_factory", None)
-    if factory is None:
-        raise RuntimeError("app.state.session_factory is not set")
-    return factory
 
 
 # ── Stats ─────────────────────────────────────────────────────────────────────
@@ -101,7 +94,9 @@ def list_proteins(
         if reviewed is not None:
             q = q.filter(Protein.reviewed == reviewed)
         if search:
-            like = f"%{search}%"
+            # Limit search length to prevent abuse; escape LIKE special chars.
+            term = search[:100].replace("%", r"\%").replace("_", r"\_")
+            like = f"%{term}%"
             q = q.filter(
                 Protein.accession.ilike(like)
                 | Protein.entry_name.ilike(like)

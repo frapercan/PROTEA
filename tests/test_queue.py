@@ -240,7 +240,9 @@ class TestPublishJob:
              patch("protea.infrastructure.queue.publisher._local", threading.local()):
             publish_job("amqp://localhost/", "my.queue", uuid4())
 
-        channel.queue_declare.assert_called_once_with(queue="my.queue", durable=True)
+        channel.queue_declare.assert_called_once_with(
+            queue="my.queue", durable=True, arguments={"x-dead-letter-exchange": "protea.dlx"}
+        )
 
     def test_exponential_backoff_delays(self):
         """Verify that the publisher uses exponential backoff between retries."""
