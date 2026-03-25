@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Header, HTTPException
 from starlette.requests import Request
 
 from protea.infrastructure.session import build_session_factory
@@ -13,10 +14,26 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
+_ADMIN_TOKEN = os.getenv("PROTEA_ADMIN_TOKEN", "")
+
+
+def _require_admin_token(authorization: str | None) -> None:
+    """Validate bearer token for destructive admin endpoints."""
+    if not _ADMIN_TOKEN:
+        raise HTTPException(
+            status_code=403,
+            detail="Admin operations are disabled — set PROTEA_ADMIN_TOKEN env var to enable.",
+        )
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing Bearer token.")
+    if authorization[7:] != _ADMIN_TOKEN:
+        raise HTTPException(status_code=403, detail="Invalid admin token.")
+
 
 @router.post("/reset-db")
-def reset_db(request: Request) -> dict:
+def reset_db(request: Request, authorization: str | None = Header(default=None)) -> dict:
     """Drop and recreate the public schema, then re-apply all Alembic migrations."""
+    _require_admin_token(authorization)
     settings = load_settings(_PROJECT_ROOT)
 
     # 1. Drop + recreate schema using a raw connection (outside SQLAlchemy pool)

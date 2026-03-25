@@ -69,6 +69,10 @@ class InsertProteinsOperation(UniProtHttpMixin, Operation):
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
+        self._http_requests = 0
+        self._http_retries = 0
+        self._total_results = None
+
         p = InsertProteinsPayload.model_validate(payload)
 
         t0 = time.perf_counter()

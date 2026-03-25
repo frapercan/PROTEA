@@ -3,11 +3,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from protea.api.routers import admin as admin_router
+from protea.api.routers import annotate as annotate_router
 from protea.api.routers import annotations as annotations_router
 from protea.api.routers import embeddings as embeddings_router
 from protea.api.routers import jobs as jobs_router
@@ -15,6 +16,7 @@ from protea.api.routers import maintenance as maintenance_router
 from protea.api.routers import proteins as proteins_router
 from protea.api.routers import query_sets as query_sets_router
 from protea.api.routers import scoring as scoring_router
+from protea.api.routers import showcase as showcase_router
 from protea.api.routers import support as support_router
 from protea.infrastructure.session import build_session_factory
 from protea.infrastructure.settings import load_settings
@@ -69,20 +71,56 @@ def create_app(project_root: Path | None = None) -> FastAPI:
                 "description": "Scoring configs, scored prediction export, and CAFA metrics.",
             },
             {"name": "support", "description": "Community thumbs-up and comments."},
+            {
+                "name": "annotate",
+                "description": "One-click protein annotation — upload FASTA, auto-run the full pipeline.",
+            },
         ],
     )
     app.state.session_factory = factory
     app.state.amqp_url = settings.amqp_url
     app.state.artifacts_dir = settings.artifacts_dir
 
+    allowed_origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://protea.ngrok.app",
+    ]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=allowed_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
 
+    @app.get("/health", tags=["health"])
+    def health_check() -> dict[str, str]:
+        """Liveness probe — returns 200 if the API process is up."""
+        return {"status": "ok"}
+
+    @app.get("/health/ready", tags=["health"])
+    def readiness_check() -> dict[str, str]:
+        """Readiness probe — verifies database and RabbitMQ connections."""
+        from sqlalchemy import text
+
+        from protea.infrastructure.session import session_scope
+
+        with session_scope(factory) as session:
+            session.execute(text("SELECT 1"))
+
+        # Check RabbitMQ connectivity
+        import pika
+
+        try:
+            conn = pika.BlockingConnection(pika.URLParameters(settings.amqp_url))
+            conn.close()
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail=f"RabbitMQ unreachable: {exc}") from exc
+
+        return {"status": "ready"}
+
+    app.include_router(annotate_router.router)
     app.include_router(jobs_router.router)
     app.include_router(proteins_router.router)
     app.include_router(annotations_router.router)
@@ -91,6 +129,7 @@ def create_app(project_root: Path | None = None) -> FastAPI:
     app.include_router(maintenance_router.router)
     app.include_router(admin_router.router)
     app.include_router(scoring_router.router)
+    app.include_router(showcase_router.router)
     app.include_router(support_router.router)
 
     sphinx_build = project_root / "docs" / "build" / "html"

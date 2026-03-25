@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-import torch
 
 from protea.core.operations.compute_embeddings import _embed_esm
 

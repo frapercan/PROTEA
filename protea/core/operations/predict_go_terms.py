@@ -53,7 +53,7 @@ _ASPECTS = ("P", "F", "C")  # biological_process, molecular_function, cellular_c
 # at KNN time with negligible accuracy loss for cosine similarity.
 # Limited to 1 entry — evicts previous reference on config change.
 # ---------------------------------------------------------------------------
-_REF_CACHE: dict[tuple[str, str], dict[str, Any]] = {}
+_REF_CACHE: dict[tuple[str, str, bool], dict[str, Any]] = {}
 _REF_CACHE_MAX = 1
 
 # ---------------------------------------------------------------------------
@@ -258,6 +258,7 @@ class PredictGOTermsPayload(ProteaPayload, frozen=True):
     # Feature engineering (opt-in)
     compute_alignments: bool = False
     compute_taxonomy: bool = False
+    compute_reranker_features: bool = False
 
     # Per-aspect KNN indices (opt-in)
     # When True, three separate KNN indices are built — one per GO aspect (P/F/C).
@@ -299,6 +300,7 @@ class PredictGOTermsBatchPayload(ProteaPayload, frozen=True):
     faiss_hnsw_ef_search: int = 64
     compute_alignments: bool = False
     compute_taxonomy: bool = False
+    compute_reranker_features: bool = False
     aspect_separated_knn: bool = True
 
 
@@ -421,6 +423,7 @@ class PredictGOTermsOperation:
                             "faiss_hnsw_ef_search": p.faiss_hnsw_ef_search,
                             "compute_alignments": p.compute_alignments,
                             "compute_taxonomy": p.compute_taxonomy,
+                            "compute_reranker_features": p.compute_reranker_features,
                             "aspect_separated_knn": p.aspect_separated_knn,
                         },
                     },
@@ -994,6 +997,30 @@ class PredictGOTermsBatchOperation:
         seen_per_query: dict[str, set[int]] = {acc: set() for acc in valid_accessions}
         pair_features: dict[tuple[str, str], dict[str, Any]] = {}
 
+        compute_rr = p.compute_reranker_features
+
+        # Pre-compute per-query reranker stats across all aspects
+        rr_distance_std_per_query: dict[str, float] = {}
+        rr_vote_count_per_query: dict[str, dict[int, int]] = {}
+        rr_k_position_per_query: dict[str, dict[int, int]] = {}
+        # go_term_frequency and ref_annotation_density are computed per-aspect below
+        all_go_term_freq: dict[int, int] = {}
+        all_ref_ann_density: dict[str, int] = {}
+
+        if compute_rr:
+            for q_idx, q_acc in enumerate(valid_accessions):
+                rr_vote_count_per_query[q_acc] = {}
+                rr_k_position_per_query[q_acc] = {}
+                all_distances = []
+                for aspect in _ASPECTS:
+                    aspect_neighbors = neighbors_by_aspect[aspect]
+                    if q_idx < len(aspect_neighbors):
+                        for _, d in aspect_neighbors[q_idx]:
+                            all_distances.append(d)
+                rr_distance_std_per_query[q_acc] = (
+                    float(np.std(all_distances)) if len(all_distances) > 1 else 0.0
+                )
+
         for aspect in _ASPECTS:
             unique_neighbors_aspect: set[str] = set()
             for top_refs in neighbors_by_aspect[aspect]:
@@ -1015,6 +1042,29 @@ class PredictGOTermsBatchOperation:
                 go_map = self._load_annotations_for(
                     session, annotation_set_id, unique_neighbors_aspect, aspect=aspect
                 )
+
+            # Pre-compute reranker aggregates for this aspect's go_map
+            if compute_rr:
+                for acc, anns in go_map.items():
+                    if acc not in all_ref_ann_density:
+                        all_ref_ann_density[acc] = 0
+                    all_ref_ann_density[acc] += len(anns)
+                    for ann in anns:
+                        gtid = ann["go_term_id"]
+                        all_go_term_freq[gtid] = all_go_term_freq.get(gtid, 0) + 1
+
+                # vote_count and k_position per query per aspect
+                for q_idx, q_acc in enumerate(valid_accessions):
+                    vc = rr_vote_count_per_query.setdefault(q_acc, {})
+                    kp = rr_k_position_per_query.setdefault(q_acc, {})
+                    aspect_neighbors = neighbors_by_aspect[aspect]
+                    if q_idx < len(aspect_neighbors):
+                        for k_pos, (ref_acc, _) in enumerate(aspect_neighbors[q_idx], 1):
+                            for ann in go_map.get(ref_acc, []):
+                                gtid = ann["go_term_id"]
+                                vc[gtid] = vc.get(gtid, 0) + 1
+                                if gtid not in kp:
+                                    kp[gtid] = k_pos
 
             for q_acc, top_refs in zip(valid_accessions, neighbors_by_aspect[aspect], strict=False):
                 seen_terms = seen_per_query[q_acc]
@@ -1054,6 +1104,12 @@ class PredictGOTermsBatchOperation:
                             pred["qualifier"] = ann["qualifier"]
                         if ann.get("evidence_code"):
                             pred["evidence_code"] = ann["evidence_code"]
+                        if compute_rr:
+                            pred["vote_count"] = rr_vote_count_per_query.get(q_acc, {}).get(go_term_id, 1)
+                            pred["k_position"] = rr_k_position_per_query.get(q_acc, {}).get(go_term_id, 1)
+                            pred["go_term_frequency"] = all_go_term_freq.get(go_term_id, 0)
+                            pred["ref_annotation_density"] = all_ref_ann_density.get(ref_acc, 0)
+                            pred["neighbor_distance_std"] = rr_distance_std_per_query.get(q_acc, 0.0)
                         for key in (
                             "identity_nw",
                             "similarity_nw",
@@ -1236,9 +1292,33 @@ class PredictGOTermsBatchOperation:
         go_map = ref_data["go_map"]
         predictions: list[dict[str, Any]] = []
 
+        # Pre-compute reranker aggregates if requested
+        compute_rr = p.compute_reranker_features
+        go_term_freq: dict[int, int] = {}
+        ref_ann_density: dict[str, int] = {}
+        if compute_rr:
+            for acc, anns in go_map.items():
+                ref_ann_density[acc] = len(anns)
+                for ann in anns:
+                    gtid = ann["go_term_id"]
+                    go_term_freq[gtid] = go_term_freq.get(gtid, 0) + 1
+
         for q_acc, top_refs in zip(query_accessions, neighbors, strict=False):
             seen_terms: set[int] = set()
             pair_features: dict[str, dict[str, Any]] = {}
+
+            # Reranker: pre-compute per-query stats
+            rr_distance_std: float | None = None
+            rr_vote_count: dict[int, int] = {}
+            rr_k_position: dict[int, int] = {}
+            if compute_rr and top_refs:
+                rr_distance_std = float(np.std([d for _, d in top_refs])) if len(top_refs) > 1 else 0.0
+                for k_pos, (ref_acc, _) in enumerate(top_refs, 1):
+                    for ann in go_map.get(ref_acc, []):
+                        gtid = ann["go_term_id"]
+                        rr_vote_count[gtid] = rr_vote_count.get(gtid, 0) + 1
+                        if gtid not in rr_k_position:
+                            rr_k_position[gtid] = k_pos
 
             for ref_acc, distance in top_refs:
                 if ref_acc not in pair_features:
@@ -1279,6 +1359,12 @@ class PredictGOTermsBatchOperation:
                         pred["qualifier"] = ann["qualifier"]
                     if ann.get("evidence_code"):
                         pred["evidence_code"] = ann["evidence_code"]
+                    if compute_rr:
+                        pred["vote_count"] = rr_vote_count.get(go_term_id, 1)
+                        pred["k_position"] = rr_k_position.get(go_term_id, 1)
+                        pred["go_term_frequency"] = go_term_freq.get(go_term_id, 0)
+                        pred["ref_annotation_density"] = ref_ann_density.get(ref_acc, 0)
+                        pred["neighbor_distance_std"] = rr_distance_std
                     for key in (
                         "identity_nw",
                         "similarity_nw",
@@ -1439,6 +1525,11 @@ class StorePredictionsOperation:
                         "taxonomic_distance": pred.get("taxonomic_distance"),
                         "taxonomic_common_ancestors": pred.get("taxonomic_common_ancestors"),
                         "taxonomic_relation": pred.get("taxonomic_relation"),
+                        "vote_count": pred.get("vote_count"),
+                        "k_position": pred.get("k_position"),
+                        "go_term_frequency": pred.get("go_term_frequency"),
+                        "ref_annotation_density": pred.get("ref_annotation_density"),
+                        "neighbor_distance_std": pred.get("neighbor_distance_std"),
                     }
                     for pred in p.predictions
                 ],
@@ -1466,7 +1557,7 @@ class StorePredictionsOperation:
             .returning(Job.progress_current, Job.progress_total)
         ).fetchone()
 
-        if row is None or row.progress_current < row.progress_total:
+        if row is None or row.progress_current != row.progress_total:
             return
 
         closed = session.execute(

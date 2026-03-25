@@ -6,6 +6,7 @@ import { NavLinks } from "@/components/NavLinks";
 import { SupportButton } from "@/components/SupportButton";
 import { ToastProvider } from "@/components/Toast";
 import { UsagePolicyModal } from "@/components/UsagePolicyModal";
+import { FloatingJobsWidget } from "@/components/FloatingJobsWidget";
 import { NextIntlClientProvider } from "next-intl";
 import { getMessages } from "next-intl/server";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
@@ -33,19 +34,31 @@ export default async function LocaleLayout({
         <NextIntlClientProvider messages={messages}>
           <UsagePolicyModal />
           <ToastProvider>
-            <header className="relative border-b bg-white px-4 sm:px-6 py-3 flex items-center gap-3">
-              <span className="text-lg font-bold tracking-tight text-blue-700">PROTEA</span>
+            <header className="relative border-b bg-white px-4 sm:px-6 py-3 flex items-center gap-2 sm:gap-3">
+              <a href="/" className="text-lg font-bold tracking-tight text-blue-700 hover:text-blue-800 transition-colors">PROTEA</a>
               <span className="hidden lg:inline text-gray-300">|</span>
-              <NavLinks />
+              <NavLinks
+                mobileExtras={
+                  <>
+                    <LanguageSwitcher />
+                    <ResetDbButton />
+                  </>
+                }
+              />
               <div className="ml-auto flex items-center gap-2 sm:gap-3">
-                <LanguageSwitcher />
+                <div className="hidden lg:flex items-center gap-2">
+                  <LanguageSwitcher />
+                </div>
                 <SupportButton />
-                <ResetDbButton />
+                <div className="hidden lg:block">
+                  <ResetDbButton />
+                </div>
               </div>
             </header>
             <main className="mx-auto max-w-5xl px-4 sm:px-6 py-4 sm:py-6">
               {children}
             </main>
+            <FloatingJobsWidget />
           </ToastProvider>
         </NextIntlClientProvider>
       </body>

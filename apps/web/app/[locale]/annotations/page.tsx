@@ -201,12 +201,12 @@ export default function AnnotationsPage() {
         <h1 className="text-xl font-semibold">{t("title")}</h1>
       </div>
 
-      <div className="flex gap-1 border-b mb-6 overflow-x-auto">
+      <div className="border-b mb-6 overflow-hidden"><div className="flex gap-1 overflow-x-auto">
         {tabs.map((tab) => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            className={`px-3 sm:px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
               activeTab === tab.key
                 ? "border-blue-600 text-blue-600"
                 : "border-transparent text-gray-500 hover:text-gray-700"
@@ -215,7 +215,7 @@ export default function AnnotationsPage() {
             {tab.label}
           </button>
         ))}
-      </div>
+      </div></div>
 
       {/* ── Annotation Sets ── */}
       {activeTab === "sets" && (
@@ -226,7 +226,51 @@ export default function AnnotationsPage() {
               {t("setsTab.refresh")}
             </button>
           </div>
-          <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
+          {/* Mobile card list */}
+          <div className="lg:hidden space-y-2">
+            {loadingSets && Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="rounded-lg border bg-white p-4 shadow-sm animate-pulse">
+                <div className="h-4 bg-gray-200 rounded w-1/3 mb-2" />
+                <div className="h-3 bg-gray-100 rounded w-2/3" />
+              </div>
+            ))}
+            {!loadingSets && sets.length === 0 && (
+              <div className="rounded-lg border bg-white px-4 py-8 text-center text-sm text-gray-400 shadow-sm">
+                {t("setsTab.noSetsFound")}
+              </div>
+            )}
+            {sets.map((a) => (
+              <div key={a.id} className="rounded-lg border bg-white p-4 shadow-sm">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-medium text-gray-800">{a.source}</span>
+                  <button
+                    onClick={() => handleDeleteSet(a.id)}
+                    className="rounded border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 transition-colors"
+                  >
+                    {t("setsTab.delete")}
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500">{a.source_version ?? "—"} · {(a.annotation_count ?? 0).toLocaleString()} annotations</p>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {a.meta && Object.entries(a.meta).map(([k, v]) => (
+                    <span key={k} className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">
+                      {k}: {Array.isArray(v) ? v.join(", ") : String(v)}
+                    </span>
+                  ))}
+                </div>
+                <div className="mt-1 flex items-center gap-2 text-xs text-gray-400">
+                  <span className="font-mono">{shortId(a.id)}</span>
+                  <span>{formatDate(a.created_at)}</span>
+                  {a.job_id && (
+                    <Link href={`/jobs/${a.job_id}`} className="text-blue-400 hover:text-blue-600">↗</Link>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop table */}
+          <div className="hidden lg:block overflow-x-auto rounded-lg border bg-white shadow-sm">
             <div className="grid grid-cols-[80px_100px_140px_100px_1fr_160px_60px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
               <div>{t("setsTab.tableHeaders.id")}</div><div>{t("setsTab.tableHeaders.source")}</div><div>{t("setsTab.tableHeaders.version")}</div><div>{t("setsTab.tableHeaders.annotations")}</div><div>{t("setsTab.tableHeaders.meta")}</div><div>{t("setsTab.tableHeaders.created")}</div><div></div>
             </div>
@@ -278,7 +322,70 @@ export default function AnnotationsPage() {
               {t("snapshotsTab.refresh")}
             </button>
           </div>
-          <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
+          {/* Mobile card list */}
+          <div className="lg:hidden space-y-2">
+            {loadingSnaps && Array.from({ length: 2 }).map((_, i) => (
+              <div key={i} className="rounded-lg border bg-white p-4 shadow-sm animate-pulse">
+                <div className="h-4 bg-gray-200 rounded w-1/3 mb-2" />
+                <div className="h-3 bg-gray-100 rounded w-2/3" />
+              </div>
+            ))}
+            {!loadingSnaps && snapshots.length === 0 && (
+              <div className="rounded-lg border bg-white px-4 py-8 text-center text-sm text-gray-400 shadow-sm">
+                {t("snapshotsTab.noSnapshotsFound")}
+              </div>
+            )}
+            {snapshots.map((s) => (
+              <div key={s.id} className="rounded-lg border bg-white p-4 shadow-sm space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-gray-800">{s.obo_version}</span>
+                  <span className="text-xs text-gray-400">{(s.go_term_count ?? 0).toLocaleString()} terms</span>
+                </div>
+                <div className="min-w-0">
+                  {iaEditId === s.id ? (
+                    <div className="flex flex-col gap-1">
+                      <input
+                        autoFocus
+                        type="text"
+                        value={iaEditValue}
+                        onChange={(e) => setIaEditValue(e.target.value)}
+                        placeholder="https://…/IA_cafa6.tsv or file path"
+                        className="w-full rounded border px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleSaveIa(s.id);
+                          if (e.key === "Escape") setIaEditId(null);
+                        }}
+                      />
+                      <div className="flex gap-1">
+                        <button onClick={() => handleSaveIa(s.id)} disabled={iaSaving} className="rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-700 disabled:opacity-50">{t("snapshotsTab.save")}</button>
+                        <button onClick={() => setIaEditId(null)} className="rounded border px-2 py-1 text-xs text-gray-500 hover:bg-gray-50">{t("snapshotsTab.cancel")}</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => { setIaEditId(s.id); setIaEditValue(s.ia_url ?? ""); }}
+                      className="w-full text-left flex items-center gap-2 rounded px-1 py-0.5 hover:bg-gray-50 active:bg-gray-100 transition-colors"
+                      title={t("snapshotsTab.editTooltip")}
+                    >
+                      {s.ia_url ? (
+                        <span className="truncate text-xs text-gray-500 font-mono flex-1">{s.ia_url}</span>
+                      ) : (
+                        <span className="text-xs text-amber-500 italic flex-1">{t("snapshotsTab.notSet")}</span>
+                      )}
+                      <span className="shrink-0 text-gray-400 text-xs">✎</span>
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 text-xs text-gray-400">
+                  <span className="font-mono">{shortId(s.id)}</span>
+                  <span>{formatDate(s.loaded_at)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop table */}
+          <div className="hidden lg:block overflow-x-auto rounded-lg border bg-white shadow-sm">
             <div className="grid grid-cols-[80px_160px_100px_minmax(160px,1fr)_160px] min-w-[700px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
               <div>{t("snapshotsTab.tableHeaders.id")}</div><div>{t("snapshotsTab.tableHeaders.version")}</div><div>{t("snapshotsTab.tableHeaders.goTerms")}</div><div>{t("snapshotsTab.tableHeaders.iaUrl")}</div><div>{t("snapshotsTab.tableHeaders.loaded")}</div>
             </div>

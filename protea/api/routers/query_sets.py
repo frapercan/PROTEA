@@ -6,20 +6,13 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
-from starlette.requests import Request
 
+from protea.api.deps import get_session_factory
 from protea.infrastructure.orm.models.query.query_set import QuerySet, QuerySetEntry
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
 from protea.infrastructure.session import session_scope
 
 router = APIRouter(prefix="/query-sets", tags=["query-sets"])
-
-
-def get_session_factory(request: Request) -> sessionmaker[Session]:
-    factory = getattr(request.app.state, "session_factory", None)
-    if factory is None:
-        raise RuntimeError("app.state.session_factory is not set")
-    return factory  # type: ignore[no-any-return]
 
 
 def _parse_fasta(content: str) -> list[tuple[str, str]]:
@@ -80,7 +73,10 @@ async def create_query_set(
     preserving the original FASTA accession. Duplicate accessions within the
     same upload are rejected with 422.
     """
+    _MAX_FASTA_BYTES = 50 * 1024 * 1024  # 50 MB
     raw = await file.read()
+    if len(raw) > _MAX_FASTA_BYTES:
+        raise HTTPException(status_code=413, detail="FASTA file exceeds 50 MB limit")
     try:
         content = raw.decode("utf-8")
     except UnicodeDecodeError:

@@ -117,7 +117,7 @@ export default function QuerySetsPage() {
 
       {/* List */}
       <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
-        <div className="grid grid-cols-[1fr_100px_160px_80px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
+        <div className="grid grid-cols-[1fr_80px_140px_60px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
           <div>{t("tableHeaders.name")}</div>
           <div>{t("tableHeaders.sequences")}</div>
           <div>{t("tableHeaders.created")}</div>
@@ -143,7 +143,7 @@ export default function QuerySetsPage() {
         {sets.map((qs) => (
           <div key={qs.id} className="border-b last:border-0">
             <div
-              className="grid grid-cols-[1fr_100px_160px_80px] gap-2 px-4 py-3 text-sm items-center hover:bg-blue-50 cursor-pointer transition-colors"
+              className="grid grid-cols-[1fr_80px_140px_60px] gap-2 px-4 py-3 text-sm items-center hover:bg-blue-50 cursor-pointer transition-colors"
               onClick={() => setExpandedId(expandedId === qs.id ? null : qs.id)}
             >
               <div>

@@ -177,6 +177,16 @@ class BaseWorker:
 
             except RetryLaterError as e:
                 # Resource busy — reset to QUEUED so the consumer can re-publish.
+                # Adaptive backoff: count previous retries and increase delay.
+                retry_count = (
+                    session.query(func.count(JobEvent.id))
+                    .filter(JobEvent.job_id == job_id, JobEvent.event == "job.retry_later")
+                    .scalar()
+                    or 0
+                )
+                base_delay = e.delay_seconds
+                delay = min(base_delay * (2 ** retry_count), 600)  # cap at 10 min
+
                 job.status = JobStatus.QUEUED
                 job.started_at = None
                 self._emit(
@@ -184,10 +194,12 @@ class BaseWorker:
                     job_id,
                     "job.retry_later",
                     str(e),
-                    {"delay_seconds": e.delay_seconds},
+                    {"delay_seconds": delay, "retry_count": retry_count + 1},
                     level="info",
                 )
                 session.commit()
+                # Propagate adaptive delay to the consumer.
+                e.delay_seconds = delay
                 raise  # consumer handles re-publish
 
             except Exception as e:

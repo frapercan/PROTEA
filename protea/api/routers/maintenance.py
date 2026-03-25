@@ -5,20 +5,13 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
-from starlette.requests import Request
 
+from protea.api.deps import get_session_factory
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
 from protea.infrastructure.session import session_scope
 
 router = APIRouter(prefix="/maintenance", tags=["maintenance"])
-
-
-def get_session_factory(request: Request) -> sessionmaker[Session]:
-    factory = getattr(request.app.state, "session_factory", None)
-    if factory is None:
-        raise RuntimeError("app.state.session_factory is not set")
-    return factory  # type: ignore[no-any-return]
 
 
 @router.get("/vacuum-sequences/preview")

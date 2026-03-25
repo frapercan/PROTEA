@@ -81,18 +81,14 @@ Jobs in terminal states (``SUCCEEDED``, ``FAILED``) are unaffected —
 the endpoint is a no-op. Cancelling a ``RUNNING`` job marks the DB row as
 ``CANCELLED`` but does not interrupt the worker process (soft cancel).
 
-Run a job manually without RabbitMQ
--------------------------------------
+Run a single worker manually
+-----------------------------
 
-Useful for debugging a specific job without the full message-broker pipeline:
+Useful for debugging a specific queue without the full ``manage.sh`` stack:
 
 .. code-block:: bash
 
-   poetry run python scripts/run_one_job.py <job-id-uuid>
-
-The script loads the job from the DB and runs it through ``BaseWorker``
-directly. The job must already exist in QUEUED status (created via the API
-before calling this script, for example).
+   poetry run python scripts/worker.py --queue protea.jobs
 
 Add a new operation
 --------------------
@@ -277,9 +273,111 @@ the DB before submitting.
          "distance_threshold": 0.3,
          "search_backend": "numpy",
          "compute_alignments": true,
-         "compute_taxonomy": false
+         "compute_taxonomy": false,
+         "compute_reranker_features": true
        }
      }'
+
+Generate an evaluation set (temporal holdout)
+----------------------------------------------
+
+Create a CAFA-style evaluation delta between an old and new annotation set.
+Both must share the same ``ontology_snapshot_id``.
+
+.. code-block:: bash
+
+   curl -s -X POST http://127.0.0.1:8000/annotations/evaluation-sets/generate \
+     -H "Content-Type: application/json" \
+     -d '{
+       "old_annotation_set_id": "<old-uuid>",
+       "new_annotation_set_id": "<new-uuid>"
+     }'
+
+The job classifies proteins into NK (no-knowledge), LK (limited-knowledge),
+and PK (partial-knowledge) categories per namespace. Download ground-truth
+files via ``GET /annotations/evaluation-sets/{id}/ground-truth-{NK|LK|PK}.tsv``.
+
+Run a CAFA evaluation
+----------------------
+
+Evaluate a prediction set against an evaluation set using the ``cafaeval``
+evaluator:
+
+.. code-block:: bash
+
+   curl -s -X POST http://127.0.0.1:8000/annotations/evaluation-sets/<eval-id>/run \
+     -H "Content-Type: application/json" \
+     -d '{
+       "prediction_set_id": "<prediction-set-uuid>"
+     }'
+
+Results include per-namespace Fmax, precision, recall, and coverage for
+NK, LK, and PK settings. Download metrics via
+``GET /annotations/evaluation-sets/{id}/results/{rid}/metrics.tsv``.
+
+Train a re-ranker
+------------------
+
+Train a LightGBM binary classifier to re-score GO predictions using
+temporal holdout labels:
+
+.. code-block:: bash
+
+   curl -s -X POST http://127.0.0.1:8000/jobs \
+     -H "Content-Type: application/json" \
+     -d '{
+       "operation": "train_reranker",
+       "queue_name": "protea.jobs",
+       "payload": {
+         "prediction_set_id": "<prediction-set-uuid>",
+         "evaluation_set_id": "<eval-set-uuid>"
+       }
+     }'
+
+The prediction set must have been generated with
+``compute_alignments=true``, ``compute_taxonomy=true``, and
+``compute_reranker_features=true`` to provide the full feature set.
+
+Apply a trained re-ranker to new predictions via
+``GET /scoring/prediction-sets/{id}/rerank.tsv?reranker_id=<uuid>``.
+
+Use one-click annotation
+-------------------------
+
+The ``/annotate`` endpoint accepts a FASTA file and automatically selects
+the best available embedding config, annotation set, and ontology snapshot:
+
+.. code-block:: bash
+
+   curl -s -X POST http://127.0.0.1:8000/annotate \
+     -F "file=@my_proteins.fasta" \
+     -F "name=Quick annotation" | python -m json.tool
+
+The response includes all IDs needed to monitor the embedding job and chain
+the prediction step. The frontend uses this endpoint to power the one-click
+annotation wizard.
+
+Score predictions with a ScoringConfig
+----------------------------------------
+
+Create a scoring config and apply it to a prediction set:
+
+.. code-block:: bash
+
+   # Create scoring config
+   curl -s -X POST http://127.0.0.1:8000/scoring/configs \
+     -H "Content-Type: application/json" \
+     -d '{
+       "name": "distance-only",
+       "weights": {"distance": -1.0}
+     }' | python -m json.tool
+
+   # Download scored predictions
+   curl -s "http://127.0.0.1:8000/scoring/prediction-sets/<id>/score.tsv?scoring_config_id=<config-id>" \
+     -o scored.tsv
+
+   # Compute CAFA metrics for scored predictions
+   curl -s "http://127.0.0.1:8000/scoring/prediction-sets/<id>/metrics?scoring_config_id=<config-id>&evaluation_set_id=<eval-id>"
 
 Scale batch workers
 --------------------

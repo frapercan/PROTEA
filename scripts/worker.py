@@ -32,21 +32,31 @@ from protea.core.operations.predict_go_terms import (
     StorePredictionsOperation,
 )
 from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationOperation
+from protea.core.operations.train_reranker import TrainRerankerAutoOperation, TrainRerankerOperation
 from protea.infrastructure.queue.consumer import OperationConsumer, QueueConsumer
 from protea.infrastructure.session import build_session_factory
 from protea.infrastructure.settings import load_settings
 from protea.workers.base_worker import BaseWorker, WorkerConfig
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-# Suppress pika's verbose connection lifecycle messages
-logging.getLogger("pika").setLevel(logging.WARNING)
+from protea.workers.stale_job_reaper import StaleJobReaper
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="PROTEA queue worker")
     parser.add_argument("--queue", default="protea.jobs", help="Queue name to consume")
     parser.add_argument("--requeue-on-failure", action="store_true")
+    parser.add_argument(
+        "--log-format",
+        choices=["json", "text"],
+        default="json",
+        help="Log output format (default: json)",
+    )
     args = parser.parse_args()
+
+    from protea.infrastructure.logging import configure_logging
+
+    configure_logging(json=(args.log_format == "json"))
+    # Suppress pika's verbose connection lifecycle messages
+    logging.getLogger("pika").setLevel(logging.WARNING)
 
     project_root = Path(__file__).resolve().parents[1]
     settings = load_settings(project_root)
@@ -68,6 +78,8 @@ def main() -> None:
     registry.register(PredictGOTermsOperation())
     registry.register(PredictGOTermsBatchOperation())
     registry.register(StorePredictionsOperation())
+    registry.register(TrainRerankerOperation())
+    registry.register(TrainRerankerAutoOperation())
 
     # Queues that carry ephemeral operation messages (no DB Job row per message)
     # use OperationConsumer.  All other queues use the standard QueueConsumer.
@@ -77,6 +89,13 @@ def main() -> None:
         "protea.predictions.batch",
         "protea.predictions.write",
     }
+
+    # Special mode: stale job reaper (no queue, just periodic DB check).
+    if args.queue == "reaper":
+        reaper = StaleJobReaper(factory, timeout_seconds=21600)
+        logging.info("Stale job reaper started. timeout=21600s interval=60s")
+        reaper.run(interval_seconds=60)
+        return
 
     if args.queue in _OPERATION_QUEUES:
         consumer: QueueConsumer | OperationConsumer = OperationConsumer(
@@ -94,6 +113,15 @@ def main() -> None:
             worker=worker,
             requeue_on_failure=args.requeue_on_failure,
         )
+
+    # Pre-warm taxonomy DB for prediction workers that may need it.
+    if args.queue in ("protea.predictions.batch", "protea.jobs"):
+        try:
+            from protea.core.feature_engineering import warmup_taxonomy_db
+
+            warmup_taxonomy_db()
+        except Exception as exc:
+            logging.warning("Taxonomy DB warmup skipped: %s", exc)
 
     logging.info("Worker started. queue=%s", args.queue)
     while True:

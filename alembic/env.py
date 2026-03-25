@@ -1,8 +1,7 @@
 from logging.config import fileConfig
 from pathlib import Path
 
-from sqlalchemy import engine_from_config
-from sqlalchemy import pool
+from sqlalchemy import engine_from_config, pool
 
 from alembic import context
 
@@ -17,14 +16,14 @@ if config.config_file_name is not None:
 
 # Wire PROTEA's ORM metadata so autogenerate works.
 # All model modules must be imported before Base.metadata is used.
-from protea.infrastructure.orm.base import Base
-import protea.infrastructure.orm.models  # noqa: F401 — registers all mappers
+import protea.infrastructure.orm.models  # noqa: E402, F401 — registers all mappers
+from protea.infrastructure.orm.base import Base  # noqa: E402
 
 target_metadata = Base.metadata
 
 # Override the DB URL from PROTEA's settings rather than relying on the
 # placeholder value in alembic.ini.
-from protea.infrastructure.settings import load_settings
+from protea.infrastructure.settings import load_settings  # noqa: E402
 
 _project_root = Path(__file__).resolve().parents[1]
 _settings = load_settings(_project_root)

@@ -103,8 +103,12 @@ cmd_start() {
     done
     _start_bg worker-predictions-write poetry run python scripts/worker.py --queue protea.predictions.write
 
+    # Stale job reaper
+    printf "\n${BOLD}[6] Stale job reaper${RESET}\n"
+    _start_bg worker-reaper poetry run python scripts/worker.py --queue reaper
+
     # Frontend
-    printf "\n${BOLD}[6] Frontend${RESET}\n"
+    printf "\n${BOLD}[7] Frontend${RESET}\n"
     cd "$ROOT/apps/web"
     _start_bg frontend npm run dev
     sleep 6

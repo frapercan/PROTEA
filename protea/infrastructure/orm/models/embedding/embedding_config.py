@@ -10,7 +10,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from protea.infrastructure.orm.base import Base
 
-_VALID_LAYER_AGG = {"mean", "concat"}
+_VALID_LAYER_AGG = {"mean", "last", "concat"}
 _VALID_POOLING = {"mean", "max", "cls", "mean_max"}
 _VALID_BACKENDS = {"esm", "esm3c", "t5", "auto"}
 

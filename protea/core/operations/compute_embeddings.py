@@ -519,7 +519,7 @@ class StoreEmbeddingsOperation:
             .returning(Job.progress_current, Job.progress_total)
         ).fetchone()
 
-        if row is None or row.progress_current < row.progress_total:
+        if row is None or row.progress_current != row.progress_total:
             return
 
         closed = session.execute(
@@ -552,13 +552,18 @@ class StoreEmbeddingsOperation:
 
 # Keyed by (model_name, model_backend, device) — one entry per worker process.
 # Workers are long-lived processes, so the model is loaded once and reused for
-# all subsequent batch messages with the same config.
+# all subsequent batch messages with the same config.  Max 1 entry to avoid
+# accumulating multi-GB models in GPU memory when configs change.
 _MODEL_CACHE: dict[tuple[str, str, str], tuple[Any, Any]] = {}
+_MODEL_CACHE_MAX = 1
 
 
 def _get_or_load_model(config: EmbeddingConfig, device: str, emit: EmitFn) -> tuple[Any, Any]:
     key = (config.model_name, config.model_backend, device)
     if key not in _MODEL_CACHE:
+        if len(_MODEL_CACHE) >= _MODEL_CACHE_MAX:
+            evict_key = next(iter(_MODEL_CACHE))
+            del _MODEL_CACHE[evict_key]
         _MODEL_CACHE[key] = _load_model(config, device, emit)
     return _MODEL_CACHE[key]
 
@@ -873,24 +878,28 @@ def _aggregate_residue_layers(layer_tensors: list[Any], layer_agg: str) -> Any:
     """Combine [L, D] tensors from multiple layers into one [L, D] tensor."""
     import torch
 
-    if layer_agg == "mean":
+    if layer_agg == "last":
+        return layer_tensors[-1]
+    elif layer_agg == "mean":
         return torch.stack(layer_tensors, dim=0).mean(dim=0)
     elif layer_agg == "concat":
         return torch.cat(layer_tensors, dim=-1)
     else:
-        raise ValueError(f"Unknown layer_agg: {layer_agg!r}. Choose: mean, concat")
+        raise ValueError(f"Unknown layer_agg: {layer_agg!r}. Choose: last, mean, concat")
 
 
 def _aggregate_1d(layer_tensors: list[Any], layer_agg: str) -> Any:
     """Combine [D] tensors from multiple layers into one [D] tensor (CLS path)."""
     import torch
 
-    if layer_agg == "mean":
+    if layer_agg == "last":
+        return layer_tensors[-1]
+    elif layer_agg == "mean":
         return torch.stack(layer_tensors, dim=0).mean(dim=0)
     elif layer_agg == "concat":
         return torch.cat(layer_tensors, dim=-1)
     else:
-        raise ValueError(f"Unknown layer_agg: {layer_agg!r}. Choose: mean, concat")
+        raise ValueError(f"Unknown layer_agg: {layer_agg!r}. Choose: last, mean, concat")
 
 
 def _chunk_and_pool(residues: Any, config: EmbeddingConfig) -> list[ChunkEmbedding]:

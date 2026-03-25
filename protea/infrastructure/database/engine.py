@@ -5,4 +5,11 @@ from sqlalchemy.engine import Engine
 
 
 def build_engine(db_url: str) -> Engine:
-    return create_engine(db_url, future=True, pool_pre_ping=True)
+    return create_engine(
+        db_url,
+        future=True,
+        pool_pre_ping=True,
+        pool_size=20,
+        max_overflow=40,
+        pool_recycle=3600,
+    )

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
@@ -10,9 +10,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from protea.api.routers.support import router as support_router
 from protea.api.routers.maintenance import router as maintenance_router
-
+from protea.api.routers.support import router as support_router
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -68,7 +67,7 @@ class TestGetSupport:
         entry = MagicMock()
         entry.id = uuid4()
         entry.comment = "Great tool!"
-        entry.created_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        entry.created_at = datetime(2026, 1, 1, tzinfo=UTC)
         support_session.query.return_value.count.return_value = 1
         support_session.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [entry]
         resp = support_client.get("/support")

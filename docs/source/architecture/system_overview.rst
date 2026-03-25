@@ -92,7 +92,9 @@ Services and data stores
         - QueueConsumer
         - ``insert_proteins``, ``fetch_uniprot_metadata``, ``load_ontology_snapshot``,
           ``load_goa_annotations``, ``load_quickgo_annotations``,
-          ``compute_embeddings`` (coordinator), ``predict_go_terms`` (coordinator)
+          ``compute_embeddings`` (coordinator), ``predict_go_terms`` (coordinator),
+          ``generate_evaluation_set``, ``run_cafa_evaluation``,
+          ``train_reranker``, ``train_reranker_auto``
       * - ``protea.embeddings``
         - QueueConsumer
         - ``compute_embeddings`` coordinator (serialised: one at a time, 60 s retry delay if GPU busy)
@@ -168,28 +170,35 @@ Code layout
    protea/
      api/                 FastAPI application and routers
        routers/           jobs, proteins, annotations, embeddings,
-                          query_sets, maintenance, admin
+                          query_sets, maintenance, admin, scoring,
+                          annotate, showcase, support
      core/
        contracts/         Operation protocol, ProteaPayload, OperationResult
-       operations/        Domain logic (all 9 operations)
+       operations/        Domain logic (11 operation modules, 16 registered instances)
        knn_search.py      KNN backends: numpy brute-force and FAISS (Flat/IVFFlat/HNSW)
        feature_engineering.py  Alignment (parasail NW/SW) and taxonomy (ete3 NCBITaxa)
+       scoring.py         Scoring engine (weighted formulas, composite scores)
+       metrics.py         CAFA-style Fmax, precision, recall, coverage
+       evidence_codes.py  ECO→GO evidence code mapping
+       evaluation.py      CAFA5 evaluation protocol (NK/LK/PK delta)
+       reranker.py        LightGBM binary classifier for re-ranking predictions
        utils.py           UniProtHttpMixin, chunks(), utcnow()
      infrastructure/
        orm/models/        SQLAlchemy 2.x ORM models (protein, sequence, annotation,
-                          embedding, prediction, query, job)
+                          embedding, prediction, query, job, evaluation, scoring, support)
        queue/             RabbitMQ consumer (QueueConsumer, OperationConsumer) and publisher
+       logging.py         Structured JSON logging
        session.py         session_scope context manager
        settings.py        YAML + env-var config loader
      workers/
        base_worker.py     Two-session job lifecycle orchestrator
+       stale_job_reaper.py  Periodic cleanup of stuck RUNNING jobs
    apps/
      web/                 Next.js frontend
    scripts/
      manage.sh            Unified stack manager (start/stop/status/logs/scale)
-     worker.py            Worker entry point (registers all operations)
+     worker.py            Worker entry point (registers all 16 operations)
      init_db.py           Schema initialisation
-     run_one_job.py       Manual job runner (debugging)
 
 Technology stack
 ----------------

@@ -236,8 +236,41 @@ export default function ProteinsPage() {
             <span className="ml-auto text-sm text-gray-400">{t("browseTab.totalProteins", { count: total.toLocaleString() })}</span>
           </div>
 
-          {/* Table */}
-          <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
+          {/* Mobile card list */}
+          <div className="lg:hidden space-y-2">
+            {loadingBrowse && Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="rounded-lg border bg-white p-4 shadow-sm animate-pulse">
+                <div className="h-4 bg-gray-200 rounded w-1/3 mb-2" />
+                <div className="h-3 bg-gray-100 rounded w-2/3" />
+              </div>
+            ))}
+            {!loadingBrowse && proteins.length === 0 && (
+              <div className="rounded-lg border bg-white px-4 py-12 text-center text-sm text-gray-400 shadow-sm">
+                {t("browseTab.noProteinsCta")}
+              </div>
+            )}
+            {!loadingBrowse && proteins.map((p) => (
+              <Link
+                key={p.accession}
+                href={`/proteins/${p.accession}`}
+                className="block rounded-lg border bg-white p-4 shadow-sm hover:bg-blue-50 transition-colors"
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-mono text-sm text-blue-600">{p.accession}</span>
+                  <ReviewedBadge reviewed={p.reviewed} />
+                </div>
+                <p className="text-sm font-medium text-gray-800 truncate">{p.gene_name ?? "—"}</p>
+                <p className="text-xs text-gray-500 truncate">{p.organism ?? "—"}</p>
+                <div className="mt-1 flex gap-3 text-xs text-gray-400">
+                  <span>{p.entry_name ?? "—"}</span>
+                  {p.length != null && <span>{p.length.toLocaleString()} aa</span>}
+                </div>
+              </Link>
+            ))}
+          </div>
+
+          {/* Desktop table */}
+          <div className="hidden lg:block overflow-x-auto rounded-lg border bg-white shadow-sm">
             <div className="grid grid-cols-[130px_140px_120px_1fr_80px_110px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
               <div>{t("browseTab.tableHeaders.accession")}</div>
               <div>{t("browseTab.tableHeaders.entryName")}</div>
@@ -353,7 +386,7 @@ export default function ProteinsPage() {
                 <input type="text" value={searchCriteria} onChange={(e) => setSearchCriteria(e.target.value)} required className={inputClass} placeholder="organism_id:9606 AND reviewed:true" />
                 <p className="mt-1 text-xs text-gray-400">{t("insertTab.searchCriteriaHelper")}</p>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className={labelClass}>{t("insertTab.pageSizeLabel")}</label>
                   <input type="number" value={pageSize} onChange={(e) => setPageSize(parseInt(e.target.value, 10))} min={1} className={inputClass} />
@@ -395,7 +428,7 @@ export default function ProteinsPage() {
                 <input type="text" value={metaCriteria} onChange={(e) => setMetaCriteria(e.target.value)} required className={inputClass} placeholder="organism_id:9606 AND reviewed:true" />
                 <p className="mt-1 text-xs text-gray-400">{t("metadataTab.searchCriteriaHelper")}</p>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className={labelClass}>{t("metadataTab.pageSizeLabel")}</label>
                   <input type="number" value={metaPageSize} onChange={(e) => setMetaPageSize(parseInt(e.target.value, 10))} min={1} className={inputClass} />

@@ -140,6 +140,24 @@ annotation date.
    :undoc-members:
    :show-inheritance:
 
+**Evaluation Sets**
+
+``EvaluationSet`` stores the CAFA-style temporal holdout delta between two
+annotation sets (old → new). Contains summary statistics (NK/LK/PK protein and
+annotation counts) in a JSONB ``stats`` column. ``EvaluationResult`` stores the
+output of running ``cafaeval`` against a prediction set: per-namespace Fmax,
+precision, recall, τ, and coverage for NK, LK, and PK settings.
+
+.. automodule:: protea.infrastructure.orm.models.annotation.evaluation_set
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.infrastructure.orm.models.annotation.evaluation_result
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 **Embeddings**
 
 ``EmbeddingConfig`` defines a reproducible embedding recipe: model identifier,
@@ -171,7 +189,9 @@ neighbour queries are performed in Python via ``protea.core.knn_search``.
 annotation set, and ontology snapshot used, making every prediction set
 fully reproducible. ``GOPrediction`` stores one row per (query protein,
 GO term, reference protein) triple. The 14 optional feature-engineering
-columns (alignment statistics and taxonomy fields) are ``NULL`` unless the
+columns (alignment statistics and taxonomy fields) and 5 re-ranker aggregate
+features (``vote_count``, ``k_position``, ``go_term_frequency``,
+``ref_annotation_density``, ``neighbor_distance_std``) are ``NULL`` unless the
 corresponding flags were set in the prediction payload.
 
 .. automodule:: protea.infrastructure.orm.models.embedding.prediction_set
@@ -180,6 +200,39 @@ corresponding flags were set in the prediction payload.
    :show-inheritance:
 
 .. automodule:: protea.infrastructure.orm.models.embedding.go_prediction
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+**Re-ranker Models**
+
+``RerankerModel`` stores a trained LightGBM binary classifier for re-scoring
+GO term predictions. Each row contains the serialized model string, validation
+metrics (AUC, logloss, precision, recall, F1), feature importance, and
+references to the ``PredictionSet`` and ``EvaluationSet`` used for training.
+
+.. automodule:: protea.infrastructure.orm.models.embedding.reranker_model
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+**Scoring Configurations**
+
+``ScoringConfig`` defines a set of feature weights and parameters for scoring
+GO predictions. Each config is a named, immutable recipe that can be applied
+to any prediction set to produce a composite score per prediction row.
+
+.. automodule:: protea.infrastructure.orm.models.embedding.scoring_config
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+**Support Entries**
+
+``SupportEntry`` stores community feedback: a thumbs-up with an optional
+comment. Used by the ``/support`` router.
+
+.. automodule:: protea.infrastructure.orm.models.support_entry
    :members:
    :undoc-members:
    :show-inheritance:
@@ -193,6 +246,19 @@ already exists in the database, the existing ``Sequence`` row is reused,
 avoiding redundant embedding computation.
 
 .. automodule:: protea.infrastructure.orm.models.query.query_set
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Logging
+-------
+
+``protea.infrastructure.logging`` provides structured JSON logging via a
+custom ``JSONFormatter``. The ``configure_logging()`` function sets up the
+root logger with either JSON or plain text output, used by worker processes
+and the API server.
+
+.. automodule:: protea.infrastructure.logging
    :members:
    :undoc-members:
    :show-inheritance:

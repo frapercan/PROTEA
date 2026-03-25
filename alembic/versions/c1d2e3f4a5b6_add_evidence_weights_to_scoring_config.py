@@ -20,8 +20,9 @@ The change is therefore fully backwards-compatible with all existing
 from __future__ import annotations
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects import postgresql
+
+from alembic import op
 
 revision = "c1d2e3f4a5b6"
 down_revision = "7c19ca08d5d4"

@@ -4,13 +4,20 @@ No DB or network required.
 """
 from __future__ import annotations
 
+import gzip
+from io import BytesIO
 from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
 
-from protea.core.contracts.operation import OperationResult
+from protea.core.contracts.operation import OperationResult, RetryLaterError
 from protea.core.contracts.registry import OperationRegistry
+from protea.core.evidence_codes import ECO_TO_CODE, EXPERIMENTAL, is_experimental, normalize
+from protea.core.operations.fetch_uniprot_metadata import (
+    FetchUniProtMetadataOperation,
+    FetchUniProtMetadataPayload,
+)
 from protea.core.operations.ping import PingOperation
 from protea.core.utils import UniProtHttpMixin, chunks
 
@@ -113,7 +120,8 @@ class _ConcreteHttp(UniProtHttpMixin):
         self._http = MagicMock()
 
 
-_noop_emit = lambda *_: None
+def _noop_emit(*_):
+    return None
 
 
 class TestUniProtHttpMixin:
@@ -130,9 +138,11 @@ class TestUniProtHttpMixin:
 
     def test_retries_on_429(self) -> None:
         obj = self._obj()
-        bad = MagicMock(); bad.status_code = 429
+        bad = MagicMock()
+        bad.status_code = 429
         bad.headers = {}
-        good = MagicMock(); good.status_code = 200
+        good = MagicMock()
+        good.status_code = 200
         obj._http.get.side_effect = [bad, good]
         with patch("protea.core.utils.time.sleep"):
             result = obj._get_with_retries("http://x", _make_payload(), _noop_emit)
@@ -141,9 +151,11 @@ class TestUniProtHttpMixin:
 
     def test_uses_retry_after_header(self) -> None:
         obj = self._obj()
-        bad = MagicMock(); bad.status_code = 429
+        bad = MagicMock()
+        bad.status_code = 429
         bad.headers = {"Retry-After": "5"}
-        good = MagicMock(); good.status_code = 200
+        good = MagicMock()
+        good.status_code = 200
         obj._http.get.side_effect = [bad, good]
         sleep_calls = []
         with patch("protea.core.utils.time.sleep", side_effect=sleep_calls.append):
@@ -153,7 +165,8 @@ class TestUniProtHttpMixin:
 
     def test_raises_after_max_retries(self) -> None:
         obj = self._obj()
-        bad = MagicMock(); bad.status_code = 503
+        bad = MagicMock()
+        bad.status_code = 503
         bad.headers = {}
         bad.raise_for_status.side_effect = requests.HTTPError("503")
         obj._http.get.return_value = bad
@@ -163,7 +176,8 @@ class TestUniProtHttpMixin:
 
     def test_retries_on_network_exception(self) -> None:
         obj = self._obj()
-        good = MagicMock(); good.status_code = 200
+        good = MagicMock()
+        good.status_code = 200
         obj._http.get.side_effect = [requests.ConnectionError("down"), good]
         with patch("protea.core.utils.time.sleep"):
             result = obj._get_with_retries("http://x", _make_payload(), _noop_emit)
@@ -188,7 +202,6 @@ class TestUniProtHttpMixin:
 # evidence_codes — normalize and is_experimental
 # ---------------------------------------------------------------------------
 
-from protea.core.evidence_codes import normalize, is_experimental, ECO_TO_CODE, EXPERIMENTAL
 
 
 class TestNormalize:
@@ -233,9 +246,6 @@ class TestIsExperimental:
 # RetryLaterError
 # ---------------------------------------------------------------------------
 
-from protea.core.contracts.operation import RetryLaterError
-
-
 class TestRetryLaterError:
     def test_default_delay(self):
         err = RetryLaterError("GPU busy")
@@ -249,3 +259,319 @@ class TestRetryLaterError:
     def test_is_exception(self):
         with pytest.raises(RetryLaterError):
             raise RetryLaterError("test")
+
+
+# ---------------------------------------------------------------------------
+# FetchUniProtMetadataOperation
+# ---------------------------------------------------------------------------
+
+def _noop_emit(*_):
+    pass
+
+
+def _make_tsv_content(rows: list[dict[str, str]], compressed: bool = True) -> bytes:
+    """Build a TSV byte string (optionally gzipped) from a list of dicts."""
+    if not rows:
+        header = "Entry\tReviewed\tEntry Name\tOrganism\tGene Names\tLength"
+        text = header + "\n"
+    else:
+        headers = list(rows[0].keys())
+        lines = ["\t".join(headers)]
+        for row in rows:
+            lines.append("\t".join(row.get(h, "") for h in headers))
+        text = "\n".join(lines) + "\n"
+
+    raw = text.encode("utf-8")
+    if compressed:
+        buf = BytesIO()
+        with gzip.GzipFile(fileobj=buf, mode="wb") as f:
+            f.write(raw)
+        return buf.getvalue()
+    return raw
+
+
+
+
+class TestFetchUniProtMetadataExecute:
+    def _make_op(self):
+        op = FetchUniProtMetadataOperation()
+        op._http = MagicMock()
+        return op
+
+    def test_execute_empty_page_continues(self):
+        """Line 108: when rows is empty, continue (skip store)."""
+        op = self._make_op()
+        events = []
+
+        def emit(event, message, fields, level):
+            events.append(event)
+
+        # Return one page with no data rows, then stop
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.headers = {"X-Total-Results": "0"}
+        resp.content = _make_tsv_content([], compressed=True)
+        op._http.get.return_value = resp
+
+        session = MagicMock()
+        payload = {"search_criteria": "organism_id:9606", "page_size": 10}
+
+        result = op.execute(session, payload, emit=emit)
+        assert result.result["rows"] == 0
+        assert result.result["pages"] == 1
+
+    def test_execute_total_limit_truncation(self):
+        """Lines 110-113: when total_limit is set and rows exceed it, truncate."""
+        op = self._make_op()
+
+        # Build 5 rows
+        rows = []
+        for i in range(5):
+            row = {"Entry": f"P0000{i}", "Reviewed": "reviewed"}
+            # Add all FIELD_MAP headers as empty
+            for header in FetchUniProtMetadataOperation.FIELD_MAP.values():
+                row[header] = ""
+            row["Entry Name"] = ""
+            row["Organism"] = ""
+            row["Gene Names"] = ""
+            row["Length"] = ""
+            rows.append(row)
+
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.headers = {"X-Total-Results": "5"}
+        resp.content = _make_tsv_content(rows, compressed=True)
+        op._http.get.return_value = resp
+
+        session = MagicMock()
+        session.query.return_value.filter.return_value.all.return_value = []
+
+        payload = {
+            "search_criteria": "organism_id:9606",
+            "page_size": 10,
+            "total_limit": 3,
+        }
+
+        result = op.execute(session, payload, emit=_noop_emit)
+        # Should only process 3 rows despite page having 5
+        assert result.result["rows"] == 3
+
+    def test_execute_total_limit_zero_after_truncation(self):
+        """Line 113: if truncation results in empty rows, break."""
+        op = self._make_op()
+
+        rows = [{"Entry": "P00001"}]
+        for header in FetchUniProtMetadataOperation.FIELD_MAP.values():
+            rows[0][header] = ""
+        rows[0].update({"Reviewed": "", "Entry Name": "", "Organism": "", "Gene Names": "", "Length": ""})
+
+        # First page returns 1 row, second page returns 1 row
+        resp1 = MagicMock()
+        resp1.status_code = 200
+        resp1.headers = {"X-Total-Results": "2", "link": '<http://next?cursor=ABC>; rel="next"'}
+        resp1.content = _make_tsv_content(rows, compressed=True)
+
+        resp2 = MagicMock()
+        resp2.status_code = 200
+        resp2.headers = {"X-Total-Results": "2"}
+        rows2 = [{"Entry": "P00002"}]
+        for header in FetchUniProtMetadataOperation.FIELD_MAP.values():
+            rows2[0][header] = ""
+        rows2[0].update({"Reviewed": "", "Entry Name": "", "Organism": "", "Gene Names": "", "Length": ""})
+        resp2.content = _make_tsv_content(rows2, compressed=True)
+
+        op._http.get.side_effect = [resp1, resp2]
+
+        session = MagicMock()
+        session.query.return_value.filter.return_value.all.return_value = []
+
+        payload = {
+            "search_criteria": "organism_id:9606",
+            "page_size": 1,
+            "total_limit": 1,
+        }
+
+        result = op.execute(session, payload, emit=_noop_emit)
+        # Should stop after first page (total_limit=1, first page gives 1 row)
+        assert result.result["rows"] == 1
+
+    def test_x_total_results_none_on_invalid_header(self):
+        """Line 227: X-Total-Results header with invalid value."""
+        op = self._make_op()
+
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.headers = {"X-Total-Results": "not-a-number"}
+        resp.content = _make_tsv_content([], compressed=True)
+        op._http.get.return_value = resp
+
+        session = MagicMock()
+        payload = {"search_criteria": "test", "page_size": 10}
+
+        op.execute(session, payload, emit=_noop_emit)
+        assert op._total_results is None
+
+    def test_decode_response_uncompressed(self):
+        """Line 241-242: uncompressed response decoding."""
+        op = self._make_op()
+        resp = MagicMock()
+        resp.content = b"Entry\tReviewed\nP00001\treviewed\n"
+        text = op._decode_response(resp, compressed=False)
+        assert "P00001" in text
+
+    def test_store_rows_empty_accession_skipped(self):
+        """Line 275: rows with empty Entry are skipped."""
+        op = self._make_op()
+        session = MagicMock()
+        session.query.return_value.filter.return_value.all.return_value = []
+
+        p = FetchUniProtMetadataPayload(
+            search_criteria="test",
+            update_protein_core=False,
+        )
+
+        rows = [{"Entry": "", "Absorption": "test"}]
+        for header in FetchUniProtMetadataOperation.FIELD_MAP.values():
+            if header not in rows[0]:
+                rows[0][header] = ""
+
+        touched, upserted = op._store_rows(session, rows, p, _noop_emit)
+        assert touched == 0
+        assert upserted == 0
+
+    def test_store_rows_update_protein_core_fields(self):
+        """Lines 296-328: update_protein_core fills in missing fields on Protein."""
+        op = self._make_op()
+        session = MagicMock()
+
+        # No existing metadata
+        session.query.return_value.filter.return_value.all.return_value = []
+
+        # Create a mock protein with all None fields
+        protein = MagicMock()
+        protein.accession = "P12345"
+        protein.reviewed = None
+        protein.entry_name = None
+        protein.organism = None
+        protein.gene_name = None
+        protein.length = None
+
+        # Second query().filter().all() returns proteins
+        call_count = [0]
+        def query_side_effect(*args):
+            result = MagicMock()
+            call_count[0] += 1
+            if call_count[0] <= 1:
+                # First call: metadata lookup
+                result.filter.return_value.all.return_value = []
+            else:
+                # Second call: protein lookup
+                result.filter.return_value.all.return_value = [protein]
+            return result
+        session.query.side_effect = query_side_effect
+
+        p = FetchUniProtMetadataPayload(
+            search_criteria="test",
+            update_protein_core=True,
+        )
+
+        row = {"Entry": "P12345", "Reviewed": "reviewed", "Entry Name": "TEST_HUMAN",
+               "Organism": "Homo sapiens", "Gene Names": "TEST GENE2", "Length": "500"}
+        for header in FetchUniProtMetadataOperation.FIELD_MAP.values():
+            row.setdefault(header, "")
+
+        touched, upserted = op._store_rows(session, [row], p, _noop_emit)
+        assert protein.reviewed is True
+        assert protein.entry_name == "TEST_HUMAN"
+        assert protein.organism == "Homo sapiens"
+        assert protein.gene_name == "TEST"
+        assert protein.length == 500
+        assert touched == 1
+
+    def test_store_rows_unreviewed_protein(self):
+        """Lines 303-305: reviewed == 'unreviewed' sets pr.reviewed = False."""
+        op = self._make_op()
+        session = MagicMock()
+
+        protein = MagicMock()
+        protein.accession = "Q99999"
+        protein.reviewed = None
+        protein.entry_name = None
+        protein.organism = None
+        protein.gene_name = None
+        protein.length = None
+
+        call_count = [0]
+        def query_side_effect(*args):
+            result = MagicMock()
+            call_count[0] += 1
+            if call_count[0] <= 1:
+                result.filter.return_value.all.return_value = []
+            else:
+                result.filter.return_value.all.return_value = [protein]
+            return result
+        session.query.side_effect = query_side_effect
+
+        p = FetchUniProtMetadataPayload(
+            search_criteria="test",
+            update_protein_core=True,
+        )
+
+        row = {"Entry": "Q99999", "Reviewed": "unreviewed"}
+        for header in FetchUniProtMetadataOperation.FIELD_MAP.values():
+            row.setdefault(header, "")
+        row.setdefault("Entry Name", "")
+        row.setdefault("Organism", "")
+        row.setdefault("Gene Names", "")
+        row.setdefault("Length", "")
+
+        touched, _ = op._store_rows(session, [row], p, _noop_emit)
+        assert protein.reviewed is False
+        assert touched == 1
+
+    def test_store_rows_protein_not_in_db(self):
+        """Lines 294-295: protein not found in protein_map, no core update."""
+        op = self._make_op()
+        session = MagicMock()
+
+        call_count = [0]
+        def query_side_effect(*args):
+            result = MagicMock()
+            call_count[0] += 1
+            if call_count[0] <= 1:
+                result.filter.return_value.all.return_value = []
+            else:
+                result.filter.return_value.all.return_value = []  # No proteins
+            return result
+        session.query.side_effect = query_side_effect
+
+        p = FetchUniProtMetadataPayload(
+            search_criteria="test",
+            update_protein_core=True,
+        )
+
+        row = {"Entry": "UNKNOWN1", "Reviewed": "reviewed"}
+        for header in FetchUniProtMetadataOperation.FIELD_MAP.values():
+            row.setdefault(header, "")
+        row.setdefault("Entry Name", "")
+        row.setdefault("Organism", "")
+        row.setdefault("Gene Names", "")
+        row.setdefault("Length", "")
+
+        touched, upserted = op._store_rows(session, [row], p, _noop_emit)
+        assert touched == 0
+        # Still upserted metadata
+        assert upserted == 1
+
+    def test_load_existing_metadata_chunks(self):
+        """Line 346: _load_existing_metadata returns existing metadata by canonical."""
+        op = self._make_op()
+        session = MagicMock()
+
+        m1 = MagicMock()
+        m1.canonical_accession = "P12345"
+        session.query.return_value.filter.return_value.all.return_value = [m1]
+
+        result = op._load_existing_metadata(session, ["P12345"], chunk_size=10)
+        assert "P12345" in result
+        assert result["P12345"] is m1

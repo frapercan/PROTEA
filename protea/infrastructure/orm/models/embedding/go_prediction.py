@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, Float, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import BigInteger, Float, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -31,6 +31,7 @@ class GOPrediction(Base):
             "go_term_id",
             name="uq_go_prediction_set_protein_term",
         ),
+        Index("ix_go_prediction_set_accession", "prediction_set_id", "protein_accession"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -73,6 +74,13 @@ class GOPrediction(Base):
     # --- Sequence lengths (populated when alignments are computed) ---
     length_query: Mapped[int | None] = mapped_column(Integer, nullable=True)
     length_ref: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # --- Re-ranker features ---
+    vote_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    k_position: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    go_term_frequency: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ref_annotation_density: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    neighbor_distance_std: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # --- Taxonomy features ---
     query_taxonomy_id: Mapped[int | None] = mapped_column(Integer, nullable=True)

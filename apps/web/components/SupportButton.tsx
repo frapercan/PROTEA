@@ -62,7 +62,7 @@ export function SupportButton() {
       <div className="group relative inline-block">
         <button
           onClick={() => { setOpen((v) => !v); setSubmitted(false); }}
-          className="flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-2.5 sm:px-3 py-1.5 text-sm text-gray-600 hover:border-blue-300 hover:text-blue-600 transition-colors shadow-sm"
+          className="flex items-center justify-center gap-1.5 rounded-full border border-gray-200 bg-white px-2.5 sm:px-3 py-1.5 text-sm text-gray-600 hover:border-blue-300 hover:text-blue-600 transition-colors shadow-sm min-h-[40px] min-w-[40px]"
         >
           <span className="text-base leading-none">👍</span>
           <span className="font-medium hidden sm:inline">{t("support")}</span>

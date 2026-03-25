@@ -129,6 +129,22 @@ def _get_ncbi() -> NCBITaxa:
     return _ncbi
 
 
+def warmup_taxonomy_db() -> None:
+    """Pre-initialize the NCBITaxa database.
+
+    Call at worker startup so the download (~100 MB on first run)
+    happens before any batch is processed, not mid-flight.
+    """
+    if not _ETE3_AVAILABLE:
+        return
+    import logging
+
+    log = logging.getLogger(__name__)
+    log.info("Warming up NCBI taxonomy database...")
+    _get_ncbi()
+    log.info("NCBI taxonomy database ready.")
+
+
 @lru_cache(maxsize=100_000)
 def _cached_lineage(tid: int) -> list[int]:
     return _get_ncbi().get_lineage(tid)  # type: ignore[return-value]

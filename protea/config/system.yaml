@@ -6,3 +6,6 @@ queue:
 
 storage:
   artifacts_dir: storage/evaluation_artifacts
+
+admin:
+  token: protea-admin

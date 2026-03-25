@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from typing import Any
 from uuid import UUID
@@ -10,37 +11,64 @@ import pika
 
 logger = logging.getLogger(__name__)
 
-_RETRY_DELAYS = (1, 3, 10)  # seconds between attempts (3 attempts total)
+_MAX_ATTEMPTS = 5
+_BASE_DELAY = 1  # seconds; exponential backoff: 1, 2, 4, 8, 16 (capped at 30)
+
+# Thread-local persistent connection to avoid opening/closing per publish.
+_local = threading.local()
+
+
+def _get_connection(amqp_url: str) -> pika.BlockingConnection:
+    """Return a reusable connection, creating one if needed."""
+    conn: pika.BlockingConnection | None = getattr(_local, "connection", None)
+    if conn is not None and conn.is_open:
+        return conn
+    _local.connection = pika.BlockingConnection(pika.URLParameters(amqp_url))
+    return _local.connection
+
+
+def _close_cached_connection() -> None:
+    conn: pika.BlockingConnection | None = getattr(_local, "connection", None)
+    if conn is not None and conn.is_open:
+        try:
+            conn.close()
+        except Exception:
+            pass
+    _local.connection = None
 
 
 def _publish(amqp_url: str, queue_name: str, body: bytes) -> None:
-    """Core publish logic with retries. Used by both publish_job and publish_operation."""
+    """Core publish logic with retries and connection reuse."""
     last_exc: Exception | None = None
 
-    for attempt, delay in enumerate((*_RETRY_DELAYS, None), start=1):
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
         try:
-            connection = pika.BlockingConnection(pika.URLParameters(amqp_url))
-            try:
-                channel = connection.channel()
-                channel.queue_declare(queue=queue_name, durable=True)
-                channel.basic_publish(
-                    exchange="",
-                    routing_key=queue_name,
-                    body=body,
-                    properties=pika.BasicProperties(
-                        delivery_mode=pika.DeliveryMode.Persistent,
-                    ),
-                )
-                return
-            finally:
-                if connection.is_open:
-                    connection.close()
+            connection = _get_connection(amqp_url)
+            channel = connection.channel()
+            channel.queue_declare(
+                queue=queue_name,
+                durable=True,
+                arguments={"x-dead-letter-exchange": "protea.dlx"},
+            )
+            channel.basic_publish(
+                exchange="",
+                routing_key=queue_name,
+                body=body,
+                properties=pika.BasicProperties(
+                    delivery_mode=pika.DeliveryMode.Persistent,
+                ),
+            )
+            return
         except Exception as exc:
             last_exc = exc
-            if delay is not None:
+            # Connection is stale — discard it so next attempt creates a fresh one.
+            _close_cached_connection()
+            if attempt < _MAX_ATTEMPTS:
+                delay = min(_BASE_DELAY * (2 ** (attempt - 1)), 30)
                 logger.warning(
-                    "publish failed (attempt %d), retrying in %ds. queue=%s error=%s",
+                    "publish failed (attempt %d/%d), retrying in %ds. queue=%s error=%s",
                     attempt,
+                    _MAX_ATTEMPTS,
                     delay,
                     queue_name,
                     exc,
@@ -49,13 +77,13 @@ def _publish(amqp_url: str, queue_name: str, body: bytes) -> None:
             else:
                 logger.error(
                     "publish failed after %d attempts. queue=%s error=%s",
-                    attempt,
+                    _MAX_ATTEMPTS,
                     queue_name,
                     exc,
                 )
 
     raise RuntimeError(
-        f"Failed to publish to queue {queue_name!r} after {len(_RETRY_DELAYS) + 1} attempts"
+        f"Failed to publish to queue {queue_name!r} after {_MAX_ATTEMPTS} attempts"
     ) from last_exc
 
 

@@ -16,6 +16,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 2G
 
   rabbitmq:
     image: rabbitmq:3-management
@@ -30,6 +34,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   migrate:
     build: .
@@ -55,6 +63,10 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          memory: 1G
 
   worker-jobs:
     build: .
@@ -67,6 +79,10 @@ services:
         condition: service_completed_successfully
       rabbitmq:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 2G
 
   worker-embeddings:
     build: .
@@ -79,8 +95,44 @@ services:
         condition: service_completed_successfully
       rabbitmq:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 2G
 
-  worker-predictions:
+  worker-embeddings-batch:
+    build: .
+    environment:
+      PROTEA_DB_URL: postgresql+psycopg://protea:protea@postgres/protea
+      PROTEA_AMQP_URL: amqp://guest:guest@rabbitmq/
+    command: python scripts/worker.py --queue protea.embeddings.batch
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
+  worker-embeddings-write:
+    build: .
+    environment:
+      PROTEA_DB_URL: postgresql+psycopg://protea:protea@postgres/protea
+      PROTEA_AMQP_URL: amqp://guest:guest@rabbitmq/
+    command: python scripts/worker.py --queue protea.embeddings.write
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  worker-predictions-batch:
     build: .
     environment:
       PROTEA_DB_URL: postgresql+psycopg://protea:protea@postgres/protea
@@ -91,6 +143,40 @@ services:
         condition: service_completed_successfully
       rabbitmq:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
+  worker-predictions-write:
+    build: .
+    environment:
+      PROTEA_DB_URL: postgresql+psycopg://protea:protea@postgres/protea
+      PROTEA_AMQP_URL: amqp://guest:guest@rabbitmq/
+    command: python scripts/worker.py --queue protea.predictions.write
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  worker-reaper:
+    build: .
+    environment:
+      PROTEA_DB_URL: postgresql+psycopg://protea:protea@postgres/protea
+      PROTEA_AMQP_URL: amqp://guest:guest@rabbitmq/
+    command: python scripts/worker.py --queue reaper
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
   frontend:
     build:
@@ -102,6 +188,10 @@ services:
       - "3000:3000"
     depends_on:
       - api
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
 volumes:
   postgres_data:

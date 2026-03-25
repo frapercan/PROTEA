@@ -5,12 +5,14 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useToast } from "@/components/Toast";
 import { SkeletonTableRow } from "@/components/Skeleton";
+import { ContextBanner } from "@/components/ContextBanner";
 import {
   listEmbeddingConfigs,
   createEmbeddingConfig,
   deleteEmbeddingConfig,
   createJob,
   listQuerySets,
+  getProteinStats,
   EmbeddingConfig,
   QuerySet,
 } from "@/lib/api";
@@ -95,6 +97,7 @@ export default function EmbeddingsPage() {
   const [cmpResult, setCmpResult] = useState<{ id: string; status: string } | null>(null);
   const [cmpError, setCmpError] = useState("");
   const [cmpSubmitting, setCmpSubmitting] = useState(false);
+  const [proteinCount, setProteinCount] = useState<number | null>(null);
 
   async function loadAll() {
     setLoading(true);
@@ -106,6 +109,7 @@ export default function EmbeddingsPage() {
       ]);
       setConfigs(cfgs);
       setQuerySets(qsets);
+      getProteinStats().then((s) => setProteinCount(s.total ?? 0)).catch(() => {});
       if (cfgs.length > 0 && !cmpConfigId) setCmpConfigId(cfgs[0].id);
     } catch (e: any) {
       setError(String(e));
@@ -223,6 +227,16 @@ export default function EmbeddingsPage() {
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <h1 className="text-xl font-semibold">{t("title")}</h1>
       </div>
+
+      <ContextBanner
+        title="Compute protein embeddings using language models"
+        description="Convert protein sequences into numerical vectors (ESM-2, ESMC, ProT5). These embeddings enable KNN-based GO term prediction."
+        prerequisites={proteinCount !== null ? [
+          { label: `${proteinCount} proteins loaded`, met: proteinCount > 0, href: "/proteins" },
+          { label: `${configs.length} embedding config(s)`, met: configs.length > 0 },
+        ] : undefined}
+        nextStep={{ label: "Functional Annotation", href: "/functional-annotation" }}
+      />
 
       {error && (
         <pre className="mb-4 whitespace-pre-wrap rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
@@ -475,53 +489,92 @@ export default function EmbeddingsPage() {
               {Array.from({ length: 3 }).map((_, i) => <SkeletonTableRow key={i} cols={9} />)}
             </div>
           ) : (
-            <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
-              <div className="grid grid-cols-[1fr_140px_80px_100px_80px_80px_60px_160px_60px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                <div>{t("configsTab.tableHeaders.description")}</div>
-                <div>{t("configsTab.tableHeaders.model")}</div>
-                <div>{t("configsTab.tableHeaders.backend")}</div>
-                <div>{t("configsTab.tableHeaders.layers")}</div>
-                <div>{t("configsTab.tableHeaders.agg")}</div>
-                <div>{t("configsTab.tableHeaders.pool")}</div>
-                <div>{t("configsTab.tableHeaders.norm")}</div>
-                <div>{t("configsTab.tableHeaders.created")}</div>
-                <div></div>
-              </div>
-              {configs.map((c) => (
-                <div
-                  key={c.id}
-                  className="grid grid-cols-[1fr_140px_80px_100px_80px_80px_60px_160px_60px] gap-2 border-b px-4 py-3 text-sm last:border-0 items-center"
-                >
-                  <div className="text-gray-700 truncate" title={c.description ?? c.model_name}>
-                    {c.description || <span className="text-gray-400 italic">—</span>}
+            <>
+              {/* Mobile card list */}
+              <div className="lg:hidden space-y-2">
+                {configs.map((c) => (
+                  <div key={c.id} className="rounded-lg border bg-white p-4 shadow-sm">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-sm font-medium text-gray-800 truncate">
+                        {c.description || <span className="text-gray-400 italic">—</span>}
+                      </span>
+                      <button
+                        onClick={() => handleDeleteConfig(c.id)}
+                        className="text-gray-400 hover:text-red-600 transition-colors ml-2"
+                        title="Delete config"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <p className="font-mono text-xs text-gray-500 truncate" title={c.model_name}>{c.model_name}</p>
+                    <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-600">
+                      <span>{c.model_backend}</span>
+                      <span>layers [{c.layer_indices.join(", ")}]</span>
+                      <span>{c.layer_agg}/{c.pooling}</span>
+                      <span>{c.normalize ? "norm" : "no norm"}</span>
+                    </div>
+                    <p className="mt-1 text-xs text-gray-400">{formatDate(c.created_at)}</p>
                   </div>
-                  <div className="font-mono text-xs text-gray-500 truncate" title={c.model_name}>{c.model_name}</div>
-                  <div className="text-gray-600">{c.model_backend}</div>
-                  <div className="font-mono text-xs text-gray-500">[{c.layer_indices.join(", ")}]</div>
-                  <div className="text-gray-600">{c.layer_agg}</div>
-                  <div className="text-gray-600">{c.pooling}</div>
-                  <div className="text-gray-600">{c.normalize ? "yes" : "no"}</div>
-                  <div className="text-xs text-gray-400">{formatDate(c.created_at)}</div>
-                  <div>
-                    <button
-                      onClick={() => handleDeleteConfig(c.id)}
-                      className="text-gray-400 hover:text-red-600 transition-colors"
-                      title="Delete config"
-                    >
-                      ✕
+                ))}
+                {configs.length === 0 && (
+                  <div className="rounded-lg border bg-white px-4 py-8 text-center text-sm text-gray-400 shadow-sm">
+                    {t("configsTab.noConfigs")}{" "}
+                    <button onClick={() => setShowConfigForm(true)} className="text-blue-600 underline">
+                      ↑
                     </button>
                   </div>
+                )}
+              </div>
+
+              {/* Desktop table */}
+              <div className="hidden lg:block overflow-x-auto rounded-lg border bg-white shadow-sm">
+                <div className="grid grid-cols-[1fr_140px_80px_100px_80px_80px_60px_160px_60px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  <div>{t("configsTab.tableHeaders.description")}</div>
+                  <div>{t("configsTab.tableHeaders.model")}</div>
+                  <div>{t("configsTab.tableHeaders.backend")}</div>
+                  <div>{t("configsTab.tableHeaders.layers")}</div>
+                  <div>{t("configsTab.tableHeaders.agg")}</div>
+                  <div>{t("configsTab.tableHeaders.pool")}</div>
+                  <div>{t("configsTab.tableHeaders.norm")}</div>
+                  <div>{t("configsTab.tableHeaders.created")}</div>
+                  <div></div>
                 </div>
-              ))}
-              {configs.length === 0 && (
-                <div className="px-4 py-8 text-center text-sm text-gray-400">
-                  {t("configsTab.noConfigs")}{" "}
-                  <button onClick={() => setShowConfigForm(true)} className="text-blue-600 underline">
-                    ↑
-                  </button>
-                </div>
-              )}
-            </div>
+                {configs.map((c) => (
+                  <div
+                    key={c.id}
+                    className="grid grid-cols-[1fr_140px_80px_100px_80px_80px_60px_160px_60px] gap-2 border-b px-4 py-3 text-sm last:border-0 items-center"
+                  >
+                    <div className="text-gray-700 truncate" title={c.description ?? c.model_name}>
+                      {c.description || <span className="text-gray-400 italic">—</span>}
+                    </div>
+                    <div className="font-mono text-xs text-gray-500 truncate" title={c.model_name}>{c.model_name}</div>
+                    <div className="text-gray-600">{c.model_backend}</div>
+                    <div className="font-mono text-xs text-gray-500">[{c.layer_indices.join(", ")}]</div>
+                    <div className="text-gray-600">{c.layer_agg}</div>
+                    <div className="text-gray-600">{c.pooling}</div>
+                    <div className="text-gray-600">{c.normalize ? "yes" : "no"}</div>
+                    <div className="text-xs text-gray-400">{formatDate(c.created_at)}</div>
+                    <div>
+                      <button
+                        onClick={() => handleDeleteConfig(c.id)}
+                        className="text-gray-400 hover:text-red-600 transition-colors"
+                        title="Delete config"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {configs.length === 0 && (
+                  <div className="px-4 py-8 text-center text-sm text-gray-400">
+                    {t("configsTab.noConfigs")}{" "}
+                    <button onClick={() => setShowConfigForm(true)} className="text-blue-600 underline">
+                      ↑
+                    </button>
+                  </div>
+                )}
+              </div>
+            </>
           )}
         </div>
       )}
@@ -572,7 +625,7 @@ export default function EmbeddingsPage() {
                   </select>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className={labelClass}>
                       {t("computeTab.queueBatchSizeLabel")}{" "}

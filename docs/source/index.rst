@@ -41,8 +41,17 @@ metadata enrichment, and job orchestration.
       :shadow: md
       :text-align: left
 
-      Built-in operations: insert_proteins, fetch_uniprot_metadata, ping. :bdg-success:`UniProt`
+      16 registered operations: ingestion, embedding, prediction, evaluation, re-ranking. :bdg-success:`UniProt`
       See :doc:`architecture/operations`.
+
+   .. grid-item-card:: Results
+      :link: results
+      :link-type: doc
+      :shadow: md
+      :text-align: left
+
+      Benchmark, ablation studies, and data leakage analysis. :bdg-danger:`Evaluation`
+      See :doc:`results`.
 
    .. grid-item-card:: API Reference
       :link: reference/index
@@ -78,9 +87,10 @@ metadata enrichment, and job orchestration.
 .. admonition:: What is PROTEA?
    :class: tip
 
-   A job-orchestration platform for protein data pipelines: clean separation of
-   infrastructure, execution flow, and domain logic — designed for incremental
-   migration and horizontal scalability.
+   A platform for protein functional annotation: from sequence ingestion through
+   GPU embedding computation (ESM-2, ESM3c, T5) and KNN-based GO term prediction
+   to CAFA evaluation and LightGBM re-ranking — with clean separation of
+   infrastructure, execution flow, and domain logic.
 
 .. toctree::
    :caption: Documentation
@@ -89,6 +99,7 @@ metadata enrichment, and job orchestration.
    abstract
    introduction
    architecture/index
+   results
    appendix/index
 
 .. toctree::

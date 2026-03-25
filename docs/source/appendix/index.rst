@@ -7,3 +7,4 @@ Appendix
    installation_and_quickstart
    configuration
    howto_guides
+   runbook

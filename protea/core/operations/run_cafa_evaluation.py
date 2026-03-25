@@ -21,6 +21,9 @@ from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
+from protea.infrastructure.orm.models.embedding.reranker_model import (
+    RerankerModel as RerankerModelORM,
+)
 from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
 
 # Namespace labels used by cafaeval OBO parser
@@ -38,6 +41,17 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
     max_distance: float | None = Field(default=None, ge=0.0, le=2.0)
     artifacts_dir: str | None = Field(default=None)
     scoring_config_id: str | None = Field(default=None)
+    reranker_id_nk: str | None = Field(default=None)
+    reranker_id_lk: str | None = Field(default=None)
+    reranker_id_pk: str | None = Field(default=None)
+    rerankers: dict[str, dict[str, str]] | None = Field(
+        default=None,
+        description=(
+            "Nested mapping of category → aspect → reranker_model_id. "
+            "E.g. {\"nk\": {\"bpo\": \"uuid\", \"mfo\": \"uuid\"}, \"lk\": {...}}. "
+            "Overrides the flat reranker_id_* fields when present."
+        ),
+    )
     ia_file: str | None = Field(
         default=None,
         description=(
@@ -148,6 +162,46 @@ class RunCafaEvaluationOperation:
                 weights=dict(sc.weights),
             )
 
+        # Load per-category (and optionally per-aspect) reranker models before session commit.
+        # reranker_models: setting → aspect → model_data  (aspect="" means single model for all aspects)
+        reranker_models: dict[str, dict[str, str]] = {}
+        reranker_config_snapshot: dict[str, dict[str, str]] | None = None  # for persisting in EvaluationResult
+
+        if p.rerankers:
+            # New nested mapping: {"nk": {"bpo": "uuid", "mfo": "uuid", ...}, ...}
+            reranker_config_snapshot = {}
+            _aspect_map = {"bpo": "P", "mfo": "F", "cco": "C"}
+            for cat_key, aspect_map in p.rerankers.items():
+                setting = cat_key.upper()
+                reranker_models[setting] = {}
+                reranker_config_snapshot[cat_key] = {}
+                for aspect_key, rid_str in aspect_map.items():
+                    rid = uuid.UUID(rid_str)
+                    rm = session.get(RerankerModelORM, rid)
+                    if rm is None:
+                        raise ValueError(f"RerankerModel {rid_str} not found")
+                    aspect_char = _aspect_map.get(aspect_key, aspect_key)
+                    reranker_models[setting][aspect_char] = rm.model_data
+                    reranker_config_snapshot[cat_key][aspect_key] = rid_str
+                    emit("run_cafa_evaluation.reranker_loaded", None, {
+                        "setting": setting, "aspect": aspect_key,
+                        "reranker_id": str(rid), "name": rm.name,
+                    }, "info")
+        else:
+            # Legacy flat fields: one model per category (all aspects)
+            for setting, field in [("NK", p.reranker_id_nk), ("LK", p.reranker_id_lk), ("PK", p.reranker_id_pk)]:
+                if field:
+                    rid = uuid.UUID(field)
+                    rm = session.get(RerankerModelORM, rid)
+                    if rm is None:
+                        raise ValueError(f"RerankerModel {field} not found")
+                    reranker_models[setting] = {"": rm.model_data}  # "" = all aspects
+                    emit(
+                        "run_cafa_evaluation.reranker_loaded", None,
+                        {"setting": setting, "reranker_id": str(rid), "name": rm.name},
+                        "info",
+                    )
+
         # Pre-generate result_id so the artifact directory name matches the DB row.
         result_id = uuid.uuid4()
 
@@ -201,27 +255,25 @@ class RunCafaEvaluationOperation:
             self._write_gt(data.known, known_path)
             self._write_gt(data.pk_known, pk_known_path)
 
-            # Write predictions (CAFA format) filtered to delta proteins
-            pred_dir = os.path.join(gt_dir, "predictions")
-            os.makedirs(pred_dir, exist_ok=True)
-            pred_path = os.path.join(pred_dir, "predictions.tsv")
             delta_proteins = set(data.nk) | set(data.lk) | set(data.pk)
             emit(
                 "run_cafa_evaluation.writing_predictions",
                 None,
-                {
-                    "delta_proteins": len(delta_proteins),
-                },
+                {"delta_proteins": len(delta_proteins)},
                 "info",
             )
-            self._write_predictions(
-                session,
-                pred_set_id,
-                delta_proteins,
-                p.max_distance,
-                pred_path,
-                scoring_config_snapshot,
-            )
+
+            # If any reranker is set, write per-setting prediction files;
+            # otherwise write a single shared file.
+            has_rerankers = bool(reranker_models)
+            if not has_rerankers:
+                pred_dir = os.path.join(gt_dir, "predictions")
+                os.makedirs(pred_dir, exist_ok=True)
+                pred_path = os.path.join(pred_dir, "predictions.tsv")
+                self._write_predictions(
+                    session, pred_set_id, delta_proteins, p.max_distance,
+                    pred_path, scoring_config_snapshot,
+                )
 
             # No-op commit: releases the DB connection back to the pool before
             # cafaeval forks worker processes via multiprocessing.Pool.  Forked
@@ -237,6 +289,25 @@ class RunCafaEvaluationOperation:
                 ("LK", lk_path, None),
                 ("PK", pk_path, pk_known_path),
             ]:
+                # Write per-setting predictions if this setting has a reranker
+                if has_rerankers:
+                    pred_dir = os.path.join(gt_dir, f"predictions_{setting}")
+                    os.makedirs(pred_dir, exist_ok=True)
+                    pred_path = os.path.join(pred_dir, "predictions.tsv")
+                    rr_aspect_map = reranker_models.get(setting, {})
+                    if "" in rr_aspect_map:
+                        # Single model for all aspects (legacy flat field)
+                        self._write_predictions(
+                            session, pred_set_id, delta_proteins, p.max_distance,
+                            pred_path, scoring_config_snapshot,
+                            reranker_model_str=rr_aspect_map[""],
+                        )
+                    else:
+                        # Per-aspect models
+                        self._write_predictions_per_aspect(
+                            session, pred_set_id, delta_proteins, p.max_distance,
+                            pred_path, rr_aspect_map,
+                        )
                 emit("run_cafa_evaluation.evaluating", None, {"setting": setting}, "info")
                 try:
                     # Reset SIGTERM/SIGINT to defaults before cafaeval forks pool
@@ -292,11 +363,31 @@ class RunCafaEvaluationOperation:
                     results[setting] = {}
 
         # ── 3. Persist EvaluationResult ───────────────────────────────────────
+        # For backwards compat, pick a single representative reranker_model_id
+        first_reranker_id: uuid.UUID | None = None
+        if reranker_config_snapshot:
+            for _cat_map in reranker_config_snapshot.values():
+                for _rid_str in _cat_map.values():
+                    first_reranker_id = uuid.UUID(_rid_str)
+                    break
+                if first_reranker_id:
+                    break
+        elif reranker_models:
+            # Flat per-category fields: build config snapshot and pick first ID
+            reranker_config_snapshot = {}
+            for setting, field in [("nk", p.reranker_id_nk), ("lk", p.reranker_id_lk), ("pk", p.reranker_id_pk)]:
+                if field:
+                    reranker_config_snapshot[setting] = {"all": field}
+                    if first_reranker_id is None:
+                        first_reranker_id = uuid.UUID(field)
+
         eval_result = EvaluationResult(
             id=result_id,
             evaluation_set_id=eval_set_id,
             prediction_set_id=pred_set_id,
             scoring_config_id=uuid.UUID(p.scoring_config_id) if p.scoring_config_id else None,
+            reranker_model_id=first_reranker_id,
+            reranker_config=reranker_config_snapshot,
             results=results,
         )
         session.add(eval_result)
@@ -387,13 +478,22 @@ class RunCafaEvaluationOperation:
         max_distance: float | None,
         path: str,
         scoring_config: ScoringConfig | None = None,
+        reranker_model_str: str | None = None,
     ) -> None:
         """Write CAFA-format predictions (protein\\tgo_id\\tscore) for delta proteins.
 
-        If a ScoringConfig is provided, scores are computed via compute_score()
-        using all available signals (embedding similarity, evidence, alignment,
-        taxonomy).  Otherwise falls back to ``1 - cosine_distance / 2``.
+        Scoring priority:
+          1. If ``reranker_model_str`` is provided, apply the LightGBM model to
+             all predictions and use re-ranker probabilities as scores.
+          2. If a ``ScoringConfig`` is provided, compute scores via ``compute_score()``.
+          3. Otherwise fall back to ``1 - cosine_distance / 2``.
         """
+        if reranker_model_str is not None:
+            self._write_predictions_reranked(
+                session, pred_set_id, delta_proteins, max_distance, path, reranker_model_str,
+            )
+            return
+
         q = (
             session.query(GOPrediction, GOTerm)
             .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
@@ -423,6 +523,177 @@ class RunCafaEvaluationOperation:
                 else:
                     score = max(0.0, 1.0 - (pred.distance or 0.0) / 2.0)
                 f.write(f"{pred.protein_accession}\t{gt.go_id}\t{score:.4f}\n")
+
+    def _write_predictions_reranked(
+        self,
+        session: Session,
+        pred_set_id: uuid.UUID,
+        delta_proteins: set[str],
+        max_distance: float | None,
+        path: str,
+        reranker_model_str: str,
+    ) -> None:
+        """Write CAFA-format predictions using LightGBM re-ranker scores."""
+        import pandas as pd
+
+        from protea.core.reranker import model_from_string
+        from protea.core.reranker import predict as reranker_predict
+
+        q = (
+            session.query(GOPrediction, GOTerm.go_id)
+            .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
+            .filter(GOPrediction.prediction_set_id == pred_set_id)
+            .filter(GOPrediction.protein_accession.in_(delta_proteins))
+        )
+        if max_distance is not None:
+            q = q.filter(GOPrediction.distance <= max_distance)
+
+        records: list[dict[str, Any]] = []
+        for pred, go_id in q.yield_per(5000):
+            records.append({
+                "protein_accession": pred.protein_accession,
+                "go_id": go_id,
+                "distance": pred.distance,
+                "qualifier": pred.qualifier or "",
+                "evidence_code": pred.evidence_code or "",
+                "identity_nw": pred.identity_nw,
+                "similarity_nw": pred.similarity_nw,
+                "alignment_score_nw": pred.alignment_score_nw,
+                "gaps_pct_nw": pred.gaps_pct_nw,
+                "alignment_length_nw": pred.alignment_length_nw,
+                "identity_sw": pred.identity_sw,
+                "similarity_sw": pred.similarity_sw,
+                "alignment_score_sw": pred.alignment_score_sw,
+                "gaps_pct_sw": pred.gaps_pct_sw,
+                "alignment_length_sw": pred.alignment_length_sw,
+                "length_query": pred.length_query,
+                "length_ref": pred.length_ref,
+                "query_taxonomy_id": pred.query_taxonomy_id,
+                "ref_taxonomy_id": pred.ref_taxonomy_id,
+                "taxonomic_lca": pred.taxonomic_lca,
+                "taxonomic_distance": pred.taxonomic_distance,
+                "taxonomic_common_ancestors": pred.taxonomic_common_ancestors,
+                "taxonomic_relation": pred.taxonomic_relation or "",
+                "vote_count": pred.vote_count,
+                "k_position": pred.k_position,
+                "go_term_frequency": pred.go_term_frequency,
+                "ref_annotation_density": pred.ref_annotation_density,
+                "neighbor_distance_std": pred.neighbor_distance_std,
+            })
+
+        if not records:
+            with open(path, "w") as f:
+                pass
+            return
+
+        df = pd.DataFrame(records)
+        model = model_from_string(reranker_model_str)
+        scores = reranker_predict(model, df)
+
+        # Deduplicate: keep highest score per (protein, go_id)
+        df["score"] = scores
+        df = df.sort_values("score", ascending=False).drop_duplicates(
+            subset=["protein_accession", "go_id"], keep="first",
+        )
+
+        with open(path, "w") as f:
+            for _, row in df.iterrows():
+                f.write(f"{row['protein_accession']}\t{row['go_id']}\t{row['score']:.4f}\n")
+
+    def _write_predictions_per_aspect(
+        self,
+        session: Session,
+        pred_set_id: uuid.UUID,
+        delta_proteins: set[str],
+        max_distance: float | None,
+        path: str,
+        aspect_models: dict[str, str],
+    ) -> None:
+        """Write CAFA-format predictions applying per-aspect LightGBM models.
+
+        ``aspect_models`` maps GO aspect char (P/F/C) to model_data strings.
+        Predictions whose aspect has no model fall back to ``1 - distance/2``.
+        """
+        import pandas as pd
+
+        from protea.core.reranker import model_from_string
+        from protea.core.reranker import predict as reranker_predict
+
+        q = (
+            session.query(GOPrediction, GOTerm.go_id, GOTerm.aspect)
+            .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
+            .filter(GOPrediction.prediction_set_id == pred_set_id)
+            .filter(GOPrediction.protein_accession.in_(delta_proteins))
+        )
+        if max_distance is not None:
+            q = q.filter(GOPrediction.distance <= max_distance)
+
+        records: list[dict[str, Any]] = []
+        for pred, go_id, aspect in q.yield_per(5000):
+            records.append({
+                "protein_accession": pred.protein_accession,
+                "go_id": go_id,
+                "aspect": aspect or "",
+                "distance": pred.distance,
+                "qualifier": pred.qualifier or "",
+                "evidence_code": pred.evidence_code or "",
+                "identity_nw": pred.identity_nw,
+                "similarity_nw": pred.similarity_nw,
+                "alignment_score_nw": pred.alignment_score_nw,
+                "gaps_pct_nw": pred.gaps_pct_nw,
+                "alignment_length_nw": pred.alignment_length_nw,
+                "identity_sw": pred.identity_sw,
+                "similarity_sw": pred.similarity_sw,
+                "alignment_score_sw": pred.alignment_score_sw,
+                "gaps_pct_sw": pred.gaps_pct_sw,
+                "alignment_length_sw": pred.alignment_length_sw,
+                "length_query": pred.length_query,
+                "length_ref": pred.length_ref,
+                "query_taxonomy_id": pred.query_taxonomy_id,
+                "ref_taxonomy_id": pred.ref_taxonomy_id,
+                "taxonomic_lca": pred.taxonomic_lca,
+                "taxonomic_distance": pred.taxonomic_distance,
+                "taxonomic_common_ancestors": pred.taxonomic_common_ancestors,
+                "taxonomic_relation": pred.taxonomic_relation or "",
+                "vote_count": pred.vote_count,
+                "k_position": pred.k_position,
+                "go_term_frequency": pred.go_term_frequency,
+                "ref_annotation_density": pred.ref_annotation_density,
+                "neighbor_distance_std": pred.neighbor_distance_std,
+            })
+
+        if not records:
+            with open(path, "w") as f:
+                pass
+            return
+
+        df = pd.DataFrame(records)
+
+        # Score each aspect group with its corresponding model
+        df["score"] = 0.0
+        for aspect_char, model_str in aspect_models.items():
+            mask = df["aspect"] == aspect_char
+            if not mask.any():
+                continue
+            model = model_from_string(model_str)
+            df.loc[mask, "score"] = reranker_predict(model, df.loc[mask])
+
+        # Fallback for aspects without a model
+        modeled_aspects = set(aspect_models.keys())
+        fallback_mask = ~df["aspect"].isin(modeled_aspects)
+        if fallback_mask.any():
+            df.loc[fallback_mask, "score"] = df.loc[fallback_mask, "distance"].apply(
+                lambda d: max(0.0, 1.0 - (d or 0.0) / 2.0)
+            )
+
+        # Deduplicate: keep highest score per (protein, go_id)
+        df = df.sort_values("score", ascending=False).drop_duplicates(
+            subset=["protein_accession", "go_id"], keep="first",
+        )
+
+        with open(path, "w") as f:
+            for _, row in df.iterrows():
+                f.write(f"{row['protein_accession']}\t{row['go_id']}\t{row['score']:.4f}\n")
 
     def _parse_results(self, dfs_best: dict) -> dict[str, Any]:
         """Extract per-namespace Fmax metrics from cafaeval dfs_best."""

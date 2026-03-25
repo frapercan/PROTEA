@@ -8,6 +8,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { EventTimeline } from "@/components/EventTimeline";
 import { useToast } from "@/components/Toast";
 import { useTranslations } from "next-intl";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 
 const TERMINAL = ["succeeded", "failed", "cancelled"];
 
@@ -140,8 +141,8 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
   return (
     <div>
       {/* Header */}
+      <Breadcrumbs />
       <div className="flex flex-wrap items-center gap-3">
-        <Link href="/jobs" className="text-sm text-gray-500 hover:text-gray-800">{t("jobDetail.backToJobs")}</Link>
         <h1 className="text-xl font-semibold">{t("jobDetail.title")}</h1>
         {isLive && (
           <span className="flex items-center gap-1 text-xs text-blue-600">

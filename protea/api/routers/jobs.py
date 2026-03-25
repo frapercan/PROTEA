@@ -7,8 +7,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session, sessionmaker
-from starlette.requests import Request
 
+from protea.api.deps import get_amqp_url, get_session_factory
+from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
 from protea.infrastructure.queue.publisher import publish_job
 from protea.infrastructure.session import session_scope
@@ -36,23 +37,6 @@ class CreateJobRequest(BaseModel):
         if not isinstance(v, str) or not v.strip():
             raise ValueError("must be a non-empty string")
         return v.strip()
-
-
-# --- Dependency hook (wire this in your app factory) ---
-
-
-def get_session_factory(request: Request) -> sessionmaker[Session]:
-    factory = getattr(request.app.state, "session_factory", None)
-    if factory is None:
-        raise RuntimeError("app.state.session_factory is not set")
-    return factory  # type: ignore[no-any-return]
-
-
-def get_amqp_url(request: Request) -> str:
-    url = getattr(request.app.state, "amqp_url", None)
-    if url is None:
-        raise RuntimeError("app.state.amqp_url is not set")
-    return url  # type: ignore[no-any-return]
 
 
 @router.post("", summary="Create and enqueue a job")
@@ -228,10 +212,12 @@ def cancel_job(
     job_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
-    """Mark a job (and any queued child jobs) as CANCELLED.
+    """Mark a job (and any non-terminal child jobs) as CANCELLED.
 
     Already-finished jobs (SUCCEEDED/FAILED) are returned as-is with no state change.
-    Note: workers processing a batch mid-flight will complete their current message before stopping.
+    Children in QUEUED are cancelled immediately.  Children in RUNNING are also
+    marked CANCELLED — the worker's parent-check in BaseWorker.handle_job() will
+    detect the cancelled parent on the next iteration and stop gracefully.
     """
     with session_scope(factory) as session:
         j = session.get(Job, job_id)
@@ -242,16 +228,21 @@ def cancel_job(
             return {"id": str(j.id), "status": j.status.value}
 
         j.status = JobStatus.CANCELLED
+        j.finished_at = utcnow()
         session.add(JobEvent(job_id=job_id, event="job.cancelled", fields={}))
 
-        # Cancel any queued children so they are not picked up by a worker.
+        # Cancel all non-terminal children (QUEUED and RUNNING).
         children = (
             session.query(Job)
-            .filter(Job.parent_job_id == job_id, Job.status == JobStatus.QUEUED)
+            .filter(
+                Job.parent_job_id == job_id,
+                Job.status.in_((JobStatus.QUEUED, JobStatus.RUNNING)),
+            )
             .all()
         )
         for child in children:
             child.status = JobStatus.CANCELLED
+            child.finished_at = utcnow()
             session.add(
                 JobEvent(
                     job_id=child.id,
