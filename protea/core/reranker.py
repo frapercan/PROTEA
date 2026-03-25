@@ -215,11 +215,11 @@ def train(
         num_boost_round=num_boost_round,
         valid_sets=[val_ds],
         valid_names=["val"],
-        callbacks=callbacks,
+        callbacks=callbacks,  # type: ignore[arg-type]
     )
 
     # Collect validation metrics
-    val_preds = booster.predict(X.iloc[val_idx])
+    val_preds = np.asarray(booster.predict(X.iloc[val_idx]))
     val_labels = y.iloc[val_idx].values
 
     tp = np.sum((val_preds >= 0.5) & (val_labels == 1))
@@ -269,7 +269,7 @@ def predict(model: lgb.Booster, df: pd.DataFrame) -> np.ndarray:
             if col in X.columns:
                 X[col] = X[col].replace("", pd.NA).astype("category")
 
-    return model.predict(X)
+    return np.asarray(model.predict(X))
 
 
 # ---------------------------------------------------------------------------

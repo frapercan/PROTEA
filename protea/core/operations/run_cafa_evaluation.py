@@ -196,7 +196,11 @@ class RunCafaEvaluationOperation:
                     if rm is None:
                         raise ValueError(f"RerankerModel {field} not found")
                     reranker_models[setting] = {"": rm.model_data}  # "" = all aspects
-                    emit("run_cafa_evaluation.reranker_loaded", None, {"setting": setting, "reranker_id": str(rid), "name": rm.name}, "info")
+                    emit(
+                        "run_cafa_evaluation.reranker_loaded", None,
+                        {"setting": setting, "reranker_id": str(rid), "name": rm.name},
+                        "info",
+                    )
 
         # Pre-generate result_id so the artifact directory name matches the DB row.
         result_id = uuid.uuid4()

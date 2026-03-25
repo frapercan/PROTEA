@@ -1170,7 +1170,11 @@ class TrainRerankerAutoOperation:
                 # 3c. Load query embeddings from preloaded cache
                 query_accs = [a for a in all_query_accessions if a in acc_to_idx]
                 query_indices = np.array([acc_to_idx[a] for a in query_accs], dtype=np.int32)
-                query_emb = all_embeddings[query_indices].astype(np.float32) if len(query_indices) > 0 else np.empty((0, all_embeddings.shape[1]), dtype=np.float32)
+                query_emb = (
+                    all_embeddings[query_indices].astype(np.float32)
+                    if len(query_indices) > 0
+                    else np.empty((0, all_embeddings.shape[1]), dtype=np.float32)
+                )
                 valid_queries = query_accs
 
                 if not valid_queries:
@@ -1293,7 +1297,11 @@ class TrainRerankerAutoOperation:
                 )
                 test_accs = [a for a in test_all_queries if a in acc_to_idx]
                 test_indices = np.array([acc_to_idx[a] for a in test_accs], dtype=np.int32)
-                test_emb = all_embeddings[test_indices].astype(np.float32) if len(test_indices) > 0 else np.empty((0, all_embeddings.shape[1]), dtype=np.float32)
+                test_emb = (
+                    all_embeddings[test_indices].astype(np.float32)
+                    if len(test_indices) > 0
+                    else np.empty((0, all_embeddings.shape[1]), dtype=np.float32)
+                )
                 test_valid = test_accs
                 if test_valid:
                     # Load sequences / taxonomy for test split
