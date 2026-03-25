@@ -271,8 +271,8 @@ class TestOperationConsumerEmit:
     """Verify that OperationConsumer's emit writes JobEvent rows to the parent job."""
 
     def test_emit_writes_job_event_on_parent(self):
-        from protea.infrastructure.queue.consumer import OperationConsumer
         from protea.core.contracts.operation import OperationResult
+        from protea.infrastructure.queue.consumer import OperationConsumer
 
         parent_job_id = uuid4()
 
@@ -370,8 +370,8 @@ class TestOperationConsumerOnMessage:
     """Cover uncovered lines in OperationConsumer._on_message."""
 
     def _make_consumer(self, op=None, raises=None, requeue_on_failure=False):
-        from protea.infrastructure.queue.consumer import OperationConsumer
         from protea.core.contracts.operation import OperationResult
+        from protea.infrastructure.queue.consumer import OperationConsumer
 
         if op is None:
             op = MagicMock()
@@ -447,7 +447,7 @@ class TestOperationConsumerOnMessage:
         channel = MagicMock()
         method = _make_method(30)
 
-        with patch("protea.infrastructure.queue.consumer.torch", create=True) as mock_torch:
+        with patch("protea.infrastructure.queue.consumer.torch", create=True):
             # Import torch inside the handler — we patch at module level
             import sys
             mock_module = MagicMock()
@@ -543,7 +543,6 @@ class TestOperationConsumerOnMessage:
         from protea.core.contracts.operation import OperationResult
 
         parent_id = uuid4()
-        call_count = [0]
 
         def _execute(session, payload, *, emit):
             emit("progress", "msg", {}, "info")

@@ -8,8 +8,7 @@ import gzip
 import os
 import tempfile
 import uuid
-from types import SimpleNamespace
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
@@ -17,10 +16,10 @@ from pydantic import ValidationError
 
 from protea.core.evaluation import EvaluationData
 from protea.core.operations.run_cafa_evaluation import (
-    RunCafaEvaluationOperation,
-    RunCafaEvaluationPayload,
     _NS_LABELS,
     _NS_SHORT,
+    RunCafaEvaluationOperation,
+    RunCafaEvaluationPayload,
 )
 
 # ---------------------------------------------------------------------------

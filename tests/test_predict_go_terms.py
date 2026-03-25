@@ -8,20 +8,19 @@ import pytest
 
 from protea.core.knn_search import _compute_distance_matrix, search_knn
 from protea.core.operations.predict_go_terms import (
-    PredictGOTermsOperation,
-    PredictGOTermsPayload,
     PredictGOTermsBatchOperation,
     PredictGOTermsBatchPayload,
+    PredictGOTermsOperation,
+    PredictGOTermsPayload,
     StorePredictionsOperation,
-    StorePredictionsPayload,
+    _aspect_index_path,
     _build_anno_csr,
     _csr_lookup,
     _disk_cache_paths,
-    _aspect_index_path,
 )
-from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
+from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.job import JobStatus
 
 _noop_emit = lambda *_: None  # noqa: E731
@@ -201,7 +200,7 @@ class TestSearchKnn:
         numpy_res = search_knn(Q, R, accs, k=3, backend="numpy", metric="cosine")
         faiss_res = search_knn(Q, R, accs, k=3, backend="faiss",
                                metric="cosine", faiss_index_type="Flat")
-        for np_hits, fa_hits in zip(numpy_res, faiss_res):
+        for np_hits, fa_hits in zip(numpy_res, faiss_res, strict=False):
             np_accs = [a for a, _ in np_hits]
             fa_accs = [a for a, _ in fa_hits]
             assert np_accs == fa_accs
@@ -580,7 +579,7 @@ class TestStorePredictions:
         def capture_emit(event, msg, fields, level):
             events.append(event)
 
-        result = op.execute(session, payload, emit=capture_emit)
+        op.execute(session, payload, emit=capture_emit)
         assert "store_predictions.parent_succeeded" in events
 
     def test_name(self) -> None:

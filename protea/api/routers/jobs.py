@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.deps import get_amqp_url, get_session_factory
 from protea.core.utils import utcnow
-
 from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
 from protea.infrastructure.queue.publisher import publish_job
 from protea.infrastructure.session import session_scope

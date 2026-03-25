@@ -1,16 +1,15 @@
 """Tests for protea.core.scoring and related evidence weight resolution."""
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 from protea.core.scoring import compute_score, evidence_weight, score_predictions
 from protea.infrastructure.orm.models.embedding.scoring_config import (
     DEFAULT_EVIDENCE_WEIGHT_FALLBACK,
-    DEFAULT_EVIDENCE_WEIGHTS,
     FORMULA_EVIDENCE_WEIGHTED,
     FORMULA_LINEAR,
     ScoringConfig,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

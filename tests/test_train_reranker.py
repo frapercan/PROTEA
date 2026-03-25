@@ -20,7 +20,8 @@ from protea.core.operations.train_reranker import (
 )
 
 
-_noop_emit = lambda *a, **kw: None
+def _noop_emit(*a, **kw):
+    return None
 
 
 # ---------------------------------------------------------------------------

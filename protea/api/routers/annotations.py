@@ -13,6 +13,8 @@ from pydantic import ValidationError
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+
+from protea.api.deps import get_amqp_url, get_artifacts_dir, get_session_factory
 from protea.core.evaluation import compute_evaluation_data
 from protea.core.operations.generate_evaluation_set import GenerateEvaluationSetPayload
 from protea.core.operations.load_goa_annotations import LoadGOAAnnotationsPayload
@@ -30,7 +32,6 @@ from protea.infrastructure.orm.models.job import Job, JobEvent
 from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
 from protea.infrastructure.queue.publisher import publish_job
-from protea.api.deps import get_amqp_url, get_artifacts_dir, get_session_factory
 from protea.infrastructure.session import session_scope
 
 router = APIRouter(prefix="/annotations", tags=["annotations"])

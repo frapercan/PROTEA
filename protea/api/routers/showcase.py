@@ -7,6 +7,8 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
+
+from protea.api.deps import get_session_factory
 from protea.infrastructure.orm.models.annotation.evaluation_result import EvaluationResult
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
@@ -14,7 +16,6 @@ from protea.infrastructure.orm.models.embedding.reranker_model import RerankerMo
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
-from protea.api.deps import get_session_factory
 from protea.infrastructure.session import session_scope
 
 router = APIRouter(prefix="/showcase", tags=["showcase"])

@@ -3,9 +3,6 @@ from __future__ import annotations
 
 import json
 import logging
-from unittest.mock import patch
-
-import pytest
 
 from protea.infrastructure.logging import JSONFormatter, configure_logging
 

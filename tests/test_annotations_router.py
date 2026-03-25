@@ -16,7 +16,6 @@ from sqlalchemy.exc import IntegrityError
 
 from protea.api.routers.annotations import router
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -638,8 +637,8 @@ class TestDownloadGroundTruthNK:
         ann_old = _make_annotation_set(snap_id=uuid4())
 
         def get_side(model, id_):
-            from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
             from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
+            from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
             if model is EvaluationSet:
                 return ev
             if model is AnnotationSet:
@@ -671,8 +670,8 @@ class TestDownloadGroundTruthLK:
         ann_old = _make_annotation_set(snap_id=uuid4())
 
         def get_side(model, id_):
-            from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
             from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
+            from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
             if model is EvaluationSet:
                 return ev
             if model is AnnotationSet:
@@ -696,8 +695,8 @@ class TestDownloadGroundTruthPK:
         ann_old = _make_annotation_set(snap_id=uuid4())
 
         def get_side(model, id_):
-            from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
             from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
+            from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
             if model is EvaluationSet:
                 return ev
             if model is AnnotationSet:
@@ -719,8 +718,8 @@ class TestDownloadKnownTerms:
         ann_old = _make_annotation_set(snap_id=uuid4())
 
         def get_side(model, id_):
-            from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
             from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
+            from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
             if model is EvaluationSet:
                 return ev
             if model is AnnotationSet:
@@ -744,8 +743,8 @@ class TestDownloadKnownTerms:
 class TestDownloadDeltaFasta:
     def _setup_session(self, session, ev, ann_old, fake_data, protein_rows=None):
         def get_side(model, id_):
-            from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
             from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
+            from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
             if model is EvaluationSet:
                 return ev
             if model is AnnotationSet:
@@ -1012,7 +1011,8 @@ class TestDownloadEvaluationArtifacts:
         assert len(resp.content) > 0
 
         # Verify it's a valid zip
-        import io, zipfile
+        import io
+        import zipfile
         with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
             names = zf.namelist()
             assert "pr_curve.tsv" in names

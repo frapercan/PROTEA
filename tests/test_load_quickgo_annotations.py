@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io as _io
 import uuid
 from unittest.mock import MagicMock, patch
 
@@ -213,7 +214,8 @@ class TestLoadAccessions:
             iter({"P12345", "P12345-2", "Q99999"}),
         ]
         events: list[str] = []
-        emit = lambda event, msg, fields, level: events.append(event)
+        def emit(event, msg, fields, level):
+            return events.append(event)
 
         canon, prots = op._load_accessions(session, emit)
         assert canon == {"P12345", "Q99999"}
@@ -226,7 +228,8 @@ class TestLoadAccessions:
         session = MagicMock()
         session.scalars.side_effect = [iter({"A", "B"}), iter({"A", "B", "C"})]
         fields_log: list[dict] = []
-        emit = lambda event, msg, fields, level: fields_log.append(fields)
+        def emit(event, msg, fields, level):
+            return fields_log.append(fields)
 
         op._load_accessions(session, emit)
         done_fields = fields_log[-1]
@@ -250,7 +253,8 @@ class TestLoadGoTermMap:
         session.query.return_value = query_mock
 
         events: list[str] = []
-        emit = lambda event, msg, fields, level: events.append(event)
+        def emit(event, msg, fields, level):
+            return events.append(event)
 
         result = op._load_go_term_map(session, sid, emit)
         assert result == {"GO:0005634": 1, "GO:0008150": 2}
@@ -326,7 +330,8 @@ class TestLoadEcoMapping:
             "eco_mapping_url": "https://eco.test/map.txt",
         })
         events: list[str] = []
-        emit = lambda event, msg, fields, level: events.append(event)
+        def emit(event, msg, fields, level):
+            return events.append(event)
         op._load_eco_mapping(p, emit)
         assert "load_quickgo_annotations.eco_mapping_start" in events
         assert "load_quickgo_annotations.eco_mapping_done" in events
@@ -351,8 +356,6 @@ class TestLoadEcoMapping:
 # ---------------------------------------------------------------------------
 # _fetch_quickgo_page — TSV stream parsing
 # ---------------------------------------------------------------------------
-
-import io as _io
 
 QUICKGO_HEADER_LINE = (
     "GENE PRODUCT ID\tGO TERM\tQUALIFIER\tECO ID\tREFERENCE\tWITH/FROM\tASSIGNED BY\tDATE"
@@ -473,7 +476,8 @@ class TestFetchQuickgoPage:
     def test_emits_download_start_with_progress(self, mock_get) -> None:
         mock_get.return_value = _make_stream_response(_make_tsv_text())
         events: list[tuple[str, dict]] = []
-        emit = lambda event, msg, fields, level: events.append((event, fields))
+        def emit(event, msg, fields, level):
+            return events.append((event, fields))
 
         op = LoadQuickGOAnnotationsOperation()
         list(
@@ -533,7 +537,8 @@ class TestStreamQuickgo:
         mock_get.side_effect = lambda *a, **kw: _make_stream_response(_make_tsv_text())
 
         events: list[tuple[str, dict]] = []
-        emit = lambda event, msg, fields, level: events.append((event, fields))
+        def emit(event, msg, fields, level):
+            return events.append((event, fields))
 
         op = LoadQuickGOAnnotationsOperation()
         p = self._payload(gene_product_batch_size=2)
@@ -616,7 +621,8 @@ class TestExecute:
         session.scalars.side_effect = [iter(set()), iter(set())]
         op = LoadQuickGOAnnotationsOperation()
         events: list[str] = []
-        emit = lambda event, msg, fields, level: events.append(event)
+        def emit(event, msg, fields, level):
+            return events.append(event)
         result = op.execute(session, _base_payload(), emit=emit)
         assert result.result["annotations_inserted"] == 0
         assert "load_quickgo_annotations.no_proteins" in events
@@ -637,7 +643,8 @@ class TestExecute:
         )
 
         events: list[str] = []
-        emit = lambda event, msg, fields, level: events.append(event)
+        def emit(event, msg, fields, level):
+            return events.append(event)
 
         op = LoadQuickGOAnnotationsOperation()
         result = op.execute(session, _base_payload(), emit=emit)
@@ -662,10 +669,11 @@ class TestExecute:
         )
 
         events: list[str] = []
-        emit = lambda event, msg, fields, level: events.append(event)
+        def emit(event, msg, fields, level):
+            return events.append(event)
 
         op = LoadQuickGOAnnotationsOperation()
-        result = op.execute(
+        op.execute(
             session, _base_payload(total_limit=1, page_size=1), emit=emit,
         )
         assert "load_quickgo_annotations.limit_reached" in events
@@ -720,7 +728,8 @@ class TestExecute:
         )
 
         events: list[tuple[str, dict]] = []
-        emit = lambda event, msg, fields, level: events.append((event, fields))
+        def emit(event, msg, fields, level):
+            return events.append((event, fields))
 
         op = LoadQuickGOAnnotationsOperation()
         result = op.execute(session, _base_payload(page_size=2), emit=emit)

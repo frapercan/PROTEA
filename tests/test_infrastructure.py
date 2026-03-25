@@ -158,6 +158,7 @@ class TestCreateApp:
     def test_health_endpoint_returns_ok(self):
         """GET /health returns 200 with status ok."""
         from fastapi.testclient import TestClient
+
         from protea.api.app import create_app
 
         mock_settings = MagicMock()
@@ -176,6 +177,7 @@ class TestCreateApp:
     def test_readiness_check_succeeds(self):
         """GET /health/ready returns 200 when DB and RabbitMQ are reachable."""
         from fastapi.testclient import TestClient
+
         from protea.api.app import create_app
 
         mock_settings = MagicMock()
@@ -194,7 +196,7 @@ class TestCreateApp:
 
         mock_conn = MagicMock()
         with patch("protea.infrastructure.session.session_scope") as mock_scope, \
-             patch("pika.BlockingConnection", return_value=mock_conn) as mock_pika:
+             patch("pika.BlockingConnection", return_value=mock_conn):
             mock_scope.return_value.__enter__ = lambda s: mock_session
             mock_scope.return_value.__exit__ = MagicMock(return_value=False)
             client = TestClient(app)
@@ -206,6 +208,7 @@ class TestCreateApp:
     def test_readiness_check_fails_when_rabbitmq_down(self):
         """GET /health/ready returns 503 when RabbitMQ is unreachable."""
         from fastapi.testclient import TestClient
+
         from protea.api.app import create_app
 
         mock_settings = MagicMock()
@@ -242,7 +245,7 @@ class TestCreateApp:
 
         with patch("protea.api.app.load_settings", return_value=mock_settings) as mock_load, \
              patch("protea.api.app.build_session_factory", return_value=MagicMock()):
-            app = create_app()  # project_root=None
+            create_app()  # project_root=None
 
         # load_settings should have been called with the resolved parents[2] path
         called_root = mock_load.call_args[0][0]

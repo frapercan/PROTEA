@@ -6,12 +6,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from protea.core.evaluation import EvaluationData
 from protea.core.operations.generate_evaluation_set import (
     GenerateEvaluationSetOperation,
     GenerateEvaluationSetPayload,
 )
-from protea.core.evaluation import EvaluationData
-
 
 # ---------------------------------------------------------------------------
 # Payload validator
@@ -129,7 +128,7 @@ class TestGenerateEvaluationSetExecute:
         new_set = _make_annotation_set(snap_id)
         session.get.side_effect = [old_set, new_set]
 
-        eval_set = MagicMock()
+        MagicMock()
 
         def add_side(obj):
             obj.id = uuid.uuid4()

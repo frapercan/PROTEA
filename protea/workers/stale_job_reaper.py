@@ -18,7 +18,6 @@ import signal
 import time
 from datetime import timedelta
 
-from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.core.utils import utcnow

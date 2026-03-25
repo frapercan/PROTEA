@@ -5,6 +5,7 @@ Usage:
     python scripts/queue_evals_when_ready.py
 """
 import time
+
 import requests
 
 API = "http://localhost:8000"

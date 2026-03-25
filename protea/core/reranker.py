@@ -12,7 +12,6 @@ label-encoded.  Missing values are left as NaN — LightGBM handles them nativel
 from __future__ import annotations
 
 import io
-import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -243,7 +242,7 @@ def train(
     }
 
     importance = dict(
-        zip(booster.feature_name(), booster.feature_importance(importance_type="gain").tolist())
+        zip(booster.feature_name(), booster.feature_importance(importance_type="gain").tolist(), strict=False)
     )
 
     return TrainResult(model=booster, metrics=metrics, feature_importance=importance)

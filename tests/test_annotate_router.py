@@ -5,7 +5,6 @@ Database and queue are fully mocked — no real infrastructure required.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from io import BytesIO
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
@@ -14,7 +13,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from protea.api.routers.annotate import router
-
 
 # ---------------------------------------------------------------------------
 # Helpers

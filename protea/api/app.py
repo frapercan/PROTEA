@@ -116,7 +116,7 @@ def create_app(project_root: Path | None = None) -> FastAPI:
             conn = pika.BlockingConnection(pika.URLParameters(settings.amqp_url))
             conn.close()
         except Exception as exc:
-            raise HTTPException(status_code=503, detail=f"RabbitMQ unreachable: {exc}")
+            raise HTTPException(status_code=503, detail=f"RabbitMQ unreachable: {exc}") from exc
 
         return {"status": "ready"}
 

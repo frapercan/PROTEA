@@ -4,13 +4,20 @@ No DB or network required.
 """
 from __future__ import annotations
 
+import gzip
+from io import BytesIO
 from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
 
-from protea.core.contracts.operation import OperationResult
+from protea.core.contracts.operation import OperationResult, RetryLaterError
 from protea.core.contracts.registry import OperationRegistry
+from protea.core.evidence_codes import ECO_TO_CODE, EXPERIMENTAL, is_experimental, normalize
+from protea.core.operations.fetch_uniprot_metadata import (
+    FetchUniProtMetadataOperation,
+    FetchUniProtMetadataPayload,
+)
 from protea.core.operations.ping import PingOperation
 from protea.core.utils import UniProtHttpMixin, chunks
 
@@ -113,7 +120,8 @@ class _ConcreteHttp(UniProtHttpMixin):
         self._http = MagicMock()
 
 
-_noop_emit = lambda *_: None
+def _noop_emit(*_):
+    return None
 
 
 class TestUniProtHttpMixin:
@@ -130,9 +138,11 @@ class TestUniProtHttpMixin:
 
     def test_retries_on_429(self) -> None:
         obj = self._obj()
-        bad = MagicMock(); bad.status_code = 429
+        bad = MagicMock()
+        bad.status_code = 429
         bad.headers = {}
-        good = MagicMock(); good.status_code = 200
+        good = MagicMock()
+        good.status_code = 200
         obj._http.get.side_effect = [bad, good]
         with patch("protea.core.utils.time.sleep"):
             result = obj._get_with_retries("http://x", _make_payload(), _noop_emit)
@@ -141,9 +151,11 @@ class TestUniProtHttpMixin:
 
     def test_uses_retry_after_header(self) -> None:
         obj = self._obj()
-        bad = MagicMock(); bad.status_code = 429
+        bad = MagicMock()
+        bad.status_code = 429
         bad.headers = {"Retry-After": "5"}
-        good = MagicMock(); good.status_code = 200
+        good = MagicMock()
+        good.status_code = 200
         obj._http.get.side_effect = [bad, good]
         sleep_calls = []
         with patch("protea.core.utils.time.sleep", side_effect=sleep_calls.append):
@@ -153,7 +165,8 @@ class TestUniProtHttpMixin:
 
     def test_raises_after_max_retries(self) -> None:
         obj = self._obj()
-        bad = MagicMock(); bad.status_code = 503
+        bad = MagicMock()
+        bad.status_code = 503
         bad.headers = {}
         bad.raise_for_status.side_effect = requests.HTTPError("503")
         obj._http.get.return_value = bad
@@ -163,7 +176,8 @@ class TestUniProtHttpMixin:
 
     def test_retries_on_network_exception(self) -> None:
         obj = self._obj()
-        good = MagicMock(); good.status_code = 200
+        good = MagicMock()
+        good.status_code = 200
         obj._http.get.side_effect = [requests.ConnectionError("down"), good]
         with patch("protea.core.utils.time.sleep"):
             result = obj._get_with_retries("http://x", _make_payload(), _noop_emit)
@@ -188,7 +202,6 @@ class TestUniProtHttpMixin:
 # evidence_codes — normalize and is_experimental
 # ---------------------------------------------------------------------------
 
-from protea.core.evidence_codes import normalize, is_experimental, ECO_TO_CODE, EXPERIMENTAL
 
 
 class TestNormalize:
@@ -233,9 +246,6 @@ class TestIsExperimental:
 # RetryLaterError
 # ---------------------------------------------------------------------------
 
-from protea.core.contracts.operation import RetryLaterError
-
-
 class TestRetryLaterError:
     def test_default_delay(self):
         err = RetryLaterError("GPU busy")
@@ -254,15 +264,6 @@ class TestRetryLaterError:
 # ---------------------------------------------------------------------------
 # FetchUniProtMetadataOperation
 # ---------------------------------------------------------------------------
-
-import gzip
-from io import BytesIO
-
-from protea.core.operations.fetch_uniprot_metadata import (
-    FetchUniProtMetadataOperation,
-    FetchUniProtMetadataPayload,
-)
-
 
 def _noop_emit(*_):
     pass
@@ -407,7 +408,7 @@ class TestFetchUniProtMetadataExecute:
         session = MagicMock()
         payload = {"search_criteria": "test", "page_size": 10}
 
-        result = op.execute(session, payload, emit=_noop_emit)
+        op.execute(session, payload, emit=_noop_emit)
         assert op._total_results is None
 
     def test_decode_response_uncompressed(self):

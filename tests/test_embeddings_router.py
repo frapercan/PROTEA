@@ -5,7 +5,7 @@ Database and pika are fully mocked — no real infrastructure required.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
@@ -37,7 +37,7 @@ def _make_config(config_id=None):
     c.chunk_size = 512
     c.chunk_overlap = 0
     c.description = None
-    c.created_at = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    c.created_at = datetime(2024, 1, 1, tzinfo=UTC)
     return c
 
 
@@ -95,7 +95,7 @@ class TestCreateEmbeddingConfigValidation:
         def _fake_add(obj):
             # Copy needed attributes from the validated body into the mock
             obj.id = uuid4()
-            obj.created_at = datetime(2024, 1, 1, tzinfo=timezone.utc)
+            obj.created_at = datetime(2024, 1, 1, tzinfo=UTC)
             added_objects.append(obj)
 
         session.add.side_effect = _fake_add
@@ -151,12 +151,12 @@ class TestCreateEmbeddingConfigValidation:
         """chunk_overlap < chunk_size must be accepted."""
         body = {**_VALID_CONFIG_BODY, "use_chunking": True, "chunk_size": 512, "chunk_overlap": 64}
         # Just check it passes validation (not 422)
-        cfg = _make_config()
+        _make_config()
         added: list = []
 
         def _fake_add(obj):
             obj.id = uuid4()
-            obj.created_at = datetime(2024, 1, 1, tzinfo=timezone.utc)
+            obj.created_at = datetime(2024, 1, 1, tzinfo=UTC)
             added.append(obj)
 
         session.add.side_effect = _fake_add
@@ -218,7 +218,7 @@ def _make_prediction_set(ps_id=None):
     ps.query_set_id = None
     ps.limit_per_entry = 5
     ps.distance_threshold = None
-    ps.created_at = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    ps.created_at = datetime(2024, 1, 1, tzinfo=UTC)
     return ps
 
 
@@ -614,7 +614,9 @@ class TestPredictGoTerms:
         call_count = [0]
         def _get_side(model_cls, id_val):
             call_count[0] += 1
-            from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
+            from protea.infrastructure.orm.models.annotation.ontology_snapshot import (
+                OntologySnapshot,
+            )
             if model_cls is OntologySnapshot:
                 return None
             return MagicMock()

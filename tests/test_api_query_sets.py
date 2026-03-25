@@ -13,8 +13,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from protea.api.routers.query_sets import router
-
+from protea.api.routers.query_sets import _parse_fasta, router
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -90,7 +89,6 @@ class TestCreateQuerySet:
 
         # Intercept QuerySet add to set its id
         added_qs = None
-        original_add = session.add.side_effect
 
         def add_side(obj):
             nonlocal added_qs
@@ -243,9 +241,6 @@ class TestDeleteQuerySet:
 # ---------------------------------------------------------------------------
 # FASTA parser unit tests
 # ---------------------------------------------------------------------------
-
-from protea.api.routers.query_sets import _parse_fasta
-
 
 class TestParseFasta:
     def test_parses_two_records(self) -> None:

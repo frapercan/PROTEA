@@ -8,11 +8,12 @@ frontend needs to chain ``predict_go_terms`` once embeddings finish.
 from __future__ import annotations
 
 from typing import Any
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
+
+from protea.api.deps import get_amqp_url, get_session_factory
 from protea.api.routers.query_sets import _parse_fasta
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
@@ -23,7 +24,6 @@ from protea.infrastructure.orm.models.job import Job, JobEvent
 from protea.infrastructure.orm.models.query.query_set import QuerySet, QuerySetEntry
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
 from protea.infrastructure.queue.publisher import publish_job
-from protea.api.deps import get_amqp_url, get_session_factory
 from protea.infrastructure.session import session_scope
 
 router = APIRouter(prefix="/annotate", tags=["annotate"])

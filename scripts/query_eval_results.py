@@ -4,12 +4,9 @@ from pathlib import Path
 
 from sqlalchemy.orm import joinedload
 
-from protea.infrastructure.settings import load_settings
-from protea.infrastructure.session import build_session_factory, session_scope
 from protea.infrastructure.orm.models.annotation.evaluation_result import EvaluationResult
-from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
-from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
-from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
+from protea.infrastructure.session import build_session_factory, session_scope
+from protea.infrastructure.settings import load_settings
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 settings = load_settings(PROJECT_ROOT)
@@ -65,8 +62,8 @@ with session_scope(factory) as session:
 
         r = er.results or {}
 
-        def fmax(cat: str, ns: str) -> str:
-            val = r.get(cat, {}).get(ns, {}).get("fmax")
+        def fmax(cat: str, ns: str, _r: dict = r) -> str:
+            val = _r.get(cat, {}).get(ns, {}).get("fmax")
             if val is None:
                 return "-"
             return f"{val:.4f}"

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import enum
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -10,8 +10,8 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from protea.infrastructure.orm.base import Base
 from protea.core.utils import utcnow
+from protea.infrastructure.orm.base import Base
 
 
 class JobStatus(enum.StrEnum):

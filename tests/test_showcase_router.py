@@ -12,8 +12,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from protea.api.routers.showcase import router, _derive_method
-
+from protea.api.routers.showcase import _derive_method, router
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -213,7 +212,6 @@ class TestShowcaseWithEvaluations:
             },
         )
 
-        call_count = [0]
         def query_side_effect(*args):
             q = MagicMock()
             q.scalar.return_value = 0
@@ -237,7 +235,6 @@ class TestShowcaseWithEvaluations:
 
         eval_result = self._make_eval_result(results={})
 
-        call_count = [0]
         def query_side_effect(*args):
             q = MagicMock()
             q.scalar.return_value = 0
@@ -256,7 +253,6 @@ class TestShowcaseWithEvaluations:
 
         eval_result = self._make_eval_result(results=None)
 
-        call_count = [0]
         def query_side_effect(*args):
             q = MagicMock()
             q.scalar.return_value = 0
@@ -274,7 +270,6 @@ class TestShowcaseWithEvaluations:
         er1 = self._make_eval_result(results={"NK": {"BPO": {"fmax": 0.40}}})
         er2 = self._make_eval_result(results={"NK": {"BPO": {"fmax": 0.60}}})
 
-        call_count = [0]
         def query_side_effect(*args):
             q = MagicMock()
             q.scalar.return_value = 0

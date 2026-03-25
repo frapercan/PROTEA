@@ -2,8 +2,6 @@
 import uuid
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from protea.core.evaluation import (
     EvaluationData,
     _build_negative_keys,
@@ -13,7 +11,6 @@ from protea.core.evaluation import (
     _load_go_maps,
     compute_evaluation_data,
 )
-
 
 # ---------------------------------------------------------------------------
 # EvaluationData — dataclass properties

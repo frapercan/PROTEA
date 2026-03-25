@@ -321,7 +321,9 @@ class TestSpecialTokenStripping:
     def test_esm3c_strips_bos_and_eos(self) -> None:
         """ESM3c [1:-1] slicing excludes BOS and EOS from residue pooling."""
         import sys
+
         import torch
+
         from protea.core.operations.compute_embeddings import _embed_esm3c
 
         dim = 8
@@ -360,6 +362,7 @@ class TestSpecialTokenStripping:
     def test_t5_includes_eos_token(self) -> None:
         """T5 keeps EOS in the residue tensor (PIS convention)."""
         import torch
+
         from protea.core.operations.compute_embeddings import _embed_t5
 
         dim = 8
@@ -636,6 +639,7 @@ class TestBatchSizeConsistency:
     def test_esm_batch_size_consistency(self):
         """ESM embeddings must be bit-exact for batch_size 1, 2, and 4."""
         from transformers import AutoTokenizer, EsmModel
+
         from protea.core.operations.compute_embeddings import _embed_esm
 
         cfg = self._esm_cfg()
@@ -653,7 +657,7 @@ class TestBatchSizeConsistency:
                     _embed_esm(model, tokenizer, self.SEQUENCES[i:i + batch_size], cfg, "cpu")
                 )
 
-            for i, (got, expected) in enumerate(zip(batched, ref)):
+            for i, (got, expected) in enumerate(zip(batched, ref, strict=False)):
                 np.testing.assert_allclose(
                     got[0].vector, expected[0].vector, rtol=1e-5, atol=1e-6,
                     err_msg=f"ESM batch_size={batch_size}: mismatch at sequence {i}",
@@ -668,6 +672,7 @@ class TestBatchSizeConsistency:
         positions would produce wrong values and fail the assertion.
         """
         import torch
+
         from protea.core.operations.compute_embeddings import _embed_t5
 
         cfg = _mock_config(
@@ -838,7 +843,7 @@ class TestStoreEmbeddingsOperation:
         def capture_emit(event, msg, fields, level):
             events.append(event)
 
-        result = op.execute(session, self._make_payload(n_sequences=1), emit=capture_emit)
+        op.execute(session, self._make_payload(n_sequences=1), emit=capture_emit)
         assert "store_embeddings.parent_succeeded" in events
 
     def test_multiple_chunks_per_sequence(self) -> None:

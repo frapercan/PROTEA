@@ -5,7 +5,7 @@ Uses a mocked session factory and a fake Operation — no real DB needed.
 from __future__ import annotations
 
 import signal
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
@@ -13,7 +13,7 @@ import pytest
 
 from protea.core.contracts.operation import OperationResult, RetryLaterError
 from protea.core.contracts.registry import OperationRegistry
-from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
+from protea.infrastructure.orm.models.job import Job, JobStatus
 from protea.workers.base_worker import BaseWorker, WorkerConfig
 from protea.workers.stale_job_reaper import StaleJobReaper
 
@@ -197,7 +197,7 @@ class TestStaleJobReaper:
         stale_job.id = uuid4()
         stale_job.status = JobStatus.RUNNING
         stale_job.operation = "compute_embeddings"
-        stale_job.started_at = datetime.now(timezone.utc) - timedelta(hours=2)
+        stale_job.started_at = datetime.now(UTC) - timedelta(hours=2)
 
         session = MagicMock()
         session.query.return_value.filter.return_value.all.return_value = [stale_job]
@@ -476,7 +476,6 @@ class TestBaseWorkerTwoSessionPattern:
         """First session transitions to RUNNING; second session runs the operation."""
         job = _make_job()
         status_log = []
-        original_status = job.status
 
         call_count = [0]
 
@@ -486,7 +485,6 @@ class TestBaseWorkerTwoSessionPattern:
             call_count[0] += 1
             current_call = call_count[0]
 
-            original_commit = s.commit
             def commit_side_effect():
                 status_log.append((current_call, job.status))
             s.commit.side_effect = commit_side_effect

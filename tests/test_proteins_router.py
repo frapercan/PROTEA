@@ -14,7 +14,6 @@ from fastapi.testclient import TestClient
 
 from protea.api.routers.proteins import router
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

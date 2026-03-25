@@ -4,12 +4,11 @@ Run with: poetry run pytest --with-postgres -m integration
 """
 from __future__ import annotations
 
-import uuid
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import numpy as np
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 import protea.infrastructure.orm.models  # noqa: F401 — register all models
@@ -26,7 +25,6 @@ from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
 from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.orm.models.query.query_set import QuerySet, QuerySetEntry
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
-
 
 _noop_emit = lambda *_: None  # noqa: E731
 
@@ -283,9 +281,6 @@ def test_store_predictions_roundtrip(db):
         session.add(parent)
         session.flush()
 
-        config_id = config.id
-        snap_id = snap.id
-        ann_set_id = ann_set.id
         pred_set_id = pred_set.id
         parent_id = parent.id
         go_term1_id = go_term1.id
@@ -366,6 +361,7 @@ def test_job_parent_child_progress(db):
 
     # Simulate 3 child batches incrementing progress
     from sqlalchemy import update as sa_update
+
     from protea.core.utils import utcnow
 
     for i in range(3):

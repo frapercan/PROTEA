@@ -6,7 +6,6 @@ import pytest
 from protea.core.evaluation import EvaluationData
 from protea.core.metrics import CAFAMetrics, PRPoint, compute_cafa_metrics
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

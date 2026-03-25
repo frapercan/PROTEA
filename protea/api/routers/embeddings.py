@@ -9,13 +9,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
+
+from protea.api.deps import get_amqp_url, get_session_factory
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
-from protea.api.deps import get_amqp_url, get_session_factory
 from protea.infrastructure.orm.models.job import Job, JobEvent
 from protea.infrastructure.queue.publisher import publish_job
 from protea.infrastructure.session import session_scope

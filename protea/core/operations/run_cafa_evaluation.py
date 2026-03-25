@@ -21,7 +21,9 @@ from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
-from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel as RerankerModelORM
+from protea.infrastructure.orm.models.embedding.reranker_model import (
+    RerankerModel as RerankerModelORM,
+)
 from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
 
 # Namespace labels used by cafaeval OBO parser
@@ -530,7 +532,8 @@ class RunCafaEvaluationOperation:
         """Write CAFA-format predictions using LightGBM re-ranker scores."""
         import pandas as pd
 
-        from protea.core.reranker import model_from_string, predict as reranker_predict
+        from protea.core.reranker import model_from_string
+        from protea.core.reranker import predict as reranker_predict
 
         q = (
             session.query(GOPrediction, GOTerm.go_id)
@@ -609,7 +612,8 @@ class RunCafaEvaluationOperation:
         """
         import pandas as pd
 
-        from protea.core.reranker import model_from_string, predict as reranker_predict
+        from protea.core.reranker import model_from_string
+        from protea.core.reranker import predict as reranker_predict
 
         q = (
             session.query(GOPrediction, GOTerm.go_id, GOTerm.aspect)

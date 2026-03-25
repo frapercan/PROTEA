@@ -24,7 +24,7 @@ from typing import Annotated, Any
 import numpy as np
 import pandas as pd
 from pydantic import Field, field_validator
-from sqlalchemy import distinct, select, text
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
@@ -36,14 +36,14 @@ from protea.core.reranker import (
     ALL_FEATURES,
     LABEL_COLUMN,
     model_to_string,
+)
+from protea.core.reranker import (
     predict as reranker_predict,
+)
+from protea.core.reranker import (
     train as reranker_train,
 )
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
-from protea.infrastructure.orm.models.annotation.go_term import GOTerm
-from protea.infrastructure.orm.models.annotation.protein_go_annotation import (
-    ProteinGOAnnotation,
-)
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
 from protea.infrastructure.orm.models.embedding.sequence_embedding import (
@@ -1236,7 +1236,7 @@ class TrainRerankerAutoOperation:
                     gt_p = cat_gt_pairs[cat]
                     labels = np.array([
                         1 if (acc, go_id) in gt_p else 0
-                        for acc, go_id in zip(base_df["protein_accession"], base_df["go_id"])
+                        for acc, go_id in zip(base_df["protein_accession"], base_df["go_id"], strict=False)
                     ], dtype=np.int8)
                     base_df[LABEL_COLUMN] = labels
                     n_pos = int(labels.sum())
@@ -1333,7 +1333,7 @@ class TrainRerankerAutoOperation:
                         gt_p = test_cat_gt[cat]
                         labels = np.array([
                             1 if (acc, go_id) in gt_p else 0
-                            for acc, go_id in zip(test_base_df["protein_accession"], test_base_df["go_id"])
+                            for acc, go_id in zip(test_base_df["protein_accession"], test_base_df["go_id"], strict=False)
                         ], dtype=np.int8)
                         test_base_df[LABEL_COLUMN] = labels
                         pq_path = tmp_dir / f"test_{cat}.parquet"

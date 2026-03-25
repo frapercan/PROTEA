@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
@@ -19,7 +19,6 @@ from protea.infrastructure.orm.models.embedding.scoring_config import (
     ScoringConfig,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -32,7 +31,7 @@ def _make_config(name="test", formula=FORMULA_LINEAR, weights=None, ev_weights=N
     cfg.weights = weights or {"embedding_similarity": 1.0}
     cfg.evidence_weights = ev_weights
     cfg.description = None
-    cfg.created_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    cfg.created_at = datetime(2026, 1, 1, tzinfo=UTC)
     return cfg
 
 
@@ -229,7 +228,6 @@ class TestScoredTSV:
         assert resp.status_code == 404
 
     def test_scoring_config_not_found(self, client, session):
-        from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
         # First get (PredictionSet) found, second (ScoringConfig) not found
         session.get.side_effect = [MagicMock(), None]
         resp = client.get(
@@ -823,7 +821,7 @@ def _make_reranker_model(**kwargs):
     m.model_data = kwargs.get("model_data", "lgb_model_string")
     m.metrics = kwargs.get("metrics", {"val_auc": 0.85})
     m.feature_importance = kwargs.get("feature_importance", {"distance": 100})
-    m.created_at = datetime(2026, 3, 18, tzinfo=timezone.utc)
+    m.created_at = datetime(2026, 3, 18, tzinfo=UTC)
     return m
 
 

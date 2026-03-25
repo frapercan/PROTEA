@@ -38,7 +38,6 @@ from protea.infrastructure.orm.models.annotation.ontology_snapshot import Ontolo
 from protea.infrastructure.session import build_session_factory, session_scope
 from protea.infrastructure.settings import load_settings
 
-
 # ---------------------------------------------------------------------------
 # Parsers for external tools
 # ---------------------------------------------------------------------------
@@ -256,7 +255,7 @@ def run_evaluation(
     ann_old = session.get(AnnotationSet, eval_set.old_annotation_set_id)
     snapshot = session.get(OntologySnapshot, ann_old.ontology_snapshot_id)
 
-    print(f"Computing ground truth delta...")
+    print("Computing ground truth delta...")
     data = compute_evaluation_data(
         session,
         eval_set.old_annotation_set_id,

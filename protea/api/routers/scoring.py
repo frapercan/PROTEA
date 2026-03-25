@@ -37,16 +37,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
+from protea.api.deps import get_session_factory
 from protea.core.evaluation import compute_evaluation_data
 from protea.core.metrics import compute_cafa_metrics
 from protea.core.reranker import (
-    ALL_FEATURES,
-    CATEGORICAL_FEATURES,
-    NUMERIC_FEATURES,
-    load_training_tsv,
     model_from_string,
     model_to_string,
+)
+from protea.core.reranker import (
     predict as reranker_predict,
+)
+from protea.core.reranker import (
     train as reranker_train,
 )
 from protea.core.scoring import compute_score
@@ -61,7 +62,6 @@ from protea.infrastructure.orm.models.embedding.scoring_config import (
     VALID_FORMULAS,
     ScoringConfig,
 )
-from protea.api.deps import get_session_factory
 from protea.infrastructure.session import session_scope
 
 router = APIRouter(prefix="/scoring", tags=["scoring"])
