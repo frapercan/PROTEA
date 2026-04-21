@@ -90,6 +90,7 @@ export function NavLinks({ mobileExtras }: { mobileExtras?: React.ReactNode }) {
     {
       title: t("results" as any),
       items: [
+        { href: "/benchmark", label: t("benchmark" as any) },
         { href: "/evaluation", label: t("evaluation") },
         { href: "/scoring", label: t("scoring") },
       ],

@@ -23,10 +23,13 @@ dependencies = [
     "faiss-cpu (>=1.7.0)",
     "parasail (>=1.3.4)",
     "ete3 (>=3.1.3)",
-    "cafaeval @ git+https://github.com/claradepaolis/CAFA-evaluator-PK.git",
+    "cafaeval-protea @ file:///home/frapercan/Thesis/repositories/cafaeval-protea",
     "lightgbm (>=4.6.0,<5.0.0)",
     "pyarrow (>=23.0.1,<24.0.0)",
 ]
+
+[project.optional-dependencies]
+storage = ["minio (>=7.2,<8.0)"]
 
 
 [build-system]
@@ -34,6 +37,10 @@ requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.group.dev.dependencies]
+# Dev-time only: imported by protea.core.parquet_export at export-validation
+# time so the manifest dict is checked against the lab's pydantic contract
+# before we publish to the ArtifactStore. Production images do NOT need this.
+protea-reranker-lab = {path = "../protea-reranker-lab", develop = true}
 pytest = ">=9.0.2,<10.0.0"
 uvicorn = ">=0.41.0,<0.42.0"
 coverage = {extras = ["toml"], version = ">=7.2.1"}

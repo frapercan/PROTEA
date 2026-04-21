@@ -62,6 +62,25 @@ class LoadGOAAnnotationsOperation:
     """
 
     name = "load_goa_annotations"
+    description = (
+        "Stream a UniProt GOA GAF release line by line and bulk-insert "
+        "ProteinGOAnnotation rows for accessions already present in the DB."
+    )
+
+    def summarize_payload(self, payload: dict[str, Any]) -> str:
+        p = payload or {}
+        version = p.get("source_version")
+        url = p.get("gaf_url", "")
+        # Strip everything before the filename to keep it short
+        filename = url.rsplit("/", 1)[-1] if url else ""
+        bits = []
+        if version:
+            bits.append(f"release={version}")
+        if filename:
+            bits.append(filename)
+        if p.get("total_limit"):
+            bits.append(f"limit={p['total_limit']}")
+        return " · ".join(bits)
 
     # GAF 2.x column indices (0-based after splitting on tab)
     _IDX_ACCESSION = 1

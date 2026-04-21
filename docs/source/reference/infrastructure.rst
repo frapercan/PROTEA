@@ -1,6 +1,10 @@
 Infrastructure
 ==============
 
+.. contents:: On this page
+   :local:
+   :depth: 2
+
 The ``protea.infrastructure`` package implements the persistence and messaging
 layer. It is the only package that imports SQLAlchemy, psycopg2, or aio-pika
 directly. All other layers interact with the database through the session
@@ -206,10 +210,19 @@ corresponding flags were set in the prediction payload.
 
 **Re-ranker Models**
 
-``RerankerModel`` stores a trained LightGBM binary classifier for re-scoring
-GO term predictions. Each row contains the serialized model string, validation
-metrics (AUC, logloss, precision, recall, F1), feature importance, and
-references to the ``PredictionSet`` and ``EvaluationSet`` used for training.
+``RerankerModel`` stores a trained LightGBM re-ranker for re-scoring GO
+term predictions. The booster itself can live either **inline** in the
+legacy ``model_data`` (``Text``, nullable) column or **by reference** in
+``artifact_uri`` (``String(512)``) resolved through an ``ArtifactStore``.
+New rows registered via ``scripts/register_reranker.py`` from a
+``protea-reranker-lab`` run always use the artifact-backed path.
+
+Provenance columns travel with every artifact-backed row:
+``feature_schema_sha`` (``String(16)``, load-bearing at inference time),
+``embedding_config_id`` / ``ontology_snapshot_id`` (FKs, both
+``SET NULL``), ``producer_version`` (``String(64)``), ``producer_git_sha``
+(``String(40)``) and ``spec_yaml`` (``Text``). ``metrics`` and
+``feature_importance`` remain JSONB.
 
 .. automodule:: protea.infrastructure.orm.models.embedding.reranker_model
    :members:
@@ -263,6 +276,65 @@ and the API server.
    :undoc-members:
    :show-inheritance:
 
+Artifact storage
+----------------
+
+``protea.infrastructure.storage`` defines the ``ArtifactStore`` Protocol
+and its two concrete backends. It is the single surface for writing and
+reading large produced blobs (re-ranker boosters, frozen datasets) and
+is kept strictly separate from the evaluation-artifacts directory
+consumed by ``run_cafa_evaluation``.
+
+``ArtifactStore`` is a ``typing.Protocol`` with four methods:
+
+- ``put(key: str, src: Path | bytes) -> str`` — store a blob under
+  ``key`` and return its URI.
+- ``get(key: str) -> bytes`` — fetch raw bytes stored at ``key``.
+- ``url(key: str) -> str`` — return the backend-specific URI for
+  ``key`` without performing I/O.
+- ``exists(key: str) -> bool`` — check whether ``key`` is present.
+
+URIs are always persisted verbatim in the database so consumers can
+resolve them without knowing the concrete backend:
+
+- ``LocalFsArtifactStore`` emits ``file:///absolute/path/...`` URIs.
+- ``MinioArtifactStore`` emits ``s3://<bucket>/<key>`` URIs.
+
+The ``MinioArtifactStore`` client is imported lazily so PROTEA can be
+installed without the ``minio`` package — the constructor raises a
+clear ``ImportError`` pointing at the ``[storage]`` extra when the
+dependency is missing.
+
+``get_artifact_store(settings)`` is the entry point used by every
+operation that needs to write a blob. It reads
+``settings.storage_backend`` (``"local"`` or ``"minio"``) and returns
+the appropriate instance. If MinIO is selected but the endpoint or
+credentials are incomplete, or the server is unreachable at
+construction time, the factory logs a warning and returns a
+``LocalFsArtifactStore`` rooted at ``settings.storage_root`` (or
+``settings.artifacts_dir`` as a fallback). This prevents missing
+optional infrastructure from crashing the stack in development.
+
+.. automodule:: protea.infrastructure.storage
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.infrastructure.storage.local
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.infrastructure.storage.minio_store
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.infrastructure.storage.factory
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Queue
 -----
 
@@ -295,3 +367,12 @@ guaranteeing that workers always find the DB row before they try to claim it.
    :members:
    :undoc-members:
    :show-inheritance:
+
+.. seealso::
+
+   - :doc:`/architecture/data_model` — the conceptual model behind every
+     ORM class above.
+   - :doc:`workers` — how ``BaseWorker`` and the consumer classes use the
+     publisher and session helpers documented here.
+   - :doc:`/adr/005-thread-local-rabbitmq-connections` — why the publisher
+     reuses one connection per thread.

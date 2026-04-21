@@ -610,8 +610,12 @@ _TRAINING_COLUMNS = [
 )
 def download_training_data(
     set_id: uuid.UUID,
-    evaluation_set_id: uuid.UUID = Query(..., description="EvaluationSet to derive ground-truth labels from"),
-    category: str = Query("nk", pattern="^(nk|lk|pk)$", description="Ground-truth category: nk, lk, or pk"),
+    evaluation_set_id: uuid.UUID = Query(
+        ..., description="EvaluationSet to derive ground-truth labels from"
+    ),
+    category: str = Query(
+        "nk", pattern="^(nk|lk|pk)$", description="Ground-truth category: nk, lk, or pk"
+    ),
     factory=Depends(get_session_factory),
 ) -> StreamingResponse:
     """Stream labeled training data for the re-ranker model.
@@ -670,39 +674,44 @@ def download_training_data(
                 def _v(val: object) -> str:
                     return "" if val is None else str(val)
 
-                row = "\t".join([
-                    pred.protein_accession,
-                    go_id,
-                    aspect or "",
-                    str(label),
-                    _v(pred.distance),
-                    pred.ref_protein_accession or "",
-                    pred.qualifier or "",
-                    pred.evidence_code or "",
-                    _v(pred.identity_nw),
-                    _v(pred.similarity_nw),
-                    _v(pred.alignment_score_nw),
-                    _v(pred.gaps_pct_nw),
-                    _v(pred.alignment_length_nw),
-                    _v(pred.identity_sw),
-                    _v(pred.similarity_sw),
-                    _v(pred.alignment_score_sw),
-                    _v(pred.gaps_pct_sw),
-                    _v(pred.alignment_length_sw),
-                    _v(pred.length_query),
-                    _v(pred.length_ref),
-                    _v(pred.query_taxonomy_id),
-                    _v(pred.ref_taxonomy_id),
-                    _v(pred.taxonomic_lca),
-                    _v(pred.taxonomic_distance),
-                    _v(pred.taxonomic_common_ancestors),
-                    pred.taxonomic_relation or "",
-                    _v(pred.vote_count),
-                    _v(pred.k_position),
-                    _v(pred.go_term_frequency),
-                    _v(pred.ref_annotation_density),
-                    _v(pred.neighbor_distance_std),
-                ]) + "\n"
+                row = (
+                    "\t".join(
+                        [
+                            pred.protein_accession,
+                            go_id,
+                            aspect or "",
+                            str(label),
+                            _v(pred.distance),
+                            pred.ref_protein_accession or "",
+                            pred.qualifier or "",
+                            pred.evidence_code or "",
+                            _v(pred.identity_nw),
+                            _v(pred.similarity_nw),
+                            _v(pred.alignment_score_nw),
+                            _v(pred.gaps_pct_nw),
+                            _v(pred.alignment_length_nw),
+                            _v(pred.identity_sw),
+                            _v(pred.similarity_sw),
+                            _v(pred.alignment_score_sw),
+                            _v(pred.gaps_pct_sw),
+                            _v(pred.alignment_length_sw),
+                            _v(pred.length_query),
+                            _v(pred.length_ref),
+                            _v(pred.query_taxonomy_id),
+                            _v(pred.ref_taxonomy_id),
+                            _v(pred.taxonomic_lca),
+                            _v(pred.taxonomic_distance),
+                            _v(pred.taxonomic_common_ancestors),
+                            pred.taxonomic_relation or "",
+                            _v(pred.vote_count),
+                            _v(pred.k_position),
+                            _v(pred.go_term_frequency),
+                            _v(pred.ref_annotation_density),
+                            _v(pred.neighbor_distance_std),
+                        ]
+                    )
+                    + "\n"
+                )
                 yield row.encode()
 
     filename = f"training_data_{set_id}_{category}.tsv"
@@ -818,39 +827,41 @@ def _collect_training_records(
         q_preds = q_preds.filter(GOTerm.aspect == aspect_filter_char)
     for pred, go_id, aspect in q_preds.yield_per(5000):
         label = 1 if (pred.protein_accession, go_id) in gt_pairs else 0
-        records.append({
-            "protein_accession": pred.protein_accession,
-            "go_id": go_id,
-            "aspect": aspect or "",
-            "label": label,
-            "distance": pred.distance,
-            "ref_protein_accession": pred.ref_protein_accession or "",
-            "qualifier": pred.qualifier or "",
-            "evidence_code": pred.evidence_code or "",
-            "identity_nw": pred.identity_nw,
-            "similarity_nw": pred.similarity_nw,
-            "alignment_score_nw": pred.alignment_score_nw,
-            "gaps_pct_nw": pred.gaps_pct_nw,
-            "alignment_length_nw": pred.alignment_length_nw,
-            "identity_sw": pred.identity_sw,
-            "similarity_sw": pred.similarity_sw,
-            "alignment_score_sw": pred.alignment_score_sw,
-            "gaps_pct_sw": pred.gaps_pct_sw,
-            "alignment_length_sw": pred.alignment_length_sw,
-            "length_query": pred.length_query,
-            "length_ref": pred.length_ref,
-            "query_taxonomy_id": pred.query_taxonomy_id,
-            "ref_taxonomy_id": pred.ref_taxonomy_id,
-            "taxonomic_lca": pred.taxonomic_lca,
-            "taxonomic_distance": pred.taxonomic_distance,
-            "taxonomic_common_ancestors": pred.taxonomic_common_ancestors,
-            "taxonomic_relation": pred.taxonomic_relation or "",
-            "vote_count": pred.vote_count,
-            "k_position": pred.k_position,
-            "go_term_frequency": pred.go_term_frequency,
-            "ref_annotation_density": pred.ref_annotation_density,
-            "neighbor_distance_std": pred.neighbor_distance_std,
-        })
+        records.append(
+            {
+                "protein_accession": pred.protein_accession,
+                "go_id": go_id,
+                "aspect": aspect or "",
+                "label": label,
+                "distance": pred.distance,
+                "ref_protein_accession": pred.ref_protein_accession or "",
+                "qualifier": pred.qualifier or "",
+                "evidence_code": pred.evidence_code or "",
+                "identity_nw": pred.identity_nw,
+                "similarity_nw": pred.similarity_nw,
+                "alignment_score_nw": pred.alignment_score_nw,
+                "gaps_pct_nw": pred.gaps_pct_nw,
+                "alignment_length_nw": pred.alignment_length_nw,
+                "identity_sw": pred.identity_sw,
+                "similarity_sw": pred.similarity_sw,
+                "alignment_score_sw": pred.alignment_score_sw,
+                "gaps_pct_sw": pred.gaps_pct_sw,
+                "alignment_length_sw": pred.alignment_length_sw,
+                "length_query": pred.length_query,
+                "length_ref": pred.length_ref,
+                "query_taxonomy_id": pred.query_taxonomy_id,
+                "ref_taxonomy_id": pred.ref_taxonomy_id,
+                "taxonomic_lca": pred.taxonomic_lca,
+                "taxonomic_distance": pred.taxonomic_distance,
+                "taxonomic_common_ancestors": pred.taxonomic_common_ancestors,
+                "taxonomic_relation": pred.taxonomic_relation or "",
+                "vote_count": pred.vote_count,
+                "k_position": pred.k_position,
+                "go_term_frequency": pred.go_term_frequency,
+                "ref_annotation_density": pred.ref_annotation_density,
+                "neighbor_distance_std": pred.neighbor_distance_std,
+            }
+        )
     return records
 
 
@@ -873,20 +884,28 @@ def train_reranker(
         # Check name uniqueness
         existing = session.query(RerankerModel).filter(RerankerModel.name == body.name).first()
         if existing is not None:
-            raise HTTPException(status_code=409, detail=f"Reranker with name '{body.name}' already exists")
+            raise HTTPException(
+                status_code=409, detail=f"Reranker with name '{body.name}' already exists"
+            )
 
         # Collect records from the primary pair
         records = _collect_training_records(
-            session, body.prediction_set_id, body.evaluation_set_id,
-            body.category, aspect_filter_char,
+            session,
+            body.prediction_set_id,
+            body.evaluation_set_id,
+            body.category,
+            aspect_filter_char,
         )
 
         # Collect records from extra pairs
         if body.extra_pairs:
             for pair in body.extra_pairs:
                 extra = _collect_training_records(
-                    session, pair.prediction_set_id, pair.evaluation_set_id,
-                    body.category, aspect_filter_char,
+                    session,
+                    pair.prediction_set_id,
+                    pair.evaluation_set_id,
+                    body.category,
+                    aspect_filter_char,
                 )
                 records.extend(extra)
 
@@ -948,7 +967,9 @@ def delete_reranker(reranker_id: uuid.UUID, factory=Depends(get_session_factory)
 def download_reranked_predictions(
     set_id: uuid.UUID,
     reranker_id: uuid.UUID = Query(..., description="UUID of the trained RerankerModel to apply"),
-    min_score: float | None = Query(None, ge=0.0, le=1.0, description="Minimum re-ranker score threshold"),
+    min_score: float | None = Query(
+        None, ge=0.0, le=1.0, description="Minimum re-ranker score threshold"
+    ),
     factory=Depends(get_session_factory),
 ) -> StreamingResponse:
     """Stream predictions re-scored by a trained LightGBM model.
@@ -975,43 +996,47 @@ def download_reranked_predictions(
             .filter(GOPrediction.prediction_set_id == set_id)
             .yield_per(5000)
         ):
-            records.append({
-                "protein_accession": pred.protein_accession,
-                "go_id": go_id,
-                "aspect": aspect or "",
-                "distance": pred.distance,
-                "ref_protein_accession": pred.ref_protein_accession or "",
-                "qualifier": pred.qualifier or "",
-                "evidence_code": pred.evidence_code or "",
-                "identity_nw": pred.identity_nw,
-                "similarity_nw": pred.similarity_nw,
-                "alignment_score_nw": pred.alignment_score_nw,
-                "gaps_pct_nw": pred.gaps_pct_nw,
-                "alignment_length_nw": pred.alignment_length_nw,
-                "identity_sw": pred.identity_sw,
-                "similarity_sw": pred.similarity_sw,
-                "alignment_score_sw": pred.alignment_score_sw,
-                "gaps_pct_sw": pred.gaps_pct_sw,
-                "alignment_length_sw": pred.alignment_length_sw,
-                "length_query": pred.length_query,
-                "length_ref": pred.length_ref,
-                "query_taxonomy_id": pred.query_taxonomy_id,
-                "ref_taxonomy_id": pred.ref_taxonomy_id,
-                "taxonomic_lca": pred.taxonomic_lca,
-                "taxonomic_distance": pred.taxonomic_distance,
-                "taxonomic_common_ancestors": pred.taxonomic_common_ancestors,
-                "taxonomic_relation": pred.taxonomic_relation or "",
-                "vote_count": pred.vote_count,
-                "k_position": pred.k_position,
-                "go_term_frequency": pred.go_term_frequency,
-                "ref_annotation_density": pred.ref_annotation_density,
-                "neighbor_distance_std": pred.neighbor_distance_std,
-                "label": 0,
-            })
+            records.append(
+                {
+                    "protein_accession": pred.protein_accession,
+                    "go_id": go_id,
+                    "aspect": aspect or "",
+                    "distance": pred.distance,
+                    "ref_protein_accession": pred.ref_protein_accession or "",
+                    "qualifier": pred.qualifier or "",
+                    "evidence_code": pred.evidence_code or "",
+                    "identity_nw": pred.identity_nw,
+                    "similarity_nw": pred.similarity_nw,
+                    "alignment_score_nw": pred.alignment_score_nw,
+                    "gaps_pct_nw": pred.gaps_pct_nw,
+                    "alignment_length_nw": pred.alignment_length_nw,
+                    "identity_sw": pred.identity_sw,
+                    "similarity_sw": pred.similarity_sw,
+                    "alignment_score_sw": pred.alignment_score_sw,
+                    "gaps_pct_sw": pred.gaps_pct_sw,
+                    "alignment_length_sw": pred.alignment_length_sw,
+                    "length_query": pred.length_query,
+                    "length_ref": pred.length_ref,
+                    "query_taxonomy_id": pred.query_taxonomy_id,
+                    "ref_taxonomy_id": pred.ref_taxonomy_id,
+                    "taxonomic_lca": pred.taxonomic_lca,
+                    "taxonomic_distance": pred.taxonomic_distance,
+                    "taxonomic_common_ancestors": pred.taxonomic_common_ancestors,
+                    "taxonomic_relation": pred.taxonomic_relation or "",
+                    "vote_count": pred.vote_count,
+                    "k_position": pred.k_position,
+                    "go_term_frequency": pred.go_term_frequency,
+                    "ref_annotation_density": pred.ref_annotation_density,
+                    "neighbor_distance_std": pred.neighbor_distance_std,
+                    "label": 0,
+                }
+            )
 
     if not records:
+
         def _empty() -> Iterator[bytes]:
             yield b"protein_accession\tgo_id\taspect\treranker_score\tdistance\n"
+
         return StreamingResponse(
             _empty(),
             media_type="text/tab-separated-values",
@@ -1027,8 +1052,14 @@ def download_reranked_predictions(
     df = df.sort_values(["protein_accession", "reranker_score"], ascending=[True, False])
 
     _RERANK_COLUMNS = [
-        "protein_accession", "go_id", "aspect", "reranker_score", "distance",
-        "ref_protein_accession", "evidence_code", "qualifier",
+        "protein_accession",
+        "go_id",
+        "aspect",
+        "reranker_score",
+        "distance",
+        "ref_protein_accession",
+        "evidence_code",
+        "qualifier",
     ]
 
     def _generate() -> Iterator[bytes]:
@@ -1036,16 +1067,21 @@ def download_reranked_predictions(
         for _, row in df.iterrows():
             if min_score is not None and row["reranker_score"] < min_score:
                 continue
-            line = "\t".join([
-                str(row["protein_accession"]),
-                str(row["go_id"]),
-                str(row["aspect"]),
-                f"{row['reranker_score']:.6f}",
-                str(row["distance"]) if pd.notna(row["distance"]) else "",
-                str(row["ref_protein_accession"]),
-                str(row["evidence_code"]),
-                str(row["qualifier"]),
-            ]) + "\n"
+            line = (
+                "\t".join(
+                    [
+                        str(row["protein_accession"]),
+                        str(row["go_id"]),
+                        str(row["aspect"]),
+                        f"{row['reranker_score']:.6f}",
+                        str(row["distance"]) if pd.notna(row["distance"]) else "",
+                        str(row["ref_protein_accession"]),
+                        str(row["evidence_code"]),
+                        str(row["qualifier"]),
+                    ]
+                )
+                + "\n"
+            )
             yield line.encode()
 
     filename = f"reranked_{set_id}.tsv"
@@ -1101,37 +1137,39 @@ def compute_reranker_metrics(
             .filter(GOPrediction.prediction_set_id == set_id)
             .yield_per(5000)
         ):
-            records.append({
-                "protein_accession": pred.protein_accession,
-                "go_id": go_id,
-                "distance": pred.distance,
-                "qualifier": pred.qualifier or "",
-                "evidence_code": pred.evidence_code or "",
-                "identity_nw": pred.identity_nw,
-                "similarity_nw": pred.similarity_nw,
-                "alignment_score_nw": pred.alignment_score_nw,
-                "gaps_pct_nw": pred.gaps_pct_nw,
-                "alignment_length_nw": pred.alignment_length_nw,
-                "identity_sw": pred.identity_sw,
-                "similarity_sw": pred.similarity_sw,
-                "alignment_score_sw": pred.alignment_score_sw,
-                "gaps_pct_sw": pred.gaps_pct_sw,
-                "alignment_length_sw": pred.alignment_length_sw,
-                "length_query": pred.length_query,
-                "length_ref": pred.length_ref,
-                "query_taxonomy_id": pred.query_taxonomy_id,
-                "ref_taxonomy_id": pred.ref_taxonomy_id,
-                "taxonomic_lca": pred.taxonomic_lca,
-                "taxonomic_distance": pred.taxonomic_distance,
-                "taxonomic_common_ancestors": pred.taxonomic_common_ancestors,
-                "taxonomic_relation": pred.taxonomic_relation or "",
-                "vote_count": pred.vote_count,
-                "k_position": pred.k_position,
-                "go_term_frequency": pred.go_term_frequency,
-                "ref_annotation_density": pred.ref_annotation_density,
-                "neighbor_distance_std": pred.neighbor_distance_std,
-                "label": 0,
-            })
+            records.append(
+                {
+                    "protein_accession": pred.protein_accession,
+                    "go_id": go_id,
+                    "distance": pred.distance,
+                    "qualifier": pred.qualifier or "",
+                    "evidence_code": pred.evidence_code or "",
+                    "identity_nw": pred.identity_nw,
+                    "similarity_nw": pred.similarity_nw,
+                    "alignment_score_nw": pred.alignment_score_nw,
+                    "gaps_pct_nw": pred.gaps_pct_nw,
+                    "alignment_length_nw": pred.alignment_length_nw,
+                    "identity_sw": pred.identity_sw,
+                    "similarity_sw": pred.similarity_sw,
+                    "alignment_score_sw": pred.alignment_score_sw,
+                    "gaps_pct_sw": pred.gaps_pct_sw,
+                    "alignment_length_sw": pred.alignment_length_sw,
+                    "length_query": pred.length_query,
+                    "length_ref": pred.length_ref,
+                    "query_taxonomy_id": pred.query_taxonomy_id,
+                    "ref_taxonomy_id": pred.ref_taxonomy_id,
+                    "taxonomic_lca": pred.taxonomic_lca,
+                    "taxonomic_distance": pred.taxonomic_distance,
+                    "taxonomic_common_ancestors": pred.taxonomic_common_ancestors,
+                    "taxonomic_relation": pred.taxonomic_relation or "",
+                    "vote_count": pred.vote_count,
+                    "k_position": pred.k_position,
+                    "go_term_frequency": pred.go_term_frequency,
+                    "ref_annotation_density": pred.ref_annotation_density,
+                    "neighbor_distance_std": pred.neighbor_distance_std,
+                    "label": 0,
+                }
+            )
 
     if not records:
         return {

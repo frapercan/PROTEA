@@ -5,6 +5,7 @@ embedding config, annotation set, and ontology snapshot, creates a
 QuerySet, and kicks off ``compute_embeddings``.  Returns all the IDs the
 frontend needs to chain ``predict_go_terms`` once embeddings finish.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -45,7 +46,8 @@ _DEFAULT_CONFIG = {
 
 
 def _best_embedding_config(session: Session) -> EmbeddingConfig | None:
-    """Pick the config with the most computed embeddings (prefer ESM-2)."""
+    """Pick the smallest model that already has embeddings — the quick-annotation
+    path is latency-sensitive, so a 300M PLM beats a 3B one for the default."""
     rows = (
         session.query(
             EmbeddingConfig,
@@ -53,12 +55,11 @@ def _best_embedding_config(session: Session) -> EmbeddingConfig | None:
         )
         .outerjoin(SequenceEmbedding, SequenceEmbedding.embedding_config_id == EmbeddingConfig.id)
         .group_by(EmbeddingConfig.id)
-        .order_by(func.count(SequenceEmbedding.id).desc())
+        .order_by(EmbeddingConfig.param_count.asc().nulls_last())
         .all()
     )
     if not rows:
         return None
-    # Prefer a config that already has embeddings
     for config, cnt in rows:
         if cnt > 0:
             return config
@@ -66,19 +67,11 @@ def _best_embedding_config(session: Session) -> EmbeddingConfig | None:
 
 
 def _newest_annotation_set(session: Session) -> AnnotationSet | None:
-    return (
-        session.query(AnnotationSet)
-        .order_by(AnnotationSet.created_at.desc())
-        .first()
-    )
+    return session.query(AnnotationSet).order_by(AnnotationSet.created_at.desc()).first()
 
 
 def _newest_ontology_snapshot(session: Session) -> OntologySnapshot | None:
-    return (
-        session.query(OntologySnapshot)
-        .order_by(OntologySnapshot.loaded_at.desc())
-        .first()
-    )
+    return session.query(OntologySnapshot).order_by(OntologySnapshot.loaded_at.desc()).first()
 
 
 @router.post("", summary="Annotate proteins from FASTA")
@@ -107,7 +100,9 @@ async def annotate(
         try:
             content = raw.decode("utf-8")
         except UnicodeDecodeError:
-            raise HTTPException(status_code=422, detail="FASTA file must be UTF-8 encoded") from None
+            raise HTTPException(
+                status_code=422, detail="FASTA file must be UTF-8 encoded"
+            ) from None
     elif fasta_text:
         if len(fasta_text.encode("utf-8")) > _MAX_FASTA_BYTES:
             raise HTTPException(status_code=413, detail="FASTA text exceeds 50 MB limit")
@@ -120,7 +115,7 @@ async def annotate(
         raise HTTPException(status_code=422, detail="No valid sequences found in the FASTA input")
 
     seen: set[str] = set()
-    for acc, _ in records:
+    for acc, _, _ in records:
         if acc in seen:
             raise HTTPException(status_code=422, detail=f"Duplicate accession: '{acc}'")
         seen.add(acc)
@@ -129,7 +124,7 @@ async def annotate(
     with session_scope(factory) as session:
         # Upsert sequences
         hash_to_seq_id: dict[str, int] = {}
-        hashes = [Sequence.compute_hash(seq) for _, seq in records]
+        hashes = [Sequence.compute_hash(seq) for _, seq, _ in records]
         existing = (
             session.query(Sequence.sequence_hash, Sequence.id)
             .filter(Sequence.sequence_hash.in_(hashes))
@@ -137,7 +132,7 @@ async def annotate(
         )
         for h, sid in existing:
             hash_to_seq_id[h] = sid
-        for (_, seq), h in zip(records, hashes, strict=False):
+        for (_, seq, _), h in zip(records, hashes, strict=False):
             if h not in hash_to_seq_id:
                 new_seq = Sequence(sequence=seq, sequence_hash=h)
                 session.add(new_seq)
@@ -153,7 +148,7 @@ async def annotate(
                 sequence_id=hash_to_seq_id[h],
                 accession=acc,
             )
-            for (acc, _), h in zip(records, hashes, strict=False)
+            for (acc, _, _), h in zip(records, hashes, strict=False)
         ]
         session.add_all(entries)
         session.flush()
@@ -185,9 +180,7 @@ async def annotate(
 
         # ── Check for trained reranker ────────────────────────────────
         best_reranker = (
-            session.query(RerankerModel)
-            .order_by(RerankerModel.created_at.desc())
-            .first()
+            session.query(RerankerModel).order_by(RerankerModel.created_at.desc()).first()
         )
         reranker_id = best_reranker.id if best_reranker else None
 

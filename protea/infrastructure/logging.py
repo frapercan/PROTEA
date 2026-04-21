@@ -4,6 +4,7 @@
 Provides a JSON formatter using only the Python standard library and a
 ``configure_logging()`` helper that workers and the API can call at startup.
 """
+
 from __future__ import annotations
 
 import json

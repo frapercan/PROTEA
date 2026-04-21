@@ -2,6 +2,7 @@
 
 Run with: poetry run pytest --with-postgres -m integration
 """
+
 from __future__ import annotations
 
 from unittest.mock import patch
@@ -72,6 +73,7 @@ def db(postgres_url: str):
 # Load ontology snapshot — full round-trip
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 def test_load_ontology_snapshot_roundtrip(db):
     from protea.core.operations.load_ontology_snapshot import LoadOntologySnapshotOperation
@@ -136,6 +138,7 @@ def test_load_ontology_snapshot_idempotent(db):
 # Store embeddings — pgvector round-trip
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 def test_store_embeddings_roundtrip(db):
     from protea.core.operations.compute_embeddings import StoreEmbeddingsOperation
@@ -160,8 +163,13 @@ def test_store_embeddings_roundtrip(db):
         seq = Sequence(sequence="MKVLWAGS", sequence_hash=Sequence.compute_hash("MKVLWAGS"))
         session.add(seq)
 
-        parent = Job(operation="compute_embeddings", queue_name="protea.embeddings",
-                     status=JobStatus.RUNNING, progress_current=0, progress_total=1)
+        parent = Job(
+            operation="compute_embeddings",
+            queue_name="protea.embeddings",
+            status=JobStatus.RUNNING,
+            progress_current=0,
+            progress_total=1,
+        )
         session.add(parent)
         session.flush()
 
@@ -177,15 +185,19 @@ def test_store_embeddings_roundtrip(db):
         "parent_job_id": str(parent_id),
         "embedding_config_id": str(config_id),
         "skip_existing": True,
-        "sequences": [{
-            "sequence_id": seq_id,
-            "chunks": [{
-                "chunk_index_s": 0,
-                "chunk_index_e": None,
-                "vector": vec,
-                "embedding_dim": 4,
-            }],
-        }],
+        "sequences": [
+            {
+                "sequence_id": seq_id,
+                "chunks": [
+                    {
+                        "chunk_index_s": 0,
+                        "chunk_index_e": None,
+                        "vector": vec,
+                        "embedding_dim": 4,
+                    }
+                ],
+            }
+        ],
     }
 
     with Session(db, future=True) as session:
@@ -214,6 +226,7 @@ def test_store_embeddings_roundtrip(db):
 # ---------------------------------------------------------------------------
 # Store predictions — round-trip with parent progress
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 def test_store_predictions_roundtrip(db):
@@ -311,6 +324,7 @@ def test_store_predictions_roundtrip(db):
     }
 
     events = []
+
     def capture_emit(event, msg, fields, level):
         events.append(event)
 
@@ -339,6 +353,7 @@ def test_store_predictions_roundtrip(db):
 # ---------------------------------------------------------------------------
 # Job lifecycle — parent-child with atomic progress
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 def test_job_parent_child_progress(db):
@@ -381,12 +396,14 @@ def test_job_parent_child_progress(db):
                     .where(Job.id == parent_id, Job.status == JobStatus.RUNNING)
                     .values(status=JobStatus.SUCCEEDED, finished_at=utcnow())
                 )
-                session.add(JobEvent(
-                    job_id=parent_id,
-                    event="job.succeeded",
-                    fields={"via": "last_batch"},
-                    level="info",
-                ))
+                session.add(
+                    JobEvent(
+                        job_id=parent_id,
+                        event="job.succeeded",
+                        fields={"via": "last_batch"},
+                        level="info",
+                    )
+                )
             session.commit()
 
     # Verify final state
@@ -403,6 +420,7 @@ def test_job_parent_child_progress(db):
 # Load GOA annotations — round-trip
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 def test_load_goa_annotations_roundtrip(db):
     from protea.core.operations.load_goa_annotations import LoadGOAAnnotationsOperation
@@ -413,7 +431,9 @@ def test_load_goa_annotations_roundtrip(db):
     with patch.object(ont_op, "_download", return_value=_OBO_SAMPLE):
         with Session(db, future=True) as session:
             ont_result = ont_op.execute(
-                session, {"obo_url": "http://example.org/go.obo"}, emit=_noop_emit,
+                session,
+                {"obo_url": "http://example.org/go.obo"},
+                emit=_noop_emit,
             )
             session.commit()
 
@@ -479,6 +499,7 @@ def test_load_goa_annotations_roundtrip(db):
 # Full pipeline: QuerySet → Embeddings → Predictions
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 def test_full_pipeline_queryset_to_predictions(db):
     """End-to-end: create QuerySet, store embeddings, store predictions."""
@@ -490,10 +511,17 @@ def test_full_pipeline_queryset_to_predictions(db):
     with Session(db, future=True) as session:
         # 1. Create EmbeddingConfig
         config = EmbeddingConfig(
-            model_name="test/model", model_backend="esm",
-            layer_indices=[0], layer_agg="mean", pooling="mean",
-            normalize_residues=False, normalize=True,
-            max_length=1022, use_chunking=False, chunk_size=512, chunk_overlap=0,
+            model_name="test/model",
+            model_backend="esm",
+            layer_indices=[0],
+            layer_agg="mean",
+            pooling="mean",
+            normalize_residues=False,
+            normalize=True,
+            max_length=1022,
+            use_chunking=False,
+            chunk_size=512,
+            chunk_overlap=0,
         )
         session.add(config)
 
@@ -502,8 +530,9 @@ def test_full_pipeline_queryset_to_predictions(db):
         session.add(snap)
         session.flush()
 
-        go_mf = GOTerm(go_id="GO:0003674", name="molecular_function", aspect="F",
-                       ontology_snapshot_id=snap.id)
+        go_mf = GOTerm(
+            go_id="GO:0003674", name="molecular_function", aspect="F", ontology_snapshot_id=snap.id
+        )
         session.add(go_mf)
 
         # 3. Create AnnotationSet
@@ -516,10 +545,15 @@ def test_full_pipeline_queryset_to_predictions(db):
         session.add_all([seq1, seq2])
         session.flush()
 
-        p1 = Protein(accession="Q_QUERY", canonical_accession="Q_QUERY",
-                      is_canonical=True, sequence_id=seq1.id)
-        p2 = Protein(accession="R_REF", canonical_accession="R_REF",
-                      is_canonical=True, sequence_id=seq2.id)
+        p1 = Protein(
+            accession="Q_QUERY",
+            canonical_accession="Q_QUERY",
+            is_canonical=True,
+            sequence_id=seq1.id,
+        )
+        p2 = Protein(
+            accession="R_REF", canonical_accession="R_REF", is_canonical=True, sequence_id=seq2.id
+        )
         session.add_all([p1, p2])
 
         # 5. Create QuerySet
@@ -531,15 +565,25 @@ def test_full_pipeline_queryset_to_predictions(db):
         session.add(entry)
 
         # 6. Create embedding parent job
-        embed_job = Job(operation="compute_embeddings", queue_name="protea.embeddings",
-                        status=JobStatus.RUNNING, progress_current=0, progress_total=1)
+        embed_job = Job(
+            operation="compute_embeddings",
+            queue_name="protea.embeddings",
+            status=JobStatus.RUNNING,
+            progress_current=0,
+            progress_total=1,
+        )
         session.add(embed_job)
         session.flush()
 
         ids = {
-            "config_id": config.id, "snap_id": snap.id, "ann_set_id": ann_set.id,
-            "go_term_id": go_mf.id, "seq1_id": seq1.id, "seq2_id": seq2.id,
-            "qs_id": qs.id, "embed_job_id": embed_job.id,
+            "config_id": config.id,
+            "snap_id": snap.id,
+            "ann_set_id": ann_set.id,
+            "go_term_id": go_mf.id,
+            "seq1_id": seq1.id,
+            "seq2_id": seq2.id,
+            "qs_id": qs.id,
+            "embed_job_id": embed_job.id,
         }
         session.commit()
 
@@ -549,14 +593,28 @@ def test_full_pipeline_queryset_to_predictions(db):
         "parent_job_id": str(ids["embed_job_id"]),
         "embedding_config_id": str(ids["config_id"]),
         "sequences": [
-            {"sequence_id": ids["seq1_id"], "chunks": [
-                {"chunk_index_s": 0, "chunk_index_e": None,
-                 "vector": [0.9, 0.1, 0.0, 0.0], "embedding_dim": dim}
-            ]},
-            {"sequence_id": ids["seq2_id"], "chunks": [
-                {"chunk_index_s": 0, "chunk_index_e": None,
-                 "vector": [0.0, 0.0, 0.1, 0.9], "embedding_dim": dim}
-            ]},
+            {
+                "sequence_id": ids["seq1_id"],
+                "chunks": [
+                    {
+                        "chunk_index_s": 0,
+                        "chunk_index_e": None,
+                        "vector": [0.9, 0.1, 0.0, 0.0],
+                        "embedding_dim": dim,
+                    }
+                ],
+            },
+            {
+                "sequence_id": ids["seq2_id"],
+                "chunks": [
+                    {
+                        "chunk_index_s": 0,
+                        "chunk_index_e": None,
+                        "vector": [0.0, 0.0, 0.1, 0.9],
+                        "embedding_dim": dim,
+                    }
+                ],
+            },
         ],
     }
     with Session(db, future=True) as session:
@@ -567,8 +625,13 @@ def test_full_pipeline_queryset_to_predictions(db):
 
     # 8. Create prediction job + PredictionSet
     with Session(db, future=True) as session:
-        pred_job = Job(operation="predict_go_terms", queue_name="protea.jobs",
-                       status=JobStatus.RUNNING, progress_current=0, progress_total=1)
+        pred_job = Job(
+            operation="predict_go_terms",
+            queue_name="protea.jobs",
+            status=JobStatus.RUNNING,
+            progress_current=0,
+            progress_total=1,
+        )
         session.add(pred_job)
 
         pred_set = PredictionSet(
@@ -576,7 +639,8 @@ def test_full_pipeline_queryset_to_predictions(db):
             annotation_set_id=ids["ann_set_id"],
             ontology_snapshot_id=ids["snap_id"],
             query_set_id=ids["qs_id"],
-            limit_per_entry=5, meta={},
+            limit_per_entry=5,
+            meta={},
         )
         session.add(pred_set)
         session.flush()
@@ -589,14 +653,16 @@ def test_full_pipeline_queryset_to_predictions(db):
     pred_payload = {
         "parent_job_id": str(pred_job_id),
         "prediction_set_id": str(pred_set_id),
-        "predictions": [{
-            "protein_accession": "Q_QUERY",
-            "go_term_id": ids["go_term_id"],
-            "ref_protein_accession": "R_REF",
-            "distance": 0.85,
-            "qualifier": "enables",
-            "evidence_code": "IDA",
-        }],
+        "predictions": [
+            {
+                "protein_accession": "Q_QUERY",
+                "go_term_id": ids["go_term_id"],
+                "ref_protein_accession": "R_REF",
+                "distance": 0.85,
+                "qualifier": "enables",
+                "evidence_code": "IDA",
+            }
+        ],
     }
     with Session(db, future=True) as session:
         pred_result = store_pred.execute(session, pred_payload, emit=_noop_emit)
@@ -611,9 +677,9 @@ def test_full_pipeline_queryset_to_predictions(db):
         assert len(entries) == 1
 
         # Embeddings exist
-        embs = session.query(SequenceEmbedding).filter_by(
-            embedding_config_id=ids["config_id"]
-        ).all()
+        embs = (
+            session.query(SequenceEmbedding).filter_by(embedding_config_id=ids["config_id"]).all()
+        )
         assert len(embs) == 2
 
         # Predictions exist

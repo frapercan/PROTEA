@@ -13,9 +13,16 @@ from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from protea.core.anc2vec_embeddings import Anc2VecIndex, get_index as get_anc2vec_index
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.feature_engineering import compute_alignment, compute_taxonomy
 from protea.core.knn_search import search_knn
+from protea.core.reranker import EMBEDDING_PCA_DIM, fit_embedding_pca
+from protea.core.reranking import (
+    apply_reranker,
+    infer_active_feature_families,
+    load_reranker,
+)
 from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
@@ -24,11 +31,14 @@ from protea.infrastructure.orm.models.annotation.protein_go_annotation import Pr
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
+from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
 from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.orm.models.query.query_set import QuerySet, QuerySetEntry
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
+from protea.infrastructure.settings import load_settings
+from protea.infrastructure.storage import get_artifact_store
 
 PositiveInt = Annotated[int, Field(gt=0)]
 
@@ -202,6 +212,39 @@ def _csr_lookup(
     return go_map
 
 
+def _derive_reference_views(
+    accessions: list[str],
+    embeddings_f16: np.ndarray,
+) -> dict[str, Any]:
+    """Build the per-process reference view dict used by the KNN path.
+
+    Stores one f32 copy of the embeddings plus an L2-normalised f32 copy
+    for cosine similarity. These are the inputs the search path consumes —
+    keeping them precomputed avoids an ``astype(np.float32)`` and an
+    ``np.linalg.norm`` on every batch (together ~9 s per batch at 555k × 1280).
+
+    The original f16 array is also kept on the result dict for any consumer
+    that still expects it (e.g. size reporting), but the hot path reads
+    ``embeddings_f32`` and ``embeddings_f32_cos`` directly.
+    """
+    if not accessions or embeddings_f16.size == 0:
+        return {
+            "accessions": accessions,
+            "embeddings": embeddings_f16,
+            "embeddings_f32": np.empty((0,), dtype=np.float32),
+            "embeddings_f32_cos": np.empty((0,), dtype=np.float32),
+        }
+    emb_f32 = embeddings_f16.astype(np.float32)
+    norms = np.linalg.norm(emb_f32, axis=1, keepdims=True)
+    emb_f32_cos = emb_f32 / (norms + 1e-9)
+    return {
+        "accessions": accessions,
+        "embeddings": embeddings_f16,
+        "embeddings_f32": emb_f32,
+        "embeddings_f32_cos": emb_f32_cos,
+    }
+
+
 def _load_from_disk_cache(
     embedding_config_id: uuid.UUID,
     annotation_set_id: uuid.UUID,
@@ -227,6 +270,156 @@ def _save_to_disk_cache(
     emb_path.parent.mkdir(parents=True, exist_ok=True)
     np.save(emb_path, embeddings)
     np.save(acc_path, np.array(accessions))
+
+
+# ---------------------------------------------------------------------------
+# PCA state artifact (one file per EmbeddingConfig)
+# ---------------------------------------------------------------------------
+
+_PCA_ARTIFACTS_DIR = Path(
+    os.environ.get(
+        "PROTEA_PCA_ARTIFACTS_DIR",
+        str(Path(__file__).resolve().parents[2] / "artifacts" / "pca"),
+    )
+)
+
+
+def _pca_state_path(embedding_config_id: uuid.UUID) -> Path:
+    return _PCA_ARTIFACTS_DIR / f"{embedding_config_id}.npz"
+
+
+def _load_pca_state(
+    embedding_config_id: uuid.UUID,
+) -> tuple[np.ndarray, np.ndarray] | None:
+    path = _pca_state_path(embedding_config_id)
+    if not path.exists():
+        return None
+    try:
+        data = np.load(path)
+        return (
+            np.ascontiguousarray(data["mean"], dtype=np.float32),
+            np.ascontiguousarray(data["components"], dtype=np.float32),
+        )
+    except Exception:
+        return None
+
+
+def _save_pca_state(
+    embedding_config_id: uuid.UUID,
+    mean: np.ndarray,
+    components: np.ndarray,
+) -> None:
+    path = _pca_state_path(embedding_config_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(path, mean=mean, components=components)
+
+
+def _load_or_fit_pca_state(
+    embedding_config_id: uuid.UUID,
+    unified_embeddings_f32: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """Load PCA state from disk or fit on the reference pool.
+
+    Returns ``None`` when the reference pool is empty (no projection possible).
+    The artifact is shared across all workers and every prediction_set that
+    uses this ``EmbeddingConfig`` — fit once, reuse forever.
+    """
+    cached = _load_pca_state(embedding_config_id)
+    if cached is not None:
+        return cached
+    if unified_embeddings_f32.size == 0:
+        return None
+    mean, components = fit_embedding_pca(unified_embeddings_f32, EMBEDDING_PCA_DIM)
+    _save_pca_state(embedding_config_id, mean, components)
+    return mean, components
+
+
+# ---------------------------------------------------------------------------
+# v6 reranker feature constants
+# ---------------------------------------------------------------------------
+
+_TAX_CLOSE_RELATIONS = frozenset(
+    {"same", "ancestor", "descendant", "child", "parent", "close"}
+)
+
+_NEW_V6_FEATURE_KEYS: tuple[str, ...] = (
+    "anc2vec_neighbor_cos",
+    "anc2vec_neighbor_maxcos",
+    "anc2vec_has_emb",
+    "anc2vec_query_known_cos",
+    "anc2vec_query_known_maxcos",
+    "anc2vec_query_known_count",
+    "tax_voters_same_frac",
+    "tax_voters_close_frac",
+    "tax_voters_mean_common_ancestors",
+    *(f"emb_pca_query_{i}" for i in range(EMBEDDING_PCA_DIM)),
+)
+
+_STORE_FLOAT_KEYS: tuple[str, ...] = (
+    "identity_nw",
+    "similarity_nw",
+    "alignment_score_nw",
+    "gaps_pct_nw",
+    "alignment_length_nw",
+    "identity_sw",
+    "similarity_sw",
+    "alignment_score_sw",
+    "gaps_pct_sw",
+    "alignment_length_sw",
+    "length_query",
+    "length_ref",
+    "query_taxonomy_id",
+    "ref_taxonomy_id",
+    "taxonomic_lca",
+    "taxonomic_distance",
+    "taxonomic_common_ancestors",
+    "vote_count",
+    "k_position",
+    "go_term_frequency",
+    "ref_annotation_density",
+    "neighbor_distance_std",
+    "neighbor_vote_fraction",
+    "neighbor_min_distance",
+    "neighbor_mean_distance",
+    *_NEW_V6_FEATURE_KEYS,
+)
+
+
+def _clean_float(value: Any) -> Any:
+    """Return ``None`` for NaN / non-finite floats, pass-through otherwise.
+
+    Postgres stores NaN as a real value in double precision columns, but
+    LightGBM treats NULL as missing (its native NA handling) while NaN can
+    trip numeric safeguards downstream. Keeping NaN out of the DB avoids
+    both footguns — feature columns read as ``None`` → pandas NA → LightGBM
+    missing.
+    """
+    if value is None:
+        return None
+    if isinstance(value, float):
+        if value != value or value in (float("inf"), float("-inf")):
+            return None
+    return value
+
+
+def _row_from_prediction(
+    pred: dict[str, Any],
+    prediction_set_id: uuid.UUID,
+) -> dict[str, Any]:
+    """Build a GOPrediction INSERT row from a predict-side prediction dict."""
+    row: dict[str, Any] = {
+        "prediction_set_id": prediction_set_id,
+        "protein_accession": pred["protein_accession"],
+        "go_term_id": pred["go_term_id"],
+        "ref_protein_accession": pred["ref_protein_accession"],
+        "distance": pred["distance"],
+        "qualifier": pred.get("qualifier"),
+        "evidence_code": pred.get("evidence_code"),
+        "taxonomic_relation": pred.get("taxonomic_relation"),
+    }
+    for key in _STORE_FLOAT_KEYS:
+        row[key] = _clean_float(pred.get(key))
+    return row
 
 
 # ---------------------------------------------------------------------------
@@ -260,6 +453,13 @@ class PredictGOTermsPayload(ProteaPayload, frozen=True):
     compute_taxonomy: bool = False
     compute_reranker_features: bool = False
 
+    # v6 reranker features (opt-in): 6 Anc2Vec + 3 tax_voters + 16 emb_pca.
+    # When enabled, the PCA state is fit once per ``EmbeddingConfig`` (or
+    # reused from ``artifacts/pca/{config_id}.npz``) and the 25 extra columns
+    # are persisted on every ``GOPrediction`` row. Required at predict time
+    # for any prediction_set that will be rerank-scored with a v6 model.
+    compute_v6_features: bool = False
+
     # Per-aspect KNN indices (opt-in)
     # When True, three separate KNN indices are built — one per GO aspect (P/F/C).
     # Each index contains only reference proteins annotated in that aspect, and only
@@ -269,6 +469,12 @@ class PredictGOTermsPayload(ProteaPayload, frozen=True):
     # one or two aspects (a common cause of BPO recall ceilings).
     # Memory cost: 3× the reference embedding array; search time: 3 KNN calls per batch.
     aspect_separated_knn: bool = True
+
+    # Optional reranker promoted from protea-reranker-lab. When set, the
+    # batch worker scores predictions with the referenced booster after
+    # validating ``feature_schema_sha`` against the live feature set —
+    # mismatch degrades to KNN-distance ordering (never crashes).
+    reranker_model_id: str | None = None
 
     @field_validator(
         "embedding_config_id", "annotation_set_id", "ontology_snapshot_id", mode="before"
@@ -301,7 +507,15 @@ class PredictGOTermsBatchPayload(ProteaPayload, frozen=True):
     compute_alignments: bool = False
     compute_taxonomy: bool = False
     compute_reranker_features: bool = False
+    compute_v6_features: bool = False
     aspect_separated_knn: bool = True
+
+    # Reranker context propagated from the coordinator. ``artifact_uri``
+    # and ``feature_schema_sha`` are snapshotted at dispatch time so the
+    # worker does not have to re-query the RerankerModel row.
+    reranker_model_id: str | None = None
+    reranker_artifact_uri: str | None = None
+    reranker_feature_schema_sha: str | None = None
 
 
 class StorePredictionsPayload(ProteaPayload, frozen=True):
@@ -321,16 +535,69 @@ class PredictGOTermsOperation:
     """Coordinator: validates, creates PredictionSet, dispatches N batch messages.
 
     Pipeline:
-    1. Validate EmbeddingConfig / AnnotationSet / OntologySnapshot.
+
+    1. Validate ``EmbeddingConfig``, ``AnnotationSet`` and
+       ``OntologySnapshot``.
     2. Load query accessions that have embeddings (no embedding data — keeps
        the coordinator session light).
-    3. Create PredictionSet.
-    4. Partition accessions into batches and publish to protea.predictions.batch.
+    3. Create the ``PredictionSet``.
+    4. Partition accessions into batches and publish to
+       ``protea.predictions.batch``.
 
-    The actual KNN search and GO transfer happen inside PredictGOTermsBatchOperation.
+    The actual KNN search and GO transfer happen inside
+    ``PredictGOTermsBatchOperation``.
     """
 
     name = "predict_go_terms"
+    description = (
+        "Coordinator: create a PredictionSet and partition query proteins into "
+        "KNN batches dispatched to predict_go_terms_batch workers."
+    )
+
+    def summarize_payload(self, payload: dict[str, Any], *, session: Session | None = None) -> str:
+        p = payload or {}
+        bits: list[str] = []
+
+        cfg_id_raw = p.get("embedding_config_id")
+        if cfg_id_raw and session is not None:
+            try:
+                cfg = session.get(EmbeddingConfig, uuid.UUID(str(cfg_id_raw)))
+            except Exception:
+                cfg = None
+            if cfg is not None:
+                model_label = cfg.display_name or cfg.model_name or str(cfg.id)[:8]
+                bits.append(f"{model_label} ({cfg.model_backend})")
+        elif cfg_id_raw:
+            bits.append(f"cfg={str(cfg_id_raw)[:8]}")
+
+        ann_id_raw = p.get("annotation_set_id")
+        if ann_id_raw and session is not None:
+            try:
+                ann = session.get(AnnotationSet, uuid.UUID(str(ann_id_raw)))
+            except Exception:
+                ann = None
+            if ann is not None:
+                label = f"{ann.source}@{ann.source_version}" if ann.source_version else ann.source
+                bits.append(f"ref={label}")
+        elif ann_id_raw:
+            bits.append(f"ann={str(ann_id_raw)[:8]}")
+
+        if p.get("query_set_id"):
+            bits.append(f"qs={str(p['query_set_id'])[:8]}")
+        if p.get("limit_per_entry"):
+            bits.append(f"k={p['limit_per_entry']}")
+        if p.get("search_backend"):
+            backend = p["search_backend"]
+            if backend == "faiss" and p.get("faiss_index_type"):
+                backend = f"faiss/{p['faiss_index_type']}"
+            bits.append(backend)
+        if p.get("aspect_separated_knn"):
+            bits.append("aspect-knn")
+        if p.get("compute_alignments"):
+            bits.append("+align")
+        if p.get("compute_taxonomy"):
+            bits.append("+tax")
+        return " · ".join(bits)
 
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
@@ -362,6 +629,35 @@ class PredictGOTermsOperation:
             },
             "info",
         )
+
+        reranker_artifact_uri: str | None = None
+        reranker_feature_schema_sha: str | None = None
+        if p.reranker_model_id:
+            reranker_row = session.get(RerankerModel, uuid.UUID(p.reranker_model_id))
+            if reranker_row is None:
+                raise ValueError(f"RerankerModel {p.reranker_model_id} not found")
+            if not reranker_row.artifact_uri:
+                raise ValueError(
+                    f"RerankerModel {p.reranker_model_id} has no artifact_uri — "
+                    "register it via scripts/register_reranker.py"
+                )
+            if not reranker_row.feature_schema_sha:
+                raise ValueError(
+                    f"RerankerModel {p.reranker_model_id} has no feature_schema_sha — "
+                    "cannot validate feature alignment at inference time"
+                )
+            reranker_artifact_uri = reranker_row.artifact_uri
+            reranker_feature_schema_sha = reranker_row.feature_schema_sha
+            emit(
+                "predict_go_terms.reranker_bound",
+                None,
+                {
+                    "reranker_model_id": p.reranker_model_id,
+                    "reranker_name": reranker_row.name,
+                    "feature_schema_sha": reranker_feature_schema_sha,
+                },
+                "info",
+            )
 
         query_accessions = self._load_query_accessions(session, p, embedding_config_id, emit)
         if not query_accessions:
@@ -424,7 +720,11 @@ class PredictGOTermsOperation:
                             "compute_alignments": p.compute_alignments,
                             "compute_taxonomy": p.compute_taxonomy,
                             "compute_reranker_features": p.compute_reranker_features,
+                            "compute_v6_features": p.compute_v6_features,
                             "aspect_separated_knn": p.aspect_separated_knn,
+                            "reranker_model_id": p.reranker_model_id,
+                            "reranker_artifact_uri": reranker_artifact_uri,
+                            "reranker_feature_schema_sha": reranker_feature_schema_sha,
                         },
                     },
                 )
@@ -501,6 +801,15 @@ class PredictGOTermsBatchOperation:
     """
 
     name = "predict_go_terms_batch"
+    description = (
+        "CPU child job: KNN search and GO annotation transfer for one query "
+        "chunk; result is forwarded to store_predictions."
+    )
+
+    def summarize_payload(self, payload: dict[str, Any]) -> str:
+        p = payload or {}
+        n = len(p.get("query_accessions") or [])
+        return f"n={n}" if n else ""
 
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
@@ -559,8 +868,15 @@ class PredictGOTermsBatchOperation:
 
         t0 = time.perf_counter()
 
+        v6_ctx: dict[str, Any] | None = None
+
         if p.aspect_separated_knn:
-            prediction_dicts = self._run_aspect_separated_knn(
+            (
+                prediction_dicts,
+                neighbors_by_aspect,
+                go_map_by_aspect,
+                pair_features,
+            ) = self._run_aspect_separated_knn(
                 session,
                 valid_accessions,
                 query_embeddings,
@@ -569,14 +885,23 @@ class PredictGOTermsBatchOperation:
                 prediction_set_id,
                 p,
             )
+            if p.compute_v6_features:
+                v6_ctx = {
+                    "neighbors_by_aspect": neighbors_by_aspect,
+                    "go_map_by_aspect": go_map_by_aspect,
+                    "pair_features": pair_features,
+                }
         else:
             ref_data = _REF_CACHE[cache_key]
             if not ref_data["embeddings"].size:
                 emit("predict_go_terms_batch.no_references", None, {}, "warning")
                 return OperationResult(result={"predictions": 0})
 
-            # --- KNN: convert float16 cache → float32 for search ---
-            ref_embeddings_f32 = ref_data["embeddings"].astype(np.float32)
+            # --- KNN: use precomputed f32 (cosine-normalised if metric == cosine) ---
+            use_cos = p.metric == "cosine"
+            ref_embeddings_f32 = (
+                ref_data["embeddings_f32_cos"] if use_cos else ref_data["embeddings_f32"]
+            )
             neighbors = search_knn(
                 query_embeddings,
                 ref_embeddings_f32,
@@ -585,6 +910,7 @@ class PredictGOTermsBatchOperation:
                 distance_threshold=p.distance_threshold,
                 backend=p.search_backend,
                 metric=p.metric,
+                pre_normalized=use_cos,
                 faiss_index_type=p.faiss_index_type,
                 faiss_nlist=p.faiss_nlist,
                 faiss_nprobe=p.faiss_nprobe,
@@ -618,7 +944,7 @@ class PredictGOTermsBatchOperation:
                 "embeddings": ref_embeddings_f32,
                 "go_map": go_map,
             }
-            prediction_dicts = self._predict_batch(
+            prediction_dicts, neighbors, pair_features = self._predict_batch(
                 valid_accessions,
                 query_embeddings,
                 ref_data_with_annotations,
@@ -630,17 +956,78 @@ class PredictGOTermsBatchOperation:
                 ref_tax_ids=ref_tax_ids,
                 query_tax_ids=query_tax_ids,
             )
+            if p.compute_v6_features:
+                # Unified mode: collapse to a single synthetic aspect key so the
+                # enricher can partition GO terms via the aspect map.
+                v6_ctx = {
+                    "neighbors_by_aspect": {"": neighbors},
+                    "go_map_by_aspect": {"": go_map},
+                    "pair_features": pair_features,
+                }
+
+        # --- v6 feature enrichment (Anc2Vec + tax_voters + emb_pca) ---------
+        if p.compute_v6_features and v6_ctx is not None and prediction_dicts:
+            ref_unified = _REF_CACHE[cache_key]
+            # For aspect-separated mode, the cache is a per-aspect dict —
+            # concatenate f32 embeddings to fit PCA on the full pool.
+            if p.aspect_separated_knn:
+                pools = [
+                    ref_unified[a]["embeddings_f32"]
+                    for a in _ASPECTS
+                    if ref_unified[a].get("embeddings_f32") is not None
+                    and ref_unified[a]["embeddings_f32"].size
+                ]
+                pca_pool = (
+                    np.concatenate(pools, axis=0)
+                    if pools
+                    else np.empty((0,), dtype=np.float32)
+                )
+            else:
+                pca_pool = ref_unified.get("embeddings_f32", np.empty((0,), dtype=np.float32))
+
+            pca_state = _load_or_fit_pca_state(embedding_config_id, pca_pool)
+            self._enrich_with_v6_features(
+                prediction_dicts,
+                session=session,
+                valid_accessions=valid_accessions,
+                query_embeddings=query_embeddings,
+                neighbors_by_aspect=v6_ctx["neighbors_by_aspect"],
+                go_map_by_aspect=v6_ctx["go_map_by_aspect"],
+                pair_features=v6_ctx["pair_features"],
+                embedding_config_id=embedding_config_id,
+                pca_state=pca_state,
+                compute_taxonomy=p.compute_taxonomy,
+            )
+            emit(
+                "predict_go_terms_batch.v6_features_done",
+                None,
+                {
+                    "pca_state_fit": pca_state is not None,
+                    "pca_dim": EMBEDDING_PCA_DIM if pca_state is not None else 0,
+                    "rows_enriched": len(prediction_dicts),
+                },
+                "info",
+            )
+
+        reranker_stats: dict[str, Any] | None = None
+        if p.reranker_model_id and prediction_dicts:
+            reranker_stats = self._apply_reranker_if_aligned(
+                session, prediction_dicts, p, emit
+            )
 
         elapsed = time.perf_counter() - t0
 
+        done_fields: dict[str, Any] = {
+            "queries": len(valid_accessions),
+            "predictions": len(prediction_dicts),
+            "elapsed_seconds": elapsed,
+        }
+        if reranker_stats is not None:
+            done_fields["reranker"] = reranker_stats
         emit(
             "predict_go_terms_batch.done",
             None,
-            {
-                "queries": len(valid_accessions),
-                "predictions": len(prediction_dicts),
-                "elapsed_seconds": elapsed,
-            },
+            done_fields,
             "info",
         )
 
@@ -663,6 +1050,130 @@ class PredictGOTermsBatchOperation:
         )
 
     # ── helpers ──────────────────────────────────────────────────────────────
+
+    def _apply_reranker_if_aligned(
+        self,
+        session: Session,
+        prediction_dicts: list[dict[str, Any]],
+        p: PredictGOTermsBatchPayload,
+        emit: EmitFn,
+    ) -> dict[str, Any] | None:
+        """Score ``prediction_dicts`` with the configured reranker.
+
+        The booster is skipped (never crashed) whenever any of the load-
+        bearing preconditions fails:
+
+        * ``artifact_uri`` / ``feature_schema_sha`` missing in the payload
+          (coordinator bug — should not happen, but we log and continue).
+        * ``protea_reranker_lab.contracts`` is not importable (production
+          image without the dev dep).
+        * ``live_sha != expected_sha`` (feature set diverged since
+          training — silently fall back to KNN distance ordering).
+
+        On success the ``reranker_score`` float ends up on every prediction
+        dict in memory (not persisted — ``GOPrediction`` has no column for
+        it yet) and the method returns per-batch summary stats for the
+        ``predict_go_terms_batch.done`` event.
+        """
+        if not (p.reranker_artifact_uri and p.reranker_feature_schema_sha):
+            emit(
+                "reranker.skipped",
+                None,
+                {"reason": "missing_artifact_context", "reranker_model_id": p.reranker_model_id},
+                "warning",
+            )
+            return None
+
+        try:
+            from protea_reranker_lab.contracts import compute_feature_schema_sha
+        except Exception as exc:
+            emit(
+                "reranker.skipped",
+                None,
+                {
+                    "reason": "contracts_unavailable",
+                    "reranker_model_id": p.reranker_model_id,
+                    "error": str(exc),
+                },
+                "warning",
+            )
+            return None
+
+        live_families = infer_active_feature_families(
+            compute_alignments=p.compute_alignments,
+            compute_taxonomy=p.compute_taxonomy,
+            compute_v6_features=p.compute_v6_features,
+        )
+        live_sha = compute_feature_schema_sha(live_families)
+        if live_sha != p.reranker_feature_schema_sha:
+            emit(
+                "reranker.schema_mismatch",
+                None,
+                {
+                    "reranker_model_id": p.reranker_model_id,
+                    "expected_sha": p.reranker_feature_schema_sha,
+                    "live_sha": live_sha,
+                    "live_families": live_families,
+                },
+                "error",
+            )
+            return {
+                "applied": False,
+                "skipped_reason": "schema_mismatch",
+                "expected_sha": p.reranker_feature_schema_sha,
+                "live_sha": live_sha,
+            }
+
+        import pandas as pd
+
+        project_root = Path(__file__).resolve().parents[2]
+        settings = load_settings(project_root)
+        store = get_artifact_store(settings)
+        booster = load_reranker(
+            p.reranker_artifact_uri,
+            feature_schema_sha=p.reranker_feature_schema_sha,
+            store=store,
+        )
+
+        self._attach_go_term_aspect(session, prediction_dicts)
+        df = pd.DataFrame(prediction_dicts)
+        scores = apply_reranker(df, booster)
+
+        for rec, score in zip(prediction_dicts, scores.tolist(), strict=True):
+            rec["reranker_score"] = float(score)
+
+        if scores.size == 0:
+            return {"applied": True, "rows": 0}
+        return {
+            "applied": True,
+            "rows": int(scores.size),
+            "score_min": float(scores.min()),
+            "score_max": float(scores.max()),
+            "score_mean": float(scores.mean()),
+            "feature_schema_sha": live_sha,
+        }
+
+    def _attach_go_term_aspect(
+        self,
+        session: Session,
+        prediction_dicts: list[dict[str, Any]],
+    ) -> None:
+        """Look up ``GOTerm.aspect`` for every unique ``go_term_id`` and
+        write it back onto each prediction dict so the reranker's
+        categorical feature is populated.
+        """
+        unique_ids = {rec["go_term_id"] for rec in prediction_dicts if rec.get("go_term_id") is not None}
+        if not unique_ids:
+            return
+        aspect_by_id: dict[int, str] = dict(
+            session.query(GOTerm.id, GOTerm.aspect)
+            .filter(GOTerm.id.in_(unique_ids))
+            .all()
+        )
+        for rec in prediction_dicts:
+            gid = rec.get("go_term_id")
+            if gid is not None and gid in aspect_by_id:
+                rec["aspect"] = aspect_by_id[gid]
 
     def _load_reference_data(
         self,
@@ -695,7 +1206,7 @@ class PredictGOTermsBatchOperation:
                 },
                 "info",
             )
-            return cached
+            return _derive_reference_views(cached["accessions"], cached["embeddings"])
 
         annotated_accessions_sq = (
             session.query(ProteinGOAnnotation.protein_accession)
@@ -721,11 +1232,13 @@ class PredictGOTermsBatchOperation:
         # materialises ~14 GB of Python float objects and hits swap.
         total = base_q.count()
         if total == 0:
-            return {"accessions": [], "embeddings": np.empty((0,), dtype=np.float16)}
+            return _derive_reference_views([], np.empty((0,), dtype=np.float16))
 
-        # Determine embedding dimension from a single row.
+        # Determine embedding dimension from a single row.  Rows come back as
+        # pgvector HalfVector instances after the 2026-04-11 halfvec migration —
+        # they expose .dimensions() and .to_numpy() but not len() / __array__.
         first_emb = base_q.limit(1).one()[1]
-        dim = len(first_emb)
+        dim = first_emb.dimensions()
 
         # Pre-allocate float16 array; fill row-by-row via yield_per so the
         # cursor fetches _STREAM_CHUNK_SIZE rows at a time — peak Python-object
@@ -733,7 +1246,7 @@ class PredictGOTermsBatchOperation:
         embeddings = np.empty((total, dim), dtype=np.float16)
         accessions: list[str] = []
         for i, (acc, emb) in enumerate(base_q.yield_per(_STREAM_CHUNK_SIZE)):
-            embeddings[i] = emb
+            embeddings[i] = emb.to_numpy()
             accessions.append(acc)
 
         _save_to_disk_cache(embedding_config_id, annotation_set_id, accessions, embeddings)
@@ -749,7 +1262,7 @@ class PredictGOTermsBatchOperation:
             "info",
         )
 
-        return {"accessions": accessions, "embeddings": embeddings}
+        return _derive_reference_views(accessions, embeddings)
 
     def _load_reference_data_per_aspect(
         self,
@@ -800,7 +1313,7 @@ class PredictGOTermsBatchOperation:
         unified = self._load_reference_data(session, embedding_config_id, annotation_set_id, emit)
         if not unified["accessions"]:
             return {
-                asp: {"accessions": [], "embeddings": np.empty((0,), dtype=np.float16)}
+                asp: _derive_reference_views([], np.empty((0,), dtype=np.float16))
                 for asp in _ASPECTS
             }
 
@@ -848,11 +1361,13 @@ class PredictGOTermsBatchOperation:
             for acc, asp, go_term_id, qualifier, evidence_code in rows:
                 if asp in aspect_to_accset:
                     aspect_to_accset[asp].add(acc)
-                    aspect_to_go_map[asp].setdefault(acc, []).append({
-                        "go_term_id": go_term_id,
-                        "qualifier": qualifier,
-                        "evidence_code": evidence_code,
-                    })
+                    aspect_to_go_map[asp].setdefault(acc, []).append(
+                        {
+                            "go_term_id": go_term_id,
+                            "qualifier": qualifier,
+                            "evidence_code": evidence_code,
+                        }
+                    )
 
             for asp in missing_aspects:
                 # Save embedding index array
@@ -880,6 +1395,8 @@ class PredictGOTermsBatchOperation:
 
             aspect_accessions = [unified["accessions"][i] for i in indices]
             aspect_embeddings = unified["embeddings"][indices]  # float16 copy, ~300 MB max
+            aspect_embeddings_f32 = unified["embeddings_f32"][indices]
+            aspect_embeddings_f32_cos = unified["embeddings_f32_cos"][indices]
 
             anno_csr = _load_anno_csr_from_disk(embedding_config_id, annotation_set_id, aspect)
             anno_data: dict[str, Any] = {}
@@ -896,6 +1413,8 @@ class PredictGOTermsBatchOperation:
             result[aspect] = {
                 "accessions": aspect_accessions,
                 "embeddings": aspect_embeddings,
+                "embeddings_f32": aspect_embeddings_f32,
+                "embeddings_f32_cos": aspect_embeddings_f32_cos,
                 **anno_data,
             }
             total_refs += len(indices)
@@ -929,7 +1448,12 @@ class PredictGOTermsBatchOperation:
         annotation_set_id: uuid.UUID,
         prediction_set_id: uuid.UUID,
         p: PredictGOTermsBatchPayload,
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[
+        list[dict[str, Any]],
+        dict[str, list[list[tuple[str, float]]]],
+        dict[str, dict[str, list[dict[str, Any]]]],
+        dict[tuple[str, str], dict[str, Any]],
+    ]:
         """Run three independent KNN searches (one per GO aspect) and merge results.
 
         For each aspect ``a`` in (P, F, C):
@@ -951,13 +1475,18 @@ class PredictGOTermsBatchOperation:
         neighbors_by_aspect: dict[str, list[list[tuple[str, float]]]] = {}
         all_unique_neighbors: set[str] = set()
 
+        use_cos = p.metric == "cosine"
         for aspect in _ASPECTS:
             aspect_refs = ref_data_by_aspect[aspect]
             if not aspect_refs["accessions"]:
                 neighbors_by_aspect[aspect] = [[] for _ in valid_accessions]
                 continue
 
-            ref_f32 = aspect_refs["embeddings"].astype(np.float32)
+            ref_f32 = (
+                aspect_refs["embeddings_f32_cos"]
+                if use_cos
+                else aspect_refs["embeddings_f32"]
+            )
             aspect_neighbors = search_knn(
                 query_embeddings,
                 ref_f32,
@@ -966,6 +1495,7 @@ class PredictGOTermsBatchOperation:
                 distance_threshold=p.distance_threshold,
                 backend=p.search_backend,
                 metric=p.metric,
+                pre_normalized=use_cos,
                 faiss_index_type=p.faiss_index_type,
                 faiss_nlist=p.faiss_nlist,
                 faiss_nprobe=p.faiss_nprobe,
@@ -1003,14 +1533,23 @@ class PredictGOTermsBatchOperation:
         rr_distance_std_per_query: dict[str, float] = {}
         rr_vote_count_per_query: dict[str, dict[int, int]] = {}
         rr_k_position_per_query: dict[str, dict[int, int]] = {}
+        # Consensus features: per (q_acc, gtid) min and sum of distances across
+        # the neighbors that voted for that term; mean is sum / vote_count.
+        rr_vote_min_d_per_query: dict[str, dict[int, float]] = {}
+        rr_vote_sum_d_per_query: dict[str, dict[int, float]] = {}
         # go_term_frequency and ref_annotation_density are computed per-aspect below
         all_go_term_freq: dict[int, int] = {}
         all_ref_ann_density: dict[str, int] = {}
+        # Track the per-aspect go_maps so the v6 feature enricher can see the
+        # full set of voting-neighbor annotations without re-querying.
+        go_map_by_aspect: dict[str, dict[str, list[dict[str, Any]]]] = {}
 
         if compute_rr:
             for q_idx, q_acc in enumerate(valid_accessions):
                 rr_vote_count_per_query[q_acc] = {}
                 rr_k_position_per_query[q_acc] = {}
+                rr_vote_min_d_per_query[q_acc] = {}
+                rr_vote_sum_d_per_query[q_acc] = {}
                 all_distances = []
                 for aspect in _ASPECTS:
                     aspect_neighbors = neighbors_by_aspect[aspect]
@@ -1043,6 +1582,8 @@ class PredictGOTermsBatchOperation:
                     session, annotation_set_id, unique_neighbors_aspect, aspect=aspect
                 )
 
+            go_map_by_aspect[aspect] = go_map
+
             # Pre-compute reranker aggregates for this aspect's go_map
             if compute_rr:
                 for acc, anns in go_map.items():
@@ -1053,18 +1594,24 @@ class PredictGOTermsBatchOperation:
                         gtid = ann["go_term_id"]
                         all_go_term_freq[gtid] = all_go_term_freq.get(gtid, 0) + 1
 
-                # vote_count and k_position per query per aspect
+                # vote_count, k_position and consensus per query per aspect
                 for q_idx, q_acc in enumerate(valid_accessions):
                     vc = rr_vote_count_per_query.setdefault(q_acc, {})
                     kp = rr_k_position_per_query.setdefault(q_acc, {})
+                    min_d = rr_vote_min_d_per_query.setdefault(q_acc, {})
+                    sum_d = rr_vote_sum_d_per_query.setdefault(q_acc, {})
                     aspect_neighbors = neighbors_by_aspect[aspect]
                     if q_idx < len(aspect_neighbors):
-                        for k_pos, (ref_acc, _) in enumerate(aspect_neighbors[q_idx], 1):
+                        for k_pos, (ref_acc, dist) in enumerate(aspect_neighbors[q_idx], 1):
                             for ann in go_map.get(ref_acc, []):
                                 gtid = ann["go_term_id"]
                                 vc[gtid] = vc.get(gtid, 0) + 1
                                 if gtid not in kp:
                                     kp[gtid] = k_pos
+                                prev_min = min_d.get(gtid)
+                                if prev_min is None or dist < prev_min:
+                                    min_d[gtid] = dist
+                                sum_d[gtid] = sum_d.get(gtid, 0.0) + dist
 
             for q_acc, top_refs in zip(valid_accessions, neighbors_by_aspect[aspect], strict=False):
                 seen_terms = seen_per_query[q_acc]
@@ -1105,11 +1652,24 @@ class PredictGOTermsBatchOperation:
                         if ann.get("evidence_code"):
                             pred["evidence_code"] = ann["evidence_code"]
                         if compute_rr:
-                            pred["vote_count"] = rr_vote_count_per_query.get(q_acc, {}).get(go_term_id, 1)
-                            pred["k_position"] = rr_k_position_per_query.get(q_acc, {}).get(go_term_id, 1)
+                            vc_val = rr_vote_count_per_query.get(q_acc, {}).get(go_term_id, 1)
+                            pred["vote_count"] = vc_val
+                            pred["k_position"] = rr_k_position_per_query.get(q_acc, {}).get(
+                                go_term_id, 1
+                            )
                             pred["go_term_frequency"] = all_go_term_freq.get(go_term_id, 0)
                             pred["ref_annotation_density"] = all_ref_ann_density.get(ref_acc, 0)
-                            pred["neighbor_distance_std"] = rr_distance_std_per_query.get(q_acc, 0.0)
+                            pred["neighbor_distance_std"] = rr_distance_std_per_query.get(
+                                q_acc, 0.0
+                            )
+                            pred["neighbor_vote_fraction"] = (
+                                vc_val / p.limit_per_entry if p.limit_per_entry else None
+                            )
+                            min_d_map = rr_vote_min_d_per_query.get(q_acc, {})
+                            sum_d_map = rr_vote_sum_d_per_query.get(q_acc, {})
+                            pred["neighbor_min_distance"] = min_d_map.get(go_term_id)
+                            if vc_val > 0 and go_term_id in sum_d_map:
+                                pred["neighbor_mean_distance"] = sum_d_map[go_term_id] / vc_val
                         for key in (
                             "identity_nw",
                             "similarity_nw",
@@ -1135,7 +1695,7 @@ class PredictGOTermsBatchOperation:
                                 pred[key] = val
                         predictions.append(pred)
 
-        return predictions
+        return predictions, neighbors_by_aspect, go_map_by_aspect, pair_features
 
     def _load_annotations_for(
         self,
@@ -1241,7 +1801,8 @@ class PredictGOTermsBatchOperation:
             return np.empty((0,)), []
 
         valid_accessions = [r[0] for r in rows]
-        embeddings = np.array([list(r[1]) for r in rows], dtype=np.float32)
+        # Rows return pgvector HalfVector instances (halfvec column since 2026-04-11).
+        embeddings = np.array([r[1].to_list() for r in rows], dtype=np.float32)
         return embeddings, valid_accessions
 
     def _predict_batch(
@@ -1257,13 +1818,18 @@ class PredictGOTermsBatchOperation:
         query_sequences: dict[str, str] | None = None,
         ref_tax_ids: dict[str, int | None] | None = None,
         query_tax_ids: dict[str, int | None] | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[
+        list[dict[str, Any]],
+        list[list[tuple[str, float]]],
+        dict[tuple[str, str], dict[str, Any]],
+    ]:
         """Build serializable prediction dicts from KNN results.
 
         ``ref_data`` must have keys ``accessions``, ``embeddings``, and ``go_map``.
         If ``neighbors`` is provided (pre-computed by execute()), KNN is skipped.
-        Returns compact dicts — None-valued optional fields are omitted to reduce
-        message size.
+        Returns ``(predictions, neighbors, pair_features)`` — the last two are
+        used by ``_enrich_with_v6_features`` when ``compute_v6_features`` is on.
+        ``pair_features`` is keyed by ``(query_accession, ref_accession)``.
         """
         ref_sequences = ref_sequences or {}
         query_sequences = query_sequences or {}
@@ -1291,6 +1857,9 @@ class PredictGOTermsBatchOperation:
 
         go_map = ref_data["go_map"]
         predictions: list[dict[str, Any]] = []
+        # Global (q_acc, ref_acc) keying lets callers reuse the pair features
+        # for post-hoc v6 feature enrichment without recomputing taxonomy.
+        pair_features: dict[tuple[str, str], dict[str, Any]] = {}
 
         # Pre-compute reranker aggregates if requested
         compute_rr = p.compute_reranker_features
@@ -1305,23 +1874,31 @@ class PredictGOTermsBatchOperation:
 
         for q_acc, top_refs in zip(query_accessions, neighbors, strict=False):
             seen_terms: set[int] = set()
-            pair_features: dict[str, dict[str, Any]] = {}
 
             # Reranker: pre-compute per-query stats
             rr_distance_std: float | None = None
             rr_vote_count: dict[int, int] = {}
             rr_k_position: dict[int, int] = {}
+            rr_vote_min_d: dict[int, float] = {}
+            rr_vote_sum_d: dict[int, float] = {}
             if compute_rr and top_refs:
-                rr_distance_std = float(np.std([d for _, d in top_refs])) if len(top_refs) > 1 else 0.0
-                for k_pos, (ref_acc, _) in enumerate(top_refs, 1):
+                rr_distance_std = (
+                    float(np.std([d for _, d in top_refs])) if len(top_refs) > 1 else 0.0
+                )
+                for k_pos, (ref_acc, dist) in enumerate(top_refs, 1):
                     for ann in go_map.get(ref_acc, []):
                         gtid = ann["go_term_id"]
                         rr_vote_count[gtid] = rr_vote_count.get(gtid, 0) + 1
                         if gtid not in rr_k_position:
                             rr_k_position[gtid] = k_pos
+                        prev_min = rr_vote_min_d.get(gtid)
+                        if prev_min is None or dist < prev_min:
+                            rr_vote_min_d[gtid] = dist
+                        rr_vote_sum_d[gtid] = rr_vote_sum_d.get(gtid, 0.0) + dist
 
             for ref_acc, distance in top_refs:
-                if ref_acc not in pair_features:
+                pair_key = (q_acc, ref_acc)
+                if pair_key not in pair_features:
                     features: dict[str, Any] = {}
 
                     if p.compute_alignments:
@@ -1338,9 +1915,9 @@ class PredictGOTermsBatchOperation:
                         features["query_taxonomy_id"] = q_tid
                         features["ref_taxonomy_id"] = r_tid
 
-                    pair_features[ref_acc] = features
+                    pair_features[pair_key] = features
 
-                features = pair_features[ref_acc]
+                features = pair_features[pair_key]
 
                 for ann in go_map.get(ref_acc, []):
                     go_term_id = ann["go_term_id"]
@@ -1360,11 +1937,18 @@ class PredictGOTermsBatchOperation:
                     if ann.get("evidence_code"):
                         pred["evidence_code"] = ann["evidence_code"]
                     if compute_rr:
-                        pred["vote_count"] = rr_vote_count.get(go_term_id, 1)
+                        vc_val = rr_vote_count.get(go_term_id, 1)
+                        pred["vote_count"] = vc_val
                         pred["k_position"] = rr_k_position.get(go_term_id, 1)
                         pred["go_term_frequency"] = go_term_freq.get(go_term_id, 0)
                         pred["ref_annotation_density"] = ref_ann_density.get(ref_acc, 0)
                         pred["neighbor_distance_std"] = rr_distance_std
+                        pred["neighbor_vote_fraction"] = (
+                            vc_val / p.limit_per_entry if p.limit_per_entry else None
+                        )
+                        pred["neighbor_min_distance"] = rr_vote_min_d.get(go_term_id)
+                        if vc_val > 0 and go_term_id in rr_vote_sum_d:
+                            pred["neighbor_mean_distance"] = rr_vote_sum_d[go_term_id] / vc_val
                     for key in (
                         "identity_nw",
                         "similarity_nw",
@@ -1390,7 +1974,243 @@ class PredictGOTermsBatchOperation:
                             pred[key] = val
                     predictions.append(pred)
 
-        return predictions
+        return predictions, neighbors, pair_features
+
+    # ── v6 reranker features ─────────────────────────────────────────────────
+
+    def _load_go_term_metadata(
+        self,
+        session: Session,
+        go_term_ids: set[int],
+    ) -> tuple[dict[int, str], dict[int, str]]:
+        """Return ``(go_id_map, aspect_map)`` for the given ``GOTerm.id`` set.
+
+        Both maps are keyed by the numeric ``go_term_id``. Values are the
+        canonical ``GO:NNNNNNN`` string and the single-char aspect (``P``/
+        ``F``/``C``), respectively. Chunked to stay within parameter limits.
+        """
+        go_id_map: dict[int, str] = {}
+        aspect_map: dict[int, str] = {}
+        if not go_term_ids:
+            return go_id_map, aspect_map
+        ids_list = list(go_term_ids)
+        for i in range(0, len(ids_list), _ANNOTATION_CHUNK_SIZE):
+            chunk = ids_list[i : i + _ANNOTATION_CHUNK_SIZE]
+            rows = (
+                session.query(GOTerm.id, GOTerm.go_id, GOTerm.aspect)
+                .filter(GOTerm.id.in_(chunk))
+                .all()
+            )
+            for gid, go_str, aspect in rows:
+                go_id_map[gid] = go_str
+                aspect_map[gid] = aspect or ""
+        return go_id_map, aspect_map
+
+    def _enrich_with_v6_features(
+        self,
+        predictions: list[dict[str, Any]],
+        *,
+        session: Session,
+        valid_accessions: list[str],
+        query_embeddings: np.ndarray,
+        neighbors_by_aspect: dict[str, list[list[tuple[str, float]]]],
+        go_map_by_aspect: dict[str, dict[str, list[dict[str, Any]]]],
+        pair_features: dict[tuple[str, str], dict[str, Any]],
+        embedding_config_id: uuid.UUID,
+        pca_state: tuple[np.ndarray, np.ndarray] | None,
+        compute_taxonomy: bool,
+    ) -> None:
+        """Compute the 25 v6 features and merge them into each ``pred`` dict in place.
+
+        ``neighbors_by_aspect`` / ``go_map_by_aspect`` may contain a single
+        aspect key (``""``) in unified-KNN mode; the per-aspect groupings of
+        candidate GO terms are resolved via the GO term aspect map.
+
+        ``pair_features`` carries the ``taxonomic_relation`` and
+        ``taxonomic_common_ancestors`` keys populated by ``compute_taxonomy``.
+        When ``compute_taxonomy`` is ``False`` the tax_voters family stays NaN.
+
+        Query-known Anc2Vec features are emitted as NaN / 0 at predict time —
+        ``anc2vec_query_known_*`` is resolved at eval time from the split's
+        pre-cutoff annotations (LK / PK only).
+        """
+        if not predictions:
+            return
+
+        acc_to_idx = {acc: i for i, acc in enumerate(valid_accessions)}
+
+        # Collect every go_term_id that either (a) appears as a candidate in
+        # predictions or (b) appears as an annotation of a voting neighbor —
+        # both are needed to compute neighbor Anc2Vec centroids.
+        gtids_in_play: set[int] = {int(pred["go_term_id"]) for pred in predictions}
+        for go_map in go_map_by_aspect.values():
+            for anns in go_map.values():
+                for ann in anns:
+                    gtids_in_play.add(int(ann["go_term_id"]))
+
+        go_id_map, go_aspect_map = self._load_go_term_metadata(session, gtids_in_play)
+
+        # --- Anc2Vec projection pool: every GO id seen (neighbor + candidate) ---
+        anc_idx: Anc2VecIndex = get_anc2vec_index()
+        all_go_id_strs = {
+            go_id_map[gid] for gid in gtids_in_play if gid in go_id_map
+        }
+        all_go_id_list = sorted(all_go_id_strs)
+        idx_of_go: dict[str, int] = {g: i for i, g in enumerate(all_go_id_list)}
+        all_emb = anc_idx.batch(all_go_id_list)
+        raw_norms = np.linalg.norm(all_emb, axis=1)
+        has_emb_mask = raw_norms > 0.0
+        safe_norms = np.where(has_emb_mask, raw_norms, 1.0)[:, None]
+        all_norm = (all_emb / safe_norms).astype(np.float32)
+        all_norm[~has_emb_mask] = 0.0
+
+        # --- neighbor Anc2Vec centroid per (q_acc, aspect) -------------------
+        neighbor_info: dict[
+            tuple[str, str], tuple[np.ndarray | None, np.ndarray | None]
+        ] = {}
+        for aspect_key, nbs_all in neighbors_by_aspect.items():
+            go_map = go_map_by_aspect.get(aspect_key, {})
+            for q_idx, q_acc in enumerate(valid_accessions):
+                if q_idx >= len(nbs_all):
+                    continue
+                # Partition neighbor annotations by their GO aspect so the
+                # centroid stays aspect-specific (matches training).
+                per_asp_rows: dict[str, list[int]] = {a: [] for a in _ASPECTS}
+                per_asp_seen: dict[str, set[str]] = {a: set() for a in _ASPECTS}
+                for ref_acc, _ in nbs_all[q_idx]:
+                    for ann in go_map.get(ref_acc, []):
+                        gtid = int(ann["go_term_id"])
+                        gid_str = go_id_map.get(gtid)
+                        asp = go_aspect_map.get(gtid, "")
+                        if not gid_str or asp not in per_asp_rows:
+                            continue
+                        if gid_str in per_asp_seen[asp]:
+                            continue
+                        per_asp_seen[asp].add(gid_str)
+                        i = idx_of_go.get(gid_str)
+                        if i is not None and has_emb_mask[i]:
+                            per_asp_rows[asp].append(i)
+                for asp, rows in per_asp_rows.items():
+                    if not rows:
+                        neighbor_info.setdefault((q_acc, asp), (None, None))
+                        continue
+                    nmat = all_norm[rows]
+                    centroid = nmat.mean(axis=0)
+                    cn = float(np.linalg.norm(centroid))
+                    centroid_unit = (
+                        (centroid / cn).astype(np.float32) if cn > 0.0 else None
+                    )
+                    # Keep the widest (aspect-separated mode may revisit the
+                    # same aspect once per KNN call, but per-aspect rows are
+                    # disjoint across aspect_keys — accumulate via setdefault).
+                    prev = neighbor_info.get((q_acc, asp))
+                    if prev is None or prev == (None, None):
+                        neighbor_info[(q_acc, asp)] = (centroid_unit, nmat)
+
+        # --- tax_voters counters per (q_acc, go_term_id) ---------------------
+        tax_same_cnt: dict[str, dict[int, int]] = {}
+        tax_close_cnt: dict[str, dict[int, int]] = {}
+        tax_ca_sum: dict[str, dict[int, float]] = {}
+        tax_ca_n: dict[str, dict[int, int]] = {}
+        vote_count_div: dict[str, dict[int, int]] = {}
+        if compute_taxonomy:
+            for aspect_key, nbs_all in neighbors_by_aspect.items():
+                go_map = go_map_by_aspect.get(aspect_key, {})
+                for q_idx, q_acc in enumerate(valid_accessions):
+                    if q_idx >= len(nbs_all):
+                        continue
+                    same_d = tax_same_cnt.setdefault(q_acc, {})
+                    close_d = tax_close_cnt.setdefault(q_acc, {})
+                    sum_d = tax_ca_sum.setdefault(q_acc, {})
+                    n_d = tax_ca_n.setdefault(q_acc, {})
+                    vc_d = vote_count_div.setdefault(q_acc, {})
+                    for ref_acc, _ in nbs_all[q_idx]:
+                        pf = pair_features.get((q_acc, ref_acc), {})
+                        rel = pf.get("taxonomic_relation") or ""
+                        ca = pf.get("taxonomic_common_ancestors")
+                        is_same = rel == "same"
+                        is_close = rel in _TAX_CLOSE_RELATIONS
+                        for ann in go_map.get(ref_acc, []):
+                            gtid = int(ann["go_term_id"])
+                            vc_d[gtid] = vc_d.get(gtid, 0) + 1
+                            if is_same:
+                                same_d[gtid] = same_d.get(gtid, 0) + 1
+                            if is_close:
+                                close_d[gtid] = close_d.get(gtid, 0) + 1
+                            if isinstance(ca, int | float) and ca is not None:
+                                sum_d[gtid] = sum_d.get(gtid, 0.0) + float(ca)
+                                n_d[gtid] = n_d.get(gtid, 0) + 1
+
+        # --- PCA query projection --------------------------------------------
+        pca_query_proj: np.ndarray | None = None
+        if pca_state is not None and query_embeddings.size:
+            pca_mean, pca_components = pca_state
+            pca_query_proj = (
+                (query_embeddings.astype(np.float32) - pca_mean) @ pca_components.T
+            ).astype(np.float32)
+
+        _nan_pca = [float("nan")] * EMBEDDING_PCA_DIM
+
+        # --- merge per-row features ------------------------------------------
+        for pred in predictions:
+            q_acc = pred["protein_accession"]
+            gtid = int(pred["go_term_id"])
+            go_id = go_id_map.get(gtid)
+            aspect = go_aspect_map.get(gtid, "")
+
+            cand_i = idx_of_go.get(go_id, -1) if go_id else -1
+            if cand_i >= 0 and has_emb_mask[cand_i]:
+                cand_vec = all_norm[cand_i]
+                centroid_unit, nmat = neighbor_info.get((q_acc, aspect), (None, None))
+                anc_cos = (
+                    float(cand_vec @ centroid_unit)
+                    if centroid_unit is not None
+                    else float("nan")
+                )
+                anc_maxcos = (
+                    float((nmat @ cand_vec).max()) if nmat is not None else float("nan")
+                )
+                anc_has = 1.0
+            else:
+                anc_cos = float("nan")
+                anc_maxcos = float("nan")
+                anc_has = 0.0
+
+            pred["anc2vec_neighbor_cos"] = anc_cos
+            pred["anc2vec_neighbor_maxcos"] = anc_maxcos
+            pred["anc2vec_has_emb"] = anc_has
+            # Query-known is resolved at eval time from the split context.
+            pred["anc2vec_query_known_cos"] = float("nan")
+            pred["anc2vec_query_known_maxcos"] = float("nan")
+            pred["anc2vec_query_known_count"] = 0.0
+
+            if compute_taxonomy:
+                vc_total = max(1, vote_count_div.get(q_acc, {}).get(gtid, 1))
+                pred["tax_voters_same_frac"] = (
+                    tax_same_cnt.get(q_acc, {}).get(gtid, 0) / vc_total
+                )
+                pred["tax_voters_close_frac"] = (
+                    tax_close_cnt.get(q_acc, {}).get(gtid, 0) / vc_total
+                )
+                ca_n = tax_ca_n.get(q_acc, {}).get(gtid, 0)
+                pred["tax_voters_mean_common_ancestors"] = (
+                    tax_ca_sum.get(q_acc, {}).get(gtid, 0.0) / max(1, ca_n)
+                    if ca_n > 0
+                    else float("nan")
+                )
+            else:
+                pred["tax_voters_same_frac"] = float("nan")
+                pred["tax_voters_close_frac"] = float("nan")
+                pred["tax_voters_mean_common_ancestors"] = float("nan")
+
+            q_idx = acc_to_idx.get(q_acc, -1)
+            if pca_query_proj is not None and 0 <= q_idx < pca_query_proj.shape[0]:
+                row = pca_query_proj[q_idx]
+                for i in range(EMBEDDING_PCA_DIM):
+                    pred[f"emb_pca_query_{i}"] = float(row[i])
+            else:
+                for i in range(EMBEDDING_PCA_DIM):
+                    pred[f"emb_pca_query_{i}"] = _nan_pca[i]
 
     # ── feature-engineering helpers ───────────────────────────────────────────
 
@@ -1480,6 +2300,15 @@ class StorePredictionsOperation:
     """
 
     name = "store_predictions"
+    description = (
+        "CPU child job: bulk-insert GOPrediction rows from a batch and "
+        "atomically advance the parent predict_go_terms progress counter."
+    )
+
+    def summarize_payload(self, payload: dict[str, Any]) -> str:
+        p = payload or {}
+        n = len(p.get("predictions") or [])
+        return f"n={n}" if n else ""
 
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
@@ -1498,41 +2327,7 @@ class StorePredictionsOperation:
         if p.predictions:
             session.execute(
                 pg_insert(GOPrediction).on_conflict_do_nothing(),
-                [
-                    {
-                        "prediction_set_id": prediction_set_id,
-                        "protein_accession": pred["protein_accession"],
-                        "go_term_id": pred["go_term_id"],
-                        "ref_protein_accession": pred["ref_protein_accession"],
-                        "distance": pred["distance"],
-                        "qualifier": pred.get("qualifier"),
-                        "evidence_code": pred.get("evidence_code"),
-                        "identity_nw": pred.get("identity_nw"),
-                        "similarity_nw": pred.get("similarity_nw"),
-                        "alignment_score_nw": pred.get("alignment_score_nw"),
-                        "gaps_pct_nw": pred.get("gaps_pct_nw"),
-                        "alignment_length_nw": pred.get("alignment_length_nw"),
-                        "identity_sw": pred.get("identity_sw"),
-                        "similarity_sw": pred.get("similarity_sw"),
-                        "alignment_score_sw": pred.get("alignment_score_sw"),
-                        "gaps_pct_sw": pred.get("gaps_pct_sw"),
-                        "alignment_length_sw": pred.get("alignment_length_sw"),
-                        "length_query": pred.get("length_query"),
-                        "length_ref": pred.get("length_ref"),
-                        "query_taxonomy_id": pred.get("query_taxonomy_id"),
-                        "ref_taxonomy_id": pred.get("ref_taxonomy_id"),
-                        "taxonomic_lca": pred.get("taxonomic_lca"),
-                        "taxonomic_distance": pred.get("taxonomic_distance"),
-                        "taxonomic_common_ancestors": pred.get("taxonomic_common_ancestors"),
-                        "taxonomic_relation": pred.get("taxonomic_relation"),
-                        "vote_count": pred.get("vote_count"),
-                        "k_position": pred.get("k_position"),
-                        "go_term_frequency": pred.get("go_term_frequency"),
-                        "ref_annotation_density": pred.get("ref_annotation_density"),
-                        "neighbor_distance_std": pred.get("neighbor_distance_std"),
-                    }
-                    for pred in p.predictions
-                ],
+                [_row_from_prediction(pred, prediction_set_id) for pred in p.predictions],
             )
 
         emit(

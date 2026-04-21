@@ -14,8 +14,9 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
+from protea.api.cache import cached
 from protea.api.deps import get_amqp_url, get_artifacts_dir, get_session_factory
-from protea.core.evaluation import compute_evaluation_data
+from protea.core.evaluation import load_evaluation_data_for_set
 from protea.core.operations.generate_evaluation_set import GenerateEvaluationSetPayload
 from protea.core.operations.load_goa_annotations import LoadGOAAnnotationsPayload
 from protea.core.operations.load_ontology_snapshot import LoadOntologySnapshotPayload
@@ -46,33 +47,41 @@ _JOBS_QUEUE = "protea.jobs"
 def list_snapshots(
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> list[dict[str, Any]]:
-    """List all loaded GO ontology snapshots with their GO term counts, newest first."""
-    with session_scope(factory) as session:
-        count_sub = (
-            session.query(
-                GOTerm.ontology_snapshot_id,
-                func.count(GOTerm.id).label("cnt"),
+    """List all loaded GO ontology snapshots with their GO term counts, newest first.
+
+    Cached 5 minutes — the GROUP BY over go_term (N million rows per snapshot)
+    takes multiple seconds, and snapshots are effectively immutable once loaded.
+    """
+
+    def _compute() -> list[dict[str, Any]]:
+        with session_scope(factory) as session:
+            count_sub = (
+                session.query(
+                    GOTerm.ontology_snapshot_id,
+                    func.count(GOTerm.id).label("cnt"),
+                )
+                .group_by(GOTerm.ontology_snapshot_id)
+                .subquery()
             )
-            .group_by(GOTerm.ontology_snapshot_id)
-            .subquery()
-        )
-        rows = (
-            session.query(OntologySnapshot, count_sub.c.cnt)
-            .outerjoin(count_sub, OntologySnapshot.id == count_sub.c.ontology_snapshot_id)
-            .order_by(OntologySnapshot.loaded_at.desc())
-            .all()
-        )
-        return [
-            {
-                "id": str(s.id),
-                "obo_url": s.obo_url,
-                "obo_version": s.obo_version,
-                "ia_url": s.ia_url,
-                "loaded_at": s.loaded_at.isoformat(),
-                "go_term_count": cnt or 0,
-            }
-            for s, cnt in rows
-        ]
+            rows = (
+                session.query(OntologySnapshot, count_sub.c.cnt)
+                .outerjoin(count_sub, OntologySnapshot.id == count_sub.c.ontology_snapshot_id)
+                .order_by(OntologySnapshot.loaded_at.desc())
+                .all()
+            )
+            return [
+                {
+                    "id": str(s.id),
+                    "obo_url": s.obo_url,
+                    "obo_version": s.obo_version,
+                    "ia_url": s.ia_url,
+                    "loaded_at": s.loaded_at.isoformat(),
+                    "go_term_count": cnt or 0,
+                }
+                for s, cnt in rows
+            ]
+
+    return cached("annotations:snapshots", 300.0, _compute)
 
 
 @router.get("/snapshots/{snapshot_id}", summary="Get ontology snapshot details")
@@ -182,35 +191,43 @@ def list_annotation_sets(
     source: str | None = Query(default=None, description="Filter by source: `goa` or `quickgo`."),
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> list[dict[str, Any]]:
-    """List annotation sets with their annotation counts, newest first. Optionally filter by source."""
-    with session_scope(factory) as session:
-        count_sub = (
-            session.query(
-                ProteinGOAnnotation.annotation_set_id,
-                func.count(ProteinGOAnnotation.id).label("cnt"),
+    """List annotation sets with their annotation counts, newest first. Optionally filter by source.
+
+    Cached 5 minutes — GROUP BY over protein_go_annotation (80M rows) takes
+    6+ seconds. Per-source views are cached independently.
+    """
+
+    def _compute() -> list[dict[str, Any]]:
+        with session_scope(factory) as session:
+            count_sub = (
+                session.query(
+                    ProteinGOAnnotation.annotation_set_id,
+                    func.count(ProteinGOAnnotation.id).label("cnt"),
+                )
+                .group_by(ProteinGOAnnotation.annotation_set_id)
+                .subquery()
             )
-            .group_by(ProteinGOAnnotation.annotation_set_id)
-            .subquery()
-        )
-        q = session.query(AnnotationSet, count_sub.c.cnt).outerjoin(
-            count_sub, AnnotationSet.id == count_sub.c.annotation_set_id
-        )
-        if source is not None:
-            q = q.filter(AnnotationSet.source == source)
-        rows = q.order_by(AnnotationSet.created_at.desc()).all()
-        return [
-            {
-                "id": str(a.id),
-                "source": a.source,
-                "source_version": a.source_version,
-                "ontology_snapshot_id": str(a.ontology_snapshot_id),
-                "job_id": str(a.job_id) if a.job_id else None,
-                "created_at": a.created_at.isoformat(),
-                "meta": a.meta,
-                "annotation_count": cnt or 0,
-            }
-            for a, cnt in rows
-        ]
+            q = session.query(AnnotationSet, count_sub.c.cnt).outerjoin(
+                count_sub, AnnotationSet.id == count_sub.c.annotation_set_id
+            )
+            if source is not None:
+                q = q.filter(AnnotationSet.source == source)
+            rows = q.order_by(AnnotationSet.created_at.desc()).all()
+            return [
+                {
+                    "id": str(a.id),
+                    "source": a.source,
+                    "source_version": a.source_version,
+                    "ontology_snapshot_id": str(a.ontology_snapshot_id),
+                    "job_id": str(a.job_id) if a.job_id else None,
+                    "created_at": a.created_at.isoformat(),
+                    "meta": a.meta,
+                    "annotation_count": cnt or 0,
+                }
+                for a, cnt in rows
+            ]
+
+    return cached(f"annotations:sets:{source or '*'}", 300.0, _compute)
 
 
 @router.get("/sets/{set_id}", summary="Get annotation set details")
@@ -453,13 +470,7 @@ def download_gt_nk(
     """
     with session_scope(factory) as session:
         e = _eval_set_or_404(session, eval_id)
-        ann_old = session.get(AnnotationSet, e.old_annotation_set_id)
-        data = compute_evaluation_data(
-            session,
-            e.old_annotation_set_id,
-            e.new_annotation_set_id,
-            ann_old.ontology_snapshot_id,
-        )
+        data, _ = load_evaluation_data_for_set(session, e)
         lines = [
             f"{protein}\t{go_id}\n"
             for protein, go_ids in sorted(data.nk.items())
@@ -486,13 +497,7 @@ def download_gt_lk(
     """
     with session_scope(factory) as session:
         e = _eval_set_or_404(session, eval_id)
-        ann_old = session.get(AnnotationSet, e.old_annotation_set_id)
-        data = compute_evaluation_data(
-            session,
-            e.old_annotation_set_id,
-            e.new_annotation_set_id,
-            ann_old.ontology_snapshot_id,
-        )
+        data, _ = load_evaluation_data_for_set(session, e)
         lines = [
             f"{protein}\t{go_id}\n"
             for protein, go_ids in sorted(data.lk.items())
@@ -521,13 +526,7 @@ def download_gt_pk(
     """
     with session_scope(factory) as session:
         e = _eval_set_or_404(session, eval_id)
-        ann_old = session.get(AnnotationSet, e.old_annotation_set_id)
-        data = compute_evaluation_data(
-            session,
-            e.old_annotation_set_id,
-            e.new_annotation_set_id,
-            ann_old.ontology_snapshot_id,
-        )
+        data, _ = load_evaluation_data_for_set(session, e)
         lines = [
             f"{protein}\t{go_id}\n"
             for protein, go_ids in sorted(data.pk.items())
@@ -555,13 +554,7 @@ def download_known_terms(
     """
     with session_scope(factory) as session:
         e = _eval_set_or_404(session, eval_id)
-        ann_old = session.get(AnnotationSet, e.old_annotation_set_id)
-        data = compute_evaluation_data(
-            session,
-            e.old_annotation_set_id,
-            e.new_annotation_set_id,
-            ann_old.ontology_snapshot_id,
-        )
+        data, _ = load_evaluation_data_for_set(session, e)
         lines = [
             f"{protein}\t{go_id}\n"
             for protein, go_ids in sorted(data.known.items())
@@ -593,13 +586,7 @@ def download_delta_fasta(
     """
     with session_scope(factory) as session:
         e = _eval_set_or_404(session, eval_id)
-        ann_old = session.get(AnnotationSet, e.old_annotation_set_id)
-        data = compute_evaluation_data(
-            session,
-            e.old_annotation_set_id,
-            e.new_annotation_set_id,
-            ann_old.ontology_snapshot_id,
-        )
+        data, _ = load_evaluation_data_for_set(session, e)
 
         # Collect requested accessions with their NK/LK/PK label
         accession_label: dict[str, str] = {}

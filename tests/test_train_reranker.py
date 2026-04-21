@@ -4,6 +4,7 @@ Covers payload validation, the TrainRerankerOperation helper methods,
 and the _compute_comparison_metrics logic.  Heavy DB / model training
 is mocked — no real infrastructure required.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -27,6 +28,7 @@ def _noop_emit(*a, **kw):
 # ---------------------------------------------------------------------------
 # Payload validation
 # ---------------------------------------------------------------------------
+
 
 class TestTrainRerankerPayload:
     def _valid_kwargs(self, **overrides) -> dict[str, Any]:
@@ -80,23 +82,27 @@ class TestTrainRerankerPayload:
             assert p.category == cat
 
     def test_custom_knn_params(self):
-        p = TrainRerankerPayload(**self._valid_kwargs(
-            limit_per_entry=10,
-            distance_threshold=0.5,
-            search_backend="faiss",
-            metric="euclidean",
-        ))
+        p = TrainRerankerPayload(
+            **self._valid_kwargs(
+                limit_per_entry=10,
+                distance_threshold=0.5,
+                search_backend="faiss",
+                metric="euclidean",
+            )
+        )
         assert p.limit_per_entry == 10
         assert p.distance_threshold == 0.5
         assert p.search_backend == "faiss"
 
     def test_custom_lightgbm_params(self):
-        p = TrainRerankerPayload(**self._valid_kwargs(
-            num_boost_round=500,
-            early_stopping_rounds=25,
-            val_fraction=0.1,
-            neg_pos_ratio=3.0,
-        ))
+        p = TrainRerankerPayload(
+            **self._valid_kwargs(
+                num_boost_round=500,
+                early_stopping_rounds=25,
+                val_fraction=0.1,
+                neg_pos_ratio=3.0,
+            )
+        )
         assert p.num_boost_round == 500
         assert p.early_stopping_rounds == 25
         assert p.val_fraction == 0.1
@@ -127,6 +133,7 @@ class TestTrainRerankerPayload:
 # _validate
 # ---------------------------------------------------------------------------
 
+
 class TestValidate:
     def _make_op(self):
         return TrainRerankerOperation()
@@ -150,7 +157,8 @@ class TestValidate:
 
         with pytest.raises(ValueError, match="AnnotationSet"):
             op._validate(
-                session, p,
+                session,
+                p,
                 uuid.UUID(p.old_annotation_set_id),
                 uuid.UUID(p.new_annotation_set_id),
                 uuid.UUID(p.embedding_config_id),
@@ -166,7 +174,8 @@ class TestValidate:
 
         with pytest.raises(ValueError, match="AnnotationSet"):
             op._validate(
-                session, p,
+                session,
+                p,
                 uuid.UUID(p.old_annotation_set_id),
                 uuid.UUID(p.new_annotation_set_id),
                 uuid.UUID(p.embedding_config_id),
@@ -182,7 +191,8 @@ class TestValidate:
 
         with pytest.raises(ValueError, match="EmbeddingConfig"):
             op._validate(
-                session, p,
+                session,
+                p,
                 uuid.UUID(p.old_annotation_set_id),
                 uuid.UUID(p.new_annotation_set_id),
                 uuid.UUID(p.embedding_config_id),
@@ -193,12 +203,15 @@ class TestValidate:
         op = self._make_op()
         session = MagicMock()
         session.get.return_value = MagicMock()  # all lookups succeed
-        session.query.return_value.filter.return_value.first.return_value = MagicMock()  # name exists
+        session.query.return_value.filter.return_value.first.return_value = (
+            MagicMock()
+        )  # name exists
         p = self._make_payload()
 
         with pytest.raises(ValueError, match="already exists"):
             op._validate(
-                session, p,
+                session,
+                p,
                 uuid.UUID(p.old_annotation_set_id),
                 uuid.UUID(p.new_annotation_set_id),
                 uuid.UUID(p.embedding_config_id),
@@ -209,12 +222,15 @@ class TestValidate:
         op = self._make_op()
         session = MagicMock()
         session.get.return_value = MagicMock()  # all lookups succeed
-        session.query.return_value.filter.return_value.first.return_value = None  # no duplicate name
+        session.query.return_value.filter.return_value.first.return_value = (
+            None  # no duplicate name
+        )
         p = self._make_payload()
 
         # Should not raise
         op._validate(
-            session, p,
+            session,
+            p,
             uuid.UUID(p.old_annotation_set_id),
             uuid.UUID(p.new_annotation_set_id),
             uuid.UUID(p.embedding_config_id),
@@ -225,6 +241,7 @@ class TestValidate:
 # ---------------------------------------------------------------------------
 # _load_query_embeddings
 # ---------------------------------------------------------------------------
+
 
 class TestLoadQueryEmbeddings:
     def test_returns_empty_when_no_matches(self):
@@ -254,6 +271,7 @@ class TestLoadQueryEmbeddings:
 # _load_sequences
 # ---------------------------------------------------------------------------
 
+
 class TestLoadSequences:
     def test_returns_dict(self):
         op = TrainRerankerOperation()
@@ -276,6 +294,7 @@ class TestLoadSequences:
 # ---------------------------------------------------------------------------
 # _load_taxonomy_ids
 # ---------------------------------------------------------------------------
+
 
 class TestLoadTaxonomyIds:
     def test_returns_dict(self):
@@ -304,15 +323,18 @@ class TestLoadTaxonomyIds:
 # _compute_comparison_metrics
 # ---------------------------------------------------------------------------
 
+
 class TestComputeComparisonMetrics:
     def test_returns_expected_keys(self):
         op = TrainRerankerOperation()
 
         # Create a minimal DataFrame
-        df = pd.DataFrame([
-            {"protein_accession": "P1", "go_id": "GO:0001", "distance": 0.1, "label": 1},
-            {"protein_accession": "P1", "go_id": "GO:0002", "distance": 0.9, "label": 0},
-        ])
+        df = pd.DataFrame(
+            [
+                {"protein_accession": "P1", "go_id": "GO:0001", "distance": 0.1, "label": 1},
+                {"protein_accession": "P1", "go_id": "GO:0002", "distance": 0.9, "label": 0},
+            ]
+        )
 
         # Mock train result
         train_result = MagicMock()
@@ -322,12 +344,15 @@ class TestComputeComparisonMetrics:
         eval_data = MagicMock()
         eval_data.nk = {"P1": {"GO:0001"}}
 
-        with patch(
-            "protea.core.operations.train_reranker.reranker_predict",
-            return_value=np.array([0.9, 0.1]),
-        ), patch(
-            "protea.core.operations.train_reranker.compute_cafa_metrics",
-        ) as mock_cafa:
+        with (
+            patch(
+                "protea.core.operations.train_reranker.reranker_predict",
+                return_value=np.array([0.9, 0.1]),
+            ),
+            patch(
+                "protea.core.operations.train_reranker.compute_cafa_metrics",
+            ) as mock_cafa,
+        ):
             mock_metrics = MagicMock()
             mock_metrics.fmax = 0.5
             mock_metrics.auc_pr = 0.4
@@ -338,21 +363,30 @@ class TestComputeComparisonMetrics:
             result = op._compute_comparison_metrics(df, train_result, eval_data, "nk")
 
         expected_keys = {
-            "baseline_fmax", "baseline_auc_pr", "baseline_threshold",
-            "reranker_fmax", "reranker_auc_pr", "reranker_threshold",
-            "fmax_improvement", "auc_pr_improvement", "n_ground_truth_proteins",
+            "baseline_fmax",
+            "baseline_auc_pr",
+            "baseline_threshold",
+            "reranker_fmax",
+            "reranker_auc_pr",
+            "reranker_threshold",
+            "fmax_improvement",
+            "auc_pr_improvement",
+            "n_ground_truth_proteins",
         }
         assert set(result.keys()) == expected_keys
 
     def test_fmax_improvement_computed(self):
         op = TrainRerankerOperation()
-        df = pd.DataFrame([
-            {"protein_accession": "P1", "go_id": "GO:0001", "distance": 0.1, "label": 1},
-        ])
+        df = pd.DataFrame(
+            [
+                {"protein_accession": "P1", "go_id": "GO:0001", "distance": 0.1, "label": 1},
+            ]
+        )
 
         train_result = MagicMock()
 
         call_count = [0]
+
         def fake_cafa(*args, **kwargs):
             call_count[0] += 1
             m = MagicMock()
@@ -366,12 +400,15 @@ class TestComputeComparisonMetrics:
             m.n_ground_truth_proteins = 1
             return m
 
-        with patch(
-            "protea.core.operations.train_reranker.reranker_predict",
-            return_value=np.array([0.9]),
-        ), patch(
-            "protea.core.operations.train_reranker.compute_cafa_metrics",
-            side_effect=fake_cafa,
+        with (
+            patch(
+                "protea.core.operations.train_reranker.reranker_predict",
+                return_value=np.array([0.9]),
+            ),
+            patch(
+                "protea.core.operations.train_reranker.compute_cafa_metrics",
+                side_effect=fake_cafa,
+            ),
         ):
             result = op._compute_comparison_metrics(df, train_result, MagicMock(), "nk")
 
@@ -383,6 +420,7 @@ class TestComputeComparisonMetrics:
 # ---------------------------------------------------------------------------
 # _load_go_maps
 # ---------------------------------------------------------------------------
+
 
 class TestLoadGoMaps:
     def test_returns_id_and_aspect_maps(self):
@@ -404,11 +442,17 @@ class TestLoadGoMaps:
 # Full execute flow (heavily mocked)
 # ---------------------------------------------------------------------------
 
+
 class TestExecuteFlow:
     def test_no_ground_truth_raises(self):
         op = TrainRerankerOperation()
         session = MagicMock()
-        session.get.return_value = MagicMock()
+        snap_id = uuid.uuid4()
+        # AnnotationSet.ontology_snapshot_id must equal the payload's pivot so
+        # execute() takes the same-snapshot path (which is what compute_evaluation_data patches).
+        aset = MagicMock()
+        aset.ontology_snapshot_id = snap_id
+        session.get.return_value = aset
         session.query.return_value.filter.return_value.first.return_value = None
 
         payload = {
@@ -416,13 +460,15 @@ class TestExecuteFlow:
             "old_annotation_set_id": str(uuid.uuid4()),
             "new_annotation_set_id": str(uuid.uuid4()),
             "embedding_config_id": str(uuid.uuid4()),
-            "ontology_snapshot_id": str(uuid.uuid4()),
+            "ontology_snapshot_id": str(snap_id),
         }
 
-        with patch.object(op, "_validate"), \
-             patch(
-                 "protea.core.operations.train_reranker.compute_evaluation_data",
-             ) as mock_eval:
+        with (
+            patch.object(op, "_validate"),
+            patch(
+                "protea.core.operations.train_reranker.compute_evaluation_data",
+            ) as mock_eval,
+        ):
             eval_data = MagicMock()
             eval_data.nk = {}  # empty ground truth
             eval_data.stats.return_value = {}
@@ -434,29 +480,41 @@ class TestExecuteFlow:
     def test_no_embeddings_raises(self):
         op = TrainRerankerOperation()
         session = MagicMock()
-        session.get.return_value = MagicMock()
+        snap_id = uuid.uuid4()
+        # Force same-snapshot path so compute_evaluation_data is the one called.
+        aset = MagicMock()
+        aset.ontology_snapshot_id = snap_id
+        session.get.return_value = aset
         session.query.return_value.filter.return_value.first.return_value = None
+        # Union-map / pivot queries use session.execute(...).fetchall(): return
+        # an empty list so the dispatch code runs without touching a real DB.
+        session.execute.return_value.fetchall.return_value = []
 
         payload = {
             "name": "test",
             "old_annotation_set_id": str(uuid.uuid4()),
             "new_annotation_set_id": str(uuid.uuid4()),
             "embedding_config_id": str(uuid.uuid4()),
-            "ontology_snapshot_id": str(uuid.uuid4()),
+            "ontology_snapshot_id": str(snap_id),
         }
 
-        with patch.object(op, "_validate"), \
-             patch(
-                 "protea.core.operations.train_reranker.compute_evaluation_data",
-             ) as mock_eval, \
-             patch.object(op, "_load_go_maps", return_value=({}, {})), \
-             patch.object(op, "_load_reference_per_aspect", return_value={
-                 "P": {"accessions": [], "embeddings": np.empty((0,)), "go_map": {}},
-                 "F": {"accessions": [], "embeddings": np.empty((0,)), "go_map": {}},
-                 "C": {"accessions": [], "embeddings": np.empty((0,)), "go_map": {}},
-             }), \
-             patch.object(op, "_load_query_embeddings", return_value=(np.empty((0,)), [])):
-
+        with (
+            patch.object(op, "_validate"),
+            patch(
+                "protea.core.operations.train_reranker.compute_evaluation_data",
+            ) as mock_eval,
+            patch.object(op, "_load_parent_map", return_value={}),
+            patch.object(
+                op,
+                "_load_reference_per_aspect",
+                return_value={
+                    "P": {"accessions": [], "embeddings": np.empty((0,)), "go_map": {}},
+                    "F": {"accessions": [], "embeddings": np.empty((0,)), "go_map": {}},
+                    "C": {"accessions": [], "embeddings": np.empty((0,)), "go_map": {}},
+                },
+            ),
+            patch.object(op, "_load_query_embeddings", return_value=(np.empty((0,)), [])),
+        ):
             eval_data = MagicMock()
             eval_data.nk = {"P1": {"GO:0001"}}
             eval_data.stats.return_value = {"nk": 1}
@@ -469,6 +527,7 @@ class TestExecuteFlow:
 # ---------------------------------------------------------------------------
 # Operation name
 # ---------------------------------------------------------------------------
+
 
 class TestOperationName:
     def test_name(self):

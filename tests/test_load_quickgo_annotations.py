@@ -67,10 +67,12 @@ _QUICKGO_ROWS = [
 
 class TestLoadQuickGOAnnotationsPayload:
     def test_valid_minimal(self) -> None:
-        p = LoadQuickGOAnnotationsPayload.model_validate({
-            "ontology_snapshot_id": _SNAPSHOT_ID,
-            "source_version": "2026-01-11",
-        })
+        p = LoadQuickGOAnnotationsPayload.model_validate(
+            {
+                "ontology_snapshot_id": _SNAPSHOT_ID,
+                "source_version": "2026-01-11",
+            }
+        )
         assert p.eco_mapping_url is None
         assert p.page_size == 10000
 
@@ -80,10 +82,12 @@ class TestLoadQuickGOAnnotationsPayload:
 
     def test_empty_source_version_raises(self) -> None:
         with pytest.raises(ValueError):
-            LoadQuickGOAnnotationsPayload.model_validate({
-                "ontology_snapshot_id": _SNAPSHOT_ID,
-                "source_version": "",
-            })
+            LoadQuickGOAnnotationsPayload.model_validate(
+                {
+                    "ontology_snapshot_id": _SNAPSHOT_ID,
+                    "source_version": "",
+                }
+            )
 
 
 class TestStoreBuffer:
@@ -94,7 +98,9 @@ class TestStoreBuffer:
         op = self._op()
         session = MagicMock()
         inserted, skipped = op._store_buffer(
-            session, _QUICKGO_ROWS, uuid.UUID(_SNAPSHOT_ID),
+            session,
+            _QUICKGO_ROWS,
+            uuid.UUID(_SNAPSHOT_ID),
             valid_accessions={"P12345"},
             go_term_map={"GO:0003824": 1, "GO:0008150": 2},
             eco_map={},
@@ -106,7 +112,9 @@ class TestStoreBuffer:
         op = self._op()
         session = MagicMock()
         inserted, skipped = op._store_buffer(
-            session, _QUICKGO_ROWS, uuid.UUID(_SNAPSHOT_ID),
+            session,
+            _QUICKGO_ROWS,
+            uuid.UUID(_SNAPSHOT_ID),
             valid_accessions={"P12345", "Q67890", "XXXXXX"},
             go_term_map={},
             eco_map={},
@@ -118,7 +126,9 @@ class TestStoreBuffer:
         op = self._op()
         session = MagicMock()
         inserted, skipped = op._store_buffer(
-            session, _QUICKGO_ROWS, uuid.UUID(_SNAPSHOT_ID),
+            session,
+            _QUICKGO_ROWS,
+            uuid.UUID(_SNAPSHOT_ID),
             valid_accessions={"P12345", "Q67890", "XXXXXX"},
             go_term_map={"GO:0003824": 1, "GO:0008150": 2},
             eco_map={},
@@ -132,7 +142,9 @@ class TestStoreBuffer:
         session = MagicMock()
         eco_map = {"ECO:0000314": "IDA", "ECO:0000501": "IEA"}
         inserted, _ = op._store_buffer(
-            session, _QUICKGO_ROWS[:1], uuid.UUID(_SNAPSHOT_ID),
+            session,
+            _QUICKGO_ROWS[:1],
+            uuid.UUID(_SNAPSHOT_ID),
             valid_accessions={"P12345"},
             go_term_map={"GO:0003824": 1},
             eco_map=eco_map,
@@ -140,6 +152,7 @@ class TestStoreBuffer:
         assert inserted == 1
         call_stmt = session.execute.call_args[0][0]
         from sqlalchemy.dialects.postgresql import dialect as pg_dialect
+
         compiled = call_stmt.compile(dialect=pg_dialect())
         assert compiled.params["evidence_code_m0"] == "IDA"
 
@@ -147,7 +160,9 @@ class TestStoreBuffer:
         op = self._op()
         session = MagicMock()
         inserted, _ = op._store_buffer(
-            session, _QUICKGO_ROWS[:1], uuid.UUID(_SNAPSHOT_ID),
+            session,
+            _QUICKGO_ROWS[:1],
+            uuid.UUID(_SNAPSHOT_ID),
             valid_accessions={"P12345"},
             go_term_map={"GO:0003824": 1},
             eco_map={},
@@ -155,6 +170,7 @@ class TestStoreBuffer:
         assert inserted == 1
         call_stmt = session.execute.call_args[0][0]
         from sqlalchemy.dialects.postgresql import dialect as pg_dialect
+
         compiled = call_stmt.compile(dialect=pg_dialect())
         assert compiled.params["evidence_code_m0"] == "ECO:0000314"
 
@@ -164,7 +180,9 @@ class TestStoreBuffer:
         row = dict(_QUICKGO_ROWS[0])
         row["ECO ID"] = ""
         inserted, _ = op._store_buffer(
-            session, [row], uuid.UUID(_SNAPSHOT_ID),
+            session,
+            [row],
+            uuid.UUID(_SNAPSHOT_ID),
             valid_accessions={"P12345"},
             go_term_map={"GO:0003824": 1},
             eco_map={},
@@ -177,7 +195,9 @@ class TestStoreBuffer:
         row = dict(_QUICKGO_ROWS[0])
         row["GENE PRODUCT ID"] = "  "
         inserted, skipped = op._store_buffer(
-            session, [row], uuid.UUID(_SNAPSHOT_ID),
+            session,
+            [row],
+            uuid.UUID(_SNAPSHOT_ID),
             valid_accessions={"P12345"},
             go_term_map={"GO:0003824": 1},
             eco_map={},
@@ -191,7 +211,9 @@ class TestStoreBuffer:
         session = MagicMock()
         records = [dict(_QUICKGO_ROWS[0])] * 5001
         inserted, skipped = op._store_buffer(
-            session, records, uuid.UUID(_SNAPSHOT_ID),
+            session,
+            records,
+            uuid.UUID(_SNAPSHOT_ID),
             valid_accessions={"P12345"},
             go_term_map={"GO:0003824": 1},
             eco_map={},
@@ -205,6 +227,7 @@ class TestStoreBuffer:
 # _load_accessions
 # ---------------------------------------------------------------------------
 
+
 class TestLoadAccessions:
     def test_returns_canonical_and_protein_sets(self) -> None:
         op = LoadQuickGOAnnotationsOperation()
@@ -214,6 +237,7 @@ class TestLoadAccessions:
             iter({"P12345", "P12345-2", "Q99999"}),
         ]
         events: list[str] = []
+
         def emit(event, msg, fields, level):
             return events.append(event)
 
@@ -228,6 +252,7 @@ class TestLoadAccessions:
         session = MagicMock()
         session.scalars.side_effect = [iter({"A", "B"}), iter({"A", "B", "C"})]
         fields_log: list[dict] = []
+
         def emit(event, msg, fields, level):
             return fields_log.append(fields)
 
@@ -241,6 +266,7 @@ class TestLoadAccessions:
 # _load_go_term_map
 # ---------------------------------------------------------------------------
 
+
 class TestLoadGoTermMap:
     def test_returns_mapping(self) -> None:
         op = LoadQuickGOAnnotationsOperation()
@@ -248,11 +274,13 @@ class TestLoadGoTermMap:
         sid = uuid.uuid4()
         query_mock = MagicMock()
         query_mock.filter.return_value.all.return_value = [
-            ("GO:0005634", 1), ("GO:0008150", 2),
+            ("GO:0005634", 1),
+            ("GO:0008150", 2),
         ]
         session.query.return_value = query_mock
 
         events: list[str] = []
+
         def emit(event, msg, fields, level):
             return events.append(event)
 
@@ -276,13 +304,16 @@ class TestLoadGoTermMap:
 # _load_eco_mapping
 # ---------------------------------------------------------------------------
 
+
 class TestLoadEcoMapping:
     def test_no_url_returns_empty(self) -> None:
         op = LoadQuickGOAnnotationsOperation()
-        p = LoadQuickGOAnnotationsPayload.model_validate({
-            "ontology_snapshot_id": _SNAPSHOT_ID,
-            "source_version": "v1",
-        })
+        p = LoadQuickGOAnnotationsPayload.model_validate(
+            {
+                "ontology_snapshot_id": _SNAPSHOT_ID,
+                "source_version": "v1",
+            }
+        )
         assert op._load_eco_mapping(p, _noop_emit) == {}
 
     @patch("protea.core.operations.load_quickgo_annotations.requests.get")
@@ -293,11 +324,13 @@ class TestLoadEcoMapping:
         mock_get.return_value = resp
 
         op = LoadQuickGOAnnotationsOperation()
-        p = LoadQuickGOAnnotationsPayload.model_validate({
-            "ontology_snapshot_id": _SNAPSHOT_ID,
-            "source_version": "v1",
-            "eco_mapping_url": "https://eco.test/map.txt",
-        })
+        p = LoadQuickGOAnnotationsPayload.model_validate(
+            {
+                "ontology_snapshot_id": _SNAPSHOT_ID,
+                "source_version": "v1",
+                "eco_mapping_url": "https://eco.test/map.txt",
+            }
+        )
         result = op._load_eco_mapping(p, _noop_emit)
         assert result == {"ECO:0000314": "IDA", "ECO:0000501": "IEA"}
 
@@ -308,11 +341,13 @@ class TestLoadEcoMapping:
         mock_get.return_value = resp
 
         op = LoadQuickGOAnnotationsOperation()
-        p = LoadQuickGOAnnotationsPayload.model_validate({
-            "ontology_snapshot_id": _SNAPSHOT_ID,
-            "source_version": "v1",
-            "eco_mapping_url": "https://eco.test/bad",
-        })
+        p = LoadQuickGOAnnotationsPayload.model_validate(
+            {
+                "ontology_snapshot_id": _SNAPSHOT_ID,
+                "source_version": "v1",
+                "eco_mapping_url": "https://eco.test/bad",
+            }
+        )
         with pytest.raises(requests.HTTPError):
             op._load_eco_mapping(p, _noop_emit)
 
@@ -324,14 +359,18 @@ class TestLoadEcoMapping:
         mock_get.return_value = resp
 
         op = LoadQuickGOAnnotationsOperation()
-        p = LoadQuickGOAnnotationsPayload.model_validate({
-            "ontology_snapshot_id": _SNAPSHOT_ID,
-            "source_version": "v1",
-            "eco_mapping_url": "https://eco.test/map.txt",
-        })
+        p = LoadQuickGOAnnotationsPayload.model_validate(
+            {
+                "ontology_snapshot_id": _SNAPSHOT_ID,
+                "source_version": "v1",
+                "eco_mapping_url": "https://eco.test/map.txt",
+            }
+        )
         events: list[str] = []
+
         def emit(event, msg, fields, level):
             return events.append(event)
+
         op._load_eco_mapping(p, emit)
         assert "load_quickgo_annotations.eco_mapping_start" in events
         assert "load_quickgo_annotations.eco_mapping_done" in events
@@ -344,11 +383,13 @@ class TestLoadEcoMapping:
         mock_get.return_value = resp
 
         op = LoadQuickGOAnnotationsOperation()
-        p = LoadQuickGOAnnotationsPayload.model_validate({
-            "ontology_snapshot_id": _SNAPSHOT_ID,
-            "source_version": "v1",
-            "eco_mapping_url": "https://eco.test/map.txt",
-        })
+        p = LoadQuickGOAnnotationsPayload.model_validate(
+            {
+                "ontology_snapshot_id": _SNAPSHOT_ID,
+                "source_version": "v1",
+                "eco_mapping_url": "https://eco.test/map.txt",
+            }
+        )
         result = op._load_eco_mapping(p, _noop_emit)
         assert len(result) == 2
 
@@ -393,11 +434,13 @@ def _make_stream_response(text: str, status_code: int = 200) -> MagicMock:
 
 class TestFetchQuickgoPage:
     def _payload(self, **kw):
-        return LoadQuickGOAnnotationsPayload.model_validate({
-            "ontology_snapshot_id": _SNAPSHOT_ID,
-            "source_version": "v1",
-            **kw,
-        })
+        return LoadQuickGOAnnotationsPayload.model_validate(
+            {
+                "ontology_snapshot_id": _SNAPSHOT_ID,
+                "source_version": "v1",
+                **kw,
+            }
+        )
 
     @patch("protea.core.operations.load_quickgo_annotations.requests.get")
     def test_parses_rows(self, mock_get) -> None:
@@ -409,7 +452,9 @@ class TestFetchQuickgoPage:
 
         op = LoadQuickGOAnnotationsOperation()
         records = list(
-            op._fetch_quickgo_page(self._payload(), _noop_emit, gp_ids=["P12345"], batch_index=0, total_batches=1)
+            op._fetch_quickgo_page(
+                self._payload(), _noop_emit, gp_ids=["P12345"], batch_index=0, total_batches=1
+            )
         )
         assert len(records) == 2
         assert records[0]["GENE PRODUCT ID"] == "P12345"
@@ -422,7 +467,9 @@ class TestFetchQuickgoPage:
 
         op = LoadQuickGOAnnotationsOperation()
         records = list(
-            op._fetch_quickgo_page(self._payload(), _noop_emit, gp_ids=None, batch_index=0, total_batches=1)
+            op._fetch_quickgo_page(
+                self._payload(), _noop_emit, gp_ids=None, batch_index=0, total_batches=1
+            )
         )
         assert len(records) == 1
 
@@ -433,7 +480,9 @@ class TestFetchQuickgoPage:
 
         op = LoadQuickGOAnnotationsOperation()
         records = list(
-            op._fetch_quickgo_page(self._payload(), _noop_emit, gp_ids=None, batch_index=0, total_batches=1)
+            op._fetch_quickgo_page(
+                self._payload(), _noop_emit, gp_ids=None, batch_index=0, total_batches=1
+            )
         )
         assert len(records) == 1
 
@@ -444,7 +493,9 @@ class TestFetchQuickgoPage:
         op = LoadQuickGOAnnotationsOperation()
         with pytest.raises(requests.HTTPError):
             list(
-                op._fetch_quickgo_page(self._payload(), _noop_emit, gp_ids=None, batch_index=0, total_batches=1)
+                op._fetch_quickgo_page(
+                    self._payload(), _noop_emit, gp_ids=None, batch_index=0, total_batches=1
+                )
             )
 
     @patch("protea.core.operations.load_quickgo_annotations.requests.get")
@@ -453,7 +504,13 @@ class TestFetchQuickgoPage:
 
         op = LoadQuickGOAnnotationsOperation()
         list(
-            op._fetch_quickgo_page(self._payload(), _noop_emit, gp_ids=["P12345", "Q99999"], batch_index=0, total_batches=1)
+            op._fetch_quickgo_page(
+                self._payload(),
+                _noop_emit,
+                gp_ids=["P12345", "Q99999"],
+                batch_index=0,
+                total_batches=1,
+            )
         )
         _, kwargs = mock_get.call_args
         assert kwargs["params"]["geneProductId"] == "P12345,Q99999"
@@ -467,7 +524,9 @@ class TestFetchQuickgoPage:
 
         op = LoadQuickGOAnnotationsOperation()
         list(
-            op._fetch_quickgo_page(self._payload(), _noop_emit, gp_ids=None, batch_index=0, total_batches=1)
+            op._fetch_quickgo_page(
+                self._payload(), _noop_emit, gp_ids=None, batch_index=0, total_batches=1
+            )
         )
         _, kwargs = mock_get.call_args
         assert "geneProductId" not in kwargs["params"]
@@ -476,12 +535,15 @@ class TestFetchQuickgoPage:
     def test_emits_download_start_with_progress(self, mock_get) -> None:
         mock_get.return_value = _make_stream_response(_make_tsv_text())
         events: list[tuple[str, dict]] = []
+
         def emit(event, msg, fields, level):
             return events.append((event, fields))
 
         op = LoadQuickGOAnnotationsOperation()
         list(
-            op._fetch_quickgo_page(self._payload(), emit, gp_ids=["X"], batch_index=2, total_batches=5)
+            op._fetch_quickgo_page(
+                self._payload(), emit, gp_ids=["X"], batch_index=2, total_batches=5
+            )
         )
         start_events = [e for e in events if e[0] == "load_quickgo_annotations.download_start"]
         assert len(start_events) == 1
@@ -497,7 +559,9 @@ class TestFetchQuickgoPage:
 
         op = LoadQuickGOAnnotationsOperation()
         records = list(
-            op._fetch_quickgo_page(self._payload(), _noop_emit, gp_ids=None, batch_index=0, total_batches=1)
+            op._fetch_quickgo_page(
+                self._payload(), _noop_emit, gp_ids=None, batch_index=0, total_batches=1
+            )
         )
         assert records == []
 
@@ -506,13 +570,16 @@ class TestFetchQuickgoPage:
 # _stream_quickgo — batching logic
 # ---------------------------------------------------------------------------
 
+
 class TestStreamQuickgo:
     def _payload(self, **kw):
-        return LoadQuickGOAnnotationsPayload.model_validate({
-            "ontology_snapshot_id": _SNAPSHOT_ID,
-            "source_version": "v1",
-            **kw,
-        })
+        return LoadQuickGOAnnotationsPayload.model_validate(
+            {
+                "ontology_snapshot_id": _SNAPSHOT_ID,
+                "source_version": "v1",
+                **kw,
+            }
+        )
 
     @patch("protea.core.operations.load_quickgo_annotations.requests.get")
     def test_batches_accessions(self, mock_get) -> None:
@@ -537,6 +604,7 @@ class TestStreamQuickgo:
         mock_get.side_effect = lambda *a, **kw: _make_stream_response(_make_tsv_text())
 
         events: list[tuple[str, dict]] = []
+
         def emit(event, msg, fields, level):
             return events.append((event, fields))
 
@@ -565,6 +633,7 @@ class TestStreamQuickgo:
 # Full execute flow
 # ---------------------------------------------------------------------------
 
+
 def _mock_session(
     canonical_accessions: set[str] | None = None,
     protein_accessions: set[str] | None = None,
@@ -588,6 +657,7 @@ def _mock_session(
 
     def _set_id(obj):
         obj.id = uuid.uuid4()
+
     session.add.side_effect = _set_id
 
     return session
@@ -621,8 +691,10 @@ class TestExecute:
         session.scalars.side_effect = [iter(set()), iter(set())]
         op = LoadQuickGOAnnotationsOperation()
         events: list[str] = []
+
         def emit(event, msg, fields, level):
             return events.append(event)
+
         result = op.execute(session, _base_payload(), emit=emit)
         assert result.result["annotations_inserted"] == 0
         assert "load_quickgo_annotations.no_proteins" in events
@@ -643,6 +715,7 @@ class TestExecute:
         )
 
         events: list[str] = []
+
         def emit(event, msg, fields, level):
             return events.append(event)
 
@@ -669,12 +742,15 @@ class TestExecute:
         )
 
         events: list[str] = []
+
         def emit(event, msg, fields, level):
             return events.append(event)
 
         op = LoadQuickGOAnnotationsOperation()
         op.execute(
-            session, _base_payload(total_limit=1, page_size=1), emit=emit,
+            session,
+            _base_payload(total_limit=1, page_size=1),
+            emit=emit,
         )
         assert "load_quickgo_annotations.limit_reached" in events
 
@@ -693,7 +769,9 @@ class TestExecute:
 
         op = LoadQuickGOAnnotationsOperation()
         op.execute(
-            session, _base_payload(commit_every_page=True, page_size=1), emit=_noop_emit,
+            session,
+            _base_payload(commit_every_page=True, page_size=1),
+            emit=_noop_emit,
         )
         assert session.commit.call_count >= 2
 
@@ -709,7 +787,9 @@ class TestExecute:
 
         op = LoadQuickGOAnnotationsOperation()
         op.execute(
-            session, _base_payload(commit_every_page=False, page_size=1), emit=_noop_emit,
+            session,
+            _base_payload(commit_every_page=False, page_size=1),
+            emit=_noop_emit,
         )
         session.commit.assert_not_called()
 
@@ -728,6 +808,7 @@ class TestExecute:
         )
 
         events: list[tuple[str, dict]] = []
+
         def emit(event, msg, fields, level):
             return events.append((event, fields))
 

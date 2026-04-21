@@ -32,6 +32,9 @@ Decisions are grouped by system layer:
    * - 005
      - :doc:`Reusable RabbitMQ connections <005-thread-local-rabbitmq-connections>`
      - A coordinator dispatching 500 batches opened 500 TCP connections
+   * - 007
+     - :doc:`Contract-first integration with protea-reranker-lab <007-contract-first-lab-integration>`
+     - Re-ranker iteration cadence would contaminate the production dependency tree
 
 .. toctree::
    :maxdepth: 1
@@ -43,3 +46,4 @@ Decisions are grouped by system layer:
    004-dead-letter-queue-and-retry-strategy
    005-thread-local-rabbitmq-connections
    006-sequence-deduplication-by-md5
+   007-contract-first-lab-integration

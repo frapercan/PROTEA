@@ -56,12 +56,13 @@ def _mock_config(
 # Payload validation
 # ---------------------------------------------------------------------------
 
+
 class TestComputeEmbeddingsPayload:
     def test_minimal_valid(self) -> None:
         cid = str(uuid.uuid4())
         p = ComputeEmbeddingsPayload.model_validate({"embedding_config_id": cid})
         assert p.embedding_config_id == cid
-        assert p.batch_size == 8
+        assert p.batch_size == 1
         assert p.skip_existing is True
         assert p.device == "cuda"
 
@@ -74,12 +75,14 @@ class TestComputeEmbeddingsPayload:
             ComputeEmbeddingsPayload.model_validate({"embedding_config_id": "   "})
 
     def test_optional_fields_override(self) -> None:
-        p = ComputeEmbeddingsPayload.model_validate({
-            "embedding_config_id": str(uuid.uuid4()),
-            "batch_size": 16,
-            "skip_existing": False,
-            "device": "cuda",
-        })
+        p = ComputeEmbeddingsPayload.model_validate(
+            {
+                "embedding_config_id": str(uuid.uuid4()),
+                "batch_size": 16,
+                "skip_existing": False,
+                "device": "cuda",
+            }
+        )
         assert p.batch_size == 16
         assert p.skip_existing is False
         assert p.device == "cuda"
@@ -88,6 +91,7 @@ class TestComputeEmbeddingsPayload:
 # ---------------------------------------------------------------------------
 # _validate_layers
 # ---------------------------------------------------------------------------
+
 
 class TestValidateLayers:
     def test_valid_reverse_index(self) -> None:
@@ -111,9 +115,11 @@ class TestValidateLayers:
 # _aggregate helpers
 # ---------------------------------------------------------------------------
 
+
 class TestAggregateResidues:
     def test_mean(self) -> None:
         import torch
+
         a = torch.ones(4, 8)
         b = torch.ones(4, 8) * 3
         result = _aggregate_residue_layers([a, b], "mean")
@@ -122,6 +128,7 @@ class TestAggregateResidues:
 
     def test_concat(self) -> None:
         import torch
+
         a = torch.ones(4, 8)
         b = torch.ones(4, 8)
         result = _aggregate_residue_layers([a, b], "concat")
@@ -129,6 +136,7 @@ class TestAggregateResidues:
 
     def test_unknown_raises(self) -> None:
         import torch
+
         with pytest.raises(ValueError):
             _aggregate_residue_layers([torch.zeros(4, 8)], "unknown")
 
@@ -136,6 +144,7 @@ class TestAggregateResidues:
 class TestAggregate1d:
     def test_mean(self) -> None:
         import torch
+
         a = torch.ones(8)
         b = torch.ones(8) * 3
         result = _aggregate_1d([a, b], "mean")
@@ -143,6 +152,7 @@ class TestAggregate1d:
 
     def test_concat(self) -> None:
         import torch
+
         a = torch.ones(8)
         b = torch.ones(8)
         result = _aggregate_1d([a, b], "concat")
@@ -150,6 +160,7 @@ class TestAggregate1d:
 
     def test_unknown_raises(self) -> None:
         import torch
+
         with pytest.raises(ValueError):
             _aggregate_1d([torch.zeros(8)], "unknown")
 
@@ -157,6 +168,7 @@ class TestAggregate1d:
 # ---------------------------------------------------------------------------
 # _compute_chunk_spans
 # ---------------------------------------------------------------------------
+
 
 class TestComputeChunkSpans:
     def test_no_overlap(self) -> None:
@@ -185,9 +197,11 @@ class TestComputeChunkSpans:
 # _chunk_and_pool
 # ---------------------------------------------------------------------------
 
+
 class TestChunkAndPool:
     def test_no_chunking_mean(self) -> None:
         import torch
+
         cfg = _mock_config(pooling="mean", normalize=False)
         residues = torch.ones(5, 8)
         chunks = _chunk_and_pool(residues, cfg)
@@ -198,9 +212,13 @@ class TestChunkAndPool:
 
     def test_chunking_produces_multiple_results(self) -> None:
         import torch
+
         cfg = _mock_config(
-            pooling="mean", normalize=False,
-            use_chunking=True, chunk_size=4, chunk_overlap=0,
+            pooling="mean",
+            normalize=False,
+            use_chunking=True,
+            chunk_size=4,
+            chunk_overlap=0,
         )
         residues = torch.ones(10, 8)
         chunks = _chunk_and_pool(residues, cfg)
@@ -210,6 +228,7 @@ class TestChunkAndPool:
 
     def test_mean_max_doubles_dim(self) -> None:
         import torch
+
         cfg = _mock_config(pooling="mean_max", normalize=False)
         residues = torch.ones(5, 8)
         chunks = _chunk_and_pool(residues, cfg)
@@ -217,6 +236,7 @@ class TestChunkAndPool:
 
     def test_normalize_produces_unit_norm(self) -> None:
         import torch
+
         cfg = _mock_config(pooling="mean", normalize=True)
         residues = torch.rand(5, 8) + 0.1
         chunks = _chunk_and_pool(residues, cfg)
@@ -227,6 +247,7 @@ class TestChunkAndPool:
 # ---------------------------------------------------------------------------
 # Special-token stripping (ESM and ESM3c)
 # ---------------------------------------------------------------------------
+
 
 class TestSpecialTokenStripping:
     """Verify that CLS / EOS / BOS tokens are excluded from residue pooling.
@@ -253,8 +274,8 @@ class TestSpecialTokenStripping:
         seq_len = 7  # CLS + 5 content + EOS
 
         hidden = torch.zeros(1, seq_len, dim)
-        hidden[0, 1:6, :] = 1.0   # content (positions 1–5)
-        hidden[0, 6, :] = 10.0    # EOS at position 6 — must be excluded
+        hidden[0, 1:6, :] = 1.0  # content (positions 1–5)
+        hidden[0, 6, :] = 10.0  # EOS at position 6 — must be excluded
 
         tokens_dict = {
             "input_ids": torch.zeros(1, seq_len, dtype=torch.long),
@@ -282,16 +303,20 @@ class TestSpecialTokenStripping:
 
         op = self._op()
         cfg = _mock_config(
-            layer_indices=[0], pooling="mean", normalize=False,
-            use_chunking=True, chunk_size=3, chunk_overlap=0,
+            layer_indices=[0],
+            pooling="mean",
+            normalize=False,
+            use_chunking=True,
+            chunk_size=3,
+            chunk_overlap=0,
         )
 
         dim = 4
         seq_len = 7  # CLS + 5 content + EOS
 
         hidden = torch.ones(1, seq_len, dim)
-        hidden[0, 0, :] = 99.0   # CLS — must be excluded
-        hidden[0, 6, :] = 99.0   # EOS — must be excluded
+        hidden[0, 0, :] = 99.0  # CLS — must be excluded
+        hidden[0, 6, :] = 99.0  # EOS — must be excluded
 
         tokens_dict = {
             "input_ids": torch.zeros(1, seq_len, dtype=torch.long),
@@ -330,8 +355,8 @@ class TestSpecialTokenStripping:
         seq_len = 7  # BOS + 5 content + EOS
 
         layer = torch.zeros(1, seq_len, dim)
-        layer[0, 1:6, :] = 1.0   # content
-        layer[0, 6, :] = 10.0    # EOS — must be excluded
+        layer[0, 1:6, :] = 1.0  # content
+        layer[0, 6, :] = 10.0  # EOS — must be excluded
 
         cfg = _mock_config(layer_indices=[0], layer_agg="mean", pooling="mean", normalize=False)
 
@@ -348,19 +373,27 @@ class TestSpecialTokenStripping:
         # Patch the ESM SDK so the import inside _embed_esm3c resolves
         esm_api_mock = MagicMock()
         esm_mock = MagicMock()
-        with patch.dict(sys.modules, {
-            "esm": esm_mock,
-            "esm.sdk": esm_mock,
-            "esm.sdk.api": esm_api_mock,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "esm": esm_mock,
+                "esm.sdk": esm_mock,
+                "esm.sdk.api": esm_api_mock,
+            },
+        ):
             result = _embed_esm3c(FakeModel(), ["ACDEF"], cfg, "cpu")
 
         vec = result[0][0].vector
         # Mean of 5 content tokens (1.0) — BOS (0) and EOS (10) excluded
         assert vec == pytest.approx([1.0] * dim, abs=1e-5)
 
-    def test_t5_includes_eos_token(self) -> None:
-        """T5 keeps EOS in the residue tensor (PIS convention)."""
+    def test_t5_strips_eos_token(self) -> None:
+        """T5 (non-ProstT5) strips the trailing EOS from the residue tensor.
+
+        Each valid token position is set to a distinct value so the test can
+        prove that only the 4 content tokens — not the EOS at position 4 —
+        contribute to the mean.
+        """
         import torch
 
         from protea.core.operations.compute_embeddings import _embed_t5
@@ -368,16 +401,18 @@ class TestSpecialTokenStripping:
         dim = 8
         # T5: 4 content tokens + EOS = 5 valid tokens; 3 padding tokens
         batch_len = 8
-        actual_len = 5
+        actual_len = 5  # 4 content + EOS
 
         hidden = torch.zeros(1, batch_len, dim)
-        hidden[0, :actual_len, :] = 2.0   # valid tokens (content + EOS)
-        # padding positions remain 0.0
+        hidden[0, 0, :] = 1.0   # A
+        hidden[0, 1, :] = 2.0   # C
+        hidden[0, 2, :] = 3.0   # D
+        hidden[0, 3, :] = 4.0   # E
+        hidden[0, 4, :] = 99.0  # EOS — must be excluded
+        # padding positions (5..7) remain 0.0
 
-        cfg = _mock_config(
-            layer_indices=[0], layer_agg="mean", pooling="mean", normalize=False
-        )
-        cfg.model_name = "Rostlab/prot_t5_xl_uniref50"  # not prostt5
+        cfg = _mock_config(layer_indices=[0], layer_agg="mean", pooling="mean", normalize=False)
+        cfg.model_name = "Rostlab/prot_t5_xl_uniref50"  # no AA2fold prefix
 
         mock_outputs = MagicMock()
         mock_outputs.hidden_states = [hidden]
@@ -398,13 +433,146 @@ class TestSpecialTokenStripping:
             result = _embed_t5(mock_model, mock_tokenizer, ["ACDE"], cfg, "cpu")
 
         vec = result[0][0].vector
-        # Mean of actual_len=5 tokens (all 2.0) including EOS, excluding padding (0)
-        assert vec == pytest.approx([2.0] * dim, abs=1e-5)
+        # Mean of the 4 content tokens: (1 + 2 + 3 + 4) / 4 = 2.5; EOS excluded.
+        assert vec == pytest.approx([2.5] * dim, abs=1e-5)
+        # And the chunk's index_e must equal the AA count (4), not 5.
+        assert result[0][0].chunk_index_s == 0
+        assert result[0][0].chunk_index_e is None  # not chunking → None
+
+    def test_t5_prostt5_strips_aa2fold_and_eos(self) -> None:
+        """ProstT5 strips both the leading <AA2fold> prefix and the trailing EOS.
+
+        Same shape as the non-ProstT5 test but with an extra leading position
+        for <AA2fold>. The mean must only contain the 4 content tokens.
+        """
+        import torch
+
+        from protea.core.operations.compute_embeddings import _embed_t5
+
+        dim = 8
+        # ProstT5: <AA2fold> + 4 content + EOS = 6 valid tokens; 2 padding
+        batch_len = 8
+        actual_len = 6
+
+        hidden = torch.zeros(1, batch_len, dim)
+        hidden[0, 0, :] = 77.0  # <AA2fold> — must be excluded
+        hidden[0, 1, :] = 1.0
+        hidden[0, 2, :] = 2.0
+        hidden[0, 3, :] = 3.0
+        hidden[0, 4, :] = 4.0
+        hidden[0, 5, :] = 99.0  # EOS — must be excluded
+
+        cfg = _mock_config(layer_indices=[0], layer_agg="mean", pooling="mean", normalize=False)
+        cfg.model_name = "Rostlab/ProstT5"
+
+        mock_outputs = MagicMock()
+        mock_outputs.hidden_states = [hidden]
+
+        mock_model = MagicMock()
+        mock_model.return_value = mock_outputs
+
+        attention_mask = torch.zeros(1, batch_len, dtype=torch.long)
+        attention_mask[0, :actual_len] = 1
+
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.batch_encode_plus.return_value = {
+            "input_ids": torch.zeros(1, batch_len, dtype=torch.long),
+            "attention_mask": attention_mask,
+        }
+
+        with patch("torch.no_grad"):
+            result = _embed_t5(mock_model, mock_tokenizer, ["ACDE"], cfg, "cpu")
+
+        vec = result[0][0].vector
+        # Mean of 4 content tokens: (1 + 2 + 3 + 4) / 4 = 2.5.
+        # <AA2fold>=77 and EOS=99 must be excluded or the mean would be wildly off.
+        assert vec == pytest.approx([2.5] * dim, abs=1e-5)
+
+
+# ---------------------------------------------------------------------------
+# Ankh backend (shared T5 pipeline, never injects <AA2fold>)
+# ---------------------------------------------------------------------------
+
+
+class TestAnkhBackend:
+    def _run_embed_ankh(self, model_name: str) -> MagicMock:
+        """Call _embed_ankh with a mocked model/tokenizer and return the tokenizer."""
+        import torch
+
+        from protea.core.operations.compute_embeddings import _embed_ankh
+
+        dim = 4
+        batch_len = 5
+        actual_len = 4
+
+        hidden = torch.zeros(1, batch_len, dim)
+        hidden[0, :actual_len, :] = 1.0
+
+        cfg = _mock_config(layer_indices=[0], layer_agg="mean", pooling="mean", normalize=False)
+        cfg.model_name = model_name
+
+        mock_outputs = MagicMock()
+        mock_outputs.hidden_states = [hidden]
+
+        mock_model = MagicMock()
+        mock_model.return_value = mock_outputs
+
+        attention_mask = torch.zeros(1, batch_len, dtype=torch.long)
+        attention_mask[0, :actual_len] = 1
+
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.batch_encode_plus.return_value = {
+            "input_ids": torch.zeros(1, batch_len, dtype=torch.long),
+            "attention_mask": attention_mask,
+        }
+
+        with patch("torch.no_grad"):
+            _embed_ankh(mock_model, mock_tokenizer, ["ACDE"], cfg, "cpu")
+
+        return mock_tokenizer
+
+    def test_ankh_uses_is_split_into_words(self) -> None:
+        """Ankh must tokenise via list-of-chars + is_split_into_words=True.
+
+        The space-joined path used by ProstT5 maps spaces to <unk> for Ankh's
+        tokeniser, causing NaN outputs under FP16. Verified against
+        ElnaggarLab/ankh-base on 2026-04-10.
+        """
+        tok = self._run_embed_ankh("ElnaggarLab/ankh-base")
+        args, kwargs = tok.batch_encode_plus.call_args
+        processed = args[0]
+        # One list of chars per sequence, no space-joined string, no <AA2fold>
+        assert processed == [["A", "C", "D", "E"]]
+        assert kwargs.get("is_split_into_words") is True
+
+    def test_ankh_ignores_prostt5_substring_heuristic(self) -> None:
+        """Even if the model name misleadingly contains 'prostt5', ankh must not prefix."""
+        tok = self._run_embed_ankh("fake/prostt5-ankh-variant")
+        processed = tok.batch_encode_plus.call_args[0][0]
+        # processed is a list of lists of chars; no element may start with <AA2fold>
+        assert processed == [["A", "C", "D", "E"]]
+
+    def test_embed_batch_dispatches_ankh(self) -> None:
+        """ComputeEmbeddingsBatchOperation._embed_batch routes 'ankh' to _embed_ankh."""
+        from protea.core.operations.compute_embeddings import ComputeEmbeddingsBatchOperation
+
+        op = ComputeEmbeddingsBatchOperation()
+        cfg = _mock_config(backend="ankh")
+        cfg.model_name = "ElnaggarLab/ankh-base"
+
+        with patch(
+            "protea.core.operations.compute_embeddings._embed_ankh",
+            return_value=[[]],
+        ) as mock_ankh:
+            op._embed_batch(MagicMock(), MagicMock(), ["ACDE"], cfg, "cpu")
+
+        mock_ankh.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
 # _embed_batch dispatch (mocked model)
 # ---------------------------------------------------------------------------
+
 
 class TestEmbedBatch:
     def _op(self) -> ComputeEmbeddingsOperation:
@@ -476,6 +644,7 @@ class TestEmbedBatch:
 # execute() — coordinator (ComputeEmbeddingsOperation)
 # ---------------------------------------------------------------------------
 
+
 class TestComputeEmbeddingsCoordinator:
     """Tests for the coordinator operation that dispatches child batch jobs."""
 
@@ -537,6 +706,7 @@ class TestComputeEmbeddingsCoordinator:
 # execute() — batch operation (ComputeEmbeddingsBatchOperation)
 # ---------------------------------------------------------------------------
 
+
 class TestComputeEmbeddingsBatchExecute:
     def _op(self) -> ComputeEmbeddingsBatchOperation:
         return ComputeEmbeddingsBatchOperation()
@@ -582,8 +752,10 @@ class TestComputeEmbeddingsBatchExecute:
         fake_vec = np.array([0.1, 0.2, 0.3], dtype=np.float32)
         fake_batch = [self._fake_chunks(fake_vec), self._fake_chunks(fake_vec)]
 
-        with patch.object(op, "_load_model", return_value=(MagicMock(), MagicMock())), \
-             patch.object(op, "_embed_batch", return_value=fake_batch):
+        with (
+            patch.object(op, "_load_model", return_value=(MagicMock(), MagicMock())),
+            patch.object(op, "_embed_batch", return_value=fake_batch),
+        ):
             result = op.execute(session, self._base_payload(cfg), emit=_noop_emit)
 
         assert result.result["sequences_inferred"] == 2
@@ -606,8 +778,10 @@ class TestComputeEmbeddingsBatchExecute:
             ChunkEmbedding(8, 10, fake_vec),
         ]
 
-        with patch.object(op, "_load_model", return_value=(MagicMock(), MagicMock())), \
-             patch.object(op, "_embed_batch", return_value=[three_chunks]):
+        with (
+            patch.object(op, "_load_model", return_value=(MagicMock(), MagicMock())),
+            patch.object(op, "_embed_batch", return_value=[three_chunks]),
+        ):
             result = op.execute(session, self._base_payload(cfg), emit=_noop_emit)
 
         _, msg = result.publish_operations[0]
@@ -617,6 +791,7 @@ class TestComputeEmbeddingsBatchExecute:
 # ---------------------------------------------------------------------------
 # Batch-size consistency
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.slow
 class TestBatchSizeConsistency:
@@ -632,8 +807,11 @@ class TestBatchSizeConsistency:
 
     def _esm_cfg(self):
         return _mock_config(
-            layer_indices=[0], layer_agg="mean",
-            pooling="mean", normalize=False, normalize_residues=False,
+            layer_indices=[0],
+            layer_agg="mean",
+            pooling="mean",
+            normalize=False,
+            normalize_residues=False,
         )
 
     def test_esm_batch_size_consistency(self):
@@ -654,12 +832,15 @@ class TestBatchSizeConsistency:
             batched = []
             for i in range(0, len(self.SEQUENCES), batch_size):
                 batched.extend(
-                    _embed_esm(model, tokenizer, self.SEQUENCES[i:i + batch_size], cfg, "cpu")
+                    _embed_esm(model, tokenizer, self.SEQUENCES[i : i + batch_size], cfg, "cpu")
                 )
 
             for i, (got, expected) in enumerate(zip(batched, ref, strict=False)):
                 np.testing.assert_allclose(
-                    got[0].vector, expected[0].vector, rtol=1e-5, atol=1e-6,
+                    got[0].vector,
+                    expected[0].vector,
+                    rtol=1e-5,
+                    atol=1e-6,
                     err_msg=f"ESM batch_size={batch_size}: mismatch at sequence {i}",
                 )
 
@@ -676,8 +857,12 @@ class TestBatchSizeConsistency:
         from protea.core.operations.compute_embeddings import _embed_t5
 
         cfg = _mock_config(
-            backend="t5", layer_indices=[0], layer_agg="mean",
-            pooling="mean", normalize=False, normalize_residues=False,
+            backend="t5",
+            layer_indices=[0],
+            layer_agg="mean",
+            pooling="mean",
+            normalize=False,
+            normalize_residues=False,
         )
         cfg.model_name = "Rostlab/prot_t5_xl_uniref50"  # non-prostt5 path
 
@@ -701,8 +886,8 @@ class TestBatchSizeConsistency:
                 input_ids = torch.zeros(B, max_len, dtype=torch.long)
                 attention_mask = torch.zeros(B, max_len, dtype=torch.long)
                 for i, enc in enumerate(encoded):
-                    input_ids[i, :len(enc)] = torch.tensor(enc)
-                    attention_mask[i, :len(enc)] = 1
+                    input_ids[i, : len(enc)] = torch.tensor(enc)
+                    attention_mask[i, : len(enc)] = 1
                 return {"input_ids": input_ids, "attention_mask": attention_mask}
 
         model = _FakeT5()
@@ -714,12 +899,17 @@ class TestBatchSizeConsistency:
         for batch_size in (2, 4):
             results = []
             for i in range(0, len(self.SEQUENCES), batch_size):
-                for r in _embed_t5(model, tokenizer, self.SEQUENCES[i:i + batch_size], cfg, "cpu"):
+                for r in _embed_t5(
+                    model, tokenizer, self.SEQUENCES[i : i + batch_size], cfg, "cpu"
+                ):
                     results.append(r[0].vector)
 
             for i in range(len(self.SEQUENCES)):
                 np.testing.assert_allclose(
-                    results[i], ref[i], rtol=1e-5, atol=1e-6,
+                    results[i],
+                    ref[i],
+                    rtol=1e-5,
+                    atol=1e-6,
                     err_msg=f"T5 batch_size={batch_size}: mismatch at sequence {i}",
                 )
 
@@ -728,6 +918,7 @@ class TestBatchSizeConsistency:
 # StoreEmbeddingsOperation
 # ---------------------------------------------------------------------------
 
+
 class TestStoreEmbeddingsOperation:
     def _op(self) -> StoreEmbeddingsOperation:
         return StoreEmbeddingsOperation()
@@ -735,15 +926,19 @@ class TestStoreEmbeddingsOperation:
     def _make_payload(self, n_sequences=2, skip_existing=True, **kw):
         sequences = []
         for i in range(n_sequences):
-            sequences.append({
-                "sequence_id": i + 1,
-                "chunks": [{
-                    "chunk_index_s": 0,
-                    "chunk_index_e": None,
-                    "vector": [0.1, 0.2, 0.3],
-                    "embedding_dim": 3,
-                }],
-            })
+            sequences.append(
+                {
+                    "sequence_id": i + 1,
+                    "chunks": [
+                        {
+                            "chunk_index_s": 0,
+                            "chunk_index_e": None,
+                            "vector": [0.1, 0.2, 0.3],
+                            "embedding_dim": 3,
+                        }
+                    ],
+                }
+            )
         defaults = {
             "parent_job_id": str(uuid.uuid4()),
             "embedding_config_id": str(uuid.uuid4()),
@@ -840,6 +1035,7 @@ class TestStoreEmbeddingsOperation:
         session.execute.return_value.fetchone.side_effect = [progress_row, closed_row]
 
         events = []
+
         def capture_emit(event, msg, fields, level):
             events.append(event)
 
@@ -859,14 +1055,16 @@ class TestStoreEmbeddingsOperation:
         session.execute.return_value.fetchone.return_value = row
 
         payload = self._make_payload(n_sequences=0)
-        payload["sequences"] = [{
-            "sequence_id": 1,
-            "chunks": [
-                {"chunk_index_s": 0, "chunk_index_e": 4, "vector": [0.1], "embedding_dim": 1},
-                {"chunk_index_s": 4, "chunk_index_e": 8, "vector": [0.2], "embedding_dim": 1},
-                {"chunk_index_s": 8, "chunk_index_e": 10, "vector": [0.3], "embedding_dim": 1},
-            ],
-        }]
+        payload["sequences"] = [
+            {
+                "sequence_id": 1,
+                "chunks": [
+                    {"chunk_index_s": 0, "chunk_index_e": 4, "vector": [0.1], "embedding_dim": 1},
+                    {"chunk_index_s": 4, "chunk_index_e": 8, "vector": [0.2], "embedding_dim": 1},
+                    {"chunk_index_s": 8, "chunk_index_e": 10, "vector": [0.3], "embedding_dim": 1},
+                ],
+            }
+        ]
 
         result = op.execute(session, payload, emit=_noop_emit)
         assert result.result["embeddings_stored"] == 3
@@ -878,6 +1076,7 @@ class TestStoreEmbeddingsOperation:
 # ---------------------------------------------------------------------------
 # Coordinator — GPU retry (RetryLaterError)
 # ---------------------------------------------------------------------------
+
 
 class TestComputeEmbeddingsRetryLogic:
     def _op(self) -> ComputeEmbeddingsOperation:

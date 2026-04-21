@@ -2,6 +2,7 @@
 
 Database and queue are fully mocked — no real infrastructure required.
 """
+
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -17,6 +18,7 @@ from protea.api.routers.annotate import router
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_app(session_factory, amqp_url="amqp://guest:guest@localhost:5672/"):
     app = FastAPI()
@@ -67,6 +69,7 @@ def _mock_ontology_snapshot(session):
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def session():
     return MagicMock()
@@ -80,12 +83,15 @@ def factory(session):
 @pytest.fixture()
 def client(session, factory):
     app = _make_app(factory)
-    with patch(
-        "protea.api.routers.annotate.session_scope",
-        side_effect=lambda _: _mock_scope(session),
-    ), patch(
-        "protea.api.routers.annotate.publish_job",
-    ) as mock_publish:
+    with (
+        patch(
+            "protea.api.routers.annotate.session_scope",
+            side_effect=lambda _: _mock_scope(session),
+        ),
+        patch(
+            "protea.api.routers.annotate.publish_job",
+        ) as mock_publish,
+    ):
         with TestClient(app) as c:
             yield c, session, mock_publish
 
@@ -93,6 +99,7 @@ def client(session, factory):
 # ---------------------------------------------------------------------------
 # POST /annotate — input validation
 # ---------------------------------------------------------------------------
+
 
 class TestAnnotateInputValidation:
     def test_no_input_returns_422(self, client):
@@ -131,6 +138,7 @@ class TestAnnotateInputValidation:
 # POST /annotate — missing prerequisites
 # ---------------------------------------------------------------------------
 
+
 class TestAnnotatePrerequisites:
     def _setup_session(self, session, has_config=True, has_ann=True, has_snap=True):
         """Configure mock session for the annotate flow."""
@@ -148,6 +156,7 @@ class TestAnnotatePrerequisites:
         def add_side_effect(obj):
             if not hasattr(obj, "id") or obj.id is None:
                 obj.id = uuid4()
+
         session.add.side_effect = add_side_effect
         session.flush.return_value = None
 
@@ -155,7 +164,9 @@ class TestAnnotatePrerequisites:
         if has_config:
             config = MagicMock()
             config.id = uuid4()
-            query_mock.outerjoin.return_value.group_by.return_value.order_by.return_value.all.return_value = [(config, 10)]
+            query_mock.outerjoin.return_value.group_by.return_value.order_by.return_value.all.return_value = [
+                (config, 10)
+            ]
         else:
             query_mock.outerjoin.return_value.group_by.return_value.order_by.return_value.all.return_value = []
 
@@ -189,11 +200,14 @@ class TestAnnotatePrerequisites:
         def add_side_effect(obj):
             if not hasattr(obj, "id") or obj.id is None:
                 obj.id = uuid4()
+
         session.add.side_effect = add_side_effect
 
         config = MagicMock()
         config.id = uuid4()
-        query_mock.outerjoin.return_value.group_by.return_value.order_by.return_value.all.return_value = [(config, 10)]
+        query_mock.outerjoin.return_value.group_by.return_value.order_by.return_value.all.return_value = [
+            (config, 10)
+        ]
         # No annotation set
         query_mock.order_by.return_value.first.return_value = None
 
@@ -205,6 +219,7 @@ class TestAnnotatePrerequisites:
 # ---------------------------------------------------------------------------
 # POST /annotate — successful flow
 # ---------------------------------------------------------------------------
+
 
 class TestAnnotateSuccess:
     def test_fasta_text_happy_path(self, client):
@@ -225,7 +240,9 @@ class TestAnnotateSuccess:
         def query_side_effect(*args):
             q = MagicMock()
             q.filter.return_value.all.return_value = []
-            q.outerjoin.return_value.group_by.return_value.order_by.return_value.all.return_value = [(config, 10)]
+            q.outerjoin.return_value.group_by.return_value.order_by.return_value.all.return_value = [
+                (config, 10)
+            ]
             q.order_by.return_value.first.side_effect = lambda: next(first_results)
             return q
 
@@ -234,6 +251,7 @@ class TestAnnotateSuccess:
         def add_side_effect(obj):
             if not hasattr(obj, "id") or obj.id is None:
                 obj.id = uuid4()
+
         session.add.side_effect = add_side_effect
         session.flush.return_value = None
 
@@ -264,7 +282,9 @@ class TestAnnotateSuccess:
         def query_side_effect(*args):
             q = MagicMock()
             q.filter.return_value.all.return_value = []
-            q.outerjoin.return_value.group_by.return_value.order_by.return_value.all.return_value = [(config, 10)]
+            q.outerjoin.return_value.group_by.return_value.order_by.return_value.all.return_value = [
+                (config, 10)
+            ]
             q.order_by.return_value.first.side_effect = lambda: next(first_results)
             return q
 
@@ -273,6 +293,7 @@ class TestAnnotateSuccess:
         def add_side_effect(obj):
             if not hasattr(obj, "id") or obj.id is None:
                 obj.id = uuid4()
+
         session.add.side_effect = add_side_effect
 
         resp = c.post(
@@ -288,6 +309,7 @@ class TestAnnotateSuccess:
 # ---------------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------------
+
 
 class TestBestEmbeddingConfig:
     def test_returns_config_with_most_embeddings(self):
@@ -364,11 +386,3 @@ class TestNewestOntologySnapshot:
         assert _newest_ontology_snapshot(session) is None
 
 
-class TestDeriveMethod:
-    def test_derive_method_used_in_showcase(self):
-        from protea.api.routers.showcase import _derive_method
-
-        assert _derive_method(None, None) == ("knn_baseline", "KNN (embedding distance)")
-        assert _derive_method(uuid4(), None) == ("knn_scored", "KNN + Scoring")
-        assert _derive_method(None, uuid4()) == ("knn_reranker", "KNN + Re-ranker")
-        assert _derive_method(uuid4(), uuid4()) == ("knn_reranker", "KNN + Re-ranker")

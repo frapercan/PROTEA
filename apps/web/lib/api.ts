@@ -1,6 +1,8 @@
 export type Job = {
   id: string;
   operation: string;
+  operation_description?: string | null;
+  operation_summary?: string | null;
   queue_name: string;
   status: string;
   parent_job_id?: string | null;
@@ -634,31 +636,41 @@ export async function createQuerySet(file: File, name: string, description?: str
 // Showcase
 // ---------------------------------------------------------------------------
 
-export type ShowcaseAspectFmax = {
-  fmax: number;
-  method: string;
-  method_label: string;
-  evaluation_result_id: string;
-};
-
-export type ShowcaseMethodEntry = {
-  method: string;
-  label: string;
-  BPO: { fmax: number | null };
-  MFO: { fmax: number | null };
-  CCO: { fmax: number | null };
-};
-
 export type ShowcasePipelineStage = {
   name: string;
   count: number;
   href: string;
 };
 
+export type ShowcaseBestCell = {
+  category: string;
+  aspect: string;
+  fmax: number;
+  precision: number | null;
+  recall: number | null;
+};
+
+export type ShowcaseEmbedding = {
+  id: string;
+  model_name: string;
+  model_backend: string;
+  family: string;
+  display_name: string;
+  param_count: number | null;
+};
+
+export type ShowcaseBest = {
+  evaluation_result_id: string;
+  evaluation_set_id: string;
+  stage: "baseline" | "alignment_weighted" | "reranker";
+  avg_fmax: number;
+  embedding: ShowcaseEmbedding;
+  per_cell: ShowcaseBestCell[];
+};
+
 export type ShowcaseData = {
   protein_stats: { total: number; canonical: number };
-  best_fmax: Record<string, Record<string, ShowcaseAspectFmax>>;
-  method_comparison: Record<string, ShowcaseMethodEntry[]>;
+  best: ShowcaseBest | null;
   counts: {
     proteins: number;
     sequences: number;
@@ -673,4 +685,110 @@ export type ShowcaseData = {
 
 export function getShowcase() {
   return http<ShowcaseData>("/showcase/");
+}
+
+// ─── Benchmark matrix ──────────────────────────────────────────────
+
+export type BenchmarkEmbedding = {
+  id: string;
+  model_name: string;
+  model_backend: string;
+  description: string | null;
+  pooling: string;
+  layer_agg: string;
+  family: string;
+  display_name: string;
+  param_count: number | null;
+};
+
+export type BenchmarkEmbeddingsResponse = {
+  embeddings: BenchmarkEmbedding[];
+  total: number;
+};
+
+export type BenchmarkStageKind = "scoring" | "reranker";
+
+export type BenchmarkStage = {
+  name: string;
+  label: string;
+  kind: BenchmarkStageKind;
+  is_baseline: boolean;
+};
+
+export type BenchmarkRow = {
+  embedding_config_id: string;
+  evaluation_set_id: string;
+  stage: string;
+  category: string;
+  aspect: string;
+  fmax: number;
+  precision: number | null;
+  recall: number | null;
+  coverage: number | null;
+  n_proteins: number | null;
+  evaluation_result_id: string;
+};
+
+export type BenchmarkBestCell = {
+  category: string;
+  aspect: string;
+  fmax: number;
+  precision: number | null;
+  recall: number | null;
+  coverage: number | null;
+  embedding_config_id: string;
+  stage: string;
+  evaluation_result_id: string;
+  evaluation_set_id: string;
+};
+
+export type BenchmarkEvalSet = {
+  id: string;
+  label: string;
+  old_source: string | null;
+  old_source_version: string | null;
+  new_source: string | null;
+  new_source_version: string | null;
+  old_obo_version: string | null;
+  new_obo_version: string | null;
+  stats: {
+    delta_proteins?: number;
+    nk_proteins?: number;
+    lk_proteins?: number;
+    pk_proteins?: number;
+    nk_annotations?: number;
+    lk_annotations?: number;
+    pk_annotations?: number;
+    known_terms_count?: number;
+  };
+};
+
+export type BenchmarkMatrixResponse = {
+  rows: BenchmarkRow[];
+  total: number;
+  evaluation_sets: BenchmarkEvalSet[];
+  embedding_config_ids: string[];
+  stages: BenchmarkStage[];
+  categories: string[];
+  aspects: string[];
+  best_per_cell: BenchmarkBestCell[];
+  filters: {
+    evaluation_set_id: string | null;
+    stage: string | null;
+  };
+};
+
+export function getBenchmarkEmbeddings() {
+  return http<BenchmarkEmbeddingsResponse>("/benchmark/embeddings");
+}
+
+export function getBenchmarkMatrix(params?: {
+  evaluation_set_id?: string;
+  stage?: string;
+}) {
+  const qs = new URLSearchParams();
+  if (params?.evaluation_set_id) qs.set("evaluation_set_id", params.evaluation_set_id);
+  if (params?.stage) qs.set("stage", params.stage);
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return http<BenchmarkMatrixResponse>(`/benchmark/matrix${suffix}`);
 }

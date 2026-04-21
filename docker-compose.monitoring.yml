@@ -1,0 +1,37 @@
+# Grafana sidecar for PROTEA — Level A (visitor analytics only).
+#
+# Runs Grafana in a bridge network and publishes 3001 on the host. Postgres
+# lives in the `pgvectorsql` bridge container which publishes 5432 on the
+# host, so Grafana reaches it via the docker0 gateway (host.docker.internal).
+#
+# `network_mode: host` was tried first but this host's Docker puts "host"
+# containers in a netns that's not actually the real init netns, so the
+# listener was invisible from the outside. Bridge + published port works.
+#
+# Usage:
+#   docker compose -f docker-compose.monitoring.yml up -d
+#   open http://localhost:3001   (admin / admin on first login)
+
+services:
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: protea-grafana
+    ports:
+      - "3001:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    restart: unless-stopped
+
+volumes:
+  grafana_data:

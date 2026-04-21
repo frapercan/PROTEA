@@ -1,0 +1,28 @@
+# Grafana datasource provisioning — connects to the local pgvectorsql
+# Postgres container. Because Grafana runs with host networking, "localhost"
+# here refers to the host, same as from manage.sh-launched processes.
+#
+# Credentials mirror protea/config/system.yaml for local dev. For any other
+# deployment, override these with env vars before starting the container.
+
+apiVersion: 1
+
+datasources:
+  - name: PROTEA Postgres
+    uid: protea-postgres
+    type: postgres
+    access: proxy
+    url: host.docker.internal:5432
+    user: protea
+    jsonData:
+      database: protea
+      sslmode: disable
+      maxOpenConns: 5
+      maxIdleConns: 2
+      connMaxLifetime: 14400
+      postgresVersion: 1600
+      timescaledb: false
+    secureJsonData:
+      password: protea
+    isDefault: true
+    editable: true

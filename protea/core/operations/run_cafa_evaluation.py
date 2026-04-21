@@ -7,14 +7,15 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import requests
 from pydantic import Field, field_validator
 from sqlalchemy.orm import Session
 
+from protea.core.anc2vec_embeddings import get_index as get_anc2vec_index
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
-from protea.core.evaluation import compute_evaluation_data
+from protea.core.evaluation import load_evaluation_data_for_set
 from protea.core.scoring import compute_score
-from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.evaluation_result import EvaluationResult
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
@@ -35,6 +36,157 @@ _NS_LABELS = {
 _NS_SHORT = {"BPO", "MFO", "CCO"}
 
 
+# Feature columns read straight off the GOPrediction ORM into the reranker
+# DataFrame. Kept local (not imported from reranker.py) so this module does
+# not pay the LightGBM import cost when no reranker is configured.
+_NUMERIC_ORM_COLS: tuple[str, ...] = (
+    "distance",
+    "identity_nw",
+    "similarity_nw",
+    "alignment_score_nw",
+    "gaps_pct_nw",
+    "alignment_length_nw",
+    "identity_sw",
+    "similarity_sw",
+    "alignment_score_sw",
+    "gaps_pct_sw",
+    "alignment_length_sw",
+    "length_query",
+    "length_ref",
+    "taxonomic_distance",
+    "taxonomic_common_ancestors",
+    "vote_count",
+    "k_position",
+    "go_term_frequency",
+    "ref_annotation_density",
+    "neighbor_distance_std",
+    "neighbor_vote_fraction",
+    "neighbor_min_distance",
+    "neighbor_mean_distance",
+    "anc2vec_neighbor_cos",
+    "anc2vec_neighbor_maxcos",
+    "anc2vec_has_emb",
+    "anc2vec_query_known_cos",
+    "anc2vec_query_known_maxcos",
+    "anc2vec_query_known_count",
+    "tax_voters_same_frac",
+    "tax_voters_close_frac",
+    "tax_voters_mean_common_ancestors",
+    *(f"emb_pca_query_{i}" for i in range(16)),
+)
+
+
+def _record_from_pred(
+    pred: GOPrediction,
+    go_id: str,
+    aspect: str | None = None,
+) -> dict[str, Any]:
+    """Extract a reranker-ready record from a GOPrediction ORM instance.
+
+    ``aspect`` is only needed when the caller routes by aspect (per-aspect
+    models). For category-level reranking pass ``None``.
+    """
+    record: dict[str, Any] = {
+        "protein_accession": pred.protein_accession,
+        "go_id": go_id,
+        "aspect": aspect or "",
+        "qualifier": pred.qualifier or "",
+        "evidence_code": pred.evidence_code or "",
+        "taxonomic_relation": pred.taxonomic_relation or "",
+    }
+    for col in _NUMERIC_ORM_COLS:
+        record[col] = getattr(pred, col, None)
+    return record
+
+
+def _patch_query_known_features(
+    df: "Any",
+    known_gos: dict[str, set[str]],
+) -> None:
+    """Overwrite ``anc2vec_query_known_*`` in-place from eval-time known GOs.
+
+    At predict time these columns are stored as NaN / 0 because the query's
+    pre-cutoff annotation set is a property of the evaluation split, not the
+    prediction set.  This helper repairs them for LK / PK evaluation so the
+    reranker sees the same query-profile features it was trained on.
+
+    - ``anc2vec_query_known_cos`` : cosine between the candidate's Anc2Vec
+      vector and the L2-normalized centroid of the query's known-GO vectors.
+    - ``anc2vec_query_known_maxcos`` : max cosine vs any individual known-GO
+      vector.
+    - ``anc2vec_query_known_count`` : raw size of the known-GO set (before
+      filtering by Anc2Vec coverage).  Stays informative even when the
+      intersection with the Anc2Vec vocab is empty.
+
+    Rows whose candidate term has no Anc2Vec vector keep cos/maxcos as NaN
+    (matches the predict-time convention and the training code path).
+    """
+    import pandas as pd
+
+    if df.empty or not known_gos:
+        return
+
+    anc_idx = get_anc2vec_index()
+
+    unique_proteins = df["protein_accession"].unique().tolist()
+    candidate_go_ids = df["go_id"].unique().tolist()
+
+    all_go_ids: set[str] = set(candidate_go_ids)
+    for q_acc in unique_proteins:
+        all_go_ids.update(known_gos.get(q_acc, ()))
+    go_list = sorted(all_go_ids)
+    if not go_list:
+        return
+    idx_of_go: dict[str, int] = {g: i for i, g in enumerate(go_list)}
+    emb = anc_idx.batch(go_list)
+    raw_norms = np.linalg.norm(emb, axis=1)
+    has_emb_mask = raw_norms > 0.0
+    safe_norms = np.where(has_emb_mask, raw_norms, 1.0)[:, None]
+    all_norm = (emb / safe_norms).astype(np.float32)
+    all_norm[~has_emb_mask] = 0.0
+
+    cos_col = np.full(len(df), np.nan, dtype=np.float32)
+    maxcos_col = np.full(len(df), np.nan, dtype=np.float32)
+    count_col = np.zeros(len(df), dtype=np.float32)
+
+    protein_groups = df.groupby("protein_accession", sort=False).indices
+
+    for q_acc, row_indices in protein_groups.items():
+        known = known_gos.get(q_acc, set())
+        count_col[row_indices] = float(len(known))
+        if not known:
+            continue
+        known_rows = [
+            idx_of_go[g]
+            for g in known
+            if g in idx_of_go and has_emb_mask[idx_of_go[g]]
+        ]
+        if not known_rows:
+            continue
+        kmat = all_norm[known_rows]
+        centroid = kmat.mean(axis=0)
+        cn = float(np.linalg.norm(centroid))
+        centroid_unit = (centroid / cn).astype(np.float32) if cn > 0.0 else None
+
+        for ridx in row_indices:
+            go_id = df["go_id"].iat[ridx]
+            cand_i = idx_of_go.get(go_id)
+            if cand_i is None or not has_emb_mask[cand_i]:
+                continue
+            cand_vec = all_norm[cand_i]
+            if centroid_unit is not None:
+                cos_col[ridx] = float(cand_vec @ centroid_unit)
+            maxcos_col[ridx] = float((kmat @ cand_vec).max())
+
+    df["anc2vec_query_known_cos"] = pd.Series(cos_col, index=df.index).replace(
+        {np.nan: pd.NA}
+    )
+    df["anc2vec_query_known_maxcos"] = pd.Series(maxcos_col, index=df.index).replace(
+        {np.nan: pd.NA}
+    )
+    df["anc2vec_query_known_count"] = count_col
+
+
 class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
     evaluation_set_id: str
     prediction_set_id: str
@@ -48,7 +200,7 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
         default=None,
         description=(
             "Nested mapping of category → aspect → reranker_model_id. "
-            "E.g. {\"nk\": {\"bpo\": \"uuid\", \"mfo\": \"uuid\"}, \"lk\": {...}}. "
+            'E.g. {"nk": {"bpo": "uuid", "mfo": "uuid"}, "lk": {...}}. '
             "Overrides the flat reranker_id_* fields when present."
         ),
     )
@@ -76,26 +228,83 @@ class RunCafaEvaluationOperation:
     """Runs the CAFA evaluator against NK, LK and PK settings.
 
     Steps:
-      1. Load EvaluationSet and PredictionSet from DB.
-      2. Compute evaluation data (delta NK/LK + known-terms) with full NOT propagation.
-      3. Download the OBO file from the ontology snapshot URL.
-      4. Resolve the Information Accretion (IA) file:
-           - If ``ia_file`` is set in the payload, use that path directly.
-           - Otherwise, if the OntologySnapshot has an ``ia_url``, download it to
-             a temporary file and pass it to cafaeval.
-           - If neither is set, cafaeval runs with uniform IC=1 for all terms.
-         IA weights make rare, specific GO terms count more than common ones and
-         are strongly recommended for publishable evaluations.  Each CAFA benchmark
-         ships its own IA file (e.g. ``IA_cafa6.tsv``); store its URL in the
-         corresponding OntologySnapshot so future evaluations pick it up
-         automatically without touching the job payload.
-      5. Write temp files: ground-truth NK/LK, known-terms, predictions (CAFA format).
-      6. Call ``cafa_eval`` for each setting (NK, LK, PK).
-      7. Parse per-namespace Fmax / precision / recall / coverage from results.
-      8. Persist an EvaluationResult row with all metrics.
+
+    1. Load ``EvaluationSet`` and ``PredictionSet`` from DB.
+    2. Compute evaluation data (delta NK/LK + known terms) with full
+       NOT propagation.
+    3. Download the OBO file from the ontology snapshot URL.
+    4. Resolve the Information Accretion (IA) file: if ``ia_file`` is set
+       in the payload, use that path directly; otherwise, if the
+       ``OntologySnapshot`` has an ``ia_url``, download it to a temporary
+       file; if neither is set, cafaeval runs with uniform IC=1. IA weights
+       make rare GO terms count more than common ones and are recommended
+       for publishable evaluations.
+    5. Write temp files: ground-truth NK/LK, known-terms, predictions
+       (CAFA format).
+    6. Call ``cafa_eval`` for each setting (NK, LK, PK).
+    7. Parse per-namespace Fmax / precision / recall / coverage from
+       results.
+    8. Persist an ``EvaluationResult`` row with all metrics.
     """
 
     name = "run_cafa_evaluation"
+    description = (
+        "Run the CAFA evaluator (NK/LK/PK) against an EvaluationSet using a "
+        "PredictionSet, optionally weighted by Information Accretion."
+    )
+
+    def summarize_payload(self, payload: dict[str, Any], *, session: Session | None = None) -> str:
+        p = payload or {}
+        bits: list[str] = []
+
+        pred_id_raw = p.get("prediction_set_id")
+        if pred_id_raw and session is not None:
+            try:
+                pred = session.get(PredictionSet, uuid.UUID(str(pred_id_raw)))
+            except Exception:
+                pred = None
+            if pred is not None and pred.embedding_config_id is not None:
+                from protea.infrastructure.orm.models.embedding.embedding_config import (
+                    EmbeddingConfig,
+                )
+                cfg = session.get(EmbeddingConfig, pred.embedding_config_id)
+                if cfg is not None:
+                    label = cfg.display_name or cfg.model_name or str(cfg.id)[:8]
+                    bits.append(label)
+            if pred is None:
+                bits.append(f"pred={str(pred_id_raw)[:8]}")
+        elif pred_id_raw:
+            bits.append(f"pred={str(pred_id_raw)[:8]}")
+
+        eval_id_raw = p.get("evaluation_set_id")
+        if eval_id_raw and session is not None:
+            try:
+                ev = session.get(EvaluationSet, uuid.UUID(str(eval_id_raw)))
+            except Exception:
+                ev = None
+            if ev is not None:
+                old_v = getattr(ev, "old_source_version", None) or "?"
+                new_v = getattr(ev, "new_source_version", None) or "?"
+                bits.append(f"eval={old_v}→{new_v}")
+        elif eval_id_raw:
+            bits.append(f"eval={str(eval_id_raw)[:8]}")
+
+        scoring_id_raw = p.get("scoring_config_id")
+        if scoring_id_raw and session is not None:
+            try:
+                sc = session.get(ScoringConfig, uuid.UUID(str(scoring_id_raw)))
+            except Exception:
+                sc = None
+            if sc is not None:
+                bits.append(f"scoring={sc.name}")
+        elif scoring_id_raw:
+            bits.append(f"scoring={str(scoring_id_raw)[:8]}")
+
+        if p.get("reranker_model_id"):
+            bits.append("+reranker")
+        if p.get("max_distance") is not None:
+            bits.append(f"max_d={p['max_distance']}")
+        return " · ".join(bits)
 
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
@@ -115,8 +324,22 @@ class RunCafaEvaluationOperation:
         if pred_set is None:
             raise ValueError(f"PredictionSet {pred_set_id} not found")
 
-        ann_old = session.get(AnnotationSet, eval_set.old_annotation_set_id)
-        snapshot = session.get(OntologySnapshot, ann_old.ontology_snapshot_id)
+        # ── 1. Compute evaluation data (dispatches same-snapshot vs reconciled) ─
+        emit("run_cafa_evaluation.computing_delta", None, {}, "info")
+        data, pivot_snapshot_id = load_evaluation_data_for_set(session, eval_set)
+        snapshot = session.get(OntologySnapshot, pivot_snapshot_id)
+        if snapshot is None:
+            raise ValueError(f"Pivot OntologySnapshot {pivot_snapshot_id} not found")
+
+        # Terms-of-interest (CAFA6 -toi): all GO terms in the pivot graph.
+        # cafaeval restricts evaluation to this set so that terms not in the
+        # frozen graph (e.g. new since t-1) are excluded from scoring.
+        toi_go_ids: list[str] = [
+            gid
+            for (gid,) in session.query(GOTerm.go_id)
+            .filter(GOTerm.ontology_snapshot_id == pivot_snapshot_id)
+            .all()
+        ]
 
         emit(
             "run_cafa_evaluation.start",
@@ -124,18 +347,11 @@ class RunCafaEvaluationOperation:
             {
                 "evaluation_set_id": str(eval_set_id),
                 "prediction_set_id": str(pred_set_id),
+                "pivot_ontology_snapshot_id": str(pivot_snapshot_id),
+                "mode": (eval_set.stats or {}).get("mode", "same_snapshot"),
                 "obo_url": snapshot.obo_url,
             },
             "info",
-        )
-
-        # ── 1. Compute evaluation data ────────────────────────────────────────
-        emit("run_cafa_evaluation.computing_delta", None, {}, "info")
-        data = compute_evaluation_data(
-            session,
-            eval_set.old_annotation_set_id,
-            eval_set.new_annotation_set_id,
-            ann_old.ontology_snapshot_id,
         )
         emit(
             "run_cafa_evaluation.delta_done",
@@ -165,7 +381,9 @@ class RunCafaEvaluationOperation:
         # Load per-category (and optionally per-aspect) reranker models before session commit.
         # reranker_models: setting → aspect → model_data  (aspect="" means single model for all aspects)
         reranker_models: dict[str, dict[str, str]] = {}
-        reranker_config_snapshot: dict[str, dict[str, str]] | None = None  # for persisting in EvaluationResult
+        reranker_config_snapshot: dict[str, dict[str, str]] | None = (
+            None  # for persisting in EvaluationResult
+        )
 
         if p.rerankers:
             # New nested mapping: {"nk": {"bpo": "uuid", "mfo": "uuid", ...}, ...}
@@ -183,13 +401,24 @@ class RunCafaEvaluationOperation:
                     aspect_char = _aspect_map.get(aspect_key, aspect_key)
                     reranker_models[setting][aspect_char] = rm.model_data
                     reranker_config_snapshot[cat_key][aspect_key] = rid_str
-                    emit("run_cafa_evaluation.reranker_loaded", None, {
-                        "setting": setting, "aspect": aspect_key,
-                        "reranker_id": str(rid), "name": rm.name,
-                    }, "info")
+                    emit(
+                        "run_cafa_evaluation.reranker_loaded",
+                        None,
+                        {
+                            "setting": setting,
+                            "aspect": aspect_key,
+                            "reranker_id": str(rid),
+                            "name": rm.name,
+                        },
+                        "info",
+                    )
         else:
             # Legacy flat fields: one model per category (all aspects)
-            for setting, field in [("NK", p.reranker_id_nk), ("LK", p.reranker_id_lk), ("PK", p.reranker_id_pk)]:
+            for setting, field in [
+                ("NK", p.reranker_id_nk),
+                ("LK", p.reranker_id_lk),
+                ("PK", p.reranker_id_pk),
+            ]:
                 if field:
                     rid = uuid.UUID(field)
                     rm = session.get(RerankerModelORM, rid)
@@ -197,7 +426,8 @@ class RunCafaEvaluationOperation:
                         raise ValueError(f"RerankerModel {field} not found")
                     reranker_models[setting] = {"": rm.model_data}  # "" = all aspects
                     emit(
-                        "run_cafa_evaluation.reranker_loaded", None,
+                        "run_cafa_evaluation.reranker_loaded",
+                        None,
                         {"setting": setting, "reranker_id": str(rid), "name": rm.name},
                         "info",
                     )
@@ -255,6 +485,18 @@ class RunCafaEvaluationOperation:
             self._write_gt(data.known, known_path)
             self._write_gt(data.pk_known, pk_known_path)
 
+            # Write terms-of-interest file (CAFA6 -toi flag).
+            toi_path = os.path.join(gt_dir, "terms_of_interest.txt")
+            with open(toi_path, "w") as f:
+                for go_id in sorted(toi_go_ids):
+                    f.write(f"{go_id}\n")
+            emit(
+                "run_cafa_evaluation.toi_written",
+                None,
+                {"toi_terms": len(toi_go_ids), "path": toi_path},
+                "info",
+            )
+
             delta_proteins = set(data.nk) | set(data.lk) | set(data.pk)
             emit(
                 "run_cafa_evaluation.writing_predictions",
@@ -271,8 +513,12 @@ class RunCafaEvaluationOperation:
                 os.makedirs(pred_dir, exist_ok=True)
                 pred_path = os.path.join(pred_dir, "predictions.tsv")
                 self._write_predictions(
-                    session, pred_set_id, delta_proteins, p.max_distance,
-                    pred_path, scoring_config_snapshot,
+                    session,
+                    pred_set_id,
+                    delta_proteins,
+                    p.max_distance,
+                    pred_path,
+                    scoring_config_snapshot,
                 )
 
             # No-op commit: releases the DB connection back to the pool before
@@ -295,18 +541,33 @@ class RunCafaEvaluationOperation:
                     os.makedirs(pred_dir, exist_ok=True)
                     pred_path = os.path.join(pred_dir, "predictions.tsv")
                     rr_aspect_map = reranker_models.get(setting, {})
+                    # anc2vec_query_known_* is only meaningful when the query
+                    # has pre-cutoff annotations (LK / PK).  NK proteins have
+                    # nothing "known", so training/serving parity requires
+                    # leaving the features at their predict-time NaN / 0.
+                    setting_known = data.known if setting in ("LK", "PK") else None
                     if "" in rr_aspect_map:
                         # Single model for all aspects (legacy flat field)
                         self._write_predictions(
-                            session, pred_set_id, delta_proteins, p.max_distance,
-                            pred_path, scoring_config_snapshot,
+                            session,
+                            pred_set_id,
+                            delta_proteins,
+                            p.max_distance,
+                            pred_path,
+                            scoring_config_snapshot,
                             reranker_model_str=rr_aspect_map[""],
+                            known_gos=setting_known,
                         )
                     else:
                         # Per-aspect models
                         self._write_predictions_per_aspect(
-                            session, pred_set_id, delta_proteins, p.max_distance,
-                            pred_path, rr_aspect_map,
+                            session,
+                            pred_set_id,
+                            delta_proteins,
+                            p.max_distance,
+                            pred_path,
+                            rr_aspect_map,
+                            known_gos=setting_known,
                         )
                 emit("run_cafa_evaluation.evaluating", None, {"setting": setting}, "info")
                 try:
@@ -323,8 +584,12 @@ class RunCafaEvaluationOperation:
                             gt_file,
                             ia=ia_path,
                             exclude=known_file,
-                            prop="max",
+                            prop="fill",
                             norm="cafa",
+                            no_orphans=True,
+                            toi_file=toi_path,
+                            max_terms=500,
+                            th_step=0.001,
                             n_cpu=1,
                         )
                     finally:
@@ -375,7 +640,11 @@ class RunCafaEvaluationOperation:
         elif reranker_models:
             # Flat per-category fields: build config snapshot and pick first ID
             reranker_config_snapshot = {}
-            for setting, field in [("nk", p.reranker_id_nk), ("lk", p.reranker_id_lk), ("pk", p.reranker_id_pk)]:
+            for setting, field in [
+                ("nk", p.reranker_id_nk),
+                ("lk", p.reranker_id_lk),
+                ("pk", p.reranker_id_pk),
+            ]:
                 if field:
                     reranker_config_snapshot[setting] = {"all": field}
                     if first_reranker_id is None:
@@ -479,6 +748,7 @@ class RunCafaEvaluationOperation:
         path: str,
         scoring_config: ScoringConfig | None = None,
         reranker_model_str: str | None = None,
+        known_gos: dict[str, set[str]] | None = None,
     ) -> None:
         """Write CAFA-format predictions (protein\\tgo_id\\tscore) for delta proteins.
 
@@ -487,10 +757,20 @@ class RunCafaEvaluationOperation:
              all predictions and use re-ranker probabilities as scores.
           2. If a ``ScoringConfig`` is provided, compute scores via ``compute_score()``.
           3. Otherwise fall back to ``1 - cosine_distance / 2``.
+
+        ``known_gos`` carries the query's pre-cutoff annotations (LK / PK
+        settings) and is used to override ``anc2vec_query_known_*`` before the
+        reranker sees the DataFrame. For NK it must stay ``None``.
         """
         if reranker_model_str is not None:
             self._write_predictions_reranked(
-                session, pred_set_id, delta_proteins, max_distance, path, reranker_model_str,
+                session,
+                pred_set_id,
+                delta_proteins,
+                max_distance,
+                path,
+                reranker_model_str,
+                known_gos=known_gos,
             )
             return
 
@@ -532,6 +812,7 @@ class RunCafaEvaluationOperation:
         max_distance: float | None,
         path: str,
         reranker_model_str: str,
+        known_gos: dict[str, set[str]] | None = None,
     ) -> None:
         """Write CAFA-format predictions using LightGBM re-ranker scores."""
         import pandas as pd
@@ -540,7 +821,7 @@ class RunCafaEvaluationOperation:
         from protea.core.reranker import predict as reranker_predict
 
         q = (
-            session.query(GOPrediction, GOTerm.go_id)
+            session.query(GOPrediction, GOTerm.go_id, GOTerm.aspect)
             .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
             .filter(GOPrediction.prediction_set_id == pred_set_id)
             .filter(GOPrediction.protein_accession.in_(delta_proteins))
@@ -548,38 +829,10 @@ class RunCafaEvaluationOperation:
         if max_distance is not None:
             q = q.filter(GOPrediction.distance <= max_distance)
 
-        records: list[dict[str, Any]] = []
-        for pred, go_id in q.yield_per(5000):
-            records.append({
-                "protein_accession": pred.protein_accession,
-                "go_id": go_id,
-                "distance": pred.distance,
-                "qualifier": pred.qualifier or "",
-                "evidence_code": pred.evidence_code or "",
-                "identity_nw": pred.identity_nw,
-                "similarity_nw": pred.similarity_nw,
-                "alignment_score_nw": pred.alignment_score_nw,
-                "gaps_pct_nw": pred.gaps_pct_nw,
-                "alignment_length_nw": pred.alignment_length_nw,
-                "identity_sw": pred.identity_sw,
-                "similarity_sw": pred.similarity_sw,
-                "alignment_score_sw": pred.alignment_score_sw,
-                "gaps_pct_sw": pred.gaps_pct_sw,
-                "alignment_length_sw": pred.alignment_length_sw,
-                "length_query": pred.length_query,
-                "length_ref": pred.length_ref,
-                "query_taxonomy_id": pred.query_taxonomy_id,
-                "ref_taxonomy_id": pred.ref_taxonomy_id,
-                "taxonomic_lca": pred.taxonomic_lca,
-                "taxonomic_distance": pred.taxonomic_distance,
-                "taxonomic_common_ancestors": pred.taxonomic_common_ancestors,
-                "taxonomic_relation": pred.taxonomic_relation or "",
-                "vote_count": pred.vote_count,
-                "k_position": pred.k_position,
-                "go_term_frequency": pred.go_term_frequency,
-                "ref_annotation_density": pred.ref_annotation_density,
-                "neighbor_distance_std": pred.neighbor_distance_std,
-            })
+        records: list[dict[str, Any]] = [
+            _record_from_pred(pred, go_id, aspect=aspect)
+            for pred, go_id, aspect in q.yield_per(5000)
+        ]
 
         if not records:
             with open(path, "w") as f:
@@ -587,13 +840,16 @@ class RunCafaEvaluationOperation:
             return
 
         df = pd.DataFrame(records)
+        if known_gos:
+            _patch_query_known_features(df, known_gos)
         model = model_from_string(reranker_model_str)
         scores = reranker_predict(model, df)
 
         # Deduplicate: keep highest score per (protein, go_id)
         df["score"] = scores
         df = df.sort_values("score", ascending=False).drop_duplicates(
-            subset=["protein_accession", "go_id"], keep="first",
+            subset=["protein_accession", "go_id"],
+            keep="first",
         )
 
         with open(path, "w") as f:
@@ -608,11 +864,17 @@ class RunCafaEvaluationOperation:
         max_distance: float | None,
         path: str,
         aspect_models: dict[str, str],
+        known_gos: dict[str, set[str]] | None = None,
     ) -> None:
         """Write CAFA-format predictions applying per-aspect LightGBM models.
 
         ``aspect_models`` maps GO aspect char (P/F/C) to model_data strings.
         Predictions whose aspect has no model fall back to ``1 - distance/2``.
+
+        ``known_gos`` carries the query's pre-cutoff annotations (LK / PK
+        settings) so the per-aspect model sees the same
+        ``anc2vec_query_known_*`` features it was trained with. Must be
+        ``None`` for NK.
         """
         import pandas as pd
 
@@ -628,39 +890,9 @@ class RunCafaEvaluationOperation:
         if max_distance is not None:
             q = q.filter(GOPrediction.distance <= max_distance)
 
-        records: list[dict[str, Any]] = []
-        for pred, go_id, aspect in q.yield_per(5000):
-            records.append({
-                "protein_accession": pred.protein_accession,
-                "go_id": go_id,
-                "aspect": aspect or "",
-                "distance": pred.distance,
-                "qualifier": pred.qualifier or "",
-                "evidence_code": pred.evidence_code or "",
-                "identity_nw": pred.identity_nw,
-                "similarity_nw": pred.similarity_nw,
-                "alignment_score_nw": pred.alignment_score_nw,
-                "gaps_pct_nw": pred.gaps_pct_nw,
-                "alignment_length_nw": pred.alignment_length_nw,
-                "identity_sw": pred.identity_sw,
-                "similarity_sw": pred.similarity_sw,
-                "alignment_score_sw": pred.alignment_score_sw,
-                "gaps_pct_sw": pred.gaps_pct_sw,
-                "alignment_length_sw": pred.alignment_length_sw,
-                "length_query": pred.length_query,
-                "length_ref": pred.length_ref,
-                "query_taxonomy_id": pred.query_taxonomy_id,
-                "ref_taxonomy_id": pred.ref_taxonomy_id,
-                "taxonomic_lca": pred.taxonomic_lca,
-                "taxonomic_distance": pred.taxonomic_distance,
-                "taxonomic_common_ancestors": pred.taxonomic_common_ancestors,
-                "taxonomic_relation": pred.taxonomic_relation or "",
-                "vote_count": pred.vote_count,
-                "k_position": pred.k_position,
-                "go_term_frequency": pred.go_term_frequency,
-                "ref_annotation_density": pred.ref_annotation_density,
-                "neighbor_distance_std": pred.neighbor_distance_std,
-            })
+        records: list[dict[str, Any]] = [
+            _record_from_pred(pred, go_id, aspect) for pred, go_id, aspect in q.yield_per(5000)
+        ]
 
         if not records:
             with open(path, "w") as f:
@@ -668,6 +900,8 @@ class RunCafaEvaluationOperation:
             return
 
         df = pd.DataFrame(records)
+        if known_gos:
+            _patch_query_known_features(df, known_gos)
 
         # Score each aspect group with its corresponding model
         df["score"] = 0.0
@@ -688,7 +922,8 @@ class RunCafaEvaluationOperation:
 
         # Deduplicate: keep highest score per (protein, go_id)
         df = df.sort_values("score", ascending=False).drop_duplicates(
-            subset=["protein_accession", "go_id"], keep="first",
+            subset=["protein_accession", "go_id"],
+            keep="first",
         )
 
         with open(path, "w") as f:

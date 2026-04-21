@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from pgvector.sqlalchemy import Vector
+from pgvector.sqlalchemy import HALFVEC
 from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -61,7 +61,7 @@ class SequenceEmbedding(Base):
     # chunk_index_e: end residue index (exclusive).
     # NULL when chunking is disabled (covers the full sequence).
     chunk_index_e: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    embedding: Mapped[Any] = mapped_column(Vector, nullable=False)
+    embedding: Mapped[Any] = mapped_column(HALFVEC, nullable=False)
     embedding_dim: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

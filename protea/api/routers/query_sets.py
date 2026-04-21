@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 from uuid import UUID
 
@@ -15,21 +16,53 @@ from protea.infrastructure.session import session_scope
 router = APIRouter(prefix="/query-sets", tags=["query-sets"])
 
 
-def _parse_fasta(content: str) -> list[tuple[str, str]]:
-    """Return list of (accession, sequence) from FASTA text.
+_TAX_RE = re.compile(r"OX=(\d+)")
+_SPECIES_RE = re.compile(r"OS=(.+?)\s+(?:OX|GN|PE|SV)=")
 
-    The accession is the first whitespace-delimited token of each header line.
+
+def extract_uniprot_header_metadata(description: str) -> dict[str, Any]:
+    """Parse UniProt-style FASTA headers and extract taxonomy fields.
+
+    Matches the SwissProt/TrEMBL convention ``sp|ACC|NAME OS=<species> OX=<taxid>
+    GN=<gene> PE=<level> SV=<version>``. Returns ``{'taxonomy_id': int | None,
+    'species': str | None}``. Silent no-op for headers that don't follow the
+    convention — fields simply come back as ``None``.
+    """
+    tax_match = _TAX_RE.search(description)
+    species_match = _SPECIES_RE.search(description)
+    return {
+        "taxonomy_id": int(tax_match.group(1)) if tax_match else None,
+        "species": species_match.group(1).strip() if species_match else None,
+    }
+
+
+def _parse_fasta(content: str) -> list[tuple[str, str, str]]:
+    """Return list of (accession, sequence, description) from FASTA text.
+
+    ``accession`` is extracted from the first whitespace-delimited token of
+    the header, unwrapping UniProt-style prefixes: ``sp|P04637|P53_HUMAN`` →
+    ``P04637`` and ``tr|A0A...|...`` → ``A0A...``. For non-UniProt headers
+    the first token is used verbatim.
+    ``description`` is the full header (minus the leading ``>``) so downstream
+    callers can extract UniProt metadata such as ``OX=`` / ``OS=``.
     Sequences with no residues are silently skipped.
     """
-    records: list[tuple[str, str]] = []
+    records: list[tuple[str, str, str]] = []
     accession: str | None = None
+    header: str = ""
     seq_parts: list[str] = []
+
+    def _extract_accession(token: str) -> str:
+        parts = token.split("|")
+        if len(parts) >= 2 and parts[0] in ("sp", "tr") and parts[1]:
+            return parts[1]
+        return token
 
     def _flush() -> None:
         if accession is not None:
             seq = "".join(seq_parts).replace(" ", "").strip().upper()
             if seq:
-                records.append((accession, seq))
+                records.append((accession, seq, header))
 
     for line in content.splitlines():
         line = line.strip()
@@ -37,7 +70,10 @@ def _parse_fasta(content: str) -> list[tuple[str, str]]:
             continue
         if line.startswith(">"):
             _flush()
-            accession = line[1:].split()[0] if line[1:].strip() else None
+            header_body = line[1:]
+            first_token = header_body.split()[0] if header_body.strip() else None
+            accession = _extract_accession(first_token) if first_token else None
+            header = header_body
             seq_parts = []
         else:
             seq_parts.append(line)
@@ -88,7 +124,7 @@ async def create_query_set(
 
     # Reject duplicate accessions within the upload
     seen_accs: set[str] = set()
-    for acc, _ in records:
+    for acc, _, _ in records:
         if acc in seen_accs:
             raise HTTPException(
                 status_code=422,
@@ -99,7 +135,7 @@ async def create_query_set(
     with session_scope(factory) as session:
         # 1) Upsert sequences (deduplicated by MD5 hash)
         hash_to_seq_id: dict[str, int] = {}
-        hashes = [Sequence.compute_hash(seq) for _, seq in records]
+        hashes = [Sequence.compute_hash(seq) for _, seq, _ in records]
 
         existing = (
             session.query(Sequence.sequence_hash, Sequence.id)
@@ -109,7 +145,7 @@ async def create_query_set(
         for h, sid in existing:
             hash_to_seq_id[h] = sid
 
-        for (_, seq), h in zip(records, hashes, strict=False):
+        for (_, seq, _), h in zip(records, hashes, strict=False):
             if h not in hash_to_seq_id:
                 new_seq = Sequence(sequence=seq, sequence_hash=h)
                 session.add(new_seq)
@@ -121,15 +157,19 @@ async def create_query_set(
         session.add(qs)
         session.flush()
 
-        # 3) Create entries
-        entries = [
-            QuerySetEntry(
-                query_set_id=qs.id,
-                sequence_id=hash_to_seq_id[h],
-                accession=acc,
+        # 3) Create entries (extract UniProt OX=/OS= when present)
+        entries = []
+        for (acc, _, header), h in zip(records, hashes, strict=False):
+            meta = extract_uniprot_header_metadata(header)
+            entries.append(
+                QuerySetEntry(
+                    query_set_id=qs.id,
+                    sequence_id=hash_to_seq_id[h],
+                    accession=acc,
+                    taxonomy_id=meta["taxonomy_id"],
+                    species=meta["species"],
+                )
             )
-            for (acc, _), h in zip(records, hashes, strict=False)
-        ]
         session.add_all(entries)
         session.flush()
 
@@ -174,14 +214,27 @@ def get_query_set(
             .scalar()
         )
         entries = (
-            session.query(QuerySetEntry.accession, QuerySetEntry.sequence_id)
+            session.query(
+                QuerySetEntry.accession,
+                QuerySetEntry.sequence_id,
+                QuerySetEntry.taxonomy_id,
+                QuerySetEntry.species,
+            )
             .filter(QuerySetEntry.query_set_id == query_set_id)
             .order_by(QuerySetEntry.id)
             .all()
         )
 
         result = _query_set_to_dict(qs, entry_count)
-        result["entries"] = [{"accession": acc, "sequence_id": seq_id} for acc, seq_id in entries]
+        result["entries"] = [
+            {
+                "accession": acc,
+                "sequence_id": seq_id,
+                "taxonomy_id": tax_id,
+                "species": species,
+            }
+            for acc, seq_id, tax_id, species in entries
+        ]
         return result
 
 

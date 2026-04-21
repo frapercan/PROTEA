@@ -2,6 +2,7 @@
 
 Database and subprocess calls are fully mocked -- no real infrastructure required.
 """
+
 from __future__ import annotations
 
 import sys
@@ -21,6 +22,7 @@ _AUTH_HEADER = {"Authorization": f"Bearer {_TEST_TOKEN}"}
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_app():
     app = FastAPI()
     app.state.session_factory = MagicMock()
@@ -31,6 +33,7 @@ def _make_app():
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def mock_psycopg():
@@ -53,6 +56,7 @@ def client(mock_psycopg):
 # ---------------------------------------------------------------------------
 # POST /admin/reset-db
 # ---------------------------------------------------------------------------
+
 
 class TestResetDBAuth:
     def test_no_token_configured_returns_403(self, mock_psycopg):

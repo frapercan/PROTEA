@@ -7,9 +7,11 @@ These features complement the embedding-space KNN distance stored in
 ``GOPrediction.distance`` with sequence-level and phylogenetic signals.
 
 Performance notes:
+
 - Alignment is O(m*n) per pair; parasail uses SIMD acceleration.
-- Taxonomy lookups use an LRU cache over lineage queries (ete3 local SQLite).
-  First call may trigger a DB download if the ete3 database is absent.
+- Taxonomy lookups use an LRU cache over lineage queries (ete3 local
+  SQLite). First call may trigger a DB download if the ete3 database
+  is absent.
 """
 
 from __future__ import annotations

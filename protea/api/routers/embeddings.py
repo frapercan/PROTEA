@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
 
+from protea.api.cache import cached
 from protea.api.deps import get_amqp_url, get_session_factory
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
@@ -25,7 +26,7 @@ router = APIRouter(prefix="/embeddings", tags=["embeddings"])
 
 _JOBS_QUEUE = "protea.jobs"
 
-_VALID_BACKENDS = {"esm", "esm3c", "t5", "auto"}
+_VALID_BACKENDS = {"esm", "esm3c", "t5", "ankh", "auto"}
 _VALID_LAYER_AGG = {"mean", "last", "concat"}
 _VALID_POOLING = {"mean", "max", "cls", "mean_max"}
 
@@ -143,19 +144,28 @@ def _config_to_dict(c: EmbeddingConfig, embedding_count: int | None = None) -> d
 def list_embedding_configs(
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> list[dict[str, Any]]:
-    """List all embedding configurations with their stored embedding counts, newest first."""
-    with session_scope(factory) as session:
-        rows = session.query(EmbeddingConfig).order_by(EmbeddingConfig.created_at.desc()).all()
-        counts = {
-            config_id: cnt
-            for config_id, cnt in session.query(
-                SequenceEmbedding.embedding_config_id,
-                func.count(SequenceEmbedding.id),
-            )
-            .group_by(SequenceEmbedding.embedding_config_id)
-            .all()
-        }
-        return [_config_to_dict(c, embedding_count=counts.get(c.id, 0)) for c in rows]
+    """List all embedding configurations with their stored embedding counts, newest first.
+
+    The per-config GROUP BY over a 4M-row table is cached 5 minutes — new
+    configs still appear immediately (they have 0 embeddings), only the
+    counts are stale.
+    """
+
+    def _compute() -> list[dict[str, Any]]:
+        with session_scope(factory) as session:
+            rows = session.query(EmbeddingConfig).order_by(EmbeddingConfig.created_at.desc()).all()
+            counts = {
+                config_id: cnt
+                for config_id, cnt in session.query(
+                    SequenceEmbedding.embedding_config_id,
+                    func.count(SequenceEmbedding.id),
+                )
+                .group_by(SequenceEmbedding.embedding_config_id)
+                .all()
+            }
+            return [_config_to_dict(c, embedding_count=counts.get(c.id, 0)) for c in rows]
+
+    return cached("embeddings:configs", 300.0, _compute)
 
 
 @router.post("/configs", summary="Create an embedding config")
@@ -315,19 +325,10 @@ def predict_go_terms(
 def list_prediction_sets(
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> list[dict[str, Any]]:
-    """List the 100 most recent prediction sets with their GO prediction counts."""
+    """List the 100 most recent prediction sets."""
     with session_scope(factory) as session:
-        # Single query with a correlated subquery for counts (avoids N+1).
-        count_subq = (
-            session.query(func.count(GOPrediction.id))
-            .filter(GOPrediction.prediction_set_id == PredictionSet.id)
-            .correlate(PredictionSet)
-            .scalar_subquery()
-        )
         rows = (
-            session.query(
-                PredictionSet, EmbeddingConfig, AnnotationSet, OntologySnapshot, count_subq
-            )
+            session.query(PredictionSet, EmbeddingConfig, AnnotationSet, OntologySnapshot)
             .join(EmbeddingConfig, PredictionSet.embedding_config_id == EmbeddingConfig.id)
             .join(AnnotationSet, PredictionSet.annotation_set_id == AnnotationSet.id)
             .join(OntologySnapshot, PredictionSet.ontology_snapshot_id == OntologySnapshot.id)
@@ -336,7 +337,7 @@ def list_prediction_sets(
             .all()
         )
         result = []
-        for ps, ec, ann, snap, prediction_count in rows:
+        for ps, ec, ann, snap in rows:
             result.append(
                 {
                     "id": str(ps.id),
@@ -352,7 +353,6 @@ def list_prediction_sets(
                     "limit_per_entry": ps.limit_per_entry,
                     "distance_threshold": ps.distance_threshold,
                     "created_at": ps.created_at.isoformat(),
-                    "prediction_count": prediction_count or 0,
                 }
             )
         return result
@@ -825,24 +825,20 @@ def download_predictions_cafa(
             # `seen` set in Python — this preserves true streaming.
             from sqlalchemy import func as sa_func
 
-            min_dist = (
-                session.query(
-                    GOPrediction.protein_accession,
-                    GOPrediction.go_term_id,
-                    sa_func.min(GOPrediction.distance).label("min_distance"),
-                )
-                .filter(GOPrediction.prediction_set_id == set_id)
-            )
+            min_dist = session.query(
+                GOPrediction.protein_accession,
+                GOPrediction.go_term_id,
+                sa_func.min(GOPrediction.distance).label("min_distance"),
+            ).filter(GOPrediction.prediction_set_id == set_id)
             if max_distance is not None:
                 min_dist = min_dist.filter(GOPrediction.distance <= max_distance)
             min_dist = min_dist.group_by(
                 GOPrediction.protein_accession, GOPrediction.go_term_id
             ).subquery()
 
-            q = (
-                session.query(min_dist.c.protein_accession, GOTerm.go_id, min_dist.c.min_distance)
-                .join(GOTerm, min_dist.c.go_term_id == GOTerm.id)
-            )
+            q = session.query(
+                min_dist.c.protein_accession, GOTerm.go_id, min_dist.c.min_distance
+            ).join(GOTerm, min_dist.c.go_term_id == GOTerm.id)
             if aspect:
                 q = q.filter(GOTerm.aspect == aspect.upper())
             if delta_proteins is not None:

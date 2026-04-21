@@ -2,6 +2,7 @@
 Unit tests for LoadGOAAnnotationsOperation.
 No DB or network required — everything is mocked.
 """
+
 from __future__ import annotations
 
 import io
@@ -25,6 +26,7 @@ _ANNOTATION_SET_ID = uuid.uuid4()
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_emit():
     """Return a recording emit function and its event list."""
@@ -66,28 +68,34 @@ def _gaf_line(
 
 class TestLoadGOAAnnotationsPayload:
     def test_valid(self) -> None:
-        p = LoadGOAAnnotationsPayload.model_validate({
-            "ontology_snapshot_id": _SNAPSHOT_ID,
-            "gaf_url": "https://ftp.ebi.ac.uk/goa_human.gaf.gz",
-            "source_version": "2024-03",
-        })
+        p = LoadGOAAnnotationsPayload.model_validate(
+            {
+                "ontology_snapshot_id": _SNAPSHOT_ID,
+                "gaf_url": "https://ftp.ebi.ac.uk/goa_human.gaf.gz",
+                "source_version": "2024-03",
+            }
+        )
         assert p.source_version == "2024-03"
         assert p.page_size == 10000
 
     def test_missing_required_raises(self) -> None:
         with pytest.raises(ValueError):
-            LoadGOAAnnotationsPayload.model_validate({
-                "gaf_url": "https://example.org/goa.gaf.gz",
-                "source_version": "2024-03",
-            })
+            LoadGOAAnnotationsPayload.model_validate(
+                {
+                    "gaf_url": "https://example.org/goa.gaf.gz",
+                    "source_version": "2024-03",
+                }
+            )
 
     def test_empty_snapshot_id_raises(self) -> None:
         with pytest.raises(ValueError):
-            LoadGOAAnnotationsPayload.model_validate({
-                "ontology_snapshot_id": "  ",
-                "gaf_url": "https://example.org/goa.gaf.gz",
-                "source_version": "2024-03",
-            })
+            LoadGOAAnnotationsPayload.model_validate(
+                {
+                    "ontology_snapshot_id": "  ",
+                    "gaf_url": "https://example.org/goa.gaf.gz",
+                    "source_version": "2024-03",
+                }
+            )
 
     def test_empty_gaf_url_raises(self) -> None:
         with pytest.raises(ValueError):
@@ -271,8 +279,11 @@ class TestStoreBuffer:
         op = self._op()
         session = MagicMock()
         inserted, skipped = op._store_buffer(
-            session, [], uuid.UUID(_SNAPSHOT_ID),
-            valid_accessions={"P12345"}, go_term_map={"GO:0003824": 1},
+            session,
+            [],
+            uuid.UUID(_SNAPSHOT_ID),
+            valid_accessions={"P12345"},
+            go_term_map={"GO:0003824": 1},
         )
         assert inserted == 0
         assert skipped == 0
@@ -320,7 +331,9 @@ class TestStreamGaf:
         mock_resp.raw = raw
         mock_resp.raise_for_status = MagicMock()
 
-        with patch("protea.core.operations.load_goa_annotations.requests.get", return_value=mock_resp):
+        with patch(
+            "protea.core.operations.load_goa_annotations.requests.get", return_value=mock_resp
+        ):
             return list(self.op._stream_gaf(payload, emit))
 
     def test_parses_valid_gaf_line(self):
@@ -396,7 +409,9 @@ class TestStreamGaf:
         mock_resp.raw = raw
         mock_resp.raise_for_status = MagicMock()
 
-        with patch("protea.core.operations.load_goa_annotations.requests.get", return_value=mock_resp):
+        with patch(
+            "protea.core.operations.load_goa_annotations.requests.get", return_value=mock_resp
+        ):
             records = list(self.op._stream_gaf(payload, emit))
         assert len(records) == 1
 
@@ -516,9 +531,16 @@ class TestExecute:
         query_mock.all.return_value = list(go_terms.items())
         return session
 
-    def _run(self, gaf_text, accessions, go_terms,
-             page_size=10000, total_limit=None, commit_every_page=True,
-             store_buffer_side_effect=None):
+    def _run(
+        self,
+        gaf_text,
+        accessions,
+        go_terms,
+        page_size=10000,
+        total_limit=None,
+        commit_every_page=True,
+        store_buffer_side_effect=None,
+    ):
         session = self._make_session(accessions, go_terms)
         emit, events = _make_emit()
 
@@ -573,14 +595,20 @@ class TestExecute:
         if store_buffer_side_effect is not None:
             fake_store_buffer = store_buffer_side_effect
 
-        with patch(
-            "protea.core.operations.load_goa_annotations.requests.get",
-            return_value=mock_resp,
-        ), patch(
-            "protea.core.operations.load_goa_annotations.AnnotationSet",
-            return_value=ann_set_mock,
-        ), patch.object(
-            self.op, "_store_buffer", side_effect=fake_store_buffer,
+        with (
+            patch(
+                "protea.core.operations.load_goa_annotations.requests.get",
+                return_value=mock_resp,
+            ),
+            patch(
+                "protea.core.operations.load_goa_annotations.AnnotationSet",
+                return_value=ann_set_mock,
+            ),
+            patch.object(
+                self.op,
+                "_store_buffer",
+                side_effect=fake_store_buffer,
+            ),
         ):
             result = self.op.execute(session, payload, emit=emit)
 
@@ -589,7 +617,9 @@ class TestExecute:
     def test_basic_execution(self):
         gaf = _gaf_line(accession="P12345", go_id="GO:0003674") + "\n"
         result, events, _ = self._run(
-            gaf, accessions=["P12345"], go_terms={"GO:0003674": 1},
+            gaf,
+            accessions=["P12345"],
+            go_terms={"GO:0003674": 1},
         )
         assert isinstance(result, OperationResult)
         assert result.result["annotations_inserted"] == 1
@@ -614,7 +644,9 @@ class TestExecute:
     def test_no_proteins_returns_zero(self):
         gaf = _gaf_line() + "\n"
         result, events, _ = self._run(
-            gaf, accessions=[], go_terms={"GO:0003674": 1},
+            gaf,
+            accessions=[],
+            go_terms={"GO:0003674": 1},
         )
         assert result.result == {"annotations_inserted": 0}
         event_names = [e["event"] for e in events]
@@ -623,7 +655,9 @@ class TestExecute:
     def test_skips_unmatched_accessions(self):
         gaf = _gaf_line(accession="UNKNOWN") + "\n"
         result, _, _ = self._run(
-            gaf, accessions=["P12345"], go_terms={"GO:0003674": 1},
+            gaf,
+            accessions=["P12345"],
+            go_terms={"GO:0003674": 1},
         )
         assert result.result["annotations_inserted"] == 0
         assert result.result["annotations_skipped"] == 1
@@ -631,17 +665,22 @@ class TestExecute:
     def test_skips_unmatched_go_ids(self):
         gaf = _gaf_line(accession="P12345", go_id="GO:UNKNOWN") + "\n"
         result, _, _ = self._run(
-            gaf, accessions=["P12345"], go_terms={"GO:0003674": 1},
+            gaf,
+            accessions=["P12345"],
+            go_terms={"GO:0003674": 1},
         )
         assert result.result["annotations_inserted"] == 0
         assert result.result["annotations_skipped"] == 1
 
     def test_pagination_emits_page_done(self):
-        lines = [_gaf_line(accession="P12345", go_id="GO:0003674", evidence=f"E{i}")
-                 for i in range(5)]
+        lines = [
+            _gaf_line(accession="P12345", go_id="GO:0003674", evidence=f"E{i}") for i in range(5)
+        ]
         gaf = "\n".join(lines) + "\n"
         result, events, _ = self._run(
-            gaf, accessions=["P12345"], go_terms={"GO:0003674": 1},
+            gaf,
+            accessions=["P12345"],
+            go_terms={"GO:0003674": 1},
             page_size=2,
         )
         page_events = [e for e in events if e["event"] == "load_goa_annotations.page_done"]
@@ -651,33 +690,45 @@ class TestExecute:
         assert result.result["pages"] == 3
 
     def test_commit_every_page(self):
-        lines = [_gaf_line(accession="P12345", go_id="GO:0003674", evidence=f"E{i}")
-                 for i in range(4)]
+        lines = [
+            _gaf_line(accession="P12345", go_id="GO:0003674", evidence=f"E{i}") for i in range(4)
+        ]
         gaf = "\n".join(lines) + "\n"
         _, _, session = self._run(
-            gaf, accessions=["P12345"], go_terms={"GO:0003674": 1},
-            page_size=2, commit_every_page=True,
+            gaf,
+            accessions=["P12345"],
+            go_terms={"GO:0003674": 1},
+            page_size=2,
+            commit_every_page=True,
         )
         # 4 records, page_size=2 -> 2 full pages -> 2 commits
         assert session.commit.call_count == 2
 
     def test_no_commit_when_disabled(self):
-        lines = [_gaf_line(accession="P12345", go_id="GO:0003674", evidence=f"E{i}")
-                 for i in range(4)]
+        lines = [
+            _gaf_line(accession="P12345", go_id="GO:0003674", evidence=f"E{i}") for i in range(4)
+        ]
         gaf = "\n".join(lines) + "\n"
         _, _, session = self._run(
-            gaf, accessions=["P12345"], go_terms={"GO:0003674": 1},
-            page_size=2, commit_every_page=False,
+            gaf,
+            accessions=["P12345"],
+            go_terms={"GO:0003674": 1},
+            page_size=2,
+            commit_every_page=False,
         )
         session.commit.assert_not_called()
 
     def test_total_limit_stops_early(self):
-        lines = [_gaf_line(accession="P12345", go_id="GO:0003674", evidence=f"E{i}")
-                 for i in range(10)]
+        lines = [
+            _gaf_line(accession="P12345", go_id="GO:0003674", evidence=f"E{i}") for i in range(10)
+        ]
         gaf = "\n".join(lines) + "\n"
         result, events, _ = self._run(
-            gaf, accessions=["P12345"], go_terms={"GO:0003674": 1},
-            page_size=3, total_limit=3,
+            gaf,
+            accessions=["P12345"],
+            go_terms={"GO:0003674": 1},
+            page_size=3,
+            total_limit=3,
         )
         assert result.result["annotations_inserted"] == 3
         event_names = [e["event"] for e in events]
@@ -685,7 +736,9 @@ class TestExecute:
 
     def test_empty_file(self):
         result, _, _ = self._run(
-            "", accessions=["P12345"], go_terms={"GO:0003674": 1},
+            "",
+            accessions=["P12345"],
+            go_terms={"GO:0003674": 1},
         )
         assert result.result["annotations_inserted"] == 0
         assert result.result["total_lines_read"] == 0
@@ -694,7 +747,9 @@ class TestExecute:
     def test_result_contains_elapsed_seconds(self):
         gaf = _gaf_line() + "\n"
         result, _, _ = self._run(
-            gaf, accessions=["P12345"], go_terms={"GO:0003674": 1},
+            gaf,
+            accessions=["P12345"],
+            go_terms={"GO:0003674": 1},
         )
         assert "elapsed_seconds" in result.result
         assert result.result["elapsed_seconds"] >= 0
@@ -702,7 +757,9 @@ class TestExecute:
     def test_result_contains_annotation_set_id(self):
         gaf = _gaf_line() + "\n"
         result, _, _ = self._run(
-            gaf, accessions=["P12345"], go_terms={"GO:0003674": 1},
+            gaf,
+            accessions=["P12345"],
+            go_terms={"GO:0003674": 1},
         )
         assert result.result["annotation_set_id"] == str(_ANNOTATION_SET_ID)
 
@@ -710,7 +767,9 @@ class TestExecute:
         line = _gaf_line(accession="P12345", go_id="GO:0003674", evidence="IDA")
         gaf = (line + "\n") * 5
         result, _, _ = self._run(
-            gaf, accessions=["P12345"], go_terms={"GO:0003674": 1},
+            gaf,
+            accessions=["P12345"],
+            go_terms={"GO:0003674": 1},
         )
         assert result.result["annotations_inserted"] == 1
         assert result.result["annotations_skipped"] == 4
@@ -719,11 +778,12 @@ class TestExecute:
         text = (
             "!GAF header comment\n"
             "!another comment\n"
-            "short\tline\n"
-            + _gaf_line(accession="P12345", go_id="GO:0003674") + "\n"
+            "short\tline\n" + _gaf_line(accession="P12345", go_id="GO:0003674") + "\n"
         )
         result, _, _ = self._run(
-            text, accessions=["P12345"], go_terms={"GO:0003674": 1},
+            text,
+            accessions=["P12345"],
+            go_terms={"GO:0003674": 1},
         )
         # Only valid GAF lines are counted as total_lines_read
         assert result.result["total_lines_read"] == 1
@@ -732,7 +792,9 @@ class TestExecute:
     def test_annotation_set_created_event(self):
         gaf = _gaf_line() + "\n"
         _, events, _ = self._run(
-            gaf, accessions=["P12345"], go_terms={"GO:0003674": 1},
+            gaf,
+            accessions=["P12345"],
+            go_terms={"GO:0003674": 1},
         )
         event_names = [e["event"] for e in events]
         assert "load_goa_annotations.annotation_set_created" in event_names
@@ -740,11 +802,14 @@ class TestExecute:
         assert created[0]["fields"]["annotation_set_id"] == str(_ANNOTATION_SET_ID)
 
     def test_page_done_event_fields(self):
-        lines = [_gaf_line(accession="P12345", go_id="GO:0003674", evidence=f"E{i}")
-                 for i in range(3)]
+        lines = [
+            _gaf_line(accession="P12345", go_id="GO:0003674", evidence=f"E{i}") for i in range(3)
+        ]
         gaf = "\n".join(lines) + "\n"
         _, events, _ = self._run(
-            gaf, accessions=["P12345"], go_terms={"GO:0003674": 1},
+            gaf,
+            accessions=["P12345"],
+            go_terms={"GO:0003674": 1},
             page_size=2,
         )
         page_events = [e for e in events if e["event"] == "load_goa_annotations.page_done"]
@@ -757,17 +822,22 @@ class TestExecute:
     def test_session_flush_called_after_annotation_set_add(self):
         gaf = _gaf_line() + "\n"
         _, _, session = self._run(
-            gaf, accessions=["P12345"], go_terms={"GO:0003674": 1},
+            gaf,
+            accessions=["P12345"],
+            go_terms={"GO:0003674": 1},
         )
         session.flush.assert_called()
 
     def test_multiple_pages_with_remainder(self):
         """7 records with page_size=3 -> 2 full pages + 1 remainder = 3 pages total."""
-        lines = [_gaf_line(accession="P12345", go_id="GO:0003674", evidence=f"E{i}")
-                 for i in range(7)]
+        lines = [
+            _gaf_line(accession="P12345", go_id="GO:0003674", evidence=f"E{i}") for i in range(7)
+        ]
         gaf = "\n".join(lines) + "\n"
         result, events, session = self._run(
-            gaf, accessions=["P12345"], go_terms={"GO:0003674": 1},
+            gaf,
+            accessions=["P12345"],
+            go_terms={"GO:0003674": 1},
             page_size=3,
         )
         assert result.result["pages"] == 3

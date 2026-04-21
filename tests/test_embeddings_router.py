@@ -2,6 +2,7 @@
 Unit tests for the FastAPI embeddings router.
 Database and pika are fully mocked — no real infrastructure required.
 """
+
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -63,7 +64,9 @@ def session():
 def client(session):
     factory = MagicMock()
     app = _make_app(factory)
-    with patch("protea.api.routers.embeddings.session_scope", side_effect=lambda _: _mock_scope(session)):
+    with patch(
+        "protea.api.routers.embeddings.session_scope", side_effect=lambda _: _mock_scope(session)
+    ):
         yield TestClient(app, raise_server_exceptions=True)
 
 
@@ -113,6 +116,19 @@ class TestCreateEmbeddingConfigValidation:
         body = {**_VALID_CONFIG_BODY, "model_backend": "llama"}
         resp = client.post("/embeddings/configs", json=body)
         assert resp.status_code == 422
+
+    def test_ankh_backend_is_accepted(self, client, session):
+        """Ankh is a valid backend; the router should not reject it."""
+        session.add.side_effect = lambda obj: setattr(obj, "id", uuid4()) or setattr(
+            obj, "created_at", datetime(2024, 1, 1, tzinfo=UTC)
+        )
+        body = {
+            **_VALID_CONFIG_BODY,
+            "model_backend": "ankh",
+            "model_name": "ElnaggarLab/ankh-base",
+        }
+        resp = client.post("/embeddings/configs", json=body)
+        assert resp.status_code == 200
 
     def test_empty_layer_indices_returns_422(self, client, session):
         body = {**_VALID_CONFIG_BODY, "layer_indices": []}
@@ -168,6 +184,7 @@ class TestCreateEmbeddingConfigValidation:
 # GET /embeddings/configs
 # ---------------------------------------------------------------------------
 
+
 class TestListEmbeddingConfigs:
     def test_returns_list(self, client, session):
         session.query.return_value.order_by.return_value.all.return_value = [_make_config()]
@@ -191,6 +208,7 @@ class TestListEmbeddingConfigs:
 # DELETE /embeddings/configs/{id}
 # ---------------------------------------------------------------------------
 
+
 class TestDeleteEmbeddingConfig:
     def test_delete_existing_returns_200(self, client, session):
         cfg = _make_config()
@@ -208,6 +226,7 @@ class TestDeleteEmbeddingConfig:
 # ---------------------------------------------------------------------------
 # GET /embeddings/prediction-sets/{set_id}/predictions.tsv
 # ---------------------------------------------------------------------------
+
 
 def _make_prediction_set(ps_id=None):
     ps = MagicMock()
@@ -230,14 +249,25 @@ def _make_go_prediction(accession="P12345", distance=0.1):
     pred.qualifier = "enables"
     pred.evidence_code = "IDA"
     # alignment — not computed
-    for col in ("identity_nw", "similarity_nw", "alignment_score_nw",
-                "gaps_pct_nw", "alignment_length_nw",
-                "identity_sw", "similarity_sw", "alignment_score_sw",
-                "gaps_pct_sw", "alignment_length_sw",
-                "length_query", "length_ref",
-                "query_taxonomy_id", "ref_taxonomy_id",
-                "taxonomic_lca", "taxonomic_distance",
-                "taxonomic_common_ancestors"):
+    for col in (
+        "identity_nw",
+        "similarity_nw",
+        "alignment_score_nw",
+        "gaps_pct_nw",
+        "alignment_length_nw",
+        "identity_sw",
+        "similarity_sw",
+        "alignment_score_sw",
+        "gaps_pct_sw",
+        "alignment_length_sw",
+        "length_query",
+        "length_ref",
+        "query_taxonomy_id",
+        "ref_taxonomy_id",
+        "taxonomic_lca",
+        "taxonomic_distance",
+        "taxonomic_common_ancestors",
+    ):
         setattr(pred, col, None)
     pred.taxonomic_relation = None
     # re-ranker features
@@ -334,16 +364,22 @@ class TestDownloadPredictionsTSV:
     def test_prediction_set_not_found_returns_404(self, client, session):
         # Both the preflight check and the generator use session.get → None
         session.get.return_value = None
-        with patch("protea.api.routers.embeddings.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.embeddings.session_scope",
+            side_effect=lambda _: _mock_scope(session),
+        ):
             resp = client.get(f"/embeddings/prediction-sets/{uuid4()}/predictions.tsv")
         assert resp.status_code == 404
 
     def test_multiple_rows_all_included(self, client, session):
         set_id = uuid4()
-        rows = [(
-            _make_go_prediction(f"PROT{i}", distance=i * 0.1),
-            _make_go_term(f"GO:{i:07d}", f"term {i}", "P"),
-        ) for i in range(5)]
+        rows = [
+            (
+                _make_go_prediction(f"PROT{i}", distance=i * 0.1),
+                _make_go_term(f"GO:{i:07d}", f"term {i}", "P"),
+            )
+            for i in range(5)
+        ]
         resp = self._get(client, session, set_id, rows)
 
         lines = resp.text.splitlines()
@@ -395,17 +431,21 @@ class TestDownloadPredictionsTSV:
 # _fmt helper
 # ---------------------------------------------------------------------------
 
+
 class TestFmt:
     def test_none_returns_empty(self):
         from protea.api.routers.embeddings import _fmt
+
         assert _fmt(None) == ""
 
     def test_float_returns_formatted(self):
         from protea.api.routers.embeddings import _fmt
+
         assert _fmt(0.123456789) == "0.123457"
 
     def test_zero_returns_formatted(self):
         from protea.api.routers.embeddings import _fmt
+
         assert _fmt(0.0) == "0"
 
 
@@ -413,9 +453,11 @@ class TestFmt:
 # get_session_factory / get_amqp_url — RuntimeError when not set
 # ---------------------------------------------------------------------------
 
+
 class TestDependencyGuards:
     def test_session_factory_missing_raises(self):
         from protea.api.routers.embeddings import get_session_factory
+
         req = MagicMock()
         req.app.state = MagicMock(spec=[])  # no session_factory attr
         with pytest.raises(RuntimeError, match="session_factory"):
@@ -423,6 +465,7 @@ class TestDependencyGuards:
 
     def test_amqp_url_missing_raises(self):
         from protea.api.routers.embeddings import get_amqp_url
+
         req = MagicMock()
         req.app.state = MagicMock(spec=[])  # no amqp_url attr
         with pytest.raises(RuntimeError, match="amqp_url"):
@@ -432,6 +475,7 @@ class TestDependencyGuards:
 # ---------------------------------------------------------------------------
 # Additional validation edge cases
 # ---------------------------------------------------------------------------
+
 
 class TestValidationEdgeCases:
     def test_normalize_residues_non_bool_returns_422(self, client, session):
@@ -475,6 +519,7 @@ class TestValidationEdgeCases:
 # GET /embeddings/configs/{config_id}
 # ---------------------------------------------------------------------------
 
+
 class TestGetEmbeddingConfig:
     def test_returns_config(self, client, session):
         cfg = _make_config()
@@ -500,6 +545,7 @@ class TestGetEmbeddingConfig:
 # DELETE /embeddings/configs/{config_id} — with prediction sets
 # ---------------------------------------------------------------------------
 
+
 class TestDeleteEmbeddingConfigCascade:
     def test_delete_with_prediction_sets(self, client, session):
         cfg = _make_config()
@@ -521,6 +567,7 @@ class TestDeleteEmbeddingConfigCascade:
 # ---------------------------------------------------------------------------
 # POST /embeddings/predict
 # ---------------------------------------------------------------------------
+
 
 class TestPredictGoTerms:
     def _make_predict_app(self, session):
@@ -545,20 +592,26 @@ class TestPredictGoTerms:
         def _fake_add(obj):
             added.append(obj)
             # If it's a Job, set its id
-            if hasattr(obj, 'operation'):
+            if hasattr(obj, "operation"):
                 obj.id = 42
 
         session.add.side_effect = _fake_add
         session.flush = MagicMock()
 
-        with patch("protea.api.routers.embeddings.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.embeddings.session_scope",
+            side_effect=lambda _: _mock_scope(session),
+        ):
             with patch("protea.api.routers.embeddings.publish_job") as mock_pub:
                 client = TestClient(app, raise_server_exceptions=True)
-                resp = client.post("/embeddings/predict", json={
-                    "embedding_config_id": str(config_id),
-                    "annotation_set_id": str(ann_id),
-                    "ontology_snapshot_id": str(onto_id),
-                })
+                resp = client.post(
+                    "/embeddings/predict",
+                    json={
+                        "embedding_config_id": str(config_id),
+                        "annotation_set_id": str(ann_id),
+                        "ontology_snapshot_id": str(onto_id),
+                    },
+                )
 
         assert resp.status_code == 200
         data = resp.json()
@@ -567,26 +620,38 @@ class TestPredictGoTerms:
 
     def test_predict_invalid_uuid_returns_422(self, session):
         app = self._make_predict_app(session)
-        with patch("protea.api.routers.embeddings.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.embeddings.session_scope",
+            side_effect=lambda _: _mock_scope(session),
+        ):
             client = TestClient(app, raise_server_exceptions=True)
-            resp = client.post("/embeddings/predict", json={
-                "embedding_config_id": "not-a-uuid",
-                "annotation_set_id": str(uuid4()),
-                "ontology_snapshot_id": str(uuid4()),
-            })
+            resp = client.post(
+                "/embeddings/predict",
+                json={
+                    "embedding_config_id": "not-a-uuid",
+                    "annotation_set_id": str(uuid4()),
+                    "ontology_snapshot_id": str(uuid4()),
+                },
+            )
         assert resp.status_code == 422
 
     def test_predict_config_not_found_returns_404(self, session):
         app = self._make_predict_app(session)
         # session.get returns None for EmbeddingConfig
         session.get.return_value = None
-        with patch("protea.api.routers.embeddings.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.embeddings.session_scope",
+            side_effect=lambda _: _mock_scope(session),
+        ):
             client = TestClient(app, raise_server_exceptions=True)
-            resp = client.post("/embeddings/predict", json={
-                "embedding_config_id": str(uuid4()),
-                "annotation_set_id": str(uuid4()),
-                "ontology_snapshot_id": str(uuid4()),
-            })
+            resp = client.post(
+                "/embeddings/predict",
+                json={
+                    "embedding_config_id": str(uuid4()),
+                    "annotation_set_id": str(uuid4()),
+                    "ontology_snapshot_id": str(uuid4()),
+                },
+            )
         assert resp.status_code == 404
 
     def test_predict_annotation_set_not_found_returns_404(self, session):
@@ -594,47 +659,63 @@ class TestPredictGoTerms:
 
         def _get_side(model_cls, id_val):
             from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
+
             if model_cls is EmbeddingConfig:
                 return MagicMock()
             return None
 
         session.get.side_effect = _get_side
-        with patch("protea.api.routers.embeddings.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.embeddings.session_scope",
+            side_effect=lambda _: _mock_scope(session),
+        ):
             client = TestClient(app, raise_server_exceptions=True)
-            resp = client.post("/embeddings/predict", json={
-                "embedding_config_id": str(uuid4()),
-                "annotation_set_id": str(uuid4()),
-                "ontology_snapshot_id": str(uuid4()),
-            })
+            resp = client.post(
+                "/embeddings/predict",
+                json={
+                    "embedding_config_id": str(uuid4()),
+                    "annotation_set_id": str(uuid4()),
+                    "ontology_snapshot_id": str(uuid4()),
+                },
+            )
         assert resp.status_code == 404
 
     def test_predict_ontology_not_found_returns_404(self, session):
         app = self._make_predict_app(session)
 
         call_count = [0]
+
         def _get_side(model_cls, id_val):
             call_count[0] += 1
             from protea.infrastructure.orm.models.annotation.ontology_snapshot import (
                 OntologySnapshot,
             )
+
             if model_cls is OntologySnapshot:
                 return None
             return MagicMock()
 
         session.get.side_effect = _get_side
-        with patch("protea.api.routers.embeddings.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.embeddings.session_scope",
+            side_effect=lambda _: _mock_scope(session),
+        ):
             client = TestClient(app, raise_server_exceptions=True)
-            resp = client.post("/embeddings/predict", json={
-                "embedding_config_id": str(uuid4()),
-                "annotation_set_id": str(uuid4()),
-                "ontology_snapshot_id": str(uuid4()),
-            })
+            resp = client.post(
+                "/embeddings/predict",
+                json={
+                    "embedding_config_id": str(uuid4()),
+                    "annotation_set_id": str(uuid4()),
+                    "ontology_snapshot_id": str(uuid4()),
+                },
+            )
         assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------
 # GET /embeddings/prediction-sets
 # ---------------------------------------------------------------------------
+
 
 class TestListPredictionSets:
     @staticmethod
@@ -644,8 +725,7 @@ class TestListPredictionSets:
         #   .join(...).join(...).join(...).order_by(...).limit(...).all()
         # The count subquery is built via session.query().filter().correlate().scalar_subquery()
         # but all that matters for the mock is the final .all() result.
-        session.query.return_value.join.return_value.join.return_value.join.return_value \
-            .order_by.return_value.limit.return_value.all.return_value = rows
+        session.query.return_value.join.return_value.join.return_value.join.return_value.order_by.return_value.limit.return_value.all.return_value = rows
 
     def test_returns_list(self, client, session):
         ps = _make_prediction_set()
@@ -695,6 +775,7 @@ class TestListPredictionSets:
 # GET /embeddings/prediction-sets/{set_id}
 # ---------------------------------------------------------------------------
 
+
 class TestGetPredictionSet:
     def test_returns_details(self, client, session):
         ps = _make_prediction_set()
@@ -702,7 +783,8 @@ class TestGetPredictionSet:
         session.get.return_value = ps
         session.query.return_value.filter.return_value.scalar.return_value = 50
         session.query.return_value.filter.return_value.group_by.return_value.all.return_value = [
-            ("P12345", 30), ("Q67890", 20),
+            ("P12345", 30),
+            ("Q67890", 20),
         ]
 
         resp = client.get(f"/embeddings/prediction-sets/{ps_id}")
@@ -733,6 +815,7 @@ class TestGetPredictionSet:
 # ---------------------------------------------------------------------------
 # GET /embeddings/prediction-sets/{set_id}/proteins
 # ---------------------------------------------------------------------------
+
 
 class TestListPredictionSetProteins:
     def _setup_proteins_mocks(self, session, ps, rows_data):
@@ -840,6 +923,7 @@ class TestListPredictionSetProteins:
 # GET /embeddings/prediction-sets/{set_id}/proteins/{accession}
 # ---------------------------------------------------------------------------
 
+
 class TestGetProteinPredictions:
     def test_returns_predictions(self, client, session):
         ps = _make_prediction_set()
@@ -849,8 +933,9 @@ class TestGetProteinPredictions:
         pred = _make_go_prediction("P12345", distance=0.1)
         gt = _make_go_term("GO:0003824", "catalytic activity", "F")
 
-        session.query.return_value.join.return_value.filter.return_value \
-            .order_by.return_value.all.return_value = [(pred, gt)]
+        session.query.return_value.join.return_value.filter.return_value.order_by.return_value.all.return_value = [
+            (pred, gt)
+        ]
 
         resp = client.get(f"/embeddings/prediction-sets/{ps_id}/proteins/P12345")
         assert resp.status_code == 200
@@ -874,8 +959,7 @@ class TestGetProteinPredictions:
     def test_empty_predictions_returns_empty_list(self, client, session):
         ps = _make_prediction_set()
         session.get.return_value = ps
-        session.query.return_value.join.return_value.filter.return_value \
-            .order_by.return_value.all.return_value = []
+        session.query.return_value.join.return_value.filter.return_value.order_by.return_value.all.return_value = []
         resp = client.get(f"/embeddings/prediction-sets/{ps.id}/proteins/UNKNOWN")
         assert resp.status_code == 200
         assert resp.json() == []
@@ -885,6 +969,7 @@ class TestGetProteinPredictions:
 # GET /embeddings/prediction-sets/{set_id}/go-terms
 # ---------------------------------------------------------------------------
 
+
 class TestGoTermDistribution:
     def test_returns_distribution(self, client, session):
         ps = _make_prediction_set()
@@ -892,19 +977,17 @@ class TestGoTermDistribution:
         session.get.return_value = ps
 
         # Top terms query
-        session.query.return_value.join.return_value.filter.return_value \
-            .group_by.return_value.order_by.return_value.limit.return_value \
-            .all.return_value = [
-                ("GO:0003824", "catalytic activity", "F", 50),
-                ("GO:0005515", "protein binding", "F", 30),
-                ("GO:0008150", "biological_process", "P", 20),
-            ]
+        session.query.return_value.join.return_value.filter.return_value.group_by.return_value.order_by.return_value.limit.return_value.all.return_value = [
+            ("GO:0003824", "catalytic activity", "F", 50),
+            ("GO:0005515", "protein binding", "F", 30),
+            ("GO:0008150", "biological_process", "P", 20),
+        ]
 
         # Aspect counts query
-        session.query.return_value.join.return_value.filter.return_value \
-            .group_by.return_value.all.return_value = [
-                ("F", 80), ("P", 20),
-            ]
+        session.query.return_value.join.return_value.filter.return_value.group_by.return_value.all.return_value = [
+            ("F", 80),
+            ("P", 20),
+        ]
 
         resp = client.get(f"/embeddings/prediction-sets/{ps_id}/go-terms")
         assert resp.status_code == 200
@@ -922,6 +1005,7 @@ class TestGoTermDistribution:
 # ---------------------------------------------------------------------------
 # GET /embeddings/prediction-sets/{set_id}/predictions-cafa.tsv
 # ---------------------------------------------------------------------------
+
 
 class TestDownloadPredictionsCafa:
     def _get_cafa(self, client, session, set_id, rows, **params):
@@ -974,7 +1058,10 @@ class TestDownloadPredictionsCafa:
 
     def test_cafa_not_found_returns_404(self, client, session):
         session.get.return_value = None
-        with patch("protea.api.routers.embeddings.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.embeddings.session_scope",
+            side_effect=lambda _: _mock_scope(session),
+        ):
             resp = client.get(f"/embeddings/prediction-sets/{uuid4()}/predictions-cafa.tsv")
         assert resp.status_code == 404
 
@@ -992,7 +1079,9 @@ class TestDownloadPredictionsCafa:
 
     def test_cafa_filter_by_max_distance(self, client, session):
         set_id = uuid4()
-        resp = self._get_cafa(client, session, set_id, [("P12345", "GO:0003824", 0.05)], max_distance=0.5)
+        resp = self._get_cafa(
+            client, session, set_id, [("P12345", "GO:0003824", 0.05)], max_distance=0.5
+        )
         assert resp.status_code == 200
 
     def test_cafa_score_clamps_at_zero(self, client, session):
@@ -1008,6 +1097,7 @@ class TestDownloadPredictionsCafa:
 # ---------------------------------------------------------------------------
 # DELETE /embeddings/prediction-sets/{set_id}
 # ---------------------------------------------------------------------------
+
 
 class TestDeletePredictionSet:
     def test_delete_existing_returns_200(self, client, session):

@@ -12,6 +12,7 @@ label-encoded.  Missing values are left as NaN — LightGBM handles them nativel
 from __future__ import annotations
 
 import io
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -49,15 +50,84 @@ NUMERIC_FEATURES: list[str] = [
     "go_term_frequency",
     "ref_annotation_density",
     "neighbor_distance_std",
+    # Consensus features (per candidate term, computed over voting neighbors)
+    "neighbor_vote_fraction",
+    "neighbor_min_distance",
+    "neighbor_mean_distance",
+    # Anc2Vec semantic-coherence features (GO release 2020-10-06 pretrained)
+    "anc2vec_neighbor_cos",
+    "anc2vec_neighbor_maxcos",
+    "anc2vec_has_emb",
+    # Query-side Anc2Vec (PK-killer): candidate vs query's pre-cutoff annotations
+    "anc2vec_query_known_cos",
+    "anc2vec_query_known_maxcos",
+    "anc2vec_query_known_count",
+    # Taxonomic consensus across voting neighbors (requires compute_taxonomy=True)
+    "tax_voters_same_frac",
+    "tax_voters_close_frac",
+    "tax_voters_mean_common_ancestors",
+    # Sequence-embedding PCA — 16-dim query projection onto the top principal
+    # components of the reference embedding pool (use_embedding_pca flag).
+    # NaN when the flag is disabled: LightGBM treats them as missing.
+    "emb_pca_query_0",
+    "emb_pca_query_1",
+    "emb_pca_query_2",
+    "emb_pca_query_3",
+    "emb_pca_query_4",
+    "emb_pca_query_5",
+    "emb_pca_query_6",
+    "emb_pca_query_7",
+    "emb_pca_query_8",
+    "emb_pca_query_9",
+    "emb_pca_query_10",
+    "emb_pca_query_11",
+    "emb_pca_query_12",
+    "emb_pca_query_13",
+    "emb_pca_query_14",
+    "emb_pca_query_15",
 ]
+
+EMBEDDING_PCA_DIM = 16
 
 CATEGORICAL_FEATURES: list[str] = [
     "qualifier",
     "evidence_code",
     "taxonomic_relation",
+    "aspect",
 ]
 
 ALL_FEATURES: list[str] = NUMERIC_FEATURES + CATEGORICAL_FEATURES
+
+
+def fit_embedding_pca(
+    embeddings: np.ndarray,
+    n_components: int = EMBEDDING_PCA_DIM,
+    *,
+    max_fit_samples: int = 50_000,
+    seed: int = 42,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Fit PCA via truncated SVD on a (possibly subsampled) embedding matrix.
+
+    Returns ``(mean, components)`` with ``mean`` shape ``(D,)`` and
+    ``components`` shape ``(n_components, D)`` — both float32.  Designed to
+    be called once per ``EmbeddingConfig`` pool; subsequent projections are
+    a single matmul.
+    """
+    if embeddings.size == 0:
+        raise ValueError("embeddings matrix is empty")
+    n = embeddings.shape[0]
+    rng = np.random.default_rng(seed)
+    if n > max_fit_samples:
+        idx = rng.choice(n, size=max_fit_samples, replace=False)
+        x = embeddings[idx].astype(np.float32, copy=False)
+    else:
+        x = embeddings.astype(np.float32, copy=False)
+    mean = x.mean(axis=0)
+    xc = x - mean
+    _, _, vh = np.linalg.svd(xc, full_matrices=False)
+    k = min(n_components, vh.shape[0])
+    components = vh[:k].astype(np.float32)
+    return mean.astype(np.float32), components
 
 LABEL_COLUMN = "label"
 
@@ -122,6 +192,10 @@ def train(
     val_fraction: float = 0.2,
     neg_pos_ratio: float | None = None,
     sample_weight: np.ndarray | None = None,
+    heartbeat: Callable[[int], None] | None = None,
+    heartbeat_period: int = 50,
+    objective: str = "binary",
+    group_ids: np.ndarray | None = None,
 ) -> TrainResult:
     """Train a LightGBM binary classifier on labeled prediction data.
 
@@ -156,58 +230,141 @@ def train(
 
     merged_params = {**_DEFAULT_PARAMS, **(params or {})}
 
-    # Stratified train/val split
+    if objective == "lambdarank":
+        if group_ids is None:
+            raise ValueError("group_ids is required when objective='lambdarank'")
+        if len(group_ids) != len(df):
+            raise ValueError(
+                f"group_ids length ({len(group_ids)}) must match df length ({len(df)})"
+            )
+        merged_params = {
+            **merged_params,
+            "objective": "lambdarank",
+            "metric": ["ndcg", "map"],
+            "ndcg_eval_at": [5, 10, 20],
+            "map_eval_at": [10],
+            "label_gain": [0, 1],
+        }
+
     rng = np.random.RandomState(merged_params.get("seed", 42))
-    pos_idx = np.where(y == 1)[0]
-    neg_idx = np.where(y == 0)[0]
-    rng.shuffle(pos_idx)
-    rng.shuffle(neg_idx)
-
-    n_pos_val = max(1, int(len(pos_idx) * val_fraction))
-    n_neg_val = max(1, int(len(neg_idx) * val_fraction))
-
-    val_pos = pos_idx[:n_pos_val]
-    val_neg = neg_idx[:n_neg_val]
-    train_pos = pos_idx[n_pos_val:]
-    train_neg = neg_idx[n_neg_val:]
-
-    # Subsample negatives if requested
-    if neg_pos_ratio is not None:
-        max_train_neg = max(1, int(len(train_pos) * neg_pos_ratio))
-        if len(train_neg) > max_train_neg:
-            train_neg = train_neg[:max_train_neg]
-        max_val_neg = max(1, int(len(val_pos) * neg_pos_ratio))
-        if len(val_neg) > max_val_neg:
-            val_neg = val_neg[:max_val_neg]
-
-    val_idx = np.concatenate([val_pos, val_neg])
-    train_idx = np.concatenate([train_pos, train_neg])
-
     cat_cols = [c for c in CATEGORICAL_FEATURES if c in X.columns]
 
-    train_w = sample_weight[train_idx] if sample_weight is not None else None
-    val_w = sample_weight[val_idx] if sample_weight is not None else None
+    if objective == "lambdarank":
+        # Group-level split: keep all rows of a protein together so LightGBM
+        # can compute listwise gradients over a valid ranking, and so val
+        # groups are never seen during training.
+        order = np.argsort(group_ids, kind="stable")
+        X_sorted = X.iloc[order].reset_index(drop=True)
+        y_sorted = y.iloc[order].reset_index(drop=True)
+        gids_sorted = np.asarray(group_ids)[order]
+        sw_sorted = sample_weight[order] if sample_weight is not None else None
 
-    train_ds = lgb.Dataset(
-        X.iloc[train_idx],
-        label=y.iloc[train_idx],
-        weight=train_w,
-        categorical_feature=cat_cols,
-        free_raw_data=False,
-    )
-    val_ds = lgb.Dataset(
-        X.iloc[val_idx],
-        label=y.iloc[val_idx],
-        weight=val_w,
-        categorical_feature=cat_cols,
-        reference=train_ds,
-        free_raw_data=False,
-    )
+        unique_groups, first_idx = np.unique(gids_sorted, return_index=True)
+        order_by_first = np.argsort(first_idx)
+        unique_groups = unique_groups[order_by_first]
+        first_idx = first_idx[order_by_first]
+        sizes = np.diff(np.append(first_idx, len(gids_sorted)))
 
-    callbacks = [
+        perm = np.arange(len(unique_groups))
+        rng.shuffle(perm)
+        n_val_groups = max(1, int(len(unique_groups) * val_fraction))
+        val_groups = set(unique_groups[perm[:n_val_groups]].tolist())
+
+        train_rows: list[int] = []
+        val_rows: list[int] = []
+        train_sizes: list[int] = []
+        val_sizes: list[int] = []
+        for g, start, size in zip(unique_groups, first_idx, sizes, strict=False):
+            stop = start + size
+            if g in val_groups:
+                val_rows.extend(range(start, stop))
+                val_sizes.append(int(size))
+            else:
+                train_rows.extend(range(start, stop))
+                train_sizes.append(int(size))
+
+        train_idx = np.asarray(train_rows, dtype=np.int64)
+        val_idx = np.asarray(val_rows, dtype=np.int64)
+
+        train_w = sw_sorted[train_idx] if sw_sorted is not None else None
+        val_w = sw_sorted[val_idx] if sw_sorted is not None else None
+
+        train_ds = lgb.Dataset(
+            X_sorted.iloc[train_idx],
+            label=y_sorted.iloc[train_idx],
+            weight=train_w,
+            group=train_sizes,
+            categorical_feature=cat_cols,
+            free_raw_data=False,
+        )
+        val_ds = lgb.Dataset(
+            X_sorted.iloc[val_idx],
+            label=y_sorted.iloc[val_idx],
+            weight=val_w,
+            group=val_sizes,
+            categorical_feature=cat_cols,
+            reference=train_ds,
+            free_raw_data=False,
+        )
+        # Rebind X/y so that downstream metric computation uses the sorted view
+        X, y = X_sorted, y_sorted
+    else:
+        # Stratified row-level train/val split (binary classification).
+        pos_idx = np.where(y == 1)[0]
+        neg_idx = np.where(y == 0)[0]
+        rng.shuffle(pos_idx)
+        rng.shuffle(neg_idx)
+
+        n_pos_val = max(1, int(len(pos_idx) * val_fraction))
+        n_neg_val = max(1, int(len(neg_idx) * val_fraction))
+
+        val_pos = pos_idx[:n_pos_val]
+        val_neg = neg_idx[:n_neg_val]
+        train_pos = pos_idx[n_pos_val:]
+        train_neg = neg_idx[n_neg_val:]
+
+        if neg_pos_ratio is not None:
+            max_train_neg = max(1, int(len(train_pos) * neg_pos_ratio))
+            if len(train_neg) > max_train_neg:
+                train_neg = train_neg[:max_train_neg]
+            max_val_neg = max(1, int(len(val_pos) * neg_pos_ratio))
+            if len(val_neg) > max_val_neg:
+                val_neg = val_neg[:max_val_neg]
+
+        val_idx = np.concatenate([val_pos, val_neg])
+        train_idx = np.concatenate([train_pos, train_neg])
+
+        train_w = sample_weight[train_idx] if sample_weight is not None else None
+        val_w = sample_weight[val_idx] if sample_weight is not None else None
+
+        train_ds = lgb.Dataset(
+            X.iloc[train_idx],
+            label=y.iloc[train_idx],
+            weight=train_w,
+            categorical_feature=cat_cols,
+            free_raw_data=False,
+        )
+        val_ds = lgb.Dataset(
+            X.iloc[val_idx],
+            label=y.iloc[val_idx],
+            weight=val_w,
+            categorical_feature=cat_cols,
+            reference=train_ds,
+            free_raw_data=False,
+        )
+
+    callbacks: list[Any] = [
         lgb.early_stopping(early_stopping_rounds, verbose=False),
         lgb.log_evaluation(period=0),
     ]
+    if heartbeat is not None and heartbeat_period > 0:
+        def _heartbeat_cb(env: Any) -> None:
+            it = env.iteration + 1
+            if it % heartbeat_period == 0 or it == env.end_iteration:
+                heartbeat(it)
+        _heartbeat_cb.order = 20  # after early_stopping
+        _heartbeat_cb.before_iteration = False
+        callbacks.append(_heartbeat_cb)
 
     booster = lgb.train(
         merged_params,
@@ -222,27 +379,49 @@ def train(
     val_preds = np.asarray(booster.predict(X.iloc[val_idx]))
     val_labels = y.iloc[val_idx].values
 
-    tp = np.sum((val_preds >= 0.5) & (val_labels == 1))
-    fp = np.sum((val_preds >= 0.5) & (val_labels == 0))
-    fn = np.sum((val_preds < 0.5) & (val_labels == 1))
-    precision = float(tp / (tp + fp)) if (tp + fp) > 0 else 0.0
-    recall = float(tp / (tp + fn)) if (tp + fn) > 0 else 0.0
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
-
-    metrics = {
+    best = booster.best_score.get("val", {}) or {}
+    metrics: dict[str, Any] = {
         "best_iteration": booster.best_iteration,
-        "val_auc": float(booster.best_score.get("val", {}).get("auc", 0.0)),
-        "val_logloss": float(booster.best_score.get("val", {}).get("binary_logloss", 0.0)),
-        "val_precision": round(precision, 4),
-        "val_recall": round(recall, 4),
-        "val_f1": round(f1, 4),
-        "train_samples": len(train_idx),
-        "val_samples": len(val_idx),
+        "objective": objective,
+        "train_samples": int(len(train_idx)),
+        "val_samples": int(len(val_idx)),
         "positive_rate": round(float(y.mean()), 4),
     }
 
+    if objective == "lambdarank":
+        for k_at in (5, 10, 20):
+            key = f"ndcg@{k_at}"
+            if key in best:
+                metrics[f"val_{key}"] = round(float(best[key]), 4)
+        if "map@10" in best:
+            metrics["val_map@10"] = round(float(best["map@10"]), 4)
+    else:
+        tp = np.sum((val_preds >= 0.5) & (val_labels == 1))
+        fp = np.sum((val_preds >= 0.5) & (val_labels == 0))
+        fn = np.sum((val_preds < 0.5) & (val_labels == 1))
+        precision = float(tp / (tp + fp)) if (tp + fp) > 0 else 0.0
+        recall = float(tp / (tp + fn)) if (tp + fn) > 0 else 0.0
+        f1 = (
+            2 * precision * recall / (precision + recall)
+            if (precision + recall) > 0
+            else 0.0
+        )
+        metrics.update(
+            {
+                "val_auc": float(best.get("auc", 0.0)),
+                "val_logloss": float(best.get("binary_logloss", 0.0)),
+                "val_precision": round(precision, 4),
+                "val_recall": round(recall, 4),
+                "val_f1": round(f1, 4),
+            }
+        )
+
     importance = dict(
-        zip(booster.feature_name(), booster.feature_importance(importance_type="gain").tolist(), strict=False)
+        zip(
+            booster.feature_name(),
+            booster.feature_importance(importance_type="gain").tolist(),
+            strict=False,
+        )
     )
 
     return TrainResult(model=booster, metrics=metrics, feature_importance=importance)
@@ -256,20 +435,39 @@ def train(
 def predict(model: lgb.Booster, df: pd.DataFrame) -> np.ndarray:
     """Score predictions using a trained re-ranker.
 
-    Returns an array of probabilities (0–1) where higher = more likely correct.
+    Returns an array of scores in [0, 1] where higher = more likely correct.
+    For lambdarank boosters, raw scores are unbounded reals; we apply a
+    sigmoid to calibrate them into the [0, 1] range expected by the
+    downstream CAFA evaluator (which sweeps thresholds from 0 to 1).
+    Binary boosters already emit probabilities, so we leave them alone.
     """
     if LABEL_COLUMN in df.columns:
         X, _ = prepare_dataset(df)
     else:
-        X = df[ALL_FEATURES].copy()
-        for col in NUMERIC_FEATURES:
-            if col in X.columns:
+        # Align to the model's actual feature set. Older boosters were trained
+        # before consensus features existed; newer ones expect them but the
+        # columns aren't persisted in GOPrediction, so fill missing as NaN
+        # (LightGBM routes NaN down the "missing" branch natively).
+        model_features = list(model.feature_name())
+        aligned = df.copy()
+        for col in model_features:
+            if col not in aligned.columns:
+                aligned[col] = pd.NA
+        X = aligned[model_features].copy()
+        for col in model_features:
+            if col in NUMERIC_FEATURES:
                 X[col] = pd.to_numeric(X[col], errors="coerce")
-        for col in CATEGORICAL_FEATURES:
-            if col in X.columns:
+            elif col in CATEGORICAL_FEATURES:
                 X[col] = X[col].replace("", pd.NA).astype("category")
 
-    return np.asarray(model.predict(X))
+    raw = np.asarray(model.predict(X))
+    if raw.size == 0:
+        return raw
+    # Binary classification always returns probabilities in [0, 1]; any
+    # score outside that range must come from a ranking objective.
+    if float(raw.min()) < 0.0 or float(raw.max()) > 1.0:
+        return 1.0 / (1.0 + np.exp(-raw))
+    return raw
 
 
 # ---------------------------------------------------------------------------

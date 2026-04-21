@@ -5,11 +5,16 @@ Fmax, AUC-PR, and the full precision-recall curve following the CAFA protocol.
 
 CAFA protocol summary
 ---------------------
+
 - Evaluate only on proteins present in the ground truth (NK, LK, or PK).
-- At each score threshold t:
-    precision(t) = mean over proteins-with-predictions of |pred ∩ true| / |pred|
-    recall(t)    = mean over ALL ground-truth proteins of |pred ∩ true| / |true|
-- Fmax = max_t(2 * P(t) * R(t) / (P(t) + R(t)))
+- At each score threshold ``t``::
+
+    precision(t) = mean over proteins-with-predictions of
+                   card(pred & true) / card(pred)
+    recall(t)    = mean over ALL ground-truth proteins of
+                   card(pred & true) / card(true)
+
+- ``Fmax = max_t(2 * P(t) * R(t) / (P(t) + R(t)))``
 - AUC-PR via trapezoidal integration of the PR curve.
 
 Note: This implementation uses exact GO term matching (no DAG propagation).
@@ -74,7 +79,7 @@ def compute_cafa_metrics(
     scored_predictions:
         List of dicts, each must have:
           - ``protein_accession`` (str)
-          - ``go_id`` (str, e.g. "GO:0005488")
+          - ``go_id`` (str, e.g. ``GO:0005488``)
           - ``score`` (float in [0, 1])
     evaluation_data:
         Ground truth from ``compute_evaluation_data()``.

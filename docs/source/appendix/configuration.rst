@@ -18,8 +18,33 @@ YAML structure
    queue:
      amqp_url: amqp://guest:guest@localhost:5672/
 
-Both keys are required. The file is loaded by
-``protea.infrastructure.settings.load_settings(project_root)`` at startup.
+   storage:
+     artifacts_dir: storage/evaluation_artifacts   # cafaeval output
+     backend: local                                 # "local" | "minio"
+     root: storage/artifacts                        # local backend root
+     minio:
+       endpoint: localhost:9000
+       bucket: protea
+       access_key: minioadmin
+       secret_key: minioadmin
+       secure: false                                # true for HTTPS
+
+   admin:
+     token: protea-admin
+
+Only ``database.url`` and ``queue.amqp_url`` are strictly required; the
+``storage``, ``admin`` sections have working defaults. The file is loaded
+by ``protea.infrastructure.settings.load_settings(project_root)`` at
+startup.
+
+The ``storage`` block drives the ``ArtifactStore`` abstraction described
+in :doc:`/reference/infrastructure`. With ``backend: local`` (default)
+all blobs land under ``storage/artifacts/`` on the API host. Setting
+``backend: minio`` activates the S3-compatible path — requires the
+``[storage]`` extra (``pip install 'protea[storage]'``) and a running
+MinIO instance (see ``docker compose --profile storage up``). Paths
+under ``storage.*`` are resolved relative to the project root when not
+absolute.
 
 Environment variable overrides
 ------------------------------
@@ -35,6 +60,25 @@ Environment variable overrides
        string using the ``postgresql+psycopg`` driver.
    * - ``PROTEA_AMQP_URL``
      - Overrides ``queue.amqp_url``. Standard AMQP URL format.
+   * - ``PROTEA_ARTIFACTS_DIR``
+     - Overrides ``storage.artifacts_dir`` (the ``cafaeval`` artefacts
+       directory used by ``run_cafa_evaluation``).
+   * - ``PROTEA_STORAGE_BACKEND``
+     - Overrides ``storage.backend`` — ``local`` (default) or ``minio``.
+   * - ``PROTEA_STORAGE_ROOT``
+     - Overrides ``storage.root`` (local backend root directory).
+   * - ``PROTEA_MINIO_ENDPOINT``
+     - Overrides ``storage.minio.endpoint`` (e.g. ``localhost:9000``).
+   * - ``PROTEA_MINIO_BUCKET``
+     - Overrides ``storage.minio.bucket``.
+   * - ``PROTEA_MINIO_ACCESS_KEY``
+     - Overrides ``storage.minio.access_key``.
+   * - ``PROTEA_MINIO_SECRET_KEY``
+     - Overrides ``storage.minio.secret_key``.
+   * - ``PROTEA_MINIO_SECURE``
+     - Overrides ``storage.minio.secure`` — truthy enables HTTPS.
+   * - ``PROTEA_ADMIN_TOKEN``
+     - Overrides ``admin.token``.
 
 Frontend
 --------

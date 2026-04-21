@@ -35,6 +35,7 @@ CLAUDE.md
 # Local data
 static/
 storage/
+!protea/infrastructure/storage/
 
 # Large embedding caches and test artifacts
 data/ref_cache/

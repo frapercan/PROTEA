@@ -1,6 +1,36 @@
 Results
 =======
 
+.. contents:: On this page
+   :local:
+   :depth: 2
+
+.. admonition:: Provisional results — pending final recompute
+   :class: warning
+
+   Every number reported in this chapter was produced **before** the
+   2026-04-10 unification of the embedding-backend slicing convention
+   (see :doc:`/architecture/operations`, section *Residue-tensor
+   convention*, for the details of the change). As a consequence:
+
+   * The ``prot_t5_xl_uniref50`` and ProstT5 embeddings used by the
+     reranker benchmark appendix no longer match the code that would
+     regenerate them today and are not comparable to new runs.
+   * The ESM-C 300M numbers used in this chapter are technically
+     unaffected by the slicing fix (the ESM3c path was already stripping
+     BOS + EOS), but they will nevertheless be recomputed end-to-end as
+     part of a single clean run so that the Zenodo deposit accompanying
+     the thesis contains exactly one, fully reproducible result set.
+   * Do not quote the specific Fmax values from the tables below in
+     external communications until this chapter is re-rendered after the
+     final run.
+
+   The experimental protocol (GOA 220 → GOA 229 temporal holdout, NK/LK/PK
+   categorisation, IA-weighted ``cafaeval``, :math:`k=5` KNN, scoring
+   configurations, and the three re-ranker generations) is **stable** and
+   will not change in the final run — only the numerical values will be
+   regenerated.
+
 This chapter presents the experimental evaluation of PROTEA's GO term prediction
 pipeline. All experiments use the same temporal holdout (GOA 220 → GOA 229) and
 are scored with ``cafaeval`` using Information Accretion (IA) weighting from the
@@ -410,3 +440,12 @@ evaluation pipelines — a core design goal of PROTEA.
 strengthen the generalisability claims. The re-ranker's training data is also
 limited to the GOA snapshots available in PROTEA's database (releases 160–220);
 expanding this range may further improve performance.
+
+.. seealso::
+
+   - :doc:`/appendix/reproduction_guide` — exact command sequence to
+     regenerate every figure and table on this page.
+   - :doc:`/architecture/evaluation` — the CAFA temporal-holdout protocol
+     that defines the NK/LK/PK categories and the IA-weighted Fmax used here.
+   - :doc:`/architecture/operations` — ``run_cafa_evaluation`` and
+     ``train_reranker`` are the operations that produced these numbers.

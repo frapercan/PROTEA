@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import distinct, func
 from sqlalchemy.orm import Session, sessionmaker
 
+from protea.api.cache import cached
 from protea.api.deps import get_session_factory
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
@@ -27,51 +28,62 @@ def get_protein_stats(
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
     """Return aggregate counts: total proteins, canonical vs isoforms, reviewed,
-    and how many have metadata, embeddings, or GO annotations."""
-    with session_scope(factory) as session:
-        total = session.query(func.count(Protein.accession)).scalar() or 0
-        canonical = (
-            session.query(func.count(Protein.accession))
-            .filter(Protein.is_canonical.is_(True))
-            .scalar()
-            or 0
-        )
-        reviewed = (
-            session.query(func.count(Protein.accession)).filter(Protein.reviewed.is_(True)).scalar()
-            or 0
-        )
-        with_metadata = (
-            session.query(func.count(distinct(Protein.canonical_accession)))
-            .join(
-                ProteinUniProtMetadata,
-                Protein.canonical_accession == ProteinUniProtMetadata.canonical_accession,
-            )
-            .scalar()
-            or 0
-        )
-        with_embeddings = (
-            session.query(func.count(distinct(Protein.accession)))
-            .join(
-                SequenceEmbedding,
-                Protein.sequence_id == SequenceEmbedding.sequence_id,
-            )
-            .scalar()
-            or 0
-        )
-        with_go = (
-            session.query(func.count(distinct(ProteinGOAnnotation.protein_accession))).scalar() or 0
-        )
+    and how many have metadata, embeddings, or GO annotations.
 
-        return {
-            "total": total,
-            "canonical": canonical,
-            "isoforms": total - canonical,
-            "reviewed": reviewed,
-            "unreviewed": total - reviewed,
-            "with_metadata": with_metadata,
-            "with_embeddings": with_embeddings,
-            "with_go_annotations": with_go,
-        }
+    Cached for 5 minutes — the DISTINCT-over-JOIN counts scan 4M–80M rows and
+    take 30+ seconds to run from scratch. Counts move slowly enough that a
+    5-min staleness is invisible to users.
+    """
+
+    def _compute() -> dict[str, Any]:
+        with session_scope(factory) as session:
+            total = session.query(func.count(Protein.accession)).scalar() or 0
+            canonical = (
+                session.query(func.count(Protein.accession))
+                .filter(Protein.is_canonical.is_(True))
+                .scalar()
+                or 0
+            )
+            reviewed = (
+                session.query(func.count(Protein.accession))
+                .filter(Protein.reviewed.is_(True))
+                .scalar()
+                or 0
+            )
+            with_metadata = (
+                session.query(func.count(distinct(Protein.canonical_accession)))
+                .join(
+                    ProteinUniProtMetadata,
+                    Protein.canonical_accession == ProteinUniProtMetadata.canonical_accession,
+                )
+                .scalar()
+                or 0
+            )
+            with_embeddings = (
+                session.query(func.count(distinct(Protein.accession)))
+                .join(
+                    SequenceEmbedding,
+                    Protein.sequence_id == SequenceEmbedding.sequence_id,
+                )
+                .scalar()
+                or 0
+            )
+            with_go = (
+                session.query(func.count(distinct(ProteinGOAnnotation.protein_accession))).scalar()
+                or 0
+            )
+            return {
+                "total": total,
+                "canonical": canonical,
+                "isoforms": total - canonical,
+                "reviewed": reviewed,
+                "unreviewed": total - reviewed,
+                "with_metadata": with_metadata,
+                "with_embeddings": with_embeddings,
+                "with_go_annotations": with_go,
+            }
+
+    return cached("proteins:stats", 300.0, _compute)
 
 
 # ── List ──────────────────────────────────────────────────────────────────────

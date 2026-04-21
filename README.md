@@ -2,7 +2,7 @@
 
 **Protein annotation platform** for large-scale GO term prediction, sequence embedding, and functional analysis.
 
-PROTEA provides a unified backend for ingesting protein data from UniProt, computing ESM2 embeddings, and predicting Gene Ontology terms via KNN transfer — with a full job queue, REST API, and web interface.
+PROTEA provides a unified backend for ingesting protein data from UniProt, computing protein language model embeddings (ESMC, ProstT5, ESM2), and predicting Gene Ontology terms via KNN transfer plus a learned LightGBM re-ranker — with a full job queue, REST API, and web interface.
 
 [![Lint](https://github.com/frapercan/PROTEA/actions/workflows/lint.yml/badge.svg)](https://github.com/frapercan/PROTEA/actions/workflows/lint.yml)
 [![Tests](https://github.com/frapercan/PROTEA/actions/workflows/test.yml/badge.svg)](https://github.com/frapercan/PROTEA/actions/workflows/test.yml)
@@ -21,6 +21,16 @@ PROTEA provides a unified backend for ingesting protein data from UniProt, compu
 
 ---
 
+## Why PROTEA?
+
+PROTEA is the successor to [PIS](https://github.com/CBBIO/protein-information-system) and [FANTASIA](https://github.com/CBBIO/fantasia), rebuilt around three goals:
+
+1. **Clean architecture** — infrastructure, orchestration, and domain logic are explicitly decoupled. Operations are pure domain logic; workers own sessions and queue state; routers expose HTTP. No more God-classes that mix everything.
+2. **Learned re-ranking on top of KNN transfer** — beyond classical embedding-KNN annotation, PROTEA trains **LightGBM rerankers on temporal GOA splits** (LambdaRank + CAFA IA weighting, per-tier NK/LK/PK models). Candidates retrieved by KNN are re-scored with alignment, taxonomy, and retrieval features.
+3. **Honest temporal evaluation** — benchmarking uses **temporal holdout deltas** between historical GOA releases (e.g. 220→229), evaluated with the official `cafaeval` library and information-accretion weighting, avoiding the optimistic leakage of random splits.
+
+---
+
 ## What PROTEA does
 
 | Capability | Details |
@@ -28,12 +38,13 @@ PROTEA provides a unified backend for ingesting protein data from UniProt, compu
 | **Protein ingestion** | Paginated UniProt REST API, MD5-deduplicated sequences |
 | **GO ontology** | Load OBO snapshots, full DAG stored per release |
 | **GO annotations** | Bulk import from GOA (GAF) and QuickGO (TSV) |
-| **Embeddings** | ESM2 via GPU workers, stored as pgvector VECTOR columns |
-| **GO prediction** | KNN transfer with optional NW/SW alignment and taxonomic features |
-| **CAFA evaluation** | Benchmark pipeline with cafaeval integration |
-| **Job queue** | RabbitMQ-backed, 7 queues, full audit trail per job |
-| **REST API** | 21 FastAPI endpoints across 5 routers |
-| **Web UI** | Next.js frontend with protein explorer, annotation viewer, prediction browser |
+| **Embeddings** | ESMC, ProstT5, and ESM2 backends via GPU workers; stored as pgvector `VECTOR` columns |
+| **GO prediction** | KNN transfer (FAISS IVFFlat / numpy) with optional NW/SW alignment and taxonomic features |
+| **Learning-to-rank** | LightGBM rerankers trained on temporal GOA splits — LambdaRank + IA weighting, per-tier NK/LK/PK models |
+| **CAFA evaluation** | Benchmark pipeline with `cafaeval` integration, Fmax + IA-weighted scoring, per-aspect (BPO/MFO/CCO) results |
+| **Job queue** | RabbitMQ-backed, 8 queues (ingestion, embeddings, predictions, training), full audit trail per job |
+| **REST API** | FastAPI routers for jobs, proteins, embeddings, query sets, scoring, evaluation, and admin |
+| **Web UI** | Next.js frontend with protein explorer, annotation viewer, prediction browser, and live job widget |
 
 ---
 
@@ -103,10 +114,17 @@ poetry run task lint           # ruff + flake8 + mypy
 |---|---|
 | API | FastAPI + SQLAlchemy 2.x + PostgreSQL 16 + pgvector |
 | Queue | RabbitMQ (pika) |
-| Embeddings | ESM2 (Meta) via Hugging Face Transformers |
-| KNN search | FAISS IVFFlat / numpy |
+| Embeddings | ESMC (ESM SDK), ProstT5 / prot_t5_xl (T5Encoder), ESM2 (Hugging Face Transformers) |
+| KNN search | FAISS IVFFlat / numpy (chunked brute-force) |
+| Re-ranker | LightGBM (LambdaRank, IA-weighted samples) |
 | Frontend | Next.js 19 + Tailwind v4 |
-| Deployment | Docker, manage.sh, vast.ai GPU instances |
+| Deployment | Docker Compose, `scripts/manage.sh` process supervisor |
+
+---
+
+## License
+
+Released into the public domain under the [Unlicense](LICENSE). You are free to copy, modify, publish, use, compile, sell, or distribute PROTEA for any purpose, commercial or non-commercial, without attribution.
 
 ---
 

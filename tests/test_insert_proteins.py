@@ -3,6 +3,7 @@ Tests for InsertProteinsOperation.
 Unit tests use mocked HTTP + mocked session (no DB, no network).
 Integration test uses a real Postgres via --with-postgres.
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
@@ -21,6 +22,7 @@ from protea.infrastructure.orm.base import Base
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _noop_emit(event, message, fields, level):
     pass
@@ -68,6 +70,7 @@ def _make_mock_session():
 # Unit tests — InsertProteinsPayload
 # ---------------------------------------------------------------------------
 
+
 class TestInsertProteinsPayload:
     def test_minimal_valid(self):
         p = InsertProteinsPayload.model_validate({"search_criteria": "organism_id:9606"})
@@ -77,15 +80,17 @@ class TestInsertProteinsPayload:
         assert p.total_limit is None
 
     def test_all_fields(self):
-        p = InsertProteinsPayload.model_validate({
-            "search_criteria": "organism_id:9606",
-            "page_size": 100,
-            "total_limit": 50,
-            "timeout_seconds": 30,
-            "include_isoforms": False,
-            "compressed": True,
-            "max_retries": 2,
-        })
+        p = InsertProteinsPayload.model_validate(
+            {
+                "search_criteria": "organism_id:9606",
+                "page_size": 100,
+                "total_limit": 50,
+                "timeout_seconds": 30,
+                "include_isoforms": False,
+                "compressed": True,
+                "max_retries": 2,
+            }
+        )
         assert p.page_size == 100
         assert p.total_limit == 50
         assert p.include_isoforms is False
@@ -119,6 +124,7 @@ class TestInsertProteinsPayload:
 # Unit tests — _parse_fasta / _parse_header
 # ---------------------------------------------------------------------------
 
+
 class TestParseFasta:
     def setup_method(self):
         self.op = InsertProteinsOperation()
@@ -146,10 +152,7 @@ class TestParseFasta:
         assert self.op._parse_fasta("") == []
 
     def test_canonical_isoform_parsing(self):
-        fasta = (
-            ">sp|P12345-2|TEST_HUMAN Isoform 2 OS=Homo sapiens OX=9606\n"
-            "MKTAYIAK\n"
-        )
+        fasta = ">sp|P12345-2|TEST_HUMAN Isoform 2 OS=Homo sapiens OX=9606\nMKTAYIAK\n"
         records = self.op._parse_fasta(fasta)
         assert records[0]["canonical_accession"] == "P12345"
         assert records[0]["is_canonical"] is False
@@ -175,10 +178,7 @@ class TestParseFasta:
         assert records[0]["entry_name"] is None
 
     def test_isoform_accession_parsed(self):
-        fasta = (
-            ">sp|P12345-3|TEST_HUMAN Isoform 3 OS=Homo sapiens OX=9606 GN=TEST\n"
-            "MKTAYIAK\n"
-        )
+        fasta = ">sp|P12345-3|TEST_HUMAN Isoform 3 OS=Homo sapiens OX=9606 GN=TEST\nMKTAYIAK\n"
         records = self.op._parse_fasta(fasta)
         r = records[0]
         assert r["accession"] == "P12345-3"
@@ -195,8 +195,8 @@ class TestParseFasta:
 
     def test_reviewed_vs_unreviewed(self):
         records = self.op._parse_fasta(FASTA_TWO)
-        assert records[0]["reviewed"] is True   # sp|
-        assert records[1]["reviewed"] is False   # tr|
+        assert records[0]["reviewed"] is True  # sp|
+        assert records[1]["reviewed"] is False  # tr|
 
     def test_sequence_deduplication_by_hash(self):
         """Two identical sequences produce the same hash."""
@@ -209,11 +209,7 @@ class TestParseFasta:
         assert records[0]["sequence_hash"] == records[1]["sequence_hash"]
 
     def test_multiline_sequence(self):
-        fasta = (
-            ">sp|P12345|TEST_HUMAN Test OS=Homo sapiens OX=9606\n"
-            "MKTAY\n"
-            "IAKQR\n"
-        )
+        fasta = ">sp|P12345|TEST_HUMAN Test OS=Homo sapiens OX=9606\nMKTAY\nIAKQR\n"
         records = self.op._parse_fasta(fasta)
         assert records[0]["sequence"] == "MKTAYIAKQR"
         assert records[0]["length"] == 10
@@ -222,6 +218,7 @@ class TestParseFasta:
 # ---------------------------------------------------------------------------
 # Unit tests — _decode_response
 # ---------------------------------------------------------------------------
+
 
 class TestDecodeResponse:
     def setup_method(self):
@@ -252,6 +249,7 @@ class TestDecodeResponse:
 # ---------------------------------------------------------------------------
 # Unit tests — _store_records
 # ---------------------------------------------------------------------------
+
 
 class TestStoreRecords:
     def setup_method(self):
@@ -389,6 +387,7 @@ class TestStoreRecords:
 # ---------------------------------------------------------------------------
 # Unit tests — execute() with mocked HTTP and session
 # ---------------------------------------------------------------------------
+
 
 class TestInsertProteinsOperationExecute:
     def setup_method(self):
@@ -673,9 +672,7 @@ class TestInsertProteinsOperationExecute:
                 emit=emit,
             )
 
-        page_done_events = [
-            c for c in emit.calls if c["event"] == "insert_proteins.page_done"
-        ]
+        page_done_events = [c for c in emit.calls if c["event"] == "insert_proteins.page_done"]
         assert len(page_done_events) == 1
         fields = page_done_events[0]["fields"]
         assert fields["_progress_current"] == 1
@@ -699,6 +696,7 @@ class TestInsertProteinsOperationExecute:
 # ---------------------------------------------------------------------------
 # Integration test — full round-trip against real Postgres
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 def test_insert_proteins_integration(postgres_url: str):

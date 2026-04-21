@@ -13,7 +13,7 @@ export function FloatingJobsWidget() {
   const poll = useCallback(async () => {
     if (document.visibilityState === "hidden") return;
     try {
-      const running = await listJobs({ limit: 5, status: "running" });
+      const running = await listJobs({ limit: 50, status: "running" });
       setJobs(running);
     } catch {
       // ignore transient errors

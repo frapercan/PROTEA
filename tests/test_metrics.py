@@ -1,4 +1,5 @@
 """Unit tests for protea.core.metrics — pure-Python, no DB."""
+
 from __future__ import annotations
 
 import pytest
@@ -9,6 +10,7 @@ from protea.core.metrics import CAFAMetrics, PRPoint, compute_cafa_metrics
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_eval(nk=None, lk=None):
     return EvaluationData(
@@ -25,6 +27,7 @@ def _pred(acc, go_id, score):
 # ---------------------------------------------------------------------------
 # PRPoint / CAFAMetrics dataclasses
 # ---------------------------------------------------------------------------
+
 
 class TestDataclasses:
     def test_prpoint_fields(self):
@@ -46,8 +49,13 @@ class TestDataclasses:
         )
         s = m.summary()
         assert set(s.keys()) == {
-            "category", "fmax", "threshold_at_fmax", "auc_pr",
-            "n_ground_truth_proteins", "n_predicted_proteins", "n_predictions",
+            "category",
+            "fmax",
+            "threshold_at_fmax",
+            "auc_pr",
+            "n_ground_truth_proteins",
+            "n_predicted_proteins",
+            "n_predictions",
         }
         assert s["fmax"] == 0.75
 
@@ -55,6 +63,7 @@ class TestDataclasses:
 # ---------------------------------------------------------------------------
 # compute_cafa_metrics — validation
 # ---------------------------------------------------------------------------
+
 
 class TestComputeCafaMetricsValidation:
     def test_invalid_category_raises(self):
@@ -73,6 +82,7 @@ class TestComputeCafaMetricsValidation:
 # ---------------------------------------------------------------------------
 # compute_cafa_metrics — empty / no predictions
 # ---------------------------------------------------------------------------
+
 
 class TestComputeCafaMetricsEmpty:
     def test_empty_ground_truth_and_preds(self):
@@ -97,6 +107,7 @@ class TestComputeCafaMetricsEmpty:
 # ---------------------------------------------------------------------------
 # compute_cafa_metrics — correctness
 # ---------------------------------------------------------------------------
+
 
 class TestComputeCafaMetricsCorrectness:
     def test_perfect_prediction_fmax_one(self):
@@ -127,10 +138,12 @@ class TestComputeCafaMetricsCorrectness:
         assert 0 < result.fmax < 1.0
 
     def test_multiple_proteins(self):
-        eval_data = _make_eval(nk={
-            "P1": {"GO:0001"},
-            "P2": {"GO:0002"},
-        })
+        eval_data = _make_eval(
+            nk={
+                "P1": {"GO:0001"},
+                "P2": {"GO:0002"},
+            }
+        )
         preds = [_pred("P1", "GO:0001", 0.9), _pred("P2", "GO:0002", 0.9)]
         result = compute_cafa_metrics(preds, eval_data)
         assert result.fmax > 0.5

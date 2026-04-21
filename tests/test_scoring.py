@@ -1,4 +1,5 @@
 """Tests for protea.core.scoring and related evidence weight resolution."""
+
 from unittest.mock import MagicMock
 
 import pytest
@@ -15,6 +16,7 @@ from protea.infrastructure.orm.models.embedding.scoring_config import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _config(
     weights: dict,
     formula: str = FORMULA_LINEAR,
@@ -30,6 +32,7 @@ def _config(
 # ---------------------------------------------------------------------------
 # evidence_weight
 # ---------------------------------------------------------------------------
+
 
 class TestEvidenceWeight:
     def test_none_code_returns_fallback(self):
@@ -60,6 +63,7 @@ class TestEvidenceWeight:
     def test_eco_id_normalized(self):
         # ECO:0000501 maps to IEA
         from protea.core.evidence_codes import ECO_TO_CODE
+
         eco_ids = [eco for eco, go in ECO_TO_CODE.items() if go == "IEA"]
         if eco_ids:
             assert evidence_weight(eco_ids[0]) == pytest.approx(0.3)
@@ -72,6 +76,7 @@ class TestEvidenceWeight:
 # ---------------------------------------------------------------------------
 # compute_score — pure embedding
 # ---------------------------------------------------------------------------
+
 
 class TestComputeScoreEmbeddingOnly:
     def setup_method(self):
@@ -106,6 +111,7 @@ class TestComputeScoreEmbeddingOnly:
 # ---------------------------------------------------------------------------
 # compute_score — multi-signal
 # ---------------------------------------------------------------------------
+
 
 class TestComputeScoreMultiSignal:
     def test_nw_identity_contributes(self):
@@ -163,6 +169,7 @@ class TestComputeScoreMultiSignal:
 # compute_score — evidence_weighted formula
 # ---------------------------------------------------------------------------
 
+
 class TestComputeScoreEvidenceWeighted:
     def test_iea_downgrades_score(self):
         cfg_linear = _config({"embedding_similarity": 1.0}, formula=FORMULA_LINEAR)
@@ -192,6 +199,7 @@ class TestComputeScoreEvidenceWeighted:
 # ---------------------------------------------------------------------------
 # score_predictions
 # ---------------------------------------------------------------------------
+
 
 class TestScorePredictions:
     def setup_method(self):

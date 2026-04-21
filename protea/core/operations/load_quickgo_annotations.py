@@ -71,6 +71,19 @@ class LoadQuickGOAnnotationsOperation:
     """
 
     name = "load_quickgo_annotations"
+    description = (
+        "Stream GO annotations from QuickGO's bulk download endpoint and insert "
+        "ProteinGOAnnotation rows for accessions already present in the DB."
+    )
+
+    def summarize_payload(self, payload: dict[str, Any]) -> str:
+        p = payload or {}
+        bits = []
+        if p.get("source_version"):
+            bits.append(f"source={p['source_version']}")
+        if p.get("total_limit"):
+            bits.append(f"limit={p['total_limit']}")
+        return " · ".join(bits)
 
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn

@@ -68,10 +68,22 @@ class Operation(Protocol):
     Operations are pure domain logic: they receive an open SQLAlchemy session
     and an ``emit`` callback for structured event logging, and return an
     ``OperationResult``.  They must not manage sessions or queue connections.
+
+    ``description`` is a short, static, human-readable explanation of what
+    the operation does in general, surfaced in the jobs UI to give the
+    operations history context.
+
+    ``summarize_payload`` returns a 1-line dynamic summary of the most
+    informative fields in the payload (e.g. "release 211 ← OBO 2022-07-01"),
+    so each individual job in the history tells its own story.  Returning an
+    empty string is acceptable for operations with no useful payload.
     """
 
     name: str
+    description: str
 
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult: ...
+
+    def summarize_payload(self, payload: dict[str, Any]) -> str: ...

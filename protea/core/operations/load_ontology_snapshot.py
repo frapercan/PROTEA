@@ -5,6 +5,7 @@ import time
 from typing import Any
 
 import requests
+from pydantic import field_validator
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
@@ -17,8 +18,6 @@ class LoadOntologySnapshotPayload(ProteaPayload, frozen=True):
     obo_url: str
     timeout_seconds: int = 120
     force_relationships: bool = False
-
-    from pydantic import field_validator
 
     @field_validator("obo_url", mode="before")
     @classmethod
@@ -42,6 +41,20 @@ class LoadOntologySnapshotOperation:
     """
 
     name = "load_ontology_snapshot"
+    description = (
+        "Download a GO OBO file and persist it as an OntologySnapshot with its "
+        "GOTerm + GOTermRelationship rows; idempotent on the OBO data-version."
+    )
+
+    def summarize_payload(self, payload: dict[str, Any]) -> str:
+        url = (payload or {}).get("obo_url", "")
+        if not url:
+            return ""
+        # The URL usually looks like .../<YYYY-MM-DD>/ontology/<file>.obo
+        marker = url.rsplit("/", 4)
+        if len(marker) >= 4 and marker[-1].endswith(".obo"):
+            return f"{marker[-3]} · {marker[-1]}"
+        return url
 
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn

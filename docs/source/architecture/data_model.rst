@@ -1,6 +1,10 @@
 Data Model
 ==========
 
+.. contents:: On this page
+   :local:
+   :depth: 2
+
 All models use SQLAlchemy 2.x declarative style with ``Mapped[]`` type annotations.
 The schema is managed by Alembic (22 migrations to date).
 
@@ -139,10 +143,28 @@ Embeddings
    chunking). Referenced by both ``SequenceEmbedding`` rows and ``PredictionSet`` rows
    to ensure query and reference embeddings are always comparable.
 
+   Valid values for ``model_backend`` are ``esm`` (HuggingFace ``EsmModel`` /
+   ESM-2), ``esm3c`` (ESM SDK ``ESMC``), ``t5`` (``T5EncoderModel`` for ProstT5
+   and ``prot_t5_xl_uniref50``), ``ankh`` (``T5EncoderModel`` for
+   ``ElnaggarLab/ankh-base`` / ``ankh-large``, loaded via ``AutoTokenizer``,
+   forced to ``bfloat16`` on CUDA because Ankh overflows to ``NaN`` under
+   FP16, and tokenised char-by-char with ``is_split_into_words=True`` because
+   its SentencePiece vocabulary maps literal spaces to ``<unk>``; the
+   ``<AA2fold>`` prefix is never injected), and ``auto`` (alias for ``esm``).
+
 **SequenceEmbedding**
    Stores a pgvector VECTOR for one (sequence, config, chunk) triple.
    When chunking is disabled: ``chunk_index_s=0``, ``chunk_index_e=NULL``.
    When chunking is enabled: each chunk is a separate row with its own start/end indices.
+
+   ``chunk_index_s`` and ``chunk_index_e`` are **amino-acid positions** on
+   every backend. The embedding operation strips all special tokens
+   (CLS/BOS/EOS and ProstT5's ``<AA2fold>`` prefix) from the residue tensor
+   before chunking, so ``chunk_index_s=0`` always refers to the first amino
+   acid and ``chunk_index_e`` equals the amino-acid length for the final
+   chunk of a full-length sequence. This convention was unified on
+   2026-04-10; embeddings computed before that date used backend-specific
+   slicing and must be recomputed to be directly comparable.
 
    .. note::
       KNN search is **never** performed at the DB layer. Embeddings are loaded into
@@ -219,9 +241,35 @@ Predictions
    ``compute_reranker_features=true``.
 
 **RerankerModel**
-   Stores a trained LightGBM binary classifier. References the ``PredictionSet``
-   and ``EvaluationSet`` used for training. Contains the serialized model string,
-   validation metrics (JSONB), and feature importance (JSONB).
+   Stores a trained LightGBM binary (or LambdaRank) re-ranker. References the
+   ``PredictionSet`` and ``EvaluationSet`` used for training (both
+   ``SET NULL`` on delete). Two storage modes coexist:
+
+   - **Inline (legacy)** — ``model_data`` (``Text``, now nullable) holds the
+     serialized booster string. Rows created before the 2026-04 integration
+     with ``protea-reranker-lab`` use this path.
+   - **Artifact-backed (preferred)** — ``artifact_uri`` (``String(512)``)
+     points at a ``file://`` or ``s3://`` URI resolved by the
+     ``ArtifactStore``. Rows inserted via ``scripts/register_reranker.py``
+     always use this path and leave ``model_data`` NULL.
+
+   Additional provenance columns record the lab run that produced the model:
+
+   - ``feature_schema_sha`` (``String(16)``) — 12-hex-char fingerprint
+     of the feature families the booster was trained on, computed via
+     ``protea_reranker_lab.contracts.compute_feature_schema_sha``.
+     **Load-bearing at inference time**: ``predict_go_terms`` refuses to
+     apply a booster whose ``feature_schema_sha`` does not match the live
+     feature set, falling back to KNN ordering rather than scoring with
+     NaN-filled columns.
+   - ``embedding_config_id`` / ``ontology_snapshot_id`` (FKs, both
+     ``SET NULL``) — the embedding recipe and ontology release the
+     booster was trained against.
+   - ``producer_version`` (``String(64)``) / ``producer_git_sha``
+     (``String(40)``) — PROTEA ``__version__`` and HEAD sha at export
+     time, recorded in the dataset manifest and propagated here.
+   - ``spec_yaml`` (``Text``) — the full ``ExperimentSpec`` YAML used to
+     drive the lab training run, for reproducibility.
 
 **ScoringConfig**
    Defines a named scoring recipe: a set of feature weights and parameters
@@ -324,3 +372,13 @@ Status enum
      - Operation raised an exception
    * - ``cancelled``
      - Cancelled via API before or during execution
+
+.. seealso::
+
+   - :doc:`operations` — every operation lists the tables it touches.
+   - :doc:`/reference/infrastructure` — the SQLAlchemy ``Mapped[]`` classes
+     behind every table on this page.
+   - :doc:`/adr/006-sequence-deduplication-by-md5` — why the
+     ``Sequence`` ↔ ``Protein`` split exists.
+   - :doc:`/adr/001-knn-without-pgvector` — why ``SequenceEmbedding`` uses
+     pgvector for storage but not for search.

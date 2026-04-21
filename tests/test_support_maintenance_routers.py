@@ -1,4 +1,5 @@
 """Unit tests for support and maintenance API routers — no real DB required."""
+
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -17,6 +18,7 @@ from protea.api.routers.support import router as support_router
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 @contextmanager
 def _mock_scope(session):
     yield session
@@ -34,6 +36,7 @@ def _make_app_with_router(router, session):
 # Support router
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def support_session():
     return MagicMock()
@@ -42,8 +45,10 @@ def support_session():
 @pytest.fixture()
 def support_client(support_session):
     app, _ = _make_app_with_router(support_router, support_session)
-    with patch("protea.api.routers.support.session_scope",
-               side_effect=lambda _: _mock_scope(support_session)):
+    with patch(
+        "protea.api.routers.support.session_scope",
+        side_effect=lambda _: _mock_scope(support_session),
+    ):
         yield TestClient(app, raise_server_exceptions=True)
 
 
@@ -69,7 +74,9 @@ class TestGetSupport:
         entry.comment = "Great tool!"
         entry.created_at = datetime(2026, 1, 1, tzinfo=UTC)
         support_session.query.return_value.count.return_value = 1
-        support_session.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [entry]
+        support_session.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
+            entry
+        ]
         resp = support_client.get("/support")
         assert resp.status_code == 200
         comments = resp.json()["comments"]
@@ -130,6 +137,7 @@ class TestPostSupport:
 # Maintenance router
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def maint_session():
     return MagicMock()
@@ -138,8 +146,10 @@ def maint_session():
 @pytest.fixture()
 def maint_client(maint_session):
     app, _ = _make_app_with_router(maintenance_router, maint_session)
-    with patch("protea.api.routers.maintenance.session_scope",
-               side_effect=lambda _: _mock_scope(maint_session)):
+    with patch(
+        "protea.api.routers.maintenance.session_scope",
+        side_effect=lambda _: _mock_scope(maint_session),
+    ):
         yield TestClient(app, raise_server_exceptions=True)
 
 
@@ -200,6 +210,7 @@ class TestVacuumEmbeddings:
 class TestMaintenanceSessionFactoryMissing:
     def test_raises_when_no_factory(self):
         from protea.api.routers.maintenance import router as maint_router
+
         app = FastAPI()
         # Intentionally do NOT set app.state.session_factory
         app.include_router(maint_router)

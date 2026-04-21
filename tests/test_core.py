@@ -2,6 +2,7 @@
 Unit tests for core contracts and simple operations.
 No DB or network required.
 """
+
 from __future__ import annotations
 
 import gzip
@@ -25,6 +26,7 @@ from protea.core.utils import UniProtHttpMixin, chunks
 # OperationRegistry
 # ---------------------------------------------------------------------------
 
+
 class TestOperationRegistry:
     def test_register_and_get(self):
         reg = OperationRegistry()
@@ -47,6 +49,7 @@ class TestOperationRegistry:
 # ---------------------------------------------------------------------------
 # PingOperation
 # ---------------------------------------------------------------------------
+
 
 class TestPingOperation:
     def setup_method(self):
@@ -81,6 +84,7 @@ class TestPingOperation:
 # chunks()
 # ---------------------------------------------------------------------------
 
+
 class TestChunks:
     def test_even_split(self) -> None:
         result = list(chunks([1, 2, 3, 4], 2))
@@ -101,6 +105,7 @@ class TestChunks:
 # ---------------------------------------------------------------------------
 # UniProtHttpMixin
 # ---------------------------------------------------------------------------
+
 
 def _make_payload(max_retries=3, backoff_base=0.01, backoff_max=0.1, jitter=0.0):
     p = MagicMock()
@@ -203,7 +208,6 @@ class TestUniProtHttpMixin:
 # ---------------------------------------------------------------------------
 
 
-
 class TestNormalize:
     def test_go_code_passthrough(self):
         assert normalize("IDA") == "IDA"
@@ -246,6 +250,7 @@ class TestIsExperimental:
 # RetryLaterError
 # ---------------------------------------------------------------------------
 
+
 class TestRetryLaterError:
     def test_default_delay(self):
         err = RetryLaterError("GPU busy")
@@ -264,6 +269,7 @@ class TestRetryLaterError:
 # ---------------------------------------------------------------------------
 # FetchUniProtMetadataOperation
 # ---------------------------------------------------------------------------
+
 
 def _noop_emit(*_):
     pass
@@ -288,8 +294,6 @@ def _make_tsv_content(rows: list[dict[str, str]], compressed: bool = True) -> by
             f.write(raw)
         return buf.getvalue()
     return raw
-
-
 
 
 class TestFetchUniProtMetadataExecute:
@@ -363,7 +367,9 @@ class TestFetchUniProtMetadataExecute:
         rows = [{"Entry": "P00001"}]
         for header in FetchUniProtMetadataOperation.FIELD_MAP.values():
             rows[0][header] = ""
-        rows[0].update({"Reviewed": "", "Entry Name": "", "Organism": "", "Gene Names": "", "Length": ""})
+        rows[0].update(
+            {"Reviewed": "", "Entry Name": "", "Organism": "", "Gene Names": "", "Length": ""}
+        )
 
         # First page returns 1 row, second page returns 1 row
         resp1 = MagicMock()
@@ -377,7 +383,9 @@ class TestFetchUniProtMetadataExecute:
         rows2 = [{"Entry": "P00002"}]
         for header in FetchUniProtMetadataOperation.FIELD_MAP.values():
             rows2[0][header] = ""
-        rows2[0].update({"Reviewed": "", "Entry Name": "", "Organism": "", "Gene Names": "", "Length": ""})
+        rows2[0].update(
+            {"Reviewed": "", "Entry Name": "", "Organism": "", "Gene Names": "", "Length": ""}
+        )
         resp2.content = _make_tsv_content(rows2, compressed=True)
 
         op._http.get.side_effect = [resp1, resp2]
@@ -458,6 +466,7 @@ class TestFetchUniProtMetadataExecute:
 
         # Second query().filter().all() returns proteins
         call_count = [0]
+
         def query_side_effect(*args):
             result = MagicMock()
             call_count[0] += 1
@@ -468,6 +477,7 @@ class TestFetchUniProtMetadataExecute:
                 # Second call: protein lookup
                 result.filter.return_value.all.return_value = [protein]
             return result
+
         session.query.side_effect = query_side_effect
 
         p = FetchUniProtMetadataPayload(
@@ -475,8 +485,14 @@ class TestFetchUniProtMetadataExecute:
             update_protein_core=True,
         )
 
-        row = {"Entry": "P12345", "Reviewed": "reviewed", "Entry Name": "TEST_HUMAN",
-               "Organism": "Homo sapiens", "Gene Names": "TEST GENE2", "Length": "500"}
+        row = {
+            "Entry": "P12345",
+            "Reviewed": "reviewed",
+            "Entry Name": "TEST_HUMAN",
+            "Organism": "Homo sapiens",
+            "Gene Names": "TEST GENE2",
+            "Length": "500",
+        }
         for header in FetchUniProtMetadataOperation.FIELD_MAP.values():
             row.setdefault(header, "")
 
@@ -502,6 +518,7 @@ class TestFetchUniProtMetadataExecute:
         protein.length = None
 
         call_count = [0]
+
         def query_side_effect(*args):
             result = MagicMock()
             call_count[0] += 1
@@ -510,6 +527,7 @@ class TestFetchUniProtMetadataExecute:
             else:
                 result.filter.return_value.all.return_value = [protein]
             return result
+
         session.query.side_effect = query_side_effect
 
         p = FetchUniProtMetadataPayload(
@@ -535,6 +553,7 @@ class TestFetchUniProtMetadataExecute:
         session = MagicMock()
 
         call_count = [0]
+
         def query_side_effect(*args):
             result = MagicMock()
             call_count[0] += 1
@@ -543,6 +562,7 @@ class TestFetchUniProtMetadataExecute:
             else:
                 result.filter.return_value.all.return_value = []  # No proteins
             return result
+
         session.query.side_effect = query_side_effect
 
         p = FetchUniProtMetadataPayload(

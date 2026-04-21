@@ -45,9 +45,7 @@ _noop_emit = lambda *_: None  # noqa: E731
 
 class TestLoadOntologySnapshotPayload:
     def test_valid(self) -> None:
-        p = LoadOntologySnapshotPayload.model_validate(
-            {"obo_url": "http://example.org/go.obo"}
-        )
+        p = LoadOntologySnapshotPayload.model_validate({"obo_url": "http://example.org/go.obo"})
         assert p.obo_url == "http://example.org/go.obo"
         assert p.timeout_seconds == 120
 
@@ -166,8 +164,12 @@ class TestParseTermsRelationships:
         """Each of the 7 supported relationship types is captured."""
         op = self._op()
         for rt in [
-            "part_of", "regulates", "negatively_regulates",
-            "positively_regulates", "occurs_in", "capable_of",
+            "part_of",
+            "regulates",
+            "negatively_regulates",
+            "positively_regulates",
+            "occurs_in",
+            "capable_of",
             "capable_of_part_of",
         ]:
             obo = (
@@ -232,9 +234,7 @@ class TestDownload:
             result = op._download(payload, emit)
 
         assert result == _OBO_SAMPLE
-        mock_get.assert_called_once_with(
-            "http://example.org/go.obo", timeout=120, stream=True
-        )
+        mock_get.assert_called_once_with("http://example.org/go.obo", timeout=120, stream=True)
         # Should emit download_start and download_done
         assert emit.call_count == 2
         assert emit.call_args_list[0][0][0] == "load_ontology_snapshot.download_start"
@@ -287,9 +287,7 @@ class TestLoadOntologySnapshotExecute:
         existing.id = "existing-uuid"
         session = self._mock_session(existing_snapshot=existing, rel_count=42)
 
-        with patch.object(
-            LoadOntologySnapshotOperation, "_download", return_value=_OBO_SAMPLE
-        ):
+        with patch.object(LoadOntologySnapshotOperation, "_download", return_value=_OBO_SAMPLE):
             op = LoadOntologySnapshotOperation()
             result = op.execute(
                 session,
@@ -307,17 +305,18 @@ class TestLoadOntologySnapshotExecute:
         fake_snapshot.id = "new-uuid"
 
         def add_side_effect(obj):
-            if isinstance(obj, __import__(
-                "protea.infrastructure.orm.models.annotation.ontology_snapshot",
-                fromlist=["OntologySnapshot"]
-            ).OntologySnapshot):
+            if isinstance(
+                obj,
+                __import__(
+                    "protea.infrastructure.orm.models.annotation.ontology_snapshot",
+                    fromlist=["OntologySnapshot"],
+                ).OntologySnapshot,
+            ):
                 obj.id = "new-uuid"
 
         session.add.side_effect = add_side_effect
 
-        with patch.object(
-            LoadOntologySnapshotOperation, "_download", return_value=_OBO_SAMPLE
-        ):
+        with patch.object(LoadOntologySnapshotOperation, "_download", return_value=_OBO_SAMPLE):
             op = LoadOntologySnapshotOperation()
             result = op.execute(
                 session,
@@ -343,6 +342,7 @@ class TestLoadOntologySnapshotExecute:
             from protea.infrastructure.orm.models.annotation.ontology_snapshot import (
                 OntologySnapshot,
             )
+
             if isinstance(obj, OntologySnapshot):
                 obj.id = "snap-id"
 
@@ -352,6 +352,7 @@ class TestLoadOntologySnapshotExecute:
             """Simulate DB flush assigning IDs to GOTerm objects."""
             for item in items:
                 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
+
                 if isinstance(item, GOTerm) and item.id is None:
                     _id_counter["n"] += 1
                     item.id = _id_counter["n"]
@@ -392,6 +393,7 @@ class TestLoadOntologySnapshotExecute:
             from protea.infrastructure.orm.models.annotation.ontology_snapshot import (
                 OntologySnapshot,
             )
+
             if isinstance(obj, OntologySnapshot):
                 obj.id = "snap-id"
 
@@ -400,15 +402,14 @@ class TestLoadOntologySnapshotExecute:
         def add_all_side_effect(items):
             for item in items:
                 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
+
                 if isinstance(item, GOTerm) and item.id is None:
                     _id_counter["n"] += 1
                     item.id = _id_counter["n"]
 
         session.add_all.side_effect = add_all_side_effect
 
-        with patch.object(
-            LoadOntologySnapshotOperation, "_download", return_value=obo
-        ):
+        with patch.object(LoadOntologySnapshotOperation, "_download", return_value=obo):
             op = LoadOntologySnapshotOperation()
             result = op.execute(
                 session,
@@ -423,9 +424,7 @@ class TestLoadOntologySnapshotExecute:
         session = self._mock_session(existing_snapshot=None)
         emit = MagicMock()
 
-        with patch.object(
-            LoadOntologySnapshotOperation, "_download", return_value=_OBO_SAMPLE
-        ):
+        with patch.object(LoadOntologySnapshotOperation, "_download", return_value=_OBO_SAMPLE):
             op = LoadOntologySnapshotOperation()
             op.execute(session, {"obo_url": "http://x.org/go.obo"}, emit=emit)
 
@@ -439,9 +438,7 @@ class TestLoadOntologySnapshotExecute:
         session = self._mock_session(existing_snapshot=None)
         emit = MagicMock()
 
-        with patch.object(
-            LoadOntologySnapshotOperation, "_download", return_value=_OBO_SAMPLE
-        ):
+        with patch.object(LoadOntologySnapshotOperation, "_download", return_value=_OBO_SAMPLE):
             op = LoadOntologySnapshotOperation()
             result = op.execute(session, {"obo_url": "http://x.org/go.obo"}, emit=emit)
 
@@ -478,9 +475,7 @@ class TestLoadOntologySnapshotExecute:
         session.query.side_effect = query_side_effect
         emit = MagicMock()
 
-        with patch.object(
-            LoadOntologySnapshotOperation, "_download", return_value=_OBO_SAMPLE
-        ):
+        with patch.object(LoadOntologySnapshotOperation, "_download", return_value=_OBO_SAMPLE):
             op = LoadOntologySnapshotOperation()
             result = op.execute(
                 session,
@@ -520,9 +515,7 @@ class TestLoadOntologySnapshotExecute:
         session = MagicMock()
         session.query.side_effect = query_side_effect
 
-        with patch.object(
-            LoadOntologySnapshotOperation, "_download", return_value=_OBO_SAMPLE
-        ):
+        with patch.object(LoadOntologySnapshotOperation, "_download", return_value=_OBO_SAMPLE):
             op = LoadOntologySnapshotOperation()
             result = op.execute(
                 session,

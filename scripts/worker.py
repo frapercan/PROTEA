@@ -13,26 +13,7 @@ import logging
 import time
 from pathlib import Path
 
-from protea.core.contracts.registry import OperationRegistry
-from protea.core.operations.compute_embeddings import (
-    ComputeEmbeddingsBatchOperation,
-    ComputeEmbeddingsOperation,
-    StoreEmbeddingsOperation,
-)
-from protea.core.operations.fetch_uniprot_metadata import FetchUniProtMetadataOperation
-from protea.core.operations.generate_evaluation_set import GenerateEvaluationSetOperation
-from protea.core.operations.insert_proteins import InsertProteinsOperation
-from protea.core.operations.load_goa_annotations import LoadGOAAnnotationsOperation
-from protea.core.operations.load_ontology_snapshot import LoadOntologySnapshotOperation
-from protea.core.operations.load_quickgo_annotations import LoadQuickGOAnnotationsOperation
-from protea.core.operations.ping import PingOperation
-from protea.core.operations.predict_go_terms import (
-    PredictGOTermsBatchOperation,
-    PredictGOTermsOperation,
-    StorePredictionsOperation,
-)
-from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationOperation
-from protea.core.operations.train_reranker import TrainRerankerAutoOperation, TrainRerankerOperation
+from protea.core.operation_catalog import build_operation_registry
 from protea.infrastructure.queue.consumer import OperationConsumer, QueueConsumer
 from protea.infrastructure.session import build_session_factory
 from protea.infrastructure.settings import load_settings
@@ -63,23 +44,7 @@ def main() -> None:
 
     factory = build_session_factory(settings.db_url)
 
-    registry = OperationRegistry()
-    registry.register(PingOperation())
-    registry.register(InsertProteinsOperation())
-    registry.register(FetchUniProtMetadataOperation())
-    registry.register(LoadOntologySnapshotOperation())
-    registry.register(LoadQuickGOAnnotationsOperation())
-    registry.register(LoadGOAAnnotationsOperation())
-    registry.register(GenerateEvaluationSetOperation())
-    registry.register(RunCafaEvaluationOperation())
-    registry.register(ComputeEmbeddingsOperation())
-    registry.register(ComputeEmbeddingsBatchOperation())
-    registry.register(StoreEmbeddingsOperation())
-    registry.register(PredictGOTermsOperation())
-    registry.register(PredictGOTermsBatchOperation())
-    registry.register(StorePredictionsOperation())
-    registry.register(TrainRerankerOperation())
-    registry.register(TrainRerankerAutoOperation())
+    registry = build_operation_registry()
 
     # Queues that carry ephemeral operation messages (no DB Job row per message)
     # use OperationConsumer.  All other queues use the standard QueueConsumer.
@@ -115,7 +80,7 @@ def main() -> None:
         )
 
     # Pre-warm taxonomy DB for prediction workers that may need it.
-    if args.queue in ("protea.predictions.batch", "protea.jobs"):
+    if args.queue in ("protea.predictions.batch", "protea.jobs", "protea.training"):
         try:
             from protea.core.feature_engineering import warmup_taxonomy_db
 

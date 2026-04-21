@@ -1,6 +1,10 @@
 Core
 ====
 
+.. contents:: On this page
+   :local:
+   :depth: 2
+
 The ``protea.core`` package contains all domain logic. It has no dependency
 on the infrastructure layer: operations receive an open SQLAlchemy session
 and an ``emit`` callback, but they do not manage connections, queues, or
@@ -124,24 +128,91 @@ Re-ranker
 ---------
 
 ``protea.core.reranker`` implements a LightGBM binary classifier that
-re-scores GO term predictions using 19 numeric features (embedding distance,
-NW/SW alignment metrics, sequence lengths, taxonomic distance, and 5
-aggregate re-ranker signals) plus 3 categorical features (qualifier,
-evidence code, taxonomic relation).
+re-scores GO term predictions using 20 numeric features (embedding distance,
+NW/SW alignment metrics, sequence lengths, taxonomic distance and common
+ancestors, and 5 aggregate re-ranker signals) plus 3 categorical features
+(qualifier, evidence code, taxonomic relation). The full feature list is
+documented in :ref:`train_reranker <train-reranker-operation>`.
 
 The module provides:
 
-- ``prepare_dataset(df)`` — extracts and coerces feature columns.
-- ``train(df)`` — stratified train/val split with ``is_unbalance=True``,
-  returns a ``TrainResult`` with the model, validation metrics (AUC,
-  logloss, precision, recall, F1), and feature importance.
-- ``predict(model, df)`` — returns probability scores [0, 1].
+- ``prepare_dataset(df)`` — extracts and coerces feature columns. Numeric
+  columns are coerced with ``errors="coerce"`` (invalid strings become
+  ``NaN``); categorical columns are converted to pandas ``category`` dtype,
+  which LightGBM consumes directly without manual label encoding.
+- ``train(df)`` — stratified positive/negative split with early-stopping on a
+  held-out validation set (default 20 %). Returns a ``TrainResult`` with the
+  Booster, validation metrics (AUC, logloss, precision, recall, F1 at the
+  0.5 threshold), the best boosting iteration, and gain-based feature
+  importance.
+- ``predict(model, df)`` — returns probability scores in ``[0, 1]``.
 - ``model_to_string()`` / ``model_from_string()`` — serialization for DB
   storage in the ``RerankerModel`` table.
 - ``load_training_tsv()`` — parses a training data TSV as produced by the
   ``/scoring/prediction-sets/{id}/training-data.tsv`` endpoint.
 
 .. automodule:: protea.core.reranker
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Re-ranker inference (``protea.core.reranking``)
+------------------------------------------------
+
+``protea.core.reranking`` is the thin inference-side counterpart to
+``protea.core.reranker``: it applies a LightGBM booster trained offline
+in ``protea-reranker-lab`` to predictions produced by
+``predict_go_terms_batch``. The module deliberately has a small surface:
+
+- ``load_reranker(artifact_uri, *, feature_schema_sha, store, cache_dir=None)``
+  — fetches the booster blob from the ``ArtifactStore`` on first use,
+  caches it under ``storage/reranker_cache/<sha>.txt`` and in a
+  thread-safe in-process dict keyed by ``feature_schema_sha``, and
+  returns the loaded ``lgb.Booster``. Subsequent calls with the same
+  sha are served from cache with no I/O.
+- ``apply_reranker(df, booster, *, feature_cols=None)`` — scores a
+  pandas DataFrame with the booster. Missing columns are filled with
+  ``pd.NA`` so LightGBM routes them through its native missing-value
+  branch. Ranking objectives whose raw outputs fall outside ``[0, 1]``
+  are calibrated via logistic so downstream thresholds remain uniform
+  with binary-classifier boosters.
+- ``infer_active_feature_families(*, compute_alignments, compute_taxonomy,
+  compute_v6_features) -> list[str]`` — maps the predict-time feature
+  flags onto the lab's feature-family names. The returned list is fed to
+  ``protea_reranker_lab.contracts.compute_feature_schema_sha`` to
+  produce a live schema sha that must equal the booster's
+  ``feature_schema_sha``; any mismatch causes the batch worker to skip
+  re-ranking and fall back to KNN distance ordering.
+
+.. automodule:: protea.core.reranking
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Parquet export (``protea.core.parquet_export``)
+------------------------------------------------
+
+``protea.core.parquet_export`` consolidates per-split, per-category
+parquet shards produced by the KNN + feature pipeline into the frozen
+dataset layout consumed by ``protea-reranker-lab``: exactly
+``train.parquet``, ``eval.parquet`` and ``manifest.json`` under a single
+directory. The manifest follows ``ManifestV1`` (schema version ``v2``)
+and records PROTEA's ``producer_version`` + ``producer_git_sha``.
+
+The single public function ``export_reranker_parquets(...)`` is shared
+by two callers:
+
+- ``train_reranker._dump_frozen_dataset`` — thin wrapper that uses this
+  helper to emit the dataset alongside a training run.
+- ``ExportResearchDatasetOperation`` — stand-alone operation that only
+  materialises and publishes the dataset, without running LightGBM.
+
+When ``store`` is provided, the three consolidated files are
+additionally uploaded under ``key_prefix`` using the ``ArtifactStore``
+interface, and the returned dict includes ``train_uri`` / ``eval_uri``
+/ ``manifest_uri``.
+
+.. automodule:: protea.core.parquet_export
    :members:
    :undoc-members:
    :show-inheritance:
@@ -226,9 +297,10 @@ different namespaces simultaneously (e.g., LK in CCO and PK in BPO).
 Operations
 ----------
 
-PROTEA ships sixteen registered operation instances at worker startup in
-``scripts/worker.py``. Each operation is a class that implements the
-``Operation`` protocol: a ``name`` string and an ``execute`` method.
+PROTEA ships seventeen registered operation instances at worker startup
+via ``protea.core.operation_catalog.build_operation_registry``. Each
+operation is a class that implements the ``Operation`` protocol: a
+``name`` string and an ``execute`` method.
 Operations are stateless with respect to infrastructure — they receive a
 session and emit structured events, but do not open connections or manage
 transactions.
@@ -354,13 +426,40 @@ transactions.
 
 **train_reranker**
    Trains a LightGBM binary classifier re-ranker from a PredictionSet +
-   EvaluationSet pair. Uses temporal holdout labels and 22 features (embedding
-   distance, alignment metrics, taxonomy, aggregate signals). Stores the
-   serialized model, validation metrics, and feature importance in a
-   ``RerankerModel`` row. ``TrainRerankerAutoOperation`` is a convenience
-   variant that auto-selects training parameters.
+   EvaluationSet pair. Uses temporal holdout labels and 23 features (20
+   numeric: embedding distance, NW/SW alignment metrics, sequence lengths,
+   taxonomic distance and common ancestors, plus 5 aggregate re-ranker
+   signals; and 3 categorical: qualifier, evidence code, taxonomic relation).
+   Stores the serialized model, validation metrics, and feature importance
+   in a ``RerankerModel`` row. ``TrainRerankerAutoOperation`` is a convenience
+   variant that auto-selects the most recent PredictionSet + EvaluationSet.
 
 .. automodule:: protea.core.operations.train_reranker
    :members:
    :undoc-members:
    :show-inheritance:
+
+**export_research_dataset**
+   Publishes the frozen re-ranker dataset (``train.parquet`` /
+   ``eval.parquet`` / ``manifest.json``) consumed by
+   ``protea-reranker-lab``. Runs the KNN + feature-generation pipeline
+   via ``TrainRerankerAutoOperation`` in ``dump_only`` mode and uploads
+   the resulting artefacts through the configured ``ArtifactStore``
+   (local FS by default, MinIO when the ``storage`` compose profile is
+   active). Manifest records PROTEA's ``producer_version`` /
+   ``producer_git_sha`` for full traceability from lab runs back to
+   PROTEA HEAD.
+
+.. automodule:: protea.core.operations.export_research_dataset
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. seealso::
+
+   - :doc:`/architecture/operations` — narrative documentation for every
+     operation listed above, with payload examples and execution flow.
+   - :doc:`infrastructure` — the ORM models that ``protea.core`` reads and
+     writes.
+   - :doc:`/appendix/howto_guides` — task-oriented recipes that exercise
+     these modules end-to-end.

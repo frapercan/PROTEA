@@ -2,6 +2,7 @@
 Unit tests for infrastructure layer: session, engine, settings, and app factory.
 No real database or broker required — SQLAlchemy and pika are mocked.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -14,6 +15,7 @@ from protea.infrastructure.session import build_session_factory, session_scope
 # ---------------------------------------------------------------------------
 # session_scope
 # ---------------------------------------------------------------------------
+
 
 class TestSessionScope:
     def _make_factory(self):
@@ -60,6 +62,7 @@ class TestSessionScope:
 # build_session_factory
 # ---------------------------------------------------------------------------
 
+
 class TestBuildSessionFactory:
     def test_returns_sessionmaker(self):
         with patch("protea.infrastructure.session.build_engine") as mock_engine:
@@ -79,9 +82,11 @@ class TestBuildSessionFactory:
 # build_engine
 # ---------------------------------------------------------------------------
 
+
 class TestBuildEngine:
     def test_returns_engine(self):
         from protea.infrastructure.database.engine import build_engine
+
         with patch("protea.infrastructure.database.engine.create_engine") as mock_create:
             mock_create.return_value = MagicMock()
             engine = build_engine("sqlite:///:memory:")
@@ -100,41 +105,51 @@ class TestBuildEngine:
 # create_app
 # ---------------------------------------------------------------------------
 
+
 class TestCreateApp:
     def test_sets_session_factory_on_state(self):
         from protea.api.app import create_app
+
         mock_factory = MagicMock()
         mock_settings = MagicMock()
         mock_settings.db_url = "sqlite:///:memory:"
         mock_settings.amqp_url = "amqp://guest:guest@localhost/"
 
-        with patch("protea.api.app.load_settings", return_value=mock_settings), \
-             patch("protea.api.app.build_session_factory", return_value=mock_factory):
+        with (
+            patch("protea.api.app.load_settings", return_value=mock_settings),
+            patch("protea.api.app.build_session_factory", return_value=mock_factory),
+        ):
             app = create_app(Path("/fake/root"))
 
         assert app.state.session_factory is mock_factory
 
     def test_sets_amqp_url_on_state(self):
         from protea.api.app import create_app
+
         mock_factory = MagicMock()
         mock_settings = MagicMock()
         mock_settings.db_url = "sqlite:///:memory:"
         mock_settings.amqp_url = "amqp://guest:guest@localhost/"
 
-        with patch("protea.api.app.load_settings", return_value=mock_settings), \
-             patch("protea.api.app.build_session_factory", return_value=mock_factory):
+        with (
+            patch("protea.api.app.load_settings", return_value=mock_settings),
+            patch("protea.api.app.build_session_factory", return_value=mock_factory),
+        ):
             app = create_app(Path("/fake/root"))
 
         assert app.state.amqp_url == "amqp://guest:guest@localhost/"
 
     def test_jobs_router_is_registered(self):
         from protea.api.app import create_app
+
         mock_settings = MagicMock()
         mock_settings.db_url = "sqlite:///:memory:"
         mock_settings.amqp_url = "amqp://guest:guest@localhost/"
 
-        with patch("protea.api.app.load_settings", return_value=mock_settings), \
-             patch("protea.api.app.build_session_factory", return_value=MagicMock()):
+        with (
+            patch("protea.api.app.load_settings", return_value=mock_settings),
+            patch("protea.api.app.build_session_factory", return_value=MagicMock()),
+        ):
             app = create_app(Path("/fake/root"))
 
         routes = [r.path for r in app.routes]
@@ -147,8 +162,10 @@ class TestCreateApp:
         mock_settings.db_url = "sqlite:///:memory:"
         mock_settings.amqp_url = "amqp://guest:guest@localhost/"
 
-        with patch("protea.api.app.load_settings", return_value=mock_settings), \
-             patch("protea.api.app.build_session_factory", return_value=MagicMock()):
+        with (
+            patch("protea.api.app.load_settings", return_value=mock_settings),
+            patch("protea.api.app.build_session_factory", return_value=MagicMock()),
+        ):
             app = create_app(Path("/fake/root"))
 
         routes = [r.path for r in app.routes]
@@ -165,8 +182,10 @@ class TestCreateApp:
         mock_settings.db_url = "sqlite:///:memory:"
         mock_settings.amqp_url = "amqp://guest:guest@localhost/"
 
-        with patch("protea.api.app.load_settings", return_value=mock_settings), \
-             patch("protea.api.app.build_session_factory", return_value=MagicMock()):
+        with (
+            patch("protea.api.app.load_settings", return_value=mock_settings),
+            patch("protea.api.app.build_session_factory", return_value=MagicMock()),
+        ):
             app = create_app(Path("/fake/root"))
 
         client = TestClient(app)
@@ -190,13 +209,17 @@ class TestCreateApp:
         mock_session.__enter__ = lambda s: s
         mock_session.__exit__ = MagicMock(return_value=False)
 
-        with patch("protea.api.app.load_settings", return_value=mock_settings), \
-             patch("protea.api.app.build_session_factory", return_value=mock_factory):
+        with (
+            patch("protea.api.app.load_settings", return_value=mock_settings),
+            patch("protea.api.app.build_session_factory", return_value=mock_factory),
+        ):
             app = create_app(Path("/fake/root"))
 
         mock_conn = MagicMock()
-        with patch("protea.infrastructure.session.session_scope") as mock_scope, \
-             patch("pika.BlockingConnection", return_value=mock_conn):
+        with (
+            patch("protea.infrastructure.session.session_scope") as mock_scope,
+            patch("pika.BlockingConnection", return_value=mock_conn),
+        ):
             mock_scope.return_value.__enter__ = lambda s: mock_session
             mock_scope.return_value.__exit__ = MagicMock(return_value=False)
             client = TestClient(app)
@@ -221,12 +244,16 @@ class TestCreateApp:
         mock_session.__enter__ = lambda s: s
         mock_session.__exit__ = MagicMock(return_value=False)
 
-        with patch("protea.api.app.load_settings", return_value=mock_settings), \
-             patch("protea.api.app.build_session_factory", return_value=mock_factory):
+        with (
+            patch("protea.api.app.load_settings", return_value=mock_settings),
+            patch("protea.api.app.build_session_factory", return_value=mock_factory),
+        ):
             app = create_app(Path("/fake/root"))
 
-        with patch("protea.infrastructure.session.session_scope") as mock_scope, \
-             patch("pika.BlockingConnection", side_effect=Exception("Connection refused")):
+        with (
+            patch("protea.infrastructure.session.session_scope") as mock_scope,
+            patch("pika.BlockingConnection", side_effect=Exception("Connection refused")),
+        ):
             mock_scope.return_value.__enter__ = lambda s: mock_session
             mock_scope.return_value.__exit__ = MagicMock(return_value=False)
             client = TestClient(app)
@@ -243,8 +270,10 @@ class TestCreateApp:
         mock_settings.db_url = "sqlite:///:memory:"
         mock_settings.amqp_url = "amqp://guest:guest@localhost/"
 
-        with patch("protea.api.app.load_settings", return_value=mock_settings) as mock_load, \
-             patch("protea.api.app.build_session_factory", return_value=MagicMock()):
+        with (
+            patch("protea.api.app.load_settings", return_value=mock_settings) as mock_load,
+            patch("protea.api.app.build_session_factory", return_value=MagicMock()),
+        ):
             create_app()  # project_root=None
 
         # load_settings should have been called with the resolved parents[2] path
@@ -264,8 +293,10 @@ class TestCreateApp:
         mock_settings.db_url = "sqlite:///:memory:"
         mock_settings.amqp_url = "amqp://guest:guest@localhost/"
 
-        with patch("protea.api.app.load_settings", return_value=mock_settings), \
-             patch("protea.api.app.build_session_factory", return_value=MagicMock()):
+        with (
+            patch("protea.api.app.load_settings", return_value=mock_settings),
+            patch("protea.api.app.build_session_factory", return_value=MagicMock()),
+        ):
             app = create_app(project_root=tmp_path)
 
         route_paths = [r.path for r in app.routes]
@@ -283,8 +314,10 @@ class TestCreateApp:
         mock_settings.db_url = "sqlite:///:memory:"
         mock_settings.amqp_url = "amqp://guest:guest@localhost/"
 
-        with patch("protea.api.app.load_settings", return_value=mock_settings), \
-             patch("protea.api.app.build_session_factory", return_value=MagicMock()):
+        with (
+            patch("protea.api.app.load_settings", return_value=mock_settings),
+            patch("protea.api.app.build_session_factory", return_value=MagicMock()),
+        ):
             app = create_app(project_root=tmp_path)
 
         route_paths = [r.path for r in app.routes]

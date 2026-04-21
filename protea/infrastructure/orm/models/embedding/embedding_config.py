@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, Integer, String, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -12,7 +12,7 @@ from protea.infrastructure.orm.base import Base
 
 _VALID_LAYER_AGG = {"mean", "last", "concat"}
 _VALID_POOLING = {"mean", "max", "cls", "mean_max"}
-_VALID_BACKENDS = {"esm", "esm3c", "t5", "auto"}
+_VALID_BACKENDS = {"esm", "esm3c", "t5", "ankh", "auto"}
 
 
 class EmbeddingConfig(Base):
@@ -48,6 +48,9 @@ class EmbeddingConfig(Base):
                   Runs FP16 on GPU.  CLS and EOS tokens stripped for pooling.
     - ``t5``    : HuggingFace ``T5EncoderModel`` (ProstT5, prot_t5_xl…).
                   ProSTT5 mode auto-detected from ``model_name``.
+    - ``ankh``  : HuggingFace ``T5EncoderModel`` loaded via ``AutoTokenizer``
+                  (Ankh base/large).  No ``<AA2fold>`` prefix; ambiguous
+                  residues are substituted with ``X`` like the other T5 path.
     - ``auto``  : falls back to ``esm``.
 
     Normalisation
@@ -78,6 +81,9 @@ class EmbeddingConfig(Base):
     chunk_size: Mapped[int] = mapped_column(Integer, nullable=False, default=512)
     chunk_overlap: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     description: Mapped[str | None] = mapped_column(String, nullable=True)
+    display_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    family: Mapped[str | None] = mapped_column(String, nullable=True)
+    param_count: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

@@ -54,7 +54,24 @@ class FetchUniProtMetadataOperation(UniProtHttpMixin):
     """
 
     name = "fetch_uniprot_metadata"
+    description = (
+        "Fetch functional annotations (TSV) from UniProt and upsert "
+        "ProteinUniProtMetadata rows keyed by canonical accession."
+    )
     UNIPROT_SEARCH_URL = "https://rest.uniprot.org/uniprotkb/search"
+
+    def summarize_payload(self, payload: dict[str, Any]) -> str:
+        criteria = (payload or {}).get("search_criteria")
+        limit = (payload or {}).get("total_limit")
+        bits = []
+        if criteria:
+            short = str(criteria)
+            if len(short) > 60:
+                short = short[:57] + "..."
+            bits.append(f"query={short}")
+        if limit:
+            bits.append(f"limit={limit}")
+        return " · ".join(bits)
 
     # DB column -> TSV header
     FIELD_MAP: dict[str, str] = {

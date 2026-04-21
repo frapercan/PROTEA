@@ -72,6 +72,7 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   async function refresh() {
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
     try {
       setError("");
       const [j, ev, ch] = await Promise.all([
@@ -98,16 +99,24 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
     refresh();
   }, [jobId]);
 
-  // Auto-refresh while job is active
+  // Auto-refresh while job is active. Pauses when the tab is hidden and
+  // resumes on visibilitychange — avoids burning bandwidth on background tabs.
   useEffect(() => {
     if (!job) return;
     const isTerminal = TERMINAL.includes(String(job.status).toLowerCase());
-    if (!isTerminal) {
-      intervalRef.current = setInterval(refresh, 2000);
-    } else {
+    if (isTerminal) {
       if (intervalRef.current) clearInterval(intervalRef.current);
+      return;
     }
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+    intervalRef.current = setInterval(refresh, 2000);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [job?.status]);
 
   async function onDelete() {
@@ -185,6 +194,15 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
             <span className="font-semibold text-gray-800">{job.operation}</span>
             <span className="font-mono text-xs text-gray-400">{jobId}</span>
           </div>
+
+          {job.operation_description && (
+            <p className="text-sm text-gray-600 leading-snug">{job.operation_description}</p>
+          )}
+          {job.operation_summary && (
+            <p className="font-mono text-xs text-gray-700 break-words rounded bg-gray-50 px-2 py-1.5 border border-gray-100">
+              {job.operation_summary}
+            </p>
+          )}
 
           <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
             <div><span className="text-gray-500">{t("jobDetail.queue")}</span> <span className="font-mono text-xs">{job.queue_name}</span></div>

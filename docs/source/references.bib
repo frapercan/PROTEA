@@ -1,0 +1,273 @@
+% ============================================================================
+%  PROTEA — thesis bibliography
+%  Entries are grouped by topic and cited throughout the RST sources via the
+%  :cite: role (sphinxcontrib-bibtex).  Keys are stable identifiers — do not
+%  rename without updating the corresponding :cite: calls.
+% ============================================================================
+
+% ---------------------------------------------------------------------------
+%  Workflow engines and software architecture
+% ---------------------------------------------------------------------------
+
+@article{galaxy2018,
+  author       = {Afgan, Enis and Baker, Dannon and Batut, B{\'e}r{\'e}nice and
+                  van den Beek, Marius and Bouvier, Dave and {\v C}ech, Martin
+                  and Chilton, John and Clements, Dave and Coraor, Nate and
+                  Gr{\"u}ning, Bj{\"o}rn A. and others},
+  title        = {The {Galaxy} platform for accessible, reproducible and
+                  collaborative biomedical analyses: 2018 update},
+  journal      = {Nucleic Acids Research},
+  volume       = {46},
+  number       = {W1},
+  pages        = {W537--W544},
+  year         = {2018},
+  doi          = {10.1093/nar/gky379}
+}
+
+@article{snakemake2012,
+  author       = {K{\"o}ster, Johannes and Rahmann, Sven},
+  title        = {{Snakemake}---a scalable bioinformatics workflow engine},
+  journal      = {Bioinformatics},
+  volume       = {28},
+  number       = {19},
+  pages        = {2520--2522},
+  year         = {2012},
+  doi          = {10.1093/bioinformatics/bts480}
+}
+
+@article{nextflow2017,
+  author       = {Di Tommaso, Paolo and Chatzou, Maria and Floden, Evan W.
+                  and Barja, Pablo Prieto and Palumbo, Emilio and
+                  Notredame, Cedric},
+  title        = {{Nextflow} enables reproducible computational workflows},
+  journal      = {Nature Biotechnology},
+  volume       = {35},
+  number       = {4},
+  pages        = {316--319},
+  year         = {2017},
+  doi          = {10.1038/nbt.3820}
+}
+
+@book{fowler2002patterns,
+  author    = {Fowler, Martin},
+  title     = {Patterns of Enterprise Application Architecture},
+  publisher = {Addison-Wesley},
+  year      = {2002},
+  isbn      = {978-0321127426}
+}
+
+% ---------------------------------------------------------------------------
+%  CAFA challenge and evaluation
+% ---------------------------------------------------------------------------
+
+@article{cafa2013,
+  author       = {Radivojac, Predrag and Clark, Wyatt T. and Oron, Tal Ronnen
+                  and Schnoes, Alexandra M. and Wittkop, Tobias and Sokolov,
+                  Artem and others},
+  title        = {A large-scale evaluation of computational protein function
+                  prediction},
+  journal      = {Nature Methods},
+  volume       = {10},
+  number       = {3},
+  pages        = {221--227},
+  year         = {2013},
+  doi          = {10.1038/nmeth.2340}
+}
+
+@article{cafa2019,
+  author       = {Zhou, Naihui and Jiang, Yuxiang and Bergquist, Timothy R.
+                  and Lee, Alexandra J. and Kacsoh, Balint Z. and others},
+  title        = {The {CAFA} challenge reports improved protein function
+                  prediction and new functional annotations for hundreds of
+                  genes through experimental screens},
+  journal      = {Genome Biology},
+  volume       = {20},
+  number       = {1},
+  pages        = {244},
+  year         = {2019},
+  doi          = {10.1186/s13059-019-1835-8}
+}
+
+@misc{cafa2023,
+  author       = {{CAFA Consortium}},
+  title        = {{CAFA5}: Protein function prediction ({Kaggle} competition)},
+  year         = {2023},
+  howpublished = {\url{https://www.kaggle.com/competitions/cafa-5-protein-function-prediction}},
+  note         = {Accessed 2026-04-10}
+}
+
+@article{ia2013,
+  author       = {Clark, Wyatt T. and Radivojac, Predrag},
+  title        = {Information-theoretic evaluation of predicted ontological
+                  annotations},
+  journal      = {Bioinformatics},
+  volume       = {29},
+  number       = {13},
+  pages        = {i53--i61},
+  year         = {2013},
+  doi          = {10.1093/bioinformatics/btt228}
+}
+
+@misc{cafaeval2023,
+  author       = {Piovesan, Damiano and others},
+  title        = {{cafa-evaluator}: Official {CAFA5} evaluation tool},
+  year         = {2023},
+  howpublished = {\url{https://github.com/BioComputingUP/CAFA-evaluator}},
+  note         = {Accessed 2026-04-10}
+}
+
+% ---------------------------------------------------------------------------
+%  Homology-based GO prediction tools
+% ---------------------------------------------------------------------------
+
+@article{pannzer2018,
+  author       = {T{\"o}r{\"o}nen, Petri and Medlar, Alan and Holm, Liisa},
+  title        = {{PANNZER2}: a rapid functional annotation web server},
+  journal      = {Nucleic Acids Research},
+  volume       = {46},
+  number       = {W1},
+  pages        = {W84--W88},
+  year         = {2018},
+  doi          = {10.1093/nar/gky350}
+}
+
+@article{interproscan2014,
+  author       = {Jones, Philip and Binns, David and Chang, Hsin-Yu and
+                  Fraser, Matthew and Li, Weizhong and McAnulla, Craig and
+                  others},
+  title        = {{InterProScan 5}: genome-scale protein function
+                  classification},
+  journal      = {Bioinformatics},
+  volume       = {30},
+  number       = {9},
+  pages        = {1236--1240},
+  year         = {2014},
+  doi          = {10.1093/bioinformatics/btu031}
+}
+
+@article{eggnog2021,
+  author       = {Cantalapiedra, Carlos P. and Hern{\'a}ndez-Plaza, Ana and
+                  Letunic, Ivica and Bork, Peer and Huerta-Cepas, Jaime},
+  title        = {{eggNOG-mapper v2}: functional annotation, orthology
+                  assignments, and domain prediction at the metagenomic scale},
+  journal      = {Molecular Biology and Evolution},
+  volume       = {38},
+  number       = {12},
+  pages        = {5825--5829},
+  year         = {2021},
+  doi          = {10.1093/molbev/msab293}
+}
+
+% ---------------------------------------------------------------------------
+%  Embedding-based GO prediction
+% ---------------------------------------------------------------------------
+
+@article{deepgoplus2020,
+  author       = {Kulmanov, Maxat and Hoehndorf, Robert},
+  title        = {{DeepGOPlus}: improved protein function prediction from
+                  sequence},
+  journal      = {Bioinformatics},
+  volume       = {36},
+  number       = {2},
+  pages        = {422--429},
+  year         = {2020},
+  doi          = {10.1093/bioinformatics/btz595}
+}
+
+@article{sprofgo2023,
+  author       = {Yuan, Qianmu and Xie, Junjie and Xie, Jiancong and Zhao,
+                  Huiying and Yang, Yuedong},
+  title        = {Fast and accurate protein function prediction from sequence
+                  through pretrained language model and homology-based label
+                  diffusion},
+  journal      = {Briefings in Bioinformatics},
+  volume       = {24},
+  number       = {3},
+  pages        = {bbad117},
+  year         = {2023},
+  doi          = {10.1093/bib/bbad117}
+}
+
+% ---------------------------------------------------------------------------
+%  Protein language models
+% ---------------------------------------------------------------------------
+
+@article{prottrans2022,
+  author       = {Elnaggar, Ahmed and Heinzinger, Michael and Dallago,
+                  Christian and Rehawi, Ghalia and Wang, Yu and Jones, Llion
+                  and Gibbs, Tom and Feher, Tamas and Angerer, Christoph and
+                  Steinegger, Martin and Bhowmik, Debsindhu and Rost, Burkhard},
+  title        = {{ProtTrans}: Toward understanding the language of life
+                  through self-supervised learning},
+  journal      = {IEEE Transactions on Pattern Analysis and Machine
+                  Intelligence},
+  volume       = {44},
+  number       = {10},
+  pages        = {7112--7127},
+  year         = {2022},
+  doi          = {10.1109/TPAMI.2021.3095381}
+}
+
+@article{esm2_2023,
+  author       = {Lin, Zeming and Akin, Halil and Rao, Roshan and Hie, Brian
+                  and Zhu, Zhongkai and Lu, Wenting and Smetanin, Nikita and
+                  Verkuil, Robert and Kabeli, Ori and Shmueli, Yaniv and
+                  dos Santos Costa, Allan and Fazel-Zarandi, Maryam and
+                  Sercu, Tom and Candido, Salvatore and Rives, Alexander},
+  title        = {Evolutionary-scale prediction of atomic-level protein
+                  structure with a language model},
+  journal      = {Science},
+  volume       = {379},
+  number       = {6637},
+  pages        = {1123--1130},
+  year         = {2023},
+  doi          = {10.1126/science.ade2574}
+}
+
+@misc{esmc2024,
+  author       = {{EvolutionaryScale Team}},
+  title        = {{ESM Cambrian}: Revealing the mysteries of proteins with
+                  unsupervised learning},
+  year         = {2024},
+  howpublished = {\url{https://www.evolutionaryscale.ai/blog/esm-cambrian}},
+  note         = {Accessed 2026-04-10}
+}
+
+% ---------------------------------------------------------------------------
+%  Supporting libraries
+% ---------------------------------------------------------------------------
+
+@article{faiss2021,
+  author       = {Johnson, Jeff and Douze, Matthijs and J{\'e}gou, Herv{\'e}},
+  title        = {Billion-scale similarity search with {GPUs}},
+  journal      = {IEEE Transactions on Big Data},
+  volume       = {7},
+  number       = {3},
+  pages        = {535--547},
+  year         = {2021},
+  doi          = {10.1109/TBDATA.2019.2921572}
+}
+
+@article{parasail2016,
+  author       = {Daily, Jeff},
+  title        = {Parasail: {SIMD} {C} library for global, semi-global, and
+                  local pairwise sequence alignments},
+  journal      = {BMC Bioinformatics},
+  volume       = {17},
+  number       = {1},
+  pages        = {81},
+  year         = {2016},
+  doi          = {10.1186/s12859-016-0930-z}
+}
+
+@article{ete32016,
+  author       = {Huerta-Cepas, Jaime and Serra, Francois and Bork, Peer},
+  title        = {{ETE 3}: Reconstruction, analysis, and visualization of
+                  phylogenomic data},
+  journal      = {Molecular Biology and Evolution},
+  volume       = {33},
+  number       = {6},
+  pages        = {1635--1638},
+  year         = {2016},
+  doi          = {10.1093/molbev/msw046}
+}

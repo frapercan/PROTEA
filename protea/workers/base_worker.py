@@ -185,7 +185,7 @@ class BaseWorker:
                     or 0
                 )
                 base_delay = e.delay_seconds
-                delay = min(base_delay * (2 ** retry_count), 600)  # cap at 10 min
+                delay = min(base_delay * (2**retry_count), 600)  # cap at 10 min
 
                 job.status = JobStatus.QUEUED
                 job.started_at = None

@@ -54,7 +54,24 @@ class InsertProteinsOperation(UniProtHttpMixin, Operation):
     """
 
     name = "insert_proteins"
+    description = (
+        "Fetch protein sequences from UniProt (FASTA, cursor-paginated) and upsert "
+        "Protein + Sequence rows; isoforms are stored grouped by canonical accession."
+    )
     UNIPROT_SEARCH_URL = "https://rest.uniprot.org/uniprotkb/search"
+
+    def summarize_payload(self, payload: dict[str, Any]) -> str:
+        criteria = (payload or {}).get("search_criteria")
+        limit = (payload or {}).get("total_limit")
+        bits = []
+        if criteria:
+            short = str(criteria)
+            if len(short) > 60:
+                short = short[:57] + "..."
+            bits.append(f"query={short}")
+        if limit:
+            bits.append(f"limit={limit}")
+        return " · ".join(bits)
 
     _re_os = re.compile(r"\bOS=([^=]+?)\sOX=")
     _re_ox = re.compile(r"\bOX=(\d+)")

@@ -17,6 +17,7 @@ from protea.infrastructure.orm.base import Base
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _noop_emit(event: str, message: str | None, fields: dict[str, object], level: str) -> None:
     pass
 
@@ -36,6 +37,7 @@ def _capturing_emit():
 # Unit tests — FetchUniProtMetadataPayload
 # ---------------------------------------------------------------------------
 
+
 class TestFetchUniProtMetadataPayload:
     def test_minimal_valid(self):
         p = FetchUniProtMetadataPayload.model_validate({"search_criteria": "organism_id:9606"})
@@ -46,20 +48,22 @@ class TestFetchUniProtMetadataPayload:
         assert p.update_protein_core is True
 
     def test_all_fields(self):
-        p = FetchUniProtMetadataPayload.model_validate({
-            "search_criteria": "organism_id:9606",
-            "page_size": 100,
-            "total_limit": 200,
-            "timeout_seconds": 30,
-            "compressed": False,
-            "max_retries": 3,
-            "backoff_base_seconds": 0.5,
-            "backoff_max_seconds": 10.0,
-            "jitter_seconds": 0.1,
-            "commit_every_page": False,
-            "update_protein_core": False,
-            "user_agent": "test/1.0",
-        })
+        p = FetchUniProtMetadataPayload.model_validate(
+            {
+                "search_criteria": "organism_id:9606",
+                "page_size": 100,
+                "total_limit": 200,
+                "timeout_seconds": 30,
+                "compressed": False,
+                "max_retries": 3,
+                "backoff_base_seconds": 0.5,
+                "backoff_max_seconds": 10.0,
+                "jitter_seconds": 0.1,
+                "commit_every_page": False,
+                "update_protein_core": False,
+                "user_agent": "test/1.0",
+            }
+        )
         assert p.page_size == 100
         assert p.total_limit == 200
         assert p.compressed is False
@@ -85,16 +89,22 @@ class TestFetchUniProtMetadataPayload:
             FetchUniProtMetadataPayload.model_validate({"search_criteria": "q", "total_limit": -1})
 
     def test_null_total_limit_allowed(self):
-        p = FetchUniProtMetadataPayload.model_validate({"search_criteria": "q", "total_limit": None})
+        p = FetchUniProtMetadataPayload.model_validate(
+            {"search_criteria": "q", "total_limit": None}
+        )
         assert p.total_limit is None
 
     def test_invalid_compressed_raises(self):
         with pytest.raises(ValueError, match="compressed"):
-            FetchUniProtMetadataPayload.model_validate({"search_criteria": "q", "compressed": "yes"})
+            FetchUniProtMetadataPayload.model_validate(
+                {"search_criteria": "q", "compressed": "yes"}
+            )
 
     def test_negative_backoff_raises(self):
         with pytest.raises(ValueError, match="backoff_base_seconds"):
-            FetchUniProtMetadataPayload.model_validate({"search_criteria": "q", "backoff_base_seconds": -1.0})
+            FetchUniProtMetadataPayload.model_validate(
+                {"search_criteria": "q", "backoff_base_seconds": -1.0}
+            )
 
     def test_search_criteria_is_stripped(self):
         p = FetchUniProtMetadataPayload.model_validate({"search_criteria": "  organism_id:9606  "})
@@ -104,6 +114,7 @@ class TestFetchUniProtMetadataPayload:
 # ---------------------------------------------------------------------------
 # Unit tests — _parse_tsv
 # ---------------------------------------------------------------------------
+
 
 class TestParseTsv:
     def setup_method(self):
@@ -203,7 +214,12 @@ class TestFetchUniProtMetadataOperationExecute:
 
     def test_execute_respects_total_limit(self):
         # Two rows in TSV but total_limit=1 should stop after 1
-        tsv = TSV_RESPONSE + "Q99999\tunreviewed\tTEST2_HUMAN\tAnother\tT2\tMus musculus\t100\t" + "\t" * 17 + "\n"
+        tsv = (
+            TSV_RESPONSE
+            + "Q99999\tunreviewed\tTEST2_HUMAN\tAnother\tT2\tMus musculus\t100\t"
+            + "\t" * 17
+            + "\n"
+        )
         session = self._mock_session()
         emit = _capturing_emit()
 
@@ -215,7 +231,9 @@ class TestFetchUniProtMetadataOperationExecute:
             )
 
         assert result.result["rows"] == 1
-        limit_events = [c for c in emit.calls if c["event"] == "fetch_uniprot_metadata.limit_reached"]
+        limit_events = [
+            c for c in emit.calls if c["event"] == "fetch_uniprot_metadata.limit_reached"
+        ]
         assert len(limit_events) == 1
 
     def test_execute_inserts_metadata_row(self):
@@ -237,6 +255,7 @@ class TestFetchUniProtMetadataOperationExecute:
 # Integration test — execute() against a real Postgres DB with mocked HTTP
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 def test_fetch_uniprot_metadata_integration(postgres_url: str):
     engine = create_engine(postgres_url, future=True)
@@ -250,7 +269,11 @@ def test_fetch_uniprot_metadata_integration(postgres_url: str):
         with patch.object(op._http, "get", return_value=_make_mock_response(TSV_RESPONSE)):
             result = op.execute(
                 session,
-                {"search_criteria": "organism_id:9606", "compressed": False, "commit_every_page": False},
+                {
+                    "search_criteria": "organism_id:9606",
+                    "compressed": False,
+                    "commit_every_page": False,
+                },
                 emit=emit,
             )
             session.commit()
@@ -264,7 +287,11 @@ def test_fetch_uniprot_metadata_integration(postgres_url: str):
         with patch.object(op2._http, "get", return_value=_make_mock_response(TSV_RESPONSE)):
             result2 = op2.execute(
                 session,
-                {"search_criteria": "organism_id:9606", "compressed": False, "commit_every_page": False},
+                {
+                    "search_criteria": "organism_id:9606",
+                    "compressed": False,
+                    "commit_every_page": False,
+                },
                 emit=_noop_emit,
             )
             session.commit()

@@ -8,11 +8,52 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session, sessionmaker
 
-from protea.api.deps import get_amqp_url, get_session_factory
+from protea.api.deps import get_amqp_url, get_operation_registry, get_session_factory
+from protea.core.contracts.registry import OperationRegistry
 from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
 from protea.infrastructure.queue.publisher import publish_job
 from protea.infrastructure.session import session_scope
+
+
+def _operation_metadata(
+    registry: OperationRegistry,
+    operation_name: str,
+    payload: dict[str, Any] | None,
+    session: Session | None = None,
+) -> tuple[str | None, str | None]:
+    """Look up an operation's static description and dynamic payload summary.
+
+    Returns ``(description, summary)``. Both are ``None`` if the operation
+    is no longer registered (e.g. renamed/removed). ``summary`` is ``None``
+    if the operation does not implement ``summarize_payload`` or raises while
+    rendering it — we never want metadata enrichment to break the jobs API.
+
+    If ``summarize_payload`` accepts a ``session`` keyword (introspected via
+    ``inspect.signature``), the active SQLAlchemy session is forwarded so the
+    operation can resolve foreign keys (e.g. an EmbeddingConfig) and render
+    human-readable details. Otherwise it is called with payload only.
+    """
+    import inspect
+
+    try:
+        op = registry.get(operation_name)
+    except KeyError:
+        return None, None
+    description = getattr(op, "description", None) or None
+    summary: str | None = None
+    summarize = getattr(op, "summarize_payload", None)
+    if callable(summarize):
+        try:
+            sig = inspect.signature(summarize)
+            if "session" in sig.parameters:
+                rendered = summarize(payload or {}, session=session)
+            else:
+                rendered = summarize(payload or {})
+        except Exception:
+            rendered = ""
+        summary = rendered or None
+    return description, summary
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -81,6 +122,7 @@ def list_jobs(
     parent_job_id: UUID | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=500),
     factory: sessionmaker[Session] = Depends(get_session_factory),
+    registry: OperationRegistry = Depends(get_operation_registry),
 ) -> list[dict[str, Any]]:
     """List jobs with optional filtering.
 
@@ -106,29 +148,37 @@ def list_jobs(
             q = q.filter(Job.operation == operation)
 
         rows = q.order_by(Job.created_at.desc()).limit(limit).all()
-        return [
-            {
-                "id": str(j.id),
-                "operation": j.operation,
-                "queue_name": j.queue_name,
-                "status": j.status.value,
-                "parent_job_id": str(j.parent_job_id) if j.parent_job_id else None,
-                "created_at": j.created_at.isoformat(),
-                "started_at": j.started_at.isoformat() if j.started_at else None,
-                "finished_at": j.finished_at.isoformat() if j.finished_at else None,
-                "progress_current": j.progress_current,
-                "progress_total": j.progress_total,
-                "error_code": j.error_code,
-                "error_message": j.error_message,
-            }
-            for j in rows
-        ]
+        out: list[dict[str, Any]] = []
+        for j in rows:
+            description, summary = _operation_metadata(
+                registry, j.operation, j.payload, session=session
+            )
+            out.append(
+                {
+                    "id": str(j.id),
+                    "operation": j.operation,
+                    "operation_description": description,
+                    "operation_summary": summary,
+                    "queue_name": j.queue_name,
+                    "status": j.status.value,
+                    "parent_job_id": str(j.parent_job_id) if j.parent_job_id else None,
+                    "created_at": j.created_at.isoformat(),
+                    "started_at": j.started_at.isoformat() if j.started_at else None,
+                    "finished_at": j.finished_at.isoformat() if j.finished_at else None,
+                    "progress_current": j.progress_current,
+                    "progress_total": j.progress_total,
+                    "error_code": j.error_code,
+                    "error_message": j.error_message,
+                }
+            )
+        return out
 
 
 @router.get("/{job_id}", summary="Get job details")
 def get_job(
     job_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),
+    registry: OperationRegistry = Depends(get_operation_registry),
 ) -> dict[str, Any]:
     """Retrieve full details for a single job including its payload, meta, and progress counters."""
     with session_scope(factory) as session:
@@ -136,9 +186,14 @@ def get_job(
         if j is None:
             raise HTTPException(status_code=404, detail="Job not found")
 
+        description, summary = _operation_metadata(
+            registry, j.operation, j.payload, session=session
+        )
         return {
             "id": str(j.id),
             "operation": j.operation,
+            "operation_description": description,
+            "operation_summary": summary,
             "queue_name": j.queue_name,
             "status": j.status.value,
             "payload": j.payload,

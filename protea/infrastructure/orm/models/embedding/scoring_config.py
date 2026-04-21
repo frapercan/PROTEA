@@ -162,33 +162,17 @@ class ScoringConfig(Base):
     """Persistent scoring formula definition.
 
     Instances are stored in the ``scoring_config`` table and referenced by
-    evaluation endpoints and the UI scoring selector.  Every field that
+    evaluation endpoints and the UI scoring selector. Every field that
     influences score computation is serialised, making any result fully
     reproducible by re-applying the same ``ScoringConfig`` to the raw
     ``GOPrediction`` rows.
 
-    Attributes
-    ----------
-    id:
-        UUID primary key.
-    name:
-        Human-readable label shown in the UI dropdown.
-    formula:
-        One of :data:`VALID_FORMULAS` — controls how the weighted average is
-        combined with the evidence multiplier.
-    weights:
-        JSONB dict mapping signal keys to their relative weights.  Valid keys
-        are the ones in :data:`DEFAULT_WEIGHTS`.  Weights of 0 deactivate a
-        signal; absent keys are treated as 0.
-    evidence_weights:
-        Optional JSONB dict mapping GO evidence codes (e.g. ``"IEA"``) to
-        per-code quality multipliers in [0, 1].  When ``None`` the system falls
-        back to :data:`DEFAULT_EVIDENCE_WEIGHTS`.  Partial dicts are allowed:
-        codes absent from the override still resolve via the default table.
-    description:
-        Free-text description shown as a tooltip in the UI.
-    created_at:
-        UTC timestamp set by the database at insert time.
+    The ``formula`` column must be one of :data:`VALID_FORMULAS`. The
+    ``weights`` JSONB maps signal keys (see :data:`DEFAULT_WEIGHTS`) to
+    their relative weights — a weight of 0 deactivates the signal. The
+    optional ``evidence_weights`` JSONB maps GO evidence codes to per-code
+    quality multipliers in [0, 1] and falls back to
+    :data:`DEFAULT_EVIDENCE_WEIGHTS` for absent codes.
     """
 
     __tablename__ = "scoring_config"

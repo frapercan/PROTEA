@@ -1,4 +1,5 @@
 """Unit tests for the LightGBM re-ranker core module."""
+
 from __future__ import annotations
 
 import numpy as np

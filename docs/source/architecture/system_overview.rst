@@ -94,7 +94,7 @@ Services and data stores
           ``load_goa_annotations``, ``load_quickgo_annotations``,
           ``compute_embeddings`` (coordinator), ``predict_go_terms`` (coordinator),
           ``generate_evaluation_set``, ``run_cafa_evaluation``,
-          ``train_reranker``, ``train_reranker_auto``
+          ``train_reranker``, ``train_reranker_auto``, ``export_research_dataset``
       * - ``protea.embeddings``
         - QueueConsumer
         - ``compute_embeddings`` coordinator (serialised: one at a time, 60 s retry delay if GPU busy)
@@ -141,6 +141,28 @@ Services and data stores
       KNN search is performed in Python using numpy or FAISS, never at the DB layer.
       See :ref:`knn-constraint` in the howto guides.
 
+**Artifact store (local FS by default, optional MinIO)**
+
+   Large produced blobs — re-ranker boosters, exported research datasets
+   (``train.parquet`` / ``eval.parquet`` / ``manifest.json``) — do not live
+   in PostgreSQL. They are written through the ``ArtifactStore`` protocol
+   defined in ``protea/infrastructure/storage/``. Two backends are
+   available:
+
+   - **LocalFsArtifactStore** (default): blobs land under
+     ``storage/artifacts/`` on the API host. URIs are ``file:///…``.
+   - **MinioArtifactStore** (optional): an S3-compatible object store.
+     Activated by setting ``storage.backend: minio`` in ``system.yaml``
+     (or ``PROTEA_STORAGE_BACKEND=minio``) and starting the compose
+     profile: ``docker compose --profile storage up``. URIs are
+     ``s3://<bucket>/<key>``.
+
+   Both backends satisfy the same four-method protocol (``put``, ``get``,
+   ``url``, ``exists``), so operation code is agnostic of which backend
+   is active. If MinIO is configured but unreachable at startup the
+   factory logs a warning and degrades to the local FS — a missing
+   optional service never crashes the stack.
+
 **Next.js frontend (port 3000)**
 
    Single-page application for job management. Displays job list with status filtering,
@@ -174,7 +196,7 @@ Code layout
                           annotate, showcase, support
      core/
        contracts/         Operation protocol, ProteaPayload, OperationResult
-       operations/        Domain logic (11 operation modules, 16 registered instances)
+       operations/        Domain logic (12 operation modules, 17 registered instances)
        knn_search.py      KNN backends: numpy brute-force and FAISS (Flat/IVFFlat/HNSW)
        feature_engineering.py  Alignment (parasail NW/SW) and taxonomy (ete3 NCBITaxa)
        scoring.py         Scoring engine (weighted formulas, composite scores)
@@ -237,8 +259,8 @@ Technology stack
      - NumPy / FAISS
      - —
    * - Frontend
-     - Next.js 19 + Tailwind v4
-     - 19 / 4
+     - Next.js + React + Tailwind
+     - 16 / 19 / 4
    * - Dependency management
      - Poetry
      - 1.x
@@ -246,6 +268,61 @@ Technology stack
 All Python dependencies are declared in ``pyproject.toml`` with pinned version
 ranges; ``poetry.lock`` guarantees reproducible installs. The ``dev`` dependency
 group adds pytest, pytest-cov, and related tooling without affecting production.
+
+Re-ranker lab integration
+--------------------------
+
+Re-ranker model development is deliberately split into a **separate
+repository** (``protea-reranker-lab``) consumed by PROTEA through a
+narrow, contract-first interface. PROTEA does not import lab training
+code at runtime, and the lab does not import PROTEA session or queue
+code. The coupling is mediated by three files:
+
+- **Frozen dataset**: PROTEA writes ``train.parquet``, ``eval.parquet``,
+  and ``manifest.json`` (schema version ``v2``) to the configured
+  ``ArtifactStore`` via the ``export_research_dataset`` operation.
+- **Booster artefact**: the lab produces ``runs/<name>/model.txt``
+  (LightGBM ``Booster``) together with ``run.json`` and ``spec.yaml``.
+- **Shared contract**: the lab module
+  ``protea_reranker_lab.contracts`` exposes ``ManifestV1`` and
+  ``compute_feature_schema_sha(feature_families)``; PROTEA imports
+  ``compute_feature_schema_sha`` at predict time only, to validate
+  feature compatibility.
+
+.. code-block:: text
+
+   ┌──────────────────────┐        export_research_dataset        ┌────────────────────────┐
+   │       PROTEA         │───────────────────────────────────────▶│       Artifact          │
+   │ (KNN + features)     │     train.parquet / eval.parquet        │       Store             │
+   │                      │     manifest.json (schema_version=v2)   │  (local FS or MinIO)    │
+   └──────────┬───────────┘                                         └──────────┬──────────────┘
+              │                                                                 │
+              │                                                                 ▼
+              │                                                     ┌──────────────────────┐
+              │                                                     │ protea-reranker-lab  │
+              │                                                     │  trains LightGBM     │
+              │                                                     │  booster offline     │
+              │                                                     └──────────┬───────────┘
+              │                                                                 │
+              │                 scripts/register_reranker.py ─ uploads ─┐       │
+              │                                                          ▼      │
+              │                                                     ┌──────────────────────┐
+              │                                                     │  RerankerModel row   │
+              │                                                     │  artifact_uri,       │
+              │                                                     │  feature_schema_sha  │
+              │                                                     └──────────┬───────────┘
+              │                                                                 │
+              ▼                                                                 │
+   predict_go_terms ─ payload.reranker_model_id ──────────────────────────────▶─┘
+
+At predict time, ``predict_go_terms`` accepts an optional
+``reranker_model_id``. The coordinator snapshots the booster's
+``artifact_uri`` and ``feature_schema_sha`` into every batch payload;
+each batch worker re-computes a live schema sha from the active
+feature flags and applies the booster **only** when the shas match
+exactly. Strict equality is intentional: a subset match would silently
+score the booster with missing columns, so mismatch fails safe and the
+batch continues with KNN distance ordering.
 
 Testing strategy
 ----------------
@@ -268,3 +345,10 @@ The test suite is split into two categories:
 
    poetry run pytest                   # unit tests only
    poetry run pytest --with-postgres   # full suite including integration tests
+
+.. seealso::
+
+   - :doc:`job_lifecycle` — how a single job moves through the worker layer.
+   - :doc:`data_model` — the relational tables that back every layer above.
+   - :doc:`operations` — the units of domain logic dispatched by workers.
+   - :doc:`/adr/index` — design decisions behind the layering above.

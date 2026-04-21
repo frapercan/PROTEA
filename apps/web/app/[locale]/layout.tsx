@@ -29,8 +29,11 @@ export default async function LocaleLayout({
   const { locale } = await params;
   const messages = await getMessages();
   return (
-    <html lang={locale}>
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen bg-gray-50`}>
+    <html lang={locale} suppressHydrationWarning>
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen bg-gray-50`}
+        suppressHydrationWarning
+      >
         <NextIntlClientProvider messages={messages}>
           <UsagePolicyModal />
           <ToastProvider>

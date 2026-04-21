@@ -87,6 +87,25 @@ increments the progress counter and detects completion. The ``Job`` model includ
 - ``progress_current`` — batches completed so far
 - ``progress_total`` — total batches dispatched
 
+.. admonition:: Snapshotted context in batch payloads
+   :class: note
+
+   Coordinators that dispatch to ephemeral batch queues
+   (``protea.embeddings.batch``, ``protea.predictions.batch``) serialise
+   the full :class:`ProteaPayload` into the AMQP body — there is no DB
+   row the worker can read from. When a coordinator needs to propagate
+   state resolved against a row that lives in PostgreSQL, it **snapshots
+   the relevant columns into the batch payload at dispatch time**.
+
+   Example: when ``predict_go_terms`` receives a ``reranker_model_id``
+   it loads the ``RerankerModel`` row, validates that ``artifact_uri``
+   and ``feature_schema_sha`` are both populated, and copies them into
+   every ``PredictGOTermsBatchPayload`` as
+   ``reranker_artifact_uri`` / ``reranker_feature_schema_sha``. The
+   batch worker therefore never re-queries the row, which keeps the
+   batch path free of read dependencies on tables that could be updated
+   mid-run.
+
 Deferred execution pattern
 ---------------------------
 
@@ -170,3 +189,14 @@ Any queued child jobs (status = QUEUED) are also cancelled atomically.
    does not interrupt the worker process. The worker will still complete the operation and
    attempt to write SUCCEEDED/FAILED, but the CANCELLED status is already committed and
    takes precedence in the frontend view.
+
+.. seealso::
+
+   - :doc:`operations` — the operations that workers actually run.
+   - :doc:`/reference/workers` — class-level docs for ``BaseWorker``,
+     ``QueueConsumer``, ``OperationConsumer``, and ``StaleJobReaper``.
+   - :doc:`/adr/002-two-session-worker-pattern` — why two sessions, not one.
+   - :doc:`/adr/003-queue-consumer-vs-operation-consumer` — when each
+     consumer type applies.
+   - :doc:`/adr/004-dead-letter-queue-and-retry-strategy` — how
+     ``RetryLaterError`` and the DLQ interact.

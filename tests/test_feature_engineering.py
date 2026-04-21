@@ -2,6 +2,7 @@
 
 Parasail and ete3 results are mocked so no external dependencies are needed.
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
@@ -22,6 +23,7 @@ from protea.core.feature_engineering import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _fake_traceback(query: str, ref: str, comp: str) -> MagicMock:
     tb = MagicMock()
     tb.query = query
@@ -40,6 +42,7 @@ def _fake_result(query: str, ref: str, comp: str, score: float = 42.0) -> MagicM
 # ---------------------------------------------------------------------------
 # _parse_alignment
 # ---------------------------------------------------------------------------
+
 
 class TestParseAlignment:
     def test_nw_basic_metrics(self) -> None:
@@ -90,11 +93,14 @@ class TestParseAlignment:
 # compute_nw / compute_sw / compute_alignment
 # ---------------------------------------------------------------------------
 
+
 class TestComputeNW:
     def test_calls_parasail_nw_and_returns_dict(self) -> None:
         fake_res = _fake_result("ACDEF", "ACDEF", "|||||", score=100.0)
-        with patch("protea.core.feature_engineering._PARASAIL_AVAILABLE", True), \
-             patch("protea.core.feature_engineering.parasail") as mock_p:
+        with (
+            patch("protea.core.feature_engineering._PARASAIL_AVAILABLE", True),
+            patch("protea.core.feature_engineering.parasail") as mock_p,
+        ):
             mock_p.nw_trace_striped_32.return_value = fake_res
             mock_p.blosum62 = object()
             out = compute_nw("ACDEF", "ACDEF")
@@ -111,8 +117,10 @@ class TestComputeNW:
 class TestComputeSW:
     def test_calls_parasail_sw_and_returns_dict(self) -> None:
         fake_res = _fake_result("ACDEF", "ACDEF", "|||||", score=80.0)
-        with patch("protea.core.feature_engineering._PARASAIL_AVAILABLE", True), \
-             patch("protea.core.feature_engineering.parasail") as mock_p:
+        with (
+            patch("protea.core.feature_engineering._PARASAIL_AVAILABLE", True),
+            patch("protea.core.feature_engineering.parasail") as mock_p,
+        ):
             mock_p.sw_trace_striped_32.return_value = fake_res
             mock_p.blosum62 = object()
             out = compute_sw("ACDEF", "ACDEF")
@@ -128,8 +136,10 @@ class TestComputeSW:
 class TestComputeAlignment:
     def test_merges_nw_and_sw(self) -> None:
         fake_res = _fake_result("AC", "AC", "||", score=10.0)
-        with patch("protea.core.feature_engineering._PARASAIL_AVAILABLE", True), \
-             patch("protea.core.feature_engineering.parasail") as mock_p:
+        with (
+            patch("protea.core.feature_engineering._PARASAIL_AVAILABLE", True),
+            patch("protea.core.feature_engineering.parasail") as mock_p,
+        ):
             mock_p.nw_trace_striped_32.return_value = fake_res
             mock_p.sw_trace_striped_32.return_value = fake_res
             mock_p.blosum62 = object()
@@ -141,6 +151,7 @@ class TestComputeAlignment:
 # ---------------------------------------------------------------------------
 # _normalize_tax_id
 # ---------------------------------------------------------------------------
+
 
 class TestNormalizeTaxId:
     def test_int_passthrough(self) -> None:
@@ -166,6 +177,7 @@ class TestNormalizeTaxId:
 # compute_taxonomy
 # ---------------------------------------------------------------------------
 
+
 class TestComputeTaxonomy:
     def test_none_inputs_return_unrelated(self) -> None:
         out = compute_taxonomy(None, None)
@@ -183,8 +195,12 @@ class TestComputeTaxonomy:
         assert out["taxonomic_relation"] == "unrelated"
 
     def test_lineage_exception_returns_unrelated(self) -> None:
-        with patch("protea.core.feature_engineering._ETE3_AVAILABLE", True), \
-             patch("protea.core.feature_engineering._cached_lineage", side_effect=Exception("db error")):
+        with (
+            patch("protea.core.feature_engineering._ETE3_AVAILABLE", True),
+            patch(
+                "protea.core.feature_engineering._cached_lineage", side_effect=Exception("db error")
+            ),
+        ):
             out = compute_taxonomy(9606, 10090)
         assert out["taxonomic_relation"] == "unrelated"
 
@@ -214,6 +230,7 @@ class TestComputeTaxonomy:
 # ---------------------------------------------------------------------------
 # _classify_relation
 # ---------------------------------------------------------------------------
+
 
 class TestClassifyRelation:
     def test_same(self) -> None:

@@ -7,20 +7,34 @@ from pydantic import field_validator
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
-from protea.core.evaluation import compute_evaluation_data
+from protea.core.evaluation import (
+    compute_evaluation_data,
+    compute_evaluation_data_reconciled,
+)
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
+from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 
 
 class GenerateEvaluationSetPayload(ProteaPayload, frozen=True):
     old_annotation_set_id: str
     new_annotation_set_id: str
+    pivot_ontology_snapshot_id: str | None = None
 
     @field_validator("old_annotation_set_id", "new_annotation_set_id", mode="before")
     @classmethod
     def must_be_non_empty(cls, v: str) -> str:
         if not isinstance(v, str) or not v.strip():
             raise ValueError("must be a non-empty string")
+        return v.strip()
+
+    @field_validator("pivot_ontology_snapshot_id", mode="before")
+    @classmethod
+    def pivot_opt_non_empty(cls, v):
+        if v is None:
+            return None
+        if not isinstance(v, str) or not v.strip():
+            raise ValueError("must be a non-empty string or null")
         return v.strip()
 
 
@@ -35,6 +49,29 @@ class GenerateEvaluationSetOperation:
     """
 
     name = "generate_evaluation_set"
+    description = (
+        "Compute the CAFA delta between an old and a new GOA annotation set, "
+        "split delta proteins into NK/LK and persist an EvaluationSet. "
+        "Supports cross-OBO reconciliation via an optional pivot snapshot."
+    )
+
+    def summarize_payload(self, payload: dict[str, Any], *, session: Session | None = None) -> str:
+        p = payload or {}
+        old_raw = p.get("old_annotation_set_id")
+        new_raw = p.get("new_annotation_set_id")
+        if old_raw and new_raw and session is not None:
+            try:
+                old = session.get(AnnotationSet, uuid.UUID(str(old_raw)))
+                new = session.get(AnnotationSet, uuid.UUID(str(new_raw)))
+            except Exception:
+                old = new = None
+            if old is not None and new is not None:
+                ov = old.source_version or str(old.id)[:8]
+                nv = new.source_version or str(new.id)[:8]
+                return f"{old.source}@{ov} → {new.source}@{nv}"
+        if old_raw and new_raw:
+            return f"{str(old_raw)[:8]} → {str(new_raw)[:8]}"
+        return ""
 
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
@@ -50,8 +87,18 @@ class GenerateEvaluationSetOperation:
         new_set = session.get(AnnotationSet, new_set_id)
         if new_set is None:
             raise ValueError(f"AnnotationSet {new_set_id} not found")
-        if old_set.ontology_snapshot_id != new_set.ontology_snapshot_id:
-            raise ValueError("Both annotation sets must use the same ontology snapshot")
+
+        if p.pivot_ontology_snapshot_id is not None:
+            pivot_id = uuid.UUID(p.pivot_ontology_snapshot_id)
+            if session.get(OntologySnapshot, pivot_id) is None:
+                raise ValueError(f"OntologySnapshot {pivot_id} not found")
+        else:
+            pivot_id = new_set.ontology_snapshot_id
+
+        same_snapshot = (
+            old_set.ontology_snapshot_id == new_set.ontology_snapshot_id == pivot_id
+        )
+        mode = "same_snapshot" if same_snapshot else "reconciled"
 
         emit(
             "generate_evaluation_set.start",
@@ -59,20 +106,30 @@ class GenerateEvaluationSetOperation:
             {
                 "old_annotation_set_id": str(old_set_id),
                 "new_annotation_set_id": str(new_set_id),
-                "ontology_snapshot_id": str(old_set.ontology_snapshot_id),
+                "old_ontology_snapshot_id": str(old_set.ontology_snapshot_id),
+                "new_ontology_snapshot_id": str(new_set.ontology_snapshot_id),
+                "pivot_ontology_snapshot_id": str(pivot_id),
+                "mode": mode,
             },
             "info",
         )
 
-        emit("generate_evaluation_set.computing_delta", None, {}, "info")
-        data = compute_evaluation_data(
-            session,
-            old_set_id,
-            new_set_id,
-            old_set.ontology_snapshot_id,
-        )
+        emit("generate_evaluation_set.computing_delta", None, {"mode": mode}, "info")
+        if same_snapshot:
+            data = compute_evaluation_data(session, old_set_id, new_set_id, pivot_id)
+        else:
+            data = compute_evaluation_data_reconciled(
+                session,
+                old_set_id,
+                new_set_id,
+                old_set.ontology_snapshot_id,
+                new_set.ontology_snapshot_id,
+                pivot_id,
+            )
 
         stats = data.stats()
+        stats["mode"] = mode
+        stats["pivot_ontology_snapshot_id"] = str(pivot_id)
         emit("generate_evaluation_set.delta_done", None, stats, "info")
 
         eval_set = EvaluationSet(

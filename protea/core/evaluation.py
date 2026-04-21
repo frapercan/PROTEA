@@ -22,6 +22,13 @@ This module computes the ground-truth delta between two AnnotationSets
   simultaneously (e.g. had MFO+BPO at t0, gains CCO → LK in CCO, gains new
   BPO → PK in BPO).
 
+When the two annotation sets use different OntologySnapshots,
+``compute_evaluation_data_reconciled`` implements the CAFA reconciliation
+protocol: propagate ancestors under each side's native DAG, intersect with a
+frozen pivot snapshot, then re-propagate is handled by downstream cafaeval
+(idempotent under closure semantics). Reference implementation:
+``anphan0828/democafa_package``, ``utils/ontology.filter_terms_given_obo``.
+
 Output format (matching CAFA evaluator): 2-column TSV, no header.
   protein_accession \\t go_id
 """
@@ -251,16 +258,20 @@ def compute_evaluation_data(
 ) -> EvaluationData:
     """Compute NK/LK/PK ground truth following the CAFA5 protocol.
 
-    Classification is per (protein, namespace):
+    Classification is per ``(protein, namespace)``:
 
-      NK  — protein had no experimental annotations in any namespace at t0.
-      LK  — protein had annotations in some namespaces at t0, but not in
-             namespace S; gained new terms in S → those terms are LK ground truth.
-      PK  — protein had annotations in namespace S at t0 and gained new terms
-             in S → those novel terms are PK ground truth; old terms in S are
-             stored in ``pk_known`` for the cafaeval ``-known`` flag.
+    - **NK** — protein had no experimental annotations in any namespace at
+      ``t0``.
+    - **LK** — protein had annotations in some namespaces at ``t0``, but not
+      in namespace ``S``; gained new terms in ``S`` → those terms are LK
+      ground truth.
+    - **PK** — protein had annotations in namespace ``S`` at ``t0`` and
+      gained new terms in ``S`` → those novel terms are PK ground truth;
+      old terms in ``S`` are stored in ``pk_known`` for the cafaeval
+      ``-known`` flag.
 
-    The same protein can be simultaneously LK in one namespace and PK in another.
+    The same protein can be simultaneously LK in one namespace and PK in
+    another.
     """
     go_id_map, aspect_map = _load_go_maps(session, ontology_snapshot_id)
     children_map = _load_children_map(session, ontology_snapshot_id)
@@ -326,3 +337,344 @@ def compute_evaluation_data(
         pk_known=dict(pk_known),
         known=known,
     )
+
+
+# ---------------------------------------------------------------------------
+# Cross-OBO reconciliation (CAFA protocol for mismatched snapshots)
+# ---------------------------------------------------------------------------
+
+
+def _load_parents_by_go_id(session: Session, snapshot_id: uuid.UUID) -> dict[str, set[str]]:
+    """Return ``{child_go_id: {parent_go_id}}`` in string space (is_a + part_of)."""
+    rows = session.execute(
+        text("""
+        SELECT child.go_id, parent.go_id
+        FROM go_term_relationship rel
+        JOIN go_term child ON child.id = rel.child_go_term_id
+        JOIN go_term parent ON parent.id = rel.parent_go_term_id
+        WHERE rel.ontology_snapshot_id = :snap_id
+          AND rel.relation_type IN ('is_a', 'part_of')
+    """),
+        {"snap_id": snapshot_id},
+    ).fetchall()
+    parents: dict[str, set[str]] = defaultdict(set)
+    for child_go, parent_go in rows:
+        parents[child_go].add(parent_go)
+    return dict(parents)
+
+
+def _load_children_by_go_id(session: Session, snapshot_id: uuid.UUID) -> dict[str, set[str]]:
+    """Return ``{parent_go_id: {child_go_id}}`` in string space (is_a + part_of)."""
+    rows = session.execute(
+        text("""
+        SELECT parent.go_id, child.go_id
+        FROM go_term_relationship rel
+        JOIN go_term parent ON parent.id = rel.parent_go_term_id
+        JOIN go_term child ON child.id = rel.child_go_term_id
+        WHERE rel.ontology_snapshot_id = :snap_id
+          AND rel.relation_type IN ('is_a', 'part_of')
+    """),
+        {"snap_id": snapshot_id},
+    ).fetchall()
+    children: dict[str, set[str]] = defaultdict(set)
+    for parent_go, child_go in rows:
+        children[parent_go].add(child_go)
+    return dict(children)
+
+
+def _bfs_closure(seeds: set[str], edges: dict[str, set[str]]) -> set[str]:
+    """BFS over ``edges`` from ``seeds``, returning the inclusive closure."""
+    closure: set[str] = set(seeds)
+    queue: list[str] = list(seeds)
+    while queue:
+        cur = queue.pop()
+        for nxt in edges.get(cur, ()):
+            if nxt not in closure:
+                closure.add(nxt)
+                queue.append(nxt)
+    return closure
+
+
+def _load_pivot_term_universe(
+    session: Session, pivot_snapshot_id: uuid.UUID
+) -> tuple[set[str], dict[str, str]]:
+    """Return ``(set of pivot go_ids with aspect, {go_id: aspect})``.
+
+    Terms without an aspect are excluded — they cannot participate in CAFA
+    namespace bucketing and would otherwise leak through the intersect step.
+    """
+    rows = session.execute(
+        text("""
+        SELECT go_id, aspect FROM go_term
+        WHERE ontology_snapshot_id = :snap_id AND aspect IS NOT NULL
+    """),
+        {"snap_id": pivot_snapshot_id},
+    ).fetchall()
+    go_ids: set[str] = set()
+    aspect_by_go_id: dict[str, str] = {}
+    for go_id, aspect in rows:
+        go_ids.add(go_id)
+        aspect_by_go_id[go_id] = aspect
+    return go_ids, aspect_by_go_id
+
+
+def _load_experimental_raw_go_ids(
+    session: Session, annotation_set_id: uuid.UUID
+) -> dict[str, set[str]]:
+    """Return ``{protein: {native_go_id}}`` for experimental non-NOT rows."""
+    rows = session.execute(
+        text("""
+        SELECT pga.protein_accession, gt.go_id
+        FROM protein_go_annotation pga
+        JOIN go_term gt ON gt.id = pga.go_term_id
+        WHERE pga.annotation_set_id = :set_id
+          AND pga.evidence_code = ANY(:exp_codes)
+          AND (pga.qualifier IS NULL OR pga.qualifier NOT LIKE '%NOT%')
+    """),
+        {"set_id": annotation_set_id, "exp_codes": _EXP_CODES},
+    ).fetchall()
+    out: dict[str, set[str]] = defaultdict(set)
+    for prot, go_id in rows:
+        out[prot].add(go_id)
+    return dict(out)
+
+
+def _load_not_raw_go_ids(
+    session: Session, annotation_set_id: uuid.UUID
+) -> dict[str, set[str]]:
+    """Return ``{protein: {native_go_id}}`` for NOT-qualified rows."""
+    rows = session.execute(
+        text("""
+        SELECT DISTINCT pga.protein_accession, gt.go_id
+        FROM protein_go_annotation pga
+        JOIN go_term gt ON gt.id = pga.go_term_id
+        WHERE pga.annotation_set_id = :set_id
+          AND pga.qualifier LIKE '%NOT%'
+    """),
+        {"set_id": annotation_set_id},
+    ).fetchall()
+    out: dict[str, set[str]] = defaultdict(set)
+    for prot, go_id in rows:
+        out[prot].add(go_id)
+    return dict(out)
+
+
+def _reconcile_experimental_side(
+    session: Session,
+    annotation_set_id: uuid.UUID,
+    native_snapshot_id: uuid.UUID,
+    pivot_go_ids: set[str],
+    pivot_aspect: dict[str, str],
+) -> dict[str, dict[str, set[str]]]:
+    """CAFA steps 1–2 for experimental positives on one side.
+
+    Per protein: propagate ancestors under the *native* DAG (True Path Rule),
+    intersect with the pivot term universe, then bucket by the pivot aspect.
+    Step 3 (re-propagate under pivot) is deferred to cafaeval, which applies
+    ancestor propagation before scoring and produces the same closure.
+    """
+    native_parents = _load_parents_by_go_id(session, native_snapshot_id)
+    raw = _load_experimental_raw_go_ids(session, annotation_set_id)
+
+    out: dict[str, dict[str, set[str]]] = {}
+    for protein, go_ids in raw.items():
+        closure = _bfs_closure(go_ids, native_parents)
+        in_pivot = closure & pivot_go_ids
+        if not in_pivot:
+            continue
+        ns_map: dict[str, set[str]] = defaultdict(set)
+        for go_id in in_pivot:
+            aspect = pivot_aspect.get(go_id)
+            if aspect:
+                ns_map[aspect].add(go_id)
+        if ns_map:
+            out[protein] = {ns: terms for ns, terms in ns_map.items()}
+    return out
+
+
+def _reconcile_not_side(
+    session: Session,
+    annotation_set_id: uuid.UUID,
+    native_snapshot_id: uuid.UUID,
+    pivot_go_ids: set[str],
+    pivot_children: dict[str, set[str]],
+) -> dict[str, set[str]]:
+    """Reconcile NOT-qualified terms to pivot via True Path Rule contrapositive.
+
+    Per protein: propagate descendants under the native DAG (matching the
+    same-snapshot path), intersect with pivot, then propagate descendants under
+    the pivot DAG to capture subtypes only the pivot ontology sees. The final
+    set is the pivot go_ids to exclude from the experimental closure.
+
+    This preserves PROTEA's NOT propagation semantics — democafa just drops
+    NOT rows — while still producing a pivot-consistent exclusion set.
+    """
+    native_children = _load_children_by_go_id(session, native_snapshot_id)
+    raw = _load_not_raw_go_ids(session, annotation_set_id)
+
+    out: dict[str, set[str]] = {}
+    for protein, go_ids in raw.items():
+        closure_native = _bfs_closure(go_ids, native_children)
+        in_pivot = closure_native & pivot_go_ids
+        if not in_pivot:
+            continue
+        closure_pivot = _bfs_closure(in_pivot, pivot_children)
+        out[protein] = closure_pivot & pivot_go_ids
+    return out
+
+
+def _apply_negatives(
+    experimental: dict[str, dict[str, set[str]]],
+    negatives: dict[str, set[str]],
+) -> dict[str, dict[str, set[str]]]:
+    """Remove negated go_ids from each namespace bucket. Drops empty entries."""
+    cleaned: dict[str, dict[str, set[str]]] = {}
+    for protein, ns_map in experimental.items():
+        neg = negatives.get(protein)
+        if not neg:
+            cleaned[protein] = {ns: set(terms) for ns, terms in ns_map.items()}
+            continue
+        new_ns_map = {ns: terms - neg for ns, terms in ns_map.items()}
+        new_ns_map = {ns: terms for ns, terms in new_ns_map.items() if terms}
+        if new_ns_map:
+            cleaned[protein] = new_ns_map
+    return cleaned
+
+
+def compute_evaluation_data_reconciled(
+    session: Session,
+    old_annotation_set_id: uuid.UUID,
+    new_annotation_set_id: uuid.UUID,
+    old_native_snapshot_id: uuid.UUID,
+    new_native_snapshot_id: uuid.UUID,
+    pivot_snapshot_id: uuid.UUID,
+) -> EvaluationData:
+    """CAFA-compliant evaluation delta across mismatched ontology snapshots.
+
+    Applies the democafa ``filter_terms_given_obo`` protocol per side:
+
+      1. Load experimental annotations under each set's native snapshot.
+      2. Propagate ancestors under the *native* DAG (True Path Rule).
+      3. Intersect with the pivot snapshot's term universe.
+
+    Step 4 (re-propagate under pivot) is handled by cafaeval downstream, which
+    applies ancestor propagation before scoring — ``prop(prop(x)) == prop(x)``.
+
+    NOT-qualifier exclusion preserves PROTEA's True Path Rule contrapositive:
+    NOT terms are propagated to descendants under the native DAG, intersected
+    with pivot, then further propagated under the pivot DAG. The union across
+    both annotation sets is applied to both sides, matching same-snapshot
+    behaviour.
+    """
+    pivot_go_ids, pivot_aspect = _load_pivot_term_universe(session, pivot_snapshot_id)
+    pivot_children = _load_children_by_go_id(session, pivot_snapshot_id)
+
+    old_exp = _reconcile_experimental_side(
+        session, old_annotation_set_id, old_native_snapshot_id, pivot_go_ids, pivot_aspect
+    )
+    new_exp = _reconcile_experimental_side(
+        session, new_annotation_set_id, new_native_snapshot_id, pivot_go_ids, pivot_aspect
+    )
+
+    old_neg = _reconcile_not_side(
+        session, old_annotation_set_id, old_native_snapshot_id, pivot_go_ids, pivot_children
+    )
+    new_neg = _reconcile_not_side(
+        session, new_annotation_set_id, new_native_snapshot_id, pivot_go_ids, pivot_children
+    )
+    merged_neg: dict[str, set[str]] = defaultdict(set)
+    for src in (old_neg, new_neg):
+        for protein, terms in src.items():
+            merged_neg[protein] |= terms
+
+    old_by_ns = _apply_negatives(old_exp, merged_neg)
+    new_by_ns = _apply_negatives(new_exp, merged_neg)
+
+    nk: dict[str, set[str]] = {}
+    lk: dict[str, set[str]] = defaultdict(set)
+    pk: dict[str, set[str]] = defaultdict(set)
+    pk_known: dict[str, set[str]] = defaultdict(set)
+
+    all_proteins = set(old_by_ns) | set(new_by_ns)
+    for protein in all_proteins:
+        old_ns_map = old_by_ns.get(protein, {})
+        new_ns_map = new_by_ns.get(protein, {})
+
+        new_all = {go for terms in new_ns_map.values() for go in terms}
+        if not new_all:
+            continue
+
+        had_anything_old = bool(old_ns_map)
+
+        if not had_anything_old:
+            nk[protein] = new_all
+        else:
+            for ns in _NAMESPACES:
+                old_ns = old_ns_map.get(ns, set())
+                new_ns = new_ns_map.get(ns, set())
+                delta_ns = new_ns - old_ns
+                if not delta_ns:
+                    continue
+                if not old_ns:
+                    lk[protein] |= delta_ns
+                else:
+                    pk[protein] |= delta_ns
+                    pk_known[protein] |= old_ns
+
+    known = {
+        p: {go for terms in ns_map.values() for go in terms} for p, ns_map in old_by_ns.items()
+    }
+
+    return EvaluationData(
+        nk=nk,
+        lk=dict(lk),
+        pk=dict(pk),
+        pk_known=dict(pk_known),
+        known=known,
+    )
+
+
+def load_evaluation_data_for_set(session: Session, eval_set) -> tuple[EvaluationData, uuid.UUID]:
+    """Dispatch helper: compute ground-truth for an EvaluationSet row.
+
+    Reads ``eval_set.stats["mode"]`` / ``["pivot_ontology_snapshot_id"]`` to decide
+    between the fast same-snapshot path and the reconciled cross-OBO path. Returns
+    the EvaluationData plus the pivot OntologySnapshot ID — the caller should use
+    the pivot snapshot (not the old set's) when loading the OBO for cafaeval, since
+    propagated go_ids live in pivot term space.
+    """
+    from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
+
+    ann_old = session.get(AnnotationSet, eval_set.old_annotation_set_id)
+    ann_new = session.get(AnnotationSet, eval_set.new_annotation_set_id)
+
+    stats = eval_set.stats or {}
+    pivot_raw = stats.get("pivot_ontology_snapshot_id")
+    if pivot_raw:
+        pivot_id = uuid.UUID(str(pivot_raw))
+    else:
+        pivot_id = ann_new.ontology_snapshot_id if ann_new else ann_old.ontology_snapshot_id
+
+    same_snapshot = (
+        ann_old is not None
+        and ann_new is not None
+        and ann_old.ontology_snapshot_id == ann_new.ontology_snapshot_id == pivot_id
+    )
+
+    if same_snapshot:
+        data = compute_evaluation_data(
+            session,
+            eval_set.old_annotation_set_id,
+            eval_set.new_annotation_set_id,
+            pivot_id,
+        )
+    else:
+        data = compute_evaluation_data_reconciled(
+            session,
+            eval_set.old_annotation_set_id,
+            eval_set.new_annotation_set_id,
+            ann_old.ontology_snapshot_id,
+            ann_new.ontology_snapshot_id,
+            pivot_id,
+        )
+    return data, pivot_id
