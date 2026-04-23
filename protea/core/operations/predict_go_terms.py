@@ -448,10 +448,13 @@ class PredictGOTermsPayload(ProteaPayload, frozen=True):
     faiss_hnsw_m: int = 32
     faiss_hnsw_ef_search: int = 64
 
-    # Feature engineering (opt-in)
-    compute_alignments: bool = False
-    compute_taxonomy: bool = False
-    compute_reranker_features: bool = False
+    # Feature engineering — enabled by default so that every PredictionSet
+    # carries the full scoring/reranking feature set. Callers must opt *out*
+    # explicitly when they want a lean KNN-only run (e.g. for a quick smoke
+    # test or a backend where NW/SW alignment is prohibitive).
+    compute_alignments: bool = True
+    compute_taxonomy: bool = True
+    compute_reranker_features: bool = True
 
     # v6 reranker features (opt-in): 6 Anc2Vec + 3 tax_voters + 16 emb_pca.
     # When enabled, the PCA state is fit once per ``EmbeddingConfig`` (or
@@ -504,9 +507,10 @@ class PredictGOTermsBatchPayload(ProteaPayload, frozen=True):
     faiss_nprobe: int = 10
     faiss_hnsw_m: int = 32
     faiss_hnsw_ef_search: int = 64
-    compute_alignments: bool = False
-    compute_taxonomy: bool = False
-    compute_reranker_features: bool = False
+    # Feature engineering — kept in sync with PredictGOTermsPayload defaults.
+    compute_alignments: bool = True
+    compute_taxonomy: bool = True
+    compute_reranker_features: bool = True
     compute_v6_features: bool = False
     aspect_separated_knn: bool = True
 

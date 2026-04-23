@@ -17,10 +17,11 @@ Evidence code quality is resolved through a two-level lookup:
 3. Codes unknown to both tables fall back to
    :data:`DEFAULT_EVIDENCE_WEIGHT_FALLBACK` (0.5).
 
-This means a ``ScoringConfig`` may carry a *partial* override — e.g. only
-changing the IEA weight from 0.3 to 0.0 — without having to redeclare every
-other code.  The resolution order ensures backwards compatibility: configs
-stored without ``evidence_weights`` behave identically to older configs.
+This means a ``ScoringConfig`` may carry a *partial* override — e.g. zeroing
+the IEA weight for an experiment-only study — without having to redeclare
+every other code.  The resolution order ensures backwards compatibility:
+configs stored without ``evidence_weights`` behave identically to older
+configs.
 """
 
 from __future__ import annotations

@@ -76,11 +76,16 @@ DEFAULT_WEIGHTS: dict[str, float] = {
 # Default tier mapping:
 #   Experimental (EXP, IDA, IPI, IMP, IGI, IEP, HTP, HDA, HMP, HGI, HEP,
 #                 IC, TAS)                                          → 1.0
+#   Electronic annotation (IEA)                                    → 0.8
 #   Computational / Phylogenetic (ISS, ISO, ISA, ISM, IGC, IBA,
 #                                 IBD, IKR, IRD, RCA)              → 0.7
 #   Non-traceable author statement (NAS)                           → 0.5
-#   Electronic annotation (IEA)                                    → 0.3
 #   No biological data (ND)                                        → 0.1
+#
+# IEA is placed above the computational tier: GOA history shows that IEA
+# annotations are promoted to an experimental code at a higher rate than
+# ISS/IBA/NAS, so their prior quality is underestimated by the classic
+# GO-docs hierarchy that ranked IEA below every human-supplied code.
 
 DEFAULT_EVIDENCE_WEIGHTS: dict[str, float] = {
     # Experimental — direct biological evidence
@@ -110,7 +115,7 @@ DEFAULT_EVIDENCE_WEIGHTS: dict[str, float] = {
     "RCA": 0.7,  # Inferred from Reviewed Computational Analysis
     # Electronic / author statement — lowest-effort annotation
     "NAS": 0.5,  # Non-traceable Author Statement
-    "IEA": 0.3,  # Inferred from Electronic Annotation (automated, bulk)
+    "IEA": 0.8,  # Inferred from Electronic Annotation (automated, bulk)
     # No biological data — used only as a placeholder
     "ND": 0.1,  # No biological Data available
 }

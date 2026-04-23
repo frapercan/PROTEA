@@ -149,8 +149,8 @@ _PRESET_CONFIGS: list[dict[str, Any]] = [
             "Evidence quality as primary signal (80%), embedding similarity as tiebreaker (20%). "
             "Designed for datasets where cosine distances cluster tightly (>99% of predictions "
             "within distance < 0.1), making distance a poor tau discriminator. "
-            "Creates three well-separated score tiers: "
-            "EXP/IDA → ~1.0, ISS/IBA → ~0.76, IEA → ~0.46. "
+            "Pulls scores apart into evidence-code tiers: "
+            "EXP/IDA → ~1.0, IEA → ~0.84, ISS/IBA → ~0.76, NAS → ~0.60, ND → ~0.28. "
             "Recommended when compute_alignments and compute_taxonomy are not available."
         ),
     },

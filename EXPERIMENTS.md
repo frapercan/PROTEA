@@ -317,6 +317,10 @@ Pannzer2 acierta el 62.4% de las anotaciones NK — proteínas que por definici�
   - Causa 1: optimiza binary CE (todos los GO terms pesan igual) pero CAFA-eval pondera por IC
   - Causa 2: features de agregación estaban NULL en el prediction set
 
+### Cambios de configuración
+
+- **2026-04-23 — Peso IEA en `DEFAULT_EVIDENCE_WEIGHTS` 0.3 → 0.8.** La jerarquía clásica de GO-docs coloca IEA por debajo del tier computacional (ISS/IBA/... 0.7) y de NAS (0.5). Observación empírica en el histórico de GOA: las anotaciones IEA se promueven a un código experimental con mayor frecuencia que las del tier computacional, por lo que su fiabilidad previa estaba infraestimada. Los tres stages del benchmark (`baseline`, `alignment_weighted`, `reranker` v4) no consumen `evidence_weight`, así que las Fmax reportadas en Exp 1–11 no cambian; el swap sólo afecta a scorings basados en evidencia (p. ej. `evidence_primary`, `composite`, `embedding_plus_evidence`).
+
 ---
 
 ## Exp 10 — ProstT5 vs ESMC (comparativa preliminar v3)

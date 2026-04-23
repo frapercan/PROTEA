@@ -45,7 +45,7 @@ class TestEvidenceWeight:
         assert evidence_weight("IDA") == 1.0
 
     def test_known_electronic_code(self):
-        assert evidence_weight("IEA") == 0.3
+        assert evidence_weight("IEA") == 0.8
 
     def test_known_computational_code(self):
         assert evidence_weight("IBA") == 0.7
@@ -66,7 +66,7 @@ class TestEvidenceWeight:
 
         eco_ids = [eco for eco, go in ECO_TO_CODE.items() if go == "IEA"]
         if eco_ids:
-            assert evidence_weight(eco_ids[0]) == pytest.approx(0.3)
+            assert evidence_weight(eco_ids[0]) == pytest.approx(0.8)
 
     def test_override_with_none_overrides_arg(self):
         # overrides=None should not crash

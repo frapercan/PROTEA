@@ -291,6 +291,11 @@ class TestPredictBatch:
             "parent_job_id": str(uuid.uuid4()),
             "query_accessions": [],
             "limit_per_entry": 2,
+            # Opt out of features that require sequences/taxonomy — the mock
+            # ref_data in this class never provides them.
+            "compute_alignments": False,
+            "compute_taxonomy": False,
+            "compute_reranker_features": False,
         }
         defaults.update(kwargs)
         return PredictGOTermsBatchPayload.model_validate(defaults)
@@ -318,7 +323,7 @@ class TestPredictBatch:
         pred_set_id = uuid.uuid4()
 
         query_embs = np.array([[0.99, 0.01, 0.0]], dtype=np.float32)
-        preds = op._predict_batch(["RQUERY"], query_embs, ref, pred_set_id, p)
+        preds, _, _ = op._predict_batch(["RQUERY"], query_embs, ref, pred_set_id, p)
 
         assert len(preds) >= 1
         go_ids = {pr["go_term_id"] for pr in preds}
@@ -332,7 +337,7 @@ class TestPredictBatch:
         ref = self._ref_data()
         pred_set_id = uuid.uuid4()
         query_embs = np.array([[1.0, 0.0, 0.0]], dtype=np.float32)
-        preds = op._predict_batch(["P12345"], query_embs, ref, pred_set_id, p)
+        preds, _, _ = op._predict_batch(["P12345"], query_embs, ref, pred_set_id, p)
 
         ref_accs = [pr["ref_protein_accession"] for pr in preds]
         assert "P12345" in ref_accs, "Self should be included as a reference neighbor"
@@ -346,7 +351,7 @@ class TestPredictBatch:
         pred_set_id = uuid.uuid4()
 
         query_embs = np.array([[0.0, 0.0, 1.0]], dtype=np.float32)
-        preds = op._predict_batch(["RQUERY"], query_embs, ref, pred_set_id, p)
+        preds, _, _ = op._predict_batch(["RQUERY"], query_embs, ref, pred_set_id, p)
         assert preds == []
 
     def test_limit_per_entry_caps_neighbors(self) -> None:
@@ -356,7 +361,7 @@ class TestPredictBatch:
         pred_set_id = uuid.uuid4()
 
         query_embs = np.array([[0.7, 0.7, 0.0]], dtype=np.float32)
-        preds = op._predict_batch(["RQUERY"], query_embs, ref, pred_set_id, p)
+        preds, _, _ = op._predict_batch(["RQUERY"], query_embs, ref, pred_set_id, p)
 
         ref_accs = {pr["ref_protein_accession"] for pr in preds}
         assert len(ref_accs) == 1
@@ -786,9 +791,9 @@ class TestPredictGOTermsBatchPayload:
                 "query_accessions": [],
             }
         )
-        assert p.compute_alignments is False
-        assert p.compute_taxonomy is False
-        assert p.compute_reranker_features is False
+        assert p.compute_alignments is True
+        assert p.compute_taxonomy is True
+        assert p.compute_reranker_features is True
 
 
 # ---------------------------------------------------------------------------
@@ -808,6 +813,10 @@ class TestPredictBatchRerankerFeatures:
             "parent_job_id": str(uuid.uuid4()),
             "query_accessions": [],
             "limit_per_entry": 2,
+            # Reranker features ON, alignments/taxonomy OFF — this suite only
+            # exercises voting/neighbor-stat features, not NW/SW or taxonomy.
+            "compute_alignments": False,
+            "compute_taxonomy": False,
             "compute_reranker_features": True,
         }
         defaults.update(kwargs)
@@ -827,7 +836,7 @@ class TestPredictBatchRerankerFeatures:
             },
         }
         query_embs = np.array([[0.9, 0.1]], dtype=np.float32)
-        preds = op._predict_batch(["Q1"], query_embs, ref_data, pred_set_id, p)
+        preds, _, _ = op._predict_batch(["Q1"], query_embs, ref_data, pred_set_id, p)
 
         assert len(preds) >= 1
         for pred in preds:
@@ -850,7 +859,7 @@ class TestPredictBatchRerankerFeatures:
             },
         }
         query_embs = np.array([[0.9, 0.1]], dtype=np.float32)
-        preds = op._predict_batch(["Q1"], query_embs, ref_data, pred_set_id, p)
+        preds, _, _ = op._predict_batch(["Q1"], query_embs, ref_data, pred_set_id, p)
 
         for pred in preds:
             assert "vote_count" not in pred
