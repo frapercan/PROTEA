@@ -40,15 +40,9 @@ from pydantic import BaseModel, Field, field_validator
 from protea.api.deps import get_session_factory
 from protea.core.evaluation import compute_evaluation_data
 from protea.core.metrics import compute_cafa_metrics
-from protea.core.reranker import (
-    model_from_string,
-    model_to_string,
-)
+from protea.core.reranker import model_from_string
 from protea.core.reranker import (
     predict as reranker_predict,
-)
-from protea.core.reranker import (
-    train as reranker_train,
 )
 from protea.core.scoring import compute_score
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
@@ -730,37 +724,6 @@ def download_training_data(
 _ASPECT_MAP = {"bpo": "P", "mfo": "F", "cco": "C"}
 
 
-class _TrainingPair(BaseModel):
-    prediction_set_id: uuid.UUID
-    evaluation_set_id: uuid.UUID
-
-
-class RerankerTrainRequest(BaseModel):
-    """Request body for POST /scoring/rerankers/train."""
-
-    name: str = Field(..., min_length=1, max_length=255)
-    prediction_set_id: uuid.UUID
-    evaluation_set_id: uuid.UUID
-    category: str = Field("nk", pattern="^(nk|lk|pk)$")
-    aspect: str | None = Field(
-        default=None,
-        pattern="^(bpo|mfo|cco)$",
-        description="Train only on predictions for this GO aspect. None trains on all aspects.",
-    )
-    neg_pos_ratio: float | None = Field(
-        default=None,
-        ge=1.0,
-        description="Subsample negatives to this ratio vs positives (e.g. 1.0 for 1:1, 10.0 for 10:1). None keeps all.",
-    )
-    extra_pairs: list[_TrainingPair] | None = Field(
-        default=None,
-        description="Additional (prediction_set, evaluation_set) pairs to include in training data. "
-        "Data from all pairs is concatenated before training a single model.",
-    )
-
-    model_config = {"extra": "forbid"}
-
-
 class RerankerResponse(BaseModel):
     """Serialised representation of a stored RerankerModel."""
 
@@ -787,148 +750,6 @@ def _reranker_to_response(m: RerankerModel) -> RerankerResponse:
         feature_importance=m.feature_importance,
         created_at=m.created_at,
     )
-
-
-def _collect_training_records(
-    session: Any,
-    prediction_set_id: uuid.UUID,
-    evaluation_set_id: uuid.UUID,
-    category: str,
-    aspect_filter_char: str | None,
-) -> list[dict[str, Any]]:
-    """Build labeled training records from a (PredictionSet, EvaluationSet) pair."""
-    ps = session.get(PredictionSet, prediction_set_id)
-    if ps is None:
-        raise HTTPException(status_code=404, detail=f"PredictionSet {prediction_set_id} not found")
-    es = session.get(EvaluationSet, evaluation_set_id)
-    if es is None:
-        raise HTTPException(status_code=404, detail=f"EvaluationSet {evaluation_set_id} not found")
-
-    eval_data = compute_evaluation_data(
-        session,
-        old_annotation_set_id=es.old_annotation_set_id,
-        new_annotation_set_id=es.new_annotation_set_id,
-        ontology_snapshot_id=ps.ontology_snapshot_id,
-    )
-
-    ground_truth: dict[str, set[str]] = getattr(eval_data, category)
-    gt_pairs: set[tuple[str, str]] = set()
-    for protein, go_ids in ground_truth.items():
-        for go_id in go_ids:
-            gt_pairs.add((protein, go_id))
-
-    records: list[dict[str, Any]] = []
-    q_preds = (
-        session.query(GOPrediction, GOTerm.go_id, GOTerm.aspect)
-        .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
-        .filter(GOPrediction.prediction_set_id == prediction_set_id)
-    )
-    if aspect_filter_char:
-        q_preds = q_preds.filter(GOTerm.aspect == aspect_filter_char)
-    for pred, go_id, aspect in q_preds.yield_per(5000):
-        label = 1 if (pred.protein_accession, go_id) in gt_pairs else 0
-        records.append(
-            {
-                "protein_accession": pred.protein_accession,
-                "go_id": go_id,
-                "aspect": aspect or "",
-                "label": label,
-                "distance": pred.distance,
-                "ref_protein_accession": pred.ref_protein_accession or "",
-                "qualifier": pred.qualifier or "",
-                "evidence_code": pred.evidence_code or "",
-                "identity_nw": pred.identity_nw,
-                "similarity_nw": pred.similarity_nw,
-                "alignment_score_nw": pred.alignment_score_nw,
-                "gaps_pct_nw": pred.gaps_pct_nw,
-                "alignment_length_nw": pred.alignment_length_nw,
-                "identity_sw": pred.identity_sw,
-                "similarity_sw": pred.similarity_sw,
-                "alignment_score_sw": pred.alignment_score_sw,
-                "gaps_pct_sw": pred.gaps_pct_sw,
-                "alignment_length_sw": pred.alignment_length_sw,
-                "length_query": pred.length_query,
-                "length_ref": pred.length_ref,
-                "query_taxonomy_id": pred.query_taxonomy_id,
-                "ref_taxonomy_id": pred.ref_taxonomy_id,
-                "taxonomic_lca": pred.taxonomic_lca,
-                "taxonomic_distance": pred.taxonomic_distance,
-                "taxonomic_common_ancestors": pred.taxonomic_common_ancestors,
-                "taxonomic_relation": pred.taxonomic_relation or "",
-                "vote_count": pred.vote_count,
-                "k_position": pred.k_position,
-                "go_term_frequency": pred.go_term_frequency,
-                "ref_annotation_density": pred.ref_annotation_density,
-                "neighbor_distance_std": pred.neighbor_distance_std,
-            }
-        )
-    return records
-
-
-@router.post("/rerankers/train", response_model=RerankerResponse, status_code=201)
-def train_reranker(
-    body: RerankerTrainRequest,
-    factory=Depends(get_session_factory),
-):
-    """Train a LightGBM re-ranker from one or more (PredictionSet, EvaluationSet) pairs.
-
-    When ``extra_pairs`` is provided, training data from all pairs is
-    concatenated before training a single model — useful for multi-temporal
-    holdout training where each pair represents a different GOA time split.
-    """
-    import pandas as pd
-
-    aspect_filter_char = _ASPECT_MAP.get(body.aspect) if body.aspect else None
-
-    with session_scope(factory) as session:
-        # Check name uniqueness
-        existing = session.query(RerankerModel).filter(RerankerModel.name == body.name).first()
-        if existing is not None:
-            raise HTTPException(
-                status_code=409, detail=f"Reranker with name '{body.name}' already exists"
-            )
-
-        # Collect records from the primary pair
-        records = _collect_training_records(
-            session,
-            body.prediction_set_id,
-            body.evaluation_set_id,
-            body.category,
-            aspect_filter_char,
-        )
-
-        # Collect records from extra pairs
-        if body.extra_pairs:
-            for pair in body.extra_pairs:
-                extra = _collect_training_records(
-                    session,
-                    pair.prediction_set_id,
-                    pair.evaluation_set_id,
-                    body.category,
-                    aspect_filter_char,
-                )
-                records.extend(extra)
-
-    if not records:
-        raise HTTPException(status_code=422, detail="No predictions found across all pairs")
-
-    df = pd.DataFrame(records)
-    result = reranker_train(df, neg_pos_ratio=body.neg_pos_ratio)
-
-    with session_scope(factory) as session:
-        model = RerankerModel(
-            name=body.name,
-            prediction_set_id=body.prediction_set_id,
-            evaluation_set_id=body.evaluation_set_id,
-            category=body.category,
-            aspect=body.aspect,
-            model_data=model_to_string(result.model),
-            metrics=result.metrics,
-            feature_importance=result.feature_importance,
-        )
-        session.add(model)
-        session.flush()
-        return _reranker_to_response(model)
 
 
 @router.get("/rerankers", response_model=list[RerankerResponse])

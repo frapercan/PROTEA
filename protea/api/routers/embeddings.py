@@ -25,6 +25,7 @@ from protea.infrastructure.session import session_scope
 router = APIRouter(prefix="/embeddings", tags=["embeddings"])
 
 _JOBS_QUEUE = "protea.jobs"
+_PREDICTIONS_QUEUE = "protea.predictions"
 
 _VALID_BACKENDS = {"esm", "esm3c", "t5", "ankh", "auto"}
 _VALID_LAYER_AGG = {"mean", "last", "concat"}
@@ -304,7 +305,7 @@ def predict_go_terms(
         if session.get(OntologySnapshot, ontology_snapshot_id) is None:
             raise HTTPException(status_code=404, detail="OntologySnapshot not found")
 
-        job = Job(operation="predict_go_terms", queue_name=_JOBS_QUEUE, payload=body)
+        job = Job(operation="predict_go_terms", queue_name=_PREDICTIONS_QUEUE, payload=body)
         session.add(job)
         session.flush()
         job_id = job.id
@@ -312,11 +313,11 @@ def predict_go_terms(
             JobEvent(
                 job_id=job_id,
                 event="job.created",
-                fields={"operation": "predict_go_terms", "queue": _JOBS_QUEUE},
+                fields={"operation": "predict_go_terms", "queue": _PREDICTIONS_QUEUE},
             )
         )
 
-    publish_job(amqp_url, _JOBS_QUEUE, job_id)
+    publish_job(amqp_url, _PREDICTIONS_QUEUE, job_id)
     return {"id": str(job_id), "status": "queued"}
 
 
