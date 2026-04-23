@@ -35,6 +35,9 @@ Decisions are grouped by system layer:
    * - 007
      - :doc:`Contract-first integration with protea-reranker-lab <007-contract-first-lab-integration>`
      - Re-ranker iteration cadence would contaminate the production dependency tree
+   * - 008
+     - :doc:`PK coverage fix in cafaeval fork <008-cafaeval-pk-coverage-fix>`
+     - Upstream cafaeval reports coverage > 1 in PK; precision is under-divided by the same factor
 
 .. toctree::
    :maxdepth: 1
@@ -47,3 +50,4 @@ Decisions are grouped by system layer:
    005-thread-local-rabbitmq-connections
    006-sequence-deduplication-by-md5
    007-contract-first-lab-integration
+   008-cafaeval-pk-coverage-fix
