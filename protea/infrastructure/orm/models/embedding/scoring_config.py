@@ -27,6 +27,14 @@ evidence_weighted
     final multiplier on top of the weighted sum — even when its signal weight is
     0.  This allows down-ranking IEA-sourced predictions regardless of how
     strong the embedding or alignment signals are.
+
+    **Recommended usage**: set ``evidence_weight = 0`` in ``weights`` when
+    using this formula.  The multiplier is always applied, so including
+    ``evidence_weight`` in the linear sum compounds the evidence signal
+    twice — usually not intentional.  If you want a preset that only
+    *vetoes* low-evidence predictions without bending the rest of the
+    ranking, use ``formula=evidence_weighted`` with ``evidence_weight=0``
+    in ``weights``.
 """
 
 from __future__ import annotations
@@ -61,6 +69,7 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "identity_sw": 0.0,
     "evidence_weight": 0.0,
     "taxonomic_proximity": 0.0,
+    "neighbor_vote_fraction": 0.0,
 }
 
 # ---------------------------------------------------------------------------

@@ -164,6 +164,31 @@ class TestComputeScoreMultiSignal:
         score = compute_score({"identity_nw": 1.5}, cfg)
         assert score == pytest.approx(1.0)
 
+    def test_vote_fraction_signal(self):
+        cfg = _config({"neighbor_vote_fraction": 1.0})
+        score = compute_score({"neighbor_vote_fraction": 0.7}, cfg)
+        assert score == pytest.approx(0.7)
+
+    def test_vote_fraction_unanimous(self):
+        cfg = _config({"neighbor_vote_fraction": 1.0})
+        score = compute_score({"neighbor_vote_fraction": 1.0}, cfg)
+        assert score == pytest.approx(1.0)
+
+    def test_vote_fraction_combined_with_embedding(self):
+        cfg = _config({"embedding_similarity": 0.5, "neighbor_vote_fraction": 0.5})
+        # embedding similarity = 1.0 (distance=0), vote_fraction = 0.6
+        # → (0.5*1.0 + 0.5*0.6)/1.0 = 0.8
+        pred = {"distance": 0.0, "neighbor_vote_fraction": 0.6}
+        score = compute_score(pred, cfg)
+        assert score == pytest.approx(0.8)
+
+    def test_vote_fraction_none_excluded(self):
+        cfg = _config({"embedding_similarity": 0.5, "neighbor_vote_fraction": 0.5})
+        # vote_fraction is None → only embedding_similarity contributes,
+        # denominator collapses so score = 1.0
+        score = compute_score({"distance": 0.0, "neighbor_vote_fraction": None}, cfg)
+        assert score == pytest.approx(1.0)
+
 
 # ---------------------------------------------------------------------------
 # compute_score — evidence_weighted formula

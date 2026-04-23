@@ -422,6 +422,99 @@ class TestScoredTSV:
 
 
 # ---------------------------------------------------------------------------
+# Signal coverage guard — 409 when the ScoringConfig requires signals absent
+# from the target PredictionSet (e.g. alignment_weighted on a KNN-only set).
+# ---------------------------------------------------------------------------
+
+
+class TestSignalCoverageGuard:
+    def _wire_session(
+        self, session, cfg, *, total: int, counts: dict[str, int]
+    ) -> None:
+        """Configure session.get and session.execute for the guard test."""
+        from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
+        from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
+
+        def get_side(model, _id):
+            if model is PredictionSet:
+                return MagicMock()
+            if model is ScoringConfig:
+                return cfg
+            return None
+
+        session.get.side_effect = get_side
+        mapping = {"total": total, **counts}
+        session.execute.return_value.mappings.return_value.one.return_value = mapping
+
+    def test_missing_identity_nw_returns_409(self, client, session):
+        set_id, config_id = uuid4(), uuid4()
+        cfg = _make_config(
+            "align",
+            weights={"embedding_similarity": 0.5, "identity_nw": 0.5},
+        )
+        cfg.id = config_id
+        self._wire_session(
+            session,
+            cfg,
+            total=100,
+            counts={"cnt_distance": 100, "cnt_identity_nw": 0},
+        )
+        resp = client.get(
+            f"/scoring/prediction-sets/{set_id}/score.tsv?scoring_config_id={config_id}"
+        )
+        assert resp.status_code == 409
+        assert "identity_nw" in resp.json()["detail"]
+
+    def test_full_coverage_passes_guard(self, client, session):
+        """When every required column is filled, the guard lets the stream start."""
+        set_id, config_id = uuid4(), uuid4()
+        cfg = _make_config(
+            "align",
+            weights={"embedding_similarity": 0.5, "identity_nw": 0.5},
+        )
+        cfg.id = config_id
+        self._wire_session(
+            session,
+            cfg,
+            total=100,
+            counts={"cnt_distance": 100, "cnt_identity_nw": 100},
+        )
+        # Empty yield_per so the stream produces only the header
+        session.query.return_value.join.return_value.filter.return_value.yield_per.return_value = []
+        resp = client.get(
+            f"/scoring/prediction-sets/{set_id}/score.tsv?scoring_config_id={config_id}"
+        )
+        assert resp.status_code == 200
+        assert resp.text.strip().startswith("protein_accession")
+
+    def test_evidence_weighted_always_requires_evidence_code(self, client, session):
+        """formula=evidence_weighted applies the multiplier regardless of weights,
+        so evidence_code must be present even when its weight is 0."""
+        from protea.infrastructure.orm.models.embedding.scoring_config import (
+            FORMULA_EVIDENCE_WEIGHTED,
+        )
+
+        set_id, config_id = uuid4(), uuid4()
+        cfg = _make_config(
+            "veto",
+            formula=FORMULA_EVIDENCE_WEIGHTED,
+            weights={"embedding_similarity": 1.0, "evidence_weight": 0.0},
+        )
+        cfg.id = config_id
+        self._wire_session(
+            session,
+            cfg,
+            total=100,
+            counts={"cnt_distance": 100, "cnt_evidence_code": 0},
+        )
+        resp = client.get(
+            f"/scoring/prediction-sets/{set_id}/score.tsv?scoring_config_id={config_id}"
+        )
+        assert resp.status_code == 409
+        assert "evidence_weight" in resp.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
 # GET /prediction-sets/{set_id}/metrics — 404 preflight checks
 # ---------------------------------------------------------------------------
 
@@ -921,109 +1014,6 @@ class TestDeleteReranker:
         session.get.return_value = None
         resp = client.delete(f"/scoring/rerankers/{uuid4()}")
         assert resp.status_code == 404
-
-
-class TestTrainReranker:
-    def test_prediction_set_not_found(self, client, session):
-        session.get.return_value = None
-        session.query.return_value.filter.return_value.first.return_value = None
-        resp = client.post(
-            "/scoring/rerankers/train",
-            json={
-                "name": "test",
-                "prediction_set_id": str(uuid4()),
-                "evaluation_set_id": str(uuid4()),
-            },
-        )
-        assert resp.status_code == 404
-        assert "PredictionSet" in resp.json()["detail"]
-
-    def test_evaluation_set_not_found(self, client, session):
-        ps = _make_pred_set()
-        session.query.return_value.filter.return_value.first.return_value = None
-
-        def get_side(model, id_):
-            if model is PredictionSet:
-                return ps
-            return None
-
-        session.get.side_effect = get_side
-        resp = client.post(
-            "/scoring/rerankers/train",
-            json={
-                "name": "test",
-                "prediction_set_id": str(ps.id),
-                "evaluation_set_id": str(uuid4()),
-            },
-        )
-        assert resp.status_code == 404
-        assert "EvaluationSet" in resp.json()["detail"]
-
-    def test_duplicate_name_returns_409(self, client, session):
-        ps = _make_pred_set()
-        es = _make_eval_set()
-
-        def get_side(model, id_):
-            if model is PredictionSet:
-                return ps
-            if model is EvaluationSet:
-                return es
-            return None
-
-        session.get.side_effect = get_side
-        session.query.return_value.filter.return_value.first.return_value = _make_reranker_model()
-
-        resp = client.post(
-            "/scoring/rerankers/train",
-            json={
-                "name": "existing-name",
-                "prediction_set_id": str(ps.id),
-                "evaluation_set_id": str(es.id),
-            },
-        )
-        assert resp.status_code == 409
-
-    def test_empty_predictions_returns_422(self, client, session):
-        ps = _make_pred_set()
-        es = _make_eval_set()
-
-        def get_side(model, id_):
-            if model is PredictionSet:
-                return ps
-            if model is EvaluationSet:
-                return es
-            return None
-
-        session.get.side_effect = get_side
-        session.query.return_value.filter.return_value.first.return_value = None
-
-        eval_data = MagicMock()
-        eval_data.nk = {}
-
-        with patch("protea.api.routers.scoring.compute_evaluation_data", return_value=eval_data):
-            # Empty result set
-            session.query.return_value.join.return_value.filter.return_value.all.return_value = []
-            resp = client.post(
-                "/scoring/rerankers/train",
-                json={
-                    "name": "empty-test",
-                    "prediction_set_id": str(ps.id),
-                    "evaluation_set_id": str(es.id),
-                },
-            )
-        assert resp.status_code == 422
-
-    def test_invalid_category_returns_422(self, client, session):
-        resp = client.post(
-            "/scoring/rerankers/train",
-            json={
-                "name": "test",
-                "prediction_set_id": str(uuid4()),
-                "evaluation_set_id": str(uuid4()),
-                "category": "invalid",
-            },
-        )
-        assert resp.status_code == 422
 
 
 class TestRerankedTSV:

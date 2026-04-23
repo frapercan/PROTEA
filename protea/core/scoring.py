@@ -117,6 +117,8 @@ def compute_score(pred: dict[str, Any], config: ScoringConfig) -> float:
         - ``identity_sw`` (float | None): SW local identity in [0, 1].
         - ``evidence_code`` (str | None): GO or ECO evidence code.
         - ``taxonomic_distance`` (float | None): raw taxonomic distance.
+        - ``neighbor_vote_fraction`` (float | None): fraction of K neighbours
+          that voted for this GO term, in [0, 1].
 
     config:
         A :class:`ScoringConfig` instance defining the formula, signal
@@ -161,6 +163,9 @@ def compute_score(pred: dict[str, Any], config: ScoringConfig) -> float:
     tax_dist = pred.get("taxonomic_distance")
     if tax_dist is not None:
         _add("taxonomic_proximity", 1.0 / (1.0 + float(tax_dist)))
+
+    # 6. Neighbour vote fraction: already in [0, 1] — no transformation.
+    _add("neighbor_vote_fraction", pred.get("neighbor_vote_fraction"))
 
     if total_w == 0.0:
         return 0.0

@@ -53,10 +53,12 @@ from protea.infrastructure.orm.models.embedding.reranker_model import RerankerMo
 from protea.infrastructure.orm.models.embedding.scoring_config import (
     DEFAULT_EVIDENCE_WEIGHTS,
     DEFAULT_WEIGHTS,
+    FORMULA_EVIDENCE_WEIGHTED,
     VALID_FORMULAS,
     ScoringConfig,
 )
 from protea.infrastructure.session import session_scope
+from sqlalchemy import text
 
 router = APIRouter(prefix="/scoring", tags=["scoring"])
 
@@ -77,29 +79,50 @@ _PRESET_CONFIGS: list[dict[str, Any]] = [
             "identity_sw": 0.0,
             "evidence_weight": 0.0,
             "taxonomic_proximity": 0.0,
+            "neighbor_vote_fraction": 0.0,
         },
         "description": (
-            "Pure cosine similarity converted to [0, 1]. "
-            "Baseline config — no alignment, evidence, or taxonomy signals."
+            "Pure cosine similarity of the winning neighbour, converted to [0, 1]. "
+            "Baseline — tests the hypothesis that the nearest-neighbour distance "
+            "alone is enough signal."
         ),
     },
     {
-        "name": "embedding_plus_evidence",
-        "formula": "evidence_weighted",
+        "name": "vote_fraction",
+        "formula": "linear",
         "weights": {
-            "embedding_similarity": 1.0,
+            "embedding_similarity": 0.0,
             "identity_nw": 0.0,
             "identity_sw": 0.0,
-            "evidence_weight": 1.0,
+            "evidence_weight": 0.0,
             "taxonomic_proximity": 0.0,
+            "neighbor_vote_fraction": 1.0,
         },
         "description": (
-            "Embedding similarity multiplied by evidence code quality (evidence_weighted formula). "
-            "Penalises IEA-sourced annotations regardless of embedding distance."
+            "Canonical KNN score: fraction of the K neighbours that vote for each "
+            "GO term. Tests the hypothesis that consensus across neighbours beats "
+            "the raw cosine distance of the top-1 neighbour."
         ),
     },
     {
-        "name": "alignment_weighted",
+        "name": "alignment_only",
+        "formula": "linear",
+        "weights": {
+            "embedding_similarity": 0.0,
+            "identity_nw": 0.6,
+            "identity_sw": 0.4,
+            "evidence_weight": 0.0,
+            "taxonomic_proximity": 0.0,
+            "neighbor_vote_fraction": 0.0,
+        },
+        "description": (
+            "Pure sequence-identity score (NW global 60 % + SW local 40 %), no embedding. "
+            "Tests whether classical sequence alignment alone can match PLM-based KNN. "
+            "Requires compute_alignments=True."
+        ),
+    },
+    {
+        "name": "embedding_plus_alignment",
         "formula": "linear",
         "weights": {
             "embedding_similarity": 0.5,
@@ -107,45 +130,65 @@ _PRESET_CONFIGS: list[dict[str, Any]] = [
             "identity_sw": 0.2,
             "evidence_weight": 0.0,
             "taxonomic_proximity": 0.0,
+            "neighbor_vote_fraction": 0.0,
         },
         "description": (
-            "Combines embedding similarity (50 %) with global NW identity (30 %) "
-            "and local SW identity (20 %). "
-            "Requires PredictionSet computed with compute_alignments=True."
+            "Embedding (50 %) refined with global NW identity (30 %) and local SW "
+            "identity (20 %). Tests whether alignment adds a usable signal on top "
+            "of the embedding. Requires compute_alignments=True."
+        ),
+    },
+    {
+        "name": "embedding_plus_vote",
+        "formula": "linear",
+        "weights": {
+            "embedding_similarity": 0.5,
+            "identity_nw": 0.0,
+            "identity_sw": 0.0,
+            "evidence_weight": 0.0,
+            "taxonomic_proximity": 0.0,
+            "neighbor_vote_fraction": 0.5,
+        },
+        "description": (
+            "Nearest-neighbour distance (50 %) combined with K-neighbour consensus "
+            "(50 %). Tests whether adding voting on top of cosine distance improves "
+            "the ranking vs either signal alone."
+        ),
+    },
+    {
+        "name": "evidence_veto",
+        "formula": "evidence_weighted",
+        "weights": {
+            "embedding_similarity": 1.0,
+            "identity_nw": 0.0,
+            "identity_sw": 0.0,
+            "evidence_weight": 0.0,
+            "taxonomic_proximity": 0.0,
+            "neighbor_vote_fraction": 0.0,
+        },
+        "description": (
+            "Embedding similarity, multiplied by the resolved evidence weight as a "
+            "final veto (evidence_weighted formula with evidence_weight=0 in the "
+            "linear sum to avoid double-counting). Tests whether down-ranking IEA/ND "
+            "predictions via a clean multiplier beats feeding evidence into the sum."
         ),
     },
     {
         "name": "composite",
-        "formula": "evidence_weighted",
+        "formula": "linear",
         "weights": {
             "embedding_similarity": 0.4,
             "identity_nw": 0.2,
             "identity_sw": 0.1,
-            "evidence_weight": 0.2,
+            "evidence_weight": 0.0,
             "taxonomic_proximity": 0.1,
+            "neighbor_vote_fraction": 0.2,
         },
         "description": (
-            "Full composite: embedding + alignment + evidence quality + taxonomic proximity. "
-            "Requires compute_alignments=True and compute_taxonomy=True."
-        ),
-    },
-    {
-        "name": "evidence_primary",
-        "formula": "linear",
-        "weights": {
-            "embedding_similarity": 0.2,
-            "identity_nw": 0.0,
-            "identity_sw": 0.0,
-            "evidence_weight": 0.8,
-            "taxonomic_proximity": 0.0,
-        },
-        "description": (
-            "Evidence quality as primary signal (80%), embedding similarity as tiebreaker (20%). "
-            "Designed for datasets where cosine distances cluster tightly (>99% of predictions "
-            "within distance < 0.1), making distance a poor tau discriminator. "
-            "Pulls scores apart into evidence-code tiers: "
-            "EXP/IDA → ~1.0, IEA → ~0.84, ISS/IBA → ~0.76, NAS → ~0.60, ND → ~0.28. "
-            "Recommended when compute_alignments and compute_taxonomy are not available."
+            "Kitchen-sink linear mix: embedding + alignment + taxonomy + voting. "
+            "evidence_weight excluded from the linear sum (use evidence_veto when "
+            "you want the multiplier). Requires compute_alignments=True and "
+            "compute_taxonomy=True; tests whether more signals beat fewer."
         ),
     },
 ]
@@ -251,6 +294,72 @@ def _snapshot(c: ScoringConfig) -> ScoringConfig:
         evidence_weights=c.evidence_weights,
         description=c.description,
     )
+
+
+# Maps each scoring signal key to the GOPrediction column whose fill rate
+# determines whether the signal is usable for a given PredictionSet.
+_SIGNAL_TO_COLUMN: dict[str, str] = {
+    "embedding_similarity": "distance",
+    "identity_nw": "identity_nw",
+    "identity_sw": "identity_sw",
+    "evidence_weight": "evidence_code",
+    "taxonomic_proximity": "taxonomic_distance",
+    "neighbor_vote_fraction": "neighbor_vote_fraction",
+}
+
+
+def _check_signal_coverage(session, prediction_set_id, config_snap: ScoringConfig) -> None:
+    """Fail fast with 409 when the config needs signals absent from the PredictionSet.
+
+    For every signal with a non-zero weight in ``config_snap.weights`` (plus
+    ``evidence_code`` when the formula is ``evidence_weighted`` — the multiplier
+    is always applied), count how many rows in the PredictionSet have the
+    backing column non-NULL.  Zero coverage is a configuration mismatch
+    (typically a ``ScoringConfig`` that requires ``compute_alignments=True`` or
+    ``compute_taxonomy=True`` applied to a PredictionSet computed without
+    those flags).  Raise HTTP 409 with the list of missing signals instead of
+    silently producing a degraded score (``compute_score`` drops NULL signals
+    from both numerator and denominator).
+    """
+    weights = config_snap.weights or {}
+    required: list[tuple[str, str]] = []
+    for signal, col in _SIGNAL_TO_COLUMN.items():
+        if float(weights.get(signal, 0.0)) > 0.0:
+            required.append((signal, col))
+    if getattr(config_snap, "formula", "linear") == FORMULA_EVIDENCE_WEIGHTED and not any(
+        s == "evidence_weight" for s, _ in required
+    ):
+        required.append(("evidence_weight", "evidence_code"))
+    if not required:
+        return
+
+    cols_sql = ", ".join(f"COUNT({col}) AS cnt_{col}" for _, col in required)
+    row = (
+        session.execute(
+            text(
+                f"SELECT COUNT(*) AS total, {cols_sql} "  # noqa: S608 — col names are hard-coded
+                "FROM go_prediction WHERE prediction_set_id = :pid"
+            ),
+            {"pid": str(prediction_set_id)},
+        )
+        .mappings()
+        .one()
+    )
+    total = int(row["total"] or 0)
+    missing: list[str] = []
+    for signal, col in required:
+        cnt = int(row[f"cnt_{col}"] or 0)
+        if total == 0 or cnt == 0:
+            missing.append(f"{signal} (column '{col}': {cnt}/{total} rows)")
+    if missing:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "ScoringConfig requires signals absent from the PredictionSet: "
+                + "; ".join(missing)
+                + ". Re-predict with the corresponding compute_* flag enabled."
+            ),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -391,6 +500,7 @@ def download_scored_predictions(
         if config is None:
             raise HTTPException(status_code=404, detail="ScoringConfig not found")
         config_snap = _snapshot(config)
+        _check_signal_coverage(session, set_id, config_snap)
 
     def _generate() -> Iterator[bytes]:
         header = (
@@ -406,6 +516,7 @@ def download_scored_predictions(
                     "identity_nw",
                     "identity_sw",
                     "taxonomic_distance",
+                    "neighbor_vote_fraction",
                 ]
             )
             + "\n"
@@ -428,6 +539,7 @@ def download_scored_predictions(
                     "identity_sw": pred.identity_sw,
                     "evidence_code": pred.evidence_code,
                     "taxonomic_distance": pred.taxonomic_distance,
+                    "neighbor_vote_fraction": pred.neighbor_vote_fraction,
                 }
                 score = compute_score(pred_dict, config_snap)
                 if min_score is not None and score < min_score:
@@ -447,6 +559,9 @@ def download_scored_predictions(
                             str(pred.identity_sw) if pred.identity_sw is not None else "",
                             str(pred.taxonomic_distance)
                             if pred.taxonomic_distance is not None
+                            else "",
+                            str(pred.neighbor_vote_fraction)
+                            if pred.neighbor_vote_fraction is not None
                             else "",
                         ]
                     )
@@ -505,6 +620,7 @@ def compute_metrics(
         if config is None:
             raise HTTPException(status_code=404, detail="ScoringConfig not found")
         config_snap = _snapshot(config)
+        _check_signal_coverage(session, set_id, config_snap)
 
         eval_data = compute_evaluation_data(
             session,
@@ -530,6 +646,7 @@ def compute_metrics(
             "identity_sw": pred.identity_sw,
             "evidence_code": pred.evidence_code,
             "taxonomic_distance": pred.taxonomic_distance,
+            "neighbor_vote_fraction": pred.neighbor_vote_fraction,
         }
         pred_dict["score"] = compute_score(pred_dict, config_snap)
         scored.append(pred_dict)
