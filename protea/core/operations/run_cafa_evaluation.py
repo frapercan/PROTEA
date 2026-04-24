@@ -798,6 +798,7 @@ class RunCafaEvaluationOperation:
                         "identity_sw": pred.identity_sw,
                         "evidence_code": pred.evidence_code,
                         "taxonomic_distance": pred.taxonomic_distance,
+                        "neighbor_vote_fraction": pred.neighbor_vote_fraction,
                     }
                     score = compute_score(pred_dict, scoring_config)
                 else:
