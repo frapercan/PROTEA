@@ -174,6 +174,14 @@ def get_benchmark_matrix(
             "(any scoring_config.name, or 'reranker')."
         ),
     ),
+    k: int | None = Query(
+        default=None,
+        ge=1,
+        description=(
+            "If set, restrict rows to PredictionSets computed with this "
+            "``limit_per_entry`` (K). Typical values: 3, 5, 10."
+        ),
+    ),
     factory: sessionmaker[Session] = Depends(get_session_factory),
     cfg: BenchmarkConfig = Depends(get_benchmark_config),
 ) -> dict[str, Any]:
@@ -189,6 +197,7 @@ def get_benchmark_matrix(
             select(
                 EvaluationResult,
                 PredictionSet.embedding_config_id,
+                PredictionSet.limit_per_entry.label("k"),
                 ScoringConfig.name.label("scoring_name"),
             )
             .join(PredictionSet, PredictionSet.id == EvaluationResult.prediction_set_id)
@@ -198,15 +207,20 @@ def get_benchmark_matrix(
         )
         if evaluation_set_id is not None:
             stmt = stmt.where(EvaluationResult.evaluation_set_id == evaluation_set_id)
+        if k is not None:
+            stmt = stmt.where(PredictionSet.limit_per_entry == k)
 
         # Dedupe on the Python side: row count is always small (O(hundreds)),
         # and "best-Fmax per cell" is clearest as an in-memory fold.
-        best: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
+        # Key now includes K so the same (embedding, stage, cell) tuple yields
+        # one row per K (3, 5, 10) instead of collapsing them.
+        best: dict[tuple[str, str, str, int, str, str], dict[str, Any]] = {}
         eval_set_ids: set[str] = set()
         embedding_ids: set[str] = set()
         stages_seen: set[str] = set()
+        ks_seen: set[int] = set()
 
-        for er, embedding_config_id, scoring_name in session.execute(stmt).all():
+        for er, embedding_config_id, row_k, scoring_name in session.execute(stmt).all():
             st = _stage_of(er, scoring_name)
             if st is None or st in cfg.hidden_stages:
                 continue
@@ -218,6 +232,7 @@ def get_benchmark_matrix(
             esid = str(er.evaluation_set_id)
             embedding_ids.add(eid)
             eval_set_ids.add(esid)
+            ks_seen.add(int(row_k))
             results = er.results or {}
 
             for cat in cfg.categories:
@@ -230,13 +245,14 @@ def get_benchmark_matrix(
                     if fmax is None:
                         continue
 
-                    key = (eid, esid, st, cat, asp)
+                    key = (eid, esid, st, int(row_k), cat, asp)
                     cur = best.get(key)
                     if cur is None or fmax > cur["fmax"]:
                         best[key] = {
                             "embedding_config_id": eid,
                             "evaluation_set_id": esid,
                             "stage": st,
+                            "k": int(row_k),
                             "category": cat,
                             "aspect": asp,
                             "fmax": round(float(fmax), 4),
@@ -266,6 +282,7 @@ def get_benchmark_matrix(
                 r["evaluation_set_id"],
                 _stage_sort_index(r["stage"], cfg.preferred_default_stages),
                 r["embedding_config_id"],
+                r["k"],
                 r["category"],
                 r["aspect"],
             ),
@@ -290,6 +307,7 @@ def get_benchmark_matrix(
                 "recall": entry["recall"],
                 "coverage": entry["coverage"],
                 "embedding_config_id": entry["embedding_config_id"],
+                "k": entry["k"],
                 "stage": entry["stage"],
                 "evaluation_result_id": entry["evaluation_result_id"],
                 "evaluation_set_id": entry["evaluation_set_id"],
@@ -355,10 +373,12 @@ def get_benchmark_matrix(
             "stages": stages_payload,
             "categories": list(cfg.categories),
             "aspects": list(cfg.aspects),
+            "ks": sorted(ks_seen),
             "best_per_cell": best_per_cell,
             "filters": {
                 "evaluation_set_id": str(evaluation_set_id) if evaluation_set_id else None,
                 "stage": stage,
+                "k": k,
             },
         }
 

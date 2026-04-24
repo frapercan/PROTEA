@@ -144,6 +144,7 @@ export default function BenchmarkPage() {
   const [error, setError] = useState<string | null>(null);
   const [stage, setStage] = useState<string | null>(null);
   const [evalSetId, setEvalSetId] = useState<string | "all">("all");
+  const [selectedK, setSelectedK] = useState<number | null>(null);
 
   // Unfiltered catalog fetch — populates the full set of known stages and
   // eval sets, so selector chips don't disappear when a filtered query
@@ -153,7 +154,8 @@ export default function BenchmarkPage() {
     evalSets: BenchmarkEvalSet[];
     categories: string[];
     aspects: string[];
-  }>({ stages: [], evalSets: [], categories: [], aspects: [] });
+    ks: number[];
+  }>({ stages: [], evalSets: [], categories: [], aspects: [], ks: [] });
 
   useEffect(() => {
     getBenchmarkMatrix()
@@ -163,8 +165,10 @@ export default function BenchmarkPage() {
           evalSets: m.evaluation_sets,
           categories: m.categories,
           aspects: m.aspects,
+          ks: m.ks ?? [],
         });
         setStage((prev) => prev ?? pickDefaultStage(m.stages));
+        setSelectedK((prev) => prev ?? (m.ks?.[0] ?? null));
       })
       .catch((e) => setError(e.message));
   }, []);
@@ -177,6 +181,7 @@ export default function BenchmarkPage() {
       getBenchmarkMatrix({
         stage,
         evaluation_set_id: evalSetId === "all" ? undefined : evalSetId,
+        k: selectedK ?? undefined,
       }),
     ])
       .then(([e, m]) => {
@@ -184,7 +189,7 @@ export default function BenchmarkPage() {
         setMatrix(m);
       })
       .catch((e) => setError(e.message));
-  }, [stage, evalSetId]);
+  }, [stage, evalSetId, selectedK]);
 
   const rowIndex = useMemo(
     () => (matrix ? indexRows(matrix.rows) : new Map<string, BenchmarkRow>()),
@@ -349,6 +354,29 @@ export default function BenchmarkPage() {
             ))}
           </div>
         </div>
+
+        {catalog.ks.length > 0 && (
+          <div>
+            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
+              Neighbours (K)
+            </label>
+            <div className="flex gap-1 rounded-lg bg-gray-100 p-0.5">
+              {catalog.ks.map((n) => (
+                <button
+                  key={n}
+                  onClick={() => setSelectedK(n)}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                    selectedK === n
+                      ? "bg-white text-gray-900 shadow-sm"
+                      : "text-gray-500 hover:text-gray-700"
+                  }`}
+                >
+                  K={n}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {evalSetList.length > 1 && (
           <div>

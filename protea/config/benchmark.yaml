@@ -8,10 +8,12 @@
 stages:
   # Preferred stage to select on initial page load. The first entry that
   # actually has data wins; otherwise falls back to the first stage seen.
+  # Baseline first so the landing view shows the widest coverage across PLMs.
   preferred_default:
-    - alignment_weighted
-    - composite
     - embedding_only
+    - vote_fraction
+    - embedding_plus_alignment
+    - composite
 
   # Scoring configs the frontend should highlight as the "reference / raw
   # embedding" baseline in the leaderboard. The name must match an entry in
@@ -26,10 +28,12 @@ stages:
   # a Title-Cased version of its own `name`.
   labels:
     embedding_only: "Embedding-only"
-    embedding_plus_evidence: "Embedding + evidence"
-    alignment_weighted: "Alignment-weighted"
+    vote_fraction: "Vote fraction (KNN)"
+    alignment_only: "Alignment-only"
+    embedding_plus_alignment: "Embedding + alignment"
+    embedding_plus_vote: "Embedding + vote"
+    evidence_veto: "Evidence veto"
     composite: "Composite"
-    evidence_primary: "Evidence-primary"
     reranker: "Re-ranker"
 
 # Evaluation set labels ----------------------------------------------------

@@ -719,6 +719,7 @@ export type BenchmarkRow = {
   embedding_config_id: string;
   evaluation_set_id: string;
   stage: string;
+  k: number;
   category: string;
   aspect: string;
   fmax: number;
@@ -737,6 +738,7 @@ export type BenchmarkBestCell = {
   recall: number | null;
   coverage: number | null;
   embedding_config_id: string;
+  k: number;
   stage: string;
   evaluation_result_id: string;
   evaluation_set_id: string;
@@ -771,10 +773,12 @@ export type BenchmarkMatrixResponse = {
   stages: BenchmarkStage[];
   categories: string[];
   aspects: string[];
+  ks: number[];
   best_per_cell: BenchmarkBestCell[];
   filters: {
     evaluation_set_id: string | null;
     stage: string | null;
+    k: number | null;
   };
 };
 
@@ -785,10 +789,12 @@ export function getBenchmarkEmbeddings() {
 export function getBenchmarkMatrix(params?: {
   evaluation_set_id?: string;
   stage?: string;
+  k?: number;
 }) {
   const qs = new URLSearchParams();
   if (params?.evaluation_set_id) qs.set("evaluation_set_id", params.evaluation_set_id);
   if (params?.stage) qs.set("stage", params.stage);
+  if (params?.k !== undefined) qs.set("k", String(params.k));
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   return http<BenchmarkMatrixResponse>(`/benchmark/matrix${suffix}`);
 }
