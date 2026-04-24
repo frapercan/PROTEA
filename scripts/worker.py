@@ -57,8 +57,13 @@ def main() -> None:
 
     # Special mode: stale job reaper (no queue, just periodic DB check).
     if args.queue == "reaper":
-        reaper = StaleJobReaper(factory, timeout_seconds=21600)
-        logging.info("Stale job reaper started. timeout=21600s interval=60s")
+        # 24h hard timeout + 30min stall window. Earlier value (6h) killed
+        # predict_go_terms coords that waited in the batch FIFO behind other
+        # coords — the last ones in a 23-job batch routinely sat past 6h
+        # even though work was progressing upstream. With only one
+        # predictions.batch worker this is the expected shape of the queue.
+        reaper = StaleJobReaper(factory, timeout_seconds=86400)
+        logging.info("Stale job reaper started. timeout=86400s interval=60s")
         reaper.run(interval_seconds=60)
         return
 
