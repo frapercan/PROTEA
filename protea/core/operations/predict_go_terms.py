@@ -13,13 +13,15 @@ from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from protea.core.anc2vec_embeddings import Anc2VecIndex, get_index as get_anc2vec_index
+from protea.core.anc2vec_embeddings import Anc2VecIndex
+from protea.core.anc2vec_embeddings import get_index as get_anc2vec_index
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.feature_engineering import compute_alignment, compute_taxonomy
 from protea.core.knn_search import search_knn
-from protea.core.reranker import EMBEDDING_PCA_DIM, fit_embedding_pca
-from protea.core.reranking import (
+from protea.core.reranker import (
+    EMBEDDING_PCA_DIM,
     apply_reranker,
+    fit_embedding_pca,
     infer_active_feature_families,
     load_reranker,
 )
