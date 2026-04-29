@@ -6,6 +6,12 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
+from protea.core.disk_cache import (
+    _aspect_index_path,
+    _build_anno_csr,
+    _csr_lookup,
+    _disk_cache_paths,
+)
 from protea.core.knn_search import _compute_distance_matrix, search_knn
 from protea.core.operations.predict_go_terms import (
     PredictGOTermsBatchOperation,
@@ -13,10 +19,6 @@ from protea.core.operations.predict_go_terms import (
     PredictGOTermsOperation,
     PredictGOTermsPayload,
     StorePredictionsOperation,
-    _aspect_index_path,
-    _build_anno_csr,
-    _csr_lookup,
-    _disk_cache_paths,
 )
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
