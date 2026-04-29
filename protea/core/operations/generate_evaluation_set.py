@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import tempfile
 import uuid
+from pathlib import Path
 from typing import Any
 
 from pydantic import field_validator
@@ -10,10 +12,14 @@ from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPaylo
 from protea.core.evaluation import (
     compute_evaluation_data,
     compute_evaluation_data_reconciled,
+    groundtruth_key_for,
+    serialize_evaluation_data_to_parquet,
 )
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
+from protea.infrastructure.settings import load_settings
+from protea.infrastructure.storage import get_artifact_store
 
 
 class GenerateEvaluationSetPayload(ProteaPayload, frozen=True):
@@ -140,6 +146,25 @@ class GenerateEvaluationSetOperation:
         session.add(eval_set)
         session.flush()
 
-        result = {"evaluation_set_id": str(eval_set.id), **stats}
+        # Persist the full ground-truth (nk/lk/pk/known/pk_known) to the artifact
+        # store. Downstream consumers (train_reranker_auto, cafaeval) read this
+        # parquet via load_evaluation_data_for_set instead of recomputing.
+        project_root = Path(__file__).resolve().parents[3]
+        store = get_artifact_store(load_settings(project_root))
+        key = groundtruth_key_for(eval_set.id)
+        with tempfile.TemporaryDirectory(prefix="protea_eval_gt_") as tmp:
+            local_path = Path(tmp) / "groundtruth.parquet"
+            serialize_evaluation_data_to_parquet(data, local_path)
+            uri = store.put(key, local_path)
+        eval_set.groundtruth_uri = uri
+        session.flush()
+        emit(
+            "generate_evaluation_set.groundtruth_persisted",
+            None,
+            {"evaluation_set_id": str(eval_set.id), "uri": uri, "key": key},
+            "info",
+        )
+
+        result = {"evaluation_set_id": str(eval_set.id), "groundtruth_uri": uri, **stats}
         emit("generate_evaluation_set.done", None, result, "info")
         return OperationResult(result=result)

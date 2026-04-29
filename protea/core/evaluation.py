@@ -35,14 +35,19 @@ Output format (matching CAFA evaluator): 2-column TSV, no header.
 
 from __future__ import annotations
 
+import io
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from protea.core.evidence_codes import ECO_TO_CODE, EXPERIMENTAL
+
+# Parquet column for the bucket each (protein, go_id) row belongs to.
+_GROUNDTRUTH_BUCKETS = ("nk", "lk", "pk", "known", "pk_known")
 
 # ---------------------------------------------------------------------------
 # All codes (GO + ECO) that are considered experimental
@@ -634,16 +639,90 @@ def compute_evaluation_data_reconciled(
     )
 
 
-def load_evaluation_data_for_set(session: Session, eval_set) -> tuple[EvaluationData, uuid.UUID]:
-    """Dispatch helper: compute ground-truth for an EvaluationSet row.
+def _eval_data_to_dataframe(data: EvaluationData):
+    """Flatten EvaluationData's five buckets into a long DataFrame.
 
-    Reads ``eval_set.stats["mode"]`` / ``["pivot_ontology_snapshot_id"]`` to decide
-    between the fast same-snapshot path and the reconciled cross-OBO path. Returns
-    the EvaluationData plus the pivot OntologySnapshot ID — the caller should use
-    the pivot snapshot (not the old set's) when loading the OBO for cafaeval, since
-    propagated go_ids live in pivot term space.
+    Columns: ``protein_accession`` (str), ``go_id`` (str), ``bucket`` (categorical
+    one of nk/lk/pk/known/pk_known). One row per (protein, go_id, bucket) triple.
+    """
+    import pandas as pd
+
+    rows: list[tuple[str, str, str]] = []
+    for bucket_name, bucket_dict in (
+        ("nk", data.nk),
+        ("lk", data.lk),
+        ("pk", data.pk),
+        ("known", data.known),
+        ("pk_known", data.pk_known),
+    ):
+        for protein, go_ids in bucket_dict.items():
+            for go_id in go_ids:
+                rows.append((protein, go_id, bucket_name))
+    df = pd.DataFrame(rows, columns=["protein_accession", "go_id", "bucket"])
+    df["bucket"] = df["bucket"].astype(
+        pd.CategoricalDtype(categories=list(_GROUNDTRUTH_BUCKETS))
+    )
+    return df
+
+
+def _dataframe_to_eval_data(df) -> EvaluationData:
+    """Inverse of ``_eval_data_to_dataframe``."""
+    nk: dict[str, set[str]] = defaultdict(set)
+    lk: dict[str, set[str]] = defaultdict(set)
+    pk: dict[str, set[str]] = defaultdict(set)
+    known: dict[str, set[str]] = defaultdict(set)
+    pk_known: dict[str, set[str]] = defaultdict(set)
+    bucket_to_dict = {
+        "nk": nk, "lk": lk, "pk": pk, "known": known, "pk_known": pk_known,
+    }
+    for protein, go_id, bucket in df[["protein_accession", "go_id", "bucket"]].itertuples(
+        index=False, name=None
+    ):
+        bucket_to_dict[str(bucket)][str(protein)].add(str(go_id))
+    return EvaluationData(
+        nk=dict(nk), lk=dict(lk), pk=dict(pk),
+        known=dict(known), pk_known=dict(pk_known),
+    )
+
+
+def serialize_evaluation_data_to_parquet(data: EvaluationData, dest: Path) -> Path:
+    """Write ``data`` to a parquet file at ``dest`` (creates parent dirs).
+
+    Returns ``dest`` for convenience. Uses snappy compression and the long
+    layout produced by ``_eval_data_to_dataframe`` — kept stable since
+    consumers parse it back with ``deserialize_evaluation_data_from_bytes``.
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    df = _eval_data_to_dataframe(data)
+    df.to_parquet(dest, index=False, compression="snappy")
+    return dest
+
+
+def deserialize_evaluation_data_from_bytes(blob: bytes) -> EvaluationData:
+    """Parse parquet bytes (as returned by ``ArtifactStore.get``) into EvaluationData."""
+    import pandas as pd
+
+    df = pd.read_parquet(io.BytesIO(blob))
+    return _dataframe_to_eval_data(df)
+
+
+def load_evaluation_data_for_set(session: Session, eval_set) -> tuple[EvaluationData, uuid.UUID]:
+    """Load ground-truth for an EvaluationSet row.
+
+    Strict reuse path: if ``eval_set.groundtruth_uri`` is set, deserializes the
+    persisted parquet via the configured ArtifactStore and returns it. If not
+    set, raises — recomputation on-the-fly is intentionally not allowed (see
+    the project's "no on-the-fly reuse" rule). Use
+    ``scripts/backfill_evaluation_groundtruth.py`` to materialize artifacts for
+    legacy EvaluationSet rows that predate this column.
+
+    Returns the EvaluationData plus the pivot OntologySnapshot ID — the caller
+    should use the pivot snapshot (not the old set's) when loading the OBO for
+    cafaeval, since propagated go_ids live in pivot term space.
     """
     from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
+    from protea.infrastructure.settings import load_settings
+    from protea.infrastructure.storage import get_artifact_store
 
     ann_old = session.get(AnnotationSet, eval_set.old_annotation_set_id)
     ann_new = session.get(AnnotationSet, eval_set.new_annotation_set_id)
@@ -655,26 +734,22 @@ def load_evaluation_data_for_set(session: Session, eval_set) -> tuple[Evaluation
     else:
         pivot_id = ann_new.ontology_snapshot_id if ann_new else ann_old.ontology_snapshot_id
 
-    same_snapshot = (
-        ann_old is not None
-        and ann_new is not None
-        and ann_old.ontology_snapshot_id == ann_new.ontology_snapshot_id == pivot_id
-    )
+    if not eval_set.groundtruth_uri:
+        raise RuntimeError(
+            f"EvaluationSet {eval_set.id} has no groundtruth_uri. "
+            "Run scripts/backfill_evaluation_groundtruth.py to materialize "
+            "the parquet artifact, or regenerate via /annotations/evaluation-sets/generate."
+        )
 
-    if same_snapshot:
-        data = compute_evaluation_data(
-            session,
-            eval_set.old_annotation_set_id,
-            eval_set.new_annotation_set_id,
-            pivot_id,
-        )
-    else:
-        data = compute_evaluation_data_reconciled(
-            session,
-            eval_set.old_annotation_set_id,
-            eval_set.new_annotation_set_id,
-            ann_old.ontology_snapshot_id,
-            ann_new.ontology_snapshot_id,
-            pivot_id,
-        )
+    project_root = Path(__file__).resolve().parents[2]
+    settings = load_settings(project_root)
+    store = get_artifact_store(settings)
+    key = groundtruth_key_for(eval_set.id)
+    blob = store.get(key)
+    data = deserialize_evaluation_data_from_bytes(blob)
     return data, pivot_id
+
+
+def groundtruth_key_for(eval_set_id) -> str:
+    """Storage key under which an EvaluationSet's ground-truth parquet lives."""
+    return f"eval_groundtruth/{eval_set_id}/groundtruth.parquet"

@@ -98,14 +98,19 @@ cmd_start() {
 
     # Predictions pipeline
     printf "\n${BOLD}[5] Predictions pipeline${RESET}\n"
+    _start_bg worker-predictions-coord poetry run python scripts/worker.py --queue protea.predictions
     for i in $(seq 1 "$BATCH_WORKERS"); do
         _start_bg "worker-predictions-batch-${i}" \
             poetry run python scripts/worker.py --queue protea.predictions.batch
     done
     _start_bg worker-predictions-write poetry run python scripts/worker.py --queue protea.predictions.write
 
+    # Evaluations pipeline
+    printf "\n${BOLD}[6] Evaluations pipeline${RESET}\n"
+    _start_bg worker-evaluations poetry run python scripts/worker.py --queue protea.evaluations
+
     # Stale job reaper
-    printf "\n${BOLD}[6] Stale job reaper${RESET}\n"
+    printf "\n${BOLD}[7] Stale job reaper${RESET}\n"
     _start_bg worker-reaper poetry run python scripts/worker.py --queue reaper
 
     # Frontend
@@ -114,7 +119,7 @@ cmd_start() {
     # (ngrok, Cloudflare free tier, etc). Override with FRONTEND_MODE=dev for
     # local hacking where HMR is actually useful.
     local FRONTEND_MODE="${FRONTEND_MODE:-prod}"
-    printf "\n${BOLD}[7] Frontend (%s)${RESET}\n" "$FRONTEND_MODE"
+    printf "\n${BOLD}[8] Frontend (%s)${RESET}\n" "$FRONTEND_MODE"
     cd "$ROOT/apps/web"
     if [[ "$FRONTEND_MODE" == "prod" ]]; then
         printf "  Building production bundle (this may take ~30-60s)...\n"

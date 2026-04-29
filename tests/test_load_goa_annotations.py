@@ -609,6 +609,15 @@ class TestExecute:
                 "_store_buffer",
                 side_effect=fake_store_buffer,
             ),
+            # The auto-eval enqueue path has dedicated coverage in
+            # ``TestMaybeEnqueueAtomicEval`` below; stubbing it here keeps
+            # these GAF-ingest tests independent of the session.query
+            # mock state used by ``_load_go_term_map``.
+            patch.object(
+                self.op,
+                "_maybe_enqueue_atomic_eval",
+                return_value=None,
+            ),
         ):
             result = self.op.execute(session, payload, emit=emit)
 
@@ -844,6 +853,140 @@ class TestExecute:
         assert result.result["annotations_inserted"] == 7
         page_events = [e for e in events if e["event"] == "load_goa_annotations.page_done"]
         assert len(page_events) == 2  # only full pages emit page_done
+
+
+# ---------------------------------------------------------------------------
+# _maybe_enqueue_atomic_eval
+# ---------------------------------------------------------------------------
+
+
+class TestMaybeEnqueueAtomicEval:
+    """Covers the automatic generate_evaluation_set enqueue triggered by a
+    successful load_goa_annotations run.
+
+    Three scenarios:
+      1. No prior GOA AnnotationSet  → skipped, returns None.
+      2. Prior version exists, no EvaluationSet yet  → enqueues a child job.
+      3. Prior version exists AND the EvaluationSet already exists  → skipped.
+    """
+
+    def setup_method(self):
+        self.op = LoadGOAAnnotationsOperation()
+
+    def _make_ann_set(self, version: str):
+        """Build a MagicMock standing in for an AnnotationSet ORM row."""
+        ann = MagicMock()
+        ann.id = uuid.uuid4()
+        ann.source_version = version
+        ann.source = "goa"
+        return ann
+
+    def _wire_session(
+        self,
+        *,
+        candidates: list,
+        existing_eval_id: uuid.UUID | None,
+    ):
+        """Return a session mock whose query().filter().all() returns
+        ``candidates`` and whose query(EvaluationSet.id).filter(...).first()
+        returns ``(existing_eval_id,)`` or ``None``.
+
+        ``session.query`` is side-effected so AnnotationSet and EvaluationSet
+        queries route to different mock chains.
+        """
+        from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
+        from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
+
+        ann_query = MagicMock()
+        ann_query.filter.return_value = ann_query
+        ann_query.all.return_value = candidates
+
+        eval_query = MagicMock()
+        eval_query.filter.return_value = eval_query
+        eval_query.first.return_value = (existing_eval_id,) if existing_eval_id else None
+
+        session = MagicMock()
+
+        def _route_query(target):
+            if target is AnnotationSet:
+                return ann_query
+            # Matches both EvaluationSet and EvaluationSet.id — exists check
+            # in the operation passes the column.
+            if target is EvaluationSet or getattr(target, "class_", None) is EvaluationSet:
+                return eval_query
+            return eval_query
+
+        session.query.side_effect = _route_query
+        return session
+
+    def test_no_prior_goa_version_skipped(self):
+        new_set = self._make_ann_set(version="220")
+        session = self._wire_session(candidates=[], existing_eval_id=None)
+        emit, events = _make_emit()
+
+        result = self.op._maybe_enqueue_atomic_eval(session, new_set, emit)
+
+        assert result is None
+        session.add.assert_not_called()
+        assert any(
+            e["event"] == "load_goa_annotations.auto_eval_skipped"
+            and e["fields"].get("reason") == "no_prior_goa_annotation_set"
+            for e in events
+        )
+
+    def test_prior_version_enqueues_child_job(self):
+        prior = self._make_ann_set(version="215")
+        new_set = self._make_ann_set(version="220")
+        session = self._wire_session(candidates=[prior], existing_eval_id=None)
+
+        child_id = uuid.uuid4()
+
+        def _flush_side_effect():
+            # Simulate SQLAlchemy populating Job.id on flush() after add()
+            for call in session.add.call_args_list:
+                obj = call.args[0]
+                # Only set an id on Job rows (Job has queue_name, JobEvent doesn't)
+                if hasattr(obj, "queue_name") and getattr(obj, "id", None) is None:
+                    obj.id = child_id
+
+        session.flush.side_effect = _flush_side_effect
+        emit, events = _make_emit()
+
+        result = self.op._maybe_enqueue_atomic_eval(session, new_set, emit)
+
+        assert result == child_id
+        # Two add() calls: the Job and its job.created JobEvent.
+        assert session.add.call_count == 2
+        enqueued = [
+            e for e in events if e["event"] == "load_goa_annotations.auto_eval_enqueued"
+        ]
+        assert len(enqueued) == 1
+        assert enqueued[0]["fields"]["child_job_id"] == str(child_id)
+        assert enqueued[0]["fields"]["old_source_version"] == "215"
+        assert enqueued[0]["fields"]["new_source_version"] == "220"
+
+    def test_existing_evaluation_set_skips_enqueue(self):
+        prior = self._make_ann_set(version="215")
+        new_set = self._make_ann_set(version="220")
+        existing_id = uuid.uuid4()
+        session = self._wire_session(
+            candidates=[prior],
+            existing_eval_id=existing_id,
+        )
+        emit, events = _make_emit()
+
+        result = self.op._maybe_enqueue_atomic_eval(session, new_set, emit)
+
+        assert result is None
+        session.add.assert_not_called()
+        skipped = [
+            e
+            for e in events
+            if e["event"] == "load_goa_annotations.auto_eval_skipped"
+            and e["fields"].get("reason") == "evaluation_set_exists"
+        ]
+        assert len(skipped) == 1
+        assert skipped[0]["fields"]["existing_evaluation_set_id"] == str(existing_id)
 
 
 # ---------------------------------------------------------------------------

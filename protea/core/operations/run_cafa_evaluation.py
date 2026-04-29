@@ -26,6 +26,13 @@ from protea.infrastructure.orm.models.embedding.reranker_model import (
     RerankerModel as RerankerModelORM,
 )
 from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
+from protea.infrastructure.settings import load_settings
+from protea.infrastructure.storage import get_artifact_store
+
+
+def eval_artifact_key(result_id: uuid.UUID, relpath: str) -> str:
+    """Canonical MinIO/artifact-store key for a cafaeval output file."""
+    return f"eval_artifacts/{result_id}/{relpath.lstrip('/')}"
 
 # Namespace labels used by cafaeval OBO parser
 _NS_LABELS = {
@@ -191,7 +198,6 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
     evaluation_set_id: str
     prediction_set_id: str
     max_distance: float | None = Field(default=None, ge=0.0, le=2.0)
-    artifacts_dir: str | None = Field(default=None)
     scoring_config_id: str | None = Field(default=None)
     reranker_id_nk: str | None = Field(default=None)
     reranker_id_lk: str | None = Field(default=None)
@@ -432,16 +438,19 @@ class RunCafaEvaluationOperation:
                         "info",
                     )
 
-        # Pre-generate result_id so the artifact directory name matches the DB row.
+        # Pre-generate result_id so the artifact-store prefix matches the DB row.
         result_id = uuid.uuid4()
 
-        # ── 2. Prepare artifact directory (persistent) + temp dir for OBO ─────
-        artifacts_root = Path(p.artifacts_dir) / str(result_id) if p.artifacts_dir else None
-        if artifacts_root is not None:
-            artifacts_root.mkdir(parents=True, exist_ok=True)
+        project_root = Path(__file__).resolve().parents[3]
+        artifact_store = get_artifact_store(load_settings(project_root))
+        uploaded_keys: list[str] = []
 
         results: dict[str, Any] = {}
         with tempfile.TemporaryDirectory(prefix="protea_cafa_") as tmpdir:
+            # Persistent staging dir for cafaeval outputs (uploaded to MinIO at the
+            # end of each setting). Lives inside tmpdir so it vanishes on exit.
+            artifacts_root = Path(tmpdir) / "artifacts"
+            artifacts_root.mkdir(parents=True, exist_ok=True)
             # Download OBO into temp dir (large file, not persisted)
             emit("run_cafa_evaluation.downloading_obo", None, {"url": snapshot.obo_url}, "info")
             obo_path = os.path.join(tmpdir, "go.obo")
@@ -471,8 +480,8 @@ class RunCafaEvaluationOperation:
                     "warning",
                 )
 
-            # Write ground truth files
-            gt_dir = str(artifacts_root) if artifacts_root else tmpdir
+            # Write ground truth files into the staging artifacts root.
+            gt_dir = str(artifacts_root)
             nk_path = os.path.join(gt_dir, "gt_NK.tsv")
             lk_path = os.path.join(gt_dir, "gt_LK.tsv")
             pk_path = os.path.join(gt_dir, "gt_PK.tsv")
@@ -599,7 +608,7 @@ class RunCafaEvaluationOperation:
                     results[setting] = self._parse_results(dfs_best)
 
                     # Persist full cafaeval output (PR curves + best metrics per metric type)
-                    if artifacts_root is not None and df is not None:
+                    if df is not None:
                         from cafaeval.evaluation import write_results as _write_results
 
                         setting_dir = artifacts_root / setting
@@ -626,6 +635,23 @@ class RunCafaEvaluationOperation:
                         "warning",
                     )
                     results[setting] = {}
+
+            # ── 2b. Upload all staged artifacts to the artifact store ────────
+            for path in sorted(artifacts_root.rglob("*")):
+                if not path.is_file():
+                    continue
+                relpath = path.relative_to(artifacts_root).as_posix()
+                key = eval_artifact_key(result_id, relpath)
+                artifact_store.put(key, path)
+                uploaded_keys.append(key)
+            emit(
+                "run_cafa_evaluation.artifacts_uploaded",
+                None,
+                {"count": len(uploaded_keys), "prefix": f"eval_artifacts/{result_id}/"},
+                "info",
+            )
+
+        results["artifacts"] = {"keys": uploaded_keys}
 
         # ── 3. Persist EvaluationResult ───────────────────────────────────────
         # For backwards compat, pick a single representative reranker_model_id
@@ -667,8 +693,9 @@ class RunCafaEvaluationOperation:
             None,
             {
                 "evaluation_result_id": str(result_id),
-                "settings_evaluated": list(results.keys()),
-                "artifacts_dir": str(artifacts_root) if artifacts_root else None,
+                "settings_evaluated": [k for k in results.keys() if k != "artifacts"],
+                "artifacts_prefix": f"eval_artifacts/{result_id}/",
+                "artifacts_count": len(uploaded_keys),
             },
             "info",
         )

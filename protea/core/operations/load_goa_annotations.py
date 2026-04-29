@@ -14,10 +14,14 @@ from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
+from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.orm.models.annotation.protein_go_annotation import ProteinGOAnnotation
+from protea.infrastructure.orm.models.job import Job, JobEvent
 from protea.infrastructure.orm.models.protein.protein import Protein
+
+_AUTO_EVAL_QUEUE = "protea.jobs"
 
 PositiveInt = Annotated[int, Field(gt=0)]
 
@@ -198,8 +202,119 @@ class LoadGOAAnnotationsOperation:
             "annotations_skipped": total_skipped,
             "elapsed_seconds": elapsed,
         }
+
+        # Auto-trigger an atomic generate_evaluation_set against the latest
+        # prior goa AnnotationSet (numeric source_version sort).  Cascade
+        # cumulative deltas (V_K → V_target) remain manual via
+        # scripts/materialize_lab_intervals.py --mode cascade.
+        publish_after_commit: list[tuple[str, uuid.UUID]] = []
+        child_job_id = self._maybe_enqueue_atomic_eval(session, annotation_set, emit)
+        if child_job_id is not None:
+            publish_after_commit.append((_AUTO_EVAL_QUEUE, child_job_id))
+            result["auto_eval_job_id"] = str(child_job_id)
+
         emit("load_goa_annotations.done", None, result, "info")
-        return OperationResult(result=result)
+        return OperationResult(result=result, publish_after_commit=publish_after_commit)
+
+    @staticmethod
+    def _numeric_version_key(v: str | None) -> tuple[int, str]:
+        """Sort key that orders ``"160" < "211" < "215"`` numerically and
+        falls back to lexicographic for non-numeric values (which sort last)."""
+        if v is None:
+            return (10**9, "")
+        try:
+            return (int(v), "")
+        except (TypeError, ValueError):
+            return (10**9, str(v))
+
+    def _maybe_enqueue_atomic_eval(
+        self,
+        session: Session,
+        new_set: AnnotationSet,
+        emit: EmitFn,
+    ) -> uuid.UUID | None:
+        candidates = (
+            session.query(AnnotationSet)
+            .filter(
+                AnnotationSet.source == "goa",
+                AnnotationSet.id != new_set.id,
+            )
+            .all()
+        )
+        prior_candidates = [
+            s for s in candidates
+            if self._numeric_version_key(s.source_version)
+            < self._numeric_version_key(new_set.source_version)
+        ]
+        if not prior_candidates:
+            emit(
+                "load_goa_annotations.auto_eval_skipped",
+                None,
+                {"reason": "no_prior_goa_annotation_set"},
+                "info",
+            )
+            return None
+        prior = max(prior_candidates, key=lambda s: self._numeric_version_key(s.source_version))
+
+        existing = (
+            session.query(EvaluationSet.id)
+            .filter(
+                EvaluationSet.old_annotation_set_id == prior.id,
+                EvaluationSet.new_annotation_set_id == new_set.id,
+            )
+            .first()
+        )
+        if existing is not None:
+            emit(
+                "load_goa_annotations.auto_eval_skipped",
+                None,
+                {
+                    "reason": "evaluation_set_exists",
+                    "existing_evaluation_set_id": str(existing[0]),
+                    "old_annotation_set_id": str(prior.id),
+                    "new_annotation_set_id": str(new_set.id),
+                },
+                "info",
+            )
+            return None
+
+        payload = {
+            "old_annotation_set_id": str(prior.id),
+            "new_annotation_set_id": str(new_set.id),
+        }
+        child = Job(
+            operation="generate_evaluation_set",
+            queue_name=_AUTO_EVAL_QUEUE,
+            payload=payload,
+        )
+        session.add(child)
+        session.flush()
+        session.add(
+            JobEvent(
+                job_id=child.id,
+                event="job.created",
+                fields={
+                    "operation": "generate_evaluation_set",
+                    "queue": _AUTO_EVAL_QUEUE,
+                    "trigger": "load_goa_annotations.auto",
+                    "old_annotation_set_id": str(prior.id),
+                    "new_annotation_set_id": str(new_set.id),
+                },
+            )
+        )
+        emit(
+            "load_goa_annotations.auto_eval_enqueued",
+            None,
+            {
+                "child_job_id": str(child.id),
+                "old_annotation_set_id": str(prior.id),
+                "new_annotation_set_id": str(new_set.id),
+                "old_source_version": prior.source_version,
+                "new_source_version": new_set.source_version,
+            },
+            "info",
+        )
+        return child.id
 
     def _load_accessions(self, session: Session, emit: EmitFn) -> set[str]:
         emit("load_goa_annotations.load_accessions_start", None, {}, "info")
