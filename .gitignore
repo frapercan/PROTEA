@@ -16,6 +16,7 @@ htmlcov/
 
 # Docs build
 docs/build/
+docs/_build/
 
 # IDE
 .idea/
@@ -27,7 +28,7 @@ node_modules/
 
 # Misc
 *.log
-logs/pids/
+logs/
 
 CLAUDE.md
 .claude/
@@ -40,3 +41,12 @@ storage/
 # Large embedding caches and test artifacts
 data/ref_cache/
 apps/web/test-results/
+
+# Local run outputs (per-run dumps, model checkpoints, eval results)
+# Keep curated files under data/benchmarks/ tracked via explicit allow-list.
+data/
+!data/benchmarks/
+!data/benchmarks/**
+artifacts/
+results/
+var/

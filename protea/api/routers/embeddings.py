@@ -24,7 +24,6 @@ from protea.infrastructure.session import session_scope
 
 router = APIRouter(prefix="/embeddings", tags=["embeddings"])
 
-_JOBS_QUEUE = "protea.jobs"
 _PREDICTIONS_QUEUE = "protea.predictions"
 
 _VALID_BACKENDS = {"esm", "esm3c", "t5", "ankh", "auto"}
