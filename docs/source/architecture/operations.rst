@@ -547,8 +547,8 @@ closing the parent job when all batches are done.
 predict_go_terms
 ----------------
 
-**Operation name:** ``predict_go_terms`` — queue: ``protea.jobs``
-(coordinator; fans out KNN batch workers)
+**Operation name:** ``predict_go_terms`` — queue: ``protea.predictions``
+(coordinator; fans out KNN batch workers on ``protea.predictions.batch``)
 
 | **How to invoke this:** see *Predict GO terms* in :doc:`/appendix/howto_guides`.
 | **Tables touched:** ``PredictionSet``, ``GOPrediction`` (see *Predictions* in :doc:`/architecture/data_model`).
@@ -743,7 +743,7 @@ stored in the DB) using the same ``compute_evaluation_data`` logic.
 run_cafa_evaluation
 -------------------
 
-**Operation name:** ``run_cafa_evaluation`` — queue: ``protea.jobs``
+**Operation name:** ``run_cafa_evaluation`` — queue: ``protea.evaluations``
 
 | **How to invoke this:** see *Run a CAFA evaluation* in :doc:`/appendix/howto_guides`.
 | **Tables touched:** ``EvaluationSet``, ``EvaluationResult`` (see *Evaluation* in :doc:`/architecture/data_model`).
@@ -824,10 +824,30 @@ cleanly. The original handlers are restored afterwards.
 train_reranker
 --------------
 
-**Operation name:** ``train_reranker`` — queue: ``protea.jobs``
+.. deprecated:: contract-first-lab-integration
 
-| **How to invoke this:** see *Train a re-ranker* in :doc:`/appendix/howto_guides`.
-| **Tables touched:** ``RerankerModel``, ``RerankerScore`` (referenced from the *Predictions* section in :doc:`/architecture/data_model`).
+   LightGBM training has been decoupled from PROTEA and now lives in
+   `protea-reranker-lab <https://github.com/frapercan/protea-reranker-lab>`_.
+   ``TrainRerankerOperation`` and ``TrainRerankerAutoOperation`` are
+   **no longer registered** in the ``OperationRegistry`` — a ``POST /jobs``
+   request with ``operation_name: train_reranker`` or ``train_reranker_auto``
+   will be rejected. The classes remain importable as internal helpers
+   that :ref:`export-research-dataset-operation` reuses in-process to run
+   the shared KNN + feature-generation pipeline in ``dump_only`` mode.
+
+   The narrative below (feature matrix, LightGBM hyperparameters,
+   validation metrics) is retained as the canonical specification of
+   the booster that the lab trains — the lab consumes the exact same
+   feature schema PROTEA produces. For the live end-to-end flow, see
+   :ref:`export-research-dataset-operation` below and the
+   ``/reranker-models/import`` HTTP surface.
+
+**Operation name:** ``train_reranker`` — *internal helper, not queued*
+
+| **How to invoke this:** no longer invocable via ``/jobs``. See
+  :ref:`export-research-dataset-operation` and the ``POST /datasets``
+  endpoint; booster training runs in ``protea-reranker-lab``.
+| **Tables touched:** ``RerankerModel`` (written by ``/reranker-models/import``, not by this helper directly).
 | **Evaluation context:** :doc:`/architecture/evaluation` and :doc:`/results`.
 
 Trains a LightGBM binary classifier that re-scores GO term predictions on top
@@ -1076,17 +1096,24 @@ re-ranker.
 train_reranker_auto
 ~~~~~~~~~~~~~~~~~~~
 
-**Operation name:** ``train_reranker_auto`` — queue: ``protea.jobs``
+**Operation name:** ``train_reranker_auto`` — *internal helper, not queued*
 
-Convenience variant that takes no required payload fields: it selects the
-most recent ``PredictionSet`` and ``EvaluationSet`` in the database and
-forwards them to the standard ``train_reranker`` pipeline. Useful for
-end-to-end smoke tests and for nightly re-training triggered by cron.
+.. note::
+
+   Formerly a convenience variant that auto-selected the most recent
+   ``PredictionSet`` and ``EvaluationSet`` and forwarded them to
+   ``train_reranker``. Like ``train_reranker`` it is **no longer
+   registered** in the ``OperationRegistry``. The class survives only
+   as the in-process engine that ``ExportResearchDatasetOperation``
+   drives in ``dump_only`` mode to produce the frozen parquet triple
+   consumed by the lab.
+
+.. _export-research-dataset-operation:
 
 export_research_dataset
 ------------------------
 
-**Operation name:** ``export_research_dataset`` — queue: ``protea.jobs``
+**Operation name:** ``export_research_dataset`` — queue: ``protea.training``
 
 | **How to invoke this:** see *Registering a reranker from protea-reranker-lab* in :doc:`/appendix/howto_guides`.
 | **Tables touched:** read-only over existing ``PredictionSet`` / feature data. Writes blobs via the configured ``ArtifactStore`` (no ORM writes).

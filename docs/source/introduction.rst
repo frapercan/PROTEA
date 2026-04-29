@@ -210,7 +210,9 @@ protein functional annotation pipeline:
 - **GO term prediction** — ``predict_go_terms`` (coordinator),
   ``predict_go_terms_batch``, ``store_predictions``.
 - **Evaluation** — ``generate_evaluation_set``, ``run_cafa_evaluation``.
-- **Re-ranking** — ``train_reranker``, ``train_reranker_auto``.
+- **Re-ranker dataset publishing** — ``export_research_dataset`` (LightGBM
+  training itself lives in ``protea-reranker-lab``; PROTEA only produces
+  the frozen train/eval parquets and serves the registered boosters).
 - **Diagnostics** — ``ping``.
 
 A scoring engine applies weighted formulas or trained LightGBM re-rankers to

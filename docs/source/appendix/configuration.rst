@@ -142,8 +142,10 @@ credentials ``guest`` / ``guest``). The seven PROTEA queues are:
      - ``insert_proteins``, ``fetch_uniprot_metadata``, ``load_ontology_snapshot``,
        ``load_goa_annotations``, ``load_quickgo_annotations``,
        ``compute_embeddings`` (coordinator), ``predict_go_terms`` (coordinator),
-       ``generate_evaluation_set``, ``run_cafa_evaluation``,
-       ``train_reranker``, ``train_reranker_auto``
+       ``generate_evaluation_set``, ``run_cafa_evaluation``
+   * - ``protea.training``
+     - QueueConsumer
+     - ``export_research_dataset`` (serialised; GPU/RAM-intensive)
    * - ``protea.embeddings``
      - QueueConsumer
      - ``compute_embeddings`` coordinator (serialised, one at a time)

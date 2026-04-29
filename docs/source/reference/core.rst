@@ -424,15 +424,15 @@ transactions.
    :undoc-members:
    :show-inheritance:
 
-**train_reranker**
-   Trains a LightGBM binary classifier re-ranker from a PredictionSet +
-   EvaluationSet pair. Uses temporal holdout labels and 23 features (20
-   numeric: embedding distance, NW/SW alignment metrics, sequence lengths,
-   taxonomic distance and common ancestors, plus 5 aggregate re-ranker
-   signals; and 3 categorical: qualifier, evidence code, taxonomic relation).
-   Stores the serialized model, validation metrics, and feature importance
-   in a ``RerankerModel`` row. ``TrainRerankerAutoOperation`` is a convenience
-   variant that auto-selects the most recent PredictionSet + EvaluationSet.
+**train_reranker** *(internal helper — not registered)*
+   LightGBM training has been moved to
+   `protea-reranker-lab <https://github.com/frapercan/protea-reranker-lab>`_.
+   ``TrainRerankerOperation`` and ``TrainRerankerAutoOperation`` remain
+   importable but are **not** wired into the ``OperationRegistry`` — they
+   survive only as containers for the KNN / feature-generation helpers
+   that :class:`ExportResearchDatasetOperation` reuses in-process to
+   produce frozen dumps. New code should use ``export_research_dataset``
+   + the ``/reranker-models/import`` HTTP surface instead.
 
 .. automodule:: protea.core.operations.train_reranker
    :members:

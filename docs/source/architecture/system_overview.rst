@@ -93,8 +93,12 @@ Services and data stores
         - ``insert_proteins``, ``fetch_uniprot_metadata``, ``load_ontology_snapshot``,
           ``load_goa_annotations``, ``load_quickgo_annotations``,
           ``compute_embeddings`` (coordinator), ``predict_go_terms`` (coordinator),
-          ``generate_evaluation_set``, ``run_cafa_evaluation``,
-          ``train_reranker``, ``train_reranker_auto``, ``export_research_dataset``
+          ``generate_evaluation_set``, ``run_cafa_evaluation``
+      * - ``protea.training``
+        - QueueConsumer
+        - ``export_research_dataset`` — serialised, GPU/RAM-intensive KNN + feature
+          generation + artifact-store upload. LightGBM training itself has been
+          moved to ``protea-reranker-lab`` and no longer runs inside PROTEA.
       * - ``protea.embeddings``
         - QueueConsumer
         - ``compute_embeddings`` coordinator (serialised: one at a time, 60 s retry delay if GPU busy)

@@ -279,7 +279,7 @@ Endpoints summary
      - Retrieve a snapshot with its full list of GO terms.
    * - ``PATCH``
      - ``/annotations/snapshots/{id}/ia-url``
-     - Set the InterPro Archive URL on an ontology snapshot.
+     - Set the Information Accretion (IA) file URL on an ontology snapshot.
    * - ``POST``
      - ``/annotations/snapshots/load``
      - Queue a ``load_ontology_snapshot`` job.
