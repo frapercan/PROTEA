@@ -17,7 +17,7 @@ import numpy as np
 import pyarrow.parquet as pq
 import pytest
 
-from protea.core.operations.train_reranker import TrainRerankerOperation
+from protea.core.operations.train_reranker import _knn_transfer_and_label
 
 
 class _StubAnc2Vec:
@@ -120,7 +120,6 @@ def _run(mode: str, tmp_path: Path | None = None, *, expand: bool, pivot=None):
         parent_map_str,
     ) = _mk_fixtures()
 
-    op = TrainRerankerOperation()
     session = MagicMock()
     p = _mk_payload(expand=expand)
 
@@ -141,7 +140,7 @@ def _run(mode: str, tmp_path: Path | None = None, *, expand: bool, pivot=None):
         "protea.core.operations.train_reranker.get_anc2vec_index",
         return_value=_StubAnc2Vec(),
     ):
-        return op._knn_transfer_and_label(
+        return _knn_transfer_and_label(
             session,
             valid_queries,
             query_emb,
