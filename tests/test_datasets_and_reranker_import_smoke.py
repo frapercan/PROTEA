@@ -19,7 +19,6 @@ process app wired to a MagicMock session and a fake artifact store.
 
 from __future__ import annotations
 
-import io
 import json
 import uuid
 from contextlib import contextmanager
@@ -32,7 +31,6 @@ from fastapi.testclient import TestClient
 
 from protea.api.routers.datasets import router as datasets_router
 from protea.api.routers.reranker_models import router as reranker_models_router
-
 
 # ---------------------------------------------------------------------------
 # Shared helpers

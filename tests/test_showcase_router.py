@@ -47,29 +47,55 @@ def _make_eval(results, scoring_config_id=None, reranker_model_id=None):
     return er
 
 
-def _make_cfg(model_name="esmc_300m", backend="esm3c"):
+def _make_cfg(
+    model_name="esmc_300m",
+    backend="esm3c",
+    display_name=None,
+    family=None,
+    param_count=None,
+):
     cfg = MagicMock()
     cfg.id = uuid4()
     cfg.model_name = model_name
     cfg.model_backend = backend
+    cfg.display_name = display_name
+    cfg.family = family
+    cfg.param_count = param_count
     return cfg
 
 
-def _install_mock(session, *, scalar_values, eval_rows):
+def _install_mock(
+    session,
+    *,
+    approx_counts=(0, 0, 0, 0),
+    direct_scalars=(0, 0, 0),
+    eval_rows=(),
+):
     """Wire up ``session.scalar`` and ``session.execute`` mocks.
 
-    ``scalar_values`` is a list consumed in order by each ``session.scalar()``
-    call made by the router (one per count query, in the order they appear in
-    ``get_showcase``).  ``eval_rows`` is the sequence yielded by the single
-    ``session.execute(...)`` call for the join of ``EvaluationResult`` ×
-    ``EmbeddingConfig``.
-    """
-    scalars = iter(scalar_values)
-    session.scalar.side_effect = lambda *a, **kw: next(scalars)
+    The router uses two distinct count patterns:
+    * ``_approx_count(table)`` → ``session.execute(text(...)).scalar()`` for
+      protein / sequence / sequence_embedding / go_prediction.
+    * ``session.scalar(select(...))`` for canonical_proteins,
+      total_prediction_sets, total_rerankers (and a few more).
 
-    exec_result = MagicMock()
-    exec_result.all.return_value = eval_rows
-    session.execute.return_value = exec_result
+    ``approx_counts`` feeds the first pattern; ``direct_scalars`` the second.
+    ``eval_rows`` is the sequence yielded by the matrix join's ``.all()``.
+    """
+    direct_iter = iter(direct_scalars)
+    session.scalar.side_effect = lambda *a, **kw: next(direct_iter, 0)
+
+    approx_iter = iter(approx_counts)
+
+    def _execute(*args, **kwargs):
+        result = MagicMock()
+        # Each call gets its own next-approx-count for .scalar(), and the
+        # eval_rows for .all() (the matrix call uses .all()).
+        result.scalar.return_value = next(approx_iter, 0)
+        result.all.return_value = eval_rows
+        return result
+
+    session.execute.side_effect = _execute
 
 
 # ---------------------------------------------------------------------------
@@ -158,9 +184,7 @@ class TestFlattenCells:
 class TestShowcaseEmpty:
     def test_empty_database_returns_zero_counts_and_null_best(self, client):
         c, session = client
-        # 7 scalar calls in get_showcase: total_proteins, canonical_proteins,
-        # sequences, embeddings, prediction_sets, predictions, rerankers
-        _install_mock(session, scalar_values=[0] * 7, eval_rows=[])
+        _install_mock(session, eval_rows=[])
 
         resp = c.get("/showcase")
         assert resp.status_code == 200
@@ -180,7 +204,7 @@ class TestShowcaseEmpty:
 
     def test_empty_state_still_reports_stage_hrefs(self, client):
         c, session = client
-        _install_mock(session, scalar_values=[0] * 7, eval_rows=[])
+        _install_mock(session, eval_rows=[])
 
         resp = c.get("/showcase")
         data = resp.json()
@@ -197,10 +221,21 @@ class TestShowcaseEmpty:
 class TestShowcaseBestSelection:
     def test_single_evaluation_becomes_the_best(self, client):
         c, session = client
-        cfg = _make_cfg(model_name="esmc_300m", backend="esm3c")
+        cfg = _make_cfg(
+            model_name="esmc_300m",
+            backend="esm3c",
+            display_name="ESMC-300M",
+            family="esmc",
+            param_count=300_000_000,
+        )
         er = _make_eval(results={"NK": {"BPO": {"fmax": 0.5, "precision": 0.6, "recall": 0.4}}})
 
-        _install_mock(session, scalar_values=[10, 5, 4, 8, 1, 100, 3], eval_rows=[(er, cfg)])
+        _install_mock(
+            session,
+            approx_counts=[10, 5, 4, 8],
+            direct_scalars=[1, 100, 3],
+            eval_rows=[(er, cfg, "alignment_weighted")],
+        )
 
         resp = c.get("/showcase")
         assert resp.status_code == 200
@@ -209,15 +244,15 @@ class TestShowcaseBestSelection:
         assert data["counts"]["evaluations"] == 1
         assert data["best"] is not None
         assert data["best"]["avg_fmax"] == 0.5
-        assert data["best"]["stage"] == "baseline"
+        assert data["best"]["stage"] == "alignment_weighted"
         assert data["best"]["embedding"]["display_name"] == "ESMC-300M"
         assert data["best"]["embedding"]["family"] == "esmc"
         assert len(data["best"]["per_cell"]) == 1
 
     def test_best_picks_highest_avg_fmax(self, client):
         c, session = client
-        cfg1 = _make_cfg("esmc_300m", "esm3c")
-        cfg2 = _make_cfg("Rostlab/ProstT5", "t5")
+        cfg1 = _make_cfg("esmc_300m", "esm3c", display_name="ESMC-300M", family="esmc")
+        cfg2 = _make_cfg("Rostlab/ProstT5", "t5", display_name="ProstT5-XL", family="prostt5")
 
         # er1 averages 0.40, er2 averages 0.60 → er2 must win
         er1 = _make_eval(results={"NK": {"BPO": {"fmax": 0.40}}})
@@ -228,8 +263,7 @@ class TestShowcaseBestSelection:
 
         _install_mock(
             session,
-            scalar_values=[0] * 7,
-            eval_rows=[(er1, cfg1), (er2, cfg2)],
+            eval_rows=[(er1, cfg1, "alignment_weighted"), (er2, cfg2, None)],
         )
 
         resp = c.get("/showcase")
@@ -240,7 +274,7 @@ class TestShowcaseBestSelection:
 
     def test_eval_result_with_empty_results_blob_is_skipped(self, client):
         c, session = client
-        cfg = _make_cfg()
+        cfg = _make_cfg(display_name="ESMC-300M", family="esmc")
         # er1 has no fmax values at all (empty dict) — must be skipped for best
         # er2 has one cell — becomes the best
         er1 = _make_eval(results={})
@@ -248,8 +282,7 @@ class TestShowcaseBestSelection:
 
         _install_mock(
             session,
-            scalar_values=[0] * 7,
-            eval_rows=[(er1, cfg), (er2, cfg)],
+            eval_rows=[(er1, cfg, "alignment_weighted"), (er2, cfg, "alignment_weighted")],
         )
 
         resp = c.get("/showcase")
@@ -261,9 +294,9 @@ class TestShowcaseBestSelection:
 
     def test_all_empty_results_leaves_best_null(self, client):
         c, session = client
-        cfg = _make_cfg()
+        cfg = _make_cfg(display_name="ESMC-300M", family="esmc")
         er = _make_eval(results={})
-        _install_mock(session, scalar_values=[0] * 7, eval_rows=[(er, cfg)])
+        _install_mock(session, eval_rows=[(er, cfg, "alignment_weighted")])
 
         resp = c.get("/showcase")
         data = resp.json()

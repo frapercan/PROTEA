@@ -46,6 +46,7 @@ def _make_app(session_factory, amqp_url=FAKE_AMQP):
     app = FastAPI()
     app.state.session_factory = session_factory
     app.state.amqp_url = amqp_url
+    app.state.operation_registry = MagicMock()
     app.include_router(router)
     return app
 

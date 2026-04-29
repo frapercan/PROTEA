@@ -15,7 +15,34 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
 
+from protea.api.cache import invalidate as _cache_invalidate
 from protea.api.routers.annotations import router
+
+
+@pytest.fixture(autouse=True)
+def _reset_router_cache():
+    _cache_invalidate()
+    yield
+    _cache_invalidate()
+
+
+@pytest.fixture()
+def artifact_store():
+    """Stubbed ArtifactStore: bypasses MinIO and records put/get/delete calls."""
+    store = MagicMock()
+    store.get.return_value = b"stub-artifact-content"
+    with (
+        patch(
+            "protea.infrastructure.storage.factory.get_artifact_store",
+            return_value=store,
+        ),
+        patch(
+            "protea.infrastructure.storage.get_artifact_store",
+            return_value=store,
+        ),
+    ):
+        yield store
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -27,6 +54,7 @@ def _make_app(session_factory, amqp_url="amqp://guest:guest@localhost", artifact
     app.state.session_factory = session_factory
     app.state.amqp_url = amqp_url
     app.state.artifacts_dir = artifacts_dir or Path("/tmp/protea-test-artifacts")
+    app.state.benchmark_config = MagicMock()
     app.include_router(router)
     return app
 
@@ -565,25 +593,27 @@ class TestListEvaluationSets:
 
 
 class TestDeleteEvaluationSet:
-    def test_delete_success(self, client_with_artifacts):
-        c, session, tmp_path = client_with_artifacts
+    def test_delete_success(self, client_with_artifacts, artifact_store):
+        c, session, _ = client_with_artifacts
         ev = _make_evaluation_set()
         session.get.side_effect = lambda model, id_: ev if id_ == ev.id else None
 
-        # Create a fake result with an artifact directory
         result_mock = MagicMock()
         result_mock.id = uuid4()
-        result_dir = tmp_path / str(result_mock.id)
-        result_dir.mkdir()
-        (result_dir / "output.tsv").write_text("test")
+        result_keys = [
+            f"eval_artifacts/{result_mock.id}/NK/pr.tsv",
+            f"eval_artifacts/{result_mock.id}/NK/metrics.json",
+        ]
+        result_mock.results = {"artifacts": {"keys": result_keys}}
 
         session.query.return_value.filter.return_value.all.return_value = [result_mock]
 
         resp = c.delete(f"/annotations/evaluation-sets/{ev.id}")
         assert resp.status_code == 204
         session.delete.assert_called_once_with(ev)
-        # Artifact directory should be removed
-        assert not result_dir.exists()
+        # Both per-result artifact keys + the ground-truth key are removed.
+        deleted_keys = {call.args[0] for call in artifact_store.delete.call_args_list}
+        assert set(result_keys).issubset(deleted_keys)
 
     def test_delete_not_found(self, client_with_artifacts):
         c, session, _ = client_with_artifacts
@@ -592,8 +622,8 @@ class TestDeleteEvaluationSet:
         resp = c.delete(f"/annotations/evaluation-sets/{uuid4()}")
         assert resp.status_code == 404
 
-    def test_delete_no_artifact_dir(self, client_with_artifacts):
-        c, session, tmp_path = client_with_artifacts
+    def test_delete_no_artifact_keys(self, client_with_artifacts, artifact_store):
+        c, session, _ = client_with_artifacts
         ev = _make_evaluation_set()
         session.get.side_effect = lambda model, id_: ev if id_ == ev.id else None
         session.query.return_value.filter.return_value.all.return_value = []
@@ -1065,24 +1095,22 @@ class TestDownloadEvaluationMetrics:
 
 
 class TestDownloadEvaluationArtifacts:
-    def test_success(self, client_with_artifacts):
-        c, session, tmp_path = client_with_artifacts
+    def test_success(self, client_with_artifacts, artifact_store):
+        c, session, _ = client_with_artifacts
         eval_id = uuid4()
         result = _make_evaluation_result(eval_set_id=eval_id)
+        prefix = f"eval_artifacts/{result.id}/"
+        keys = [prefix + "pr_curve.tsv", prefix + "metrics.json"]
+        result.results = {"artifacts": {"keys": keys}}
         session.get.return_value = result
 
-        # Create artifact directory with files
-        result_dir = tmp_path / str(result.id)
-        result_dir.mkdir()
-        (result_dir / "pr_curve.tsv").write_text("threshold\tprecision\trecall\n0.5\t0.8\t0.6")
-        (result_dir / "metrics.json").write_text('{"fmax": 0.42}')
+        # store.get returns the file bytes for any key
+        artifact_store.get.side_effect = lambda key: f"content of {key}".encode()
 
         resp = c.get(f"/annotations/evaluation-sets/{eval_id}/results/{result.id}/artifacts.zip")
         assert resp.status_code == 200
         assert "application/zip" in resp.headers["content-type"]
-        assert len(resp.content) > 0
 
-        # Verify it's a valid zip
         import io
         import zipfile
 
@@ -1099,12 +1127,13 @@ class TestDownloadEvaluationArtifacts:
         resp = c.get(f"/annotations/evaluation-sets/{eval_id}/results/{uuid4()}/artifacts.zip")
         assert resp.status_code == 404
 
-    def test_no_artifacts_directory(self, client_with_artifacts):
-        c, session, tmp_path = client_with_artifacts
+    def test_no_artifact_keys(self, client_with_artifacts, artifact_store):
+        c, session, _ = client_with_artifacts
         eval_id = uuid4()
         result = _make_evaluation_result(eval_set_id=eval_id)
+        # results blob has no artifacts.keys → 404
+        result.results = {}
         session.get.return_value = result
-        # No directory created for this result
 
         resp = c.get(f"/annotations/evaluation-sets/{eval_id}/results/{result.id}/artifacts.zip")
         assert resp.status_code == 404
@@ -1160,21 +1189,19 @@ class TestListEvaluationResults:
 
 
 class TestDeleteEvaluationResult:
-    def test_success(self, client_with_artifacts):
-        c, session, tmp_path = client_with_artifacts
+    def test_success(self, client_with_artifacts, artifact_store):
+        c, session, _ = client_with_artifacts
         eval_id = uuid4()
         result = _make_evaluation_result(eval_set_id=eval_id)
+        keys = [f"eval_artifacts/{result.id}/NK/output.tsv"]
+        result.results = {"artifacts": {"keys": keys}}
         session.get.return_value = result
-
-        # Create artifact dir
-        result_dir = tmp_path / str(result.id)
-        result_dir.mkdir()
-        (result_dir / "output.tsv").write_text("data")
 
         resp = c.delete(f"/annotations/evaluation-sets/{eval_id}/results/{result.id}")
         assert resp.status_code == 204
         session.delete.assert_called_once_with(result)
-        assert not result_dir.exists()
+        deleted_keys = {call.args[0] for call in artifact_store.delete.call_args_list}
+        assert keys[0] in deleted_keys
 
     def test_not_found(self, client_with_artifacts):
         c, session, _ = client_with_artifacts
@@ -1193,14 +1220,16 @@ class TestDeleteEvaluationResult:
         resp = c.delete(f"/annotations/evaluation-sets/{eval_id}/results/{result.id}")
         assert resp.status_code == 404
 
-    def test_no_artifact_dir(self, client_with_artifacts):
-        c, session, tmp_path = client_with_artifacts
+    def test_no_artifact_keys(self, client_with_artifacts, artifact_store):
+        c, session, _ = client_with_artifacts
         eval_id = uuid4()
         result = _make_evaluation_result(eval_set_id=eval_id)
+        result.results = {}  # no artifacts.keys → store.delete never called
         session.get.return_value = result
 
         resp = c.delete(f"/annotations/evaluation-sets/{eval_id}/results/{result.id}")
         assert resp.status_code == 204
+        artifact_store.delete.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

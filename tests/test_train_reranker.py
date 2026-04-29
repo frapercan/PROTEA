@@ -21,7 +21,6 @@ from protea.core.operations.train_reranker import (
     TrainRerankerPayload,
 )
 
-
 # ---------------------------------------------------------------------------
 # Payload validation
 # ---------------------------------------------------------------------------

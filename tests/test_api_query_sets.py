@@ -315,7 +315,11 @@ class TestParseFasta:
     def test_preserves_full_description(self) -> None:
         fasta = ">sp|P12345|FOO_HUMAN Foo OS=Homo sapiens OX=9606 GN=FOO PE=1 SV=1\nACDEF\n"
         records = _parse_fasta(fasta)
-        assert records[0][0] == "sp|P12345|FOO_HUMAN"
+        # Accession is the unwrapped UniProt id (sp|P12345|FOO_HUMAN → P12345);
+        # the full header is kept in records[0][2] so downstream code can mine
+        # OX= / OS= / GN= metadata.
+        assert records[0][0] == "P12345"
+        assert "sp|P12345|FOO_HUMAN" in records[0][2]
         assert "OX=9606" in records[0][2]
         assert "OS=Homo sapiens" in records[0][2]
 

@@ -7,7 +7,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.cache import cached
@@ -329,8 +329,21 @@ def list_prediction_sets(
 ) -> list[dict[str, Any]]:
     """List the 100 most recent prediction sets."""
     with session_scope(factory) as session:
+        prediction_count_sq = (
+            select(func.count(GOPrediction.id))
+            .where(GOPrediction.prediction_set_id == PredictionSet.id)
+            .correlate(PredictionSet)
+            .scalar_subquery()
+            .label("prediction_count")
+        )
         rows = (
-            session.query(PredictionSet, EmbeddingConfig, AnnotationSet, OntologySnapshot)
+            session.query(
+                PredictionSet,
+                EmbeddingConfig,
+                AnnotationSet,
+                OntologySnapshot,
+                prediction_count_sq,
+            )
             .join(EmbeddingConfig, PredictionSet.embedding_config_id == EmbeddingConfig.id)
             .join(AnnotationSet, PredictionSet.annotation_set_id == AnnotationSet.id)
             .join(OntologySnapshot, PredictionSet.ontology_snapshot_id == OntologySnapshot.id)
@@ -339,7 +352,7 @@ def list_prediction_sets(
             .all()
         )
         result = []
-        for ps, ec, ann, snap in rows:
+        for ps, ec, ann, snap, pcount in rows:
             result.append(
                 {
                     "id": str(ps.id),
@@ -355,6 +368,7 @@ def list_prediction_sets(
                     "limit_per_entry": ps.limit_per_entry,
                     "distance_threshold": ps.distance_threshold,
                     "created_at": ps.created_at.isoformat(),
+                    "prediction_count": int(pcount) if pcount is not None else 0,
                 }
             )
         return result

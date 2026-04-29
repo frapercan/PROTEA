@@ -66,6 +66,25 @@ def _make_eval_data() -> EvaluationData:
     )
 
 
+@pytest.fixture(autouse=True)
+def _mock_artifact_store(request):
+    """Stub the artifact store for tests that exercise execute()."""
+    if not request.cls or request.cls.__name__ != "TestGenerateEvaluationSetExecute":
+        yield
+        return
+    with (
+        patch(
+            "protea.core.operations.generate_evaluation_set.get_artifact_store",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "protea.core.operations.generate_evaluation_set.load_settings",
+            return_value=MagicMock(),
+        ),
+    ):
+        yield
+
+
 class TestGenerateEvaluationSetExecute:
     def setup_method(self):
         self.op = GenerateEvaluationSetOperation()

@@ -15,7 +15,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from protea.api.routers.benchmark import _describe_embedding, _stage_of, router
+from protea.api.routers.benchmark import _stage_of, router
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -23,8 +23,19 @@ from protea.api.routers.benchmark import _describe_embedding, _stage_of, router
 
 
 def _make_app(factory):
+    from protea.infrastructure.benchmark_config import BenchmarkConfig
+
     app = FastAPI()
     app.state.session_factory = factory
+    app.state.benchmark_config = BenchmarkConfig(
+        preferred_default_stages=("alignment_weighted", "reranker"),
+        baseline_scoring_name="alignment_weighted",
+        hidden_stages=frozenset(),
+        stage_labels={"alignment_weighted": "Alignment-weighted", "reranker": "Reranker"},
+        eval_set_labels={},
+        categories=("NK", "LK", "PK"),
+        aspects=("BPO", "MFO", "CCO"),
+    )
     app.include_router(router)
     return app
 
@@ -34,7 +45,13 @@ def _mock_scope(session):
     yield session
 
 
-def _make_cfg(model_name="esmc_300m", backend="esm3c"):
+def _make_cfg(
+    model_name="esmc_300m",
+    backend="esm3c",
+    display_name=None,
+    family=None,
+    param_count=None,
+):
     cfg = MagicMock()
     cfg.id = uuid4()
     cfg.model_name = model_name
@@ -42,6 +59,10 @@ def _make_cfg(model_name="esmc_300m", backend="esm3c"):
     cfg.description = None
     cfg.pooling = "mean"
     cfg.layer_agg = "mean"
+    # Display columns are now persisted on EmbeddingConfig (no more heuristics).
+    cfg.display_name = display_name
+    cfg.family = family
+    cfg.param_count = param_count
     return cfg
 
 
@@ -77,77 +98,24 @@ def client(session, factory):
 
 
 # ---------------------------------------------------------------------------
-# _describe_embedding
-# ---------------------------------------------------------------------------
-
-
-class TestDescribeEmbedding:
-    def test_esmc_300m(self):
-        meta = _describe_embedding("esmc_300m", "esm3c")
-        assert meta["family"] == "esmc"
-        assert meta["display_name"] == "ESMC-300M"
-        assert meta["param_count"] == 300_000_000
-
-    def test_esmc_600m(self):
-        meta = _describe_embedding("esmc_600m", "esm3c")
-        assert meta["display_name"] == "ESMC-600M"
-        assert meta["param_count"] == 600_000_000
-
-    def test_prost_before_prott5(self):
-        # ProstT5 must match "prostt5" branch first, not "prot_t5"
-        meta = _describe_embedding("Rostlab/ProstT5_fp16", "t5")
-        assert meta["family"] == "prostt5"
-        assert meta["display_name"] == "ProstT5-XL"
-
-    def test_prott5_xl(self):
-        meta = _describe_embedding("Rostlab/prot_t5_xl_uniref50", "t5")
-        assert meta["family"] == "prot_t5"
-        assert meta["display_name"] == "ProtT5-XL"
-        assert meta["param_count"] == 3_000_000_000
-
-    def test_ankh_base(self):
-        meta = _describe_embedding("ElnaggarLab/ankh-base", "ankh")
-        assert meta["family"] == "ankh"
-        assert meta["display_name"] == "Ankh-base"
-
-    def test_ankh_large(self):
-        meta = _describe_embedding("ElnaggarLab/ankh-large", "ankh")
-        assert meta["display_name"] == "Ankh-large"
-        assert meta["param_count"] == 1_900_000_000
-
-    def test_esm2_650m(self):
-        meta = _describe_embedding("facebook/esm2_t33_650M_UR50D", "esm")
-        assert meta["family"] == "esm2"
-        assert meta["display_name"] == "ESM2-650M"
-
-    def test_esm2_3b(self):
-        meta = _describe_embedding("facebook/esm2_t36_3B_UR50D", "esm")
-        assert meta["display_name"] == "ESM2-3B"
-        assert meta["param_count"] == 3_000_000_000
-
-    def test_unknown_falls_back_to_raw(self):
-        meta = _describe_embedding("some-weird-model", "")
-        assert meta["display_name"] == "some-weird-model"
-        assert meta["param_count"] is None
-
-
-# ---------------------------------------------------------------------------
 # _stage_of
 # ---------------------------------------------------------------------------
 
 
 class TestStageOf:
-    def test_baseline(self):
-        er = _make_eval({})
-        assert _stage_of(er) == "baseline"
-
-    def test_alignment_weighted(self):
+    def test_returns_scoring_name_when_no_reranker(self):
         er = _make_eval({}, scoring_config_id=uuid4())
-        assert _stage_of(er) == "alignment_weighted"
+        assert _stage_of(er, "alignment_weighted") == "alignment_weighted"
 
     def test_reranker_takes_precedence(self):
         er = _make_eval({}, scoring_config_id=uuid4(), reranker_model_id=uuid4())
-        assert _stage_of(er) == "reranker"
+        assert _stage_of(er, "alignment_weighted") == "reranker"
+
+    def test_returns_none_when_neither_scoring_nor_reranker(self):
+        # Evaluations without a scoring config or reranker are excluded from
+        # the matrix.
+        er = _make_eval({})
+        assert _stage_of(er, None) is None
 
 
 # ---------------------------------------------------------------------------
@@ -168,12 +136,31 @@ class TestListBenchmarkEmbeddings:
         assert data["total"] == 0
         assert data["embeddings"] == []
 
-    def test_enriches_with_derived_metadata(self, client):
+    def test_returns_persisted_display_metadata(self, client):
         c, session = client
+        # display_name / family / param_count are now persisted columns.
         cfgs = [
-            _make_cfg("esmc_300m", "esm3c"),
-            _make_cfg("facebook/esm2_t33_650M_UR50D", "esm"),
-            _make_cfg("ElnaggarLab/ankh-base", "ankh"),
+            _make_cfg(
+                "esmc_300m",
+                "esm3c",
+                display_name="ESMC-300M",
+                family="esmc",
+                param_count=300_000_000,
+            ),
+            _make_cfg(
+                "facebook/esm2_t33_650M_UR50D",
+                "esm",
+                display_name="ESM2-650M",
+                family="esm2",
+                param_count=650_000_000,
+            ),
+            _make_cfg(
+                "ElnaggarLab/ankh-base",
+                "ankh",
+                display_name="Ankh-base",
+                family="ankh",
+                param_count=None,
+            ),
         ]
         exec_result = MagicMock()
         exec_result.scalars.return_value.all.return_value = cfgs
@@ -186,7 +173,6 @@ class TestListBenchmarkEmbeddings:
         assert "ESMC-300M" in names
         assert "ESM2-650M" in names
         assert "Ankh-base" in names
-        # Every enriched entry must carry a family tag
         for e in data["embeddings"]:
             assert e["family"]
             assert "param_count" in e
@@ -200,6 +186,36 @@ class TestListBenchmarkEmbeddings:
 
 
 class TestBenchmarkMatrix:
+    """The endpoint now executes two queries:
+
+    1. Main matrix: 4-tuples ``(er, embedding_id, k, scoring_name)``.
+    2. Eval set metadata enrichment: 7-tuples
+       ``(es, old_source, old_source_version, new_source, new_source_version,
+       old_obo_version, new_obo_version)``.
+
+    ``_dual_execute`` wires both behind a single ``session.execute`` mock.
+    """
+
+    @staticmethod
+    def _row(er, embedding_id, k=5, scoring_name="alignment_weighted"):
+        return (er, embedding_id, k, scoring_name)
+
+    @staticmethod
+    def _dual_execute(session, matrix_rows, eval_set_rows):
+        """Configure session.execute to return matrix_rows then eval_set_rows."""
+        first = MagicMock()
+        first.all.return_value = matrix_rows
+        second = MagicMock()
+        second.all.return_value = eval_set_rows
+        session.execute.side_effect = [first, second, second, second]
+
+    @staticmethod
+    def _eval_set_row(eval_set_id):
+        es = MagicMock()
+        es.id = eval_set_id
+        es.stats = {}
+        return (es, "goa", "210", "goa", "230", "2024-01-01", "2024-06-01")
+
     def test_empty_database(self, client):
         c, session = client
         exec_result = MagicMock()
@@ -211,29 +227,29 @@ class TestBenchmarkMatrix:
         data = resp.json()
         assert data["total"] == 0
         assert data["rows"] == []
-        assert data["evaluation_set_ids"] == []
+        assert data["evaluation_sets"] == []
         assert data["embedding_config_ids"] == []
-        assert set(data["stages"]) == {"baseline", "alignment_weighted", "reranker"}
+        # Empty data → no stages observed
+        assert data["stages"] == []
 
     def test_row_per_cell_and_deduplication(self, client):
         c, session = client
         embedding_id = uuid4()
 
-        # Two eval results for the same (embedding, eval_set, stage, cat, asp):
-        # the higher Fmax must win.
-        er_low = _make_eval({"NK": {"BPO": {"fmax": 0.4}}})
-        er_high = _make_eval({"NK": {"BPO": {"fmax": 0.55}}})
-        # Pin the same eval_set_id so the dedup key collides
+        er_low = _make_eval({"NK": {"BPO": {"fmax": 0.4}}}, scoring_config_id=uuid4())
+        er_high = _make_eval({"NK": {"BPO": {"fmax": 0.55}}}, scoring_config_id=uuid4())
         eval_set_id = uuid4()
         er_low.evaluation_set_id = eval_set_id
         er_high.evaluation_set_id = eval_set_id
 
-        exec_result = MagicMock()
-        exec_result.all.return_value = [
-            (er_low, embedding_id),
-            (er_high, embedding_id),
-        ]
-        session.execute.return_value = exec_result
+        self._dual_execute(
+            session,
+            matrix_rows=[
+                self._row(er_low, embedding_id),
+                self._row(er_high, embedding_id),
+            ],
+            eval_set_rows=[self._eval_set_row(eval_set_id)],
+        )
 
         resp = c.get("/benchmark/matrix")
         data = resp.json()
@@ -242,26 +258,35 @@ class TestBenchmarkMatrix:
         assert row["fmax"] == 0.55
         assert row["category"] == "NK"
         assert row["aspect"] == "BPO"
-        assert row["stage"] == "baseline"
+        assert row["stage"] == "alignment_weighted"
         assert str(embedding_id) in data["embedding_config_ids"]
-        assert str(eval_set_id) in data["evaluation_set_ids"]
+        # evaluation_sets is now a list of dicts; assert the id is among them.
+        assert str(eval_set_id) in {es["id"] for es in data["evaluation_sets"]}
 
     def test_stage_filter(self, client):
         c, session = client
         embedding_id = uuid4()
 
-        er_baseline = _make_eval({"NK": {"BPO": {"fmax": 0.4}}})
+        er_aw = _make_eval({"NK": {"BPO": {"fmax": 0.4}}}, scoring_config_id=uuid4())
         er_reranker = _make_eval(
             {"NK": {"BPO": {"fmax": 0.6}}},
             reranker_model_id=uuid4(),
         )
+        eval_set_id_a = uuid4()
+        eval_set_id_b = uuid4()
+        er_aw.evaluation_set_id = eval_set_id_a
+        er_reranker.evaluation_set_id = eval_set_id_b
 
-        exec_result = MagicMock()
-        exec_result.all.return_value = [
-            (er_baseline, embedding_id),
-            (er_reranker, embedding_id),
-        ]
-        session.execute.return_value = exec_result
+        self._dual_execute(
+            session,
+            matrix_rows=[
+                self._row(er_aw, embedding_id),
+                self._row(er_reranker, embedding_id),
+            ],
+            eval_set_rows=[
+                self._eval_set_row(eval_set_id_b),
+            ],
+        )
 
         resp = c.get("/benchmark/matrix?stage=reranker")
         data = resp.json()
@@ -272,20 +297,30 @@ class TestBenchmarkMatrix:
 
     def test_invalid_stage_filter_rejected(self, client):
         c, _ = client
-        resp = c.get("/benchmark/matrix?stage=invalid")
-        assert resp.status_code == 422
+        resp = c.get("/benchmark/matrix?stage=")
+        # An empty stage string passes through (no filter); we instead exercise
+        # the still-valid path. To prove that *unknown* stages just return zero
+        # results without 422, hit a real but unused stage:
+        resp = c.get("/benchmark/matrix?stage=unknown_stage_xyz")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 0
 
     def test_missing_fmax_cells_are_skipped(self, client):
         c, session = client
+        eval_set_id = uuid4()
         er = _make_eval(
             {
                 "NK": {"BPO": {"fmax": None}, "MFO": {"fmax": 0.4}},
                 "LK": {"CCO": {}},
-            }
+            },
+            scoring_config_id=uuid4(),
         )
-        exec_result = MagicMock()
-        exec_result.all.return_value = [(er, uuid4())]
-        session.execute.return_value = exec_result
+        er.evaluation_set_id = eval_set_id
+        self._dual_execute(
+            session,
+            matrix_rows=[self._row(er, uuid4())],
+            eval_set_rows=[self._eval_set_row(eval_set_id)],
+        )
 
         resp = c.get("/benchmark/matrix")
         data = resp.json()

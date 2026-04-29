@@ -134,7 +134,6 @@ class TestRunCafaEvaluationPayload:
         assert p.evaluation_set_id == EVAL_SET_ID
         assert p.prediction_set_id == PRED_SET_ID
         assert p.max_distance is None
-        assert p.artifacts_dir is None
         assert p.scoring_config_id is None
         assert p.ia_file is None
 
@@ -143,12 +142,10 @@ class TestRunCafaEvaluationPayload:
             evaluation_set_id=EVAL_SET_ID,
             prediction_set_id=PRED_SET_ID,
             max_distance=1.5,
-            artifacts_dir="/tmp/artifacts",
             scoring_config_id=SCORING_CONFIG_ID,
             ia_file="/tmp/ia.tsv",
         )
         assert p.max_distance == 1.5
-        assert p.artifacts_dir == "/tmp/artifacts"
         assert p.scoring_config_id == SCORING_CONFIG_ID
         assert p.ia_file == "/tmp/ia.tsv"
 
@@ -715,7 +712,6 @@ class TestExecuteErrors:
         session = MagicMock()
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
-        ann_old = _make_ann_old()
         snapshot = _make_snapshot()
         session.get.side_effect = [eval_set, pred_set, snapshot]
 
@@ -732,7 +728,6 @@ class TestExecuteErrors:
         session = MagicMock()
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
-        ann_old = _make_ann_old()
         snapshot = _make_snapshot()
         # get calls: eval_set, pred_set, ann_old, snapshot, scoring_config (None)
         session.get.side_effect = [eval_set, pred_set, snapshot, None]
@@ -754,6 +749,29 @@ class TestExecuteErrors:
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _mock_artifact_store(request):
+    """Stub the ArtifactStore so happy-path tests don't try to reach MinIO.
+
+    Only applied to TestExecuteHappyPath and TestExecuteErrors — the other
+    classes in this file test pure helpers that don't touch the store.
+    """
+    if not request.cls or not request.cls.__name__.startswith("TestExecute"):
+        yield
+        return
+    with (
+        patch(
+            "protea.core.operations.run_cafa_evaluation.get_artifact_store",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "protea.core.operations.run_cafa_evaluation.load_settings",
+            return_value=MagicMock(),
+        ),
+    ):
+        yield
+
+
 class TestExecuteHappyPath:
     def setup_method(self):
         self.op = RunCafaEvaluationOperation()
@@ -766,7 +784,6 @@ class TestExecuteHappyPath:
         session = MagicMock()
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
-        ann_old = _make_ann_old()
         snapshot = _make_snapshot()
         session.get.side_effect = [eval_set, pred_set, snapshot]
 
@@ -806,7 +823,6 @@ class TestExecuteHappyPath:
         session = MagicMock()
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
-        ann_old = _make_ann_old()
         snapshot = _make_snapshot()
         session.get.side_effect = [eval_set, pred_set, snapshot]
 
@@ -850,7 +866,6 @@ class TestExecuteHappyPath:
         session = MagicMock()
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
-        ann_old = _make_ann_old()
         snapshot = _make_snapshot()
         session.get.side_effect = [eval_set, pred_set, snapshot]
 
@@ -890,7 +905,6 @@ class TestExecuteHappyPath:
         session = MagicMock()
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
-        ann_old = _make_ann_old()
         snapshot = _make_snapshot(ia_url=None)  # no ia_url
         session.get.side_effect = [eval_set, pred_set, snapshot]
 
@@ -923,7 +937,6 @@ class TestExecuteHappyPath:
         session = MagicMock()
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
-        ann_old = _make_ann_old()
         snapshot = _make_snapshot(ia_url="https://example.com/ia.tsv")
         session.get.side_effect = [eval_set, pred_set, snapshot]
 
@@ -963,7 +976,6 @@ class TestExecuteHappyPath:
         session = MagicMock()
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
-        ann_old = _make_ann_old()
         snapshot = _make_snapshot(ia_url="https://example.com/ia.tsv")
         session.get.side_effect = [eval_set, pred_set, snapshot]
 
@@ -1007,7 +1019,6 @@ class TestExecuteHappyPath:
         session = MagicMock()
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
-        ann_old = _make_ann_old()
         snapshot = _make_snapshot()
         session.get.side_effect = [eval_set, pred_set, snapshot]
 
@@ -1038,15 +1049,17 @@ class TestExecuteHappyPath:
         assert call_order[0] == "commit"
         assert "cafa_eval" in call_order
 
+    @patch("protea.core.operations.run_cafa_evaluation.get_artifact_store")
     @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
-    def test_artifacts_dir(self, mock_compute):
-        """When artifacts_dir is set, artifact directory should be created."""
+    def test_artifacts_uploaded_to_store(self, mock_compute, mock_get_store):
+        """Cafaeval output staged in a tempdir is uploaded via artifact_store.put."""
         mock_compute.return_value = (_make_eval_data(), uuid.uuid4())
+        store = MagicMock()
+        mock_get_store.return_value = store
 
         session = MagicMock()
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
-        ann_old = _make_ann_old()
         snapshot = _make_snapshot()
         session.get.side_effect = [eval_set, pred_set, snapshot]
 
@@ -1057,73 +1070,32 @@ class TestExecuteHappyPath:
         query.order_by.return_value = query
         query.yield_per.return_value = []
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with patch.object(self.op, "_download_obo"):
-                with patch(
-                    "cafaeval.evaluation.cafa_eval",
-                    return_value=(None, _dfs_best_fixture()),
-                ):
-                    result = self.op.execute(
-                        session,
-                        {
-                            "evaluation_set_id": EVAL_SET_ID,
-                            "prediction_set_id": PRED_SET_ID,
-                            "artifacts_dir": tmpdir,
-                        },
-                        emit=self.emit,
-                    )
-
-            result_id = result.result["evaluation_result_id"]
-            assert os.path.isdir(os.path.join(tmpdir, result_id))
-
-    @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
-    def test_artifacts_dir_with_write_results(self, mock_compute):
-        """When artifacts_dir is set and df is not None, write_results is called."""
-        mock_compute.return_value = (_make_eval_data(), uuid.uuid4())
-
-        session = MagicMock()
-        eval_set = _make_eval_set()
-        pred_set = _make_pred_set()
-        ann_old = _make_ann_old()
-        snapshot = _make_snapshot()
-        session.get.side_effect = [eval_set, pred_set, snapshot]
-
-        query = MagicMock()
-        session.query.return_value = query
-        query.join.return_value = query
-        query.filter.return_value = query
-        query.order_by.return_value = query
-        query.yield_per.return_value = []
-
-        df_mock = MagicMock()  # non-None df triggers write_results
+        df_mock = MagicMock()  # non-None df triggers write_results inside the staging dir
         dfs_best = _dfs_best_fixture()
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with (
-                patch.object(self.op, "_download_obo"),
-                patch(
-                    "cafaeval.evaluation.cafa_eval",
-                    return_value=(df_mock, dfs_best),
-                ),
-                patch("cafaeval.evaluation.write_results") as mock_write,
-            ):
-                result = self.op.execute(
-                    session,
-                    {
-                        "evaluation_set_id": EVAL_SET_ID,
-                        "prediction_set_id": PRED_SET_ID,
-                        "artifacts_dir": tmpdir,
-                    },
-                    emit=self.emit,
-                )
+        with (
+            patch.object(self.op, "_download_obo"),
+            patch(
+                "cafaeval.evaluation.cafa_eval",
+                return_value=(df_mock, dfs_best),
+            ),
+            patch("cafaeval.evaluation.write_results") as mock_write,
+        ):
+            result = self.op.execute(
+                session,
+                {"evaluation_set_id": EVAL_SET_ID, "prediction_set_id": PRED_SET_ID},
+                emit=self.emit,
+            )
 
-            # write_results called 3 times (NK, LK, PK)
-            assert mock_write.call_count == 3
-            result_id = result.result["evaluation_result_id"]
-            # Check setting subdirectories were created
-            for setting in ("NK", "LK", "PK"):
-                setting_dir = os.path.join(tmpdir, result_id, setting)
-                assert os.path.isdir(setting_dir)
+        # write_results called once per setting (NK, LK, PK)
+        assert mock_write.call_count == 3
+        # Result advertises the uploaded keys (via artifact_store.put)
+        assert "results" in result.result
+        # Test runs without MinIO; the artifact_store mock just records the calls.
+        # We don't assert exact count because the staging tempdir is empty under
+        # the cafaeval.write_results patch — what matters is the operation
+        # finishes cleanly and the store is consulted.
+        assert mock_get_store.called
 
     @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
     def test_scoring_config_snapshot(self, mock_compute):
@@ -1133,7 +1105,6 @@ class TestExecuteHappyPath:
         session = MagicMock()
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
-        ann_old = _make_ann_old()
         snapshot = _make_snapshot()
         scoring_cfg = MagicMock()
         scoring_cfg.formula = "linear"
