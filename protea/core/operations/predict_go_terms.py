@@ -12,6 +12,7 @@ from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from protea.core.annotation_intern import intern_string
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.disk_cache import (
     _aspect_index_path,
@@ -1096,8 +1097,9 @@ class PredictGOTermsBatchOperation:
                     aspect_to_go_map[asp].setdefault(acc, []).append(
                         {
                             "go_term_id": go_term_id,
-                            "qualifier": qualifier,
-                            "evidence_code": evidence_code,
+                            # Flyweight — see ``protea.core.annotation_intern``.
+                            "qualifier": intern_string(qualifier),
+                            "evidence_code": intern_string(evidence_code),
                         }
                     )
 
@@ -1529,8 +1531,11 @@ class PredictGOTermsBatchOperation:
                 go_map.setdefault(acc, []).append(
                     {
                         "go_term_id": go_term_id,
-                        "qualifier": qualifier,
-                        "evidence_code": evidence_code,
+                        # Flyweight — qualifier / evidence_code take ~5-10 distinct
+                        # values across millions of rows; interning collapses every
+                        # duplicate to one shared string instance.
+                        "qualifier": intern_string(qualifier),
+                        "evidence_code": intern_string(evidence_code),
                     }
                 )
 

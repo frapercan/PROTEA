@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 
 from protea.core.anc2vec_embeddings import Anc2VecIndex
 from protea.core.anc2vec_embeddings import get_index as get_anc2vec_index
+from protea.core.annotation_intern import intern_string
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.domain.aspect import ASPECT_CODES as _ASPECTS
 from protea.core.domain.aspect import Aspect
@@ -326,8 +327,9 @@ def _build_reference_from_cache(
             aspect_go_map[asp].setdefault(acc, []).append(
                 {
                     "go_term_id": go_term_id,
-                    "qualifier": qualifier,
-                    "evidence_code": evidence_code,
+                    # Flyweight — see ``protea.core.annotation_intern``.
+                    "qualifier": intern_string(qualifier),
+                    "evidence_code": intern_string(evidence_code),
                 }
             )
 
