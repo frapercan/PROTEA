@@ -19,6 +19,7 @@ import shutil
 import tempfile
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -56,6 +57,43 @@ _ANNOTATION_CHUNK_SIZE = 10_000
 _STREAM_CHUNK_SIZE = 2_000
 
 _LOG = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Parameter objects for _knn_transfer_and_label
+#
+# The function used to take 20 keyword arguments. Two natural clusters
+# (per-protein sequence/taxonomy lookups, and the streaming-parquet output
+# config) are now passed as small immutable dataclasses to keep call sites
+# readable.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class SequenceContext:
+    """Per-protein sequence and taxonomy lookups.
+
+    All four attributes are optional; passing ``None`` disables the
+    corresponding feature family (alignment / taxonomy).
+    """
+
+    query_sequences: dict[str, str] | None = None
+    ref_sequences: dict[str, str] | None = None
+    query_tax_ids: dict[str, int | None] | None = None
+    ref_tax_ids: dict[str, int | None] | None = None
+
+
+@dataclass(frozen=True)
+class StreamOutput:
+    """Streaming parquet output for memory-bounded dataset generation.
+
+    When provided, ``_knn_transfer_and_label`` writes labeled rows
+    directly to ``output_parquet`` in chunks of ``chunk_rows`` instead of
+    accumulating the full result list in memory.
+    """
+
+    output_parquet: Path
+    chunk_rows: int = 100_000
 
 
 # ---------------------------------------------------------------------------
@@ -370,17 +408,13 @@ def _knn_transfer_and_label(
     gt_pairs: set[tuple[str, str]],
     p: TrainRerankerPayload | TrainRerankerAutoPayload,
     *,
-    query_sequences: dict[str, str] | None = None,
-    ref_sequences: dict[str, str] | None = None,
-    query_tax_ids: dict[str, int | None] | None = None,
-    ref_tax_ids: dict[str, int | None] | None = None,
+    sequence_context: SequenceContext | None = None,
     query_known_gos: dict[str, set[str]] | None = None,
     parent_map_str: dict[str, set[str]] | None = None,
     ia_weights: dict[str, float] | None = None,
     pca_state: tuple[np.ndarray, np.ndarray] | None = None,
-    output_parquet: Path | None = None,
     pivot_go_ids: set[str] | frozenset[str] | None = None,
-    chunk_rows: int = 100_000,
+    stream_output: StreamOutput | None = None,
     embedding_pool: np.ndarray | None = None,
 ) -> list[dict[str, Any]] | dict[str, Any]:
     """Run per-aspect KNN, transfer GO terms, label, compute features.
@@ -391,15 +425,29 @@ def _knn_transfer_and_label(
     features — the PK-killer signal: how close is each candidate GO to the
     query's existing annotation profile?
 
-    Streaming mode: when ``output_parquet`` is given, records are
-    written to disk in ``chunk_rows`` chunks as they are generated
-    (re-ordered to iterate per ``(q_acc, aspect)`` group so the
-    ancestor-expansion stays local). In this mode the function
-    returns ``{"parquet_path": str, "n_rows": int}`` instead of the
-    full list. If ``pivot_go_ids`` is given the filter is applied
-    inline, keeping the caller from materialising the pre-filter
-    list. The list-return path is unchanged for existing callers.
+    Streaming mode: when ``stream_output`` is given, records are
+    written to disk in ``stream_output.chunk_rows`` chunks as they
+    are generated (re-ordered to iterate per ``(q_acc, aspect)``
+    group so the ancestor-expansion stays local). In this mode the
+    function returns ``{"parquet_path": str, "n_rows": int}`` instead
+    of the full list. ``pivot_go_ids`` (orthogonal to streaming)
+    filters records by go_id; useful in either mode.
     """
+    # Unpack the parameter objects so the body keeps using the original
+    # local names — body untouched, only the call surface shrinks.
+    ctx = sequence_context or SequenceContext()
+    query_sequences = ctx.query_sequences
+    ref_sequences = ctx.ref_sequences
+    query_tax_ids = ctx.query_tax_ids
+    ref_tax_ids = ctx.ref_tax_ids
+
+    if stream_output is not None:
+        output_parquet: Path | None = stream_output.output_parquet
+        chunk_rows: int = stream_output.chunk_rows
+    else:
+        output_parquet = None
+        chunk_rows = 100_000
+
     # Collect neighbors per aspect
     neighbors_by_aspect: dict[str, list[list[tuple[str, float]]]] = {}
     for aspect in _ASPECTS:
@@ -1483,10 +1531,12 @@ class TrainRerankerAutoOperation:
                     aspect_map,
                     set(),  # empty gt → all label=0
                     p,
-                    query_sequences=qs,
-                    ref_sequences=rs,
-                    query_tax_ids=qt,
-                    ref_tax_ids=rt,
+                    sequence_context=SequenceContext(
+                        query_sequences=qs,
+                        ref_sequences=rs,
+                        query_tax_ids=qt,
+                        ref_tax_ids=rt,
+                    ),
                     query_known_gos=eval_data.known,
                     parent_map_str=parent_map if p.expand_votes_to_ancestors else None,
                     ia_weights=ia_weights,
@@ -1647,16 +1697,18 @@ class TrainRerankerAutoOperation:
                         aspect_map,
                         set(),
                         p,
-                        query_sequences=test_qs,
-                        ref_sequences=test_rs,
-                        query_tax_ids=test_qt,
-                        ref_tax_ids=test_rt,
+                        sequence_context=SequenceContext(
+                            query_sequences=test_qs,
+                            ref_sequences=test_rs,
+                            query_tax_ids=test_qt,
+                            ref_tax_ids=test_rt,
+                        ),
                         query_known_gos=test_eval_data.known,
                         parent_map_str=parent_map if p.expand_votes_to_ancestors else None,
                         ia_weights=ia_weights,
                         pca_state=pca_state,
-                        output_parquet=test_unlabeled_path,
                         pivot_go_ids=pivot_go_ids,
+                        stream_output=StreamOutput(output_parquet=test_unlabeled_path),
                         embedding_pool=all_embeddings,
                     )
                     del test_ref, test_emb, test_valid, test_qs, test_rs, test_qt, test_rt

@@ -17,7 +17,7 @@ import numpy as np
 import pyarrow.parquet as pq
 import pytest
 
-from protea.core.operations.train_reranker import _knn_transfer_and_label
+from protea.core.operations.train_reranker import StreamOutput, _knn_transfer_and_label
 
 
 class _StubAnc2Vec:
@@ -123,18 +123,18 @@ def _run(mode: str, tmp_path: Path | None = None, *, expand: bool, pivot=None):
     session = MagicMock()
     p = _mk_payload(expand=expand)
 
-    kwargs = dict(
-        query_known_gos=None,
-        parent_map_str=parent_map_str if expand else None,
-        ia_weights=None,
-        pca_state=None,
-    )
+    kwargs: dict = {
+        "query_known_gos": None,
+        "parent_map_str": parent_map_str if expand else None,
+        "ia_weights": None,
+        "pca_state": None,
+    }
+    kwargs["pivot_go_ids"] = pivot
     if mode == "stream":
-        kwargs["output_parquet"] = tmp_path / "out.parquet"
-        kwargs["pivot_go_ids"] = pivot
-        kwargs["chunk_rows"] = 3  # tiny to force multiple flushes
-    else:
-        kwargs["pivot_go_ids"] = pivot
+        kwargs["stream_output"] = StreamOutput(
+            output_parquet=tmp_path / "out.parquet",
+            chunk_rows=3,  # tiny to force multiple flushes
+        )
 
     with patch(
         "protea.core.operations.train_reranker.get_anc2vec_index",
