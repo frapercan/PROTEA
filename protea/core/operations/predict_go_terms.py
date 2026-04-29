@@ -1220,56 +1220,17 @@ class PredictGOTermsBatchOperation:
         Feature engineering (alignments / taxonomy) is computed for the union of
         neighbors across all aspects to avoid redundant work on shared neighbors.
         """
-        # Collect all unique neighbors across aspects so feature engineering
-        # is computed once per pair regardless of how many aspects reference it.
-        neighbors_by_aspect: dict[str, list[list[tuple[str, float]]]] = {}
-        all_unique_neighbors: set[str] = set()
+        # ── 1. KNN per aspect ─────────────────────────────────────────
+        neighbors_by_aspect, all_unique_neighbors = self._run_knn_per_aspect(
+            valid_accessions, query_embeddings, ref_data_by_aspect, p
+        )
 
-        use_cos = p.metric == "cosine"
-        for aspect in _ASPECTS:
-            aspect_refs = ref_data_by_aspect[aspect]
-            if not aspect_refs["accessions"]:
-                neighbors_by_aspect[aspect] = [[] for _ in valid_accessions]
-                continue
-
-            ref_f32 = (
-                aspect_refs["embeddings_f32_cos"]
-                if use_cos
-                else aspect_refs["embeddings_f32"]
+        # ── 2. Load feature-engineering inputs over the union of neighbors ──
+        ref_sequences, query_sequences, ref_tax_ids, query_tax_ids = (
+            self._load_feature_engineering_data(
+                session, p, valid_accessions, all_unique_neighbors
             )
-            aspect_neighbors = search_knn(
-                query_embeddings,
-                ref_f32,
-                aspect_refs["accessions"],
-                k=p.limit_per_entry,
-                distance_threshold=p.distance_threshold,
-                backend=p.search_backend,
-                metric=p.metric,
-                pre_normalized=use_cos,
-                faiss_index_type=p.faiss_index_type,
-                faiss_nlist=p.faiss_nlist,
-                faiss_nprobe=p.faiss_nprobe,
-                faiss_hnsw_m=p.faiss_hnsw_m,
-                faiss_hnsw_ef_search=p.faiss_hnsw_ef_search,
-            )
-            neighbors_by_aspect[aspect] = aspect_neighbors
-            for top_refs in aspect_neighbors:
-                for ref_acc, _ in top_refs:
-                    all_unique_neighbors.add(ref_acc)
-
-        # Feature engineering — computed over the union of all neighbors
-        ref_sequences: dict[str, str] = {}
-        query_sequences: dict[str, str] = {}
-        ref_tax_ids: dict[str, int | None] = {}
-        query_tax_ids: dict[str, int | None] = {}
-
-        if p.compute_alignments:
-            ref_sequences = self._load_sequences_for_proteins(session, all_unique_neighbors)
-            query_sequences = self._load_sequences_for_queries(session, p, valid_accessions)
-
-        if p.compute_taxonomy:
-            ref_tax_ids = self._load_taxonomy_ids_for_proteins(session, all_unique_neighbors)
-            query_tax_ids = self._load_taxonomy_ids_for_queries(session, p, valid_accessions)
+        )
 
         # Build predictions per aspect, merging into a single list.
         # seen_terms is keyed per query protein to deduplicate across aspects.
@@ -1446,6 +1407,93 @@ class PredictGOTermsBatchOperation:
                         predictions.append(pred)
 
         return predictions, neighbors_by_aspect, go_map_by_aspect, pair_features
+
+    def _run_knn_per_aspect(
+        self,
+        valid_accessions: list[str],
+        query_embeddings: np.ndarray,
+        ref_data_by_aspect: dict[str, dict[str, Any]],
+        p: PredictGOTermsBatchPayload,
+    ) -> tuple[dict[str, list[list[tuple[str, float]]]], set[str]]:
+        """Run one independent KNN search per GO aspect and accumulate
+        the union of all neighbors across aspects.
+
+        Returns ``(neighbors_by_aspect, all_unique_neighbors)`` — feature
+        engineering downstream is computed once per pair regardless of how
+        many aspects reference it, so the union is the right call surface.
+        """
+        neighbors_by_aspect: dict[str, list[list[tuple[str, float]]]] = {}
+        all_unique_neighbors: set[str] = set()
+
+        use_cos = p.metric == "cosine"
+        for aspect in _ASPECTS:
+            aspect_refs = ref_data_by_aspect[aspect]
+            if not aspect_refs["accessions"]:
+                neighbors_by_aspect[aspect] = [[] for _ in valid_accessions]
+                continue
+
+            ref_f32 = (
+                aspect_refs["embeddings_f32_cos"]
+                if use_cos
+                else aspect_refs["embeddings_f32"]
+            )
+            aspect_neighbors = search_knn(
+                query_embeddings,
+                ref_f32,
+                aspect_refs["accessions"],
+                k=p.limit_per_entry,
+                distance_threshold=p.distance_threshold,
+                backend=p.search_backend,
+                metric=p.metric,
+                pre_normalized=use_cos,
+                faiss_index_type=p.faiss_index_type,
+                faiss_nlist=p.faiss_nlist,
+                faiss_nprobe=p.faiss_nprobe,
+                faiss_hnsw_m=p.faiss_hnsw_m,
+                faiss_hnsw_ef_search=p.faiss_hnsw_ef_search,
+            )
+            neighbors_by_aspect[aspect] = aspect_neighbors
+            for top_refs in aspect_neighbors:
+                for ref_acc, _ in top_refs:
+                    all_unique_neighbors.add(ref_acc)
+
+        return neighbors_by_aspect, all_unique_neighbors
+
+    def _load_feature_engineering_data(
+        self,
+        session: Session,
+        p: PredictGOTermsBatchPayload,
+        valid_accessions: list[str],
+        all_unique_neighbors: set[str],
+    ) -> tuple[
+        dict[str, str],
+        dict[str, str],
+        dict[str, int | None],
+        dict[str, int | None],
+    ]:
+        """Load sequences and taxonomy IDs for downstream feature engineering.
+
+        Each tuple slot is empty when the corresponding flag
+        (``compute_alignments`` / ``compute_taxonomy``) is False, so the
+        caller can pass them straight into the per-pair feature builder
+        without further conditionals.
+
+        Returns ``(ref_sequences, query_sequences, ref_tax_ids, query_tax_ids)``.
+        """
+        ref_sequences: dict[str, str] = {}
+        query_sequences: dict[str, str] = {}
+        ref_tax_ids: dict[str, int | None] = {}
+        query_tax_ids: dict[str, int | None] = {}
+
+        if p.compute_alignments:
+            ref_sequences = self._load_sequences_for_proteins(session, all_unique_neighbors)
+            query_sequences = self._load_sequences_for_queries(session, p, valid_accessions)
+
+        if p.compute_taxonomy:
+            ref_tax_ids = self._load_taxonomy_ids_for_proteins(session, all_unique_neighbors)
+            query_tax_ids = self._load_taxonomy_ids_for_queries(session, p, valid_accessions)
+
+        return ref_sequences, query_sequences, ref_tax_ids, query_tax_ids
 
     def _load_annotations_for(
         self,
