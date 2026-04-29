@@ -72,25 +72,27 @@ class TestFactory:
         assert isinstance(store, LocalFsArtifactStore)
         assert any("minio" in r.message.lower() for r in caplog.records)
 
-    def test_minio_unreachable_falls_back(
-        self, base_settings: Settings, caplog: pytest.LogCaptureFixture
-    ):
+    def test_minio_unreachable_raises(self, base_settings: Settings):
+        """Unreachable MinIO must fail loudly.
+
+        The earlier silent fallback to local produced ``Dataset`` rows
+        with ``backend=local`` and ``file://…`` URIs that the lab could
+        not resolve from a different host — a subtle data-corruption
+        bug. Readiness / export should fail fast instead.
+        """
         s = replace(
             base_settings,
             storage_backend="minio",
-            minio_endpoint="localhost:1",  # closed port
+            minio_endpoint="localhost:1",
             minio_access_key="x",
             minio_secret_key="y",
         )
-        # Patch to simulate failure during bucket-ensure without requiring the
-        # real minio client to actually reach the network.
         from protea.infrastructure.storage import minio_store
+        from protea.infrastructure.storage.factory import ArtifactStoreUnavailable
 
         with patch.object(
             minio_store.MinioArtifactStore, "_ensure_bucket",
             side_effect=ConnectionError("boom"),
         ):
-            with caplog.at_level(logging.WARNING):
-                store = get_artifact_store(s)
-        assert isinstance(store, LocalFsArtifactStore)
-        assert any("fall" in r.message.lower() for r in caplog.records)
+            with pytest.raises(ArtifactStoreUnavailable, match="MinIO"):
+                get_artifact_store(s)

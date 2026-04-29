@@ -49,6 +49,11 @@ class ArtifactStore(Protocol):
         """Whether ``key`` is present in the store."""
         ...
 
+    def delete(self, key: str) -> bool:
+        """Remove ``key`` from the store. Returns ``True`` if an object was
+        deleted, ``False`` if the key did not exist. Idempotent."""
+        ...
+
 
 from .factory import get_artifact_store  # noqa: E402
 from .local import LocalFsArtifactStore  # noqa: E402

@@ -12,11 +12,13 @@ from protea.api.routers import admin as admin_router
 from protea.api.routers import annotate as annotate_router
 from protea.api.routers import annotations as annotations_router
 from protea.api.routers import benchmark as benchmark_router
+from protea.api.routers import datasets as datasets_router
 from protea.api.routers import embeddings as embeddings_router
 from protea.api.routers import jobs as jobs_router
 from protea.api.routers import maintenance as maintenance_router
 from protea.api.routers import proteins as proteins_router
 from protea.api.routers import query_sets as query_sets_router
+from protea.api.routers import reranker_models as reranker_models_router
 from protea.api.routers import scoring as scoring_router
 from protea.api.routers import showcase as showcase_router
 from protea.api.routers import support as support_router
@@ -86,6 +88,20 @@ def create_app(project_root: Path | None = None) -> FastAPI:
                 "name": "annotate",
                 "description": "One-click protein annotation — upload FASTA, auto-run the full pipeline.",
             },
+            {
+                "name": "datasets",
+                "description": (
+                    "Frozen re-ranker datasets — enqueue export jobs, "
+                    "list/fetch registered dumps, resolve URIs for the lab."
+                ),
+            },
+            {
+                "name": "reranker-models",
+                "description": (
+                    "Register lab-trained LightGBM boosters — multipart "
+                    "upload or by-reference import of artefacts already in MinIO."
+                ),
+            },
         ],
     )
     app.state.session_factory = factory
@@ -118,7 +134,14 @@ def create_app(project_root: Path | None = None) -> FastAPI:
 
     @app.get("/health/ready", tags=["health"])
     def readiness_check() -> dict[str, str]:
-        """Readiness probe — verifies database and RabbitMQ connections."""
+        """Readiness probe — verifies database, RabbitMQ, and (if configured) MinIO.
+
+        The artifact-store check is load-bearing: ``POST /datasets`` and
+        ``/reranker-models/import`` silently misbehave if MinIO is
+        configured but unreachable (``Dataset`` rows would be written
+        against the local filesystem). Failing readiness here keeps
+        docker / k8s from routing traffic until the store is back.
+        """
         from sqlalchemy import text
 
         from protea.infrastructure.session import session_scope
@@ -126,7 +149,6 @@ def create_app(project_root: Path | None = None) -> FastAPI:
         with session_scope(factory) as session:
             session.execute(text("SELECT 1"))
 
-        # Check RabbitMQ connectivity
         import pika
 
         try:
@@ -134,6 +156,15 @@ def create_app(project_root: Path | None = None) -> FastAPI:
             conn.close()
         except Exception as exc:
             raise HTTPException(status_code=503, detail=f"RabbitMQ unreachable: {exc}") from exc
+
+        if (settings.storage_backend or "local").lower() == "minio":
+            from protea.infrastructure.storage import get_artifact_store
+            from protea.infrastructure.storage.factory import ArtifactStoreUnavailable
+
+            try:
+                get_artifact_store(settings)
+            except ArtifactStoreUnavailable as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
 
         return {"status": "ready"}
 
@@ -149,6 +180,8 @@ def create_app(project_root: Path | None = None) -> FastAPI:
     app.include_router(showcase_router.router)
     app.include_router(benchmark_router.router)
     app.include_router(support_router.router)
+    app.include_router(datasets_router.router)
+    app.include_router(reranker_models_router.router)
 
     sphinx_build = project_root / "docs" / "build" / "html"
     if sphinx_build.exists():

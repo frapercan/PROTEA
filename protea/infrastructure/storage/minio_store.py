@@ -77,3 +77,13 @@ class MinioArtifactStore:
             return True
         except S3Error:
             return False
+
+    def delete(self, key: str) -> bool:
+        from minio.error import S3Error
+
+        try:
+            self._client.stat_object(self.bucket, key)
+        except S3Error:
+            return False
+        self._client.remove_object(self.bucket, key)
+        return True

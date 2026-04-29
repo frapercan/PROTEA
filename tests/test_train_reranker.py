@@ -1,28 +1,25 @@
 """Unit tests for protea.core.operations.train_reranker.
 
-Covers payload validation, the TrainRerankerOperation helper methods,
-and the _compute_comparison_metrics logic.  Heavy DB / model training
-is mocked — no real infrastructure required.
+Covers payload validation and the TrainRerankerOperation helper methods
+that remain after the LightGBM training path moved to
+``protea-reranker-lab`` — heavy DB / model training is no longer tested
+here; the helpers exist only so ``TrainRerankerAutoOperation`` can dump
+frozen datasets for the lab.
 """
 
 from __future__ import annotations
 
 import uuid
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import numpy as np
-import pandas as pd
 import pytest
 
 from protea.core.operations.train_reranker import (
     TrainRerankerOperation,
     TrainRerankerPayload,
 )
-
-
-def _noop_emit(*a, **kw):
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -254,11 +251,22 @@ class TestLoadQueryEmbeddings:
         assert emb.shape == (0,)
 
     def test_returns_embeddings_for_found(self):
+        # SequenceEmbedding.embedding is a pgvector ``halfvec`` column
+        # (migrated 2026-04-11); values come back as HalfVector objects
+        # that expose ``.to_list()``. Mimic that with a tiny shim so the
+        # loader's unwrap call succeeds without touching a real DB.
+        class _HV:
+            def __init__(self, values: list[float]) -> None:
+                self._values = values
+
+            def to_list(self) -> list[float]:
+                return self._values
+
         op = TrainRerankerOperation()
         session = MagicMock()
         session.query.return_value.join.return_value.filter.return_value.all.return_value = [
-            ("P1", [0.1, 0.2, 0.3]),
-            ("P2", [0.4, 0.5, 0.6]),
+            ("P1", _HV([0.1, 0.2, 0.3])),
+            ("P2", _HV([0.4, 0.5, 0.6])),
         ]
 
         emb, valid = op._load_query_embeddings(session, ["P1", "P2"], uuid.uuid4())
@@ -320,104 +328,6 @@ class TestLoadTaxonomyIds:
 
 
 # ---------------------------------------------------------------------------
-# _compute_comparison_metrics
-# ---------------------------------------------------------------------------
-
-
-class TestComputeComparisonMetrics:
-    def test_returns_expected_keys(self):
-        op = TrainRerankerOperation()
-
-        # Create a minimal DataFrame
-        df = pd.DataFrame(
-            [
-                {"protein_accession": "P1", "go_id": "GO:0001", "distance": 0.1, "label": 1},
-                {"protein_accession": "P1", "go_id": "GO:0002", "distance": 0.9, "label": 0},
-            ]
-        )
-
-        # Mock train result
-        train_result = MagicMock()
-        train_result.model = MagicMock()
-
-        # Mock evaluation data
-        eval_data = MagicMock()
-        eval_data.nk = {"P1": {"GO:0001"}}
-
-        with (
-            patch(
-                "protea.core.operations.train_reranker.reranker_predict",
-                return_value=np.array([0.9, 0.1]),
-            ),
-            patch(
-                "protea.core.operations.train_reranker.compute_cafa_metrics",
-            ) as mock_cafa,
-        ):
-            mock_metrics = MagicMock()
-            mock_metrics.fmax = 0.5
-            mock_metrics.auc_pr = 0.4
-            mock_metrics.threshold_at_fmax = 0.3
-            mock_metrics.n_ground_truth_proteins = 1
-            mock_cafa.return_value = mock_metrics
-
-            result = op._compute_comparison_metrics(df, train_result, eval_data, "nk")
-
-        expected_keys = {
-            "baseline_fmax",
-            "baseline_auc_pr",
-            "baseline_threshold",
-            "reranker_fmax",
-            "reranker_auc_pr",
-            "reranker_threshold",
-            "fmax_improvement",
-            "auc_pr_improvement",
-            "n_ground_truth_proteins",
-        }
-        assert set(result.keys()) == expected_keys
-
-    def test_fmax_improvement_computed(self):
-        op = TrainRerankerOperation()
-        df = pd.DataFrame(
-            [
-                {"protein_accession": "P1", "go_id": "GO:0001", "distance": 0.1, "label": 1},
-            ]
-        )
-
-        train_result = MagicMock()
-
-        call_count = [0]
-
-        def fake_cafa(*args, **kwargs):
-            call_count[0] += 1
-            m = MagicMock()
-            if call_count[0] == 1:
-                m.fmax = 0.4  # baseline
-                m.auc_pr = 0.3
-            else:
-                m.fmax = 0.6  # reranker
-                m.auc_pr = 0.5
-            m.threshold_at_fmax = 0.3
-            m.n_ground_truth_proteins = 1
-            return m
-
-        with (
-            patch(
-                "protea.core.operations.train_reranker.reranker_predict",
-                return_value=np.array([0.9]),
-            ),
-            patch(
-                "protea.core.operations.train_reranker.compute_cafa_metrics",
-                side_effect=fake_cafa,
-            ),
-        ):
-            result = op._compute_comparison_metrics(df, train_result, MagicMock(), "nk")
-
-        assert result["baseline_fmax"] == 0.4
-        assert result["reranker_fmax"] == 0.6
-        assert result["fmax_improvement"] == 0.2
-
-
-# ---------------------------------------------------------------------------
 # _load_go_maps
 # ---------------------------------------------------------------------------
 
@@ -436,92 +346,6 @@ class TestLoadGoMaps:
         assert id_map == {1: "GO:0001", 2: "GO:0002", 3: "GO:0003"}
         assert aspect_map == {1: "P", 2: "F"}
         assert 3 not in aspect_map  # None aspect excluded
-
-
-# ---------------------------------------------------------------------------
-# Full execute flow (heavily mocked)
-# ---------------------------------------------------------------------------
-
-
-class TestExecuteFlow:
-    def test_no_ground_truth_raises(self):
-        op = TrainRerankerOperation()
-        session = MagicMock()
-        snap_id = uuid.uuid4()
-        # AnnotationSet.ontology_snapshot_id must equal the payload's pivot so
-        # execute() takes the same-snapshot path (which is what compute_evaluation_data patches).
-        aset = MagicMock()
-        aset.ontology_snapshot_id = snap_id
-        session.get.return_value = aset
-        session.query.return_value.filter.return_value.first.return_value = None
-
-        payload = {
-            "name": "test",
-            "old_annotation_set_id": str(uuid.uuid4()),
-            "new_annotation_set_id": str(uuid.uuid4()),
-            "embedding_config_id": str(uuid.uuid4()),
-            "ontology_snapshot_id": str(snap_id),
-        }
-
-        with (
-            patch.object(op, "_validate"),
-            patch(
-                "protea.core.operations.train_reranker.compute_evaluation_data",
-            ) as mock_eval,
-        ):
-            eval_data = MagicMock()
-            eval_data.nk = {}  # empty ground truth
-            eval_data.stats.return_value = {}
-            mock_eval.return_value = eval_data
-
-            with pytest.raises(ValueError, match="No ground truth"):
-                op.execute(session, payload, emit=_noop_emit)
-
-    def test_no_embeddings_raises(self):
-        op = TrainRerankerOperation()
-        session = MagicMock()
-        snap_id = uuid.uuid4()
-        # Force same-snapshot path so compute_evaluation_data is the one called.
-        aset = MagicMock()
-        aset.ontology_snapshot_id = snap_id
-        session.get.return_value = aset
-        session.query.return_value.filter.return_value.first.return_value = None
-        # Union-map / pivot queries use session.execute(...).fetchall(): return
-        # an empty list so the dispatch code runs without touching a real DB.
-        session.execute.return_value.fetchall.return_value = []
-
-        payload = {
-            "name": "test",
-            "old_annotation_set_id": str(uuid.uuid4()),
-            "new_annotation_set_id": str(uuid.uuid4()),
-            "embedding_config_id": str(uuid.uuid4()),
-            "ontology_snapshot_id": str(snap_id),
-        }
-
-        with (
-            patch.object(op, "_validate"),
-            patch(
-                "protea.core.operations.train_reranker.compute_evaluation_data",
-            ) as mock_eval,
-            patch.object(op, "_load_parent_map", return_value={}),
-            patch.object(
-                op,
-                "_load_reference_per_aspect",
-                return_value={
-                    "P": {"accessions": [], "embeddings": np.empty((0,)), "go_map": {}},
-                    "F": {"accessions": [], "embeddings": np.empty((0,)), "go_map": {}},
-                    "C": {"accessions": [], "embeddings": np.empty((0,)), "go_map": {}},
-                },
-            ),
-            patch.object(op, "_load_query_embeddings", return_value=(np.empty((0,)), [])),
-        ):
-            eval_data = MagicMock()
-            eval_data.nk = {"P1": {"GO:0001"}}
-            eval_data.stats.return_value = {"nk": 1}
-            mock_eval.return_value = eval_data
-
-            with pytest.raises(ValueError, match="No delta proteins have embeddings"):
-                op.execute(session, payload, emit=_noop_emit)
 
 
 # ---------------------------------------------------------------------------

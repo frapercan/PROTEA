@@ -38,3 +38,10 @@ class LocalFsArtifactStore:
 
     def exists(self, key: str) -> bool:
         return self._full_path(key).exists()
+
+    def delete(self, key: str) -> bool:
+        path = self._full_path(key)
+        if not path.exists():
+            return False
+        path.unlink()
+        return True

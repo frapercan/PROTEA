@@ -16,45 +16,33 @@ from __future__ import annotations
 import gc
 import hashlib
 import json
+import logging
 import shutil
 import tempfile
 import time
 import uuid
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Annotated, Any
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 from pydantic import Field, field_validator
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from protea.core.anc2vec_embeddings import Anc2VecIndex, get_index as get_anc2vec_index
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
-from protea.core.evaluation import (
-    compute_evaluation_data,
-    compute_evaluation_data_reconciled,
-)
+from protea.core.evaluation import load_evaluation_data_for_set
+from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.core.feature_engineering import compute_alignment, compute_taxonomy
 from protea.core.knn_search import search_knn
-from protea.core.metrics import compute_cafa_metrics
 from protea.core.reranker import (
     ALL_FEATURES,
     EMBEDDING_PCA_DIM,
     LABEL_COLUMN,
     fit_embedding_pca,
-    model_to_string,
-)
-from protea.core.reranker import (
-    predict as reranker_predict,
-)
-from protea.core.reranker import (
-    train as reranker_train,
-)
-from protea.core.scoring import (
-    propagate_ground_truth_to_ancestors,
-    propagate_scores_to_ancestors,
 )
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
@@ -70,6 +58,8 @@ PositiveInt = Annotated[int, Field(gt=0)]
 _ASPECTS = ("P", "F", "C")
 _ANNOTATION_CHUNK_SIZE = 10_000
 _STREAM_CHUNK_SIZE = 2_000
+
+_LOG = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +143,6 @@ class TrainRerankerPayload(ProteaPayload, frozen=True):
 # Operation
 # ---------------------------------------------------------------------------
 
-_ASPECT_MAP = {"bpo": "P", "mfo": "F", "cco": "C"}
 
 
 class TrainRerankerOperation:
@@ -201,296 +190,11 @@ class TrainRerankerOperation:
             bits.append(f"rounds={p['num_boost_round']}")
         return " · ".join(bits)
 
-    def execute(
-        self, session: Session, payload: dict[str, Any], *, emit: EmitFn
-    ) -> OperationResult:
-        p = TrainRerankerPayload.model_validate(payload)
-        t0 = time.perf_counter()
-
-        old_set_id = uuid.UUID(p.old_annotation_set_id)
-        new_set_id = uuid.UUID(p.new_annotation_set_id)
-        emb_config_id = uuid.UUID(p.embedding_config_id)
-        ontology_snapshot_id = uuid.UUID(p.ontology_snapshot_id)
-
-        # ── 1. Validate ──────────────────────────────────────────────────
-        self._validate(session, p, old_set_id, new_set_id, emb_config_id, ontology_snapshot_id)
-
-        emit(
-            "train_reranker.start",
-            None,
-            {
-                "name": p.name,
-                "old_annotation_set_id": p.old_annotation_set_id,
-                "new_annotation_set_id": p.new_annotation_set_id,
-                "category": p.category,
-                "limit_per_entry": p.limit_per_entry,
-            },
-            "info",
-        )
-
-        # ── 2. Evaluation delta ──────────────────────────────────────────
-        # Dispatches to the reconciled path when old/new annotation sets use
-        # native snapshots different from the pivot (CAFA cross-OBO protocol).
-        # Mirrors the logic used by train_reranker_auto and
-        # load_evaluation_data_for_set. The non-reconciled path silently drops
-        # cross-snapshot go_term_ids → empty LK/PK and zero KNN transfers.
-        emit("train_reranker.computing_delta", None, {}, "info")
-        old_aset = session.get(AnnotationSet, old_set_id)
-        new_aset = session.get(AnnotationSet, new_set_id)
-        if old_aset is None or new_aset is None:
-            raise ValueError("AnnotationSet not found (validated earlier — should be unreachable)")
-        old_native_snap = old_aset.ontology_snapshot_id
-        new_native_snap = new_aset.ontology_snapshot_id
-        if old_native_snap == new_native_snap == ontology_snapshot_id:
-            eval_data = compute_evaluation_data(
-                session, old_set_id, new_set_id, ontology_snapshot_id
-            )
-        else:
-            eval_data = compute_evaluation_data_reconciled(
-                session,
-                old_set_id,
-                new_set_id,
-                old_native_snap,
-                new_native_snap,
-                ontology_snapshot_id,
-            )
-        ground_truth: dict[str, set[str]] = getattr(eval_data, p.category)
-        gt_pairs: set[tuple[str, str]] = set()
-        for protein, go_ids in ground_truth.items():
-            for go_id in go_ids:
-                gt_pairs.add((protein, go_id))
-
-        emit(
-            "train_reranker.delta_computed",
-            None,
-            {
-                **eval_data.stats(),
-                "gt_pairs": len(gt_pairs),
-            },
-            "info",
-        )
-
-        if not gt_pairs:
-            raise ValueError(
-                f"No ground truth found for category '{p.category}' "
-                f"between annotation sets {old_set_id} and {new_set_id}"
-            )
-
-        # ── 3. GO term mappings ──────────────────────────────────────────
-        # Build a UNION go_id_map / aspect_map spanning the pivot snapshot
-        # and every native snapshot involved. Reference annotations are in
-        # old_native PK space; ground truth is in pivot string space; a
-        # single-snapshot map would leave old-snap PKs unresolved → 0 KNN
-        # transfers. pivot_go_ids is used below to clip candidate terms to
-        # the reconciled universe (mirrors train_reranker_auto).
-        map_snapshots = {ontology_snapshot_id, old_native_snap, new_native_snap}
-        union_rows = session.execute(
-            text(
-                "SELECT id, go_id, aspect FROM go_term "
-                "WHERE ontology_snapshot_id = ANY(:snap_ids)"
-            ),
-            {"snap_ids": [str(s) for s in map_snapshots]},
-        ).fetchall()
-        go_id_map: dict[Any, str] = {row_id: go_id for row_id, go_id, _ in union_rows}
-        aspect_map: dict[Any, str] = {
-            row_id: aspect for row_id, _, aspect in union_rows if aspect
-        }
-        pivot_rows = session.execute(
-            text(
-                "SELECT go_id FROM go_term "
-                "WHERE ontology_snapshot_id = :snap_id AND aspect IS NOT NULL"
-            ),
-            {"snap_id": ontology_snapshot_id},
-        ).fetchall()
-        pivot_go_ids: set[str] = {row[0] for row in pivot_rows}
-        parent_map = self._load_parent_map(session, ontology_snapshot_id)
-        pca_state: tuple[np.ndarray, np.ndarray] | None = None
-
-        # ── 4. Load reference embeddings per aspect ──────────────────────
-        emit("train_reranker.loading_references", None, {}, "info")
-        ref_by_aspect = self._load_reference_per_aspect(session, emb_config_id, old_set_id, emit)
-
-        # ── 5. Load query embeddings ─────────────────────────────────────
-        query_accessions = list(ground_truth.keys())
-        emit(
-            "train_reranker.loading_queries",
-            None,
-            {"delta_proteins": len(query_accessions)},
-            "info",
-        )
-        query_emb, valid_queries = self._load_query_embeddings(
-            session, query_accessions, emb_config_id
-        )
-        emit(
-            "train_reranker.queries_loaded",
-            None,
-            {"with_embeddings": len(valid_queries)},
-            "info",
-        )
-
-        if not valid_queries:
-            raise ValueError("No delta proteins have embeddings")
-
-        if p.use_embedding_pca:
-            # Fit PCA on the reference embedding pool (concat across aspects).
-            ref_mats = [
-                ref_by_aspect[asp]["embeddings"].astype(np.float32)
-                for asp in _ASPECTS
-                if ref_by_aspect[asp]["embeddings"].size
-            ]
-            if ref_mats:
-                ref_concat = np.concatenate(ref_mats, axis=0)
-                pca_state = fit_embedding_pca(ref_concat, EMBEDDING_PCA_DIM)
-                emit(
-                    "train_reranker.pca_fit",
-                    None,
-                    {
-                        "n_refs": int(ref_concat.shape[0]),
-                        "dim_in": int(ref_concat.shape[1]),
-                        "dim_out": EMBEDDING_PCA_DIM,
-                    },
-                    "info",
-                )
-                del ref_mats, ref_concat
-
-        # ── 6. KNN + GO transfer + label ─────────────────────────────────
-        # Load sequences / taxonomy before releasing the DB connection
-        qs: dict[str, str] | None = None
-        rs: dict[str, str] | None = None
-        qt: dict[str, int | None] | None = None
-        rt: dict[str, int | None] | None = None
-        if p.compute_alignments or p.compute_taxonomy:
-            all_ref_accs: set[str] = set()
-            for asp in _ASPECTS:
-                all_ref_accs.update(ref_by_aspect[asp]["accessions"])
-            query_set = set(valid_queries)
-            if p.compute_alignments:
-                emit("train_reranker.loading_sequences", None, {}, "info")
-                qs = self._load_sequences(session, query_set)
-                rs = self._load_sequences(session, all_ref_accs)
-            if p.compute_taxonomy:
-                emit("train_reranker.loading_taxonomy", None, {}, "info")
-                qt = self._load_taxonomy_ids(session, query_set)
-                rt = self._load_taxonomy_ids(session, all_ref_accs)
-
-        # Release DB connection before CPU-heavy phase
-        session.expire_all()
-
-        emit("train_reranker.running_knn", None, {}, "info")
-        labeled_preds = self._knn_transfer_and_label(
-            session,
-            valid_queries,
-            query_emb,
-            ref_by_aspect,
-            go_id_map,
-            aspect_map,
-            gt_pairs,
-            p,
-            query_sequences=qs,
-            ref_sequences=rs,
-            query_tax_ids=qt,
-            ref_tax_ids=rt,
-            query_known_gos=eval_data.known,
-            parent_map_str=parent_map if p.expand_votes_to_ancestors else None,
-            ia_weights=None,
-            pca_state=pca_state,
-        )
-
-        # Restrict predictions to terms present in the pivot universe —
-        # ground truth was (potentially) reconciled into pivot space, so
-        # candidates from old_native-only terms must be dropped.
-        labeled_preds = [r for r in labeled_preds if r["go_id"] in pivot_go_ids]
-
-        emit(
-            "train_reranker.knn_done",
-            None,
-            {
-                "total_predictions": len(labeled_preds),
-                "positives": sum(1 for r in labeled_preds if r["label"] == 1),
-                "negatives": sum(1 for r in labeled_preds if r["label"] == 0),
-            },
-            "info",
-        )
-
-        if not labeled_preds:
-            raise ValueError("KNN produced no predictions for delta proteins")
-
-        # ── 7. Train LightGBM ────────────────────────────────────────────
-        emit("train_reranker.training", None, {}, "info")
-        df = pd.DataFrame(labeled_preds)
-
-        # Aspect filter if requested
-        aspect_filter = _ASPECT_MAP.get(p.aspect) if p.aspect else None
-        if aspect_filter:
-            df = df[df["aspect"] == aspect_filter]
-
-        train_result = reranker_train(
-            df,
-            num_boost_round=p.num_boost_round,
-            early_stopping_rounds=p.early_stopping_rounds,
-            val_fraction=p.val_fraction,
-            neg_pos_ratio=p.neg_pos_ratio,
-        )
-
-        emit(
-            "train_reranker.trained",
-            None,
-            train_result.metrics,
-            "info",
-        )
-
-        # ── 8. Compute baseline vs re-ranker Fmax ────────────────────────
-        emit("train_reranker.evaluating", None, {}, "info")
-        metrics_result = self._compute_comparison_metrics(
-            df, train_result, eval_data, p.category, parent_map=parent_map
-        )
-
-        emit(
-            "train_reranker.evaluated",
-            None,
-            {
-                "baseline_fmax": metrics_result["baseline_fmax"],
-                "reranker_fmax": metrics_result["reranker_fmax"],
-                "fmax_improvement": metrics_result["fmax_improvement"],
-            },
-            "info",
-        )
-
-        # ── 9. Store RerankerModel ────────────────────────────────────────
-        full_metrics = {
-            **train_result.metrics,
-            **metrics_result,
-            "category": p.category,
-            "old_annotation_set_id": str(old_set_id),
-            "new_annotation_set_id": str(new_set_id),
-            "embedding_config_id": str(emb_config_id),
-            "limit_per_entry": p.limit_per_entry,
-            "search_backend": p.search_backend,
-            "n_query_proteins": len(valid_queries),
-            "n_predictions": len(labeled_preds),
-            "elapsed_seconds": round(time.perf_counter() - t0, 1),
-        }
-
-        model = RerankerModel(
-            name=p.name,
-            prediction_set_id=None,
-            evaluation_set_id=None,
-            category=p.category,
-            aspect=p.aspect,
-            model_data=model_to_string(train_result.model),
-            metrics=full_metrics,
-            feature_importance=train_result.feature_importance,
-        )
-        session.add(model)
-        session.flush()
-
-        result = {
-            "reranker_model_id": str(model.id),
-            "name": p.name,
-            **full_metrics,
-        }
-        emit("train_reranker.done", None, result, "info")
-        return OperationResult(result=result)
+    # ``execute`` intentionally not implemented — TrainRerankerOperation is
+    # no longer registered. The class survives purely as a container for
+    # the KNN / feature / reference-loading helpers reused by
+    # ``TrainRerankerAutoOperation`` when it dumps frozen datasets for
+    # ``protea-reranker-lab``.
 
     # ── validation ────────────────────────────────────────────────────────
 
@@ -675,14 +379,14 @@ class TrainRerankerOperation:
                 dtype=np.int32,
             )
             asp_accessions = [all_accessions[i] for i in indices]
-            asp_embeddings = (
-                all_embeddings[indices]
-                if len(indices) > 0
-                else np.empty((0, dim), dtype=np.float16)
-            )
+            # Store indices into the shared preload pool instead of a fancy-indexed
+            # copy: with ~500k refs × 1024 × float16, the copy was ~1 GB per aspect
+            # and stayed alive until the split ended. The consumer
+            # (_knn_transfer_and_label) materialises a transient float32 view on
+            # demand, one aspect at a time.
             result[asp] = {
                 "accessions": asp_accessions,
-                "embeddings": asp_embeddings,
+                "indices": indices,
                 "go_map": aspect_go_map[asp],
             }
             emit(
@@ -924,7 +628,11 @@ class TrainRerankerOperation:
         parent_map_str: dict[str, set[str]] | None = None,
         ia_weights: dict[str, float] | None = None,
         pca_state: tuple[np.ndarray, np.ndarray] | None = None,
-    ) -> list[dict[str, Any]]:
+        output_parquet: Path | None = None,
+        pivot_go_ids: set[str] | frozenset[str] | None = None,
+        chunk_rows: int = 100_000,
+        embedding_pool: np.ndarray | None = None,
+    ) -> list[dict[str, Any]] | dict[str, Any]:
         """Run per-aspect KNN, transfer GO terms, label, compute features.
 
         ``query_known_gos`` is ``{protein_accession: {go_id}}`` of annotations
@@ -932,6 +640,15 @@ class TrainRerankerOperation:
         ``EvaluationData.known``). Used to compute query-side Anc2Vec coherence
         features — the PK-killer signal: how close is each candidate GO to the
         query's existing annotation profile?
+
+        Streaming mode: when ``output_parquet`` is given, records are
+        written to disk in ``chunk_rows`` chunks as they are generated
+        (re-ordered to iterate per ``(q_acc, aspect)`` group so the
+        ancestor-expansion stays local). In this mode the function
+        returns ``{"parquet_path": str, "n_rows": int}`` instead of the
+        full list. If ``pivot_go_ids`` is given the filter is applied
+        inline, keeping the caller from materialising the pre-filter
+        list. The list-return path is unchanged for existing callers.
         """
         # Collect neighbors per aspect
         neighbors_by_aspect: dict[str, list[list[tuple[str, float]]]] = {}
@@ -940,7 +657,16 @@ class TrainRerankerOperation:
             if not ref["accessions"]:
                 neighbors_by_aspect[aspect] = [[] for _ in valid_queries]
                 continue
-            ref_f32 = ref["embeddings"].astype(np.float32)
+            # Two source shapes are supported:
+            #   - ``ref["indices"]`` + ``embedding_pool`` (preload-aware path);
+            #     no per-aspect float16 copy is held in the dict.
+            #   - ``ref["embeddings"]`` (legacy path used by the single-version
+            #     train_reranker that loads embeddings per aspect from SQL).
+            indices = ref.get("indices")
+            if indices is not None and embedding_pool is not None:
+                ref_f32 = embedding_pool[indices].astype(np.float32)
+            else:
+                ref_f32 = ref["embeddings"].astype(np.float32)
             neighbors_by_aspect[aspect] = search_knn(
                 query_emb,
                 ref_f32,
@@ -954,6 +680,13 @@ class TrainRerankerOperation:
                 faiss_nprobe=p.faiss_nprobe,
             )
             del ref_f32
+            # Embeddings/indices are no longer needed past this point — only
+            # ``go_map`` and ``accessions`` are read downstream. Releasing
+            # ~940 MB per aspect (f16, ~500k × dim) keeps RSS flat before
+            # the record-building phase.
+            ref["embeddings"] = None
+            ref["indices"] = None
+        gc.collect()
 
         # Pre-compute reranker features
         rr_distance_std: dict[str, float] = {}
@@ -1010,22 +743,34 @@ class TrainRerankerOperation:
                                 vmin[gtid] = float(nb_d)
                             vsum[gtid] = vsum.get(gtid, 0.0) + float(nb_d)
 
-        # Pre-compute alignment and taxonomy features per unique (query, ref) pair
-        pair_features: dict[tuple[str, str], dict[str, Any]] = {}
+        # Pre-compute alignment and taxonomy features per unique (query, ref) pair.
+        # Nested by q_acc so per-query state can be popped atomically once the
+        # record-building loop is done with each query — keeps RSS bounded in
+        # the test split (30k queries × 5 nbrs × 3 aspects ≈ 450k entries).
+        pair_features: dict[str, dict[str, dict[str, Any]]] = {}
         do_alignments = (
             p.compute_alignments and query_sequences is not None and ref_sequences is not None
         )
         do_taxonomy = p.compute_taxonomy and query_tax_ids is not None and ref_tax_ids is not None
 
         if do_alignments or do_taxonomy:
+            # Heartbeat: this loop can run for hours on large splits with
+            # alignments enabled. Without periodic logging a stall is
+            # indistinguishable from slow progress. Logs every 30s with
+            # pairs-computed / elapsed / current aspect so operators can
+            # spot stalls or plateaus in the worker log.
+            _hb_t0 = time.perf_counter()
+            _hb_last = _hb_t0
+            _hb_interval = 30.0
+            _hb_n = 0
             for aspect in _ASPECTS:
                 nbs = neighbors_by_aspect[aspect]
                 for q_idx, q_acc in enumerate(valid_queries):
                     if q_idx >= len(nbs):
                         continue
+                    q_pairs = pair_features.setdefault(q_acc, {})
                     for ref_acc, _ in nbs[q_idx]:
-                        pair_key = (q_acc, ref_acc)
-                        if pair_key in pair_features:
+                        if ref_acc in q_pairs:
                             continue
                         feats: dict[str, Any] = {}
                         if do_alignments:
@@ -1039,7 +784,16 @@ class TrainRerankerOperation:
                             feats.update(compute_taxonomy(q_tid, r_tid))
                             feats["query_taxonomy_id"] = q_tid
                             feats["ref_taxonomy_id"] = r_tid
-                        pair_features[pair_key] = feats
+                        q_pairs[ref_acc] = feats
+                        _hb_n += 1
+                        now = time.perf_counter()
+                        if now - _hb_last >= _hb_interval:
+                            _LOG.info(
+                                "pair_features heartbeat: pairs=%d aspect=%s q_idx=%d/%d elapsed=%.1fs rate=%.0f/s",
+                                _hb_n, aspect, q_idx, len(valid_queries),
+                                now - _hb_t0, _hb_n / max(1e-9, now - _hb_t0),
+                            )
+                            _hb_last = now
 
         # Taxonomic-consensus features: mirror the (neighbor_vote_fraction,
         # neighbor_min_distance, neighbor_mean_distance) design but aggregate
@@ -1068,8 +822,9 @@ class TrainRerankerOperation:
                     close_d = tax_close_cnt.setdefault(q_acc, {})
                     sum_d = tax_ca_sum.setdefault(q_acc, {})
                     n_d = tax_ca_n.setdefault(q_acc, {})
+                    q_pairs = pair_features.get(q_acc, {})
                     for ref_acc, _ in nbs_all[q_idx]:
-                        pf = pair_features.get((q_acc, ref_acc), {})
+                        pf = q_pairs.get(ref_acc, {})
                         rel = pf.get("taxonomic_relation") or ""
                         ca = pf.get("taxonomic_common_ancestors")
                         is_same = rel == "same"
@@ -1177,19 +932,90 @@ class TrainRerankerOperation:
             ).astype(np.float32)
 
         # Build labeled predictions
+        #
+        # This block is structured per ``(q_acc, aspect)`` group so that
+        # ancestor expansion is local and intermediate state never holds
+        # more than one group worth of records. In list mode (the legacy
+        # default) records accumulate in memory. In streaming mode
+        # (``output_parquet`` given) each group flushes through a
+        # pyarrow ParquetWriter in ``chunk_rows`` batches — the caller
+        # never sees the ~10M-row list so the test split avoids OOM.
+        expand = getattr(p, "expand_votes_to_ancestors", False) and bool(parent_map_str)
+        k_limit_f = float(k_limit)
+        ancestor_closure: dict[str, set[str]] = {}
+
+        def _ancestors(gid: str) -> set[str]:
+            cached = ancestor_closure.get(gid)
+            if cached is not None:
+                return cached
+            seen: set[str] = set()
+            stack = [gid]
+            while stack:
+                node = stack.pop()
+                for parent in (parent_map_str or {}).get(node, ()):
+                    if parent not in seen:
+                        seen.add(parent)
+                        stack.append(parent)
+            ancestor_closure[gid] = seen
+            return seen
+
+        def _ia_weight(anc_gid: str, leaf_gid: str) -> float:
+            if not ia_weights:
+                return 1.0
+            anc_w = float(ia_weights.get(anc_gid, 0.0))
+            leaf_w = float(ia_weights.get(leaf_gid, 0.0))
+            if leaf_w <= 0.0:
+                return 1.0
+            return anc_w / leaf_w
+
+        streaming = output_parquet is not None
         records: list[dict[str, Any]] = []
+        buffer: list[dict[str, Any]] = []
+        writer: pq.ParquetWriter | None = None
+        n_rows = 0
         _nan_pca = [float("nan")] * EMBEDDING_PCA_DIM
-        for aspect in _ASPECTS:
-            go_map = ref_by_aspect[aspect]["go_map"]
-            for q_idx, q_acc in enumerate(valid_queries):
+
+        def _flush() -> None:
+            nonlocal writer, n_rows
+            if not buffer:
+                return
+            table = pa.Table.from_pylist(buffer)
+            if writer is None:
+                writer = pq.ParquetWriter(str(output_parquet), table.schema)
+            writer.write_table(table)
+            n_rows += len(buffer)
+            buffer.clear()
+
+        def _emit(rec: dict[str, Any]) -> None:
+            if pivot_go_ids is not None and rec["go_id"] not in pivot_go_ids:
+                return
+            if streaming:
+                buffer.append(rec)
+                if len(buffer) >= chunk_rows:
+                    _flush()
+            else:
+                records.append(rec)
+
+        for q_idx, q_acc in enumerate(valid_queries):
+            q_pca_row = (
+                pca_query_proj[q_idx].tolist()
+                if pca_query_proj is not None
+                else _nan_pca
+            )
+            q_known_cent, q_known_mat, q_known_n = query_known_info.get(
+                q_acc, (None, None, 0)
+            )
+            q_pairs_features = pair_features.get(q_acc, {})
+            for aspect in _ASPECTS:
+                go_map = ref_by_aspect[aspect]["go_map"]
                 nbs = neighbors_by_aspect[aspect]
                 if q_idx >= len(nbs):
                     continue
-                q_pca_row = (
-                    pca_query_proj[q_idx].tolist()
-                    if pca_query_proj is not None
-                    else _nan_pca
+                centroid_unit, nmat = neighbor_info.get(
+                    (q_acc, aspect), (None, None)
                 )
+
+                leaf_by_gid: dict[str, dict[str, Any]] = {}
                 seen_terms: set[int] = set()
                 for ref_acc, distance in nbs[q_idx]:
                     for ann in go_map.get(ref_acc, []):
@@ -1204,17 +1030,11 @@ class TrainRerankerOperation:
                         term_aspect = aspect_map.get(go_term_id, "")
                         label = 1 if (q_acc, go_id) in gt_pairs else 0
 
-                        pf = pair_features.get((q_acc, ref_acc), {})
+                        pf = q_pairs_features.get(ref_acc, {})
 
                         cand_i = idx_of_go.get(go_id, -1)
-                        q_known_cent, q_known_mat, q_known_n = query_known_info.get(
-                            q_acc, (None, None, 0)
-                        )
                         if cand_i >= 0 and has_emb_mask[cand_i]:
                             cand_vec = all_norm[cand_i]
-                            centroid_unit, nmat = neighbor_info.get(
-                                (q_acc, aspect), (None, None)
-                            )
                             anc_cos = (
                                 float(cand_vec @ centroid_unit)
                                 if centroid_unit is not None
@@ -1243,249 +1063,173 @@ class TrainRerankerOperation:
                             anc_q_cos = float("nan")
                             anc_q_maxcos = float("nan")
 
-                        records.append(
-                            {
-                                "protein_accession": q_acc,
-                                "go_id": go_id,
-                                "aspect": term_aspect,
-                                LABEL_COLUMN: label,
-                                "distance": distance,
-                                "ref_protein_accession": ref_acc,
-                                "qualifier": ann.get("qualifier") or "",
-                                "evidence_code": ann.get("evidence_code") or "",
-                                # Alignment features
-                                "identity_nw": pf.get("identity_nw"),
-                                "similarity_nw": pf.get("similarity_nw"),
-                                "alignment_score_nw": pf.get("alignment_score_nw"),
-                                "gaps_pct_nw": pf.get("gaps_pct_nw"),
-                                "alignment_length_nw": pf.get("alignment_length_nw"),
-                                "identity_sw": pf.get("identity_sw"),
-                                "similarity_sw": pf.get("similarity_sw"),
-                                "alignment_score_sw": pf.get("alignment_score_sw"),
-                                "gaps_pct_sw": pf.get("gaps_pct_sw"),
-                                "alignment_length_sw": pf.get("alignment_length_sw"),
-                                "length_query": pf.get("length_query"),
-                                "length_ref": pf.get("length_ref"),
-                                # Taxonomy features
-                                "taxonomic_distance": pf.get("taxonomic_distance"),
-                                "taxonomic_common_ancestors": pf.get("taxonomic_common_ancestors"),
-                                "taxonomic_relation": pf.get("taxonomic_relation", ""),
-                                # Reranker features
-                                "vote_count": rr_vote_count.get(q_acc, {}).get(go_term_id, 1),
-                                "k_position": rr_k_position.get(q_acc, {}).get(go_term_id, 1),
-                                "go_term_frequency": go_term_freq.get(go_term_id, 0),
-                                "ref_annotation_density": ref_ann_density.get(ref_acc, 0),
-                                "neighbor_distance_std": rr_distance_std.get(q_acc, 0.0),
-                                # Consensus features (this candidate term only)
-                                "neighbor_vote_fraction": (
-                                    rr_vote_count.get(q_acc, {}).get(go_term_id, 1) / k_limit
-                                ),
-                                "neighbor_min_distance": rr_vote_min_d.get(q_acc, {}).get(
-                                    go_term_id, float(distance)
-                                ),
-                                "neighbor_mean_distance": (
-                                    rr_vote_sum_d.get(q_acc, {}).get(go_term_id, float(distance))
-                                    / max(1, rr_vote_count.get(q_acc, {}).get(go_term_id, 1))
-                                ),
-                                # Anc2Vec semantic-coherence features
-                                "anc2vec_neighbor_cos": anc_cos,
-                                "anc2vec_neighbor_maxcos": anc_maxcos,
-                                "anc2vec_has_emb": anc_has,
-                                # Query-side Anc2Vec (PK-killer): cand vs query's
-                                # pre-cutoff annotation profile. NaN for NK queries.
-                                "anc2vec_query_known_cos": anc_q_cos,
-                                "anc2vec_query_known_maxcos": anc_q_maxcos,
-                                "anc2vec_query_known_count": float(q_known_n),
-                                # Taxonomic consensus across voting neighbors
-                                "tax_voters_same_frac": (
-                                    tax_same_cnt.get(q_acc, {}).get(go_term_id, 0)
-                                    / max(1, rr_vote_count.get(q_acc, {}).get(go_term_id, 1))
-                                    if do_taxonomy
-                                    else float("nan")
-                                ),
-                                "tax_voters_close_frac": (
-                                    tax_close_cnt.get(q_acc, {}).get(go_term_id, 0)
-                                    / max(1, rr_vote_count.get(q_acc, {}).get(go_term_id, 1))
-                                    if do_taxonomy
-                                    else float("nan")
-                                ),
-                                "tax_voters_mean_common_ancestors": (
-                                    (
-                                        tax_ca_sum.get(q_acc, {}).get(go_term_id, 0.0)
-                                        / max(1, tax_ca_n.get(q_acc, {}).get(go_term_id, 1))
-                                    )
-                                    if (
-                                        do_taxonomy
-                                        and tax_ca_n.get(q_acc, {}).get(go_term_id, 0) > 0
-                                    )
-                                    else float("nan")
-                                ),
-                                **{
-                                    f"emb_pca_query_{i}": q_pca_row[i]
-                                    for i in range(EMBEDDING_PCA_DIM)
-                                },
-                            }
-                        )
+                        rec = {
+                            "protein_accession": q_acc,
+                            "go_id": go_id,
+                            "aspect": term_aspect,
+                            LABEL_COLUMN: label,
+                            "distance": distance,
+                            "ref_protein_accession": ref_acc,
+                            "qualifier": ann.get("qualifier") or "",
+                            "evidence_code": ann.get("evidence_code") or "",
+                            # Alignment features
+                            "identity_nw": pf.get("identity_nw"),
+                            "similarity_nw": pf.get("similarity_nw"),
+                            "alignment_score_nw": pf.get("alignment_score_nw"),
+                            "gaps_pct_nw": pf.get("gaps_pct_nw"),
+                            "alignment_length_nw": pf.get("alignment_length_nw"),
+                            "identity_sw": pf.get("identity_sw"),
+                            "similarity_sw": pf.get("similarity_sw"),
+                            "alignment_score_sw": pf.get("alignment_score_sw"),
+                            "gaps_pct_sw": pf.get("gaps_pct_sw"),
+                            "alignment_length_sw": pf.get("alignment_length_sw"),
+                            "length_query": pf.get("length_query"),
+                            "length_ref": pf.get("length_ref"),
+                            # Taxonomy features
+                            "taxonomic_distance": pf.get("taxonomic_distance"),
+                            "taxonomic_common_ancestors": pf.get("taxonomic_common_ancestors"),
+                            "taxonomic_relation": pf.get("taxonomic_relation", ""),
+                            # Reranker features
+                            "vote_count": rr_vote_count.get(q_acc, {}).get(go_term_id, 1),
+                            "k_position": rr_k_position.get(q_acc, {}).get(go_term_id, 1),
+                            "go_term_frequency": go_term_freq.get(go_term_id, 0),
+                            "ref_annotation_density": ref_ann_density.get(ref_acc, 0),
+                            "neighbor_distance_std": rr_distance_std.get(q_acc, 0.0),
+                            # Consensus features (this candidate term only)
+                            "neighbor_vote_fraction": (
+                                rr_vote_count.get(q_acc, {}).get(go_term_id, 1) / k_limit
+                            ),
+                            "neighbor_min_distance": rr_vote_min_d.get(q_acc, {}).get(
+                                go_term_id, float(distance)
+                            ),
+                            "neighbor_mean_distance": (
+                                rr_vote_sum_d.get(q_acc, {}).get(go_term_id, float(distance))
+                                / max(1, rr_vote_count.get(q_acc, {}).get(go_term_id, 1))
+                            ),
+                            # Anc2Vec semantic-coherence features
+                            "anc2vec_neighbor_cos": anc_cos,
+                            "anc2vec_neighbor_maxcos": anc_maxcos,
+                            "anc2vec_has_emb": anc_has,
+                            # Query-side Anc2Vec (PK-killer): cand vs query's
+                            # pre-cutoff annotation profile. NaN for NK queries.
+                            "anc2vec_query_known_cos": anc_q_cos,
+                            "anc2vec_query_known_maxcos": anc_q_maxcos,
+                            "anc2vec_query_known_count": float(q_known_n),
+                            # Taxonomic consensus across voting neighbors
+                            "tax_voters_same_frac": (
+                                tax_same_cnt.get(q_acc, {}).get(go_term_id, 0)
+                                / max(1, rr_vote_count.get(q_acc, {}).get(go_term_id, 1))
+                                if do_taxonomy
+                                else float("nan")
+                            ),
+                            "tax_voters_close_frac": (
+                                tax_close_cnt.get(q_acc, {}).get(go_term_id, 0)
+                                / max(1, rr_vote_count.get(q_acc, {}).get(go_term_id, 1))
+                                if do_taxonomy
+                                else float("nan")
+                            ),
+                            "tax_voters_mean_common_ancestors": (
+                                (
+                                    tax_ca_sum.get(q_acc, {}).get(go_term_id, 0.0)
+                                    / max(1, tax_ca_n.get(q_acc, {}).get(go_term_id, 1))
+                                )
+                                if (
+                                    do_taxonomy
+                                    and tax_ca_n.get(q_acc, {}).get(go_term_id, 0) > 0
+                                )
+                                else float("nan")
+                            ),
+                            **{
+                                f"emb_pca_query_{i}": q_pca_row[i]
+                                for i in range(EMBEDDING_PCA_DIM)
+                            },
+                        }
+                        leaf_by_gid[go_id] = rec
 
-        # Ancestor expansion: synthesize records for every ancestor of each
-        # predicted leaf so the candidate set covers the full upward closure.
-        # Neighbor-vote-fraction is additively weighted by IA(ancestor)/IA(leaf)
-        # when an IA table is provided (else weight = 1). The closest leaf in
-        # the group donates its per-pair features (distance, alignment,
-        # taxonomy) to the synthesized ancestor record.
-        expand = getattr(p, "expand_votes_to_ancestors", False)
-        if expand and parent_map_str:
-            k_limit_f = float(k_limit)
-
-            def _ia_weight(anc_gid: str, leaf_gid: str) -> float:
-                if not ia_weights:
-                    return 1.0
-                anc_w = float(ia_weights.get(anc_gid, 0.0))
-                leaf_w = float(ia_weights.get(leaf_gid, 0.0))
-                if leaf_w <= 0.0:
-                    return 1.0
-                return anc_w / leaf_w
-
-            ancestor_closure: dict[str, set[str]] = {}
-
-            def _ancestors(go_id: str) -> set[str]:
-                cached = ancestor_closure.get(go_id)
-                if cached is not None:
-                    return cached
-                seen: set[str] = set()
-                stack = [go_id]
-                while stack:
-                    node = stack.pop()
-                    for parent in parent_map_str.get(node, ()):
-                        if parent not in seen:
-                            seen.add(parent)
-                            stack.append(parent)
-                ancestor_closure[go_id] = seen
-                return seen
-
-            # Group records by (q_acc, aspect)
-            groups: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
-            for r in records:
-                key = (r["protein_accession"], r["aspect"])
-                groups.setdefault(key, {})[r["go_id"]] = r
-
-            extra_records: list[dict[str, Any]] = []
-            for (q_acc, aspect), leaf_by_gid in groups.items():
+                # Ancestor expansion for this (q_acc, aspect) group only.
+                # Synthesize records for every ancestor of each predicted
+                # leaf so the candidate set covers the full upward closure.
+                # Neighbor-vote-fraction is additively weighted by
+                # IA(ancestor)/IA(leaf) when an IA table is provided
+                # (else weight = 1). The closest leaf donates its per-pair
+                # features (distance, alignment, taxonomy) to the
+                # synthesized ancestor record.
                 synth: dict[str, dict[str, Any]] = {}
-                for leaf_gid, leaf_rec in list(leaf_by_gid.items()):
-                    leaf_d = float(leaf_rec.get("distance", 1.0))
-                    for anc in _ancestors(leaf_gid):
-                        w = _ia_weight(anc, leaf_gid)
-                        if anc in leaf_by_gid:
-                            rec = leaf_by_gid[anc]
-                            rec["neighbor_vote_fraction"] = min(
-                                1.0,
-                                float(rec.get("neighbor_vote_fraction", 0.0))
-                                + w / k_limit_f,
-                            )
-                            lmd = float(
-                                leaf_rec.get("neighbor_min_distance", leaf_d)
-                            )
-                            cur_md = float(
-                                rec.get("neighbor_min_distance", leaf_d)
-                            )
-                            if lmd < cur_md:
-                                rec["neighbor_min_distance"] = lmd
-                            continue
-                        entry = synth.get(anc)
-                        if entry is None or leaf_d < float(entry["distance"]):
-                            base = dict(leaf_rec)
-                            base["go_id"] = anc
-                            base[LABEL_COLUMN] = 1 if (q_acc, anc) in gt_pairs else 0
-                            prior_frac = (
-                                float(entry["neighbor_vote_fraction"])
-                                if entry is not None
-                                else 0.0
-                            )
-                            base["neighbor_vote_fraction"] = min(
-                                1.0, prior_frac + w / k_limit_f
-                            )
-                            synth[anc] = base
-                        else:
-                            entry["neighbor_vote_fraction"] = min(
-                                1.0,
-                                float(entry["neighbor_vote_fraction"]) + w / k_limit_f,
-                            )
-                extra_records.extend(synth.values())
-            records.extend(extra_records)
+                if expand:
+                    for leaf_gid, leaf_rec in list(leaf_by_gid.items()):
+                        leaf_d = float(leaf_rec.get("distance", 1.0))
+                        for anc in _ancestors(leaf_gid):
+                            w = _ia_weight(anc, leaf_gid)
+                            if anc in leaf_by_gid:
+                                leaf_anc = leaf_by_gid[anc]
+                                leaf_anc["neighbor_vote_fraction"] = min(
+                                    1.0,
+                                    float(leaf_anc.get("neighbor_vote_fraction", 0.0))
+                                    + w / k_limit_f,
+                                )
+                                lmd = float(leaf_rec.get("neighbor_min_distance", leaf_d))
+                                cur_md = float(leaf_anc.get("neighbor_min_distance", leaf_d))
+                                if lmd < cur_md:
+                                    leaf_anc["neighbor_min_distance"] = lmd
+                                continue
+                            entry = synth.get(anc)
+                            if entry is None or leaf_d < float(entry["distance"]):
+                                base = dict(leaf_rec)
+                                base["go_id"] = anc
+                                base[LABEL_COLUMN] = 1 if (q_acc, anc) in gt_pairs else 0
+                                prior_frac = (
+                                    float(entry["neighbor_vote_fraction"])
+                                    if entry is not None
+                                    else 0.0
+                                )
+                                base["neighbor_vote_fraction"] = min(
+                                    1.0, prior_frac + w / k_limit_f
+                                )
+                                synth[anc] = base
+                            else:
+                                entry["neighbor_vote_fraction"] = min(
+                                    1.0,
+                                    float(entry["neighbor_vote_fraction"]) + w / k_limit_f,
+                                )
 
+                for rec in leaf_by_gid.values():
+                    _emit(rec)
+                for rec in synth.values():
+                    _emit(rec)
+
+                # Free per-(q,aspect) state. Keeps neighbor_info / nbs[q_idx]
+                # bounded to "queries not yet processed" instead of growing
+                # for the full run.
+                neighbor_info.pop((q_acc, aspect), None)
+                if q_idx < len(nbs):
+                    nbs[q_idx] = []
+
+            # Free per-query state. Without this the test split's intermediate
+            # dicts (pair_features, rr_*, tax_*, query_known_info, neighbor_info)
+            # accumulate ~5 GB across 30k queries before the function returns,
+            # dominating RSS during the 2-3h record-building loop and tripping
+            # systemd-oomd.
+            pair_features.pop(q_acc, None)
+            rr_vote_count.pop(q_acc, None)
+            rr_k_position.pop(q_acc, None)
+            rr_vote_min_d.pop(q_acc, None)
+            rr_vote_sum_d.pop(q_acc, None)
+            rr_distance_std.pop(q_acc, None)
+            tax_same_cnt.pop(q_acc, None)
+            tax_close_cnt.pop(q_acc, None)
+            tax_ca_sum.pop(q_acc, None)
+            tax_ca_n.pop(q_acc, None)
+            query_known_info.pop(q_acc, None)
+            if (q_idx + 1) % 1000 == 0:
+                gc.collect()
+
+        if streaming:
+            _flush()
+            if writer is not None:
+                writer.close()
+            return {"parquet_path": str(output_parquet), "n_rows": n_rows}
         return records
 
-    # ── metrics comparison ────────────────────────────────────────────────
-
-    def _compute_comparison_metrics(
-        self,
-        df: pd.DataFrame,
-        train_result: Any,
-        eval_data: Any,
-        category: str,
-        parent_map: dict[str, set[str]] | None = None,
-    ) -> dict[str, Any]:
-        """Compute baseline Fmax (distance-based) and re-ranker Fmax.
-
-        When ``parent_map`` is provided, both scored sets are max-propagated
-        to ancestors before the PR sweep — matching cafaeval's external
-        protocol so internal training-time metrics are directly comparable.
-        """
-        # Baseline: score = 1 - distance (simple cosine similarity)
-        baseline_scored = [
-            {
-                "protein_accession": row["protein_accession"],
-                "go_id": row["go_id"],
-                "score": max(0.0, 1.0 - float(row["distance"]))
-                if pd.notna(row.get("distance"))
-                else 0.0,
-            }
-            for _, row in df.iterrows()
-        ]
-        # Symmetric propagation: expand both predictions and ground truth
-        # under the pivot DAG so the internal metric matches cafaeval's
-        # protocol. compute_evaluation_data already propagates GT under the
-        # native DAG; applying the pivot DAG here is idempotent for native
-        # terms already covered and adds any pivot-only ancestors.
-        eval_data_for_metrics = eval_data
-        if parent_map:
-            baseline_scored = propagate_scores_to_ancestors(baseline_scored, parent_map)
-            gt_current: dict[str, set[str]] = getattr(eval_data, category)
-            gt_propagated = propagate_ground_truth_to_ancestors(gt_current, parent_map)
-            eval_data_for_metrics = SimpleNamespace(**{category: gt_propagated})
-        baseline_metrics = compute_cafa_metrics(
-            baseline_scored, eval_data_for_metrics, category=category
-        )
-
-        # Re-ranker
-        reranker_scores = reranker_predict(train_result.model, df)
-        reranker_scored = [
-            {
-                "protein_accession": df.iloc[i]["protein_accession"],
-                "go_id": df.iloc[i]["go_id"],
-                "score": float(reranker_scores[i]),
-            }
-            for i in range(len(df))
-        ]
-        if parent_map:
-            reranker_scored = propagate_scores_to_ancestors(reranker_scored, parent_map)
-        reranker_metrics = compute_cafa_metrics(
-            reranker_scored, eval_data_for_metrics, category=category
-        )
-
-        return {
-            "baseline_fmax": baseline_metrics.fmax,
-            "baseline_auc_pr": baseline_metrics.auc_pr,
-            "baseline_threshold": baseline_metrics.threshold_at_fmax,
-            "reranker_fmax": reranker_metrics.fmax,
-            "reranker_auc_pr": reranker_metrics.auc_pr,
-            "reranker_threshold": reranker_metrics.threshold_at_fmax,
-            "fmax_improvement": round(reranker_metrics.fmax - baseline_metrics.fmax, 4),
-            "auc_pr_improvement": round(reranker_metrics.auc_pr - baseline_metrics.auc_pr, 4),
-            "n_ground_truth_proteins": baseline_metrics.n_ground_truth_proteins,
-            "ancestor_propagation": parent_map is not None,
-        }
 
 
 # ---------------------------------------------------------------------------
@@ -1879,24 +1623,26 @@ class TrainRerankerAutoOperation:
                     "info",
                 )
 
-                # 3a. Compute delta — get all 3 categories at once.
-                # Dispatches to the reconciled path when native snapshots
-                # differ from the pivot (CAFA-protocol cross-OBO handling).
-                old_native = version_to_native[v_old]
-                new_native = version_to_native[v_new]
-                if old_native == new_native == ontology_snapshot_id:
-                    eval_data = compute_evaluation_data(
-                        session, old_set_id, new_set_id, ontology_snapshot_id
+                # 3a. Load delta from the persisted EvaluationSet artifact.
+                # Per the project's "no on-the-fly reuse" rule, the delta
+                # must be materialized beforehand via
+                # /annotations/evaluation-sets/generate (or the
+                # scripts/materialize_lab_intervals.py helper).
+                eset = (
+                    session.query(EvaluationSet)
+                    .filter_by(
+                        old_annotation_set_id=old_set_id,
+                        new_annotation_set_id=new_set_id,
                     )
-                else:
-                    eval_data = compute_evaluation_data_reconciled(
-                        session,
-                        old_set_id,
-                        new_set_id,
-                        old_native,
-                        new_native,
-                        ontology_snapshot_id,
+                    .one_or_none()
+                )
+                if eset is None:
+                    raise RuntimeError(
+                        f"EvaluationSet missing for train pair ({v_old}->{v_new}). "
+                        "Materialize it via scripts/materialize_lab_intervals.py "
+                        "or POST /annotations/evaluation-sets/generate before retrying."
                     )
+                eval_data, _ = load_evaluation_data_for_set(session, eset)
 
                 # Build gt_pairs for each category; collect union of query proteins
                 cat_gt_pairs: dict[str, set[tuple[str, str]]] = {}
@@ -1997,6 +1743,7 @@ class TrainRerankerAutoOperation:
                     parent_map_str=parent_map if p.expand_votes_to_ancestors else None,
                     ia_weights=ia_weights,
                     pca_state=pca_state,
+                    embedding_pool=all_embeddings,
                 )
 
                 # Restrict predictions to terms present in the pivot universe —
@@ -2044,6 +1791,15 @@ class TrainRerankerAutoOperation:
                 del base_df
                 gc.collect()
 
+                # Evict the SQLAlchemy identity map — ``session.expire_all``
+                # (called earlier) only marks rows stale but keeps them in
+                # the identity map, so across 12+ splits the cached
+                # ``Sequence.protein_sequence`` strings leak ~30 GB. Full
+                # expunge + gc forces the ORM to release them before the
+                # next split's ``_load_sequences`` repopulates the cache.
+                session.expunge_all()
+                gc.collect()
+
                 valid_split_versions.append((v_old, v_new))
                 per_split_stats.append(split_stats)
                 emit("train_reranker_auto.split_done", None, split_stats, "info")
@@ -2065,21 +1821,21 @@ class TrainRerankerAutoOperation:
                 "info",
             )
 
-            test_old_native = version_to_native[test_old_v]
-            test_new_native = version_to_native[test_new_v]
-            if test_old_native == test_new_native == ontology_snapshot_id:
-                test_eval_data = compute_evaluation_data(
-                    session, test_old_set_id, test_new_set_id, ontology_snapshot_id
+            test_eset = (
+                session.query(EvaluationSet)
+                .filter_by(
+                    old_annotation_set_id=test_old_set_id,
+                    new_annotation_set_id=test_new_set_id,
                 )
-            else:
-                test_eval_data = compute_evaluation_data_reconciled(
-                    session,
-                    test_old_set_id,
-                    test_new_set_id,
-                    test_old_native,
-                    test_new_native,
-                    ontology_snapshot_id,
+                .one_or_none()
+            )
+            if test_eset is None:
+                raise RuntimeError(
+                    f"EvaluationSet missing for test pair ({test_old_v}->{test_new_v}). "
+                    "Materialize it via scripts/materialize_lab_intervals.py "
+                    "or POST /annotations/evaluation-sets/generate before retrying."
                 )
+            test_eval_data, _ = load_evaluation_data_for_set(session, test_eset)
 
             # Write test data to parquet too
             test_files: dict[str, Path | None] = {c: None for c in _CATEGORIES}
@@ -2125,7 +1881,16 @@ class TrainRerankerAutoOperation:
                             test_rt = self._single._load_taxonomy_ids(session, test_ref_accs)
 
                     session.expire_all()
-                    test_unlabeled = self._single._knn_transfer_and_label(
+                    # Stream the test split directly to parquet instead of
+                    # materialising ~10M records in a Python list. The
+                    # record-building loop inside ``_knn_transfer_and_label``
+                    # already filters by ``pivot_go_ids``, so the on-disk
+                    # intermediate is the pivot-reconciled set. Per-cat
+                    # labeling reads the intermediate back in pyarrow
+                    # batches and fans out to one writer per category —
+                    # peak RSS stays bounded by ``batch_size`` rows.
+                    test_unlabeled_path = tmp_dir / "test_unlabeled.parquet"
+                    test_stream_info = self._single._knn_transfer_and_label(
                         session,
                         test_valid,
                         test_emb,
@@ -2142,284 +1907,103 @@ class TrainRerankerAutoOperation:
                         parent_map_str=parent_map if p.expand_votes_to_ancestors else None,
                         ia_weights=ia_weights,
                         pca_state=pca_state,
+                        output_parquet=test_unlabeled_path,
+                        pivot_go_ids=pivot_go_ids,
+                        embedding_pool=all_embeddings,
                     )
-                    test_unlabeled = [
-                        r for r in test_unlabeled if r["go_id"] in pivot_go_ids
-                    ]
                     del test_ref, test_emb, test_valid, test_qs, test_rs, test_qt, test_rt
                     gc.collect()
 
-                    test_base_df = pd.DataFrame(test_unlabeled, columns=_KEEP_COLS)
-                    del test_unlabeled
-                    gc.collect()
-
-                    for cat in _CATEGORIES:
-                        gt_p = test_cat_gt[cat]
-                        labels = np.array(
-                            [
-                                1 if (acc, go_id) in gt_p else 0
-                                for acc, go_id in zip(
-                                    test_base_df["protein_accession"],
-                                    test_base_df["go_id"],
-                                    strict=False,
-                                )
-                            ],
-                            dtype=np.int8,
-                        )
-                        test_base_df[LABEL_COLUMN] = labels
-                        pq_path = tmp_dir / f"test_{cat}.parquet"
-                        test_base_df.to_parquet(pq_path, index=False)
-                        test_files[cat] = pq_path
-
-                    del test_base_df
+                    n_rows = int(test_stream_info.get("n_rows", 0))
+                    if n_rows > 0 and test_unlabeled_path.exists():
+                        pf = pq.ParquetFile(str(test_unlabeled_path))
+                        project_cols = [
+                            c for c in _KEEP_COLS if c in pf.schema_arrow.names
+                        ]
+                        cat_writers: dict[str, pq.ParquetWriter] = {}
+                        cat_paths: dict[str, Path] = {
+                            cat: tmp_dir / f"test_{cat}.parquet" for cat in _CATEGORIES
+                        }
+                        try:
+                            for batch in pf.iter_batches(
+                                batch_size=200_000, columns=project_cols
+                            ):
+                                # Drop any pre-existing LABEL_COLUMN (it was
+                                # written as zero during streaming) so we can
+                                # append a fresh per-cat label column without
+                                # triggering a schema mismatch.
+                                if LABEL_COLUMN in batch.schema.names:
+                                    batch = batch.drop_columns([LABEL_COLUMN])
+                                accs = batch.column("protein_accession").to_pylist()
+                                gids = batch.column("go_id").to_pylist()
+                                for cat in _CATEGORIES:
+                                    gt_p = test_cat_gt[cat]
+                                    labels = pa.array(
+                                        [
+                                            1 if (a, g) in gt_p else 0
+                                            for a, g in zip(accs, gids, strict=False)
+                                        ],
+                                        type=pa.int8(),
+                                    )
+                                    cat_batch = batch.append_column(LABEL_COLUMN, labels)
+                                    table = pa.Table.from_batches([cat_batch])
+                                    if cat not in cat_writers:
+                                        cat_writers[cat] = pq.ParquetWriter(
+                                            str(cat_paths[cat]), table.schema
+                                        )
+                                    cat_writers[cat].write_table(table)
+                        finally:
+                            for w in cat_writers.values():
+                                w.close()
+                        for cat in _CATEGORIES:
+                            if cat in cat_writers:
+                                test_files[cat] = cat_paths[cat]
+                        test_unlabeled_path.unlink(missing_ok=True)
                     gc.collect()
                 else:
                     del test_ref, test_emb, test_valid
                     gc.collect()
 
-            # ── 4b. Optional dataset dump (protea-reranker-lab) ───────────
-            dump_stats: dict[str, Any] = {}
-            if p.dump_to:
-                dump_stats = self._dump_frozen_dataset(
-                    dump_dir=Path(p.dump_to),
-                    split_files=split_files,
-                    valid_split_versions=valid_split_versions,
-                    test_files=test_files,
-                    test_old_v=test_old_v,
-                    test_new_v=test_new_v,
-                    name=p.name,
-                    k=int(p.limit_per_entry),
-                    embedding_config_id=str(emb_config_id),
-                    ontology_snapshot_id=str(ontology_snapshot_id),
-                    annotation_source=p.annotation_source,
+            # Release the preloaded embedding pool — from here on the
+            # pipeline only reads from the per-split parquets on disk.
+            # Keeps ~1.2 GB out of RSS before dump / training.
+            del all_embeddings, all_accessions, acc_to_idx
+            gc.collect()
+
+            # ── 4b. Dataset dump ──────────────────────────────────────────
+            # Training moved to protea-reranker-lab; this operation now
+            # only materializes the frozen parquets + manifest that the
+            # lab consumes via ``scripts/pull_dataset.py``. Callers must
+            # pass ``dump_to`` — ExportResearchDatasetOperation always does.
+            if not p.dump_to:
+                raise ValueError(
+                    "train_reranker_auto requires dump_to — LightGBM "
+                    "training has been moved to protea-reranker-lab. Use "
+                    "ExportResearchDatasetOperation / POST /datasets."
                 )
-                emit("train_reranker_auto.dump_done", None, dump_stats, "info")
-                if p.dump_only:
-                    elapsed = round(time.perf_counter() - t0, 1)
-                    result: dict[str, Any] = {
-                        "dumped": True,
-                        "dump_path": str(p.dump_to),
-                        "dump_stats": dump_stats,
-                        "elapsed_seconds": elapsed,
-                    }
-                    emit("train_reranker_auto.done", None, result, "info")
-                    return OperationResult(result=result)
-
-            # ── 5. Train per-category (and optionally per-cell) models ────
-            models_created: list[dict[str, Any]] = []
-
-            # Scopes: always include cat-level (aspect=None); include
-            # (cat, aspect) cells when training_scope == "per_cell".
-            aspects_to_train: list[str | None] = [None]
-            if p.training_scope == "per_cell":
-                aspects_to_train.extend(list(_ASPECTS))
-
-            for cat in _CATEGORIES:
-                if not split_files[cat]:
-                    continue
-
-                # Read the cat-level parquet once and reuse for cell filters.
-                split_dfs: list[pd.DataFrame] = []
-                for s_idx, pq in enumerate(split_files[cat]):
-                    sdf = pd.read_parquet(pq)
-                    sdf["_split_idx"] = np.int32(s_idx)
-                    split_dfs.append(sdf)
-                cat_full_df = pd.concat(split_dfs, ignore_index=True)
-                del split_dfs
-
-                cat_test_df: pd.DataFrame | None = None
-                if test_files.get(cat) is not None:
-                    cat_test_df = pd.read_parquet(test_files[cat])
-
-                for aspect in aspects_to_train:
-                    is_cell = aspect is not None
-                    aspect_slug = _ASPECT_NAMES[aspect] if is_cell else None
-                    model_name = (
-                        f"{p.name}-{cat}-{aspect_slug}" if is_cell else f"{p.name}-{cat}"
-                    )
-
-                    if is_cell:
-                        combined_df = cat_full_df[cat_full_df["aspect"] == aspect].copy()
-                        test_df = (
-                            cat_test_df[cat_test_df["aspect"] == aspect].copy()
-                            if cat_test_df is not None
-                            else None
-                        )
-                    else:
-                        combined_df = cat_full_df.copy()
-                        test_df = cat_test_df.copy() if cat_test_df is not None else None
-
-                    n_pos = (
-                        int(combined_df[LABEL_COLUMN].sum()) if len(combined_df) else 0
-                    )
-                    if len(combined_df) == 0 or n_pos == 0:
-                        emit(
-                            "train_reranker_auto.model_skipped",
-                            None,
-                            {
-                                "model": model_name,
-                                "reason": "no data or no positives",
-                            },
-                            "warning",
-                        )
-                        del combined_df
-                        if test_df is not None:
-                            del test_df
-                        gc.collect()
-                        continue
-
-                    # Per-cell fallback: below min-positives threshold, the
-                    # cat-level model already trained above serves this cell.
-                    if is_cell and n_pos < int(p.per_cell_min_positives):
-                        emit(
-                            "train_reranker_auto.cell_fallback_to_category",
-                            None,
-                            {
-                                "model": model_name,
-                                "positives": n_pos,
-                                "threshold": int(p.per_cell_min_positives),
-                            },
-                            "info",
-                        )
-                        del combined_df
-                        if test_df is not None:
-                            del test_df
-                        gc.collect()
-                        continue
-
-                    sw: np.ndarray | None = None
-                    if ia_weights is not None:
-                        sw = (
-                            combined_df["go_id"]
-                            .map(lambda gid: ia_weights.get(gid, 1.0))
-                            .values.astype(np.float64)
-                        )
-
-                    emit(
-                        "train_reranker_auto.training_model",
-                        None,
-                        {
-                            "model": model_name,
-                            "samples": len(combined_df),
-                            "positives": n_pos,
-                            "ia_weighted": sw is not None,
-                            "cell": is_cell,
-                        },
-                        "info",
-                    )
-
-                    def _lgb_heartbeat(it: int, _m=model_name) -> None:
-                        emit(
-                            "train_reranker_auto.training_iter",
-                            None,
-                            {"model": _m, "iteration": it},
-                            "info",
-                        )
-
-                    group_ids: np.ndarray | None = None
-                    if p.reranker_objective == "lambdarank":
-                        group_keys = (
-                            combined_df["_split_idx"].astype(str)
-                            + "|"
-                            + combined_df["protein_accession"].astype(str)
-                        )
-                        group_ids = pd.factorize(group_keys)[0].astype(np.int64)
-                        del group_keys
-
-                    train_result = reranker_train(
-                        combined_df,
-                        num_boost_round=p.num_boost_round,
-                        early_stopping_rounds=p.early_stopping_rounds,
-                        val_fraction=p.val_fraction,
-                        neg_pos_ratio=p.neg_pos_ratio,
-                        sample_weight=sw,
-                        heartbeat=_lgb_heartbeat,
-                        heartbeat_period=50,
-                        objective=p.reranker_objective,
-                        group_ids=group_ids,
-                    )
-
-                    test_metrics: dict[str, Any] = {}
-                    if test_df is not None:
-                        if len(test_df) > 0 and int(test_df[LABEL_COLUMN].sum()) > 0:
-                            test_metrics = self._single._compute_comparison_metrics(
-                                test_df,
-                                train_result,
-                                test_eval_data,
-                                cat,
-                                parent_map=parent_map,
-                            )
-
-                    full_metrics: dict[str, Any] = {
-                        **train_result.metrics,
-                        "category": cat,
-                        "aspect": aspect_slug,
-                        "train_versions": p.train_versions,
-                        "test_versions": p.test_versions,
-                        "annotation_source": p.annotation_source,
-                        "embedding_config_id": str(emb_config_id),
-                        "limit_per_entry": p.limit_per_entry,
-                        "search_backend": p.search_backend,
-                        "n_splits": len(split_files[cat]),
-                        "n_predictions": len(combined_df),
-                        "per_split_stats": per_split_stats,
-                        "ia_weighted": ia_weights is not None,
-                        "training_scope": p.training_scope,
-                    }
-                    if test_metrics:
-                        full_metrics["test_evaluation"] = {
-                            "v_old": test_old_v,
-                            "v_new": test_new_v,
-                            **test_metrics,
-                        }
-
-                    model = RerankerModel(
-                        name=model_name,
-                        prediction_set_id=None,
-                        evaluation_set_id=None,
-                        category=cat,
-                        aspect=aspect_slug,
-                        model_data=model_to_string(train_result.model),
-                        metrics=full_metrics,
-                        feature_importance=train_result.feature_importance,
-                    )
-                    session.add(model)
-                    session.flush()
-
-                    model_summary = {
-                        "reranker_model_id": str(model.id),
-                        "name": model_name,
-                        "category": cat,
-                        "aspect": aspect_slug,
-                        "n_predictions": len(combined_df),
-                        "positives": n_pos,
-                        **{f"test_{k}": v for k, v in test_metrics.items()},
-                    }
-                    models_created.append(model_summary)
-
-                    emit(
-                        "train_reranker_auto.model_done",
-                        None,
-                        model_summary,
-                        "info",
-                    )
-
-                    del combined_df, test_df, sw
-                    gc.collect()
-
-                del cat_full_df
-                if cat_test_df is not None:
-                    del cat_test_df
-                gc.collect()
+            dump_stats = self._dump_frozen_dataset(
+                dump_dir=Path(p.dump_to),
+                split_files=split_files,
+                valid_split_versions=valid_split_versions,
+                test_files=test_files,
+                test_old_v=test_old_v,
+                test_new_v=test_new_v,
+                name=p.name,
+                k=int(p.limit_per_entry),
+                embedding_config_id=str(emb_config_id),
+                ontology_snapshot_id=str(ontology_snapshot_id),
+                annotation_source=p.annotation_source,
+            )
+            emit("train_reranker_auto.dump_done", None, dump_stats, "info")
+            elapsed = round(time.perf_counter() - t0, 1)
+            result: dict[str, Any] = {
+                "dumped": True,
+                "dump_path": str(p.dump_to),
+                "dump_stats": dump_stats,
+                "elapsed_seconds": elapsed,
+            }
+            emit("train_reranker_auto.done", None, result, "info")
+            return OperationResult(result=result)
 
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
-
-        elapsed = round(time.perf_counter() - t0, 1)
-        result: dict[str, Any] = {
-            "n_models": len(models_created),
-            "models": models_created,
-            "elapsed_seconds": elapsed,
-        }
-        emit("train_reranker_auto.done", None, result, "info")
-        return OperationResult(result=result)

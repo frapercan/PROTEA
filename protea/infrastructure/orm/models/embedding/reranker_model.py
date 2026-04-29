@@ -73,6 +73,19 @@ class RerankerModel(Base):
     producer_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
     producer_git_sha: Mapped[str | None] = mapped_column(String(40), nullable=True)
 
+    # External provenance — set when the booster was trained in
+    # ``protea-reranker-lab`` (or any future offline trainer) rather than
+    # by a PROTEA-internal operation. ``dataset_id`` points at the
+    # ``Dataset`` row consumed by the lab run; ``external_source`` is a
+    # free-form tag such as ``"protea-reranker-lab@<git-sha>"``.
+    dataset_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("dataset.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    external_source: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
     # Full ExperimentSpec YAML for reproducibility.
     spec_yaml: Mapped[str | None] = mapped_column(Text, nullable=True)
 

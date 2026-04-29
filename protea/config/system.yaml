@@ -6,7 +6,7 @@ queue:
 
 storage:
   artifacts_dir: storage/evaluation_artifacts
-  backend: local                  # "local" | "minio"
+  backend: minio                  # "local" | "minio"
   root: storage/artifacts         # local backend root (relative → project root)
   minio:
     endpoint: localhost:9000

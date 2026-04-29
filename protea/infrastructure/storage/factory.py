@@ -2,10 +2,13 @@
 
 Reads ``settings.storage_backend`` (with the ``PROTEA_STORAGE_BACKEND``
 env var override resolved by :func:`load_settings`) and returns a
-concrete store. If MinIO is configured but unreachable at construction
-time, emits a warning and falls back to the local filesystem — production
-should never silently degrade, but dev stacks should not crash because
-an optional service is down.
+concrete store. Missing MinIO configuration (no endpoint/credentials)
+falls back to the local filesystem with a warning so dev stacks boot
+cleanly. An explicit ``backend: minio`` with an unreachable endpoint
+raises :class:`ArtifactStoreUnavailable` — silent degradation here
+would produce ``Dataset`` rows with ``storage_backend=local`` +
+``file://…`` URIs that the lab cannot resolve from another host, which
+is a harder bug to spot than a startup failure.
 """
 
 from __future__ import annotations
@@ -16,6 +19,10 @@ from pathlib import Path
 from protea.infrastructure.settings import Settings
 
 logger = logging.getLogger(__name__)
+
+
+class ArtifactStoreUnavailable(RuntimeError):
+    """Raised when the configured MinIO backend cannot be reached."""
 
 
 def get_artifact_store(settings: Settings):
@@ -43,11 +50,12 @@ def get_artifact_store(settings: Settings):
                 secure=settings.minio_secure,
             )
         except Exception as exc:
-            logger.warning(
-                "MinIO unreachable (%s); falling back to local filesystem",
-                exc,
-            )
-            return _make_local(settings)
+            raise ArtifactStoreUnavailable(
+                f"MinIO backend configured but unreachable at "
+                f"{settings.minio_endpoint!r}: {exc}. Start the storage "
+                f"profile (docker compose --profile storage up) or switch "
+                f"to backend: local in system.yaml."
+            ) from exc
 
     return _make_local(settings)
 

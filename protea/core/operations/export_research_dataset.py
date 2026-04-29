@@ -19,7 +19,9 @@ Why a dedicated operation instead of ``train_reranker_auto --dump-only``?
 
 from __future__ import annotations
 
+import hashlib
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -28,6 +30,7 @@ from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.operations.train_reranker import TrainRerankerAutoOperation
+from protea.infrastructure.orm.models.embedding.dataset import Dataset
 from protea.infrastructure.settings import load_settings
 from protea.infrastructure.storage import get_artifact_store
 
@@ -107,10 +110,20 @@ class ExportResearchDatasetOperation:
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
         p = ExportResearchDatasetPayload.model_validate(payload)
+        raw_job_id = payload.get("_job_id") if isinstance(payload, dict) else None
+        job_uuid = uuid.UUID(raw_job_id) if raw_job_id else None
 
         settings = load_settings(_resolve_project_root())
         store = get_artifact_store(settings)
         key_prefix = f"datasets/{p.output_name}/"
+
+        # Reject duplicate names up-front so a half-succeeded run doesn't
+        # silently leave orphan blobs in the store.
+        existing = (
+            session.query(Dataset.id).filter(Dataset.name == p.output_name).first()
+        )
+        if existing is not None:
+            raise ValueError(f"Dataset {p.output_name!r} already exists")
 
         def _relay(event: str, scope: str | None, evt_payload: dict[str, Any], level: str) -> None:
             # Surface the underlying train_reranker_auto events under this
@@ -146,6 +159,22 @@ class ExportResearchDatasetOperation:
                 if p_path.exists():
                     uploaded[fname] = store.put(key_prefix + fname, p_path)
 
+            # Read manifest bytes while the staging dir still exists so the
+            # Dataset row can record a content-addressed fingerprint. The
+            # manifest is written by ``export_reranker_parquets`` and is
+            # never empty on a successful run.
+            import json as _json
+
+            manifest_path = stage_dir / "manifest.json"
+            if not manifest_path.exists():
+                raise RuntimeError(
+                    "export_research_dataset: manifest.json missing from stage dir — "
+                    "dump path did not produce the expected layout"
+                )
+            manifest_bytes = manifest_path.read_bytes()
+            manifest_sha = hashlib.sha256(manifest_bytes).hexdigest()
+            manifest_data = _json.loads(manifest_bytes)
+
             emit(
                 "export_research_dataset.published",
                 None,
@@ -153,19 +182,56 @@ class ExportResearchDatasetOperation:
                     "backend": settings.storage_backend,
                     "key_prefix": key_prefix,
                     "files": list(uploaded.keys()),
+                    "manifest_sha": manifest_sha,
                 },
                 "info",
             )
 
+        # Register the dataset in the DB so the lab can pull by name/id.
+        dataset = Dataset(
+            name=p.output_name,
+            operation=self.name,
+            job_id=job_uuid,
+            storage_backend=settings.storage_backend,
+            key_prefix=key_prefix,
+            train_uri=uploaded.get("train.parquet"),
+            eval_uri=uploaded.get("eval.parquet"),
+            manifest_uri=uploaded["manifest.json"],
+            schema_sha=manifest_data.get("schema_sha", ""),
+            manifest_sha=manifest_sha,
+            n_train_rows=int(manifest_data.get("n_train_rows", 0)),
+            n_eval_rows=int(manifest_data.get("n_eval_rows", 0)),
+            k=int(manifest_data.get("k", p.k)),
+            annotation_source=manifest_data.get("annotation_source", p.annotation_source),
+            embedding_config_id=uuid.UUID(p.embedding_config_id),
+            ontology_snapshot_id=uuid.UUID(p.ontology_snapshot_id),
+            train_snapshot_pairs=list(manifest_data.get("train_snapshot_pairs", [])),
+            eval_snapshot_pair=manifest_data.get("eval_snapshot_pair"),
+            producer_version=manifest_data.get("producer_version"),
+            producer_git_sha=manifest_data.get("producer_git_sha"),
+            meta={},
+        )
+        session.add(dataset)
+        session.flush()
+        dataset_id = dataset.id
+        emit(
+            "export_research_dataset.registered",
+            None,
+            {"dataset_id": str(dataset_id), "name": p.output_name},
+            "info",
+        )
+
         merged: dict[str, Any] = dict(auto_result.result)
         merged.update(
             {
+                "dataset_id": str(dataset_id),
                 "output_name": p.output_name,
                 "key_prefix": key_prefix,
                 "storage_backend": settings.storage_backend,
                 "train_uri": uploaded.get("train.parquet"),
                 "eval_uri": uploaded.get("eval.parquet"),
                 "manifest_uri": uploaded.get("manifest.json"),
+                "manifest_sha": manifest_sha,
             }
         )
         return OperationResult(result=merged)

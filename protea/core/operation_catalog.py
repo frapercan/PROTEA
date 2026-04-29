@@ -30,10 +30,6 @@ from protea.core.operations.predict_go_terms import (
     StorePredictionsOperation,
 )
 from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationOperation
-from protea.core.operations.train_reranker import (
-    TrainRerankerAutoOperation,
-    TrainRerankerOperation,
-)
 
 
 def build_operation_registry() -> OperationRegistry:
@@ -52,7 +48,10 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(PredictGOTermsOperation())
     registry.register(PredictGOTermsBatchOperation())
     registry.register(StorePredictionsOperation())
-    registry.register(TrainRerankerOperation())
-    registry.register(TrainRerankerAutoOperation())
+    # TrainRerankerOperation / TrainRerankerAutoOperation are no longer
+    # publicly registered: all re-ranker training moves to
+    # protea-reranker-lab. They remain importable as internal helpers —
+    # ExportResearchDatasetOperation still uses TrainRerankerAutoOperation
+    # in-process to run the dump-only pipeline.
     registry.register(ExportResearchDatasetOperation())
     return registry

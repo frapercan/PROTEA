@@ -1,19 +1,19 @@
-"""LightGBM re-ranker for GO term predictions.
+"""LightGBM re-ranker — inference helpers for GO term predictions.
 
-Trains a binary classifier on labeled prediction data (from temporal holdout)
-and produces calibrated probability scores that replace or supplement the
-original distance-based ranking.
+Training has been moved to ``protea-reranker-lab``. This module now only
+provides the feature-column schema, a ``prepare_dataset`` helper shared
+with the lab (so inference-time input matches training-time input), and
+the ``predict`` / ``model_from_string`` calls used by the scoring router
+when scoring a prediction set with a registered booster.
 
-Feature columns are the numeric signals stored in ``GOPrediction``.  Categorical
-features (``qualifier``, ``evidence_code``, ``taxonomic_relation``) are
-label-encoded.  Missing values are left as NaN — LightGBM handles them natively.
+Feature columns are the numeric signals stored in ``GOPrediction``.
+Categorical features (``qualifier``, ``evidence_code``,
+``taxonomic_relation``) are label-encoded. Missing values are left as
+NaN — LightGBM handles them natively.
 """
 
 from __future__ import annotations
 
-import io
-from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Any
 
 import lightgbm as lgb
@@ -157,274 +157,12 @@ def prepare_dataset(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
 
 
 # ---------------------------------------------------------------------------
-# Training
+# Training has been removed.
+#
+# LightGBM training lives in ``protea-reranker-lab``. PROTEA only keeps
+# the inference path below (``predict`` + ``model_from_string``) so that
+# registered boosters can score prediction sets at request time.
 # ---------------------------------------------------------------------------
-
-_DEFAULT_PARAMS: dict[str, Any] = {
-    "objective": "binary",
-    "metric": ["binary_logloss", "auc"],
-    "boosting_type": "gbdt",
-    "num_leaves": 31,
-    "learning_rate": 0.01,
-    "feature_fraction": 0.8,
-    "bagging_fraction": 0.8,
-    "bagging_freq": 5,
-    "verbose": -1,
-    "seed": 42,
-}
-
-
-@dataclass
-class TrainResult:
-    """Result of training a re-ranker model."""
-
-    model: lgb.Booster
-    metrics: dict[str, Any]
-    feature_importance: dict[str, int]
-
-
-def train(
-    df: pd.DataFrame,
-    *,
-    params: dict[str, Any] | None = None,
-    num_boost_round: int = 1000,
-    early_stopping_rounds: int = 50,
-    val_fraction: float = 0.2,
-    neg_pos_ratio: float | None = None,
-    sample_weight: np.ndarray | None = None,
-    heartbeat: Callable[[int], None] | None = None,
-    heartbeat_period: int = 50,
-    objective: str = "binary",
-    group_ids: np.ndarray | None = None,
-) -> TrainResult:
-    """Train a LightGBM binary classifier on labeled prediction data.
-
-    Parameters
-    ----------
-    df:
-        DataFrame with feature columns + ``label`` column (0/1).
-    params:
-        LightGBM parameters.  Merged on top of ``_DEFAULT_PARAMS``.
-    num_boost_round:
-        Maximum number of boosting rounds.
-    early_stopping_rounds:
-        Stop if validation metric doesn't improve for this many rounds.
-    val_fraction:
-        Fraction of data to hold out for early stopping validation.
-    neg_pos_ratio:
-        If set, subsample negatives so that the ratio of negatives to
-        positives is at most this value (e.g. 1.0 for 1:1, 10.0 for 10:1).
-        Applied independently to train and val splits.  When ``None``
-        (default), all negatives are kept.
-    sample_weight:
-        Per-sample weights (e.g. Information Accretion of each GO term).
-        Must have the same length as ``df``.  When provided, the weights
-        are passed to LightGBM so that high-weight samples contribute
-        more to the loss.
-
-    Returns
-    -------
-    TrainResult with the trained Booster, validation metrics, and feature importance.
-    """
-    X, y = prepare_dataset(df)
-
-    merged_params = {**_DEFAULT_PARAMS, **(params or {})}
-
-    if objective == "lambdarank":
-        if group_ids is None:
-            raise ValueError("group_ids is required when objective='lambdarank'")
-        if len(group_ids) != len(df):
-            raise ValueError(
-                f"group_ids length ({len(group_ids)}) must match df length ({len(df)})"
-            )
-        merged_params = {
-            **merged_params,
-            "objective": "lambdarank",
-            "metric": ["ndcg", "map"],
-            "ndcg_eval_at": [5, 10, 20],
-            "map_eval_at": [10],
-            "label_gain": [0, 1],
-        }
-
-    rng = np.random.RandomState(merged_params.get("seed", 42))
-    cat_cols = [c for c in CATEGORICAL_FEATURES if c in X.columns]
-
-    if objective == "lambdarank":
-        # Group-level split: keep all rows of a protein together so LightGBM
-        # can compute listwise gradients over a valid ranking, and so val
-        # groups are never seen during training.
-        order = np.argsort(group_ids, kind="stable")
-        X_sorted = X.iloc[order].reset_index(drop=True)
-        y_sorted = y.iloc[order].reset_index(drop=True)
-        gids_sorted = np.asarray(group_ids)[order]
-        sw_sorted = sample_weight[order] if sample_weight is not None else None
-
-        unique_groups, first_idx = np.unique(gids_sorted, return_index=True)
-        order_by_first = np.argsort(first_idx)
-        unique_groups = unique_groups[order_by_first]
-        first_idx = first_idx[order_by_first]
-        sizes = np.diff(np.append(first_idx, len(gids_sorted)))
-
-        perm = np.arange(len(unique_groups))
-        rng.shuffle(perm)
-        n_val_groups = max(1, int(len(unique_groups) * val_fraction))
-        val_groups = set(unique_groups[perm[:n_val_groups]].tolist())
-
-        train_rows: list[int] = []
-        val_rows: list[int] = []
-        train_sizes: list[int] = []
-        val_sizes: list[int] = []
-        for g, start, size in zip(unique_groups, first_idx, sizes, strict=False):
-            stop = start + size
-            if g in val_groups:
-                val_rows.extend(range(start, stop))
-                val_sizes.append(int(size))
-            else:
-                train_rows.extend(range(start, stop))
-                train_sizes.append(int(size))
-
-        train_idx = np.asarray(train_rows, dtype=np.int64)
-        val_idx = np.asarray(val_rows, dtype=np.int64)
-
-        train_w = sw_sorted[train_idx] if sw_sorted is not None else None
-        val_w = sw_sorted[val_idx] if sw_sorted is not None else None
-
-        train_ds = lgb.Dataset(
-            X_sorted.iloc[train_idx],
-            label=y_sorted.iloc[train_idx],
-            weight=train_w,
-            group=train_sizes,
-            categorical_feature=cat_cols,
-            free_raw_data=False,
-        )
-        val_ds = lgb.Dataset(
-            X_sorted.iloc[val_idx],
-            label=y_sorted.iloc[val_idx],
-            weight=val_w,
-            group=val_sizes,
-            categorical_feature=cat_cols,
-            reference=train_ds,
-            free_raw_data=False,
-        )
-        # Rebind X/y so that downstream metric computation uses the sorted view
-        X, y = X_sorted, y_sorted
-    else:
-        # Stratified row-level train/val split (binary classification).
-        pos_idx = np.where(y == 1)[0]
-        neg_idx = np.where(y == 0)[0]
-        rng.shuffle(pos_idx)
-        rng.shuffle(neg_idx)
-
-        n_pos_val = max(1, int(len(pos_idx) * val_fraction))
-        n_neg_val = max(1, int(len(neg_idx) * val_fraction))
-
-        val_pos = pos_idx[:n_pos_val]
-        val_neg = neg_idx[:n_neg_val]
-        train_pos = pos_idx[n_pos_val:]
-        train_neg = neg_idx[n_neg_val:]
-
-        if neg_pos_ratio is not None:
-            max_train_neg = max(1, int(len(train_pos) * neg_pos_ratio))
-            if len(train_neg) > max_train_neg:
-                train_neg = train_neg[:max_train_neg]
-            max_val_neg = max(1, int(len(val_pos) * neg_pos_ratio))
-            if len(val_neg) > max_val_neg:
-                val_neg = val_neg[:max_val_neg]
-
-        val_idx = np.concatenate([val_pos, val_neg])
-        train_idx = np.concatenate([train_pos, train_neg])
-
-        train_w = sample_weight[train_idx] if sample_weight is not None else None
-        val_w = sample_weight[val_idx] if sample_weight is not None else None
-
-        train_ds = lgb.Dataset(
-            X.iloc[train_idx],
-            label=y.iloc[train_idx],
-            weight=train_w,
-            categorical_feature=cat_cols,
-            free_raw_data=False,
-        )
-        val_ds = lgb.Dataset(
-            X.iloc[val_idx],
-            label=y.iloc[val_idx],
-            weight=val_w,
-            categorical_feature=cat_cols,
-            reference=train_ds,
-            free_raw_data=False,
-        )
-
-    callbacks: list[Any] = [
-        lgb.early_stopping(early_stopping_rounds, verbose=False),
-        lgb.log_evaluation(period=0),
-    ]
-    if heartbeat is not None and heartbeat_period > 0:
-        def _heartbeat_cb(env: Any) -> None:
-            it = env.iteration + 1
-            if it % heartbeat_period == 0 or it == env.end_iteration:
-                heartbeat(it)
-        _heartbeat_cb.order = 20  # after early_stopping
-        _heartbeat_cb.before_iteration = False
-        callbacks.append(_heartbeat_cb)
-
-    booster = lgb.train(
-        merged_params,
-        train_ds,
-        num_boost_round=num_boost_round,
-        valid_sets=[val_ds],
-        valid_names=["val"],
-        callbacks=callbacks,  # type: ignore[arg-type]
-    )
-
-    # Collect validation metrics
-    val_preds = np.asarray(booster.predict(X.iloc[val_idx]))
-    val_labels = y.iloc[val_idx].values
-
-    best = booster.best_score.get("val", {}) or {}
-    metrics: dict[str, Any] = {
-        "best_iteration": booster.best_iteration,
-        "objective": objective,
-        "train_samples": int(len(train_idx)),
-        "val_samples": int(len(val_idx)),
-        "positive_rate": round(float(y.mean()), 4),
-    }
-
-    if objective == "lambdarank":
-        for k_at in (5, 10, 20):
-            key = f"ndcg@{k_at}"
-            if key in best:
-                metrics[f"val_{key}"] = round(float(best[key]), 4)
-        if "map@10" in best:
-            metrics["val_map@10"] = round(float(best["map@10"]), 4)
-    else:
-        tp = np.sum((val_preds >= 0.5) & (val_labels == 1))
-        fp = np.sum((val_preds >= 0.5) & (val_labels == 0))
-        fn = np.sum((val_preds < 0.5) & (val_labels == 1))
-        precision = float(tp / (tp + fp)) if (tp + fp) > 0 else 0.0
-        recall = float(tp / (tp + fn)) if (tp + fn) > 0 else 0.0
-        f1 = (
-            2 * precision * recall / (precision + recall)
-            if (precision + recall) > 0
-            else 0.0
-        )
-        metrics.update(
-            {
-                "val_auc": float(best.get("auc", 0.0)),
-                "val_logloss": float(best.get("binary_logloss", 0.0)),
-                "val_precision": round(precision, 4),
-                "val_recall": round(recall, 4),
-                "val_f1": round(f1, 4),
-            }
-        )
-
-    importance = dict(
-        zip(
-            booster.feature_name(),
-            booster.feature_importance(importance_type="gain").tolist(),
-            strict=False,
-        )
-    )
-
-    return TrainResult(model=booster, metrics=metrics, feature_importance=importance)
 
 
 # ---------------------------------------------------------------------------
@@ -475,25 +213,6 @@ def predict(model: lgb.Booster, df: pd.DataFrame) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 
-def model_to_string(model: lgb.Booster) -> str:
-    """Serialize a trained model to a string for DB storage."""
-    return model.model_to_string()
-
-
 def model_from_string(model_str: str) -> lgb.Booster:
     """Deserialize a model from its string representation."""
     return lgb.Booster(model_str=model_str)
-
-
-def load_training_tsv(tsv_content: str | bytes) -> pd.DataFrame:
-    """Parse a training data TSV (as produced by the training-data.tsv endpoint)."""
-    if isinstance(tsv_content, bytes):
-        tsv_content = tsv_content.decode("utf-8")
-    df = pd.read_csv(io.StringIO(tsv_content), sep="\t", dtype=str)
-    # Convert numeric columns
-    for col in NUMERIC_FEATURES:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-    if LABEL_COLUMN in df.columns:
-        df[LABEL_COLUMN] = pd.to_numeric(df[LABEL_COLUMN], errors="coerce").fillna(0).astype(int)
-    return df
