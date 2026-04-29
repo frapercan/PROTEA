@@ -35,13 +35,17 @@ Two endpoints are provided:
 from __future__ import annotations
 
 import uuid
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session, aliased, sessionmaker
 
 from protea.api.deps import get_benchmark_config, get_session_factory
+from protea.api.stages import RERANKER_STAGE as _RERANKER_STAGE
+from protea.api.stages import StageKind  # noqa: F401  (re-exported for type hints)
+from protea.api.stages import stage_kind as _stage_kind
+from protea.api.stages import stage_of as _stage_of
 from protea.infrastructure.benchmark_config import BenchmarkConfig
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.evaluation_result import EvaluationResult
@@ -53,32 +57,6 @@ from protea.infrastructure.orm.models.embedding.scoring_config import ScoringCon
 from protea.infrastructure.session import session_scope
 
 router = APIRouter(prefix="/benchmark", tags=["benchmark"])
-
-
-_RERANKER_STAGE = "reranker"
-
-StageKind = Literal["scoring", "reranker"]
-
-
-# ── Helpers ────────────────────────────────────────────────────────────────
-
-
-def _stage_of(result: EvaluationResult, scoring_name: str | None) -> str | None:
-    """Classify an EvaluationResult into a stage.
-
-    Reranker dominates scoring config. Evaluations without either a scoring
-    config or a reranker are considered incomplete and excluded from the
-    matrix (return ``None``).
-    """
-    if result.reranker_model_id is not None:
-        return _RERANKER_STAGE
-    if scoring_name:
-        return scoring_name
-    return None
-
-
-def _stage_kind(stage: str) -> StageKind:
-    return "reranker" if stage == _RERANKER_STAGE else "scoring"
 
 
 def _stage_sort_index(stage: str, preferred: tuple[str, ...]) -> tuple[int, int, str]:

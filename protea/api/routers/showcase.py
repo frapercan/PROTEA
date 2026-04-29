@@ -26,15 +26,13 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.deps import get_session_factory
-from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
+from protea.api.stages import stage_of
 from protea.infrastructure.orm.models.annotation.evaluation_result import EvaluationResult
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
-from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
 from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
-from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
+from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
 from protea.infrastructure.orm.models.protein.protein import Protein
-from protea.infrastructure.orm.models.sequence.sequence import Sequence
 from protea.infrastructure.session import session_scope
 
 router = APIRouter(prefix="/showcase", tags=["showcase"])
@@ -130,14 +128,7 @@ def get_showcase(
                 continue
             if score > best_score:
                 best_score = score
-                # Stage classification: reranker > scoring > (nothing).
-                # Matches benchmark.py semantics without cross-importing.
-                if er.reranker_model_id is not None:
-                    stage = "reranker"
-                elif scoring_name:
-                    stage = scoring_name
-                else:
-                    stage = None
+                stage = stage_of(er, scoring_name)
                 best = {
                     "evaluation_result_id": str(er.id),
                     "evaluation_set_id": str(er.evaluation_set_id),
