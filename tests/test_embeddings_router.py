@@ -728,13 +728,29 @@ class TestPredictGoTerms:
 
 class TestListPredictionSets:
     @staticmethod
-    def _wire_list_query(session, rows):
-        """Wire the mock chain for the correlated-subquery list query."""
-        # query(PredictionSet, EmbeddingConfig, AnnotationSet, OntologySnapshot, count_subq)
-        #   .join(...).join(...).join(...).order_by(...).limit(...).all()
-        # The count subquery is built via session.query().filter().correlate().scalar_subquery()
-        # but all that matters for the mock is the final .all() result.
-        session.query.return_value.join.return_value.join.return_value.join.return_value.order_by.return_value.limit.return_value.all.return_value = rows
+    def _wire_list_query(session, rows, count_pairs=()):
+        """Wire the two queries the endpoint runs.
+
+        The endpoint executes:
+
+        1. ``query(PredictionSet, EmbeddingConfig, AnnotationSet, OntologySnapshot)
+           .join(...).join(...).join(...).order_by(...).limit(...).all()`` — for
+           the metadata 4-tuples.
+        2. ``query(GOPrediction.prediction_set_id, count(GOPrediction.id))
+           .group_by(...).all()`` — for the per-set counts.
+
+        ``rows`` feeds the first call; ``count_pairs`` feeds the second.
+        Both share ``session.query``, so we route them through ``side_effect``
+        on a tiny dispatch helper.
+        """
+        list_query = MagicMock()
+        list_query.join.return_value.join.return_value.join.return_value.order_by.return_value.limit.return_value.all.return_value = rows
+
+        count_query = MagicMock()
+        count_query.group_by.return_value.all.return_value = list(count_pairs)
+
+        # First query() call → list_query, second → count_query.
+        session.query.side_effect = [list_query, count_query]
 
     def test_returns_list(self, client, session):
         ps = _make_prediction_set()
@@ -745,7 +761,11 @@ class TestListPredictionSets:
         snap = MagicMock()
         snap.obo_version = "2024-01-01"
 
-        self._wire_list_query(session, [(ps, ec, ann, snap, 100)])
+        self._wire_list_query(
+            session,
+            rows=[(ps, ec, ann, snap)],
+            count_pairs=[(ps.id, 100)],
+        )
 
         resp = client.get("/embeddings/prediction-sets")
         assert resp.status_code == 200
@@ -767,14 +787,16 @@ class TestListPredictionSets:
         snap = MagicMock()
         snap.obo_version = "2024-01-01"
 
-        self._wire_list_query(session, [(ps, ec, ann, snap, 0)])
+        self._wire_list_query(session, rows=[(ps, ec, ann, snap)])
 
         resp = client.get("/embeddings/prediction-sets")
         assert resp.status_code == 200
-        assert resp.json()[0]["annotation_set_label"] == "goa"
+        body = resp.json()
+        assert body[0]["annotation_set_label"] == "goa"
+        assert body[0]["prediction_count"] == 0  # no count_pairs → defaults to 0
 
     def test_empty_list(self, client, session):
-        self._wire_list_query(session, [])
+        self._wire_list_query(session, rows=[])
         resp = client.get("/embeddings/prediction-sets")
         assert resp.status_code == 200
         assert resp.json() == []
