@@ -38,7 +38,6 @@ from sqlalchemy import text
 from protea.infrastructure.session import build_session_factory
 from protea.infrastructure.settings import load_settings
 
-
 PROPAGATE_RELATIONS = ("is_a", "part_of")
 
 

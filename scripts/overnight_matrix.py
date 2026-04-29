@@ -58,7 +58,7 @@ import json
 import sys
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -75,7 +75,6 @@ from protea.infrastructure.orm.models.annotation.evaluation_set import Evaluatio
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.session import build_session_factory
 from protea.infrastructure.settings import load_settings
-
 
 # ── Canonical benchmark constants ────────────────────────────────────────────
 
@@ -149,7 +148,7 @@ class Log:
         self.path.touch(exist_ok=True)
 
     def __call__(self, msg: str) -> None:
-        line = f"[{datetime.now(timezone.utc).isoformat(timespec='seconds')}] {msg}"
+        line = f"[{datetime.now(UTC).isoformat(timespec='seconds')}] {msg}"
         print(line, flush=True)
         with self.path.open("a") as f:
             f.write(line + "\n")
@@ -302,7 +301,7 @@ def _ensure_eval_set(
             auto_eval_job_id = None
 
     if not auto_eval_job_id:
-        log(f"  submitting explicit generate_evaluation_set")
+        log("  submitting explicit generate_evaluation_set")
         body = {
             "old_annotation_set_id": old_annotation_set_id,
             "new_annotation_set_id": new_annotation_set_id,
@@ -658,7 +657,7 @@ def _resolve_existing_bootstrap(factory, log: Log) -> dict[str, Any]:
 
 def main() -> int:
     args = _args()
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     out_dir = PROJECT_ROOT / "results" / f"overnight_matrix_{stamp}"
     out_dir.mkdir(parents=True, exist_ok=True)
     log = Log(out_dir / "run.log")

@@ -74,6 +74,14 @@ line-length = 100
 select = ["E", "F", "W", "I", "UP", "B"]
 ignore = ["E501", "B008"]
 
+[tool.ruff.lint.per-file-ignores]
+# Standalone runner scripts insert PROJECT_ROOT into sys.path before
+# importing the protea package, so module-level imports cannot live at
+# the top of the file. The pattern is deliberate (lets `python scripts/foo.py`
+# work without `poetry install` first); silencing E402 instead of moving
+# the imports keeps the runner self-contained.
+"scripts/*.py" = ["E402"]
+
 [tool.mypy]
 python_version = "3.12"
 strict = false

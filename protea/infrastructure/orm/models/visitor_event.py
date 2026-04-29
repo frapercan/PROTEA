@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import date, datetime
 
 from sqlalchemy import BigInteger, Date, DateTime, Index, Integer, String
-
 from sqlalchemy.orm import Mapped, mapped_column
 
 from protea.core.utils import utcnow

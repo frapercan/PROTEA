@@ -18,8 +18,8 @@ Choose a backend through :func:`get_artifact_store` which reads
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
 from pathlib import Path
+from typing import Protocol, runtime_checkable
 
 
 @runtime_checkable

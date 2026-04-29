@@ -36,6 +36,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import text
 
 from protea.api.deps import get_session_factory
 from protea.core.evaluation import compute_evaluation_data
@@ -58,7 +59,6 @@ from protea.infrastructure.orm.models.embedding.scoring_config import (
     ScoringConfig,
 )
 from protea.infrastructure.session import session_scope
-from sqlalchemy import text
 
 router = APIRouter(prefix="/scoring", tags=["scoring"])
 

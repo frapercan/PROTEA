@@ -1084,7 +1084,6 @@ class TestPredictGOTermsBatchReranker:
     def test_no_reranker_leaves_dicts_untouched(self) -> None:
         """Baseline: when ``reranker_model_id`` is absent, the helper is never
         invoked — coordinator + batch should behave identically to pre-Phase-6."""
-        op = self._op()
         p = self._payload()  # no reranker fields
         assert p.reranker_model_id is None
         dicts = [{"protein_accession": "Q1", "go_term_id": 1, "distance": 0.1}]

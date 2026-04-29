@@ -29,7 +29,7 @@ import hashlib
 import logging
 import secrets
 import threading
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -71,7 +71,7 @@ class _DailySalt:
         self._salt: bytes = b""
 
     def get(self) -> bytes:
-        today = datetime.now(timezone.utc).date()
+        today = datetime.now(UTC).date()
         with self._lock:
             if today != self._day:
                 self._day = today
@@ -171,7 +171,7 @@ class VisitorCounterMiddleware(BaseHTTPMiddleware):
         try:
             ip = _client_ip(request)
             event = VisitorEvent(
-                day=datetime.now(timezone.utc).date(),
+                day=datetime.now(UTC).date(),
                 visitor_hash=_visitor_hash(ip),
                 path=_truncate_path(_normalised_path(request)),
                 method=request.method,
