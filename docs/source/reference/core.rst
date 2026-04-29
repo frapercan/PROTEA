@@ -151,40 +151,15 @@ The module provides:
 - ``load_training_tsv()`` — parses a training data TSV as produced by the
   ``/scoring/prediction-sets/{id}/training-data.tsv`` endpoint.
 
+.. note::
+
+   ``load_reranker`` / ``apply_reranker`` / ``infer_active_feature_families``
+   were originally split into a sibling ``protea.core.reranking`` module;
+   they were folded back into ``protea.core.reranker`` to remove a naming
+   trap (``reranker`` vs ``reranking`` were impossible to grep apart).
+   This module is now the single inference-side surface.
+
 .. automodule:: protea.core.reranker
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-Re-ranker inference (``protea.core.reranking``)
-------------------------------------------------
-
-``protea.core.reranking`` is the thin inference-side counterpart to
-``protea.core.reranker``: it applies a LightGBM booster trained offline
-in ``protea-reranker-lab`` to predictions produced by
-``predict_go_terms_batch``. The module deliberately has a small surface:
-
-- ``load_reranker(artifact_uri, *, feature_schema_sha, store, cache_dir=None)``
-  — fetches the booster blob from the ``ArtifactStore`` on first use,
-  caches it under ``storage/reranker_cache/<sha>.txt`` and in a
-  thread-safe in-process dict keyed by ``feature_schema_sha``, and
-  returns the loaded ``lgb.Booster``. Subsequent calls with the same
-  sha are served from cache with no I/O.
-- ``apply_reranker(df, booster, *, feature_cols=None)`` — scores a
-  pandas DataFrame with the booster. Missing columns are filled with
-  ``pd.NA`` so LightGBM routes them through its native missing-value
-  branch. Ranking objectives whose raw outputs fall outside ``[0, 1]``
-  are calibrated via logistic so downstream thresholds remain uniform
-  with binary-classifier boosters.
-- ``infer_active_feature_families(*, compute_alignments, compute_taxonomy,
-  compute_v6_features) -> list[str]`` — maps the predict-time feature
-  flags onto the lab's feature-family names. The returned list is fed to
-  ``protea_reranker_lab.contracts.compute_feature_schema_sha`` to
-  produce a live schema sha that must equal the booster's
-  ``feature_schema_sha``; any mismatch causes the batch worker to skip
-  re-ranking and fall back to KNN distance ordering.
-
-.. automodule:: protea.core.reranking
    :members:
    :undoc-members:
    :show-inheritance:
