@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.cache import cached
 from protea.api.deps import get_amqp_url, get_benchmark_config, get_session_factory
+from protea.core.domain.aspect import ASPECT_CAFA_CODES
 from protea.core.evaluation import load_evaluation_data_for_set
 from protea.core.operations.generate_evaluation_set import GenerateEvaluationSetPayload
 from protea.core.operations.load_goa_annotations import LoadGOAAnnotationsPayload
@@ -720,7 +721,7 @@ def download_evaluation_metrics(
             yield "setting\tnamespace\tfmax\tprecision\trecall\ttau\tcoverage\tn_proteins\n"
             for setting in ("NK", "LK", "PK"):
                 ns_data = result.results.get(setting, {})
-                for ns in ("BPO", "MFO", "CCO"):
+                for ns in ASPECT_CAFA_CODES:
                     m = ns_data.get(ns)
                     if m is None:
                         continue

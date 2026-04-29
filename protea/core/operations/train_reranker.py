@@ -34,6 +34,8 @@ from sqlalchemy.orm import Session
 from protea.core.anc2vec_embeddings import Anc2VecIndex
 from protea.core.anc2vec_embeddings import get_index as get_anc2vec_index
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
+from protea.core.domain.aspect import ASPECT_CODES as _ASPECTS
+from protea.core.domain.aspect import Aspect
 from protea.core.evaluation import load_evaluation_data_for_set
 from protea.core.feature_engineering import compute_alignment, compute_taxonomy
 from protea.core.knn_search import search_knn
@@ -52,7 +54,6 @@ from protea.infrastructure.orm.models.sequence.sequence import Sequence
 
 PositiveInt = Annotated[int, Field(gt=0)]
 
-_ASPECTS = ("P", "F", "C")
 _ANNOTATION_CHUNK_SIZE = 10_000
 _STREAM_CHUNK_SIZE = 2_000
 
@@ -1142,7 +1143,9 @@ class TrainRerankerAutoPayload(ProteaPayload, frozen=True):
 
 
 _CATEGORIES = ("nk", "lk", "pk")
-_ASPECT_NAMES = {"P": "bpo", "F": "mfo", "C": "cco"}
+# Lower-cased CAFA codes — used only for model-name suffixes ("model-NK-bpo").
+# Built from the canonical Aspect enum so the three encodings stay in sync.
+_ASPECT_NAMES: dict[str, str] = {a.code: a.cafa.lower() for a in Aspect}
 
 
 # ---------------------------------------------------------------------------

@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.deps import get_session_factory
 from protea.api.stages import stage_of
+from protea.core.domain.aspect import ASPECT_CAFA_CODES as _ASPECTS
 from protea.infrastructure.orm.models.annotation.evaluation_result import EvaluationResult
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
@@ -38,7 +39,6 @@ from protea.infrastructure.session import session_scope
 router = APIRouter(prefix="/showcase", tags=["showcase"])
 
 _CATEGORIES = ("NK", "LK", "PK")
-_ASPECTS = ("BPO", "MFO", "CCO")
 
 
 def _approx_count(session: Session, table: str) -> int:

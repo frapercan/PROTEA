@@ -25,6 +25,7 @@ from protea.core.disk_cache import (
     _save_anno_csr_to_disk,
     _save_to_disk_cache,
 )
+from protea.core.domain.aspect import ASPECT_CODES as _ASPECTS
 from protea.core.feature_engineering import compute_alignment, compute_taxonomy
 from protea.core.knn_search import search_knn
 from protea.core.pca_cache import (
@@ -63,8 +64,8 @@ _WRITE_QUEUE = "protea.predictions.write"
 # object pressure negligible while amortising cursor round-trips.
 _STREAM_CHUNK_SIZE = 2_000
 
-# GO aspect single-character codes used in GOTerm.aspect
-_ASPECTS = ("P", "F", "C")  # biological_process, molecular_function, cellular_component
+# GO aspect single-character codes used in GOTerm.aspect — imported above
+# from the canonical protea.core.domain.aspect module.
 
 # ---------------------------------------------------------------------------
 # Process-level reference cache

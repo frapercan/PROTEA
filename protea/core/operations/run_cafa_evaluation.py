@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from protea.core.anc2vec_embeddings import get_index as get_anc2vec_index
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
+from protea.core.domain.aspect import ASPECT_CAFA_CODES, Aspect
 from protea.core.evaluation import load_evaluation_data_for_set
 from protea.core.scoring import compute_score
 from protea.infrastructure.orm.models.annotation.evaluation_result import EvaluationResult
@@ -34,13 +35,14 @@ def eval_artifact_key(result_id: uuid.UUID, relpath: str) -> str:
     """Canonical MinIO/artifact-store key for a cafaeval output file."""
     return f"eval_artifacts/{result_id}/{relpath.lstrip('/')}"
 
-# Namespace labels used by cafaeval OBO parser
-_NS_LABELS = {
-    "biological_process": "BPO",
-    "molecular_function": "MFO",
-    "cellular_component": "CCO",
+# Namespace labels used by cafaeval OBO parser. The full names come from
+# the obo file; we map them to PROTEA's canonical CAFA codes.
+_NS_LABELS: dict[str, str] = {
+    "biological_process": Aspect.BIOLOGICAL_PROCESS.cafa,
+    "molecular_function": Aspect.MOLECULAR_FUNCTION.cafa,
+    "cellular_component": Aspect.CELLULAR_COMPONENT.cafa,
 }
-_NS_SHORT = {"BPO", "MFO", "CCO"}
+_NS_SHORT: set[str] = set(ASPECT_CAFA_CODES)
 
 
 # Feature columns read straight off the GOPrediction ORM into the reranker
@@ -107,7 +109,7 @@ def _record_from_pred(
 
 
 def _patch_query_known_features(
-    df: "Any",
+    df: Any,
     known_gos: dict[str, set[str]],
 ) -> None:
     """Overwrite ``anc2vec_query_known_*`` in-place from eval-time known GOs.

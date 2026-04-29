@@ -8,11 +8,13 @@ or GO-namespace constants.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+from protea.core.domain.aspect import ASPECT_CAFA_CODES as _DEFAULT_ASPECTS
 
 
 @dataclass(frozen=True)
@@ -37,7 +39,6 @@ class BenchmarkConfig:
 
 
 _DEFAULT_CATEGORIES = ("NK", "LK", "PK")
-_DEFAULT_ASPECTS = ("BPO", "MFO", "CCO")
 
 
 def _as_str_tuple(val: Any, fallback: tuple[str, ...]) -> tuple[str, ...]:
