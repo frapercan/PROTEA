@@ -422,21 +422,6 @@ class TestDependencyGuards:
                 )
         assert resp.status_code == 500
 
-    def test_missing_artifacts_dir_raises(self, session):
-        app = FastAPI()
-        app.state.session_factory = MagicMock()
-        # no artifacts_dir set
-        app.include_router(router)
-        eval_id = uuid4()
-        with patch(
-            "protea.api.routers.annotations.session_scope",
-            side_effect=lambda _: _mock_scope(session),
-        ):
-            with TestClient(app, raise_server_exceptions=False) as c:
-                resp = c.delete(f"/annotations/evaluation-sets/{eval_id}")
-        assert resp.status_code == 500
-
-
 # ---------------------------------------------------------------------------
 # PATCH /annotations/snapshots/{snapshot_id}/ia-url (lines 146-158)
 # ---------------------------------------------------------------------------

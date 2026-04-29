@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -41,7 +42,7 @@ from sqlalchemy import text
 from protea.api.deps import get_session_factory
 from protea.core.evaluation import compute_evaluation_data
 from protea.core.metrics import compute_cafa_metrics
-from protea.core.reranker import model_from_string
+from protea.core.reranker import load_reranker, model_from_string
 from protea.core.reranker import (
     predict as reranker_predict,
 )
@@ -59,6 +60,34 @@ from protea.infrastructure.orm.models.embedding.scoring_config import (
     ScoringConfig,
 )
 from protea.infrastructure.session import session_scope
+from protea.infrastructure.settings import load_settings
+from protea.infrastructure.storage import get_artifact_store
+
+
+def _load_booster(rm: RerankerModel) -> Any:
+    """Load the LightGBM booster from either the legacy inline blob or
+    the new ``artifact_uri`` path.
+
+    Raises 409 when neither is available — the row exists but the
+    backing model is missing.
+    """
+    if rm.model_data:
+        return model_from_string(rm.model_data)
+    if rm.artifact_uri:
+        project_root = Path(__file__).resolve().parents[3]
+        store = get_artifact_store(load_settings(project_root))
+        return load_reranker(
+            rm.artifact_uri,
+            feature_schema_sha=rm.feature_schema_sha or rm.name,
+            store=store,
+        )
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            f"RerankerModel {rm.id} has no booster — both ``model_data`` "
+            f"(legacy inline) and ``artifact_uri`` (artifact-store path) are NULL."
+        ),
+    )
 
 router = APIRouter(prefix="/scoring", tags=["scoring"])
 
@@ -925,7 +954,7 @@ def download_reranked_predictions(
         rm = session.get(RerankerModel, reranker_id)
         if rm is None:
             raise HTTPException(status_code=404, detail="RerankerModel not found")
-        model_str = rm.model_data
+        model = _load_booster(rm)
 
         records: list[dict[str, Any]] = []
         for pred, go_id, aspect in (
@@ -966,7 +995,11 @@ def download_reranked_predictions(
                     "go_term_frequency": pred.go_term_frequency,
                     "ref_annotation_density": pred.ref_annotation_density,
                     "neighbor_distance_std": pred.neighbor_distance_std,
-                    "label": 0,
+                    # NOTE: do not add a ``label`` column here — its
+                    # presence makes ``predict`` route through
+                    # ``prepare_dataset`` which expects every training
+                    # column. At inference time we want the alignment
+                    # branch that fills missing v6 features as NaN.
                 }
             )
 
@@ -982,7 +1015,6 @@ def download_reranked_predictions(
         )
 
     df = pd.DataFrame(records)
-    model = model_from_string(model_str)
     scores = reranker_predict(model, df)
     df["reranker_score"] = scores
 
@@ -1058,7 +1090,9 @@ def compute_reranker_metrics(
         if es is None:
             raise HTTPException(status_code=404, detail="EvaluationSet not found")
 
-        model_str = rm.model_data
+        # Booster load is deferred until after the empty-predictions check
+        # so a request against an empty PredictionSet doesn't pay the
+        # MinIO download cost.
         reranker_name = rm.name
 
         eval_data = compute_evaluation_data(
@@ -1105,7 +1139,8 @@ def compute_reranker_metrics(
                     "go_term_frequency": pred.go_term_frequency,
                     "ref_annotation_density": pred.ref_annotation_density,
                     "neighbor_distance_std": pred.neighbor_distance_std,
-                    "label": 0,
+                    # See note in download_reranked_predictions: omitting
+                    # ``label`` forces the alignment branch in ``predict``.
                 }
             )
 
@@ -1122,7 +1157,7 @@ def compute_reranker_metrics(
         }
 
     df = pd.DataFrame(records)
-    model = model_from_string(model_str)
+    model = _load_booster(rm)
     scores = reranker_predict(model, df)
 
     scored: list[dict[str, Any]] = [

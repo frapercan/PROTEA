@@ -69,9 +69,19 @@ def _make_training_df(n: int = 200, positive_rate: float = 0.3, seed: int = 42) 
 def _fit_minimal_booster(df: pd.DataFrame, num_boost_round: int = 10) -> lgb.Booster:
     """Train a minimal LightGBM booster inline — replaces the removed
     ``protea.core.reranker.train`` helper, so tests still have a real
-    booster to exercise ``predict`` / ``model_from_string`` against."""
+    booster to exercise ``predict`` / ``model_from_string`` against.
+
+    Mirrors ``protea-reranker-lab.reranker.encode_categoricals``: label-
+    encode categoricals to int codes so the booster trained here matches
+    the booster shape PROTEA's ``predict`` (no-label branch) expects at
+    inference time.
+    """
     X, y = prepare_dataset(df)
     cat_cols = [c for c in CATEGORICAL_FEATURES if c in X.columns]
+    for col in cat_cols:
+        s = X[col].astype("object").where(X[col].notna(), None)
+        codes, _ = pd.factorize(s, use_na_sentinel=True)
+        X[col] = codes
     dataset = lgb.Dataset(X, label=y, categorical_feature=cat_cols, free_raw_data=False)
     return lgb.train(
         {
@@ -97,11 +107,16 @@ class TestPrepareDataset:
         assert X.shape == (50, len(ALL_FEATURES))
         assert y.shape == (50,)
 
-    def test_categorical_columns_are_category_dtype(self):
+    def test_categorical_columns_are_int_codes(self):
+        # Mirror protea-reranker-lab encoding: categoricals are
+        # label-encoded to int64 codes (missing → -1), not pandas
+        # ``category`` dtype. Required so cross-instance lab boosters
+        # don't trip "train and valid dataset categorical_feature do
+        # not match" at inference time.
         df = _make_training_df(20)
         X, _ = prepare_dataset(df)
         for col in CATEGORICAL_FEATURES:
-            assert X[col].dtype.name == "category"
+            assert X[col].dtype.kind == "i", f"{col} dtype = {X[col].dtype}"
 
     def test_label_is_int(self):
         df = _make_training_df(20)
@@ -115,11 +130,13 @@ class TestPrepareDataset:
         assert "protein_accession" not in X.columns
         assert "go_id" not in X.columns
 
-    def test_empty_strings_become_na_for_categoricals(self):
+    def test_empty_strings_become_minus_one_codes(self):
+        # Empty-string qualifier collapses to None → factorize sentinel
+        # code -1, matching the lab's encode_categoricals contract.
         df = _make_training_df(20)
         df.loc[0, "qualifier"] = ""
         X, _ = prepare_dataset(df)
-        assert pd.isna(X.loc[0, "qualifier"])
+        assert int(X.loc[0, "qualifier"]) == -1
 
 
 # ---------------------------------------------------------------------------

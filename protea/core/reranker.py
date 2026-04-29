@@ -152,10 +152,15 @@ LABEL_COLUMN = "label"
 def prepare_dataset(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
     """Extract feature matrix and label vector from a training DataFrame.
 
-    Categorical columns are converted to pandas ``category`` dtype so that
-    LightGBM can handle them directly (no manual encoding needed).
+    Categorical columns are label-encoded to int64 codes (missing → -1)
+    via :func:`pandas.factorize` — this mirrors
+    ``protea-reranker-lab.reranker.encode_categoricals`` so a booster
+    trained either inline here or in the lab can be scored by the same
+    ``predict`` helper without LightGBM's "categorical_feature do not
+    match" error firing on cross-instance imports.
 
-    Returns (X, y) where X has only the feature columns and y is the binary label.
+    Returns ``(X, y)`` where X has only the feature columns and y is
+    the binary label.
     """
     X = df[ALL_FEATURES].copy()
     for col in NUMERIC_FEATURES:
@@ -163,7 +168,10 @@ def prepare_dataset(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
             X[col] = pd.to_numeric(X[col], errors="coerce")
     for col in CATEGORICAL_FEATURES:
         if col in X.columns:
-            X[col] = X[col].replace("", pd.NA).astype("category")
+            s = X[col].replace("", pd.NA)
+            s = s.astype("object").where(s.notna(), None)
+            codes, _ = pd.factorize(s, use_na_sentinel=True)
+            X[col] = codes
     y = df[LABEL_COLUMN].astype(int)
     return X, y
 
@@ -208,7 +216,19 @@ def predict(model: lgb.Booster, df: pd.DataFrame) -> np.ndarray:
             if col in NUMERIC_FEATURES:
                 X[col] = pd.to_numeric(X[col], errors="coerce")
             elif col in CATEGORICAL_FEATURES:
-                X[col] = X[col].replace("", pd.NA).astype("category")
+                # Match protea-reranker-lab.reranker.encode_categoricals:
+                # label-encode to int64 codes (missing → -1) instead of
+                # casting to pandas ``category``. The lab's training pipeline
+                # uses the int-code form when calling LightGBM, so passing
+                # ``category``-dtype columns at predict time raises
+                # "train and valid dataset categorical_feature do not match".
+                # Booster scores from this branch ARE only valid when the
+                # category set seen at predict time matches training — for
+                # cross-instance imports the caller is responsible for
+                # ensuring that (or accepting noisy scores).
+                s = X[col].astype("object").where(X[col].notna(), None)
+                codes, _ = pd.factorize(s, use_na_sentinel=True)
+                X[col] = codes
 
     raw = np.asarray(model.predict(X))
     if raw.size == 0:
