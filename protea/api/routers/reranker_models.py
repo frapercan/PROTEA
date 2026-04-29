@@ -29,7 +29,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.deps import get_session_factory
+from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.orm.models.embedding.dataset import Dataset
+from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
 from protea.infrastructure.session import session_scope
 from protea.infrastructure.settings import load_settings
@@ -131,8 +133,24 @@ def _register_model(
                 dataset_uuid = row.id
 
     feature_schema_sha = _compute_feature_schema_sha(run)
-    embedding_config_id = dataset.get("embedding_config_id")
-    ontology_snapshot_id = dataset.get("ontology_snapshot_id")
+    embedding_config_id_raw = dataset.get("embedding_config_id")
+    ontology_snapshot_id_raw = dataset.get("ontology_snapshot_id")
+
+    # Lab runs may carry FKs to entities that no longer exist in this PROTEA
+    # instance (DB resets, different deployment, etc.). NULL them rather than
+    # 500'ing — the booster itself is still valid; only the back-references
+    # to local entities are unresolvable.
+    embedding_config_id: uuid.UUID | None = None
+    if embedding_config_id_raw:
+        candidate = uuid.UUID(embedding_config_id_raw)
+        if session.query(EmbeddingConfig.id).filter(EmbeddingConfig.id == candidate).first():
+            embedding_config_id = candidate
+
+    ontology_snapshot_id: uuid.UUID | None = None
+    if ontology_snapshot_id_raw:
+        candidate = uuid.UUID(ontology_snapshot_id_raw)
+        if session.query(OntologySnapshot.id).filter(OntologySnapshot.id == candidate).first():
+            ontology_snapshot_id = candidate
 
     model = RerankerModel(
         name=name,
@@ -143,8 +161,8 @@ def _register_model(
         model_data=None,
         artifact_uri=artifact_uri,
         feature_schema_sha=feature_schema_sha,
-        embedding_config_id=uuid.UUID(embedding_config_id) if embedding_config_id else None,
-        ontology_snapshot_id=uuid.UUID(ontology_snapshot_id) if ontology_snapshot_id else None,
+        embedding_config_id=embedding_config_id,
+        ontology_snapshot_id=ontology_snapshot_id,
         producer_version=dataset.get("producer_version"),
         producer_git_sha=dataset.get("producer_git_sha"),
         spec_yaml=spec_yaml_text,
