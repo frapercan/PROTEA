@@ -40,7 +40,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
 
 from protea.api.deps import get_session_factory
-from protea.core.evaluation import compute_evaluation_data
+from protea.core.evaluation import compute_evaluation_data, load_evaluation_data_for_set
 from protea.core.metrics import compute_cafa_metrics
 from protea.core.reranker import load_reranker, model_from_string
 from protea.core.reranker import (
@@ -1095,12 +1095,19 @@ def compute_reranker_metrics(
         # MinIO download cost.
         reranker_name = rm.name
 
-        eval_data = compute_evaluation_data(
-            session,
-            old_annotation_set_id=es.old_annotation_set_id,
-            new_annotation_set_id=es.new_annotation_set_id,
-            ontology_snapshot_id=ps.ontology_snapshot_id,
-        )
+        # Reuse the persisted ground-truth artifact when available (the only
+        # path that handles ``mode=reconciled`` correctly, where the eval set's
+        # underlying annotation snapshots differ from ``ps.ontology_snapshot_id``).
+        # Fall back to on-the-fly computation only for legacy same-snapshot rows.
+        if es.groundtruth_uri:
+            eval_data, _pivot_id = load_evaluation_data_for_set(session, es)
+        else:
+            eval_data = compute_evaluation_data(
+                session,
+                old_annotation_set_id=es.old_annotation_set_id,
+                new_annotation_set_id=es.new_annotation_set_id,
+                ontology_snapshot_id=ps.ontology_snapshot_id,
+            )
 
         records: list[dict[str, Any]] = []
         for pred, go_id in (
@@ -1144,20 +1151,25 @@ def compute_reranker_metrics(
                 }
             )
 
-    if not records:
-        return {
-            "prediction_set_id": str(set_id),
-            "reranker_id": str(reranker_id),
-            "reranker_name": reranker_name,
-            "category": category,
-            "fmax": 0.0,
-            "auc_pr": 0.0,
-            "n_predictions": 0,
-            "curve": [],
-        }
+        if not records:
+            return {
+                "prediction_set_id": str(set_id),
+                "reranker_id": str(reranker_id),
+                "reranker_name": reranker_name,
+                "category": category,
+                "fmax": 0.0,
+                "auc_pr": 0.0,
+                "n_predictions": 0,
+                "curve": [],
+            }
+
+        # Booster load and scoring stay inside the session scope: ``rm``'s lazy
+        # columns (``model_data`` / ``artifact_uri``) are loaded against the
+        # live session, then the heavy numeric work runs before the with-block
+        # closes (the eval_data + records are already fully materialised).
+        model = _load_booster(rm)
 
     df = pd.DataFrame(records)
-    model = _load_booster(rm)
     scores = reranker_predict(model, df)
 
     scored: list[dict[str, Any]] = [
