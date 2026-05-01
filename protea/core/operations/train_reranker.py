@@ -40,6 +40,7 @@ from protea.core.domain.aspect import Aspect
 from protea.core.evaluation import load_evaluation_data_for_set
 from protea.core.feature_engineering import compute_alignment, compute_taxonomy
 from protea.core.knn_search import search_knn
+from protea.core.pca_cache import _load_or_fit_pca_state
 from protea.core.reranker import (
     ALL_FEATURES,
     EMBEDDING_PCA_DIM,
@@ -1384,7 +1385,16 @@ class TrainRerankerAutoOperation:
         )
 
         if p.use_embedding_pca and all_embeddings.size:
-            pca_state = fit_embedding_pca(all_embeddings, EMBEDDING_PCA_DIM)
+            # Use the shared PCA cache so the projection components match
+            # whatever ``predict_go_terms`` will use at inference time.
+            # Previously this called ``fit_embedding_pca`` directly, which
+            # produced a fresh fit on a different (and randomly subsampled)
+            # pool — the resulting components only matched the live cache by
+            # coincidence, and any drift silently broke ``emb_pca_query_*``
+            # parity for the trained reranker. Boosters trained on a
+            # mismatched PCA score garbage at predict time even when every
+            # other feature is correct.
+            pca_state = _load_or_fit_pca_state(emb_config_id, all_embeddings)
             emit(
                 "train_reranker_auto.pca_fit",
                 None,
@@ -1392,6 +1402,7 @@ class TrainRerankerAutoOperation:
                     "n_refs": int(all_embeddings.shape[0]),
                     "dim_in": int(all_embeddings.shape[1]),
                     "dim_out": EMBEDDING_PCA_DIM,
+                    "source": "shared_cache",
                 },
                 "info",
             )
