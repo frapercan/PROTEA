@@ -400,21 +400,31 @@ class RunCafaEvaluationOperation:
             )
 
         # Load per-category (and optionally per-aspect) reranker models before session commit.
-        # reranker_models: setting → aspect → model_data  (aspect="" means single model for all aspects)
-        reranker_models: dict[str, dict[str, str]] = {}
+        # reranker_models: setting → aspect → {"model": model_str, "cat_codes": dict|None}
+        # aspect="" means single model for all aspects (legacy flat field).
+        reranker_models: dict[str, dict[str, dict[str, Any]]] = {}
         reranker_config_snapshot: dict[str, dict[str, str]] | None = (
             None  # for persisting in EvaluationResult
         )
 
-        def _resolve_model_string(rm: RerankerModelORM) -> str:
-            """Return a LightGBM ``model.txt`` string from either the legacy
-            inline blob or the ``artifact_uri`` cache. Boosters trained by the
-            lab and imported via ``/reranker-models/import`` only set
+        def _resolve_model_bundle(rm: RerankerModelORM) -> dict[str, Any]:
+            """Return ``{"model": str, "cat_codes": dict|None}`` from either the
+            legacy inline blob or the ``artifact_uri`` cache. Boosters trained
+            by the lab and imported via ``/reranker-models/import`` only set
             ``artifact_uri`` and leave ``model_data`` NULL, so the operation
-            must transparently support both paths."""
+            must transparently support both paths.
+
+            ``cat_codes`` (if present in the imported run.json under
+            ``__categorical_codes__``) is the lab's per-column sorted-unique
+            string vocabulary, used at predict time to reproduce the encoding
+            seen during training. Without it, ``reranker_predict`` falls back
+            to ``pd.factorize`` over the inference batch — which silently
+            produces the wrong codes for per-aspect inference and tanks the
+            LK / PK fmax. See ``protea.core.reranker.predict``.
+            """
             if rm.model_data:
-                return rm.model_data
-            if rm.artifact_uri:
+                model_str = rm.model_data
+            elif rm.artifact_uri:
                 project_root = Path(__file__).resolve().parents[3]
                 store = _get_store_for_reranker(_load_settings_for_reranker(project_root))
                 booster = load_reranker(
@@ -422,11 +432,14 @@ class RunCafaEvaluationOperation:
                     feature_schema_sha=rm.feature_schema_sha or rm.name,
                     store=store,
                 )
-                return booster.model_to_string()
-            raise ValueError(
-                f"RerankerModel {rm.id} has no booster — both ``model_data`` "
-                f"(legacy inline) and ``artifact_uri`` (artifact-store path) are NULL."
-            )
+                model_str = booster.model_to_string()
+            else:
+                raise ValueError(
+                    f"RerankerModel {rm.id} has no booster — both ``model_data`` "
+                    f"(legacy inline) and ``artifact_uri`` (artifact-store path) are NULL."
+                )
+            cat_codes = (rm.metrics or {}).get("__categorical_codes__")
+            return {"model": model_str, "cat_codes": cat_codes}
 
         if p.rerankers:
             # New nested mapping: {"nk": {"bpo": "uuid", "mfo": "uuid", ...}, ...}
@@ -442,7 +455,7 @@ class RunCafaEvaluationOperation:
                     if rm is None:
                         raise ValueError(f"RerankerModel {rid_str} not found")
                     aspect_char = _aspect_map.get(aspect_key, aspect_key)
-                    reranker_models[setting][aspect_char] = _resolve_model_string(rm)
+                    reranker_models[setting][aspect_char] = _resolve_model_bundle(rm)
                     reranker_config_snapshot[cat_key][aspect_key] = rid_str
                     emit(
                         "run_cafa_evaluation.reranker_loaded",
@@ -467,7 +480,7 @@ class RunCafaEvaluationOperation:
                     rm = session.get(RerankerModelORM, rid)
                     if rm is None:
                         raise ValueError(f"RerankerModel {field} not found")
-                    reranker_models[setting] = {"": _resolve_model_string(rm)}  # "" = all aspects
+                    reranker_models[setting] = {"": _resolve_model_bundle(rm)}  # "" = all aspects
                     emit(
                         "run_cafa_evaluation.reranker_loaded",
                         None,
@@ -628,6 +641,7 @@ class RunCafaEvaluationOperation:
                     setting_known = data.known if setting in ("LK", "PK") else None
                     if "" in rr_aspect_map:
                         # Single model for all aspects (legacy flat field)
+                        bundle = rr_aspect_map[""]
                         self._write_predictions(
                             session,
                             pred_set_id,
@@ -635,7 +649,8 @@ class RunCafaEvaluationOperation:
                             p.max_distance,
                             pred_path,
                             scoring_config_snapshot,
-                            reranker_model_str=rr_aspect_map[""],
+                            reranker_model_str=bundle["model"],
+                            reranker_cat_codes=bundle.get("cat_codes"),
                             known_gos=setting_known,
                         )
                     else:
@@ -646,7 +661,7 @@ class RunCafaEvaluationOperation:
                             delta_proteins,
                             p.max_distance,
                             pred_path,
-                            rr_aspect_map,
+                            rr_aspect_map,  # bundle dicts now
                             known_gos=setting_known,
                         )
                 emit("run_cafa_evaluation.evaluating", None, {"setting": setting}, "info")
@@ -846,6 +861,7 @@ class RunCafaEvaluationOperation:
         path: str,
         scoring_config: ScoringConfig | None = None,
         reranker_model_str: str | None = None,
+        reranker_cat_codes: dict[str, list[str]] | None = None,
         known_gos: dict[str, set[str]] | None = None,
     ) -> None:
         """Write CAFA-format predictions (protein\\tgo_id\\tscore) for delta proteins.
@@ -868,6 +884,7 @@ class RunCafaEvaluationOperation:
                 max_distance,
                 path,
                 reranker_model_str,
+                reranker_cat_codes=reranker_cat_codes,
                 known_gos=known_gos,
             )
             return
@@ -911,6 +928,7 @@ class RunCafaEvaluationOperation:
         max_distance: float | None,
         path: str,
         reranker_model_str: str,
+        reranker_cat_codes: dict[str, list[str]] | None = None,
         known_gos: dict[str, set[str]] | None = None,
     ) -> None:
         """Write CAFA-format predictions using LightGBM re-ranker scores."""
@@ -942,7 +960,7 @@ class RunCafaEvaluationOperation:
         if known_gos:
             _patch_query_known_features(df, known_gos)
         model = model_from_string(reranker_model_str)
-        scores = reranker_predict(model, df)
+        scores = reranker_predict(model, df, categorical_codes=reranker_cat_codes)
 
         # Deduplicate: keep highest score per (protein, go_id)
         df["score"] = scores
@@ -962,13 +980,14 @@ class RunCafaEvaluationOperation:
         delta_proteins: set[str],
         max_distance: float | None,
         path: str,
-        aspect_models: dict[str, str],
+        aspect_models: dict[str, dict[str, Any]],
         known_gos: dict[str, set[str]] | None = None,
     ) -> None:
         """Write CAFA-format predictions applying per-aspect LightGBM models.
 
-        ``aspect_models`` maps GO aspect char (P/F/C) to model_data strings.
-        Predictions whose aspect has no model fall back to ``1 - distance/2``.
+        ``aspect_models`` maps GO aspect char (P/F/C) to ``{"model": str,
+        "cat_codes": dict|None}`` bundles. Predictions whose aspect has no
+        model fall back to ``1 - distance/2``.
 
         ``known_gos`` carries the query's pre-cutoff annotations (LK / PK
         settings) so the per-aspect model sees the same
@@ -1004,12 +1023,14 @@ class RunCafaEvaluationOperation:
 
         # Score each aspect group with its corresponding model
         df["score"] = 0.0
-        for aspect_char, model_str in aspect_models.items():
+        for aspect_char, bundle in aspect_models.items():
             mask = df["aspect"] == aspect_char
             if not mask.any():
                 continue
-            model = model_from_string(model_str)
-            df.loc[mask, "score"] = reranker_predict(model, df.loc[mask])
+            model = model_from_string(bundle["model"])
+            df.loc[mask, "score"] = reranker_predict(
+                model, df.loc[mask], categorical_codes=bundle.get("cat_codes"),
+            )
 
         # Fallback for aspects without a model
         modeled_aspects = set(aspect_models.keys())

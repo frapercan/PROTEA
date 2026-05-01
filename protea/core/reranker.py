@@ -190,7 +190,12 @@ def prepare_dataset(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
 # ---------------------------------------------------------------------------
 
 
-def predict(model: lgb.Booster, df: pd.DataFrame) -> np.ndarray:
+def predict(
+    model: lgb.Booster,
+    df: pd.DataFrame,
+    *,
+    categorical_codes: dict[str, list[str]] | None = None,
+) -> np.ndarray:
     """Score predictions using a trained re-ranker.
 
     Returns an array of scores in [0, 1] where higher = more likely correct.
@@ -198,6 +203,14 @@ def predict(model: lgb.Booster, df: pd.DataFrame) -> np.ndarray:
     sigmoid to calibrate them into the [0, 1] range expected by the
     downstream CAFA evaluator (which sweeps thresholds from 0 to 1).
     Binary boosters already emit probabilities, so we leave them alone.
+
+    ``categorical_codes`` is the per-column ordered string vocabulary the lab
+    used at training time (``{column: [val0, val1, ...]}``). When provided,
+    each cat column is encoded against this fixed vocabulary so the codes
+    match training; when omitted, falls back to ``pd.factorize`` over the
+    inference batch (correct only if the batch happens to contain the same
+    set of values in the same order — usually wrong for small or
+    aspect-filtered batches).
     """
     if LABEL_COLUMN in df.columns:
         X, _ = prepare_dataset(df)
@@ -216,19 +229,18 @@ def predict(model: lgb.Booster, df: pd.DataFrame) -> np.ndarray:
             if col in NUMERIC_FEATURES:
                 X[col] = pd.to_numeric(X[col], errors="coerce")
             elif col in CATEGORICAL_FEATURES:
-                # Match protea-reranker-lab.reranker.encode_categoricals:
-                # label-encode to int64 codes (missing → -1) instead of
-                # casting to pandas ``category``. The lab's training pipeline
-                # uses the int-code form when calling LightGBM, so passing
-                # ``category``-dtype columns at predict time raises
-                # "train and valid dataset categorical_feature do not match".
-                # Booster scores from this branch ARE only valid when the
-                # category set seen at predict time matches training — for
-                # cross-instance imports the caller is responsible for
-                # ensuring that (or accepting noisy scores).
                 s = X[col].astype("object").where(X[col].notna(), None)
-                codes, _ = pd.factorize(s, use_na_sentinel=True)
-                X[col] = codes
+                if categorical_codes and col in categorical_codes:
+                    # Encode against the lab's training vocabulary. Values
+                    # not seen at training (rare evidence codes etc.) fall to
+                    # -1 (missing), matching how the lab handled NaN.
+                    mapping = {v: i for i, v in enumerate(categorical_codes[col])}
+                    X[col] = s.map(lambda v: mapping.get(v, -1)).astype("int64")
+                else:
+                    # No code map — fall back to the (broken-for-small-batch)
+                    # legacy path. Logged as a warning by callers.
+                    codes, _ = pd.factorize(s, use_na_sentinel=True)
+                    X[col] = codes
 
     raw = np.asarray(model.predict(X))
     if raw.size == 0:

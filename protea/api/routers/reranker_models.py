@@ -168,9 +168,21 @@ def _register_model(
         spec_yaml=spec_yaml_text,
         metrics=run.get("metrics", {}) or {},
         feature_importance=run.get("feature_importance", {}) or {},
+        # Categorical code maps live in metrics under a reserved key so the
+        # predict path can replicate the lab's sorted-unique encoding instead
+        # of falling back to ``pd.factorize`` (first-seen order, which gives
+        # different codes than training and silently corrupts LK/PK scores).
         dataset_id=dataset_uuid,
         external_source=external_source,
     )
+    # Stash categorical_codes in metrics if the lab supplied them. Stored as
+    # ``metrics["__categorical_codes__"]`` to keep the column scalar-shaped
+    # without bloating spec_yaml.
+    cat_codes = run.get("categorical_codes")
+    if cat_codes:
+        m = dict(model.metrics or {})
+        m["__categorical_codes__"] = cat_codes
+        model.metrics = m
     session.add(model)
     session.flush()
     return model.id
