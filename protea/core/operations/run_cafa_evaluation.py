@@ -16,7 +16,10 @@ from protea.core.anc2vec_embeddings import get_index as get_anc2vec_index
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.domain.aspect import ASPECT_CAFA_CODES, Aspect
 from protea.core.evaluation import load_evaluation_data_for_set
+from protea.core.reranker import load_reranker
 from protea.core.scoring import compute_score
+from protea.infrastructure.settings import load_settings as _load_settings_for_reranker
+from protea.infrastructure.storage import get_artifact_store as _get_store_for_reranker
 from protea.infrastructure.orm.models.annotation.evaluation_result import EvaluationResult
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
@@ -223,6 +226,16 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
             "For CAFA6 evaluations use the IA_cafa6.tsv file supplied with the benchmark."
         ),
     )
+    restrict_gt_to_predicted: bool = Field(
+        default=True,
+        description=(
+            "Standard CAFA practice: drop ground-truth proteins not present in the "
+            "PredictionSet before evaluation, so coverage / Fmax measure performance "
+            "on the actually-predicted cohort. Disable only when the eval set is "
+            "guaranteed to be a subset of the predicted query set (e.g. a re-eval "
+            "of a frozen lab dump where this filter has already been applied)."
+        ),
+    )
 
     @field_validator("evaluation_set_id", "prediction_set_id", mode="before")
     @classmethod
@@ -393,6 +406,28 @@ class RunCafaEvaluationOperation:
             None  # for persisting in EvaluationResult
         )
 
+        def _resolve_model_string(rm: RerankerModelORM) -> str:
+            """Return a LightGBM ``model.txt`` string from either the legacy
+            inline blob or the ``artifact_uri`` cache. Boosters trained by the
+            lab and imported via ``/reranker-models/import`` only set
+            ``artifact_uri`` and leave ``model_data`` NULL, so the operation
+            must transparently support both paths."""
+            if rm.model_data:
+                return rm.model_data
+            if rm.artifact_uri:
+                project_root = Path(__file__).resolve().parents[3]
+                store = _get_store_for_reranker(_load_settings_for_reranker(project_root))
+                booster = load_reranker(
+                    rm.artifact_uri,
+                    feature_schema_sha=rm.feature_schema_sha or rm.name,
+                    store=store,
+                )
+                return booster.model_to_string()
+            raise ValueError(
+                f"RerankerModel {rm.id} has no booster — both ``model_data`` "
+                f"(legacy inline) and ``artifact_uri`` (artifact-store path) are NULL."
+            )
+
         if p.rerankers:
             # New nested mapping: {"nk": {"bpo": "uuid", "mfo": "uuid", ...}, ...}
             reranker_config_snapshot = {}
@@ -407,7 +442,7 @@ class RunCafaEvaluationOperation:
                     if rm is None:
                         raise ValueError(f"RerankerModel {rid_str} not found")
                     aspect_char = _aspect_map.get(aspect_key, aspect_key)
-                    reranker_models[setting][aspect_char] = rm.model_data
+                    reranker_models[setting][aspect_char] = _resolve_model_string(rm)
                     reranker_config_snapshot[cat_key][aspect_key] = rid_str
                     emit(
                         "run_cafa_evaluation.reranker_loaded",
@@ -432,7 +467,7 @@ class RunCafaEvaluationOperation:
                     rm = session.get(RerankerModelORM, rid)
                     if rm is None:
                         raise ValueError(f"RerankerModel {field} not found")
-                    reranker_models[setting] = {"": rm.model_data}  # "" = all aspects
+                    reranker_models[setting] = {"": _resolve_model_string(rm)}  # "" = all aspects
                     emit(
                         "run_cafa_evaluation.reranker_loaded",
                         None,
@@ -480,6 +515,40 @@ class RunCafaEvaluationOperation:
                         "in the payload for information-content-weighted metrics.",
                     },
                     "warning",
+                )
+
+            # Restrict GT to the actually-predicted protein cohort. Without this,
+            # delta proteins outside the PredictionSet's query coverage hurt
+            # Fmax / coverage despite the booster being unable to score them.
+            if p.restrict_gt_to_predicted:
+                from sqlalchemy import select, distinct
+                from protea.infrastructure.orm.models.embedding.go_prediction import (
+                    GOPrediction as _GP,
+                )
+                predicted_set: set[str] = set(
+                    session.execute(
+                        select(distinct(_GP.protein_accession))
+                        .where(_GP.prediction_set_id == pred_set_id)
+                    ).scalars().all()
+                )
+                _orig_counts = (len(data.nk), len(data.lk), len(data.pk))
+                data = type(data)(
+                    nk={k: v for k, v in data.nk.items() if k in predicted_set},
+                    lk={k: v for k, v in data.lk.items() if k in predicted_set},
+                    pk={k: v for k, v in data.pk.items() if k in predicted_set},
+                    pk_known={k: v for k, v in data.pk_known.items() if k in predicted_set},
+                    known={k: v for k, v in data.known.items() if k in predicted_set},
+                )
+                emit(
+                    "run_cafa_evaluation.gt_restricted_to_predicted",
+                    None,
+                    {
+                        "predicted_proteins": len(predicted_set),
+                        "nk_before": _orig_counts[0], "nk_after": len(data.nk),
+                        "lk_before": _orig_counts[1], "lk_after": len(data.lk),
+                        "pk_before": _orig_counts[2], "pk_after": len(data.pk),
+                    },
+                    "info",
                 )
 
             # Write ground truth files into the staging artifacts root.
