@@ -317,22 +317,33 @@ def load_reranker(
 
     The first call materialises the booster blob under
     ``cache_dir/<feature_schema_sha>.txt``; subsequent calls reuse the
-    on-disk file *and* an in-process booster cache keyed by the sha.
+    on-disk file *and* an in-process booster cache keyed by the URI.
 
     ``store`` is used only when the cached file does not exist —
     ``artifact_uri`` is expected to resolve to a store key but the store
     implementation chooses whether to parse it (``LocalFsArtifactStore``
     ignores the URI and resolves keys from its root; MinIO derives the
     key from the ``s3://bucket/key`` URI).
+
+    The on-disk cache is namespaced by ``feature_schema_sha`` because each
+    sha represents a stable column layout; multiple boosters that share a
+    sha (e.g. all per-cell v10 boosters) need to disambiguate by URI to
+    avoid the in-process cache returning the first-loaded booster for
+    every cell — which silently uses the wrong model and produces
+    identical TSVs across LK/PK at scoring time.
     """
     with _CACHE_LOCK:
-        cached = _BOOSTER_CACHE.get(feature_schema_sha)
+        cached = _BOOSTER_CACHE.get(artifact_uri)
         if cached is not None:
             return cached
 
     cache_dir = cache_dir or _default_cache_dir()
     cache_dir.mkdir(parents=True, exist_ok=True)
-    path = _cache_path(cache_dir, feature_schema_sha)
+    # Disambiguate the on-disk cache file by URI hash so two boosters with
+    # the same schema_sha don't overwrite each other's blobs.
+    import hashlib
+    uri_tag = hashlib.md5(artifact_uri.encode()).hexdigest()[:8]
+    path = cache_dir / f"{feature_schema_sha}_{uri_tag}.txt"
 
     if not path.exists():
         key = _uri_to_key(artifact_uri, store)
@@ -342,7 +353,7 @@ def load_reranker(
 
     booster = lgb.Booster(model_file=str(path))
     with _CACHE_LOCK:
-        _BOOSTER_CACHE[feature_schema_sha] = booster
+        _BOOSTER_CACHE[artifact_uri] = booster
     return booster
 
 
