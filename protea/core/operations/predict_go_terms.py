@@ -193,6 +193,16 @@ class PredictGOTermsPayload(ProteaPayload, frozen=True):
     # for any prediction_set that will be rerank-scored with a v6 model.
     compute_v6_features: bool = False
 
+    # Ancestor expansion of leaf GO predictions (opt-in). When enabled,
+    # every leaf candidate gets its is_a / part_of ancestor closure
+    # synthesised as additional records — required to match the candidate
+    # distribution the lab booster saw at training time. Without this the
+    # live PredictionSet has ~5-10× fewer candidates per (protein, aspect)
+    # than ``train_reranker_auto``'s dump, and LK / PK fmax collapses
+    # because the booster's score distribution is calibrated against the
+    # richer expanded set. See ``feature_enricher.expand_predictions_to_ancestors``.
+    expand_votes_to_ancestors: bool = False
+
     # Per-aspect KNN indices (opt-in)
     # When True, three separate KNN indices are built — one per GO aspect (P/F/C).
     # Each index contains only reference proteins annotated in that aspect, and only
@@ -224,6 +234,7 @@ class PredictGOTermsBatchPayload(ProteaPayload, frozen=True):
 
     embedding_config_id: str
     annotation_set_id: str
+    ontology_snapshot_id: str
     prediction_set_id: str
     parent_job_id: str
     query_accessions: list[str]
@@ -242,6 +253,7 @@ class PredictGOTermsBatchPayload(ProteaPayload, frozen=True):
     compute_taxonomy: bool = True
     compute_reranker_features: bool = True
     compute_v6_features: bool = False
+    expand_votes_to_ancestors: bool = False
     aspect_separated_knn: bool = True
 
     # Reranker context propagated from the coordinator. ``artifact_uri``
@@ -258,6 +270,12 @@ class StorePredictionsPayload(ProteaPayload, frozen=True):
     parent_job_id: str
     prediction_set_id: str
     predictions: list[dict[str, Any]]
+    # When the upstream batch chunks its predictions across multiple write
+    # messages (because the full payload exceeds the RabbitMQ 128 MB limit),
+    # only the last chunk should advance the coordinator's batch counter —
+    # otherwise ``progress_current`` ticks once per chunk and the parent
+    # job marks itself succeeded long before all batches finish.
+    is_final_chunk: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -438,6 +456,7 @@ class PredictGOTermsOperation:
                         "payload": {
                             "embedding_config_id": p.embedding_config_id,
                             "annotation_set_id": p.annotation_set_id,
+                            "ontology_snapshot_id": p.ontology_snapshot_id,
                             "prediction_set_id": str(prediction_set.id),
                             "parent_job_id": str(parent_job_id),
                             "query_accessions": batch_accs,
@@ -455,6 +474,7 @@ class PredictGOTermsOperation:
                             "compute_taxonomy": p.compute_taxonomy,
                             "compute_reranker_features": p.compute_reranker_features,
                             "compute_v6_features": p.compute_v6_features,
+                            "expand_votes_to_ancestors": p.expand_votes_to_ancestors,
                             "aspect_separated_knn": p.aspect_separated_knn,
                             "reranker_model_id": p.reranker_model_id,
                             "reranker_artifact_uri": reranker_artifact_uri,
@@ -742,6 +762,82 @@ class PredictGOTermsBatchOperation:
                 "info",
             )
 
+        # Ancestor expansion — required for the lab booster's candidate
+        # distribution. Runs AFTER v6 enrichment so synthetic ancestor
+        # records inherit the leaf's anc2vec_/emb_pca_ values, mirroring
+        # what train_reranker emits.
+        if p.expand_votes_to_ancestors and prediction_dicts:
+            from sqlalchemy import select
+
+            from protea.core.feature_enricher import (
+                expand_predictions_to_ancestors,
+                load_parent_map,
+            )
+            # predict_go_terms keys candidates by integer ``go_term_id``;
+            # the expansion helper (and parent_map) operate on string GO
+            # accessions (``"GO:0006357"``). Materialise the map once for
+            # this batch's candidate set, then add ``go_id`` to each record
+            # before expanding. After expansion, synthetic ancestor records
+            # need ``go_term_id`` resolved back so the bulk insert can use
+            # the FK — pull both directions from ``go_term`` in one query.
+            parent_map = load_parent_map(session, uuid.UUID(p.ontology_snapshot_id))
+            unique_int_ids = {
+                rec["go_term_id"] for rec in prediction_dicts if rec.get("go_term_id")
+            }
+            id_pairs = session.execute(
+                select(GOTerm.id, GOTerm.go_id).where(GOTerm.id.in_(unique_int_ids))
+            ).all()
+            int_to_str = {gid: go_id for gid, go_id in id_pairs}
+            for rec in prediction_dicts:
+                gid = rec.get("go_term_id")
+                if gid is not None and gid in int_to_str:
+                    rec["go_id"] = int_to_str[gid]
+
+            n_before = len(prediction_dicts)
+            prediction_dicts = expand_predictions_to_ancestors(
+                prediction_dicts,
+                parent_map=parent_map,
+                k_limit=p.limit_per_entry,
+                ia_weights=None,
+            )
+
+            # Synthetic ancestors get a ``go_id`` string but no ``go_term_id``
+            # (the helper just clones the leaf record). Resolve the FK so
+            # store_predictions can insert the row.
+            ancestor_strs = {
+                rec["go_id"] for rec in prediction_dicts
+                if rec.get("go_id") and rec["go_id"] not in {v for v in int_to_str.values()}
+            }
+            if ancestor_strs:
+                anc_pairs = session.execute(
+                    select(GOTerm.id, GOTerm.go_id).where(
+                        GOTerm.go_id.in_(ancestor_strs),
+                        GOTerm.ontology_snapshot_id == uuid.UUID(p.ontology_snapshot_id),
+                    )
+                ).all()
+                str_to_int = {go_id: gid for gid, go_id in anc_pairs}
+                str_to_int.update({v: k for k, v in int_to_str.items()})
+                # Drop ancestors that don't exist in this snapshot — predict
+                # cannot store rows without a valid go_term FK.
+                prediction_dicts = [
+                    {**rec, "go_term_id": str_to_int[rec["go_id"]]}
+                    for rec in prediction_dicts
+                    if rec.get("go_id") in str_to_int
+                ]
+
+            emit(
+                "predict_go_terms_batch.expanded_to_ancestors",
+                None,
+                {
+                    "rows_before": n_before,
+                    "rows_after": len(prediction_dicts),
+                    "expansion_ratio": (
+                        len(prediction_dicts) / n_before if n_before else 0.0
+                    ),
+                },
+                "info",
+            )
+
         reranker_stats: dict[str, Any] | None = None
         if p.reranker_model_id and prediction_dicts:
             reranker_stats = self._apply_reranker_if_aligned(
@@ -764,9 +860,21 @@ class PredictGOTermsBatchOperation:
             "info",
         )
 
-        return OperationResult(
-            result={"predictions": len(prediction_dicts)},
-            publish_operations=[
+        # RabbitMQ caps message size at 128 MB; ancestor-expanded batches
+        # serialise to ~250-300 MB and silently land in the dead-letter
+        # queue. Split into ≤25k-row chunks (~50-60 MB each) so the write
+        # worker actually receives them. Only the final chunk advances the
+        # coordinator's batch counter (``is_final_chunk=True``) so the
+        # parent job doesn't mark itself succeeded after the first batch's
+        # chunks finish.
+        _STORE_CHUNK_SIZE = 25_000
+        chunks: list[list[dict[str, Any]]] = [
+            prediction_dicts[s:s + _STORE_CHUNK_SIZE]
+            for s in range(0, len(prediction_dicts), _STORE_CHUNK_SIZE)
+        ] or [[]]
+        store_messages: list[tuple[str, dict[str, Any]]] = []
+        for i, chunk in enumerate(chunks):
+            store_messages.append(
                 (
                     _WRITE_QUEUE,
                     {
@@ -775,11 +883,19 @@ class PredictGOTermsBatchOperation:
                         "payload": {
                             "parent_job_id": str(parent_job_id),
                             "prediction_set_id": str(prediction_set_id),
-                            "predictions": prediction_dicts,
+                            "predictions": chunk,
+                            "is_final_chunk": i == len(chunks) - 1,
                         },
                     },
                 )
-            ],
+            )
+
+        return OperationResult(
+            result={
+                "predictions": len(prediction_dicts),
+                "store_chunks": len(store_messages),
+            },
+            publish_operations=store_messages,
         )
 
     # ── helpers ──────────────────────────────────────────────────────────────
@@ -1892,7 +2008,8 @@ class StorePredictionsOperation:
             "info",
         )
 
-        self._update_parent_progress(session, parent_job_id, emit)
+        if p.is_final_chunk:
+            self._update_parent_progress(session, parent_job_id, emit)
 
         return OperationResult(result={"predictions_inserted": len(p.predictions)})
 
