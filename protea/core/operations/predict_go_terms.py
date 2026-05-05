@@ -826,7 +826,9 @@ class PredictGOTermsBatchOperation:
             return None
 
         try:
-            from protea_reranker_lab.contracts import compute_feature_schema_sha
+            # T1.8 boundary validation: live sha computed via the canonical
+            # protea_contracts implementation (single source of truth).
+            from protea_contracts import compute_feature_schema_sha
         except Exception as exc:
             emit(
                 "reranker.skipped",

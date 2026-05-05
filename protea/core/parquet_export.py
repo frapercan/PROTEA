@@ -29,6 +29,7 @@ import pandas as pd
 
 from protea.core.reranker import ALL_FEATURES, LABEL_COLUMN
 from protea.infrastructure.storage import ArtifactStore
+from protea_contracts import compute_schema_sha as _canonical_schema_sha
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +182,30 @@ def export_reranker_parquets(
     train_df = _reorder(train_df, reserved)
     eval_df = _reorder(eval_df, reserved)
 
+    # T1.8 boundary validation: before writing, the actual feature columns
+    # of every non-empty shard must equal ALL_FEATURES exactly. The
+    # canonical compute_schema_sha (lab format) is used on both sides; if
+    # the shard is missing or carries unknown feature columns the sha
+    # differs and we raise instead of silently shipping a partial dump.
+    canonical_features_sha = _canonical_schema_sha(list(ALL_FEATURES))
+    for shard_name, shard in (("train", train_df), ("eval", eval_df)):
+        if shard.empty:
+            continue
+        present_features = [c for c in shard.columns if c in ALL_FEATURES]
+        present_sha = _canonical_schema_sha(present_features)
+        if present_sha != canonical_features_sha:
+            missing = [c for c in ALL_FEATURES if c not in shard.columns]
+            extras = [
+                c
+                for c in shard.columns
+                if c not in ALL_FEATURES and c not in reserved
+            ]
+            raise ValueError(
+                f"{shard_name} shard fails the canonical column invariant. "
+                f"missing={missing!r} extras={extras!r}. "
+                "All ALL_FEATURES columns must be present before write."
+            )
+
     train_path = stage_dir / "train.parquet"
     eval_path = stage_dir / "eval.parquet"
     manifest_path = stage_dir / "manifest.json"
@@ -189,6 +214,9 @@ def export_reranker_parquets(
     if not eval_df.empty:
         eval_df.to_parquet(eval_path, index=False, compression="snappy")
 
+    # Legacy schema_sha hash kept in the manifest until T1.6 of master
+    # plan v3 lands the schema_sha_v2 migration. The T1.8 invariant
+    # above already guarantees the column set is correct.
     schema_sha = hashlib.sha256(
         json.dumps(list(ALL_FEATURES), sort_keys=True).encode()
     ).hexdigest()[:12]
