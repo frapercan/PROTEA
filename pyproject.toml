@@ -32,6 +32,20 @@ dependencies = [
 storage = ["minio (>=7.2,<8.0)"]
 
 
+[tool.poetry.group.plugins.dependencies]
+# F0 T0.15 of master plan v3: protea-core references the C-stack repos
+# as a poetry group so contributors can install with
+# ``poetry install --with plugins`` once the bootstrap repos exist on
+# disk. Real ABCs / payloads land in F1 (T1.1-T1.5); during F0 these
+# packages export only their version sentinel and entry_point stubs,
+# which is enough to validate the multi-repo layout.
+protea-contracts = { path = "../protea-contracts", develop = true }
+protea-method = { path = "../protea-method", develop = true }
+protea-sources = { path = "../protea-sources", develop = true }
+protea-runners = { path = "../protea-runners", develop = true }
+protea-backends = { path = "../protea-backends", develop = true }
+
+
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
