@@ -3,11 +3,10 @@ from __future__ import annotations
 import time
 import uuid
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Any
 from uuid import UUID
 
 import numpy as np
-from pydantic import Field, field_validator
 from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
@@ -55,8 +54,6 @@ from protea.infrastructure.orm.models.query.query_set import QuerySet, QuerySetE
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
 from protea.infrastructure.settings import load_settings
 from protea.infrastructure.storage import get_artifact_store
-
-PositiveInt = Annotated[int, Field(gt=0)]
 
 # Annotation and stream chunk sizes are configured via OperationTuning
 # (annotation_chunk_size, stream_chunk_size) and resolved at call time
@@ -156,127 +153,15 @@ def _row_from_prediction(
 # ---------------------------------------------------------------------------
 # Payloads
 # ---------------------------------------------------------------------------
+# T1.5 of master plan v3: payloads now live in protea-contracts.
+# Re-export here so existing imports of these classes from this module
+# keep working; new code should import from ``protea_contracts``.
 
-
-class PredictGOTermsPayload(ProteaPayload, frozen=True):
-    """Payload for the predict_go_terms coordinator job."""
-
-    embedding_config_id: str
-    annotation_set_id: str
-    ontology_snapshot_id: str
-    query_accessions: list[str] | None = None
-    query_set_id: str | None = None
-    limit_per_entry: PositiveInt = 5
-    distance_threshold: float | None = None
-    batch_size: PositiveInt = 1024
-
-    # Search backend
-    search_backend: str = "numpy"
-    metric: str = "cosine"
-    faiss_index_type: str = "Flat"
-    faiss_nlist: int = 100
-    faiss_nprobe: int = 10
-    faiss_hnsw_m: int = 32
-    faiss_hnsw_ef_search: int = 64
-
-    # Feature engineering — enabled by default so that every PredictionSet
-    # carries the full scoring/reranking feature set. Callers must opt *out*
-    # explicitly when they want a lean KNN-only run (e.g. for a quick smoke
-    # test or a backend where NW/SW alignment is prohibitive).
-    compute_alignments: bool = True
-    compute_taxonomy: bool = True
-    compute_reranker_features: bool = True
-
-    # v6 reranker features (opt-in): 6 Anc2Vec + 3 tax_voters + 16 emb_pca.
-    # When enabled, the PCA state is fit once per ``EmbeddingConfig`` (or
-    # reused from ``artifacts/pca/{config_id}.npz``) and the 25 extra columns
-    # are persisted on every ``GOPrediction`` row. Required at predict time
-    # for any prediction_set that will be rerank-scored with a v6 model.
-    compute_v6_features: bool = False
-
-    # Ancestor expansion of leaf GO predictions (opt-in). When enabled,
-    # every leaf candidate gets its is_a / part_of ancestor closure
-    # synthesised as additional records — required to match the candidate
-    # distribution the lab booster saw at training time. Without this the
-    # live PredictionSet has ~5-10× fewer candidates per (protein, aspect)
-    # than ``the dump helper``'s dump, and LK / PK fmax collapses
-    # because the booster's score distribution is calibrated against the
-    # richer expanded set. See ``feature_enricher.expand_predictions_to_ancestors``.
-    expand_votes_to_ancestors: bool = False
-
-    # Per-aspect KNN indices (opt-in)
-    # When True, three separate KNN indices are built — one per GO aspect (P/F/C).
-    # Each index contains only reference proteins annotated in that aspect, and only
-    # annotations of that aspect are transferred from matched neighbors.
-    # This guarantees that every query protein receives BPO, MFO, and CCO candidates
-    # even if its nearest neighbors in a unified index happen to be annotated only in
-    # one or two aspects (a common cause of BPO recall ceilings).
-    # Memory cost: 3× the reference embedding array; search time: 3 KNN calls per batch.
-    aspect_separated_knn: bool = True
-
-    # Optional reranker promoted from protea-reranker-lab. When set, the
-    # batch worker scores predictions with the referenced booster after
-    # validating ``feature_schema_sha`` against the live feature set —
-    # mismatch degrades to KNN-distance ordering (never crashes).
-    reranker_model_id: str | None = None
-
-    @field_validator(
-        "embedding_config_id", "annotation_set_id", "ontology_snapshot_id", mode="before"
-    )
-    @classmethod
-    def must_be_non_empty(cls, v: str) -> str:
-        if not isinstance(v, str) or not v.strip():
-            raise ValueError("must be a non-empty string")
-        return v.strip()
-
-
-class PredictGOTermsBatchPayload(ProteaPayload, frozen=True):
-    """Payload for one KNN batch dispatched by the coordinator."""
-
-    embedding_config_id: str
-    annotation_set_id: str
-    ontology_snapshot_id: str
-    prediction_set_id: str
-    parent_job_id: str
-    query_accessions: list[str]
-    query_set_id: str | None = None
-    limit_per_entry: PositiveInt = 5
-    distance_threshold: float | None = None
-    search_backend: str = "numpy"
-    metric: str = "cosine"
-    faiss_index_type: str = "Flat"
-    faiss_nlist: int = 100
-    faiss_nprobe: int = 10
-    faiss_hnsw_m: int = 32
-    faiss_hnsw_ef_search: int = 64
-    # Feature engineering — kept in sync with PredictGOTermsPayload defaults.
-    compute_alignments: bool = True
-    compute_taxonomy: bool = True
-    compute_reranker_features: bool = True
-    compute_v6_features: bool = False
-    expand_votes_to_ancestors: bool = False
-    aspect_separated_knn: bool = True
-
-    # Reranker context propagated from the coordinator. ``artifact_uri``
-    # and ``feature_schema_sha`` are snapshotted at dispatch time so the
-    # worker does not have to re-query the RerankerModel row.
-    reranker_model_id: str | None = None
-    reranker_artifact_uri: str | None = None
-    reranker_feature_schema_sha: str | None = None
-
-
-class StorePredictionsPayload(ProteaPayload, frozen=True):
-    """Payload carrying serialized prediction dicts to the write worker."""
-
-    parent_job_id: str
-    prediction_set_id: str
-    predictions: list[dict[str, Any]]
-    # When the upstream batch chunks its predictions across multiple write
-    # messages (because the full payload exceeds the RabbitMQ 128 MB limit),
-    # only the last chunk should advance the coordinator's batch counter —
-    # otherwise ``progress_current`` ticks once per chunk and the parent
-    # job marks itself succeeded long before all batches finish.
-    is_final_chunk: bool = True
+from protea_contracts import (  # noqa: E402
+    PredictGOTermsBatchPayload,
+    PredictGOTermsPayload,
+    StorePredictionsPayload,
+)
 
 
 # ---------------------------------------------------------------------------

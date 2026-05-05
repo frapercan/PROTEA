@@ -7,8 +7,12 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
+
+# T1.5 of master plan v3: ProteaPayload is owned by protea-contracts.
+# Re-export here so existing imports of ``ProteaPayload`` from this
+# module keep working; new code should import from ``protea_contracts``.
+from protea_contracts import ProteaPayload
 
 Level = Literal["info", "warning", "error"]
 EmitFn = Callable[[str, str | None, dict[str, Any], Level], None]
@@ -81,18 +85,6 @@ class RetryLaterError(Exception):
     def __init__(self, reason: str, delay_seconds: int = 60) -> None:  # noqa: B042
         super().__init__(reason)
         self.delay_seconds = delay_seconds
-
-
-class ProteaPayload(BaseModel):
-    """Immutable, strictly-typed base class for all operation payloads.
-
-    Subclass and declare fields using Pydantic annotations.  Validation runs
-    automatically via ``model_validate(dict)`` — no manual parsing needed.
-    ``strict=True`` prevents silent type coercion (e.g. ``"yes"`` is not a
-    valid ``bool``).
-    """
-
-    model_config = ConfigDict(strict=True, frozen=True)
 
 
 class Operation(Protocol):

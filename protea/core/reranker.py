@@ -30,85 +30,19 @@ import pandas as pd
 
 from protea.infrastructure.storage import ArtifactStore, LocalFsArtifactStore
 
+# T1.5 of master plan v3: the feature schema is owned by protea-contracts.
+# Re-export here so existing call sites that import from
+# ``protea.core.reranker`` keep working; new code should import from
+# ``protea_contracts`` directly.
+from protea_contracts import (
+    ALL_FEATURES,
+    CATEGORICAL_FEATURES,
+    EMBEDDING_PCA_DIM,
+    LABEL_COLUMN,
+    NUMERIC_FEATURES,
+)
+
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Feature definitions
-# ---------------------------------------------------------------------------
-
-NUMERIC_FEATURES: list[str] = [
-    "distance",
-    # NW alignment
-    "identity_nw",
-    "similarity_nw",
-    "alignment_score_nw",
-    "gaps_pct_nw",
-    "alignment_length_nw",
-    # SW alignment
-    "identity_sw",
-    "similarity_sw",
-    "alignment_score_sw",
-    "gaps_pct_sw",
-    "alignment_length_sw",
-    # Lengths
-    "length_query",
-    "length_ref",
-    # Taxonomy
-    "taxonomic_distance",
-    "taxonomic_common_ancestors",
-    # Re-ranker features
-    "vote_count",
-    "k_position",
-    "go_term_frequency",
-    "ref_annotation_density",
-    "neighbor_distance_std",
-    # Consensus features (per candidate term, computed over voting neighbors)
-    "neighbor_vote_fraction",
-    "neighbor_min_distance",
-    "neighbor_mean_distance",
-    # Anc2Vec semantic-coherence features (GO release 2020-10-06 pretrained)
-    "anc2vec_neighbor_cos",
-    "anc2vec_neighbor_maxcos",
-    "anc2vec_has_emb",
-    # Query-side Anc2Vec (PK-killer): candidate vs query's pre-cutoff annotations
-    "anc2vec_query_known_cos",
-    "anc2vec_query_known_maxcos",
-    "anc2vec_query_known_count",
-    # Taxonomic consensus across voting neighbors (requires compute_taxonomy=True)
-    "tax_voters_same_frac",
-    "tax_voters_close_frac",
-    "tax_voters_mean_common_ancestors",
-    # Sequence-embedding PCA — 16-dim query projection onto the top principal
-    # components of the reference embedding pool (use_embedding_pca flag).
-    # NaN when the flag is disabled: LightGBM treats them as missing.
-    "emb_pca_query_0",
-    "emb_pca_query_1",
-    "emb_pca_query_2",
-    "emb_pca_query_3",
-    "emb_pca_query_4",
-    "emb_pca_query_5",
-    "emb_pca_query_6",
-    "emb_pca_query_7",
-    "emb_pca_query_8",
-    "emb_pca_query_9",
-    "emb_pca_query_10",
-    "emb_pca_query_11",
-    "emb_pca_query_12",
-    "emb_pca_query_13",
-    "emb_pca_query_14",
-    "emb_pca_query_15",
-]
-
-EMBEDDING_PCA_DIM = 16
-
-CATEGORICAL_FEATURES: list[str] = [
-    "qualifier",
-    "evidence_code",
-    "taxonomic_relation",
-    "aspect",
-]
-
-ALL_FEATURES: list[str] = NUMERIC_FEATURES + CATEGORICAL_FEATURES
 
 
 def fit_embedding_pca(
@@ -140,8 +74,6 @@ def fit_embedding_pca(
     k = min(n_components, vh.shape[0])
     components = vh[:k].astype(np.float32)
     return mean.astype(np.float32), components
-
-LABEL_COLUMN = "label"
 
 
 # ---------------------------------------------------------------------------
