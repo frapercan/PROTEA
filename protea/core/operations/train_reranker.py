@@ -1578,29 +1578,85 @@ class TrainRerankerAutoOperation:
                 }
 
                 # 3e. Build DataFrame, label per category, write to parquet.
+                # Filter rows by genuine (protein, aspect) cat membership
+                # before labelling. Without this filter the same row appears
+                # in all three cat shards with only the label re-assigned;
+                # the resulting parquet leaks the cat boundary through
+                # ``anc2vec_query_known_count`` (constant 0 in NK whenever
+                # the protein is genuinely NK), which the booster picks up
+                # as a near-perfect positive proxy.
+                #
+                # Each (protein, aspect) maps to exactly one category by
+                # the CAFA definition: NK is global (zero pre-cutoff
+                # annotations across namespaces), LK and PK are per
+                # namespace. Membership is recovered from the aspects of
+                # the new annotations recorded in ``eval_data.cat``.
                 base_df = pd.DataFrame(unlabeled_preds, columns=_KEEP_COLS)
                 del unlabeled_preds
                 gc.collect()
 
+                # ``aspect_map`` is keyed by go_term_id (int); ``eval_data``
+                # carries go_id strings. Invert ``go_id_map`` once so the
+                # cat-membership lookup uses the same key space as the
+                # parquet's ``aspect`` column ("P"/"F"/"C" single codes).
+                aspect_by_go_id: dict[str, str] = {
+                    go_id: aspect_map[term_id]
+                    for term_id, go_id in go_id_map.items()
+                    if term_id in aspect_map
+                }
+                cat_membership: dict[str, set[tuple[str, str]]] = {}
                 for cat in _CATEGORIES:
+                    gt = getattr(eval_data, cat)
+                    members: set[tuple[str, str]] = set()
+                    for protein, go_ids in gt.items():
+                        for go_id in go_ids:
+                            asp = aspect_by_go_id.get(go_id, "")
+                            if asp:
+                                members.add((protein, asp))
+                    cat_membership[cat] = members
+
+                for cat in _CATEGORIES:
+                    members = cat_membership[cat]
+                    cat_mask = np.fromiter(
+                        (
+                            (acc, asp) in members
+                            for acc, asp in zip(
+                                base_df["protein_accession"],
+                                base_df["aspect"],
+                                strict=False,
+                            )
+                        ),
+                        count=len(base_df),
+                        dtype=bool,
+                    )
+                    cat_df = base_df.loc[cat_mask].copy()
+                    if cat_df.empty:
+                        split_stats[f"{cat}_positives"] = 0
+                        split_stats[f"{cat}_negatives"] = 0
+                        continue
+
                     gt_p = cat_gt_pairs[cat]
-                    labels = np.array(
-                        [
+                    labels = np.fromiter(
+                        (
                             1 if (acc, go_id) in gt_p else 0
                             for acc, go_id in zip(
-                                base_df["protein_accession"], base_df["go_id"], strict=False
+                                cat_df["protein_accession"],
+                                cat_df["go_id"],
+                                strict=False,
                             )
-                        ],
+                        ),
+                        count=len(cat_df),
                         dtype=np.int8,
                     )
-                    base_df[LABEL_COLUMN] = labels
+                    cat_df[LABEL_COLUMN] = labels
                     n_pos = int(labels.sum())
                     split_stats[f"{cat}_positives"] = n_pos
-                    split_stats[f"{cat}_negatives"] = len(base_df) - n_pos
+                    split_stats[f"{cat}_negatives"] = len(cat_df) - n_pos
 
                     pq_path = tmp_dir / f"train_{cat}_split{i}.parquet"
-                    base_df.to_parquet(pq_path, index=False)
+                    cat_df.to_parquet(pq_path, index=False)
                     split_files[cat].append(pq_path)
+                    del cat_df
 
                 del base_df
                 gc.collect()
@@ -1736,6 +1792,27 @@ class TrainRerankerAutoOperation:
                         project_cols = [
                             c for c in _KEEP_COLS if c in pf.schema_arrow.names
                         ]
+                        # Per-cat (protein, aspect) membership recovered from
+                        # ``test_eval_data`` so each test row lands only in
+                        # the genuine cat bucket. See train-side comment for
+                        # rationale. ``aspect_map`` is keyed by int
+                        # go_term_id; invert ``go_id_map`` to look up by
+                        # the go_id string that ``test_eval_data`` carries.
+                        aspect_by_go_id: dict[str, str] = {
+                            go_id: aspect_map[term_id]
+                            for term_id, go_id in go_id_map.items()
+                            if term_id in aspect_map
+                        }
+                        test_cat_membership: dict[str, set[tuple[str, str]]] = {}
+                        for cat in _CATEGORIES:
+                            gt = getattr(test_eval_data, cat)
+                            members: set[tuple[str, str]] = set()
+                            for protein, go_ids in gt.items():
+                                for go_id in go_ids:
+                                    asp = aspect_by_go_id.get(go_id, "")
+                                    if asp:
+                                        members.add((protein, asp))
+                            test_cat_membership[cat] = members
                         cat_writers: dict[str, pq.ParquetWriter] = {}
                         cat_paths: dict[str, Path] = {
                             cat: tmp_dir / f"test_{cat}.parquet" for cat in _CATEGORIES
@@ -1752,16 +1829,28 @@ class TrainRerankerAutoOperation:
                                     batch = batch.drop_columns([LABEL_COLUMN])
                                 accs = batch.column("protein_accession").to_pylist()
                                 gids = batch.column("go_id").to_pylist()
+                                asps = batch.column("aspect").to_pylist()
                                 for cat in _CATEGORIES:
+                                    members = test_cat_membership[cat]
+                                    mask_list = [
+                                        (a, asp) in members
+                                        for a, asp in zip(accs, asps, strict=False)
+                                    ]
+                                    if not any(mask_list):
+                                        continue
+                                    mask_arr = pa.array(mask_list, type=pa.bool_())
+                                    cat_batch = batch.filter(mask_arr)
+                                    cat_accs = cat_batch.column("protein_accession").to_pylist()
+                                    cat_gids = cat_batch.column("go_id").to_pylist()
                                     gt_p = test_cat_gt[cat]
                                     labels = pa.array(
                                         [
                                             1 if (a, g) in gt_p else 0
-                                            for a, g in zip(accs, gids, strict=False)
+                                            for a, g in zip(cat_accs, cat_gids, strict=False)
                                         ],
                                         type=pa.int8(),
                                     )
-                                    cat_batch = batch.append_column(LABEL_COLUMN, labels)
+                                    cat_batch = cat_batch.append_column(LABEL_COLUMN, labels)
                                     table = pa.Table.from_batches([cat_batch])
                                     if cat not in cat_writers:
                                         cat_writers[cat] = pq.ParquetWriter(
