@@ -41,7 +41,10 @@ class Sequence(Base):
 
     @staticmethod
     def compute_hash(seq: str) -> str:
-        return hashlib.md5(seq.encode("utf-8")).hexdigest()
+        # usedforsecurity=False: this hash is the dedup key for the
+        # protein sequence table, not a security primitive. MD5 collision
+        # resistance is irrelevant; we just need a stable 32-hex digest.
+        return hashlib.md5(seq.encode("utf-8"), usedforsecurity=False).hexdigest()
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)

@@ -85,8 +85,21 @@ target-version = "py312"
 line-length = 100
 
 [tool.ruff.lint]
+# F0 ruleset: keeps the existing baseline (E/F/W/I/UP/B) and ignores
+# enforced for project conventions. Master plan v3 F-OPS phase will
+# extend this to the full ruff catalog (N, RUF, SIM, PT, etc.).
 select = ["E", "F", "W", "I", "UP", "B"]
 ignore = ["E501", "B008"]
+
+[tool.bandit]
+# Bandit security scan (run via .github/workflows/security.yml).
+# Skips test files (assert statements + magic mocks would create noise)
+# and the lab archeology that lives outside protea/.
+exclude_dirs = ["tests", "scripts/dump_reranker_dataset.py"]
+# B404: subprocess import (legitimate in scripts/manage.sh wrappers).
+# B603: subprocess call without shell=True (we use it correctly).
+# B101: assert_used (assertions in non-test code; project keeps a few).
+skips = ["B404", "B603", "B101"]
 
 [tool.ruff.lint.per-file-ignores]
 # Standalone runner scripts insert PROJECT_ROOT into sys.path before

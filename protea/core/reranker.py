@@ -340,9 +340,11 @@ def load_reranker(
     cache_dir = cache_dir or _default_cache_dir()
     cache_dir.mkdir(parents=True, exist_ok=True)
     # Disambiguate the on-disk cache file by URI hash so two boosters with
-    # the same schema_sha don't overwrite each other's blobs.
+    # the same schema_sha don't overwrite each other's blobs. usedforsecurity=False
+    # because this is a cache key tag, not a security primitive (MD5 collision
+    # resistance is irrelevant here).
     import hashlib
-    uri_tag = hashlib.md5(artifact_uri.encode()).hexdigest()[:8]
+    uri_tag = hashlib.md5(artifact_uri.encode(), usedforsecurity=False).hexdigest()[:8]
     path = cache_dir / f"{feature_schema_sha}_{uri_tag}.txt"
 
     if not path.exists():
