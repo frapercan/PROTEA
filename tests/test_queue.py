@@ -246,8 +246,8 @@ class TestPublishJob:
             with pytest.raises(RuntimeError, match="Failed to publish to queue"):
                 publish_job("amqp://localhost/", "q", uuid4())
 
-        # _close_cached_connection calls conn.close() once per failed attempt (5 total)
-        assert conn.close.call_count == 5
+        # _close_cached_connection calls conn.close() once per failed attempt (12 total)
+        assert conn.close.call_count == 12
 
     def test_declares_durable_queue(self):
         conn = MagicMock()
@@ -289,8 +289,9 @@ class TestPublishJob:
             with pytest.raises(RuntimeError, match="Failed to publish"):
                 publish_job("amqp://localhost/", "q", uuid4())
 
-        # 5 attempts → 4 sleeps: 1, 2, 4, 8
-        assert sleep_calls == [1, 2, 4, 8]
+        # 12 attempts -> 11 sleeps: 1, 2, 4, 8, 16, 30, 30, 30, 30, 30, 30
+        # Exponential up to attempt 5 (16s); capped at 30s for the rest.
+        assert sleep_calls == [1, 2, 4, 8, 16, 30, 30, 30, 30, 30, 30]
 
 
 # ---------------------------------------------------------------------------
