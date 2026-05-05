@@ -1,7 +1,7 @@
 """Tiny in-process TTL cache for aggregate API endpoints.
 
 Built for stats/listing endpoints that run DISTINCT-over-JOIN queries on 10M+
-row tables — queries that are structurally slow (tens of seconds) and whose
+row tables: queries that are structurally slow (tens of seconds) and whose
 results change slowly enough that a 5-minute TTL is not user-visible.
 
 Process-local by design: resets on uvicorn restart, does not need Redis, does
@@ -15,7 +15,12 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-_DEFAULT_TTL = 300.0  # 5 minutes
+from protea.config.tuning import get_tuning
+
+
+def _default_ttl() -> float:
+    """Resolved each call so env/yaml overrides apply at runtime."""
+    return get_tuning().worker.api_cache_default_ttl_seconds
 
 _lock = threading.Lock()
 _store: dict[str, tuple[float, Any]] = {}
@@ -43,4 +48,4 @@ def invalidate(key: str | None = None) -> None:
             _store.pop(key, None)
 
 
-__all__ = ["cached", "invalidate", "_DEFAULT_TTL"]
+__all__ = ["cached", "invalidate", "_default_ttl"]

@@ -80,7 +80,6 @@ _STREAM_CHUNK_SIZE = 2_000
 # Limited to 1 entry — evicts previous reference on config change.
 # ---------------------------------------------------------------------------
 _REF_CACHE: dict[tuple[str, str, bool], dict[str, Any]] = {}
-_REF_CACHE_MAX = 1
 
 # ---------------------------------------------------------------------------
 # v6 reranker feature constants
@@ -592,7 +591,10 @@ class PredictGOTermsBatchOperation:
         cache_key = (p.embedding_config_id, p.annotation_set_id, p.aspect_separated_knn)
         if cache_key not in _REF_CACHE:
             # Evict oldest entry when cache is full to free numpy arrays from memory.
-            if len(_REF_CACHE) >= _REF_CACHE_MAX:
+            from protea.config.tuning import get_tuning
+
+            cache_max = get_tuning().worker.ref_cache_max
+            if len(_REF_CACHE) >= cache_max:
                 evict_key = next(iter(_REF_CACHE))
                 del _REF_CACHE[evict_key]
             emit(

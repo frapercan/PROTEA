@@ -9,6 +9,7 @@ import pytest
 from protea.config.tuning import (
     QueueTuning,
     TuningSettings,
+    WorkerTuning,
     _apply_env_overrides,
     _coerce,
     _load_yaml_tuning,
@@ -166,3 +167,60 @@ class TestTuningSettingsModel:
     def test_default_compose(self) -> None:
         s = TuningSettings()
         assert s.queue.publisher_max_attempts == 12
+
+    def test_default_worker_compose(self) -> None:
+        s = TuningSettings()
+        assert s.worker.db_pool_size == 20
+        assert s.worker.model_cache_max == 1
+        assert s.worker.api_cache_default_ttl_seconds == 300.0
+
+
+class TestWorkerTuningDefaults:
+    def test_pool_defaults(self) -> None:
+        w = WorkerTuning()
+        assert w.db_pool_size == 20
+        assert w.db_pool_max_overflow == 40
+        assert w.db_pool_recycle_seconds == 3600
+
+    def test_cache_defaults(self) -> None:
+        w = WorkerTuning()
+        assert w.model_cache_max == 1
+        assert w.ref_cache_max == 1
+        assert w.api_cache_default_ttl_seconds == pytest.approx(300.0)
+
+    def test_reaper_defaults(self) -> None:
+        w = WorkerTuning()
+        assert w.reaper_main_timeout_seconds == 86400
+        assert w.reaper_default_timeout_seconds == 3600
+        assert w.reaper_stall_seconds == 1800
+
+    def test_validates_pool_size(self) -> None:
+        with pytest.raises(Exception):
+            WorkerTuning(db_pool_size=0)
+
+    def test_validates_reaper_main_floor(self) -> None:
+        with pytest.raises(Exception):
+            WorkerTuning(reaper_main_timeout_seconds=10)
+
+    def test_validates_cache_max(self) -> None:
+        with pytest.raises(Exception):
+            WorkerTuning(model_cache_max=0)
+
+
+class TestWorkerEnvOverrides:
+    def setup_method(self) -> None:
+        get_tuning.cache_clear()
+
+    def teardown_method(self) -> None:
+        get_tuning.cache_clear()
+
+    def test_env_override_pool_size(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setattr(
+            "protea.config.tuning._resolve_project_root", lambda: tmp_path
+        )
+        monkeypatch.setenv("PROTEA_TUNING__WORKER__DB_POOL_SIZE", "50")
+        get_tuning.cache_clear()
+        s = get_tuning()
+        assert s.worker.db_pool_size == 50

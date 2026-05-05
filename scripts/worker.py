@@ -57,13 +57,26 @@ def main() -> None:
 
     # Special mode: stale job reaper (no queue, just periodic DB check).
     if args.queue == "reaper":
-        # 24h hard timeout + 30min stall window. Earlier value (6h) killed
-        # predict_go_terms coords that waited in the batch FIFO behind other
-        # coords — the last ones in a 23-job batch routinely sat past 6h
-        # even though work was progressing upstream. With only one
-        # predictions.batch worker this is the expected shape of the queue.
-        reaper = StaleJobReaper(factory, timeout_seconds=86400)
-        logging.info("Stale job reaper started. timeout=86400s interval=60s")
+        # 24h hard timeout + 30min stall window by default. Earlier value
+        # (6h) killed predict_go_terms coords that waited in the batch FIFO
+        # behind other coords; with only one predictions.batch worker the
+        # last ones in a 23-job batch routinely sat past 6h even though
+        # work was progressing upstream.
+        # Both numbers configurable via WorkerTuning (PROTEA_TUNING__WORKER__
+        # REAPER_MAIN_TIMEOUT_SECONDS and ..._STALL_SECONDS).
+        from protea.config.tuning import get_tuning
+
+        worker_settings = get_tuning().worker
+        reaper = StaleJobReaper(
+            factory,
+            timeout_seconds=worker_settings.reaper_main_timeout_seconds,
+            stall_seconds=worker_settings.reaper_stall_seconds,
+        )
+        logging.info(
+            "Stale job reaper started. timeout=%ds stall=%ds interval=60s",
+            worker_settings.reaper_main_timeout_seconds,
+            worker_settings.reaper_stall_seconds,
+        )
         reaper.run(interval_seconds=60)
         return
 

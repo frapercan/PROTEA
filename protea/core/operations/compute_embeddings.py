@@ -606,13 +606,15 @@ class StoreEmbeddingsOperation:
 # all subsequent batch messages with the same config.  Max 1 entry to avoid
 # accumulating multi-GB models in GPU memory when configs change.
 _MODEL_CACHE: dict[tuple[str, str, str], tuple[Any, Any]] = {}
-_MODEL_CACHE_MAX = 1
 
 
 def _get_or_load_model(config: EmbeddingConfig, device: str, emit: EmitFn) -> tuple[Any, Any]:
+    from protea.config.tuning import get_tuning
+
+    cache_max = get_tuning().worker.model_cache_max
     key = (config.model_name, config.model_backend, device)
     if key not in _MODEL_CACHE:
-        if len(_MODEL_CACHE) >= _MODEL_CACHE_MAX:
+        if len(_MODEL_CACHE) >= cache_max:
             evict_key = next(iter(_MODEL_CACHE))
             old_model, old_tokenizer = _MODEL_CACHE.pop(evict_key)
             del old_model, old_tokenizer

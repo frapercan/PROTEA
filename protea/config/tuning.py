@@ -79,10 +79,77 @@ class QueueTuning(BaseModel):
     )
 
 
+class WorkerTuning(BaseModel):
+    """Pool sizes, in-process caches and reaper timeouts.
+
+    Sources: ``infrastructure/database/engine.py``,
+    ``infrastructure/operations/{compute_embeddings,predict_go_terms}.py``,
+    ``workers/stale_job_reaper.py``, ``api/cache.py`` (ver
+    ``docs/CONFIG_INVENTORY.md`` §B).
+    """
+
+    db_pool_size: int = Field(
+        default=20,
+        ge=1,
+        description="SQLAlchemy connection pool size. Tunear según concurrencia esperada.",
+    )
+    db_pool_max_overflow: int = Field(
+        default=40,
+        ge=0,
+        description="Conexiones extra permitidas sobre el pool size cuando hay pico.",
+    )
+    db_pool_recycle_seconds: int = Field(
+        default=3600,
+        ge=60,
+        description=(
+            "Reciclar conexiones tras N segundos para evitar idle-timeout silencioso del DB."
+        ),
+    )
+    model_cache_max: int = Field(
+        default=1,
+        ge=1,
+        description=(
+            "Modelos PLM en cache por proceso de embeddings. >1 acumula GB en GPU."
+        ),
+    )
+    ref_cache_max: int = Field(
+        default=1,
+        ge=1,
+        description="Reference data sets en cache por proceso predict.",
+    )
+    reaper_main_timeout_seconds: int = Field(
+        default=86400,
+        ge=300,
+        description=(
+            "Timeout duro antes de marcar jobs FAILED en producción (default 24h). "
+            "Coordinator jobs como compute_embeddings pueden correr <1d en datasets "
+            "grandes; este es el corte global."
+        ),
+    )
+    reaper_default_timeout_seconds: int = Field(
+        default=3600,
+        ge=300,
+        description="Default constructor de StaleJobReaper (sobrescrito por main).",
+    )
+    reaper_stall_seconds: int = Field(
+        default=1800,
+        ge=60,
+        description=(
+            "Tiempo sin JobEvent antes de considerar un job stalled candidato a reapear."
+        ),
+    )
+    api_cache_default_ttl_seconds: float = Field(
+        default=300.0,
+        ge=1.0,
+        description="TTL default cache HTTP (api/cache.py). 5 min por defecto.",
+    )
+
+
 class TuningSettings(BaseModel):
     """Root tuning model that composes per-category sub-models."""
 
     queue: QueueTuning = Field(default_factory=QueueTuning)
+    worker: WorkerTuning = Field(default_factory=WorkerTuning)
 
 
 def _load_yaml_tuning(project_root: Path) -> dict[str, Any]:
