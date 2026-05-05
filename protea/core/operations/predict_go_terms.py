@@ -862,12 +862,13 @@ class PredictGOTermsBatchOperation:
 
         # RabbitMQ caps message size at 128 MB; ancestor-expanded batches
         # serialise to ~250-300 MB and silently land in the dead-letter
-        # queue. Split into ≤25k-row chunks (~50-60 MB each) so the write
-        # worker actually receives them. Only the final chunk advances the
-        # coordinator's batch counter (``is_final_chunk=True``) so the
-        # parent job doesn't mark itself succeeded after the first batch's
-        # chunks finish.
-        _STORE_CHUNK_SIZE = 25_000
+        # queue. Split into ≤10k-row chunks (~20-25 MB each) so the write
+        # worker actually receives them and broker memory pressure stays low
+        # even when many batches publish concurrently. Only the final chunk
+        # advances the coordinator's batch counter (``is_final_chunk=True``)
+        # so the parent job doesn't mark itself succeeded after the first
+        # batch's chunks finish.
+        _STORE_CHUNK_SIZE = 10_000
         chunks: list[list[dict[str, Any]]] = [
             prediction_dicts[s:s + _STORE_CHUNK_SIZE]
             for s in range(0, len(prediction_dicts), _STORE_CHUNK_SIZE)
