@@ -11,7 +11,7 @@ from pika.adapters.blocking_connection import BlockingChannel
 from pika.spec import Basic, BasicProperties
 from sqlalchemy.orm import Session, sessionmaker
 
-from protea.core.contracts.operation import RetryLaterError
+from protea.core.contracts.operation import RetryLaterError, make_safe_emit
 from protea.core.contracts.registry import OperationRegistry
 from protea.infrastructure.orm.models.job import JobEvent
 from protea.infrastructure.queue.publisher import publish_operation
@@ -279,40 +279,31 @@ class OperationConsumer:
         session = self._factory()
         try:
 
-            def emit(
+            def raw_emit(
                 event: str,
                 message: str | None = None,
                 fields: dict[str, Any] | None = None,
                 level: str = "info",
             ) -> None:
                 logger.info("operation.%s fields=%s", event, fields or {})
-                if parent_job_id is not None:
-                    event_session = self._factory()
-                    try:
-                        event_session.add(
-                            JobEvent(
-                                job_id=parent_job_id,
-                                event=f"child.{event}",
-                                message=message,
-                                fields=fields or {},
-                                level=level,
-                            )
+                if parent_job_id is None:
+                    return
+                event_session = self._factory()
+                try:
+                    event_session.add(
+                        JobEvent(
+                            job_id=parent_job_id,
+                            event=f"child.{event}",
+                            message=message,
+                            fields=fields or {},
+                            level=level,
                         )
-                        event_session.commit()
-                    except Exception as emit_exc:
-                        logger.warning(
-                            "Failed to write child event to parent job. parent_job_id=%s error=%s",
-                            parent_job_id,
-                            emit_exc,
-                        )
-                        try:
-                            event_session.rollback()
-                        except Exception:
-                            pass
-                    finally:
-                        event_session.close()
+                    )
+                    event_session.commit()
+                finally:
+                    event_session.close()
 
-            result = op.execute(session, payload, emit=emit)
+            result = op.execute(session, payload, emit=make_safe_emit(raw_emit))
             session.commit()
             # Forward any downstream operation messages (e.g. GPU→write worker).
             for queue_name, op_payload in result.publish_operations or []:

@@ -1,6 +1,7 @@
 # protea/core/contracts/operation.py
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
@@ -11,6 +12,38 @@ from sqlalchemy.orm import Session
 
 Level = Literal["info", "warning", "error"]
 EmitFn = Callable[[str, str | None, dict[str, Any], Level], None]
+
+_safe_emit_logger = logging.getLogger("protea.emit")
+
+
+def make_safe_emit(raw_emit: EmitFn) -> EmitFn:
+    """Wrap a raw EmitFn so failures are logged and never propagate.
+
+    The platform-level emit may fail for transient reasons (DB
+    connection lost mid-operation, JobEvent insert conflict, etc.).
+    Operations should not crash because the audit trail hiccupped:
+    the operation's primary work matters more than the event row.
+    Failures are logged at ERROR with full traceback so they remain
+    visible in observability without breaking the running job.
+    """
+
+    def wrapped(
+        event: str,
+        message: str | None = None,
+        fields: dict[str, Any] | None = None,
+        level: Level = "info",
+    ) -> None:
+        try:
+            raw_emit(event, message, fields or {}, level)
+        except Exception:
+            _safe_emit_logger.error(
+                "emit failed; operation continues. event=%s level=%s",
+                event,
+                level,
+                exc_info=True,
+            )
+
+    return wrapped
 
 
 @dataclass(frozen=True)
