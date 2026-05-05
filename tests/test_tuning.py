@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from protea.config.tuning import (
+    APILimits,
     OperationTuning,
     QueueTuning,
     TuningSettings,
@@ -263,3 +264,41 @@ class TestOperationEnvOverrides:
         get_tuning.cache_clear()
         s = get_tuning()
         assert s.operation.annotation_chunk_size == 50_000
+
+
+class TestAPILimitsDefaults:
+    def test_defaults(self) -> None:
+        a = APILimits()
+        assert a.max_fasta_bytes == 50 * 1024 * 1024
+        assert a.max_comment_length == 500
+        assert a.recent_limit == 20
+        assert a.page_limit == 100
+
+    def test_validates_floor(self) -> None:
+        with pytest.raises(Exception):
+            APILimits(max_fasta_bytes=100)
+        with pytest.raises(Exception):
+            APILimits(max_comment_length=0)
+        with pytest.raises(Exception):
+            APILimits(recent_limit=0)
+        with pytest.raises(Exception):
+            APILimits(page_limit=0)
+
+
+class TestAPILimitsEnvOverrides:
+    def setup_method(self) -> None:
+        get_tuning.cache_clear()
+
+    def teardown_method(self) -> None:
+        get_tuning.cache_clear()
+
+    def test_env_override_fasta_bytes(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setattr(
+            "protea.config.tuning._resolve_project_root", lambda: tmp_path
+        )
+        monkeypatch.setenv("PROTEA_TUNING__API__MAX_FASTA_BYTES", "104857600")  # 100 MB
+        get_tuning.cache_clear()
+        s = get_tuning()
+        assert s.api.max_fasta_bytes == 104_857_600

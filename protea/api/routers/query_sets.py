@@ -109,10 +109,15 @@ async def create_query_set(
     preserving the original FASTA accession. Duplicate accessions within the
     same upload are rejected with 422.
     """
-    _MAX_FASTA_BYTES = 50 * 1024 * 1024  # 50 MB
+    from protea.config.tuning import get_tuning
+
+    max_bytes = get_tuning().api.max_fasta_bytes
     raw = await file.read()
-    if len(raw) > _MAX_FASTA_BYTES:
-        raise HTTPException(status_code=413, detail="FASTA file exceeds 50 MB limit")
+    if len(raw) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"FASTA file exceeds {max_bytes // (1024 * 1024)} MB limit",
+        )
     try:
         content = raw.decode("utf-8")
     except UnicodeDecodeError:

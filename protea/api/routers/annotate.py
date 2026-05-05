@@ -92,11 +92,16 @@ async def annotate(
     ``predict_go_terms`` once embeddings are ready.
     """
     # ── Parse FASTA ──────────────────────────────────────────────────
-    _MAX_FASTA_BYTES = 50 * 1024 * 1024  # 50 MB
+    from protea.config.tuning import get_tuning
+
+    max_bytes = get_tuning().api.max_fasta_bytes
     if file is not None:
         raw = await file.read()
-        if len(raw) > _MAX_FASTA_BYTES:
-            raise HTTPException(status_code=413, detail="FASTA file exceeds 50 MB limit")
+        if len(raw) > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"FASTA file exceeds {max_bytes // (1024 * 1024)} MB limit",
+            )
         try:
             content = raw.decode("utf-8")
         except UnicodeDecodeError:
@@ -104,8 +109,11 @@ async def annotate(
                 status_code=422, detail="FASTA file must be UTF-8 encoded"
             ) from None
     elif fasta_text:
-        if len(fasta_text.encode("utf-8")) > _MAX_FASTA_BYTES:
-            raise HTTPException(status_code=413, detail="FASTA text exceeds 50 MB limit")
+        if len(fasta_text.encode("utf-8")) > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"FASTA text exceeds {max_bytes // (1024 * 1024)} MB limit",
+            )
         content = fasta_text
     else:
         raise HTTPException(status_code=422, detail="Provide a FASTA file or fasta_text")

@@ -196,12 +196,46 @@ class OperationTuning(BaseModel):
     )
 
 
+class APILimits(BaseModel):
+    """HTTP boundary limits enforced at the FastAPI router layer.
+
+    Sources: ``api/routers/{annotate,query_sets,support}.py`` (ver
+    ``docs/CONFIG_INVENTORY.md`` §D).
+    """
+
+    max_fasta_bytes: int = Field(
+        default=50 * 1024 * 1024,
+        ge=1024,
+        description=(
+            "Tope upload FASTA en bytes. 50 MB cubre la mayoría de "
+            "submissions; subir si el caso de uso lo justifica. "
+            "Hardcodeado antes en dos routers; este campo dedupica."
+        ),
+    )
+    max_comment_length: int = Field(
+        default=500,
+        ge=1,
+        description="Caracteres máximos por comentario en /support.",
+    )
+    recent_limit: int = Field(
+        default=20,
+        ge=1,
+        description="Items devueltos por defecto en /support/recent.",
+    )
+    page_limit: int = Field(
+        default=100,
+        ge=1,
+        description="Page size hard cap para list endpoints de soporte.",
+    )
+
+
 class TuningSettings(BaseModel):
     """Root tuning model that composes per-category sub-models."""
 
     queue: QueueTuning = Field(default_factory=QueueTuning)
     worker: WorkerTuning = Field(default_factory=WorkerTuning)
     operation: OperationTuning = Field(default_factory=OperationTuning)
+    api: APILimits = Field(default_factory=APILimits)
 
 
 def _load_yaml_tuning(project_root: Path) -> dict[str, Any]:
