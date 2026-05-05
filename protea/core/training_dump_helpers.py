@@ -106,81 +106,11 @@ class StreamOutput:
 # ---------------------------------------------------------------------------
 
 
-class TrainRerankerPayload(ProteaPayload, frozen=True):
-    """Payload for the dump_helper operation."""
-
-    name: str
-    old_annotation_set_id: str
-    new_annotation_set_id: str
-    embedding_config_id: str
-    ontology_snapshot_id: str
-
-    # Evaluation category
-    category: str = "nk"
-
-    # KNN parameters — default to FAISS IVFFlat. Numpy brute-force on 500k+ refs
-    # materialises a full (n_queries × n_refs) distance matrix that peaks at
-    # ~10 GB per aspect. IVFFlat keeps peak memory ~2.5 GB and is 5-10× faster.
-    limit_per_entry: PositiveInt = 5
-    distance_threshold: float | None = None
-    search_backend: str = "faiss"
-    metric: str = "cosine"
-    faiss_index_type: str = "IVFFlat"
-    faiss_nlist: int = 256
-    faiss_nprobe: int = 32
-
-    # LightGBM parameters
-    num_boost_round: int = 1000
-    early_stopping_rounds: int = 50
-    val_fraction: float = 0.2
-    neg_pos_ratio: float | None = None
-
-    # Feature computation
-    compute_alignments: bool = False
-    compute_taxonomy: bool = False
-
-    # Ancestor expansion: when True, synthesize candidate records for every
-    # ancestor of each leaf GO term voted by a neighbor (True Path Rule at
-    # vote time). Weight of the inherited vote = IA(ancestor)/IA(leaf) when
-    # an IA table is available; 1.0 otherwise. Expands the candidate set
-    # and helps the reranker learn on abstract terms that never get direct
-    # KNN votes but do appear in ground truth.
-    expand_votes_to_ancestors: bool = False
-
-    # Sequence-embedding PCA: when True, fit PCA(16) once on the reference
-    # embedding pool, project each query, and emit 16 extra features
-    # (emb_pca_query_0..15) per candidate row. Gives LightGBM a location
-    # signal in PLM space beyond the scalar query↔ref distance.
-    use_embedding_pca: bool = False
-
-    # Per-aspect model (None = all aspects)
-    aspect: str | None = None
-
-    @field_validator(
-        "old_annotation_set_id",
-        "new_annotation_set_id",
-        "embedding_config_id",
-        "ontology_snapshot_id",
-        "name",
-        mode="before",
-    )
-    @classmethod
-    def must_be_non_empty(cls, v: str) -> str:
-        if not isinstance(v, str) or not v.strip():
-            raise ValueError("must be a non-empty string")
-        return v.strip()
-
-    @field_validator("category", mode="before")
-    @classmethod
-    def valid_category(cls, v: str) -> str:
-        if v not in ("nk", "lk", "pk"):
-            raise ValueError("category must be nk, lk, or pk")
-        return v
-
-
-# ---------------------------------------------------------------------------
-# Operation
-# ---------------------------------------------------------------------------
+# NOTE: a single-pair ``TrainRerankerPayload`` used to live here for an
+# Operation that trained one LightGBM model per (old, new) snapshot pair.
+# That Operation was retired when LightGBM training moved to
+# protea-reranker-lab; the payload was kept around for tests until T0.6
+# pruned it (no production code referenced it).
 
 
 
@@ -412,7 +342,7 @@ def _knn_transfer_and_label(
     go_id_map: dict[int, str],
     aspect_map: dict[int, str],
     gt_pairs: set[tuple[str, str]],
-    p: TrainRerankerPayload | TrainRerankerAutoPayload,
+    p: TrainRerankerAutoPayload,
     *,
     sequence_context: SequenceContext | None = None,
     query_known_gos: dict[str, set[str]] | None = None,
@@ -1061,7 +991,10 @@ class TrainRerankerAutoPayload(ProteaPayload, frozen=True):
     # Annotation source in annotation_set (default "goa")
     annotation_source: str = "goa"
 
-    # KNN parameters — see TrainRerankerPayload for rationale.
+    # KNN parameters. Default to FAISS IVFFlat: numpy brute-force on 500k+
+    # refs materialises a full (n_queries x n_refs) distance matrix that
+    # peaks at ~10 GB per aspect. IVFFlat keeps peak memory ~2.5 GB and
+    # is 5-10x faster.
     limit_per_entry: PositiveInt = 5
     distance_threshold: float | None = None
     search_backend: str = "faiss"
@@ -1092,10 +1025,18 @@ class TrainRerankerAutoPayload(ProteaPayload, frozen=True):
     # CAFA evaluation which uses IA weighting.
     ia_file: str | None = None
 
-    # Ancestor expansion (see TrainRerankerPayload.expand_votes_to_ancestors).
+    # Ancestor expansion: when True, synthesize candidate records for every
+    # ancestor of each leaf GO term voted by a neighbor (True Path Rule at
+    # vote time). Weight of the inherited vote = IA(ancestor)/IA(leaf) when
+    # an IA table is available; 1.0 otherwise. Expands the candidate set
+    # and helps the reranker learn on abstract terms that never get direct
+    # KNN votes but do appear in ground truth.
     expand_votes_to_ancestors: bool = False
 
-    # Sequence-embedding PCA (see TrainRerankerPayload.use_embedding_pca).
+    # Sequence-embedding PCA: when True, fit PCA(16) once on the reference
+    # embedding pool, project each query, and emit 16 extra features
+    # (emb_pca_query_0..15) per candidate row. Gives LightGBM a location
+    # signal in PLM space beyond the scalar query<->ref distance.
     use_embedding_pca: bool = False
 
     # Training scope:
