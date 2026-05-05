@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from protea.core.annotation_intern import intern_string
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
+from protea.core.contracts.parent_progress import update_parent_progress
 from protea.core.disk_cache import (
     _aspect_index_path,
     _build_anno_csr,
@@ -2015,35 +2016,9 @@ class StorePredictionsOperation:
         return OperationResult(result={"predictions_inserted": len(p.predictions)})
 
     def _update_parent_progress(self, session: Session, parent_job_id: UUID, emit: EmitFn) -> None:
-        row = session.execute(
-            sa_update(Job)
-            .where(Job.id == parent_job_id, Job.status == JobStatus.RUNNING)
-            .values(progress_current=Job.progress_current + 1)
-            .returning(Job.progress_current, Job.progress_total)
-        ).fetchone()
-
-        if row is None or row.progress_current != row.progress_total:
-            return
-
-        closed = session.execute(
-            sa_update(Job)
-            .where(Job.id == parent_job_id, Job.status == JobStatus.RUNNING)
-            .values(status=JobStatus.SUCCEEDED, finished_at=utcnow())
-            .returning(Job.id)
-        ).fetchone()
-
-        if closed:
-            session.add(
-                JobEvent(
-                    job_id=parent_job_id,
-                    event="job.succeeded",
-                    fields={"via": "last_batch_stored"},
-                    level="info",
-                )
-            )
-            emit(
-                "store_predictions.parent_succeeded",
-                None,
-                {"parent_job_id": str(parent_job_id)},
-                "info",
-            )
+        update_parent_progress(
+            session,
+            parent_job_id,
+            emit,
+            event_name="store_predictions.parent_succeeded",
+        )
