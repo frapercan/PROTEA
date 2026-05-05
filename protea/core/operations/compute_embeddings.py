@@ -630,78 +630,78 @@ def _get_or_load_model(config: EmbeddingConfig, device: str, emit: EmitFn) -> tu
     return _MODEL_CACHE[key]
 
 
-def _load_model(config: EmbeddingConfig, device: str, emit: EmitFn) -> tuple[Any, Any]:
-    import torch
+# Cached map of backend plugins resolved from the ``protea.backends``
+# entry_points group.  Lazy: populated on first call to ``_load_model``.
+# ``None`` means "not yet discovered"; an empty dict means "no backends
+# installed" (which is a hard error at load time, not a registry warning).
+_BACKEND_PLUGINS: dict[str, Any] | None = None
 
+
+def _get_backend_plugins() -> dict[str, Any]:
+    """Discover and cache backend plugins via ``entry_points``.
+
+    Returns a dict keyed by ``plugin.name``. Each plugin must implement
+    :class:`protea_contracts.EmbeddingBackend`. Discovery is performed
+    once per process; subsequent calls return the cached map.
+
+    A plugin whose ``name`` attribute disagrees with its entry_point
+    name is a hard error — the entry_points file and the class
+    declaration must agree, and silently letting them drift would make
+    "Unknown model_backend" errors confusing.
+    """
+    global _BACKEND_PLUGINS
+    if _BACKEND_PLUGINS is None:
+        from importlib.metadata import entry_points
+
+        cache: dict[str, Any] = {}
+        for ep in entry_points(group="protea.backends"):
+            plugin = ep.load()
+            if getattr(plugin, "name", None) != ep.name:
+                raise RuntimeError(
+                    f"Backend plugin name mismatch: entry_point {ep.name!r} "
+                    f"resolves to plugin with name "
+                    f"{getattr(plugin, 'name', None)!r}"
+                )
+            cache[ep.name] = plugin
+        _BACKEND_PLUGINS = cache
+    return _BACKEND_PLUGINS
+
+
+def _resolve_backend(backend_name: str) -> Any:
+    """Resolve a ``model_backend`` identifier to a plugin instance.
+
+    The ``"auto"`` legacy alias maps to ``"esm"``. Unknown identifiers
+    raise ``ValueError`` listing the discovered backends so the failure
+    message is actionable.
+    """
+    plugins = _get_backend_plugins()
+    key = "esm" if backend_name == "auto" else backend_name
+    if key not in plugins:
+        raise ValueError(
+            f"Unknown model_backend: {backend_name!r}. "
+            f"Discovered: {sorted(plugins)}"
+        )
+    return plugins[key]
+
+
+def _load_model(config: EmbeddingConfig, device: str, emit: EmitFn) -> tuple[Any, Any]:
+    """Load ``(model, tokenizer)`` via the ``protea.backends`` plugin
+    matching ``config.model_backend``.
+
+    Each plugin owns its own torch / transformers / esm imports (lazy
+    inside ``plugin.load_model``) and the device + dtype dance.  The
+    return shape ``(model, tokenizer)`` matches the legacy hardcoded
+    dispatch exactly; for ESM-C the tokenizer slot is ``None`` because
+    the standalone ``esm`` SDK takes raw sequence strings.
+    """
     emit(
         "compute_embeddings.model_load_start",
         None,
         {"model_name": config.model_name, "backend": config.model_backend},
         "info",
     )
-
-    if config.model_backend == "esm3c":
-        from esm.models.esmc import ESMC
-
-        device_obj = torch.device(device)
-        dtype = torch.float16 if device_obj.type == "cuda" else torch.float32
-        model = ESMC.from_pretrained(config.model_name)
-        model = model.to(device)
-        model = model.to(dtype)
-        model.eval()
-        tokenizer = None
-
-    elif config.model_backend in ("esm", "auto"):
-        from transformers import AutoTokenizer, EsmModel
-
-        device_obj = torch.device(device)
-        dtype = torch.float16 if device_obj.type == "cuda" else torch.float32
-        tokenizer = AutoTokenizer.from_pretrained(config.model_name)
-        model = EsmModel.from_pretrained(config.model_name, output_hidden_states=True)
-        model.eval()
-        model.to(device)
-        model.to(dtype)
-
-    elif config.model_backend == "t5":
-        from transformers import T5EncoderModel, T5Tokenizer
-
-        device_obj = torch.device(device)
-        dtype = torch.float16 if device_obj.type == "cuda" else torch.float32
-        tokenizer = T5Tokenizer.from_pretrained(config.model_name, do_lower_case=False)
-        model = T5EncoderModel.from_pretrained(
-            config.model_name,
-            output_hidden_states=True,
-            torch_dtype=dtype,
-        )
-        model.eval()
-        model.to(device)
-
-    elif config.model_backend == "ankh":
-        # Ankh ships a SentencePiece tokenizer; AutoTokenizer resolves to the
-        # correct class (T5TokenizerFast) without hard-coding T5Tokenizer,
-        # which has caused loading issues with some Ankh revisions.
-        #
-        # Precision: Ankh was pre-trained on TPU in bfloat16 and its
-        # T5-encoder LayerNorm overflows in FP16 — every forward collapses
-        # to NaN.  Verified on ElnaggarLab/ankh-base 2026-04-10.  Use
-        # bfloat16 on CUDA (same VRAM footprint as FP16 but with FP32
-        # dynamic range) and FP32 on CPU.
-        from transformers import AutoTokenizer, T5EncoderModel
-
-        device_obj = torch.device(device)
-        dtype = torch.bfloat16 if device_obj.type == "cuda" else torch.float32
-        tokenizer = AutoTokenizer.from_pretrained(config.model_name)
-        model = T5EncoderModel.from_pretrained(
-            config.model_name,
-            output_hidden_states=True,
-            torch_dtype=dtype,
-        )
-        model.eval()
-        model.to(device)
-
-    else:
-        raise ValueError(f"Unknown model_backend: {config.model_backend!r}")
-
+    plugin = _resolve_backend(config.model_backend)
+    model, tokenizer = plugin.load_model(config.model_name, device, emit)
     emit("compute_embeddings.model_load_done", None, {}, "info")
     return model, tokenizer
 
