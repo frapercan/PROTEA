@@ -39,7 +39,7 @@ from protea.core.domain.aspect import ASPECT_CODES as _ASPECTS
 from protea.core.reranker import EMBEDDING_PCA_DIM
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 
-_ANNOTATION_CHUNK_SIZE = 10_000
+# Annotation chunk size is configured via OperationTuning.annotation_chunk_size.
 
 _TAX_CLOSE_RELATIONS = frozenset(
     {"same", "ancestor", "descendant", "child", "parent", "close"}
@@ -97,9 +97,12 @@ def _load_go_term_metadata(
     aspect_map: dict[int, str] = {}
     if not go_term_ids:
         return go_id_map, aspect_map
+    from protea.config.tuning import get_tuning
+
+    chunk_size = get_tuning().operation.annotation_chunk_size
     ids_list = list(go_term_ids)
-    for i in range(0, len(ids_list), _ANNOTATION_CHUNK_SIZE):
-        chunk = ids_list[i : i + _ANNOTATION_CHUNK_SIZE]
+    for i in range(0, len(ids_list), chunk_size):
+        chunk = ids_list[i : i + chunk_size]
         rows = (
             session.query(GOTerm.id, GOTerm.go_id, GOTerm.aspect)
             .filter(GOTerm.id.in_(chunk))

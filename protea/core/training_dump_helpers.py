@@ -58,8 +58,8 @@ from protea.infrastructure.orm.models.sequence.sequence import Sequence
 
 PositiveInt = Annotated[int, Field(gt=0)]
 
-_ANNOTATION_CHUNK_SIZE = 10_000
-_STREAM_CHUNK_SIZE = 2_000
+# Chunk sizes are configured via OperationTuning.annotation_chunk_size /
+# stream_chunk_size and resolved at call time inside the helpers below.
 
 _LOG = logging.getLogger(__name__)
 
@@ -187,6 +187,10 @@ def _preload_all_embeddings(
         "info",
     )
 
+    from protea.config.tuning import get_tuning
+
+    stream_chunk = get_tuning().operation.stream_chunk_size
+
     embeddings = np.empty((total, dim), dtype=np.float16)
     accessions: list[str] = []
     result_proxy = conn.execute(
@@ -198,7 +202,7 @@ def _preload_all_embeddings(
             "   AND se.embedding_config_id = :ecid"
         ),
         {"ecid": emb_config_id},
-    ).yield_per(_STREAM_CHUNK_SIZE)
+    ).yield_per(stream_chunk)
 
     for i, (acc, emb_str) in enumerate(result_proxy):
         if isinstance(emb_str, str):
@@ -299,10 +303,13 @@ def _load_sequences(
     session: Session,
     accessions: set[str],
 ) -> dict[str, str]:
+    from protea.config.tuning import get_tuning
+
+    chunk_size = get_tuning().operation.annotation_chunk_size
     result: dict[str, str] = {}
     acc_list = list(accessions)
-    for i in range(0, len(acc_list), _ANNOTATION_CHUNK_SIZE):
-        chunk = acc_list[i : i + _ANNOTATION_CHUNK_SIZE]
+    for i in range(0, len(acc_list), chunk_size):
+        chunk = acc_list[i : i + chunk_size]
         rows = (
             session.query(Protein.accession, Sequence.sequence)
             .join(Protein.sequence)
@@ -318,10 +325,13 @@ def _load_taxonomy_ids(
     session: Session,
     accessions: set[str],
 ) -> dict[str, int | None]:
+    from protea.config.tuning import get_tuning
+
+    chunk_size = get_tuning().operation.annotation_chunk_size
     result: dict[str, int | None] = {}
     acc_list = list(accessions)
-    for i in range(0, len(acc_list), _ANNOTATION_CHUNK_SIZE):
-        chunk = acc_list[i : i + _ANNOTATION_CHUNK_SIZE]
+    for i in range(0, len(acc_list), chunk_size):
+        chunk = acc_list[i : i + chunk_size]
         rows = (
             session.query(Protein.accession, Protein.taxonomy_id)
             .filter(Protein.accession.in_(chunk))

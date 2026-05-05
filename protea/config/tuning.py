@@ -145,11 +145,63 @@ class WorkerTuning(BaseModel):
     )
 
 
+class OperationTuning(BaseModel):
+    """Module-level chunk and batch sizes used inside operations.
+
+    HTTP retry policy and per-source timeouts live inside their
+    respective pydantic payloads (``InsertProteinsPayload``,
+    ``LoadGoaAnnotationsPayload``, etc.) because the caller picks
+    them per-job. The values here are infra-level: how to slice
+    work between memory and broker pressure constraints.
+
+    Sources: ``core/feature_enricher.py``, ``core/knn_search.py``,
+    ``core/operations/{predict_go_terms,training_dump_helpers}.py``
+    (ver ``docs/CONFIG_INVENTORY.md`` §C).
+    """
+
+    annotation_chunk_size: int = Field(
+        default=10_000,
+        ge=100,
+        description=(
+            "Filas por chunk al cargar/iterar anotaciones. Tunear "
+            "según RAM disponible: 1k-100k razonable."
+        ),
+    )
+    stream_chunk_size: int = Field(
+        default=2_000,
+        ge=100,
+        description=(
+            "Chunk size streaming PyArrow / SQLAlchemy yield_per. "
+            "Más bajo reduce pico Python-object; más alto reduce "
+            "round-trips. 500-10k razonable."
+        ),
+    )
+    store_chunk_size: int = Field(
+        default=10_000,
+        ge=500,
+        description=(
+            "Filas por chunk al publicar predictions a la cola "
+            "store. RabbitMQ cap 128 MB; 10k filas serializan "
+            "~20-25 MB. 5k-50k según mensaje promedio."
+        ),
+    )
+    numpy_query_chunk: int = Field(
+        default=500,
+        ge=10,
+        description=(
+            "Query chunk size para KNN numpy backend. Multiplicado "
+            "por n_refs determina el pico de la matriz de "
+            "distancias (500 x 500k x 4B ~ 1 GB)."
+        ),
+    )
+
+
 class TuningSettings(BaseModel):
     """Root tuning model that composes per-category sub-models."""
 
     queue: QueueTuning = Field(default_factory=QueueTuning)
     worker: WorkerTuning = Field(default_factory=WorkerTuning)
+    operation: OperationTuning = Field(default_factory=OperationTuning)
 
 
 def _load_yaml_tuning(project_root: Path) -> dict[str, Any]:

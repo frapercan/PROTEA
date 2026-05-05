@@ -128,11 +128,11 @@ def search_knn(
 # ---------------------------------------------------------------------------
 
 
-# Cap on queries processed at once. The full (n_queries × n_refs) distance
-# matrix would peak at n_queries × n_refs × 4 bytes; with 500k refs a naive
-# call materialises 10+ GB per aspect. Chunking caps peak at
-# _NUMPY_QUERY_CHUNK × n_refs × 4 bytes (≈1 GB for 500 × 500k).
-_NUMPY_QUERY_CHUNK = 500
+# Query chunk size lives in OperationTuning.numpy_query_chunk so the
+# memory ceiling is tunable per deployment (the full n_queries x n_refs
+# distance matrix would peak at n_queries x n_refs x 4 bytes; with 500k
+# refs a naive call materialises 10+ GB per aspect; 500 x 500k x 4B
+# is ~1 GB).
 
 
 def _search_numpy(
@@ -172,8 +172,11 @@ def _search_numpy(
 
     results: list[list[tuple[str, float]]] = []
     n_queries = Q.shape[0]
-    for start in range(0, n_queries, _NUMPY_QUERY_CHUNK):
-        Q_chunk = Q[start : start + _NUMPY_QUERY_CHUNK]
+    from protea.config.tuning import get_tuning
+
+    query_chunk = get_tuning().operation.numpy_query_chunk
+    for start in range(0, n_queries, query_chunk):
+        Q_chunk = Q[start : start + query_chunk]
         if metric == "cosine":
             if pre_normalized:
                 Q_n = Q_chunk / (np.linalg.norm(Q_chunk, axis=1, keepdims=True) + 1e-9)

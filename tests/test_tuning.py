@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from protea.config.tuning import (
+    OperationTuning,
     QueueTuning,
     TuningSettings,
     WorkerTuning,
@@ -224,3 +225,41 @@ class TestWorkerEnvOverrides:
         get_tuning.cache_clear()
         s = get_tuning()
         assert s.worker.db_pool_size == 50
+
+
+class TestOperationTuningDefaults:
+    def test_chunk_defaults(self) -> None:
+        o = OperationTuning()
+        assert o.annotation_chunk_size == 10_000
+        assert o.stream_chunk_size == 2_000
+        assert o.store_chunk_size == 10_000
+        assert o.numpy_query_chunk == 500
+
+    def test_validates_floor(self) -> None:
+        with pytest.raises(Exception):
+            OperationTuning(annotation_chunk_size=10)
+        with pytest.raises(Exception):
+            OperationTuning(stream_chunk_size=10)
+        with pytest.raises(Exception):
+            OperationTuning(store_chunk_size=100)
+        with pytest.raises(Exception):
+            OperationTuning(numpy_query_chunk=0)
+
+
+class TestOperationEnvOverrides:
+    def setup_method(self) -> None:
+        get_tuning.cache_clear()
+
+    def teardown_method(self) -> None:
+        get_tuning.cache_clear()
+
+    def test_env_override_chunk_size(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setattr(
+            "protea.config.tuning._resolve_project_root", lambda: tmp_path
+        )
+        monkeypatch.setenv("PROTEA_TUNING__OPERATION__ANNOTATION_CHUNK_SIZE", "50000")
+        get_tuning.cache_clear()
+        s = get_tuning()
+        assert s.operation.annotation_chunk_size == 50_000

@@ -58,13 +58,14 @@ from protea.infrastructure.storage import get_artifact_store
 
 PositiveInt = Annotated[int, Field(gt=0)]
 
-_ANNOTATION_CHUNK_SIZE = 10_000
+# Annotation and stream chunk sizes are configured via OperationTuning
+# (annotation_chunk_size, stream_chunk_size) and resolved at call time
+# inside the helpers below. At 1280 dims x 2 bytes (float16) x 2000 rows
+# the streaming reference query fetches ~5 MB per cursor round-trip,
+# keeping Python object pressure negligible.
+
 _BATCH_QUEUE = "protea.predictions.batch"
 _WRITE_QUEUE = "protea.predictions.write"
-# Rows fetched per round-trip when streaming reference embeddings from PostgreSQL.
-# At 1280 dims × 2 bytes (float16) × 2000 rows = ~5 MB per chunk — keeps Python
-# object pressure negligible while amortising cursor round-trips.
-_STREAM_CHUNK_SIZE = 2_000
 
 # GO aspect single-character codes used in GOTerm.aspect — imported above
 # from the canonical protea.core.domain.aspect module.
@@ -871,10 +872,12 @@ class PredictGOTermsBatchOperation:
         # advances the coordinator's batch counter (``is_final_chunk=True``)
         # so the parent job doesn't mark itself succeeded after the first
         # batch's chunks finish.
-        _STORE_CHUNK_SIZE = 10_000
+        from protea.config.tuning import get_tuning
+
+        store_chunk_size = get_tuning().operation.store_chunk_size
         chunks: list[list[dict[str, Any]]] = [
-            prediction_dicts[s:s + _STORE_CHUNK_SIZE]
-            for s in range(0, len(prediction_dicts), _STORE_CHUNK_SIZE)
+            prediction_dicts[s:s + store_chunk_size]
+            for s in range(0, len(prediction_dicts), store_chunk_size)
         ] or [[]]
         store_messages: list[tuple[str, dict[str, Any]]] = []
         for i, chunk in enumerate(chunks):
@@ -1094,11 +1097,14 @@ class PredictGOTermsBatchOperation:
         dim = first_emb.dimensions()
 
         # Pre-allocate float16 array; fill row-by-row via yield_per so the
-        # cursor fetches _STREAM_CHUNK_SIZE rows at a time — peak Python-object
-        # memory stays at ~chunk_size × dim × 28 bytes ≈ tens of MB, not 14 GB.
+        # cursor fetches stream_chunk_size rows at a time, peak Python-object
+        # memory stays at ~chunk_size x dim x 28 bytes ~= tens of MB, not 14 GB.
+        from protea.config.tuning import get_tuning
+
+        stream_chunk = get_tuning().operation.stream_chunk_size
         embeddings = np.empty((total, dim), dtype=np.float16)
         accessions: list[str] = []
-        for i, (acc, emb) in enumerate(base_q.yield_per(_STREAM_CHUNK_SIZE)):
+        for i, (acc, emb) in enumerate(base_q.yield_per(stream_chunk)):
             embeddings[i] = emb.to_numpy()
             accessions.append(acc)
 
@@ -1621,11 +1627,14 @@ class PredictGOTermsBatchOperation:
         MFO-index neighbors transfer only MFO terms, etc.  The join to ``go_term``
         is added only when needed to keep the no-aspect path as fast as before.
         """
+        from protea.config.tuning import get_tuning
+
+        chunk_size = get_tuning().operation.annotation_chunk_size
         go_map: dict[str, list[dict[str, Any]]] = {}
         accessions_list = list(accessions)
 
-        for i in range(0, len(accessions_list), _ANNOTATION_CHUNK_SIZE):
-            chunk = accessions_list[i : i + _ANNOTATION_CHUNK_SIZE]
+        for i in range(0, len(accessions_list), chunk_size):
+            chunk = accessions_list[i : i + chunk_size]
             q = session.query(
                 ProteinGOAnnotation.protein_accession,
                 ProteinGOAnnotation.go_term_id,
@@ -1889,10 +1898,13 @@ class PredictGOTermsBatchOperation:
     def _load_sequences_for_proteins(
         self, session: Session, accessions: set[str]
     ) -> dict[str, str]:
+        from protea.config.tuning import get_tuning
+
+        chunk_size = get_tuning().operation.annotation_chunk_size
         result: dict[str, str] = {}
         acc_list = list(accessions)
-        for i in range(0, len(acc_list), _ANNOTATION_CHUNK_SIZE):
-            chunk = acc_list[i : i + _ANNOTATION_CHUNK_SIZE]
+        for i in range(0, len(acc_list), chunk_size):
+            chunk = acc_list[i : i + chunk_size]
             rows = (
                 session.query(Protein.accession, Sequence.sequence)
                 .join(Protein.sequence)
@@ -1923,10 +1935,13 @@ class PredictGOTermsBatchOperation:
     def _load_taxonomy_ids_for_proteins(
         self, session: Session, accessions: set[str]
     ) -> dict[str, int | None]:
+        from protea.config.tuning import get_tuning
+
+        chunk_size = get_tuning().operation.annotation_chunk_size
         result: dict[str, int | None] = {}
         acc_list = list(accessions)
-        for i in range(0, len(acc_list), _ANNOTATION_CHUNK_SIZE):
-            chunk = acc_list[i : i + _ANNOTATION_CHUNK_SIZE]
+        for i in range(0, len(acc_list), chunk_size):
+            chunk = acc_list[i : i + chunk_size]
             rows = (
                 session.query(Protein.accession, Protein.taxonomy_id)
                 .filter(Protein.accession.in_(chunk))
@@ -1942,11 +1957,14 @@ class PredictGOTermsBatchOperation:
         p: PredictGOTermsBatchPayload,
         accessions: list[str],
     ) -> dict[str, int | None]:
+        from protea.config.tuning import get_tuning
+
+        chunk_size = get_tuning().operation.annotation_chunk_size
         acc_set = set(accessions)
         result: dict[str, int | None] = {acc: None for acc in acc_set}
         acc_list = list(acc_set)
-        for i in range(0, len(acc_list), _ANNOTATION_CHUNK_SIZE):
-            chunk = acc_list[i : i + _ANNOTATION_CHUNK_SIZE]
+        for i in range(0, len(acc_list), chunk_size):
+            chunk = acc_list[i : i + chunk_size]
             rows = (
                 session.query(Protein.accession, Protein.taxonomy_id)
                 .filter(Protein.accession.in_(chunk))
