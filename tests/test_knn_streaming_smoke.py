@@ -17,7 +17,7 @@ import numpy as np
 import pyarrow.parquet as pq
 import pytest
 
-from protea.core.operations.train_reranker import StreamOutput, _knn_transfer_and_label
+from protea.core.training_dump_helpers import StreamOutput, _knn_transfer_and_label
 
 
 class _StubAnc2Vec:
@@ -137,7 +137,7 @@ def _run(mode: str, tmp_path: Path | None = None, *, expand: bool, pivot=None):
         )
 
     with patch(
-        "protea.core.operations.train_reranker.get_anc2vec_index",
+        "protea.core.training_dump_helpers.get_anc2vec_index",
         return_value=_StubAnc2Vec(),
     ):
         return _knn_transfer_and_label(

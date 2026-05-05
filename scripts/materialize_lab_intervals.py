@@ -1,7 +1,7 @@
 """Materialize EvaluationSet + QuerySet rows for every snapshot pair the lab
 benchmarks consume.
 
-The lab dump (``train_reranker_auto`` with ``dump_only=True``) historically
+The lab dump (the dump helper with ``dump_only=True``) historically
 recomputed the per-pair delta on the fly via ``compute_evaluation_data``.
 That violated the project rule "never recompute on-the-fly what can be
 persisted and reused".  This script materializes the missing artefacts so

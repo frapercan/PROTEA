@@ -1,14 +1,16 @@
-"""Train LightGBM re-rankers from temporal holdout pairs.
+"""Helpers used to generate frozen re-ranker datasets in-process.
 
-Provides two operations:
+Survives as a container for the KNN, feature-engineering,
+streaming-parquet, and reference-loading utilities consumed by
+``ExportResearchDatasetOperation``. The module used to expose two
+operations (single-pair and multi-split training) wired into the
+OperationRegistry; LightGBM training itself moved to the standalone
+protea-reranker-lab repo, so the operations are unregistered.
+``TrainRerankerAutoOperation.execute()`` still runs the dump pipeline
+(KNN + feature generation + parquet emission) for the export operation
+in ``dump_only=True`` mode.
 
-* ``train_reranker`` — single pair (old → new annotation set).
-* ``train_reranker_auto`` — automated multi-split training: generates
-  consecutive pairs from a list of GOA version numbers, concatenates all
-  labeled data, trains one combined model, and evaluates on a held-out
-  test split.
-
-Both operations run entirely in-process (no RabbitMQ coordination).
+All execution is in-process; no RabbitMQ coordination.
 """
 
 from __future__ import annotations
@@ -105,7 +107,7 @@ class StreamOutput:
 
 
 class TrainRerankerPayload(ProteaPayload, frozen=True):
-    """Payload for the train_reranker operation."""
+    """Payload for the dump_helper operation."""
 
     name: str
     old_annotation_set_id: str
@@ -218,7 +220,7 @@ def _load_parent_map(
         parent_map.setdefault(str(child), set()).add(str(parent))
     return parent_map
 
-# ── bulk embedding preload (used by train_reranker_auto) ─────────────
+# ── bulk embedding preload (used by dump_helper) ─────────────
 
 
 def _preload_all_embeddings(
@@ -249,7 +251,7 @@ def _preload_all_embeddings(
     total, dim = int(count_row[0]), int(count_row[1]) if count_row[1] else 960
 
     emit(
-        "train_reranker_auto.preloading_embeddings",
+        "dump_helper.preloading_embeddings",
         None,
         {"total": total, "dim": dim},
         "info",
@@ -279,7 +281,7 @@ def _preload_all_embeddings(
     acc_to_idx = {acc: i for i, acc in enumerate(accessions)}
 
     emit(
-        "train_reranker_auto.embeddings_preloaded",
+        "dump_helper.embeddings_preloaded",
         None,
         {
             "total": len(accessions),
@@ -352,7 +354,7 @@ def _build_reference_from_cache(
             "go_map": aspect_go_map[asp],
         }
         emit(
-            "train_reranker.aspect_loaded",
+            "dump_helper.aspect_loaded",
             None,
             {"aspect": asp, "references": len(indices)},
             "info",
@@ -463,7 +465,7 @@ def _knn_transfer_and_label(
         #   - ``ref["indices"]`` + ``embedding_pool`` (preload-aware path);
         #     no per-aspect float16 copy is held in the dict.
         #   - ``ref["embeddings"]`` (legacy path used by the single-version
-        #     train_reranker that loads embeddings per aspect from SQL).
+        #     dump_helper that loads embeddings per aspect from SQL).
         indices = ref.get("indices")
         if indices is not None and embedding_pool is not None:
             ref_f32 = embedding_pool[indices].astype(np.float32)
@@ -1040,7 +1042,7 @@ def _knn_transfer_and_label(
 
 
 class TrainRerankerAutoPayload(ProteaPayload, frozen=True):
-    """Payload for the train_reranker_auto operation.
+    """Payload for the dump_helper operation.
 
     Generates consecutive temporal pairs from ``train_versions``, runs KNN
     once per pair, then trains 3 per-category LightGBM models (NK, LK, PK)
@@ -1177,10 +1179,13 @@ class TrainRerankerAutoOperation:
        as ``{name}-{category}``.
     """
 
-    name = "train_reranker_auto"
+    # Unregistered since LightGBM training moved to protea-reranker-lab.
+    # Kept as in-process helper invoked from ExportResearchDatasetOperation.
+    name = "research_dataset_dump_helper"
     description = (
-        "Train one LightGBM re-ranker per category (NK/LK/PK) across multiple "
-        "consecutive temporal holdout pairs and evaluate on a held-out split."
+        "Run KNN + feature generation across multiple temporal holdout "
+        "pairs and emit frozen parquets. Originally also trained "
+        "LightGBM models; that path now lives in protea-reranker-lab."
     )
 
     def summarize_payload(self, payload: dict[str, Any], *, session: Session | None = None) -> str:
@@ -1225,7 +1230,7 @@ class TrainRerankerAutoOperation:
         annotation_source: str,
     ) -> dict[str, Any]:
         """Thin wrapper that delegates to ``parquet_export`` — kept so
-        ``train_reranker_auto`` can still dump a frozen dataset to a local
+        ``dump_helper`` can still dump a frozen dataset to a local
         path via ``dump_to=...``. New code should prefer the
         ``export_research_dataset`` operation which publishes via the
         configured ``ArtifactStore``.
@@ -1319,7 +1324,7 @@ class TrainRerankerAutoOperation:
                     if len(parts) >= 2:
                         ia_weights[parts[0]] = float(parts[1])
             emit(
-                "train_reranker_auto.ia_loaded",
+                "dump_helper.ia_loaded",
                 None,
                 {"ia_file": p.ia_file, "n_terms": len(ia_weights)},
                 "info",
@@ -1327,7 +1332,7 @@ class TrainRerankerAutoOperation:
 
         max_models = len(candidate_names)
         emit(
-            "train_reranker_auto.start",
+            "dump_helper.start",
             None,
             {
                 "name": p.name,
@@ -1396,7 +1401,7 @@ class TrainRerankerAutoOperation:
             # other feature is correct.
             pca_state = _load_or_fit_pca_state(emb_config_id, all_embeddings)
             emit(
-                "train_reranker_auto.pca_fit",
+                "dump_helper.pca_fit",
                 None,
                 {
                     "n_refs": int(all_embeddings.shape[0]),
@@ -1429,7 +1434,7 @@ class TrainRerankerAutoOperation:
                 new_set_id = version_to_set[v_new]
 
                 emit(
-                    "train_reranker_auto.split_start",
+                    "dump_helper.split_start",
                     None,
                     {"split": i + 1, "v_old": v_old, "v_new": v_new},
                     "info",
@@ -1470,7 +1475,7 @@ class TrainRerankerAutoOperation:
 
                 if not all_query_accessions:
                     emit(
-                        "train_reranker_auto.split_skipped",
+                        "dump_helper.split_skipped",
                         None,
                         {"split": i + 1, "reason": "no ground truth in any category"},
                         "warning",
@@ -1502,7 +1507,7 @@ class TrainRerankerAutoOperation:
 
                 if not valid_queries:
                     emit(
-                        "train_reranker_auto.split_skipped",
+                        "dump_helper.split_skipped",
                         None,
                         {"split": i + 1, "reason": "no query embeddings"},
                         "warning",
@@ -1672,7 +1677,7 @@ class TrainRerankerAutoOperation:
 
                 valid_split_versions.append((v_old, v_new))
                 per_split_stats.append(split_stats)
-                emit("train_reranker_auto.split_done", None, split_stats, "info")
+                emit("dump_helper.split_done", None, split_stats, "info")
 
             # Check we have data
             if not any(split_files[c] for c in _CATEGORIES):
@@ -1685,7 +1690,7 @@ class TrainRerankerAutoOperation:
             test_new_set_id = version_to_set[test_new_v]
 
             emit(
-                "train_reranker_auto.test_knn",
+                "dump_helper.test_knn",
                 None,
                 {"test_old": test_old_v, "test_new": test_new_v},
                 "info",
@@ -1882,7 +1887,7 @@ class TrainRerankerAutoOperation:
             # pass ``dump_to`` — ExportResearchDatasetOperation always does.
             if not p.dump_to:
                 raise ValueError(
-                    "train_reranker_auto requires dump_to — LightGBM "
+                    "dump_helper requires dump_to — LightGBM "
                     "training has been moved to protea-reranker-lab. Use "
                     "ExportResearchDatasetOperation / POST /datasets."
                 )
@@ -1899,7 +1904,7 @@ class TrainRerankerAutoOperation:
                 ontology_snapshot_id=str(ontology_snapshot_id),
                 annotation_source=p.annotation_source,
             )
-            emit("train_reranker_auto.dump_done", None, dump_stats, "info")
+            emit("dump_helper.dump_done", None, dump_stats, "info")
             elapsed = round(time.perf_counter() - t0, 1)
             result: dict[str, Any] = {
                 "dumped": True,
@@ -1907,7 +1912,7 @@ class TrainRerankerAutoOperation:
                 "dump_stats": dump_stats,
                 "elapsed_seconds": elapsed,
             }
-            emit("train_reranker_auto.done", None, result, "info")
+            emit("dump_helper.done", None, result, "info")
             return OperationResult(result=result)
 
         finally:

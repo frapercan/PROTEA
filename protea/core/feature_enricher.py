@@ -438,9 +438,9 @@ def expand_predictions_to_ancestors(
     """Expand each leaf prediction to its is_a / part_of ancestor closure.
 
     Mirrors the in-loop expansion in
-    :func:`protea.core.operations.train_reranker._knn_transfer_and_label`,
+    :func:`protea.core.training_dump_helpers._knn_transfer_and_label`,
     pulled out so :mod:`predict_go_terms` (live inference) and
-    ``train_reranker`` (offline dataset generation) share a single canonical
+    ``the dump helper`` (offline dataset generation) share a single canonical
     implementation. Without it the candidate sets diverge — the lab dump
     expanded to ancestors, live KNN didn't, and the v9/v10 boosters scored
     LK / PK candidates on a feature distribution they never saw at
@@ -465,7 +465,7 @@ def expand_predictions_to_ancestors(
         Leaf prediction records, each with at least ``protein_accession``,
         ``aspect``, ``go_id``, ``distance``, ``neighbor_vote_fraction``,
         ``neighbor_min_distance``. Must be the unmodified output of the
-        leaf record loop — both train_reranker and predict_go_terms emit
+        leaf record loop — both the dump helper and predict_go_terms emit
         this shape.
     parent_map:
         ``{child_go_id: {parent_go_id, ...}}`` for is_a / part_of edges.
@@ -582,7 +582,7 @@ def load_parent_map(session: Session, snapshot_id: uuid.UUID) -> dict[str, set[s
     """``{child_go_id: {parent_go_id, ...}}`` for is_a + part_of edges in a
     given :class:`OntologySnapshot`. Used by the ancestor-expansion helper
     above; both the live ``predict_go_terms`` path and offline
-    ``train_reranker`` should load it through this function so the closure
+    ``the dump helper`` should load it through this function so the closure
     they pass to :func:`expand_predictions_to_ancestors` is identical."""
     from sqlalchemy import text
 

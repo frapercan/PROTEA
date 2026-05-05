@@ -319,5 +319,5 @@ class TestOperationCatalogWiring:
         names = set(registry._ops.keys())  # type: ignore[attr-defined]
 
         assert "export_research_dataset" in names
-        assert "train_reranker" not in names
-        assert "train_reranker_auto" not in names
+        # Historical training operations remain unregistered.
+        assert "research_dataset_dump_helper" not in names

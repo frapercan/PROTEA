@@ -1,14 +1,15 @@
-"""Export a frozen re-ranker dataset for ``protea-reranker-lab``.
+"""Export a frozen re-ranker dataset for protea-reranker-lab.
 
-This operation runs the same KNN + feature-generation pipeline as
-``train_reranker_auto`` but skips the LightGBM training stage and
-publishes the resulting parquets + manifest via the configured
+Runs the same KNN + feature-generation pipeline as the now-renamed
+research dataset dump helper (``training_dump_helpers``), skips the
+LightGBM training stage, and publishes the resulting parquets +
+manifest via the configured
 :class:`~protea.infrastructure.storage.ArtifactStore` (local FS by
 default, MinIO when enabled via the ``storage`` compose profile).
 
-Why a dedicated operation instead of ``train_reranker_auto --dump-only``?
+Why a dedicated operation instead of dump-only mode of the helper?
 
-* Narrower payload — only the knobs that matter for export, no
+* Narrower payload: only the knobs that matter for export, no
   LightGBM-specific fields.
 * Routes output through the storage abstraction, so the lab can consume
   from MinIO without every export having to know a local dump path on
@@ -29,7 +30,7 @@ from pydantic import Field, field_validator
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
-from protea.core.operations.train_reranker import TrainRerankerAutoOperation
+from protea.core.training_dump_helpers import TrainRerankerAutoOperation
 from protea.infrastructure.orm.models.embedding.dataset import Dataset
 from protea.infrastructure.settings import load_settings
 from protea.infrastructure.storage import get_artifact_store
@@ -50,7 +51,7 @@ class ExportResearchDatasetPayload(ProteaPayload, frozen=True):
     # the lab manifest and the key prefix ``datasets/{output_name}/``.
     output_name: str
 
-    # KNN + feature generation knobs (mirror train_reranker_auto).
+    # KNN + feature generation knobs (mirror the dump helper).
     k: PositiveInt = 5
     search_backend: str = "faiss"
     compute_alignments: bool = False
@@ -126,10 +127,10 @@ class ExportResearchDatasetOperation:
             raise ValueError(f"Dataset {p.output_name!r} already exists")
 
         def _relay(event: str, scope: str | None, evt_payload: dict[str, Any], level: str) -> None:
-            # Surface the underlying train_reranker_auto events under this
+            # Surface the underlying dump-helper events under this
             # operation's namespace so the job event log reads naturally.
-            if event.startswith("train_reranker_auto."):
-                event = "export_research_dataset." + event[len("train_reranker_auto."):]
+            if event.startswith("dump_helper."):
+                event = "export_research_dataset." + event[len("dump_helper."):]
             emit(event, scope, evt_payload, level)  # type: ignore[arg-type]
 
         with tempfile.TemporaryDirectory(prefix="protea_export_") as tmp:

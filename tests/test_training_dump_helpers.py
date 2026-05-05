@@ -1,4 +1,4 @@
-"""Unit tests for protea.core.operations.train_reranker.
+"""Unit tests for protea.core.training_dump_helpers.
 
 Covers ``TrainRerankerPayload`` (still imported by the lab via the
 ``protea_reranker_lab.contracts`` mirror) and the few module-level
@@ -17,7 +17,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from protea.core.operations.train_reranker import (
+from protea.core.training_dump_helpers import (
     TrainRerankerPayload,
     _load_sequences,
     _load_taxonomy_ids,

@@ -9,7 +9,7 @@ The layout is a directory containing exactly three files:
 
 This module is shared between two producers:
 
-* ``train_reranker_auto`` (operation) — runs KNN + feature generation for
+* ``the dump helper`` (operation) — runs KNN + feature generation for
   training and optionally dumps the resulting shards.
 * ``export_research_dataset`` (operation) — runs the same generation but
   only to publish the frozen dataset via an ``ArtifactStore`` (local or

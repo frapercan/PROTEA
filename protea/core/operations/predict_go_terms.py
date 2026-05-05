@@ -199,7 +199,7 @@ class PredictGOTermsPayload(ProteaPayload, frozen=True):
     # synthesised as additional records — required to match the candidate
     # distribution the lab booster saw at training time. Without this the
     # live PredictionSet has ~5-10× fewer candidates per (protein, aspect)
-    # than ``train_reranker_auto``'s dump, and LK / PK fmax collapses
+    # than ``the dump helper``'s dump, and LK / PK fmax collapses
     # because the booster's score distribution is calibrated against the
     # richer expanded set. See ``feature_enricher.expand_predictions_to_ancestors``.
     expand_votes_to_ancestors: bool = False
@@ -766,7 +766,7 @@ class PredictGOTermsBatchOperation:
         # Ancestor expansion — required for the lab booster's candidate
         # distribution. Runs AFTER v6 enrichment so synthetic ancestor
         # records inherit the leaf's anc2vec_/emb_pca_ values, mirroring
-        # what train_reranker emits.
+        # what the dump helper emits.
         if p.expand_votes_to_ancestors and prediction_dicts:
             from sqlalchemy import select
 

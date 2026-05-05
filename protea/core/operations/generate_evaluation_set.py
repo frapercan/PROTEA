@@ -147,7 +147,7 @@ class GenerateEvaluationSetOperation:
         session.flush()
 
         # Persist the full ground-truth (nk/lk/pk/known/pk_known) to the artifact
-        # store. Downstream consumers (train_reranker_auto, cafaeval) read this
+        # store. Downstream consumers (the dump helper, cafaeval) read this
         # parquet via load_evaluation_data_for_set instead of recomputing.
         project_root = Path(__file__).resolve().parents[3]
         store = get_artifact_store(load_settings(project_root))
