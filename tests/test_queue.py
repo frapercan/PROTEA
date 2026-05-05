@@ -512,8 +512,8 @@ class TestOperationConsumerOnMessage:
         channel.connection.sleep.assert_called_once_with(5)
 
     def test_cuda_oom_retries_exhausted_dead_letters(self):
-        """After _OOM_MAX_RETRIES failures the message is nack'd without requeue."""
-        from protea.infrastructure.queue import consumer as consumer_module
+        """After oom_max_retries failures the message is nack'd without requeue."""
+        from protea.config.tuning import get_tuning
 
         exc = RuntimeError("CUDA out of memory. Tried to allocate 2 GiB")
         consumer, sessions, _, _ = self._make_consumer(raises=exc)
@@ -521,7 +521,7 @@ class TestOperationConsumerOnMessage:
         method = _make_method(31)
         properties = MagicMock()
         # Message has already retried the maximum number of times.
-        properties.headers = {"x-oom-retry": consumer_module._OOM_MAX_RETRIES}
+        properties.headers = {"x-oom-retry": get_tuning().queue.oom_max_retries}
 
         import sys
 

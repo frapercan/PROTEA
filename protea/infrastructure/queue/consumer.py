@@ -11,6 +11,7 @@ from pika.adapters.blocking_connection import BlockingChannel
 from pika.spec import Basic, BasicProperties
 from sqlalchemy.orm import Session, sessionmaker
 
+from protea.config.tuning import get_tuning
 from protea.core.contracts.operation import RetryLaterError, make_safe_emit
 from protea.core.contracts.registry import OperationRegistry
 from protea.infrastructure.orm.models.job import JobEvent
@@ -23,11 +24,9 @@ _DLX_NAME = "protea.dlx"
 _DLQ_NAME = "protea.dead-letter"
 
 # CUDA OOM retry policy for OperationConsumer.
-# Backoff: base * 2^retry → 5, 10, 20, 40, 80 s (capped at 300s).
-# Total wait budget before dead-letter: ~155 s over 5 retries.
-_OOM_MAX_RETRIES = 5
-_OOM_BASE_DELAY = 5
-_OOM_MAX_DELAY = 300
+# Configured via QueueTuning (oom_max_retries / oom_base_delay /
+# oom_max_delay). Defaults: 5 retries, 5s base, 300s cap, backoff
+# 5/10/20/40/80s. ~155s wait budget before dead-letter.
 _OOM_RETRY_HEADER = "x-oom-retry"
 
 
@@ -328,28 +327,29 @@ class OperationConsumer:
                 except Exception:
                     pass
 
-                if oom_retry_count < _OOM_MAX_RETRIES:
+                qsettings = get_tuning().queue
+                if oom_retry_count < qsettings.oom_max_retries:
                     next_count = oom_retry_count + 1
                     delay = min(
-                        _OOM_BASE_DELAY * (2**oom_retry_count),
-                        _OOM_MAX_DELAY,
+                        qsettings.oom_base_delay * (2**oom_retry_count),
+                        qsettings.oom_max_delay,
                     )
                     logger.warning(
-                        "CUDA OOM — backing off %ds (retry %d/%d). operation=%s",
+                        "CUDA OOM: backing off %ds (retry %d/%d). operation=%s",
                         delay,
                         next_count,
-                        _OOM_MAX_RETRIES,
+                        qsettings.oom_max_retries,
                         operation_name,
                     )
                     self._emit_parent_event(
                         parent_job_id,
                         "child.cuda_oom_retry",
-                        f"CUDA OOM on {operation_name}; retry {next_count}/{_OOM_MAX_RETRIES} "
+                        f"CUDA OOM on {operation_name}; retry {next_count}/{qsettings.oom_max_retries} "
                         f"after {delay}s backoff",
                         {
                             "operation": operation_name,
                             "retry_count": next_count,
-                            "max_retries": _OOM_MAX_RETRIES,
+                            "max_retries": qsettings.oom_max_retries,
                             "delay_seconds": delay,
                         },
                         level="warning",
