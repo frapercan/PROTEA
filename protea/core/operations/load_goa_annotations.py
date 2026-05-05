@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import gzip
-import io
 import time
 import uuid
 from collections.abc import Iterator
 from typing import Annotated, Any
 
-import requests
+from protea_contracts import GoaAnnotationRecord, GoaStreamPayload
 from pydantic import Field, field_validator
 from sqlalchemy import distinct, select
 from sqlalchemy.orm import Session
@@ -86,16 +84,6 @@ class LoadGOAAnnotationsOperation:
             bits.append(f"limit={p['total_limit']}")
         return " · ".join(bits)
 
-    # GAF 2.x column indices (0-based after splitting on tab)
-    _IDX_ACCESSION = 1
-    _IDX_QUALIFIER = 3
-    _IDX_GO_ID = 4
-    _IDX_DB_REFERENCE = 5
-    _IDX_EVIDENCE = 6
-    _IDX_WITH_FROM = 7
-    _IDX_ASSIGNED_BY = 14
-    _IDX_DATE = 13
-
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
@@ -144,7 +132,7 @@ class LoadGOAAnnotationsOperation:
         total_inserted = 0
         total_skipped = 0
         pages = 0
-        buffer: list[dict[str, str]] = []
+        buffer: list[GoaAnnotationRecord] = []
 
         for record in self._stream_gaf(p, emit):
             total_lines += 1
@@ -340,45 +328,27 @@ class LoadGOAAnnotationsOperation:
         emit("load_goa_annotations.load_go_terms_done", None, {"go_terms": len(mapping)}, "info")
         return mapping
 
-    def _stream_gaf(self, p: LoadGOAAnnotationsPayload, emit: EmitFn) -> Iterator[dict[str, str]]:
-        emit("load_goa_annotations.download_start", None, {"gaf_url": p.gaf_url}, "info")
-        resp = requests.get(p.gaf_url, stream=True, timeout=p.timeout_seconds)
-        resp.raise_for_status()
+    def _stream_gaf(
+        self, p: LoadGOAAnnotationsPayload, emit: EmitFn
+    ) -> Iterator[GoaAnnotationRecord]:
+        """Delegate to the protea-sources GoaSource plugin.
 
-        compressed = p.gaf_url.endswith(".gz")
-        raw_stream = resp.raw
-        raw_stream.decode_content = True
+        The plugin owns HTTP, gzip decoding, and GAF line parsing; the
+        operation owns DB filtering, GO term resolution, dedup, and
+        bulk insert. See ``f2a6_real_migration_design.md`` (D-MIGR-01,
+        D-MIGR-02, D-MIGR-06).
+        """
+        from protea_sources.goa import plugin as goa_plugin
 
-        stream: io.TextIOWrapper
-        if compressed:
-            gz = gzip.GzipFile(fileobj=raw_stream)
-            stream = io.TextIOWrapper(gz, encoding="utf-8", errors="replace")
-        else:
-            stream = io.TextIOWrapper(raw_stream, encoding="utf-8", errors="replace")
-
-        with stream:
-            for raw in stream:
-                line = raw.rstrip("\n")
-                if not line or line.startswith("!"):
-                    continue
-                parts = line.split("\t")
-                if len(parts) < 15:
-                    continue
-                yield {
-                    "accession": parts[self._IDX_ACCESSION],
-                    "go_id": parts[self._IDX_GO_ID],
-                    "qualifier": parts[self._IDX_QUALIFIER],
-                    "evidence_code": parts[self._IDX_EVIDENCE],
-                    "db_reference": parts[self._IDX_DB_REFERENCE],
-                    "with_from": parts[self._IDX_WITH_FROM],
-                    "assigned_by": parts[self._IDX_ASSIGNED_BY],
-                    "annotation_date": parts[self._IDX_DATE],
-                }
+        yield from goa_plugin.stream(
+            GoaStreamPayload(gaf_url=p.gaf_url, timeout_seconds=p.timeout_seconds),
+            emit=emit,
+        )
 
     def _store_buffer(
         self,
         session: Session,
-        records: list[dict[str, str]],
+        records: list[GoaAnnotationRecord],
         annotation_set_id: uuid.UUID,
         valid_accessions: set[str],
         go_term_map: dict[str, int],
@@ -388,18 +358,18 @@ class LoadGOAAnnotationsOperation:
         seen: set[tuple] = set()
 
         for rec in records:
-            accession = rec["accession"].strip()
+            accession = rec.accession.strip()
             if not accession or accession not in valid_accessions:
                 skipped += 1
                 continue
 
-            go_id = rec["go_id"].strip()
+            go_id = rec.go_id.strip()
             go_term_id = go_term_map.get(go_id)
             if go_term_id is None:
                 skipped += 1
                 continue
 
-            evidence_code = rec["evidence_code"] or None
+            evidence_code = rec.evidence_code
             dedup_key = (annotation_set_id, accession, go_term_id, evidence_code)
             if dedup_key in seen:
                 skipped += 1
@@ -411,12 +381,12 @@ class LoadGOAAnnotationsOperation:
                     "annotation_set_id": annotation_set_id,
                     "protein_accession": accession,
                     "go_term_id": go_term_id,
-                    "qualifier": rec["qualifier"] or None,
+                    "qualifier": rec.qualifier,
                     "evidence_code": evidence_code,
-                    "assigned_by": rec["assigned_by"] or None,
-                    "db_reference": rec["db_reference"] or None,
-                    "with_from": rec["with_from"] or None,
-                    "annotation_date": rec["annotation_date"] or None,
+                    "assigned_by": rec.assigned_by,
+                    "db_reference": rec.db_reference,
+                    "with_from": rec.with_from,
+                    "annotation_date": rec.annotation_date,
                 }
             )
 

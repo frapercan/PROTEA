@@ -153,16 +153,18 @@ class TestStoreBuffer:
         return LoadGOAAnnotationsOperation()
 
     def _make_record(self, accession="P12345", go_id="GO:0003824", evidence="IDA"):
-        return {
-            "accession": accession,
-            "go_id": go_id,
-            "qualifier": "enables",
-            "evidence_code": evidence,
-            "db_reference": "PMID:1",
-            "with_from": "",
-            "assigned_by": "UniProt",
-            "annotation_date": "20240101",
-        }
+        from protea_contracts import GoaAnnotationRecord
+
+        return GoaAnnotationRecord(
+            accession=accession,
+            go_id=go_id,
+            qualifier="enables",
+            evidence_code=evidence,
+            db_reference="PMID:1",
+            with_from=None,
+            assigned_by="UniProt",
+            annotation_date="20240101",
+        )
 
     def test_skips_unknown_accession(self) -> None:
         op = self._op()
@@ -228,7 +230,7 @@ class TestStoreBuffer:
         op = self._op()
         session = MagicMock()
         rec = self._make_record()
-        records = [rec.copy(), rec.copy(), rec.copy()]
+        records = [rec.model_copy(), rec.model_copy(), rec.model_copy()]
         inserted, skipped = op._store_buffer(
             session,
             records,
@@ -332,7 +334,7 @@ class TestStreamGaf:
         mock_resp.raise_for_status = MagicMock()
 
         with patch(
-            "protea.core.operations.load_goa_annotations.requests.get", return_value=mock_resp
+            "protea_sources.goa.requests.get", return_value=mock_resp
         ):
             return list(self.op._stream_gaf(payload, emit))
 
@@ -340,9 +342,9 @@ class TestStreamGaf:
         line = _gaf_line(accession="P12345", go_id="GO:0003674", evidence="IDA")
         records = self._stream_from_text(line + "\n")
         assert len(records) == 1
-        assert records[0]["accession"] == "P12345"
-        assert records[0]["go_id"] == "GO:0003674"
-        assert records[0]["evidence_code"] == "IDA"
+        assert records[0].accession == "P12345"
+        assert records[0].go_id == "GO:0003674"
+        assert records[0].evidence_code == "IDA"
 
     def test_skips_comment_lines(self):
         text = "!this is a comment\n" + _gaf_line() + "\n"
@@ -367,7 +369,7 @@ class TestStreamGaf:
         ]
         records = self._stream_from_text("\n".join(lines) + "\n")
         assert len(records) == 3
-        assert [r["accession"] for r in records] == ["A1", "A2", "A3"]
+        assert [r.accession for r in records] == ["A1", "A2", "A3"]
 
     def test_extracts_all_fields(self):
         line = _gaf_line(
@@ -382,14 +384,14 @@ class TestStreamGaf:
         )
         records = self._stream_from_text(line + "\n")
         r = records[0]
-        assert r["accession"] == "Q99999"
-        assert r["go_id"] == "GO:0005575"
-        assert r["qualifier"] == "located_in"
-        assert r["evidence_code"] == "IEA"
-        assert r["db_reference"] == "GO_REF:001"
-        assert r["with_from"] == "InterPro:IPR000001"
-        assert r["annotation_date"] == "20230615"
-        assert r["assigned_by"] == "InterPro"
+        assert r.accession == "Q99999"
+        assert r.go_id == "GO:0005575"
+        assert r.qualifier == "located_in"
+        assert r.evidence_code == "IEA"
+        assert r.db_reference == "GO_REF:001"
+        assert r.with_from == "InterPro:IPR000001"
+        assert r.annotation_date == "20230615"
+        assert r.assigned_by == "InterPro"
 
     def test_gzip_url_uses_gzip_decompression(self):
         import gzip as gzip_mod
@@ -410,7 +412,7 @@ class TestStreamGaf:
         mock_resp.raise_for_status = MagicMock()
 
         with patch(
-            "protea.core.operations.load_goa_annotations.requests.get", return_value=mock_resp
+            "protea_sources.goa.requests.get", return_value=mock_resp
         ):
             records = list(self.op._stream_gaf(payload, emit))
         assert len(records) == 1
@@ -574,16 +576,16 @@ class TestExecute:
             skipped = 0
             seen = set()
             for rec in records:
-                acc = rec["accession"].strip()
+                acc = rec.accession.strip()
                 if not acc or acc not in real_valid:
                     skipped += 1
                     continue
-                go_id = rec["go_id"].strip()
+                go_id = rec.go_id.strip()
                 go_term_id = real_go.get(go_id)
                 if go_term_id is None:
                     skipped += 1
                     continue
-                ev = rec["evidence_code"] or None
+                ev = rec.evidence_code
                 key = (_ann_set_id, acc, go_term_id, ev)
                 if key in seen:
                     skipped += 1
@@ -597,7 +599,7 @@ class TestExecute:
 
         with (
             patch(
-                "protea.core.operations.load_goa_annotations.requests.get",
+                "protea_sources.goa.requests.get",
                 return_value=mock_resp,
             ),
             patch(
