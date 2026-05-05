@@ -35,31 +35,52 @@ class _HttpPayload(Protocol):
     jitter_seconds: float
 
 
-class UniProtHttpMixin:
-    """Shared HTTP retry logic for UniProt REST API operations.
+class UniProtHttpClient:
+    """Composable HTTP client with retries, used by UniProt REST operations.
 
-    Requires the subclass ``__init__`` to set:
-        self._http_requests: int = 0
-        self._http_retries:  int = 0
-        self._http:          requests.Session = requests.Session()
+    Replaces the historical ``UniProtHttpMixin`` (favours composition
+    over inheritance). Operations instantiate one client per execution
+    and read counters from ``client.requests`` / ``client.retries``.
+
+    Example::
+
+        class InsertProteinsOperation:
+            def __init__(self) -> None:
+                self._http_client = UniProtHttpClient()
+
+            def execute(self, session, payload, *, emit):
+                self._http_client.reset()
+                ...
+                resp = self._http_client.get_with_retries(url, p, emit)
+                cursor = self._http_client.extract_next_cursor(link)
     """
 
-    _http: requests.Session
-    _http_requests: int
-    _http_retries: int
+    def __init__(self) -> None:
+        self.session: requests.Session = requests.Session()
+        self.requests: int = 0
+        self.retries: int = 0
 
-    def _get_with_retries(self, url: str, p: _HttpPayload, emit: EmitFn) -> Response:
+    def reset(self) -> None:
+        """Reset request/retry counters before a new execution.
+
+        The underlying ``requests.Session`` is reused across executions
+        so connection pooling stays effective.
+        """
+        self.requests = 0
+        self.retries = 0
+
+    def get_with_retries(self, url: str, p: _HttpPayload, emit: EmitFn) -> Response:
         headers = {"User-Agent": p.user_agent}
         attempt = 0
         while True:
             attempt += 1
-            self._http_requests += 1
+            self.requests += 1
             try:
-                resp = self._http.get(url, timeout=p.timeout_seconds, headers=headers)
+                resp = self.session.get(url, timeout=p.timeout_seconds, headers=headers)
             except requests.RequestException as e:
                 if attempt > p.max_retries:
                     raise
-                self._http_retries += 1
+                self.retries += 1
                 self._sleep_backoff(
                     p, attempt, emit, reason=f"request_exception:{e.__class__.__name__}"
                 )
@@ -71,7 +92,7 @@ class UniProtHttpMixin:
             if resp.status_code in (429, 500, 502, 503, 504):
                 if attempt > p.max_retries:
                     resp.raise_for_status()
-                self._http_retries += 1
+                self.retries += 1
                 retry_after = resp.headers.get("Retry-After")
                 if retry_after and retry_after.isdigit():
                     wait_s = min(float(retry_after), p.backoff_max_seconds)
@@ -99,7 +120,8 @@ class UniProtHttpMixin:
         )
         time.sleep(wait_s)
 
-    def _extract_next_cursor(self, link_header: str) -> str | None:
+    @staticmethod
+    def extract_next_cursor(link_header: str) -> str | None:
         if not link_header or 'rel="next"' not in link_header or "cursor=" not in link_header:
             return None
         try:

@@ -185,7 +185,7 @@ class TestFetchUniProtMetadataOperationExecute:
         session = self._mock_session()
         emit = _capturing_emit()
 
-        with patch.object(self.op._http, "get", return_value=_make_mock_response(TSV_RESPONSE)):
+        with patch.object(self.op._http_client.session, "get", return_value=_make_mock_response(TSV_RESPONSE)):
             result = self.op.execute(
                 session,
                 {"search_criteria": "organism_id:9606", "page_size": 1, "compressed": False},
@@ -201,7 +201,7 @@ class TestFetchUniProtMetadataOperationExecute:
         session = self._mock_session()
         emit = _capturing_emit()
 
-        with patch.object(self.op._http, "get", return_value=_make_mock_response(TSV_RESPONSE)):
+        with patch.object(self.op._http_client.session, "get", return_value=_make_mock_response(TSV_RESPONSE)):
             self.op.execute(
                 session,
                 {"search_criteria": "organism_id:9606", "compressed": False},
@@ -223,7 +223,7 @@ class TestFetchUniProtMetadataOperationExecute:
         session = self._mock_session()
         emit = _capturing_emit()
 
-        with patch.object(self.op._http, "get", return_value=_make_mock_response(tsv)):
+        with patch.object(self.op._http_client.session, "get", return_value=_make_mock_response(tsv)):
             result = self.op.execute(
                 session,
                 {"search_criteria": "q", "total_limit": 1, "compressed": False},
@@ -241,7 +241,7 @@ class TestFetchUniProtMetadataOperationExecute:
         session = self._mock_session()
         emit = _noop_emit
 
-        with patch.object(self.op._http, "get", return_value=_make_mock_response(TSV_RESPONSE)):
+        with patch.object(self.op._http_client.session, "get", return_value=_make_mock_response(TSV_RESPONSE)):
             self.op.execute(
                 session,
                 {"search_criteria": "q", "compressed": False},
@@ -266,7 +266,7 @@ def test_fetch_uniprot_metadata_integration(postgres_url: str):
     emit = _capturing_emit()
 
     with Session(engine, future=True) as session:
-        with patch.object(op._http, "get", return_value=_make_mock_response(TSV_RESPONSE)):
+        with patch.object(op._http_client.session, "get", return_value=_make_mock_response(TSV_RESPONSE)):
             result = op.execute(
                 session,
                 {
@@ -284,7 +284,7 @@ def test_fetch_uniprot_metadata_integration(postgres_url: str):
     # Second run with same data → upsert should not double-insert
     op2 = FetchUniProtMetadataOperation()
     with Session(engine, future=True) as session:
-        with patch.object(op2._http, "get", return_value=_make_mock_response(TSV_RESPONSE)):
+        with patch.object(op2._http_client.session, "get", return_value=_make_mock_response(TSV_RESPONSE)):
             result2 = op2.execute(
                 session,
                 {

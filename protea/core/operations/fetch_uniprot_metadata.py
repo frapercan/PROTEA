@@ -14,7 +14,7 @@ from requests import Response
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
-from protea.core.utils import UniProtHttpMixin, chunks
+from protea.core.utils import UniProtHttpClient, chunks
 from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.orm.models.protein.protein_metadata import ProteinUniProtMetadata
 
@@ -44,7 +44,7 @@ class FetchUniProtMetadataPayload(ProteaPayload, frozen=True):
         return v.strip()
 
 
-class FetchUniProtMetadataOperation(UniProtHttpMixin):
+class FetchUniProtMetadataOperation:
     """Fetches functional annotations from UniProt (TSV) and upserts ProteinUniProtMetadata rows.
 
     One metadata row is stored per canonical accession. Isoforms share the same
@@ -96,16 +96,13 @@ class FetchUniProtMetadataOperation(UniProtHttpMixin):
     }
 
     def __init__(self) -> None:
-        self._http_requests = 0
-        self._http_retries = 0
+        self._http_client = UniProtHttpClient()
         self._total_results: int | None = None
-        self._http = requests.Session()
 
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        self._http_requests = 0
-        self._http_retries = 0
+        self._http_client.reset()
         self._total_results = None
 
         p = FetchUniProtMetadataPayload.model_validate(payload)
@@ -147,8 +144,8 @@ class FetchUniProtMetadataOperation(UniProtHttpMixin):
                     "rows_total": total_rows,
                     "proteins_touched_total": proteins_touched,
                     "metadata_upserted_total": metadata_upserted,
-                    "http_requests": self._http_requests,
-                    "http_retries": self._http_retries,
+                    "http_requests": self._http_client.requests,
+                    "http_retries": self._http_client.retries,
                     "_progress_current": total_rows,
                     **(
                         {"_progress_total": p.total_limit or self._total_results}
@@ -177,8 +174,8 @@ class FetchUniProtMetadataOperation(UniProtHttpMixin):
             "rows": total_rows,
             "proteins_touched": proteins_touched,
             "metadata_upserted": metadata_upserted,
-            "http_requests": self._http_requests,
-            "http_retries": self._http_retries,
+            "http_requests": self._http_client.requests,
+            "http_retries": self._http_client.retries,
             "elapsed_seconds": elapsed,
         }
         emit("fetch_uniprot_metadata.done", None, result, "info")
@@ -241,7 +238,7 @@ class FetchUniProtMetadataOperation(UniProtHttpMixin):
                 "info",
             )
 
-            resp = self._get_with_retries(url, p, emit)
+            resp = self._http_client.get_with_retries(url, p, emit)
             if self._total_results is None:
                 try:
                     self._total_results = int(resp.headers.get("X-Total-Results", 0)) or None
@@ -253,7 +250,7 @@ class FetchUniProtMetadataOperation(UniProtHttpMixin):
             emit("uniprot.fetch_page_done", None, {"page": page, "rows": len(rows)}, "info")
             yield rows
 
-            next_cursor = self._extract_next_cursor(resp.headers.get("link", ""))
+            next_cursor = self._http_client.extract_next_cursor(resp.headers.get("link", ""))
             if not next_cursor:
                 break
 

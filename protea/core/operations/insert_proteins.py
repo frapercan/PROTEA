@@ -15,7 +15,7 @@ from requests import Response
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, Operation, OperationResult, ProteaPayload
-from protea.core.utils import UniProtHttpMixin, chunks
+from protea.core.utils import UniProtHttpClient, chunks
 from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.orm.models.sequence.sequence import Sequence as SequenceModel
 
@@ -44,7 +44,7 @@ class InsertProteinsPayload(ProteaPayload, frozen=True):
         return v.strip()
 
 
-class InsertProteinsOperation(UniProtHttpMixin, Operation):
+class InsertProteinsOperation(Operation):
     """Fetches protein sequences from UniProt (FASTA) and upserts them into the DB.
 
     Uses cursor-based pagination, exponential backoff with jitter, and MD5-based
@@ -78,16 +78,13 @@ class InsertProteinsOperation(UniProtHttpMixin, Operation):
     _re_gn = re.compile(r"\bGN=([^\s]+)")
 
     def __init__(self) -> None:
-        self._http_requests = 0
-        self._http_retries = 0
+        self._http_client = UniProtHttpClient()
         self._total_results: int | None = None
-        self._http = requests.Session()
 
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        self._http_requests = 0
-        self._http_retries = 0
+        self._http_client.reset()
         self._total_results = None
 
         p = InsertProteinsPayload.model_validate(payload)
@@ -137,8 +134,8 @@ class InsertProteinsOperation(UniProtHttpMixin, Operation):
                     "proteins_updated_total": proteins_updated,
                     "sequences_inserted_total": sequences_inserted,
                     "sequences_reused_total": sequences_reused,
-                    "http_requests": self._http_requests,
-                    "http_retries": self._http_retries,
+                    "http_requests": self._http_client.requests,
+                    "http_retries": self._http_client.retries,
                     "_progress_current": retrieved,
                     **(
                         {"_progress_total": p.total_limit or self._total_results}
@@ -167,8 +164,8 @@ class InsertProteinsOperation(UniProtHttpMixin, Operation):
                 "proteins_updated": proteins_updated,
                 "sequences_inserted": sequences_inserted,
                 "sequences_reused": sequences_reused,
-                "http_requests": self._http_requests,
-                "http_retries": self._http_retries,
+                "http_requests": self._http_client.requests,
+                "http_retries": self._http_client.retries,
                 "elapsed_seconds": elapsed,
             },
             "info",
@@ -183,8 +180,8 @@ class InsertProteinsOperation(UniProtHttpMixin, Operation):
                 "proteins_updated": proteins_updated,
                 "sequences_inserted": sequences_inserted,
                 "sequences_reused": sequences_reused,
-                "http_requests": self._http_requests,
-                "http_retries": self._http_retries,
+                "http_requests": self._http_client.requests,
+                "http_retries": self._http_client.retries,
                 "elapsed_seconds": elapsed,
             }
         )
@@ -214,7 +211,7 @@ class InsertProteinsOperation(UniProtHttpMixin, Operation):
                 "info",
             )
 
-            resp = self._get_with_retries(url, p, emit)
+            resp = self._http_client.get_with_retries(url, p, emit)
             if self._total_results is None:
                 try:
                     self._total_results = int(resp.headers.get("X-Total-Results", 0)) or None
@@ -226,7 +223,7 @@ class InsertProteinsOperation(UniProtHttpMixin, Operation):
             emit("uniprot.fetch_page_done", None, {"page": page, "records": len(records)}, "info")
             yield records
 
-            next_cursor = self._extract_next_cursor(resp.headers.get("link", ""))
+            next_cursor = self._http_client.extract_next_cursor(resp.headers.get("link", ""))
             if not next_cursor:
                 break
 

@@ -20,7 +20,7 @@ from protea.core.operations.fetch_uniprot_metadata import (
     FetchUniProtMetadataPayload,
 )
 from protea.core.operations.ping import PingOperation
-from protea.core.utils import UniProtHttpMixin, chunks
+from protea.core.utils import UniProtHttpClient, chunks
 
 # ---------------------------------------------------------------------------
 # OperationRegistry
@@ -103,7 +103,7 @@ class TestChunks:
 
 
 # ---------------------------------------------------------------------------
-# UniProtHttpMixin
+# UniProtHttpClient
 # ---------------------------------------------------------------------------
 
 
@@ -118,89 +118,90 @@ def _make_payload(max_retries=3, backoff_base=0.01, backoff_max=0.1, jitter=0.0)
     return p
 
 
-class _ConcreteHttp(UniProtHttpMixin):
-    def __init__(self):
-        self._http_requests = 0
-        self._http_retries = 0
-        self._http = MagicMock()
+def _make_client() -> UniProtHttpClient:
+    client = UniProtHttpClient()
+    client.session = MagicMock()
+    return client
 
 
 def _noop_emit(*_):
     return None
 
 
-class TestUniProtHttpMixin:
-    def _obj(self) -> _ConcreteHttp:
-        return _ConcreteHttp()
-
+class TestUniProtHttpClient:
     def test_returns_response_on_200(self) -> None:
-        obj = self._obj()
+        client = _make_client()
         resp = MagicMock()
         resp.status_code = 200
-        obj._http.get.return_value = resp
-        result = obj._get_with_retries("http://x", _make_payload(), _noop_emit)
+        client.session.get.return_value = resp
+        result = client.get_with_retries("http://x", _make_payload(), _noop_emit)
         assert result is resp
 
     def test_retries_on_429(self) -> None:
-        obj = self._obj()
+        client = _make_client()
         bad = MagicMock()
         bad.status_code = 429
         bad.headers = {}
         good = MagicMock()
         good.status_code = 200
-        obj._http.get.side_effect = [bad, good]
+        client.session.get.side_effect = [bad, good]
         with patch("protea.core.utils.time.sleep"):
-            result = obj._get_with_retries("http://x", _make_payload(), _noop_emit)
+            result = client.get_with_retries("http://x", _make_payload(), _noop_emit)
         assert result is good
-        assert obj._http_retries == 1
+        assert client.retries == 1
 
     def test_uses_retry_after_header(self) -> None:
-        obj = self._obj()
+        client = _make_client()
         bad = MagicMock()
         bad.status_code = 429
         bad.headers = {"Retry-After": "5"}
         good = MagicMock()
         good.status_code = 200
-        obj._http.get.side_effect = [bad, good]
+        client.session.get.side_effect = [bad, good]
         sleep_calls = []
         with patch("protea.core.utils.time.sleep", side_effect=sleep_calls.append):
-            obj._get_with_retries("http://x", _make_payload(backoff_max=30.0), _noop_emit)
+            client.get_with_retries("http://x", _make_payload(backoff_max=30.0), _noop_emit)
         assert len(sleep_calls) == 1
         assert sleep_calls[0] == pytest.approx(5.0)
 
     def test_raises_after_max_retries(self) -> None:
-        obj = self._obj()
+        client = _make_client()
         bad = MagicMock()
         bad.status_code = 503
         bad.headers = {}
         bad.raise_for_status.side_effect = requests.HTTPError("503")
-        obj._http.get.return_value = bad
+        client.session.get.return_value = bad
         with patch("protea.core.utils.time.sleep"):
             with pytest.raises(requests.HTTPError):
-                obj._get_with_retries("http://x", _make_payload(max_retries=2), _noop_emit)
+                client.get_with_retries("http://x", _make_payload(max_retries=2), _noop_emit)
 
     def test_retries_on_network_exception(self) -> None:
-        obj = self._obj()
+        client = _make_client()
         good = MagicMock()
         good.status_code = 200
-        obj._http.get.side_effect = [requests.ConnectionError("down"), good]
+        client.session.get.side_effect = [requests.ConnectionError("down"), good]
         with patch("protea.core.utils.time.sleep"):
-            result = obj._get_with_retries("http://x", _make_payload(), _noop_emit)
+            result = client.get_with_retries("http://x", _make_payload(), _noop_emit)
         assert result is good
 
+    def test_reset_clears_counters(self) -> None:
+        client = _make_client()
+        client.requests = 7
+        client.retries = 3
+        client.reset()
+        assert client.requests == 0
+        assert client.retries == 0
+
     def test_extract_next_cursor_present(self) -> None:
-        obj = self._obj()
         header = '<https://rest.uniprot.org/uniprotkb/search?cursor=ABCD1234>; rel="next"'
-        assert obj._extract_next_cursor(header) == "ABCD1234"
+        assert UniProtHttpClient.extract_next_cursor(header) == "ABCD1234"
 
     def test_extract_next_cursor_absent(self) -> None:
-        obj = self._obj()
-        assert obj._extract_next_cursor("") is None
-        assert obj._extract_next_cursor('<http://x>; rel="prev"') is None
+        assert UniProtHttpClient.extract_next_cursor("") is None
+        assert UniProtHttpClient.extract_next_cursor('<http://x>; rel="prev"') is None
 
     def test_extract_next_cursor_no_cursor_param(self) -> None:
-        obj = self._obj()
-        assert obj._extract_next_cursor('<http://x?page=2>; rel="next"') is None
+        assert UniProtHttpClient.extract_next_cursor('<http://x?page=2>; rel="next"') is None
 
 
 # ---------------------------------------------------------------------------
@@ -299,7 +300,7 @@ def _make_tsv_content(rows: list[dict[str, str]], compressed: bool = True) -> by
 class TestFetchUniProtMetadataExecute:
     def _make_op(self):
         op = FetchUniProtMetadataOperation()
-        op._http = MagicMock()
+        op._http_client.session = MagicMock()
         return op
 
     def test_execute_empty_page_continues(self):
@@ -315,7 +316,7 @@ class TestFetchUniProtMetadataExecute:
         resp.status_code = 200
         resp.headers = {"X-Total-Results": "0"}
         resp.content = _make_tsv_content([], compressed=True)
-        op._http.get.return_value = resp
+        op._http_client.session.get.return_value = resp
 
         session = MagicMock()
         payload = {"search_criteria": "organism_id:9606", "page_size": 10}
@@ -345,7 +346,7 @@ class TestFetchUniProtMetadataExecute:
         resp.status_code = 200
         resp.headers = {"X-Total-Results": "5"}
         resp.content = _make_tsv_content(rows, compressed=True)
-        op._http.get.return_value = resp
+        op._http_client.session.get.return_value = resp
 
         session = MagicMock()
         session.query.return_value.filter.return_value.all.return_value = []
@@ -388,7 +389,7 @@ class TestFetchUniProtMetadataExecute:
         )
         resp2.content = _make_tsv_content(rows2, compressed=True)
 
-        op._http.get.side_effect = [resp1, resp2]
+        op._http_client.session.get.side_effect = [resp1, resp2]
 
         session = MagicMock()
         session.query.return_value.filter.return_value.all.return_value = []
@@ -411,7 +412,7 @@ class TestFetchUniProtMetadataExecute:
         resp.status_code = 200
         resp.headers = {"X-Total-Results": "not-a-number"}
         resp.content = _make_tsv_content([], compressed=True)
-        op._http.get.return_value = resp
+        op._http_client.session.get.return_value = resp
 
         session = MagicMock()
         payload = {"search_criteria": "test", "page_size": 10}

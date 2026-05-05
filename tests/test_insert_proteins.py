@@ -397,7 +397,7 @@ class TestInsertProteinsOperationExecute:
         session = _make_mock_session()
         emit = _capturing_emit()
 
-        with patch.object(self.op._http, "get", return_value=_make_mock_response(FASTA_ONE)):
+        with patch.object(self.op._http_client.session, "get", return_value=_make_mock_response(FASTA_ONE)):
             result = self.op.execute(
                 session,
                 {"search_criteria": "organism_id:9606", "compressed": False},
@@ -414,7 +414,7 @@ class TestInsertProteinsOperationExecute:
         session = _make_mock_session()
         emit = _capturing_emit()
 
-        with patch.object(self.op._http, "get", return_value=_make_mock_response(FASTA_ONE)):
+        with patch.object(self.op._http_client.session, "get", return_value=_make_mock_response(FASTA_ONE)):
             self.op.execute(
                 session,
                 {"search_criteria": "q", "compressed": False},
@@ -429,7 +429,7 @@ class TestInsertProteinsOperationExecute:
         session = _make_mock_session()
         emit = _capturing_emit()
 
-        with patch.object(self.op._http, "get", return_value=_make_mock_response(FASTA_TWO)):
+        with patch.object(self.op._http_client.session, "get", return_value=_make_mock_response(FASTA_TWO)):
             result = self.op.execute(
                 session,
                 {"search_criteria": "q", "total_limit": 1, "compressed": False},
@@ -443,7 +443,7 @@ class TestInsertProteinsOperationExecute:
     def test_execute_calls_session_add_all_for_new_protein(self):
         session = _make_mock_session()
 
-        with patch.object(self.op._http, "get", return_value=_make_mock_response(FASTA_ONE)):
+        with patch.object(self.op._http_client.session, "get", return_value=_make_mock_response(FASTA_ONE)):
             self.op.execute(
                 session,
                 {"search_criteria": "q", "compressed": False},
@@ -456,7 +456,7 @@ class TestInsertProteinsOperationExecute:
         session = _make_mock_session()
         emit = _capturing_emit()
 
-        with patch.object(self.op._http, "get", return_value=_make_mock_response(FASTA_TWO)):
+        with patch.object(self.op._http_client.session, "get", return_value=_make_mock_response(FASTA_TWO)):
             result = self.op.execute(
                 session,
                 {"search_criteria": "q", "compressed": False},
@@ -472,7 +472,7 @@ class TestInsertProteinsOperationExecute:
         emit = _capturing_emit()
         # First response is empty FASTA, no link header → single page with 0 records
         empty_resp = _make_mock_response("")
-        with patch.object(self.op._http, "get", return_value=empty_resp):
+        with patch.object(self.op._http_client.session, "get", return_value=empty_resp):
             result = self.op.execute(
                 session,
                 {"search_criteria": "q", "compressed": False},
@@ -502,7 +502,7 @@ class TestInsertProteinsOperationExecute:
                 return page1_resp
             return page2_resp
 
-        with patch.object(self.op._http, "get", side_effect=get_side_effect):
+        with patch.object(self.op._http_client.session, "get", side_effect=get_side_effect):
             result = self.op.execute(
                 session,
                 {"search_criteria": "q", "total_limit": 2, "compressed": False},
@@ -530,7 +530,7 @@ class TestInsertProteinsOperationExecute:
         resp.headers = {"link": ""}
         resp.raise_for_status = MagicMock()
 
-        with patch.object(self.op._http, "get", return_value=resp) as mock_get:
+        with patch.object(self.op._http_client.session, "get", return_value=resp) as mock_get:
             self.op.execute(
                 session,
                 {"search_criteria": "q", "compressed": True},
@@ -549,7 +549,7 @@ class TestInsertProteinsOperationExecute:
         resp.headers["X-Total-Results"] = "42"
 
         op = InsertProteinsOperation()
-        with patch.object(op._http, "get", return_value=resp):
+        with patch.object(op._http_client.session, "get", return_value=resp):
             op.execute(
                 session,
                 {"search_criteria": "q", "compressed": False},
@@ -567,7 +567,7 @@ class TestInsertProteinsOperationExecute:
         resp.headers["X-Total-Results"] = "not-a-number"
 
         op = InsertProteinsOperation()
-        with patch.object(op._http, "get", return_value=resp):
+        with patch.object(op._http_client.session, "get", return_value=resp):
             op.execute(
                 session,
                 {"search_criteria": "q", "compressed": False},
@@ -598,7 +598,7 @@ class TestInsertProteinsOperationExecute:
             return page2_resp
 
         op = InsertProteinsOperation()
-        with patch.object(op._http, "get", side_effect=get_side_effect):
+        with patch.object(op._http_client.session, "get", side_effect=get_side_effect):
             result = op.execute(
                 session,
                 {"search_criteria": "q", "compressed": False},
@@ -618,7 +618,7 @@ class TestInsertProteinsOperationExecute:
         op = InsertProteinsOperation()
 
         with patch.object(
-            op._http,
+            op._http_client.session,
             "get",
             side_effect=req.ConnectionError("network down"),
         ):
@@ -647,7 +647,7 @@ class TestInsertProteinsOperationExecute:
         )
         resp = _make_mock_response(fasta_with_isoform)
         op = InsertProteinsOperation()
-        with patch.object(op._http, "get", return_value=resp):
+        with patch.object(op._http_client.session, "get", return_value=resp):
             result = op.execute(
                 session,
                 {"search_criteria": "q", "compressed": False},
@@ -665,7 +665,7 @@ class TestInsertProteinsOperationExecute:
         resp.headers["X-Total-Results"] = "100"
 
         op = InsertProteinsOperation()
-        with patch.object(op._http, "get", return_value=resp):
+        with patch.object(op._http_client.session, "get", return_value=resp):
             op.execute(
                 session,
                 {"search_criteria": "q", "compressed": False},
@@ -683,7 +683,7 @@ class TestInsertProteinsOperationExecute:
         session = _make_mock_session()
         resp = _make_mock_response(FASTA_ONE)
         op = InsertProteinsOperation()
-        with patch.object(op._http, "get", return_value=resp) as mock_get:
+        with patch.object(op._http_client.session, "get", return_value=resp) as mock_get:
             op.execute(
                 session,
                 {"search_criteria": "q", "compressed": False, "include_isoforms": False},
@@ -708,7 +708,7 @@ def test_insert_proteins_integration(postgres_url: str):
     emit = _capturing_emit()
 
     with Session(engine, future=True) as session:
-        with patch.object(op._http, "get", return_value=_make_mock_response(FASTA_TWO)):
+        with patch.object(op._http_client.session, "get", return_value=_make_mock_response(FASTA_TWO)):
             result = op.execute(
                 session,
                 {"search_criteria": "organism_id:9606", "compressed": False},
@@ -722,7 +722,7 @@ def test_insert_proteins_integration(postgres_url: str):
     # Idempotency: second run should update, not re-insert
     op2 = InsertProteinsOperation()
     with Session(engine, future=True) as session:
-        with patch.object(op2._http, "get", return_value=_make_mock_response(FASTA_TWO)):
+        with patch.object(op2._http_client.session, "get", return_value=_make_mock_response(FASTA_TWO)):
             result2 = op2.execute(
                 session,
                 {"search_criteria": "organism_id:9606", "compressed": False},
