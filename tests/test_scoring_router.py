@@ -669,6 +669,11 @@ def _make_eval_set():
     es.id = uuid4()
     es.old_annotation_set_id = uuid4()
     es.new_annotation_set_id = uuid4()
+    # When None, scoring router takes the on-the-fly compute_evaluation_data
+    # branch (which tests mock); a truthy MagicMock pulls the persisted
+    # artifact path that needs a real UUID for pivot_ontology_snapshot_id.
+    es.groundtruth_uri = None
+    es.stats = None
     return es
 
 

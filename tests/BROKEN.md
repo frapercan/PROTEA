@@ -1,46 +1,40 @@
 # Broken tests inventory
 
-Snapshot 2026-05-05 tras T0.1 cobertura baseline. Los siguientes tests fallan en HEAD `7e8de14` (rama `refactor/post-lab-stabilization`). Corresponden a deuda preexistente o regresiones que se arreglan como parte del trabajo de F0/F2 del master plan.
+Snapshot 2026-05-05 tras T0.1b. Suite unit verde end-to-end: **1056 passed, 10 skipped, 0 failed**.
 
-## A. Resueltos en este pase (T0.1)
+Política: este fichero registra cualquier test que esté roto en `master` o `refactor/*`. Si está vacío, la suite está limpia.
 
-- `tests/test_queue.py::TestPublishJob::test_exponential_backoff_delays`
-- `tests/test_queue.py::TestPublishJob::test_closes_connection_on_exception`
+## Histórico de resoluciones
 
-Causa: regresión directa del commit `e299672` (publisher retry 5 to 12). Tests actualizados a las nuevas constantes; verde.
+### T0.1b — 2026-05-05
 
-## B. Pendientes: payload schema drift
+Resueltos en este pase los 16 tests rotos detectados en T0.1:
 
-14 tests en `tests/test_predict_go_terms.py` fallan porque sus fixtures no pasan `ontology_snapshot_id`, ahora campo requerido en `PredictGOTermsPayload` y `PredictGOTermsBatchPayload` (`predict_go_terms.py:165, 237`). Previo a este snapshot.
+**A. Regresiones de los 5 commits previos (2 tests)**
 
-Tests afectados:
+- `test_queue.py::TestPublishJob::test_exponential_backoff_delays`
+- `test_queue.py::TestPublishJob::test_closes_connection_on_exception`
 
-- `TestPredictBatch::test_transfers_go_annotations_from_nearest_neighbor`
-- `TestPredictBatch::test_includes_self_as_first_reference`
-- `TestPredictBatch::test_distance_threshold_filters_far_neighbors`
-- `TestPredictBatch::test_limit_per_entry_caps_neighbors`
-- `TestPredictBatchParentCancellation::test_skips_when_parent_cancelled`
-- `TestPredictBatchParentCancellation::test_skips_when_parent_failed`
+Causa: commit `e299672` subió publisher retry de 5 a 12. Tests actualizados a las nuevas constantes.
+
+**B. Payload schema drift en `test_predict_go_terms.py` (12 tests)**
+
+- `TestPredictBatch::*` (4 tests)
+- `TestPredictBatchParentCancellation::*` (2 tests)
 - `TestPredictGOTermsBatchPayload::test_valid_payload`
 - `TestPredictGOTermsBatchPayload::test_feature_flags_default_false`
-- `TestPredictBatchRerankerFeatures::test_reranker_features_included_when_enabled`
-- `TestPredictBatchRerankerFeatures::test_reranker_features_excluded_when_disabled`
-- `TestPredictGOTermsBatchReranker::test_skipped_when_artifact_context_missing`
-- `TestPredictGOTermsBatchReranker::test_schema_mismatch_falls_back`
-- `TestPredictGOTermsBatchReranker::test_applies_when_schema_matches`
-- `TestPredictGOTermsBatchReranker::test_no_reranker_leaves_dicts_untouched`
+- `TestPredictBatchRerankerFeatures::*` (2 tests)
+- `TestPredictGOTermsBatchReranker::*` (4 tests)
 
-Reparación: añadir `"ontology_snapshot_id": str(uuid.uuid4())` (o usar el existente del fixture) en cada payload de test. Dejado para T0.2 (safe_emit) que toca tests, o como hard-prerequisite a T2B.4 (extract class de `PredictGOTermsBatchOperation`) que reescribirá estas suites.
+Causa: `ontology_snapshot_id` añadido como campo requerido en `PredictGOTermsPayload` y `PredictGOTermsBatchPayload`. Fixtures y payloads inline no se actualizaron al añadirlo. Patch: 5 ediciones añadiendo `"ontology_snapshot_id": _SNAPSHOT_ID` (constante ya existente) en `_payload()` helpers e inline.
 
-## C. Pendientes: scoring router metrics
+**C. EvaluationSet mock fields drift en `test_scoring_router.py` (2 tests)**
 
-- `tests/test_scoring_router.py::TestRerankerMetrics::test_returns_metrics`
-- `tests/test_scoring_router.py::TestRerankerMetrics::test_empty_predictions_returns_zero_metrics`
+- `TestRerankerMetrics::test_returns_metrics`
+- `TestRerankerMetrics::test_empty_predictions_returns_zero_metrics`
 
-Causa pendiente de diagnóstico. Si es deuda similar a B, mismo tratamiento.
+Causa: `EvaluationSet.groundtruth_uri` añadido al modelo; el helper `_make_eval_set()` lo dejaba como MagicMock truthy, lo que enrutaba el handler hacia el path persisted-artifact (que no estaba mockeado) en lugar del path on-the-fly (sí mockeado). Patch: `_make_eval_set()` setea explícitamente `groundtruth_uri = None` y `stats = None`.
 
-## Política
+## Hard rule
 
-- Cada test en B y C que pasa por una refactor de F0-F2, se arregla a la vez.
-- Antes de cerrar F2, este fichero debe estar vacío o con explicación de exclusión por test.
-- Cualquier nueva regresión se añade aquí con su causa documentada.
+Antes de cerrar cualquier fase mayor del master plan, este fichero debe estar vacío o con explicación de exclusión por test.

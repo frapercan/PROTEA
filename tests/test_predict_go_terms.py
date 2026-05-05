@@ -289,11 +289,12 @@ class TestPredictBatch:
         defaults = {
             "embedding_config_id": str(uuid.uuid4()),
             "annotation_set_id": _ANN_SET_ID,
+            "ontology_snapshot_id": _SNAPSHOT_ID,
             "prediction_set_id": str(uuid.uuid4()),
             "parent_job_id": str(uuid.uuid4()),
             "query_accessions": [],
             "limit_per_entry": 2,
-            # Opt out of features that require sequences/taxonomy — the mock
+            # Opt out of features that require sequences/taxonomy: the mock
             # ref_data in this class never provides them.
             "compute_alignments": False,
             "compute_taxonomy": False,
@@ -660,6 +661,7 @@ class TestPredictBatchParentCancellation:
         payload = {
             "embedding_config_id": str(uuid.uuid4()),
             "annotation_set_id": str(uuid.uuid4()),
+            "ontology_snapshot_id": _SNAPSHOT_ID,
             "prediction_set_id": str(uuid.uuid4()),
             "parent_job_id": str(uuid.uuid4()),
             "query_accessions": ["P1"],
@@ -678,6 +680,7 @@ class TestPredictBatchParentCancellation:
         payload = {
             "embedding_config_id": str(uuid.uuid4()),
             "annotation_set_id": str(uuid.uuid4()),
+            "ontology_snapshot_id": _SNAPSHOT_ID,
             "prediction_set_id": str(uuid.uuid4()),
             "parent_job_id": str(uuid.uuid4()),
             "query_accessions": ["P1"],
@@ -775,6 +778,7 @@ class TestPredictGOTermsBatchPayload:
             {
                 "embedding_config_id": str(uuid.uuid4()),
                 "annotation_set_id": str(uuid.uuid4()),
+                "ontology_snapshot_id": _SNAPSHOT_ID,
                 "prediction_set_id": str(uuid.uuid4()),
                 "parent_job_id": str(uuid.uuid4()),
                 "query_accessions": ["P1", "P2"],
@@ -788,6 +792,7 @@ class TestPredictGOTermsBatchPayload:
             {
                 "embedding_config_id": str(uuid.uuid4()),
                 "annotation_set_id": str(uuid.uuid4()),
+                "ontology_snapshot_id": _SNAPSHOT_ID,
                 "prediction_set_id": str(uuid.uuid4()),
                 "parent_job_id": str(uuid.uuid4()),
                 "query_accessions": [],
@@ -811,11 +816,12 @@ class TestPredictBatchRerankerFeatures:
         defaults = {
             "embedding_config_id": str(uuid.uuid4()),
             "annotation_set_id": _ANN_SET_ID,
+            "ontology_snapshot_id": _SNAPSHOT_ID,
             "prediction_set_id": str(uuid.uuid4()),
             "parent_job_id": str(uuid.uuid4()),
             "query_accessions": [],
             "limit_per_entry": 2,
-            # Reranker features ON, alignments/taxonomy OFF — this suite only
+            # Reranker features ON, alignments/taxonomy OFF: this suite only
             # exercises voting/neighbor-stat features, not NW/SW or taxonomy.
             "compute_alignments": False,
             "compute_taxonomy": False,
@@ -978,6 +984,7 @@ class TestPredictGOTermsBatchReranker:
         defaults = {
             "embedding_config_id": str(uuid.uuid4()),
             "annotation_set_id": _ANN_SET_ID,
+            "ontology_snapshot_id": _SNAPSHOT_ID,
             "prediction_set_id": str(uuid.uuid4()),
             "parent_job_id": str(uuid.uuid4()),
             "query_accessions": ["Q1"],
