@@ -11,8 +11,8 @@ import pika
 
 logger = logging.getLogger(__name__)
 
-_MAX_ATTEMPTS = 5
-_BASE_DELAY = 1  # seconds; exponential backoff: 1, 2, 4, 8, 16 (capped at 30)
+_MAX_ATTEMPTS = 12
+_BASE_DELAY = 1  # seconds; exponential backoff: 1, 2, 4, 8, 16 (capped at 30); 12 attempts cover ~4 min of broker downtime
 
 # Thread-local persistent connection to avoid opening/closing per publish.
 _local = threading.local()
