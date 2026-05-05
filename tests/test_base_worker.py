@@ -188,6 +188,95 @@ class TestBaseWorkerHandleJob:
 
         assert exc_info.value.delay_seconds == 600
 
+    def test_retryable_db_error_is_retried_then_succeeds(self):
+        """Postgres deadlock during op.execute() retries until the op succeeds."""
+        from sqlalchemy.exc import OperationalError
+
+        job = _make_job()
+        session = MagicMock()
+        session.get.return_value = job
+        factory = MagicMock(return_value=session)
+
+        # First call raises retryable OperationalError; second succeeds.
+        attempts = {"n": 0}
+
+        def _execute(sess, payload, *, emit):
+            attempts["n"] += 1
+            if attempts["n"] == 1:
+                orig = MagicMock()
+                orig.pgcode = "40P01"  # deadlock_detected
+                err = OperationalError("stmt", {}, orig)
+                err.orig = orig
+                raise err
+            return OperationResult(result={"ok": True})
+
+        op = MagicMock()
+        op.name = "ping"
+        op.execute.side_effect = _execute
+        registry = OperationRegistry()
+        registry.register(op)
+
+        worker = BaseWorker(factory, registry, WorkerConfig(worker_name="test"))
+        with patch("protea.core.retry.time.sleep"):
+            worker.handle_job(job.id)
+
+        assert attempts["n"] == 2
+        assert job.status == JobStatus.SUCCEEDED
+
+    def test_retryable_db_error_max_attempts_then_fails(self):
+        """If retryable error keeps recurring, after max_attempts the job is FAILED."""
+        from sqlalchemy.exc import OperationalError
+
+        job = _make_job()
+        session = MagicMock()
+        session.get.return_value = job
+        factory = MagicMock(return_value=session)
+
+        def _always_deadlock(sess, payload, *, emit):
+            orig = MagicMock()
+            orig.pgcode = "40P01"
+            err = OperationalError("stmt", {}, orig)
+            err.orig = orig
+            raise err
+
+        op = MagicMock()
+        op.name = "ping"
+        op.execute.side_effect = _always_deadlock
+        registry = OperationRegistry()
+        registry.register(op)
+
+        worker = BaseWorker(factory, registry, WorkerConfig(worker_name="test"))
+        with patch("protea.core.retry.time.sleep"):
+            with pytest.raises(OperationalError):
+                worker.handle_job(job.id)
+
+        # 3 attempts (max_attempts=3 in handle_job).
+        assert op.execute.call_count == 3
+        # Retry-exhausted path uses the fallback session via sa_update,
+        # so the in-memory mock Job is not directly mutated. Verify the
+        # fallback session.execute was invoked instead.
+        # session was reused as the factory's only fixture, so an
+        # update statement should have run on it.
+        assert any(
+            "UPDATE" in str(call.args[0]).upper() if call.args else False
+            for call in session.execute.call_args_list
+        )
+
+    def test_non_retryable_error_does_not_retry(self):
+        """Non-infrastructure errors propagate immediately, single attempt."""
+        job = _make_job()
+        session = MagicMock()
+        session.get.return_value = job
+        factory = MagicMock(return_value=session)
+        registry, op = _make_registry(raises=ValueError("bad payload"))
+
+        worker = BaseWorker(factory, registry, WorkerConfig(worker_name="test"))
+        with pytest.raises(ValueError, match="bad payload"):
+            worker.handle_job(job.id)
+
+        assert op.execute.call_count == 1
+        assert job.status == JobStatus.FAILED
+
 
 # ---------------------------------------------------------------------------
 # StaleJobReaper
