@@ -1,15 +1,15 @@
-"""Process-shared PCA state for the predict_go_terms pipeline.
+"""Process-shared PCA state cache — thin shim over ``protea_method.pca_cache``.
 
-The PCA projection of reference embeddings into 16 dims is a feature
-input for the lab re-ranker. Fitting it on the full reference pool is
-expensive (~50k samples × ~1280 dims) and the result is deterministic
-for a given ``EmbeddingConfig`` — so we materialise ``(mean, components)``
-into a single ``.npz`` artifact and reuse it across all workers and
-prediction sets that share the config.
+The implementation lives in the standalone ``protea-method`` library
+(F2C extraction, 2026-05-07). This module is a backwards-compatible
+shim so existing PROTEA call sites that import from
+``protea.core.pca_cache`` keep working without changes; new code
+should import directly from ``protea_method.pca_cache``.
 
-Artifact layout: one file per ``EmbeddingConfig``:
-``{_PCA_ARTIFACTS_DIR}/{embedding_config_id}.npz`` with two arrays
-``mean`` (D,) float32 and ``components`` (16, D) float32.
+The PROTEA-specific default artifact directory
+(``protea/artifacts/pca/``) is preserved; the underlying helper
+accepts an explicit ``artifacts_dir`` kwarg so the path stays under
+the PROTEA repo regardless of CWD.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
-from protea.core.reranker import EMBEDDING_PCA_DIM, fit_embedding_pca
+from protea_method.pca_cache import load_or_fit_pca_state as _lib_load_or_fit
 
 _PCA_ARTIFACTS_DIR = Path(
     os.environ.get(
@@ -66,18 +66,15 @@ def _load_or_fit_pca_state(
 ) -> tuple[np.ndarray, np.ndarray] | None:
     """Load PCA state from disk or fit on the reference pool.
 
-    Returns ``None`` when the reference pool is empty (no projection possible).
-    The artifact is shared across all workers and every prediction_set that
-    uses this ``EmbeddingConfig`` — fit once, reuse forever.
+    Delegates to ``protea_method.pca_cache.load_or_fit_pca_state``
+    with the PROTEA-specific artifact directory; returns ``None``
+    when the reference pool is empty.
     """
-    cached = _load_pca_state(embedding_config_id)
-    if cached is not None:
-        return cached
-    if unified_embeddings_f32.size == 0:
-        return None
-    mean, components = fit_embedding_pca(unified_embeddings_f32, EMBEDDING_PCA_DIM)
-    _save_pca_state(embedding_config_id, mean, components)
-    return mean, components
+    return _lib_load_or_fit(
+        embedding_config_id,
+        unified_embeddings_f32,
+        artifacts_dir=_PCA_ARTIFACTS_DIR,
+    )
 
 
 __all__ = [
