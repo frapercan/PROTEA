@@ -84,6 +84,52 @@ bash scripts/manage.sh start
 
 ---
 
+## 5 minutes to your first job
+
+With the stack running locally, you can submit a job and watch it
+move through the queue + worker + DB lifecycle in under 5 minutes.
+
+```bash
+# 1. Submit a `ping` job (the smoke-test operation).
+JOB_ID=$(curl -s -X POST http://localhost:8000/jobs \
+  -H 'content-type: application/json' \
+  -d '{"operation": "ping", "queue_name": "protea.ping", "payload": {}}' \
+  | jq -r '.id')
+echo "queued: $JOB_ID"
+
+# 2. Tail the structured-event log until the job reaches a terminal state.
+curl -s "http://localhost:8000/jobs/$JOB_ID/events" | jq -c '.[]'
+# {"event":"ping.start","fields":null,"level":"info","ts":"..."}
+# {"event":"ping.done","fields":{"latency_ms":1.2},"level":"info","ts":"..."}
+
+# 3. Check the final job row + result.
+curl -s "http://localhost:8000/jobs/$JOB_ID" | jq '{status, result, error_code}'
+# {"status":"succeeded","result":{"echo":"pong"},"error_code":null}
+```
+
+That round-trip exercises the full machinery: HTTP enqueue → AMQP
+publish → worker claim → operation execute → JobEvent stream → DB
+commit → REST query. Real operations (`insert_proteins`,
+`load_goa_annotations`, `compute_embeddings`, `predict_go_terms`)
+are submitted the same way; their payloads are documented at
+`/docs` (Swagger UI) and in the operation-catalog page of the
+Sphinx docs.
+
+Discovering the installed plugins (added in F2B turn 36):
+
+```bash
+curl -s http://localhost:8000/backends | jq '.plugins[].name'
+# "ankh", "esm", "esm3c", "t5"
+
+curl -s http://localhost:8000/sources | jq '.plugins[].name'
+# "goa", "quickgo", "uniprot"
+
+curl -s http://localhost:8000/runners | jq '.plugins[].name'
+# "baseline", "knn", "lightgbm"
+```
+
+---
+
 ## Documentation
 
 Full documentation at **https://protea.readthedocs.io**
