@@ -732,7 +732,10 @@ def load_evaluation_data_for_set(session: Session, eval_set) -> tuple[Evaluation
     if pivot_raw:
         pivot_id = uuid.UUID(str(pivot_raw))
     else:
-        pivot_id = ann_new.ontology_snapshot_id if ann_new else ann_old.ontology_snapshot_id
+        # Both ann_new and ann_old are validated non-None by the caller
+        # (run_cafa_evaluation); the ternary short-circuits before
+        # dereferencing ann_old when ann_new is set.
+        pivot_id = ann_new.ontology_snapshot_id if ann_new else ann_old.ontology_snapshot_id  # type: ignore[union-attr]
 
     if not eval_set.groundtruth_uri:
         raise RuntimeError(

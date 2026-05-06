@@ -23,7 +23,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 import numpy as np
 import pandas as pd
@@ -517,11 +517,15 @@ def _knn_transfer_and_label(
                         continue
                     feats: dict[str, Any] = {}
                     if do_alignments:
+                        # do_alignments implies both dicts are non-None.
+                        assert query_sequences is not None and ref_sequences is not None
                         q_seq = query_sequences.get(q_acc, "")
                         r_seq = ref_sequences.get(ref_acc, "")
                         if q_seq and r_seq:
                             feats.update(compute_alignment(q_seq, r_seq))
                     if do_taxonomy:
+                        # do_taxonomy implies both dicts are non-None.
+                        assert query_tax_ids is not None and ref_tax_ids is not None
                         q_tid = query_tax_ids.get(q_acc)
                         r_tid = ref_tax_ids.get(ref_acc)
                         feats.update(compute_taxonomy(q_tid, r_tid))
@@ -755,7 +759,10 @@ def _knn_transfer_and_label(
             nbs = neighbors_by_aspect[aspect]
             if q_idx >= len(nbs):
                 continue
-            centroid_unit, nmat = neighbor_info.get((q_acc, aspect), (None, None))
+            # neighbor_info value is Optional; downstream None-check below.
+            centroid_unit, nmat = neighbor_info.get(  # type: ignore[assignment]
+                (q_acc, aspect), (None, None)
+            )
 
             leaf_by_gid: dict[str, dict[str, Any]] = {}
             seen_terms: set[int] = set()
@@ -965,7 +972,9 @@ def _knn_transfer_and_label(
 # ---------------------------------------------------------------------------
 
 
-class TrainRerankerAutoPayload(ProteaPayload, frozen=True):
+# ProteaPayload is a pydantic BaseModel, not a dataclass;
+# mypy's dataclass-frozen-from-non-frozen check is a false positive.
+class TrainRerankerAutoPayload(ProteaPayload, frozen=True):  # type: ignore[misc]
     """Payload for the dump_helper operation.
 
     Generates consecutive temporal pairs from ``train_versions``, runs KNN
@@ -1499,7 +1508,17 @@ class TrainRerankerAutoOperation:
 
                 # Restrict predictions to terms present in the pivot universe —
                 # ground truth was reconciled into pivot space above.
-                unlabeled_preds = [r for r in unlabeled_preds if r["go_id"] in pivot_go_ids]
+                # _knn_transfer_and_label always returns list[dict].
+                # Cast explicitly to silence the list-widening mypy
+                # check that fires on self-reassignment of unlabeled_preds.
+                unlabeled_preds = cast(
+                    "list[dict[str, Any]]",
+                    [
+                        r
+                        for r in unlabeled_preds
+                        if r["go_id"] in pivot_go_ids  # type: ignore[index]
+                    ],
+                )
 
                 # Free large objects immediately
                 del ref_by_aspect, query_emb, valid_queries, qs, rs, qt, rt
@@ -1647,8 +1666,9 @@ class TrainRerankerAutoOperation:
             test_all_queries: set[str] = set()
             test_cat_gt: dict[str, set[tuple[str, str]]] = {}
             for cat in _CATEGORIES:
-                gt: dict[str, set[str]] = getattr(test_eval_data, cat)
-                pairs: set[tuple[str, str]] = set()
+                # gt + pairs reused from train-side block above; lexically distinct usage.
+                gt: dict[str, set[str]] = getattr(test_eval_data, cat)  # type: ignore[no-redef]
+                pairs: set[tuple[str, str]] = set()  # type: ignore[no-redef]
                 for protein, go_ids in gt.items():
                     for go_id in go_ids:
                         pairs.add((protein, go_id))
@@ -1721,7 +1741,9 @@ class TrainRerankerAutoOperation:
                     del test_ref, test_emb, test_valid, test_qs, test_rs, test_qt, test_rt
                     gc.collect()
 
-                    n_rows = int(test_stream_info.get("n_rows", 0))
+                    # test_stream_info is always a dict in this branch; the
+                    # list variant is only used for empty-split short-circuits.
+                    n_rows = int(test_stream_info.get("n_rows", 0))  # type: ignore[union-attr]
                     if n_rows > 0 and test_unlabeled_path.exists():
                         pf = pq.ParquetFile(str(test_unlabeled_path))
                         project_cols = [c for c in _KEEP_COLS if c in pf.schema_arrow.names]
@@ -1731,7 +1753,8 @@ class TrainRerankerAutoOperation:
                         # rationale. ``aspect_map`` is keyed by int
                         # go_term_id; invert ``go_id_map`` to look up by
                         # the go_id string that ``test_eval_data`` carries.
-                        aspect_by_go_id: dict[str, str] = {
+                        # Same name as train-side block; lexically distinct test path.
+                        aspect_by_go_id: dict[str, str] = {  # type: ignore[no-redef]
                             go_id: aspect_map[term_id]
                             for term_id, go_id in go_id_map.items()
                             if term_id in aspect_map
@@ -1739,7 +1762,7 @@ class TrainRerankerAutoOperation:
                         test_cat_membership: dict[str, set[tuple[str, str]]] = {}
                         for cat in _CATEGORIES:
                             gt = getattr(test_eval_data, cat)
-                            members: set[tuple[str, str]] = set()
+                            members: set[tuple[str, str]] = set()  # type: ignore[no-redef]
                             for protein, go_ids in gt.items():
                                 for go_id in go_ids:
                                     asp = aspect_by_go_id.get(go_id, "")
