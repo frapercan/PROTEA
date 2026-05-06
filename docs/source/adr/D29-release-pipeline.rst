@@ -34,13 +34,24 @@ Consequences
 
 Resolution
 ----------
-**Accepted with semantic-release tooling.** User confirmation
-2026-05-06 ("semantic parece que añade un mejor contexto"). Version
-bumps + CHANGELOG generation driven by Conventional Commits parsed by
-``semantic-release``: ``feat:`` → minor, ``fix:`` → patch,
-``BREAKING CHANGE:`` footer → major. The commit-message style is
-already in place from the F2 phase (every commit during F2A.6-real,
-F2B, D-MIGR-06, Doc-T11 is conventional). Cross-repo integration test
-on tag stays as recommended. Implementation: a ``release.yml`` GitHub
-Action per repo + ``semantic-release`` config in ``pyproject.toml`` (or
-``.releaserc``).
+**Accepted with release-please tooling.** User confirmation 2026-05-06.
+The original direction ("semantic-release") implied
+``python-semantic-release``, which push-commits the version bump back
+to ``main`` and bypasses branch protection. Branch protection on
+``main`` is a hard project rule; we keep the spirit (Conventional
+Commits driving version + CHANGELOG) but switch to ``release-please``
+which opens a release PR instead of pushing to ``main`` directly.
+
+Version bumps + CHANGELOG generation are driven by Conventional
+Commits parsed by ``release-please``: ``feat:`` → minor, ``fix:`` →
+patch, ``BREAKING CHANGE:`` footer or ``feat!:`` → major. The
+commit-message style is already in place from the F2 phase (every
+commit during F2A.6-real, F2B, D-MIGR-06, Doc-T11 is conventional).
+
+Cross-repo integration test on tag stays as recommended. Per-repo
+implementation: a ``release-please.yml`` GitHub Action +
+``release-please-config.json`` + ``.release-please-manifest.json`` at
+the repo root. The action keeps a release PR open at all times; when
+that PR is merged, ``release-please`` creates the GitHub Release and
+tag, which in turn triggers ``docker.yml`` (D27) and the cross-repo
+integration test job.
