@@ -39,11 +39,11 @@ storage = ["minio (>=7.2,<8.0)"]
 # disk. Real ABCs / payloads land in F1 (T1.1-T1.5); during F0 these
 # packages export only their version sentinel and entry_point stubs,
 # which is enough to validate the multi-repo layout.
-protea-contracts = { path = "../protea-contracts", develop = true }
-protea-method = { path = "../protea-method", develop = true }
-protea-sources = { path = "../protea-sources", develop = true }
-protea-runners = { path = "../protea-runners", develop = true }
-protea-backends = { path = "../protea-backends", develop = true }
+protea-contracts = { git = "https://github.com/frapercan/protea-contracts.git", branch = "master" }
+protea-method = { git = "https://github.com/frapercan/protea-method.git", branch = "master" }
+protea-sources = { git = "https://github.com/frapercan/protea-sources.git", branch = "master" }
+protea-runners = { git = "https://github.com/frapercan/protea-runners.git", branch = "master" }
+protea-backends = { git = "https://github.com/frapercan/protea-backends.git", branch = "master" }
 
 
 [build-system]
@@ -54,7 +54,7 @@ build-backend = "poetry.core.masonry.api"
 # Dev-time only: imported by protea.core.parquet_export at export-validation
 # time so the manifest dict is checked against the lab's pydantic contract
 # before we publish to the ArtifactStore. Production images do NOT need this.
-protea-reranker-lab = {path = "../protea-reranker-lab", develop = true}
+protea-reranker-lab = {git = "https://github.com/frapercan/protea-reranker-lab.git", branch = "main"}
 pytest = ">=9.0.2,<10.0.0"
 uvicorn = ">=0.41.0,<0.42.0"
 coverage = {extras = ["toml"], version = ">=7.2.1"}
