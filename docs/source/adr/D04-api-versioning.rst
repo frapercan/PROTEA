@@ -1,8 +1,9 @@
 ADR-D4: API versioning strategy
 ===============================
 
-:Status: Pending
+:Status: Accepted
 :Date: 2026-05-05
+:Decided: 2026-05-06 (user confirmation)
 :Phase: F4
 :Gate: opens at F4 entry
 
@@ -27,4 +28,7 @@ Consequences
 
 Resolution
 ----------
-Pending; gate opens with F4 (T4.1).
+**Accepted as recommended.** Universal ``/v1/`` prefix on all routers.
+Implementation when F4 entry opens (T4.1) — keep deprecated unprefixed
+mounts for one release to avoid breaking ``protea.ngrok.app`` and
+front-end clients during the transition.

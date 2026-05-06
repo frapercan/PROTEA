@@ -211,8 +211,12 @@ def test_store_embeddings_roundtrip(db):
         emb = session.query(SequenceEmbedding).filter_by(sequence_id=seq_id).one()
         assert emb.embedding_config_id == config_id
         assert emb.embedding_dim == 4
-        stored_vec = list(emb.embedding)
-        np.testing.assert_allclose(stored_vec, vec, atol=1e-5)
+        # halfvec migration (2026-04-11): emb.embedding is a HalfVector,
+        # which exposes ``.to_list()`` rather than __iter__. atol is
+        # relaxed to 1e-3 because fp16 quantization introduces ~1e-4
+        # roundtrip error (e.g. 0.1 → 0.0999755859375).
+        stored_vec = emb.embedding.to_list()
+        np.testing.assert_allclose(stored_vec, vec, atol=1e-3)
 
     # Second run — skip_existing should prevent re-insert
     with Session(db, future=True) as session:
@@ -453,18 +457,21 @@ def test_load_goa_annotations_roundtrip(db):
         session.add(protein)
         session.commit()
 
-    # Step 3: Build a GAF record (as _stream_gaf yields dicts)
+    # Step 3: Build a GAF record (post-F2A.6-real: _stream_gaf yields
+    # GoaAnnotationRecord instances from protea_contracts).
+    from protea_contracts import GoaAnnotationRecord
+
     gaf_records = [
-        {
-            "accession": "P12345",
-            "go_id": "GO:0003824",
-            "qualifier": "enables",
-            "evidence_code": "IDA",
-            "db_reference": "PMID:123",
-            "with_from": "",
-            "assigned_by": "UniProt",
-            "annotation_date": "20240101",
-        },
+        GoaAnnotationRecord(
+            accession="P12345",
+            go_id="GO:0003824",
+            qualifier="enables",
+            evidence_code="IDA",
+            db_reference="PMID:123",
+            with_from=None,
+            assigned_by="UniProt",
+            annotation_date="20240101",
+        ),
     ]
 
     # Step 4: Load annotations

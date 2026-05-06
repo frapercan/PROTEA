@@ -47,7 +47,6 @@ from protea.core.reranker import (
     ALL_FEATURES,
     EMBEDDING_PCA_DIM,
     LABEL_COLUMN,
-    fit_embedding_pca,
 )
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
@@ -1784,7 +1783,6 @@ class TrainRerankerAutoOperation:
                                 if LABEL_COLUMN in batch.schema.names:
                                     batch = batch.drop_columns([LABEL_COLUMN])
                                 accs = batch.column("protein_accession").to_pylist()
-                                gids = batch.column("go_id").to_pylist()
                                 asps = batch.column("aspect").to_pylist()
                                 for cat in _CATEGORIES:
                                     members = test_cat_membership[cat]

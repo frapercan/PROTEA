@@ -60,7 +60,7 @@ P = ParamSpec("P")
 R = TypeVar("R")
 
 
-def with_retry(
+def with_retry(  # noqa: UP047 — keep ParamSpec/TypeVar form; PEP 695 syntax churn deferred.
     fn: Callable[P, R],
     *args: P.args,
     max_attempts: int = 3,

@@ -1,8 +1,9 @@
 ADR-D7: Observability stack
 ============================
 
-:Status: Pending
+:Status: Accepted
 :Date: 2026-05-05
+:Decided: 2026-05-06 (user confirmation)
 :Phase: F-OPS
 :Gate: opens at F-OPS entry
 
@@ -32,4 +33,12 @@ Consequences
 
 Resolution
 ----------
-Pending; gate opens with F-OPS (T5.1-T5.4).
+**Accepted as recommended.** User confirmation 2026-05-06 ("libre +
+fácil + buen funcionamiento"). Loki + Grafana for logs; Prometheus
+for metrics; OpenTelemetry for traces. Loki chosen over the ELK stack
+(Elasticsearch + Kibana) because it indexes labels rather than full
+text, has lower memory footprint, and integrates with the same Grafana
+that already surfaces Prometheus dashboards. Logs ship via
+``loki-docker-driver`` from container stdout (no separate Promtail
+sidecar in the cloud target). Implementation gate at F-OPS entry
+(T5.1-T5.4).

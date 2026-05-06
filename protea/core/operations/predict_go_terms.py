@@ -7,12 +7,11 @@ from typing import Any
 from uuid import UUID
 
 import numpy as np
-from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from protea.core.annotation_intern import intern_string
-from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
+from protea.core.contracts.operation import EmitFn, OperationResult
 from protea.core.contracts.parent_progress import update_parent_progress
 from protea.core.disk_cache import (
     _aspect_index_path,
@@ -38,7 +37,6 @@ from protea.core.reranker import (
     infer_active_feature_families,
     load_reranker,
 )
-from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
@@ -48,7 +46,7 @@ from protea.infrastructure.orm.models.embedding.go_prediction import GOPredictio
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
 from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
-from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
+from protea.infrastructure.orm.models.job import Job, JobStatus
 from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.orm.models.query.query_set import QuerySet, QuerySetEntry
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
@@ -162,7 +160,6 @@ from protea_contracts import (  # noqa: E402
     PredictGOTermsPayload,
     StorePredictionsPayload,
 )
-
 
 # ---------------------------------------------------------------------------
 # Coordinator

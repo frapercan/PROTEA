@@ -1,8 +1,9 @@
 ADR-D29: Release pipeline
 ===========================
 
-:Status: Pending
+:Status: Accepted
 :Date: 2026-05-05
+:Decided: 2026-05-06 (user confirmation)
 :Phase: F-OPS
 :Gate: opens at F-OPS entry
 
@@ -33,4 +34,13 @@ Consequences
 
 Resolution
 ----------
-Pending; gate opens with F-OPS (T-OPS.8).
+**Accepted with semantic-release tooling.** User confirmation
+2026-05-06 ("semantic parece que añade un mejor contexto"). Version
+bumps + CHANGELOG generation driven by Conventional Commits parsed by
+``semantic-release``: ``feat:`` → minor, ``fix:`` → patch,
+``BREAKING CHANGE:`` footer → major. The commit-message style is
+already in place from the F2 phase (every commit during F2A.6-real,
+F2B, D-MIGR-06, Doc-T11 is conventional). Cross-repo integration test
+on tag stays as recommended. Implementation: a ``release.yml`` GitHub
+Action per repo + ``semantic-release`` config in ``pyproject.toml`` (or
+``.releaserc``).

@@ -18,8 +18,6 @@ from protea.core.domain.aspect import ASPECT_CAFA_CODES, Aspect
 from protea.core.evaluation import load_evaluation_data_for_set
 from protea.core.reranker import load_reranker
 from protea.core.scoring import compute_score
-from protea.infrastructure.settings import load_settings as _load_settings_for_reranker
-from protea.infrastructure.storage import get_artifact_store as _get_store_for_reranker
 from protea.infrastructure.orm.models.annotation.evaluation_result import EvaluationResult
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
@@ -31,7 +29,9 @@ from protea.infrastructure.orm.models.embedding.reranker_model import (
 )
 from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
 from protea.infrastructure.settings import load_settings
+from protea.infrastructure.settings import load_settings as _load_settings_for_reranker
 from protea.infrastructure.storage import get_artifact_store
+from protea.infrastructure.storage import get_artifact_store as _get_store_for_reranker
 
 
 def eval_artifact_key(result_id: uuid.UUID, relpath: str) -> str:
@@ -534,7 +534,8 @@ class RunCafaEvaluationOperation:
             # delta proteins outside the PredictionSet's query coverage hurt
             # Fmax / coverage despite the booster being unable to score them.
             if p.restrict_gt_to_predicted:
-                from sqlalchemy import select, distinct
+                from sqlalchemy import distinct, select
+
                 from protea.infrastructure.orm.models.embedding.go_prediction import (
                     GOPrediction as _GP,
                 )

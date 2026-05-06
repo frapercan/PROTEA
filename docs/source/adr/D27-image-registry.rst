@@ -1,8 +1,9 @@
 ADR-D27: Image registry
 =========================
 
-:Status: Pending
+:Status: Accepted
 :Date: 2026-05-05
+:Decided: 2026-05-06 (user confirmation)
 :Phase: F-OPS
 :Gate: opens at F-OPS entry
 
@@ -27,4 +28,9 @@ Consequences
 
 Resolution
 ----------
-Pending; gate opens with F-OPS (T-OPS.8).
+**Accepted as recommended.** ``ghcr.io`` confirmed by user 2026-05-06.
+Implementation: GitHub Actions workflow per repo on tag push, login via
+the built-in ``GITHUB_TOKEN``, image tag set from the SemVer tag.
+Public visibility for ``protea-method-runtime``; org-scoped or private
+for internal images if/when needed. Mirror to Docker Hub deferred until
+external pull rates demand it.

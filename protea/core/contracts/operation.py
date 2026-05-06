@@ -7,12 +7,11 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 from uuid import UUID
 
-from sqlalchemy.orm import Session
-
 # T1.5 of master plan v3: ProteaPayload is owned by protea-contracts.
 # Re-export here so existing imports of ``ProteaPayload`` from this
 # module keep working; new code should import from ``protea_contracts``.
-from protea_contracts import ProteaPayload
+from protea_contracts import ProteaPayload as ProteaPayload  # noqa: F401  # re-export
+from sqlalchemy.orm import Session
 
 Level = Literal["info", "warning", "error"]
 EmitFn = Callable[[str, str | None, dict[str, Any], Level], None]

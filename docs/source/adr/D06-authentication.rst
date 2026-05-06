@@ -1,8 +1,9 @@
 ADR-D6: Authentication strategy
 ================================
 
-:Status: Pending
+:Status: Accepted
 :Date: 2026-05-05
+:Decided: 2026-05-06 (user confirmation)
 :Phase: F5
 :Gate: opens at F5 entry
 
@@ -31,4 +32,15 @@ Consequences
 
 Resolution
 ----------
-Pending; gate opens with F5 (T5.6).
+**Accepted as recommended, with the OIDC provider pinned.**
+
+- API key path: ``ApiKey`` ORM table + ``Authorization: Bearer …`` for
+  service-to-service calls (LAFA containers, downstream pipelines).
+- OIDC path: **Authentik** as the identity provider behind
+  ``oauth2-proxy`` for human users. User picked Authentik on
+  2026-05-06 ("contra menos custom mejor"); Authentik chosen for its
+  lighter footprint and simpler Docker-Compose setup vs Keycloak's
+  JBoss-flavour weight.
+
+Rate limiting via ``slowapi`` per F5 plan. Implementation gate at F5
+entry (T5.6).
