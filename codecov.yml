@@ -1,0 +1,29 @@
+# Codecov configuration for PROTEA.
+#
+# Coverage signal is informational, never gating. Required CI checks
+# (lint, test, docs) own the merge gate; codecov is a dashboard.
+#
+# Reference: https://docs.codecov.com/docs/codecov-yaml
+
+coverage:
+  status:
+    project:
+      default:
+        informational: true
+        target: auto
+        threshold: 1%
+    patch:
+      default:
+        informational: true
+
+comment:
+  layout: "reach, diff, flags, files"
+  behavior: default
+  require_changes: true
+
+ignore:
+  - "tests/**"
+  - "scripts/**"
+  - "apps/web/**"
+  - "alembic/**"
+  - "docs/**"
