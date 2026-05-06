@@ -1,23 +1,33 @@
-"""LAFA-compatible PROTEA wrapper.
+"""LAFA-compatible PROTEA wrapper (frozen-data + reranker variant).
 
-Entry point that honours the LAFA container CLI contract:
+Entry point that honours the LAFA container CLI plus a
+``--frozen_data_dir`` flag pointing at a bind-mounted bundle. The
+bundle must contain the artifacts produced by the PROTEA exporter
+``scripts/export_lafa_bundle.py`` (F-LAFA.1, separate slice):
 
-    --query_file        FASTA of query sequences
-    --train_sequences   FASTA of training sequences
-    --annot_file        TSV (EntryID, term, aspect) of training annotations
-    --graph             go-basic.obo (currently unused; kept for contract parity)
-    --output_baseline   3-column TSV output (Query_ID, GO_Term, Score)
+::
+
+    <bundle>/
+    ├── manifest.json                # cutoff version + schema sha
+    ├── reference_embeddings.parquet # (accession, embedding) for refs
+    ├── reference_annotations.parquet# (accession, go_term_id, ...) per ref
+    ├── go_term_metadata.parquet     # (go_term_id, go_id, aspect, name, ia_weight)
+    ├── pca_state.npz                # mean (D,) + components (16, D) for query PCA
+    ├── anc2vec.npz                  # Anc2Vec GO-term embedding dictionary
+    └── reranker.txt                 # LightGBM booster (text format)
 
 Pipeline:
-    1. Mean-pool ProtT5 embeddings for queries and refs (``prott5_encoder``).
-    2. Cosine KNN via ``protea.core.knn_search.search_knn`` (numpy backend).
-    3. First-hit GO transfer per query (matches PROTEA's ``_predict_batch``).
-    4. Score = ``1 - distance`` (cosine, in [0, 1]).
-    5. Emit ``<query>\\t<term>\\t<score:.4f>``; gzipped if ``--output_baseline``
-       ends in ``.gz``.
+    1. Embed query FASTA via ``prott5_encoder`` (mean-pool ProtT5).
+    2. Load the bundle into memory (parquet / npz / text).
+    3. Call ``protea_method.pipeline.predict`` with the frozen
+       references, reranker booster, and v6 feature inputs.
+    4. Write predictions: ``<query>\\t<go_id>\\t<reranker_score>`` per
+       (query, go_term) candidate. Fallback to ``1 - distance`` when
+       no booster ships in the bundle.
 
-Smoke-test focus: integration over fidelity. The ontology graph is accepted
-but not consulted — LAFA distributes propagated TSVs in the official splits.
+Strict design rule: this module owns no compute logic. KNN, feature
+enrichment, reranker scoring all live in ``protea_method``. The
+container's job is FASTA in, frozen-data load, library call, TSV out.
 """
 
 from __future__ import annotations
@@ -25,83 +35,30 @@ from __future__ import annotations
 import argparse
 import csv
 import gzip
+import json
 import os
 import sys
-from collections import defaultdict
 from pathlib import Path
-from typing import Iterator
+from typing import Any
 
 import numpy as np
 
-# Make `protea.core.knn_search` importable when running from a checkout.
+# Make ``protea_method`` importable when the container is run from a
+# checkout (the published wheel is the canonical install path; this
+# fallback is only for local development).
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from protea.core.knn_search import search_knn  # noqa: E402
-
-from prott5_encoder import embed_sequences, fasta_accessions, parse_fasta  # noqa: E402
+import pyarrow.parquet as pq  # noqa: E402
+from protea_method.anc2vec import Anc2VecIndex  # noqa: E402
+from protea_method.pipeline import PredictConfig, predict  # noqa: E402
+from protea_method.reranker import load_from_bytes  # noqa: E402
+from prott5_encoder import embed_sequences, parse_fasta  # noqa: E402
 
 
 def _open_text(path: str):
     return gzip.open(path, "rt") if path.endswith(".gz") else open(path)
-
-
-def _load_annotations(path: str, ref_accessions: set[str]) -> dict[str, list[str]]:
-    """Return ``{ref_accession: [go_term, ...]}`` filtered to refs we use.
-
-    Dispatches by extension: ``.gaf[.gz]`` → GAF parser (skipping ``NOT``
-    qualifiers and ``!`` headers); anything else → TSV with ``EntryID`` /
-    ``term`` columns in the header.
-    """
-    base = path[:-3] if path.endswith(".gz") else path
-    if base.endswith(".gaf"):
-        return _load_annotations_gaf(path, ref_accessions)
-    return _load_annotations_tsv(path, ref_accessions)
-
-
-def _load_annotations_tsv(path: str, ref_accessions: set[str]) -> dict[str, list[str]]:
-    go_map: dict[str, list[str]] = defaultdict(list)
-    with _open_text(path) as handle:
-        header = handle.readline().rstrip("\n").split("\t")
-        try:
-            entry_idx = header.index("EntryID")
-            term_idx = header.index("term")
-        except ValueError:
-            print(
-                f"[protea_main] Annotation TSV must have header with 'EntryID' and 'term'. "
-                f"Got: {header}",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        for line in handle:
-            cols = line.rstrip("\n").split("\t")
-            if len(cols) <= max(entry_idx, term_idx):
-                continue
-            acc = cols[entry_idx]
-            term = cols[term_idx]
-            if acc in ref_accessions:
-                go_map[acc].append(term)
-    return go_map
-
-
-def _load_annotations_gaf(path: str, ref_accessions: set[str]) -> dict[str, list[str]]:
-    """Parse a GAF 2.x file. Cols: 2=DB_Object_ID, 5=GO_ID, 4=Qualifier."""
-    go_map: dict[str, list[str]] = defaultdict(list)
-    with _open_text(path) as handle:
-        for raw in handle:
-            if raw.startswith("!"):
-                continue
-            cols = raw.rstrip("\n").split("\t")
-            if len(cols) < 9:
-                continue
-            if "NOT" in cols[3]:
-                continue
-            acc = cols[1]
-            term = cols[4]
-            if acc in ref_accessions:
-                go_map[acc].append(term)
-    return go_map
 
 
 def _open_output(path: str):
@@ -110,111 +67,200 @@ def _open_output(path: str):
     return open(path, "w", newline="")
 
 
-def _stack(embeddings: dict[str, np.ndarray], order: list[str]) -> tuple[np.ndarray, list[str]]:
-    """Stack embeddings in ``order``, dropping accessions that failed to embed."""
-    kept_accs: list[str] = []
+def _load_manifest(bundle: Path) -> dict[str, Any]:
+    return json.loads((bundle / "manifest.json").read_text())
+
+
+def _load_refs(bundle: Path) -> tuple[list[str], np.ndarray]:
+    table = pq.read_table(bundle / "reference_embeddings.parquet")
+    accs = [str(a) for a in table.column("accession").to_pylist()]
+    raw = table.column("embedding").to_pylist()
+    embeddings = np.asarray(raw, dtype=np.float32)
+    if embeddings.ndim == 1:
+        embeddings = np.stack([np.asarray(v, dtype=np.float32) for v in raw])
+    return accs, embeddings
+
+
+def _load_annotations(bundle: Path) -> dict[str, list[dict[str, Any]]]:
+    table = pq.read_table(bundle / "reference_annotations.parquet")
+    rows = table.to_pylist()
+    out: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        out.setdefault(str(row["accession"]), []).append(
+            {k: v for k, v in row.items() if k != "accession"},
+        )
+    return out
+
+
+def _load_go_metadata(bundle: Path) -> tuple[dict[int, str], dict[int, str]]:
+    table = pq.read_table(bundle / "go_term_metadata.parquet")
+    rows = table.to_pylist()
+    go_id_map: dict[int, str] = {}
+    go_aspect_map: dict[int, str] = {}
+    for row in rows:
+        gid = int(row["go_term_id"])
+        go_id_map[gid] = str(row["go_id"])
+        go_aspect_map[gid] = str(row.get("aspect") or "")
+    return go_id_map, go_aspect_map
+
+
+def _load_pca_state(bundle: Path) -> tuple[np.ndarray, np.ndarray] | None:
+    pca_path = bundle / "pca_state.npz"
+    if not pca_path.exists():
+        return None
+    data = np.load(pca_path)
+    return (
+        np.asarray(data["mean"], dtype=np.float32),
+        np.asarray(data["components"], dtype=np.float32),
+    )
+
+
+def _load_booster_bytes(bundle: Path) -> bytes | None:
+    booster_path = bundle / "reranker.txt"
+    if not booster_path.exists():
+        return None
+    return booster_path.read_bytes()
+
+
+def _stack_query_embeddings(
+    embeddings: dict[str, np.ndarray],
+    order: list[str],
+) -> tuple[np.ndarray, list[str]]:
+    """Stack in input FASTA order, dropping accessions that failed to embed."""
+    kept: list[str] = []
     rows: list[np.ndarray] = []
     for acc in order:
         vec = embeddings.get(acc)
         if vec is None:
             continue
-        kept_accs.append(acc)
+        kept.append(acc)
         rows.append(vec)
     if not rows:
-        return np.empty((0, 0), dtype=np.float32), kept_accs
-    return np.stack(rows).astype(np.float32, copy=False), kept_accs
+        return np.empty((0, 0), dtype=np.float32), kept
+    return np.stack(rows).astype(np.float32, copy=False), kept
 
 
-def _transfer(
-    query_accs: list[str],
-    neighbors: list[list[tuple[str, float]]],
-    go_map: dict[str, list[str]],
-    *,
-    keep_self_hits: bool,
-) -> Iterator[tuple[str, str, float]]:
-    """First-hit GO transfer; one ``(query, term, score)`` row per (q, term)."""
-    for q_acc, top_refs in zip(query_accs, neighbors, strict=False):
-        seen: set[str] = set()
-        for ref_acc, distance in top_refs:
-            if not keep_self_hits and ref_acc == q_acc:
-                continue
-            score = max(0.0, 1.0 - float(distance))
-            for term in go_map.get(ref_acc, ()):
-                if term in seen:
-                    continue
-                seen.add(term)
-                yield q_acc, term, score
+def _score_for_output(pred: dict[str, Any]) -> float:
+    """Pick the reranker score when present, otherwise fall back to ``1 - distance``."""
+    if "reranker_score" in pred:
+        return float(pred["reranker_score"])
+    distance = float(pred.get("min_distance", pred.get("distance", 1.0)))
+    return max(0.0, 1.0 - distance)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="LAFA-compatible PROTEA KNN wrapper (ProtT5 + cosine KNN + first-hit transfer)."
+        description=(
+            "LAFA-compatible PROTEA wrapper. Embeds queries with ProtT5, then "
+            "runs KNN + v6 features + LightGBM reranker against a frozen "
+            "reference bundle."
+        ),
     )
-    parser.add_argument("--query_file", "-q", required=True)
-    parser.add_argument("--train_sequences", required=True)
-    parser.add_argument("--annot_file", "-a", required=True)
-    parser.add_argument("--graph", required=True, help="OBO file (currently not consulted).")
-    parser.add_argument("--output_baseline", "-o", required=True)
-    parser.add_argument("--k", type=int, default=5, help="KNN neighbours per query (default: 5).")
+    parser.add_argument("--query_file", "-q", required=True, help="FASTA of query sequences.")
+    parser.add_argument(
+        "--frozen_data_dir",
+        required=True,
+        help="Bind-mounted bundle directory (see module docstring for layout).",
+    )
+    parser.add_argument(
+        "--output_baseline",
+        "-o",
+        required=True,
+        help="Output TSV: <query>\\t<go_id>\\t<score>. Gzipped if suffix is .gz.",
+    )
+    parser.add_argument("--k", type=int, default=5)
     parser.add_argument("--metric", default="cosine", choices=["cosine", "l2"])
     parser.add_argument("--backend", default="numpy", choices=["numpy", "faiss"])
     parser.add_argument(
-        "--keep_self_hits",
+        "--aspect_separated",
         action="store_true",
-        help="Keep query==ref hits (default: drop, matching LAFA's prott5_container).",
+        help="Run one KNN per GO aspect (P / F / C). Improves BPO recall.",
+    )
+    parser.add_argument(
+        "--no_v6",
+        action="store_true",
+        help="Skip the v6 feature enrichment pass (faster, less accurate).",
+    )
+    parser.add_argument(
+        "--no_reranker",
+        action="store_true",
+        help="Skip the LightGBM reranker even if reranker.txt is in the bundle.",
     )
     parser.add_argument(
         "--model_dir",
         default=os.environ.get("HF_CACHE"),
-        help="HuggingFace cache dir (default: $HF_CACHE).",
+        help="HuggingFace cache dir for ProtT5 (default: $HF_CACHE).",
     )
     args = parser.parse_args()
 
-    for label, path in (
-        ("query", args.query_file),
-        ("train", args.train_sequences),
-        ("annot", args.annot_file),
-        ("graph", args.graph),
-    ):
-        if not os.path.exists(path):
-            print(f"[protea_main] {label} file not found: {path}", file=sys.stderr)
-            sys.exit(1)
+    bundle = Path(args.frozen_data_dir)
+    if not bundle.is_dir():
+        print(f"[protea_main] frozen_data_dir not a directory: {bundle}", file=sys.stderr)
+        sys.exit(1)
 
-    print(f"[protea_main] reading FASTAs: {args.query_file} / {args.train_sequences}")
+    manifest = _load_manifest(bundle)
+    print(
+        f"[protea_main] bundle: cutoff={manifest.get('cutoff_version', '?')} "
+        f"schema_sha={manifest.get('feature_schema_sha', '?')[:12]}",
+    )
+
+    print(f"[protea_main] reading queries: {args.query_file}")
     query_seqs = parse_fasta(args.query_file)
-    train_seqs = parse_fasta(args.train_sequences)
-    print(f"[protea_main] queries={len(query_seqs)} refs={len(train_seqs)}")
-
-    print(f"[protea_main] loading annotations from {args.annot_file}")
-    go_map = _load_annotations(args.annot_file, set(train_seqs))
-    refs_with_anns = [acc for acc in train_seqs if acc in go_map]
-    print(f"[protea_main] refs with annotations: {len(refs_with_anns)}/{len(train_seqs)}")
-    if not refs_with_anns:
-        print("[protea_main] no annotated refs after filter — nothing to transfer.", file=sys.stderr)
+    if not query_seqs:
+        print("[protea_main] no query sequences parsed; aborting.", file=sys.stderr)
         sys.exit(2)
+    query_order = list(query_seqs.keys())
+    print(f"[protea_main] {len(query_seqs)} query sequences")
 
-    to_embed = {**{a: query_seqs[a] for a in query_seqs},
-                **{a: train_seqs[a] for a in refs_with_anns}}
-    print(f"[protea_main] embedding {len(to_embed)} sequences with ProtT5 mean-pool")
-    embeddings = embed_sequences(to_embed, cache_dir=args.model_dir)
-
-    query_order = fasta_accessions(args.query_file)
-    Q, kept_q = _stack(embeddings, query_order)
-    R, kept_r = _stack(embeddings, refs_with_anns)
-    print(f"[protea_main] embedding matrix Q={Q.shape} R={R.shape}")
-    if Q.size == 0 or R.size == 0:
-        print("[protea_main] empty embedding matrix — aborting.", file=sys.stderr)
+    print("[protea_main] embedding queries with ProtT5 (mean-pool)")
+    query_embeddings_by_acc = embed_sequences(query_seqs, cache_dir=args.model_dir)
+    Q, kept_q = _stack_query_embeddings(query_embeddings_by_acc, query_order)
+    if Q.size == 0:
+        print("[protea_main] all queries failed to embed; aborting.", file=sys.stderr)
         sys.exit(3)
 
-    print(f"[protea_main] KNN k={args.k} metric={args.metric} backend={args.backend}")
-    neighbors = search_knn(
-        Q,
-        R,
-        kept_r,
+    print("[protea_main] loading frozen bundle")
+    ref_accs, R = _load_refs(bundle)
+    annotations = _load_annotations(bundle)
+    go_id_map, go_aspect_map = _load_go_metadata(bundle)
+    pca_state = _load_pca_state(bundle) if not args.no_v6 else None
+    anc_idx = (
+        Anc2VecIndex(bundle / "anc2vec.npz")
+        if (bundle / "anc2vec.npz").exists() and not args.no_v6
+        else None
+    )
+    booster_bytes = _load_booster_bytes(bundle) if not args.no_reranker else None
+    booster = load_from_bytes(booster_bytes) if booster_bytes is not None else None
+    print(
+        f"[protea_main] refs={len(ref_accs)} annotations={sum(len(v) for v in annotations.values())} "
+        f"go_terms={len(go_id_map)} pca={pca_state is not None} "
+        f"anc2vec={anc_idx is not None} reranker={booster is not None}",
+    )
+
+    config = PredictConfig(
         k=args.k,
         metric=args.metric,
         backend=args.backend,
+        aspect_separated=args.aspect_separated,
+        compute_v6_features=not args.no_v6 and anc_idx is not None,
+        compute_taxonomy=False,  # taxonomy pair features not bundled in the canonical export
+        pre_normalized=False,
     )
+    print(f"[protea_main] running predict (config={config})")
+    predictions = predict(
+        query_accessions=kept_q,
+        query_embeddings=Q,
+        reference_accessions=ref_accs,
+        reference_embeddings=R,
+        annotations=annotations,
+        go_id_map=go_id_map,
+        go_aspect_map=go_aspect_map,
+        config=config,
+        pca_state=pca_state,
+        booster=booster,
+        anc_idx=anc_idx,
+    )
+    print(f"[protea_main] {len(predictions)} prediction rows")
 
     out_path = args.output_baseline
     out_dir = os.path.dirname(out_path)
@@ -224,10 +270,12 @@ def main() -> None:
     n_rows = 0
     with _open_output(out_path) as fh:
         writer = csv.writer(fh, delimiter="\t")
-        for q_acc, term, score in _transfer(
-            kept_q, neighbors, go_map, keep_self_hits=args.keep_self_hits
-        ):
-            writer.writerow([q_acc, term, f"{score:.4f}"])
+        for pred in predictions:
+            go_id = go_id_map.get(int(pred["go_term_id"]))
+            if not go_id:
+                continue
+            score = _score_for_output(pred)
+            writer.writerow([pred["protein_accession"], go_id, f"{score:.4f}"])
             n_rows += 1
 
     print(f"[protea_main] wrote {n_rows} predictions to {out_path}")

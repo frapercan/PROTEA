@@ -8,9 +8,8 @@ in the LAFA reference container so embeddings are bit-comparable.
 
 from __future__ import annotations
 
-import os
 import time
-from typing import Iterable
+from collections.abc import Iterable
 
 import numpy as np
 import torch
@@ -71,7 +70,7 @@ def embed_sequences(
         if not flush:
             continue
 
-        accs, seqs, lens = zip(*batch)
+        accs, seqs, lens = zip(*batch, strict=True)
         batch = []
 
         token_encoding = tokenizer.batch_encode_plus(
