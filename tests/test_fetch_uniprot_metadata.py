@@ -112,40 +112,6 @@ class TestFetchUniProtMetadataPayload:
 
 
 # ---------------------------------------------------------------------------
-# Unit tests — _parse_tsv
-# ---------------------------------------------------------------------------
-
-
-class TestParseTsv:
-    def setup_method(self):
-        self.op = FetchUniProtMetadataOperation()
-
-    def test_parses_basic_tsv(self):
-        tsv = "Entry\tReviewed\tLength\nP12345\treviewed\t500\nQ99999\tunreviewed\t120\n"
-        rows = self.op._parse_tsv(tsv)
-        assert len(rows) == 2
-        assert rows[0]["Entry"] == "P12345"
-        assert rows[0]["Reviewed"] == "reviewed"
-        assert rows[1]["Length"] == "120"
-
-    def test_empty_tsv_returns_empty(self):
-        rows = self.op._parse_tsv("")
-        assert rows == []
-
-    def test_none_values_coerced_to_empty_string(self):
-        # DictReader returns None for missing fields in some edge cases;
-        # the implementation maps None -> ""
-        tsv = "Entry\tReviewed\nP12345\t\n"
-        rows = self.op._parse_tsv(tsv)
-        assert rows[0]["Reviewed"] == ""
-
-    def test_header_only_returns_empty(self):
-        tsv = "Entry\tReviewed\tLength\n"
-        rows = self.op._parse_tsv(tsv)
-        assert rows == []
-
-
-# ---------------------------------------------------------------------------
 # Unit tests — execute() with fully mocked HTTP and DB session
 # ---------------------------------------------------------------------------
 
@@ -185,7 +151,7 @@ class TestFetchUniProtMetadataOperationExecute:
         session = self._mock_session()
         emit = _capturing_emit()
 
-        with patch.object(self.op._http_client.session, "get", return_value=_make_mock_response(TSV_RESPONSE)):
+        with patch.object(self.op._uniprot_plugin._client.session, "get", return_value=_make_mock_response(TSV_RESPONSE)):
             result = self.op.execute(
                 session,
                 {"search_criteria": "organism_id:9606", "page_size": 1, "compressed": False},
@@ -201,7 +167,7 @@ class TestFetchUniProtMetadataOperationExecute:
         session = self._mock_session()
         emit = _capturing_emit()
 
-        with patch.object(self.op._http_client.session, "get", return_value=_make_mock_response(TSV_RESPONSE)):
+        with patch.object(self.op._uniprot_plugin._client.session, "get", return_value=_make_mock_response(TSV_RESPONSE)):
             self.op.execute(
                 session,
                 {"search_criteria": "organism_id:9606", "compressed": False},
@@ -223,7 +189,7 @@ class TestFetchUniProtMetadataOperationExecute:
         session = self._mock_session()
         emit = _capturing_emit()
 
-        with patch.object(self.op._http_client.session, "get", return_value=_make_mock_response(tsv)):
+        with patch.object(self.op._uniprot_plugin._client.session, "get", return_value=_make_mock_response(tsv)):
             result = self.op.execute(
                 session,
                 {"search_criteria": "q", "total_limit": 1, "compressed": False},
@@ -241,7 +207,7 @@ class TestFetchUniProtMetadataOperationExecute:
         session = self._mock_session()
         emit = _noop_emit
 
-        with patch.object(self.op._http_client.session, "get", return_value=_make_mock_response(TSV_RESPONSE)):
+        with patch.object(self.op._uniprot_plugin._client.session, "get", return_value=_make_mock_response(TSV_RESPONSE)):
             self.op.execute(
                 session,
                 {"search_criteria": "q", "compressed": False},
@@ -266,7 +232,7 @@ def test_fetch_uniprot_metadata_integration(postgres_url: str):
     emit = _capturing_emit()
 
     with Session(engine, future=True) as session:
-        with patch.object(op._http_client.session, "get", return_value=_make_mock_response(TSV_RESPONSE)):
+        with patch.object(op._uniprot_plugin._client.session, "get", return_value=_make_mock_response(TSV_RESPONSE)):
             result = op.execute(
                 session,
                 {

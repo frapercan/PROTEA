@@ -1,20 +1,19 @@
 from __future__ import annotations
 
-import csv
-import gzip
 import time
-from collections.abc import Iterable, Sequence
-from io import BytesIO, StringIO
+from collections.abc import Iterator, Sequence
 from typing import Annotated, Any
-from urllib.parse import quote
 
-import requests
+from protea_contracts import (
+    UniProtMetadataRecord,
+    UniProtMetadataStreamPayload,
+    parse_isoform,
+)
 from pydantic import Field, field_validator
-from requests import Response
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
-from protea.core.utils import UniProtHttpClient, chunks
+from protea.core.utils import chunks
 from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.orm.models.protein.protein_metadata import ProteinUniProtMetadata
 
@@ -58,7 +57,37 @@ class FetchUniProtMetadataOperation:
         "Fetch functional annotations (TSV) from UniProt and upsert "
         "ProteinUniProtMetadata rows keyed by canonical accession."
     )
-    UNIPROT_SEARCH_URL = "https://rest.uniprot.org/uniprotkb/search"
+
+    # UniProt field identifiers requested in the TSV query, in display
+    # order. Kept here (operation-side) because the field set is a
+    # persistence concern: it determines which DB columns get populated.
+    UNIPROT_FIELDS: list[str] = [
+        "accession",
+        "reviewed",
+        "id",
+        "protein_name",
+        "gene_names",
+        "organism_name",
+        "length",
+        "absorption",
+        "ft_act_site",
+        "ft_binding",
+        "cc_catalytic_activity",
+        "cc_cofactor",
+        "ft_dna_bind",
+        "ec",
+        "cc_activity_regulation",
+        "cc_function",
+        "cc_pathway",
+        "kinetics",
+        "ph_dependence",
+        "redox_potential",
+        "rhea",
+        "ft_site",
+        "temp_dependence",
+        "keyword",
+        "feature_count",
+    ]
 
     def summarize_payload(self, payload: dict[str, Any]) -> str:
         criteria = (payload or {}).get("search_criteria")
@@ -96,15 +125,16 @@ class FetchUniProtMetadataOperation:
     }
 
     def __init__(self) -> None:
-        self._http_client = UniProtHttpClient()
-        self._total_results: int | None = None
+        # Plugin instance is reused across executions for connection
+        # pooling; counters are reset by the plugin at the start of
+        # each ``stream_metadata`` call.
+        from protea_sources.uniprot import plugin as _uniprot_plugin
+
+        self._uniprot_plugin = _uniprot_plugin
 
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        self._http_client.reset()
-        self._total_results = None
-
         p = FetchUniProtMetadataPayload.model_validate(payload)
 
         t0 = time.perf_counter()
@@ -120,45 +150,11 @@ class FetchUniProtMetadataOperation:
         proteins_touched = 0
         metadata_upserted = 0
 
-        for page_idx, rows in enumerate(self._fetch_tsv_pages(p, emit), start=1):
-            pages = page_idx
-            if not rows:
-                continue
-
-            if p.total_limit is not None and (total_rows + len(rows)) > p.total_limit:
-                rows = rows[: max(0, p.total_limit - total_rows)]
-            if not rows:
-                break
-
-            total_rows += len(rows)
-
-            touched, upserted = self._store_rows(session, rows, p, emit)
-            proteins_touched += touched
-            metadata_upserted += upserted
-
-            emit(
-                "fetch_uniprot_metadata.page_done",
-                None,
-                {
-                    "page": page_idx,
-                    "rows_total": total_rows,
-                    "proteins_touched_total": proteins_touched,
-                    "metadata_upserted_total": metadata_upserted,
-                    "http_requests": self._http_client.requests,
-                    "http_retries": self._http_client.retries,
-                    "_progress_current": total_rows,
-                    **(
-                        {"_progress_total": p.total_limit or self._total_results}
-                        if (p.total_limit or self._total_results)
-                        else {}
-                    ),
-                },
-                "info",
-            )
-
-            if p.commit_every_page:
-                session.commit()
-
+        # Buffer per-record into operation-controlled pages of size
+        # ``p.page_size``. Plugin yields one record at a time; operation
+        # owns batching policy + commits.
+        buffer: list[UniProtMetadataRecord] = []
+        for record in self._stream_metadata(p, emit):
             if p.total_limit is not None and total_rows >= p.total_limit:
                 emit(
                     "fetch_uniprot_metadata.limit_reached",
@@ -168,113 +164,97 @@ class FetchUniProtMetadataOperation:
                 )
                 break
 
+            buffer.append(record)
+            total_rows += 1
+
+            if len(buffer) >= p.page_size:
+                pages += 1
+                touched, upserted = self._store_rows(session, buffer, p, emit)
+                proteins_touched += touched
+                metadata_upserted += upserted
+                buffer.clear()
+
+                http_req, http_ret = self._uniprot_plugin.http_counters
+                emit(
+                    "fetch_uniprot_metadata.page_done",
+                    None,
+                    {
+                        "page": pages,
+                        "rows_total": total_rows,
+                        "proteins_touched_total": proteins_touched,
+                        "metadata_upserted_total": metadata_upserted,
+                        "http_requests": http_req,
+                        "http_retries": http_ret,
+                        "_progress_current": total_rows,
+                        **(
+                            {"_progress_total": p.total_limit}
+                            if p.total_limit
+                            else {}
+                        ),
+                    },
+                    "info",
+                )
+
+                if p.commit_every_page:
+                    session.commit()
+
+        # Flush remaining buffer.
+        if buffer:
+            pages += 1
+            touched, upserted = self._store_rows(session, buffer, p, emit)
+            proteins_touched += touched
+            metadata_upserted += upserted
+
         elapsed = time.perf_counter() - t0
+        http_req, http_ret = self._uniprot_plugin.http_counters
         result = {
             "pages": pages,
             "rows": total_rows,
             "proteins_touched": proteins_touched,
             "metadata_upserted": metadata_upserted,
-            "http_requests": self._http_client.requests,
-            "http_retries": self._http_client.retries,
+            "http_requests": http_req,
+            "http_retries": http_ret,
             "elapsed_seconds": elapsed,
         }
         emit("fetch_uniprot_metadata.done", None, result, "info")
         return OperationResult(result=result)
 
-    # ---------------- HTTP / paging ----------------
-
-    def _fetch_tsv_pages(
+    def _stream_metadata(
         self, p: FetchUniProtMetadataPayload, emit: EmitFn
-    ) -> Iterable[list[dict[str, str]]]:
-        encoded_query = quote(p.search_criteria)
+    ) -> Iterator[UniProtMetadataRecord]:
+        """Delegate to the protea-sources UniProtSource plugin.
 
-        fields = [
-            "accession",
-            "reviewed",
-            "id",
-            "protein_name",
-            "gene_names",
-            "organism_name",
-            "length",
-            "absorption",
-            "ft_act_site",
-            "ft_binding",
-            "cc_catalytic_activity",
-            "cc_cofactor",
-            "ft_dna_bind",
-            "ec",
-            "cc_activity_regulation",
-            "cc_function",
-            "cc_pathway",
-            "kinetics",
-            "ph_dependence",
-            "redox_potential",
-            "rhea",
-            "ft_site",
-            "temp_dependence",
-            "keyword",
-            "feature_count",
-        ]
+        Plugin owns HTTP retries, cursor pagination, gzip decoding,
+        and TSV parsing. The operation owns the field list (persistence
+        concern) plus DB upsert. See ``f2a6_real_migration_design.md``.
+        """
+        yield from self._uniprot_plugin.stream_metadata(
+            UniProtMetadataStreamPayload(
+                search_criteria=p.search_criteria,
+                fields=self.UNIPROT_FIELDS,
+                page_size=p.page_size,
+                timeout_seconds=p.timeout_seconds,
+                compressed=p.compressed,
+                max_retries=p.max_retries,
+                backoff_base_seconds=p.backoff_base_seconds,
+                backoff_max_seconds=p.backoff_max_seconds,
+                jitter_seconds=p.jitter_seconds,
+                user_agent=p.user_agent,
+            ),
+            emit=emit,
+        )
 
-        params = [
-            "format=tsv",
-            f"query={encoded_query}",
-            f"size={p.page_size}",
-            "compressed=true" if p.compressed else "compressed=false",
-            f"fields={quote(','.join(fields))}",
-        ]
-        base_url = f"{self.UNIPROT_SEARCH_URL}?{'&'.join(params)}"
-
-        next_cursor: str | None = None
-        page = 0
-
-        while True:
-            page += 1
-            url = base_url if not next_cursor else f"{base_url}&cursor={next_cursor}"
-            emit(
-                "uniprot.fetch_page_start",
-                None,
-                {"page": page, "has_cursor": bool(next_cursor)},
-                "info",
-            )
-
-            resp = self._http_client.get_with_retries(url, p, emit)
-            if self._total_results is None:
-                try:
-                    self._total_results = int(resp.headers.get("X-Total-Results", 0)) or None
-                except (ValueError, TypeError):
-                    pass
-            text = self._decode_response(resp, p.compressed)
-            rows = self._parse_tsv(text)
-
-            emit("uniprot.fetch_page_done", None, {"page": page, "rows": len(rows)}, "info")
-            yield rows
-
-            next_cursor = self._http_client.extract_next_cursor(resp.headers.get("link", ""))
-            if not next_cursor:
-                break
-
-    def _decode_response(self, resp: Response, compressed: bool) -> str:
-        if compressed:
-            with gzip.GzipFile(fileobj=BytesIO(resp.content)) as f:
-                return f.read().decode("utf-8", errors="replace")
-        return resp.content.decode("utf-8", errors="replace")
-
-    # ---------------- TSV / DB ----------------
-
-    def _parse_tsv(self, tsv_text: str) -> list[dict[str, str]]:
-        reader = csv.DictReader(StringIO(tsv_text), delimiter="\t")
-        return [{k: (v if v is not None else "") for k, v in row.items()} for row in reader]
+    # ---------------- DB ----------------
 
     def _store_rows(
         self,
         session: Session,
-        rows: list[dict[str, str]],
+        records: list[UniProtMetadataRecord],
         p: FetchUniProtMetadataPayload,
         emit: EmitFn,
     ) -> tuple[int, int]:
-        accessions = [r.get("Entry", "").strip() for r in rows if r.get("Entry")]
-        canonicals = [Protein.parse_isoform(a)[0] for a in accessions]
+        accessions = [r.accession for r in records]
+        canonicals = [parse_isoform(a)[0] for a in accessions]
         canonical_unique = list(dict.fromkeys([c for c in canonicals if c]))
 
         existing = self._load_existing_metadata(session, canonical_unique)
@@ -287,11 +267,9 @@ class FetchUniProtMetadataOperation:
         touched = 0
         upserted = 0
 
-        for row in rows:
-            acc = row.get("Entry", "").strip()
-            if not acc:
-                continue
-            canonical, _, _ = Protein.parse_isoform(acc)
+        for record in records:
+            canonical, _, _ = parse_isoform(record.accession)
+            row = record.raw_fields
 
             m = existing.get(canonical)
             if m is None:
@@ -309,7 +287,7 @@ class FetchUniProtMetadataOperation:
                 upserted += 1
 
             if p.update_protein_core:
-                pr = protein_map.get(acc)
+                pr = protein_map.get(record.accession)
                 if pr is not None:
                     core_changed = False
 
