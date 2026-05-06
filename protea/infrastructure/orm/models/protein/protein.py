@@ -76,15 +76,17 @@ class Protein(Base):
 
     @staticmethod
     def parse_isoform(accession: str) -> tuple[str, bool, int | None]:
+        """Parse isoform accession pattern ``"<canonical>-<n>"``.
+
+        Forwards to :func:`protea_contracts.parse_isoform`. The
+        canonical implementation lives in ``protea-contracts.bio_utils``
+        so the FASTA parser in ``protea-sources`` can reuse it
+        without inverting the C-stack dependency direction (D-MIGR-04
+        of master plan v3).
         """
-        Parse isoform accession pattern "<canonical>-<n>".
-        Returns: (canonical_accession, is_canonical, isoform_index)
-        """
-        if "-" in accession:
-            left, right = accession.rsplit("-", 1)
-            if right.isdigit():
-                return left, False, int(right)
-        return accession, True, None
+        from protea_contracts import parse_isoform as _parse_isoform
+
+        return _parse_isoform(accession)
 
     def __repr__(self) -> str:
         return (

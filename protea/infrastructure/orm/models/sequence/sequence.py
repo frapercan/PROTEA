@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -41,10 +40,18 @@ class Sequence(Base):
 
     @staticmethod
     def compute_hash(seq: str) -> str:
-        # usedforsecurity=False: this hash is the dedup key for the
-        # protein sequence table, not a security primitive. MD5 collision
-        # resistance is irrelevant; we just need a stable 32-hex digest.
-        return hashlib.md5(seq.encode("utf-8"), usedforsecurity=False).hexdigest()
+        """Forward to :func:`protea_contracts.compute_sequence_hash`.
+
+        The canonical implementation lives in ``protea-contracts.bio_utils``
+        (D-MIGR-04 of master plan v3) so the FASTA parser in
+        ``protea-sources`` can populate ``UniProtProteinRecord
+        .sequence_hash`` without depending on PROTEA's ORM. The wrapper
+        keeps every existing call site (``Sequence.compute_hash(seq)``)
+        working unchanged.
+        """
+        from protea_contracts import compute_sequence_hash
+
+        return compute_sequence_hash(seq)
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)
