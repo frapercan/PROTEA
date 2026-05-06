@@ -50,6 +50,7 @@ protea-backends = { git = "https://github.com/frapercan/protea-backends.git", br
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
 
+
 [tool.poetry.group.dev.dependencies]
 # Dev-time only: imported by protea.core.parquet_export at export-validation
 # time so the manifest dict is checked against the lab's pydantic contract
@@ -72,6 +73,7 @@ mypy = ">=1.19.1,<2.0.0"
 pytest-cov = ">=7.0.0,<8.0.0"
 types-requests = "^2.32.4.20260107"
 types-pyyaml = "^6.0.12.20250915"
+sphinxcontrib-bibtex = "^2.7.0"
 
 [tool.taskipy.tasks]
 lint     = "ruff check protea scripts && flake8 protea"
