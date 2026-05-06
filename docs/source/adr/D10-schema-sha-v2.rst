@@ -1,8 +1,9 @@
 ADR-D10: ``schema_sha`` v2 parallel migration
 ==============================================
 
-:Status: Pending
+:Status: Accepted (implementation pending)
 :Date: 2026-05-05
+:Decided: 2026-05-06 (user confirmation)
 :Phase: F1
 :Gate: T1.6 (requires_human, Alembic on live DB)
 
@@ -32,4 +33,13 @@ Consequences
 
 Resolution
 ----------
-Pending human review of the live-DB migration. Rolls in F1 with T1.6.
+**Accepted as recommended.** User greenlight 2026-05-06 with the
+explicit constraint **"no subir a prod hasta que no esté listo"** —
+implementation must land in staging (or a local-DB rehearsal) and the
+backfill must be verified there before any production migration.
+Implementation order: (1) Alembic migration adding ``schema_sha_v2``
+column, (2) backfill script populating from
+``protea_contracts.compute_schema_sha``, (3) regression test exposing
+v1/v2 drift on historical rows (rather than retroactively fixing), (4)
+inference path reads v2. Production rollout only after staging
+verification.

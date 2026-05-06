@@ -7,12 +7,11 @@ from typing import Any
 from uuid import UUID
 
 import numpy as np
-from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from protea.core.annotation_intern import intern_string
-from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
+from protea.core.contracts.operation import EmitFn, OperationResult
 from protea.core.contracts.parent_progress import update_parent_progress
 from protea.core.disk_cache import (
     _aspect_index_path,
@@ -38,7 +37,6 @@ from protea.core.reranker import (
     infer_active_feature_families,
     load_reranker,
 )
-from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
@@ -48,7 +46,7 @@ from protea.infrastructure.orm.models.embedding.go_prediction import GOPredictio
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
 from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
-from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
+from protea.infrastructure.orm.models.job import Job, JobStatus
 from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.orm.models.query.query_set import QuerySet, QuerySetEntry
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
@@ -162,7 +160,6 @@ from protea_contracts import (  # noqa: E402
     PredictGOTermsPayload,
     StorePredictionsPayload,
 )
-
 
 # ---------------------------------------------------------------------------
 # Coordinator
@@ -621,9 +618,7 @@ class PredictGOTermsBatchOperation:
                     and ref_unified[a]["embeddings_f32"].size
                 ]
                 pca_pool = (
-                    np.concatenate(pools, axis=0)
-                    if pools
-                    else np.empty((0,), dtype=np.float32)
+                    np.concatenate(pools, axis=0) if pools else np.empty((0,), dtype=np.float32)
                 )
             else:
                 pca_pool = ref_unified.get("embeddings_f32", np.empty((0,), dtype=np.float32))
@@ -662,6 +657,7 @@ class PredictGOTermsBatchOperation:
                 expand_predictions_to_ancestors,
                 load_parent_map,
             )
+
             # predict_go_terms keys candidates by integer ``go_term_id``;
             # the expansion helper (and parent_map) operate on string GO
             # accessions (``"GO:0006357"``). Materialise the map once for
@@ -694,7 +690,8 @@ class PredictGOTermsBatchOperation:
             # (the helper just clones the leaf record). Resolve the FK so
             # store_predictions can insert the row.
             ancestor_strs = {
-                rec["go_id"] for rec in prediction_dicts
+                rec["go_id"]
+                for rec in prediction_dicts
                 if rec.get("go_id") and rec["go_id"] not in {v for v in int_to_str.values()}
             }
             if ancestor_strs:
@@ -720,18 +717,14 @@ class PredictGOTermsBatchOperation:
                 {
                     "rows_before": n_before,
                     "rows_after": len(prediction_dicts),
-                    "expansion_ratio": (
-                        len(prediction_dicts) / n_before if n_before else 0.0
-                    ),
+                    "expansion_ratio": (len(prediction_dicts) / n_before if n_before else 0.0),
                 },
                 "info",
             )
 
         reranker_stats: dict[str, Any] | None = None
         if p.reranker_model_id and prediction_dicts:
-            reranker_stats = self._apply_reranker_if_aligned(
-                session, prediction_dicts, p, emit
-            )
+            reranker_stats = self._apply_reranker_if_aligned(session, prediction_dicts, p, emit)
 
         elapsed = time.perf_counter() - t0
 
@@ -761,7 +754,7 @@ class PredictGOTermsBatchOperation:
 
         store_chunk_size = get_tuning().operation.store_chunk_size
         chunks: list[list[dict[str, Any]]] = [
-            prediction_dicts[s:s + store_chunk_size]
+            prediction_dicts[s : s + store_chunk_size]
             for s in range(0, len(prediction_dicts), store_chunk_size)
         ] or [[]]
         store_messages: list[tuple[str, dict[str, Any]]] = []
@@ -905,13 +898,13 @@ class PredictGOTermsBatchOperation:
         write it back onto each prediction dict so the reranker's
         categorical feature is populated.
         """
-        unique_ids = {rec["go_term_id"] for rec in prediction_dicts if rec.get("go_term_id") is not None}
+        unique_ids = {
+            rec["go_term_id"] for rec in prediction_dicts if rec.get("go_term_id") is not None
+        }
         if not unique_ids:
             return
         aspect_by_id: dict[int, str] = dict(
-            session.query(GOTerm.id, GOTerm.aspect)
-            .filter(GOTerm.id.in_(unique_ids))
-            .all()
+            session.query(GOTerm.id, GOTerm.aspect).filter(GOTerm.id.in_(unique_ids)).all()
         )
         for rec in prediction_dicts:
             gid = rec.get("go_term_id")
@@ -1224,9 +1217,7 @@ class PredictGOTermsBatchOperation:
 
         # ── 2. Load feature-engineering inputs over the union of neighbors ──
         ref_sequences, query_sequences, ref_tax_ids, query_tax_ids = (
-            self._load_feature_engineering_data(
-                session, p, valid_accessions, all_unique_neighbors
-            )
+            self._load_feature_engineering_data(session, p, valid_accessions, all_unique_neighbors)
         )
 
         # Build predictions per aspect, merging into a single list.
@@ -1430,9 +1421,7 @@ class PredictGOTermsBatchOperation:
                 continue
 
             ref_f32 = (
-                aspect_refs["embeddings_f32_cos"]
-                if use_cos
-                else aspect_refs["embeddings_f32"]
+                aspect_refs["embeddings_f32_cos"] if use_cos else aspect_refs["embeddings_f32"]
             )
             aspect_neighbors = search_knn(
                 query_embeddings,
@@ -1778,7 +1767,6 @@ class PredictGOTermsBatchOperation:
         return predictions, neighbors, pair_features
 
     # ── v6 reranker features ─────────────────────────────────────────────────
-
 
     # ── feature-engineering helpers ───────────────────────────────────────────
 

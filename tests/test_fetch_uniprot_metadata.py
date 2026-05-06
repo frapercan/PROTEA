@@ -250,7 +250,7 @@ def test_fetch_uniprot_metadata_integration(postgres_url: str):
     # Second run with same data → upsert should not double-insert
     op2 = FetchUniProtMetadataOperation()
     with Session(engine, future=True) as session:
-        with patch.object(op2._http_client.session, "get", return_value=_make_mock_response(TSV_RESPONSE)):
+        with patch.object(op2._uniprot_plugin._client.session, "get", return_value=_make_mock_response(TSV_RESPONSE)):
             result2 = op2.execute(
                 session,
                 {

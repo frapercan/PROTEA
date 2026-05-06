@@ -18,8 +18,6 @@ from protea.core.domain.aspect import ASPECT_CAFA_CODES, Aspect
 from protea.core.evaluation import load_evaluation_data_for_set
 from protea.core.reranker import load_reranker
 from protea.core.scoring import compute_score
-from protea.infrastructure.settings import load_settings as _load_settings_for_reranker
-from protea.infrastructure.storage import get_artifact_store as _get_store_for_reranker
 from protea.infrastructure.orm.models.annotation.evaluation_result import EvaluationResult
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
@@ -31,12 +29,15 @@ from protea.infrastructure.orm.models.embedding.reranker_model import (
 )
 from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
 from protea.infrastructure.settings import load_settings
+from protea.infrastructure.settings import load_settings as _load_settings_for_reranker
 from protea.infrastructure.storage import get_artifact_store
+from protea.infrastructure.storage import get_artifact_store as _get_store_for_reranker
 
 
 def eval_artifact_key(result_id: uuid.UUID, relpath: str) -> str:
     """Canonical MinIO/artifact-store key for a cafaeval output file."""
     return f"eval_artifacts/{result_id}/{relpath.lstrip('/')}"
+
 
 # Namespace labels used by cafaeval OBO parser. The full names come from
 # the obo file; we map them to PROTEA's canonical CAFA codes.
@@ -168,11 +169,7 @@ def _patch_query_known_features(
         count_col[row_indices] = float(len(known))
         if not known:
             continue
-        known_rows = [
-            idx_of_go[g]
-            for g in known
-            if g in idx_of_go and has_emb_mask[idx_of_go[g]]
-        ]
+        known_rows = [idx_of_go[g] for g in known if g in idx_of_go and has_emb_mask[idx_of_go[g]]]
         if not known_rows:
             continue
         kmat = all_norm[known_rows]
@@ -190,9 +187,7 @@ def _patch_query_known_features(
                 cos_col[ridx] = float(cand_vec @ centroid_unit)
             maxcos_col[ridx] = float((kmat @ cand_vec).max())
 
-    df["anc2vec_query_known_cos"] = pd.Series(cos_col, index=df.index).replace(
-        {np.nan: pd.NA}
-    )
+    df["anc2vec_query_known_cos"] = pd.Series(cos_col, index=df.index).replace({np.nan: pd.NA})
     df["anc2vec_query_known_maxcos"] = pd.Series(maxcos_col, index=df.index).replace(
         {np.nan: pd.NA}
     )
@@ -288,6 +283,7 @@ class RunCafaEvaluationOperation:
                 from protea.infrastructure.orm.models.embedding.embedding_config import (
                     EmbeddingConfig,
                 )
+
                 cfg = session.get(EmbeddingConfig, pred.embedding_config_id)
                 if cfg is not None:
                     label = cfg.display_name or cfg.model_name or str(cfg.id)[:8]
@@ -534,15 +530,20 @@ class RunCafaEvaluationOperation:
             # delta proteins outside the PredictionSet's query coverage hurt
             # Fmax / coverage despite the booster being unable to score them.
             if p.restrict_gt_to_predicted:
-                from sqlalchemy import select, distinct
+                from sqlalchemy import distinct, select
+
                 from protea.infrastructure.orm.models.embedding.go_prediction import (
                     GOPrediction as _GP,
                 )
+
                 predicted_set: set[str] = set(
                     session.execute(
-                        select(distinct(_GP.protein_accession))
-                        .where(_GP.prediction_set_id == pred_set_id)
-                    ).scalars().all()
+                        select(distinct(_GP.protein_accession)).where(
+                            _GP.prediction_set_id == pred_set_id
+                        )
+                    )
+                    .scalars()
+                    .all()
                 )
                 _orig_counts = (len(data.nk), len(data.lk), len(data.pk))
                 data = type(data)(
@@ -557,9 +558,12 @@ class RunCafaEvaluationOperation:
                     None,
                     {
                         "predicted_proteins": len(predicted_set),
-                        "nk_before": _orig_counts[0], "nk_after": len(data.nk),
-                        "lk_before": _orig_counts[1], "lk_after": len(data.lk),
-                        "pk_before": _orig_counts[2], "pk_after": len(data.pk),
+                        "nk_before": _orig_counts[0],
+                        "nk_after": len(data.nk),
+                        "lk_before": _orig_counts[1],
+                        "lk_after": len(data.lk),
+                        "pk_before": _orig_counts[2],
+                        "pk_after": len(data.pk),
                     },
                     "info",
                 )
@@ -1029,7 +1033,9 @@ class RunCafaEvaluationOperation:
                 continue
             model = model_from_string(bundle["model"])
             df.loc[mask, "score"] = reranker_predict(
-                model, df.loc[mask], categorical_codes=bundle.get("cat_codes"),
+                model,
+                df.loc[mask],
+                categorical_codes=bundle.get("cat_codes"),
             )
 
         # Fallback for aspects without a model

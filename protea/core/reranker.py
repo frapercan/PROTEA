@@ -28,8 +28,6 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 
-from protea.infrastructure.storage import ArtifactStore, LocalFsArtifactStore
-
 # T1.5 of master plan v3: the feature schema is owned by protea-contracts.
 # Re-export here so existing call sites that import from
 # ``protea.core.reranker`` keep working; new code should import from
@@ -41,6 +39,8 @@ from protea_contracts import (
     LABEL_COLUMN,
     NUMERIC_FEATURES,
 )
+
+from protea.infrastructure.storage import ArtifactStore, LocalFsArtifactStore
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +167,9 @@ def predict(
                     # not seen at training (rare evidence codes etc.) fall to
                     # -1 (missing), matching how the lab handled NaN.
                     mapping = {v: i for i, v in enumerate(categorical_codes[col])}
-                    X[col] = s.map(lambda v: mapping.get(v, -1)).astype("int64")
+                    # Bind ``mapping`` at lambda-definition time so the
+                    # closure does not see a later iteration's value (B023).
+                    X[col] = s.map(lambda v, m=mapping: m.get(v, -1)).astype("int64")
                 else:
                     # No code map — fall back to the (broken-for-small-batch)
                     # legacy path. Logged as a warning by callers.

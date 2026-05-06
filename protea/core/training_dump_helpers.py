@@ -23,7 +23,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 import numpy as np
 import pandas as pd
@@ -47,7 +47,6 @@ from protea.core.reranker import (
     ALL_FEATURES,
     EMBEDDING_PCA_DIM,
     LABEL_COLUMN,
-    fit_embedding_pca,
 )
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
@@ -113,7 +112,6 @@ class StreamOutput:
 # pruned it (no production code referenced it).
 
 
-
 # ---------------------------------------------------------------------------
 # Dataset-export pipeline helpers
 #
@@ -125,9 +123,7 @@ class StreamOutput:
 # ---------------------------------------------------------------------------
 
 
-def _load_parent_map(
-    session: Session, snapshot_id: uuid.UUID
-) -> dict[str, set[str]]:
+def _load_parent_map(session: Session, snapshot_id: uuid.UUID) -> dict[str, set[str]]:
     """Return ``{child_go_id: {parent_go_id, ...}}`` for is_a + part_of edges.
 
     Used to drive True-Path-Rule max-propagation of predicted scores
@@ -149,6 +145,7 @@ def _load_parent_map(
     for child, parent in rows:
         parent_map.setdefault(str(child), set()).add(str(parent))
     return parent_map
+
 
 # ── bulk embedding preload (used by dump_helper) ─────────────
 
@@ -296,6 +293,7 @@ def _build_reference_from_cache(
 
     return result
 
+
 # ── reference embeddings per aspect ───────────────────────────────────
 
 
@@ -340,6 +338,7 @@ def _load_taxonomy_ids(
         for acc, tid in rows:
             result[acc] = int(tid) if tid else None
     return result
+
 
 # ── KNN + transfer + label ────────────────────────────────────────────
 
@@ -518,11 +517,15 @@ def _knn_transfer_and_label(
                         continue
                     feats: dict[str, Any] = {}
                     if do_alignments:
+                        # do_alignments implies both dicts are non-None.
+                        assert query_sequences is not None and ref_sequences is not None
                         q_seq = query_sequences.get(q_acc, "")
                         r_seq = ref_sequences.get(ref_acc, "")
                         if q_seq and r_seq:
                             feats.update(compute_alignment(q_seq, r_seq))
                     if do_taxonomy:
+                        # do_taxonomy implies both dicts are non-None.
+                        assert query_tax_ids is not None and ref_tax_ids is not None
                         q_tid = query_tax_ids.get(q_acc)
                         r_tid = ref_tax_ids.get(ref_acc)
                         feats.update(compute_taxonomy(q_tid, r_tid))
@@ -534,8 +537,12 @@ def _knn_transfer_and_label(
                     if now - _hb_last >= _hb_interval:
                         _LOG.info(
                             "pair_features heartbeat: pairs=%d aspect=%s q_idx=%d/%d elapsed=%.1fs rate=%.0f/s",
-                            _hb_n, aspect, q_idx, len(valid_queries),
-                            now - _hb_t0, _hb_n / max(1e-9, now - _hb_t0),
+                            _hb_n,
+                            aspect,
+                            q_idx,
+                            len(valid_queries),
+                            now - _hb_t0,
+                            _hb_n / max(1e-9, now - _hb_t0),
                         )
                         _hb_last = now
 
@@ -548,9 +555,16 @@ def _knn_transfer_and_label(
     #   tax_voters_same_frac              — fraction of voters in same organism
     #   tax_voters_close_frac             — fraction in "close relatives" bucket
     #   tax_voters_mean_common_ancestors  — mean lineage overlap across voters
-    _CLOSE_RELATIONS = frozenset({
-        "same", "ancestor", "descendant", "child", "parent", "close",
-    })
+    _CLOSE_RELATIONS = frozenset(
+        {
+            "same",
+            "ancestor",
+            "descendant",
+            "child",
+            "parent",
+            "close",
+        }
+    )
     tax_same_cnt: dict[str, dict[int, int]] = {}
     tax_close_cnt: dict[str, dict[int, int]] = {}
     tax_ca_sum: dict[str, dict[int, float]] = {}
@@ -650,11 +664,7 @@ def _knn_transfer_and_label(
             if not known:
                 query_known_info[q_acc] = (None, None, 0)
                 continue
-            rows = [
-                idx_of_go[g]
-                for g in known
-                if g in idx_of_go and has_emb_mask[idx_of_go[g]]
-            ]
+            rows = [idx_of_go[g] for g in known if g in idx_of_go and has_emb_mask[idx_of_go[g]]]
             if not rows:
                 query_known_info[q_acc] = (None, None, len(known))
                 continue
@@ -671,9 +681,9 @@ def _knn_transfer_and_label(
     pca_query_proj: np.ndarray | None = None
     if pca_state is not None and query_emb.size:
         pca_mean, pca_components = pca_state
-        pca_query_proj = (
-            (query_emb.astype(np.float32) - pca_mean) @ pca_components.T
-        ).astype(np.float32)
+        pca_query_proj = ((query_emb.astype(np.float32) - pca_mean) @ pca_components.T).astype(
+            np.float32
+        )
 
     # Build labeled predictions
     #
@@ -741,21 +751,16 @@ def _knn_transfer_and_label(
             records.append(rec)
 
     for q_idx, q_acc in enumerate(valid_queries):
-        q_pca_row = (
-            pca_query_proj[q_idx].tolist()
-            if pca_query_proj is not None
-            else _nan_pca
-        )
-        q_known_cent, q_known_mat, q_known_n = query_known_info.get(
-            q_acc, (None, None, 0)
-        )
+        q_pca_row = pca_query_proj[q_idx].tolist() if pca_query_proj is not None else _nan_pca
+        q_known_cent, q_known_mat, q_known_n = query_known_info.get(q_acc, (None, None, 0))
         q_pairs_features = pair_features.get(q_acc, {})
         for aspect in _ASPECTS:
             go_map = ref_by_aspect[aspect]["go_map"]
             nbs = neighbors_by_aspect[aspect]
             if q_idx >= len(nbs):
                 continue
-            centroid_unit, nmat = neighbor_info.get(
+            # neighbor_info value is Optional; downstream None-check below.
+            centroid_unit, nmat = neighbor_info.get(  # type: ignore[assignment]
                 (q_acc, aspect), (None, None)
             )
 
@@ -785,9 +790,7 @@ def _knn_transfer_and_label(
                             else float("nan")
                         )
                         anc_maxcos = (
-                            float((nmat @ cand_vec).max())
-                            if nmat is not None
-                            else float("nan")
+                            float((nmat @ cand_vec).max()) if nmat is not None else float("nan")
                         )
                         anc_has = 1.0
                         anc_q_cos = (
@@ -877,16 +880,10 @@ def _knn_transfer_and_label(
                                 tax_ca_sum.get(q_acc, {}).get(go_term_id, 0.0)
                                 / max(1, tax_ca_n.get(q_acc, {}).get(go_term_id, 1))
                             )
-                            if (
-                                do_taxonomy
-                                and tax_ca_n.get(q_acc, {}).get(go_term_id, 0) > 0
-                            )
+                            if (do_taxonomy and tax_ca_n.get(q_acc, {}).get(go_term_id, 0) > 0)
                             else float("nan")
                         ),
-                        **{
-                            f"emb_pca_query_{i}": q_pca_row[i]
-                            for i in range(EMBEDDING_PCA_DIM)
-                        },
+                        **{f"emb_pca_query_{i}": q_pca_row[i] for i in range(EMBEDDING_PCA_DIM)},
                     }
                     leaf_by_gid[go_id] = rec
 
@@ -908,8 +905,7 @@ def _knn_transfer_and_label(
                             leaf_anc = leaf_by_gid[anc]
                             leaf_anc["neighbor_vote_fraction"] = min(
                                 1.0,
-                                float(leaf_anc.get("neighbor_vote_fraction", 0.0))
-                                + w / k_limit_f,
+                                float(leaf_anc.get("neighbor_vote_fraction", 0.0)) + w / k_limit_f,
                             )
                             lmd = float(leaf_rec.get("neighbor_min_distance", leaf_d))
                             cur_md = float(leaf_anc.get("neighbor_min_distance", leaf_d))
@@ -922,13 +918,9 @@ def _knn_transfer_and_label(
                             base["go_id"] = anc
                             base[LABEL_COLUMN] = 1 if (q_acc, anc) in gt_pairs else 0
                             prior_frac = (
-                                float(entry["neighbor_vote_fraction"])
-                                if entry is not None
-                                else 0.0
+                                float(entry["neighbor_vote_fraction"]) if entry is not None else 0.0
                             )
-                            base["neighbor_vote_fraction"] = min(
-                                1.0, prior_frac + w / k_limit_f
-                            )
+                            base["neighbor_vote_fraction"] = min(1.0, prior_frac + w / k_limit_f)
                             synth[anc] = base
                         else:
                             entry["neighbor_vote_fraction"] = min(
@@ -975,13 +967,14 @@ def _knn_transfer_and_label(
     return records
 
 
-
 # ---------------------------------------------------------------------------
 # Auto payload
 # ---------------------------------------------------------------------------
 
 
-class TrainRerankerAutoPayload(ProteaPayload, frozen=True):
+# ProteaPayload is a pydantic BaseModel, not a dataclass;
+# mypy's dataclass-frozen-from-non-frozen check is a false positive.
+class TrainRerankerAutoPayload(ProteaPayload, frozen=True):  # type: ignore[misc]
     """Payload for the dump_helper operation.
 
     Generates consecutive temporal pairs from ``train_versions``, runs KNN
@@ -1250,15 +1243,15 @@ class TrainRerankerAutoOperation:
         candidate_names: list[str] = [f"{p.name}-{cat}" for cat in _CATEGORIES]
         if p.training_scope == "per_cell":
             candidate_names.extend(
-                f"{p.name}-{cat}-{_ASPECT_NAMES[asp]}"
-                for cat in _CATEGORIES
-                for asp in _ASPECTS
+                f"{p.name}-{cat}-{_ASPECT_NAMES[asp]}" for cat in _CATEGORIES for asp in _ASPECTS
             )
         # Name-collision check — skipped when dump_only=True since no
         # RerankerModel rows are written.
         if not p.dump_only:
             for model_name in candidate_names:
-                existing = session.query(RerankerModel).filter(RerankerModel.name == model_name).first()
+                existing = (
+                    session.query(RerankerModel).filter(RerankerModel.name == model_name).first()
+                )
                 if existing is not None:
                     raise ValueError(f"RerankerModel '{model_name}' already exists")
 
@@ -1311,15 +1304,12 @@ class TrainRerankerAutoOperation:
         map_snapshots = {ontology_snapshot_id} | set(version_to_native.values())
         union_rows = session.execute(
             text(
-                "SELECT id, go_id, aspect FROM go_term "
-                "WHERE ontology_snapshot_id = ANY(:snap_ids)"
+                "SELECT id, go_id, aspect FROM go_term WHERE ontology_snapshot_id = ANY(:snap_ids)"
             ),
             {"snap_ids": [str(s) for s in map_snapshots]},
         ).fetchall()
         go_id_map: dict[Any, str] = {row_id: go_id for row_id, go_id, _ in union_rows}
-        aspect_map: dict[Any, str] = {
-            row_id: aspect for row_id, _, aspect in union_rows if aspect
-        }
+        aspect_map: dict[Any, str] = {row_id: aspect for row_id, _, aspect in union_rows if aspect}
         pivot_rows = session.execute(
             text(
                 "SELECT go_id FROM go_term "
@@ -1518,9 +1508,17 @@ class TrainRerankerAutoOperation:
 
                 # Restrict predictions to terms present in the pivot universe —
                 # ground truth was reconciled into pivot space above.
-                unlabeled_preds = [
-                    r for r in unlabeled_preds if r["go_id"] in pivot_go_ids
-                ]
+                # _knn_transfer_and_label always returns list[dict].
+                # Cast explicitly to silence the list-widening mypy
+                # check that fires on self-reassignment of unlabeled_preds.
+                unlabeled_preds = cast(
+                    "list[dict[str, Any]]",
+                    [
+                        r
+                        for r in unlabeled_preds
+                        if r["go_id"] in pivot_go_ids  # type: ignore[index]
+                    ],
+                )
 
                 # Free large objects immediately
                 del ref_by_aspect, query_emb, valid_queries, qs, rs, qt, rt
@@ -1668,8 +1666,9 @@ class TrainRerankerAutoOperation:
             test_all_queries: set[str] = set()
             test_cat_gt: dict[str, set[tuple[str, str]]] = {}
             for cat in _CATEGORIES:
-                gt: dict[str, set[str]] = getattr(test_eval_data, cat)
-                pairs: set[tuple[str, str]] = set()
+                # gt + pairs reused from train-side block above; lexically distinct usage.
+                gt: dict[str, set[str]] = getattr(test_eval_data, cat)  # type: ignore[no-redef]
+                pairs: set[tuple[str, str]] = set()  # type: ignore[no-redef]
                 for protein, go_ids in gt.items():
                     for go_id in go_ids:
                         pairs.add((protein, go_id))
@@ -1742,19 +1741,20 @@ class TrainRerankerAutoOperation:
                     del test_ref, test_emb, test_valid, test_qs, test_rs, test_qt, test_rt
                     gc.collect()
 
-                    n_rows = int(test_stream_info.get("n_rows", 0))
+                    # test_stream_info is always a dict in this branch; the
+                    # list variant is only used for empty-split short-circuits.
+                    n_rows = int(test_stream_info.get("n_rows", 0))  # type: ignore[union-attr]
                     if n_rows > 0 and test_unlabeled_path.exists():
                         pf = pq.ParquetFile(str(test_unlabeled_path))
-                        project_cols = [
-                            c for c in _KEEP_COLS if c in pf.schema_arrow.names
-                        ]
+                        project_cols = [c for c in _KEEP_COLS if c in pf.schema_arrow.names]
                         # Per-cat (protein, aspect) membership recovered from
                         # ``test_eval_data`` so each test row lands only in
                         # the genuine cat bucket. See train-side comment for
                         # rationale. ``aspect_map`` is keyed by int
                         # go_term_id; invert ``go_id_map`` to look up by
                         # the go_id string that ``test_eval_data`` carries.
-                        aspect_by_go_id: dict[str, str] = {
+                        # Same name as train-side block; lexically distinct test path.
+                        aspect_by_go_id: dict[str, str] = {  # type: ignore[no-redef]
                             go_id: aspect_map[term_id]
                             for term_id, go_id in go_id_map.items()
                             if term_id in aspect_map
@@ -1762,7 +1762,7 @@ class TrainRerankerAutoOperation:
                         test_cat_membership: dict[str, set[tuple[str, str]]] = {}
                         for cat in _CATEGORIES:
                             gt = getattr(test_eval_data, cat)
-                            members: set[tuple[str, str]] = set()
+                            members: set[tuple[str, str]] = set()  # type: ignore[no-redef]
                             for protein, go_ids in gt.items():
                                 for go_id in go_ids:
                                     asp = aspect_by_go_id.get(go_id, "")
@@ -1774,9 +1774,7 @@ class TrainRerankerAutoOperation:
                             cat: tmp_dir / f"test_{cat}.parquet" for cat in _CATEGORIES
                         }
                         try:
-                            for batch in pf.iter_batches(
-                                batch_size=200_000, columns=project_cols
-                            ):
+                            for batch in pf.iter_batches(batch_size=200_000, columns=project_cols):
                                 # Drop any pre-existing LABEL_COLUMN (it was
                                 # written as zero during streaming) so we can
                                 # append a fresh per-cat label column without
@@ -1784,7 +1782,6 @@ class TrainRerankerAutoOperation:
                                 if LABEL_COLUMN in batch.schema.names:
                                     batch = batch.drop_columns([LABEL_COLUMN])
                                 accs = batch.column("protein_accession").to_pylist()
-                                gids = batch.column("go_id").to_pylist()
                                 asps = batch.column("aspect").to_pylist()
                                 for cat in _CATEGORIES:
                                     members = test_cat_membership[cat]

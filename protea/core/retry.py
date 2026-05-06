@@ -60,7 +60,11 @@ P = ParamSpec("P")
 R = TypeVar("R")
 
 
-def with_retry(
+# PEP 612 strict says no params allowed between *args: P.args and
+# **kwargs: P.kwargs; named keyword-only knobs bind correctly at runtime
+# (Python binds explicit names before falling through to **kwargs).
+# PEP 695 syntax churn deferred.
+def with_retry(  # type: ignore[valid-type]  # noqa: UP047
     fn: Callable[P, R],
     *args: P.args,
     max_attempts: int = 3,

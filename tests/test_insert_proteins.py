@@ -570,7 +570,7 @@ def test_insert_proteins_integration(postgres_url: str):
     # Idempotency: second run should update, not re-insert
     op2 = InsertProteinsOperation()
     with Session(engine, future=True) as session:
-        with patch.object(op2._http_client.session, "get", return_value=_make_mock_response(FASTA_TWO)):
+        with patch.object(op2._uniprot_plugin._client.session, "get", return_value=_make_mock_response(FASTA_TWO)):
             result2 = op2.execute(
                 session,
                 {"search_criteria": "organism_id:9606", "compressed": False},

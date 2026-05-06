@@ -1,8 +1,9 @@
 ADR-D28: Secrets management
 =============================
 
-:Status: Pending
+:Status: Accepted
 :Date: 2026-05-05
+:Decided: 2026-05-06 (user confirmation)
 :Phase: F-OPS
 :Gate: opens at F-OPS entry
 
@@ -29,4 +30,12 @@ Consequences
 
 Resolution
 ----------
-Pending; gate opens with F-OPS (T-OPS.7).
+**Accepted as recommended.** ``sops + age`` confirmed by user
+2026-05-06. Two reasons captured: (a) age keys are post-PGP ed25519,
+short and revocation-chain-free; (b) sops is file-format agnostic so
+the same workflow handles yaml/json/env. First migration target:
+``secrets.enc.yaml`` containing DB URL + AMQP URL + MinIO creds + GitHub
+release token. Bootstrap script invokes ``sops -d`` before
+``manage.sh start``. Per-environment files (``secrets.dev.enc.yaml`` /
+``secrets.prod.enc.yaml``). Rotation procedure to be documented at
+implementation time.

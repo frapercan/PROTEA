@@ -1,8 +1,9 @@
 ADR-D25: HPC operation mode
 =============================
 
-:Status: Pending
+:Status: Accepted (mode B primary, mode C deferred)
 :Date: 2026-05-05
+:Decided: 2026-05-06 (user confirmation)
 :Phase: F-OPS
 :Gate: opens at F-OPS entry
 
@@ -35,4 +36,9 @@ Consequences
 
 Resolution
 ----------
-Pending; gate opens with F-OPS (T-OPS.5, T-OPS.9).
+**Accepted with scope adjustment.** User confirmation 2026-05-06: mode
+B primary, mode C deferred until **post-defensa** (when contact with
+BSC or similar restricted sites becomes concrete). Mode B is sufficient
+for the thesis defense scope: stateless PROTEA workers on HPC nodes
+connecting to LifeWatch / EOSC-hosted Postgres + RabbitMQ. Mode C
+(airgap ``.sif`` bundle) becomes a F9 post-defensa item.

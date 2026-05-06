@@ -55,6 +55,7 @@ def _operation_metadata(
         summary = rendered or None
     return description, summary
 
+
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 

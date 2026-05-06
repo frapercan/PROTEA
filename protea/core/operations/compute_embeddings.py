@@ -10,16 +10,14 @@ from uuid import UUID
 import numpy as np
 from pydantic import Field, field_validator
 from sqlalchemy import exists, select
-from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload, RetryLaterError
 from protea.core.contracts.parent_progress import update_parent_progress
-from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
-from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
+from protea.infrastructure.orm.models.job import Job, JobStatus
 from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.orm.models.query.query_set import QuerySetEntry
 from protea.infrastructure.orm.models.sequence.sequence import Sequence

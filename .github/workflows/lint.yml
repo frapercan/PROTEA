@@ -27,8 +27,8 @@ jobs:
       - name: Add poetry to PATH
         run: echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      - name: Install dev dependencies
-        run: poetry install --only dev
+      - name: Install main + dev dependencies
+        run: poetry install --with dev
 
       - name: ruff check
         run: poetry run ruff check protea scripts

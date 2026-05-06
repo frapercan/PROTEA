@@ -27,8 +27,8 @@ jobs:
       - name: Add poetry to PATH
         run: echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      - name: Install dev dependencies
-        run: poetry install --only dev
+      - name: Install main + dev dependencies
+        run: poetry install --with dev
 
       - name: Build Sphinx docs
         run: poetry run task html_docs

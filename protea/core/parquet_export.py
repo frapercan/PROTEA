@@ -26,10 +26,10 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from protea_contracts import compute_schema_sha as _canonical_schema_sha
 
 from protea.core.reranker import ALL_FEATURES, LABEL_COLUMN
 from protea.infrastructure.storage import ArtifactStore
-from protea_contracts import compute_schema_sha as _canonical_schema_sha
 
 logger = logging.getLogger(__name__)
 
