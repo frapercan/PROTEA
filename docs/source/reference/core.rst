@@ -44,6 +44,51 @@ dispatch time; new operations are registered at process startup in
    :undoc-members:
    :show-inheritance:
 
+``parent_progress`` exposes the shared
+``_update_parent_progress`` helper used by every coordinator
+operation (``compute_embeddings``, ``predict_go_terms``) to advance
+the parent job's progress as child workers finish their batches.
+Extracted to its own module in F0 (T0.7) to remove duplicated copies
+across coordinators.
+
+.. automodule:: protea.core.contracts.parent_progress
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Retry middleware
+----------------
+
+``protea.core.retry`` implements the ``with_retry`` decorator used by
+``BaseWorker`` to wrap the execute session against transient
+database errors (deadlocks, connection drops, serialisation
+failures). Exponential backoff with jitter; the maximum number of
+attempts and the backoff base are controlled by
+``settings.WorkerTuning.retry_max_attempts`` and
+``settings.WorkerTuning.retry_backoff_base`` (see
+:doc:`/appendix/configuration`). Added as part of F0 (T0.3) of the
+master plan v3.
+
+.. automodule:: protea.core.retry
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Operation catalogue
+-------------------
+
+``protea.core.operation_catalog`` builds the singleton
+``OperationRegistry`` that workers consult at message dispatch. The
+public function ``build_operation_registry()`` instantiates each
+operation class and registers it under its canonical name. Adding a
+new operation is a one-line edit here plus a new module under
+``protea/core/operations/``.
+
+.. automodule:: protea.core.operation_catalog
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Utilities
 ---------
 
@@ -399,21 +444,6 @@ transactions.
    :undoc-members:
    :show-inheritance:
 
-**train_reranker** *(internal helper — not registered)*
-   LightGBM training has been moved to
-   `protea-reranker-lab <https://github.com/frapercan/protea-reranker-lab>`_.
-   ``TrainRerankerOperation`` and ``TrainRerankerAutoOperation`` remain
-   importable but are **not** wired into the ``OperationRegistry`` — they
-   survive only as containers for the KNN / feature-generation helpers
-   that :class:`ExportResearchDatasetOperation` reuses in-process to
-   produce frozen dumps. New code should use ``export_research_dataset``
-   + the ``/reranker-models/import`` HTTP surface instead.
-
-.. automodule:: protea.core.operations.train_reranker
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 **export_research_dataset**
    Publishes the frozen re-ranker dataset (``train.parquet`` /
    ``eval.parquet`` / ``manifest.json``) consumed by
@@ -426,6 +456,70 @@ transactions.
    PROTEA HEAD.
 
 .. automodule:: protea.core.operations.export_research_dataset
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Training-dump helpers
+---------------------
+
+``protea.core.training_dump_helpers`` is the home of the KNN /
+feature-generation helpers that were extracted in F0 (T0.6) when
+``protea.core.operations.train_reranker`` was deleted. The module is
+deliberately not an operation — it is reused in-process by
+:class:`ExportResearchDatasetOperation` to materialise ``train`` and
+``eval`` shards before the ``parquet_export`` consolidation pass.
+LightGBM training itself lives in
+`protea-reranker-lab <https://github.com/frapercan/protea-reranker-lab>`_,
+which consumes the published ``Dataset`` rows produced by
+``export_research_dataset``.
+
+.. automodule:: protea.core.training_dump_helpers
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Internal helpers
+----------------
+
+These modules are imported by the operations and the feature
+engineering layer; they are documented here for completeness but are
+not part of the public API.
+
+- ``protea.core.anc2vec_embeddings`` — anc2vec ancestry embeddings for
+  GO terms, used as features by the re-ranker (see ADR D19 for the
+  GeOKG replacement candidate).
+- ``protea.core.annotation_intern`` — string interning helper for
+  reducing memory pressure when loading large annotation sets.
+- ``protea.core.disk_cache`` — generic on-disk cache with TTL used by
+  the KNN reference loader and the PCA cache.
+- ``protea.core.feature_enricher`` — orchestrator that combines
+  alignment, taxonomy and anc2vec features into a single
+  per-candidate row.
+- ``protea.core.pca_cache`` — per-PLM PCA projection cache, used to
+  pre-compute the ``emb_pca`` feature family.
+
+.. automodule:: protea.core.anc2vec_embeddings
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core.annotation_intern
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core.disk_cache
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core.feature_enricher
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core.pca_cache
    :members:
    :undoc-members:
    :show-inheritance:

@@ -10,9 +10,8 @@ even though across a million rows there are only ~5-10 distinct values
 
 Without interning, each duplicate string allocates ~50 B in CPython,
 so a 5 M-row batch can carry ~500 MB of redundant string objects.
-Interning collapses every duplicate to a single shared instance — a
-:doc:`Flyweight </refactoring/design-patterns/flyweight>`-style
-intrinsic-state share. Python already does this implicitly for short
+Interning collapses every duplicate to a single shared instance, a
+Flyweight-style intrinsic-state share. Python already does this implicitly for short
 identifier-like literals; this module forces the same dedup for the
 strings that come back from the DB driver.
 
