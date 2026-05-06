@@ -89,6 +89,7 @@ def _load_booster(rm: RerankerModel) -> Any:
         ),
     )
 
+
 router = APIRouter(prefix="/scoring", tags=["scoring"])
 
 # ---------------------------------------------------------------------------

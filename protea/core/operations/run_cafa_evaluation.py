@@ -38,6 +38,7 @@ def eval_artifact_key(result_id: uuid.UUID, relpath: str) -> str:
     """Canonical MinIO/artifact-store key for a cafaeval output file."""
     return f"eval_artifacts/{result_id}/{relpath.lstrip('/')}"
 
+
 # Namespace labels used by cafaeval OBO parser. The full names come from
 # the obo file; we map them to PROTEA's canonical CAFA codes.
 _NS_LABELS: dict[str, str] = {
@@ -168,11 +169,7 @@ def _patch_query_known_features(
         count_col[row_indices] = float(len(known))
         if not known:
             continue
-        known_rows = [
-            idx_of_go[g]
-            for g in known
-            if g in idx_of_go and has_emb_mask[idx_of_go[g]]
-        ]
+        known_rows = [idx_of_go[g] for g in known if g in idx_of_go and has_emb_mask[idx_of_go[g]]]
         if not known_rows:
             continue
         kmat = all_norm[known_rows]
@@ -190,9 +187,7 @@ def _patch_query_known_features(
                 cos_col[ridx] = float(cand_vec @ centroid_unit)
             maxcos_col[ridx] = float((kmat @ cand_vec).max())
 
-    df["anc2vec_query_known_cos"] = pd.Series(cos_col, index=df.index).replace(
-        {np.nan: pd.NA}
-    )
+    df["anc2vec_query_known_cos"] = pd.Series(cos_col, index=df.index).replace({np.nan: pd.NA})
     df["anc2vec_query_known_maxcos"] = pd.Series(maxcos_col, index=df.index).replace(
         {np.nan: pd.NA}
     )
@@ -288,6 +283,7 @@ class RunCafaEvaluationOperation:
                 from protea.infrastructure.orm.models.embedding.embedding_config import (
                     EmbeddingConfig,
                 )
+
                 cfg = session.get(EmbeddingConfig, pred.embedding_config_id)
                 if cfg is not None:
                     label = cfg.display_name or cfg.model_name or str(cfg.id)[:8]
@@ -539,11 +535,15 @@ class RunCafaEvaluationOperation:
                 from protea.infrastructure.orm.models.embedding.go_prediction import (
                     GOPrediction as _GP,
                 )
+
                 predicted_set: set[str] = set(
                     session.execute(
-                        select(distinct(_GP.protein_accession))
-                        .where(_GP.prediction_set_id == pred_set_id)
-                    ).scalars().all()
+                        select(distinct(_GP.protein_accession)).where(
+                            _GP.prediction_set_id == pred_set_id
+                        )
+                    )
+                    .scalars()
+                    .all()
                 )
                 _orig_counts = (len(data.nk), len(data.lk), len(data.pk))
                 data = type(data)(
@@ -558,9 +558,12 @@ class RunCafaEvaluationOperation:
                     None,
                     {
                         "predicted_proteins": len(predicted_set),
-                        "nk_before": _orig_counts[0], "nk_after": len(data.nk),
-                        "lk_before": _orig_counts[1], "lk_after": len(data.lk),
-                        "pk_before": _orig_counts[2], "pk_after": len(data.pk),
+                        "nk_before": _orig_counts[0],
+                        "nk_after": len(data.nk),
+                        "lk_before": _orig_counts[1],
+                        "lk_after": len(data.lk),
+                        "pk_before": _orig_counts[2],
+                        "pk_after": len(data.pk),
                     },
                     "info",
                 )
@@ -1030,7 +1033,9 @@ class RunCafaEvaluationOperation:
                 continue
             model = model_from_string(bundle["model"])
             df.loc[mask, "score"] = reranker_predict(
-                model, df.loc[mask], categorical_codes=bundle.get("cat_codes"),
+                model,
+                df.loc[mask],
+                categorical_codes=bundle.get("cat_codes"),
             )
 
         # Fallback for aspects without a model

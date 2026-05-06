@@ -22,6 +22,7 @@ def _default_ttl() -> float:
     """Resolved each call so env/yaml overrides apply at runtime."""
     return get_tuning().worker.api_cache_default_ttl_seconds
 
+
 _lock = threading.Lock()
 _store: dict[str, tuple[float, Any]] = {}
 
