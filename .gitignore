@@ -50,3 +50,9 @@ data/
 artifacts/
 results/
 var/
+
+# Plaintext secret files (D28). Committed encrypted form is
+# secrets/*.enc.yaml; the example template (secrets.dev.example.yaml)
+# is also tracked.
+secrets/secrets.dev.yaml
+secrets/secrets.prod.yaml

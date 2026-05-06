@@ -1,0 +1,31 @@
+# sops + age configuration for PROTEA.
+#
+# Each rule maps a path glob to the age recipients allowed to decrypt
+# files matching it. The first matching rule wins (top to bottom).
+#
+# Recipients listed under `age:` are the public keys that the file is
+# encrypted to. Anyone holding a corresponding private key can decrypt.
+#
+# To encrypt a new file:
+#   sops --encrypt --in-place secrets/secrets.dev.yaml
+# (sops reads .sops.yaml, picks the recipients matching the path,
+# encrypts in place.)
+#
+# To decrypt for inspection:
+#   sops --decrypt secrets/secrets.dev.enc.yaml
+#
+# To edit an encrypted file in $EDITOR:
+#   sops secrets/secrets.dev.enc.yaml
+#
+# CI: GitHub Actions reads the private key from secret SOPS_AGE_KEY
+# (entire keys.txt body) and writes it to a temp file before invoking
+# sops --decrypt.
+
+creation_rules:
+  - path_regex: secrets/secrets\.dev(\.enc)?\.yaml$
+    age: >-
+      AGE_RECIPIENT_DEV_PLACEHOLDER
+
+  - path_regex: secrets/secrets\.prod(\.enc)?\.yaml$
+    age: >-
+      AGE_RECIPIENT_PROD_PLACEHOLDER
