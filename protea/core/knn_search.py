@@ -18,6 +18,8 @@ import os
 
 from protea_method.knn_search import (
     _compute_distance_matrix,
+)
+from protea_method.knn_search import (
     search_knn as _lib_search_knn,
 )
 

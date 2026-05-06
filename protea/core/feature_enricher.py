@@ -16,10 +16,9 @@ import uuid
 from typing import Any
 
 import numpy as np
-from sqlalchemy.orm import Session
-
 from protea_method.feature_enricher import NEW_V6_FEATURE_KEYS
 from protea_method.feature_enricher import enrich_v6_features as _lib_enrich_v6_features
+from sqlalchemy.orm import Session
 
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 

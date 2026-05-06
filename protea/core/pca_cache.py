@@ -19,7 +19,6 @@ import uuid
 from pathlib import Path
 
 import numpy as np
-
 from protea_method.pca_cache import load_or_fit_pca_state as _lib_load_or_fit
 
 _PCA_ARTIFACTS_DIR = Path(

@@ -15,7 +15,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from protea_method.anc2vec import Anc2VecIndex, get_index as _get_index_lib
+from protea_method.anc2vec import Anc2VecIndex
+from protea_method.anc2vec import get_index as _get_index_lib
 
 _DEFAULT_PATH = (
     Path(__file__).resolve().parents[2] / "artifacts" / "anc2vec" / "anc2vec_2020-10.npz"
