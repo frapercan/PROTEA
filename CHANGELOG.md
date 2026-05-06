@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.0](https://github.com/frapercan/PROTEA/compare/v0.4.0...v0.5.0) (2026-05-06)
+
+
+### Features
+
+* **anc2vec:** F2C.5.a shim protea.core.anc2vec_embeddings → protea_method.anc2vec ([e88ff12](https://github.com/frapercan/PROTEA/commit/e88ff1264107546770df7fe802a23288f212452c))
+* F2C.5.a expand shims (pca_cache, knn_search, reranker pure helpers) ([2e151f9](https://github.com/frapercan/PROTEA/commit/2e151f9966f0fa240856d823beab0f4c646fd683))
+* F2C.5.a feature_enricher shim with DB-load adapter (-353 LOC) ([547f2c5](https://github.com/frapercan/PROTEA/commit/547f2c577fbc9def2b42b2b9284b51312e17ef94))
+* **F2C.5:** wire PROTEA to protea-method (anc2vec shim first) ([e4633b1](https://github.com/frapercan/PROTEA/commit/e4633b15f13a5e0dfd599d19496091ff471e39f4))
+
 ## [0.4.0](https://github.com/frapercan/PROTEA/compare/v0.3.0...v0.4.0) (2026-05-06)
 
 
