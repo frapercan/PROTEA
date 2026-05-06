@@ -66,6 +66,32 @@ def _make_mock_session():
     return session
 
 
+def _make_record(
+    accession: str = "P12345",
+    sequence: str = "MKTAYIAK",
+    is_canonical: bool = True,
+    isoform_index: int | None = None,
+    canonical_accession: str | None = None,
+):
+    """Build a UniProtProteinRecord for store-records testing."""
+    from protea_contracts import UniProtProteinRecord, compute_sequence_hash
+
+    return UniProtProteinRecord(
+        accession=accession,
+        entry_name="TEST_HUMAN",
+        canonical_accession=canonical_accession or accession,
+        is_canonical=is_canonical,
+        isoform_index=isoform_index,
+        organism="Homo sapiens",
+        taxonomy_id="9606",
+        gene_name="TEST",
+        reviewed=True,
+        sequence=sequence,
+        length=len(sequence),
+        sequence_hash=compute_sequence_hash(sequence),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Unit tests — InsertProteinsPayload
 # ---------------------------------------------------------------------------
@@ -120,131 +146,6 @@ class TestInsertProteinsPayload:
         assert p.search_criteria == "q"
 
 
-# ---------------------------------------------------------------------------
-# Unit tests — _parse_fasta / _parse_header
-# ---------------------------------------------------------------------------
-
-
-class TestParseFasta:
-    def setup_method(self):
-        self.op = InsertProteinsOperation()
-
-    def test_parses_single_record(self):
-        records = self.op._parse_fasta(FASTA_ONE)
-        assert len(records) == 1
-        r = records[0]
-        assert r["accession"] == "P12345"
-        assert r["reviewed"] is True
-        assert r["organism"] == "Homo sapiens"
-        assert r["taxonomy_id"] == "9606"
-        assert r["gene_name"] == "TEST"
-        assert len(r["sequence"]) > 0
-        assert r["length"] == len(r["sequence"])
-
-    def test_parses_multiple_records(self):
-        records = self.op._parse_fasta(FASTA_TWO)
-        assert len(records) == 2
-        assert records[1]["accession"] == "Q99999"
-        assert records[1]["reviewed"] is False
-        assert records[1]["taxonomy_id"] == "10090"
-
-    def test_empty_fasta_returns_empty(self):
-        assert self.op._parse_fasta("") == []
-
-    def test_canonical_isoform_parsing(self):
-        fasta = ">sp|P12345-2|TEST_HUMAN Isoform 2 OS=Homo sapiens OX=9606\nMKTAYIAK\n"
-        records = self.op._parse_fasta(fasta)
-        assert records[0]["canonical_accession"] == "P12345"
-        assert records[0]["is_canonical"] is False
-        assert records[0]["isoform_index"] == 2
-
-    def test_sequence_hash_is_set(self):
-        records = self.op._parse_fasta(FASTA_ONE)
-        assert records[0]["sequence_hash"] is not None
-        assert len(records[0]["sequence_hash"]) == 32  # MD5 hex
-
-    def test_empty_sequence_skipped(self):
-        """Lines 231-233: header with no sequence lines is skipped."""
-        fasta = ">sp|P12345|TEST_HUMAN Test OS=Homo sapiens OX=9606\n\n"
-        records = self.op._parse_fasta(fasta)
-        assert records == []
-
-    def test_header_without_pipe_separators(self):
-        """Lines 264-265: header without | uses first word as accession."""
-        fasta = ">SIMPLE_ACC some description\nMKTAYIAK\n"
-        records = self.op._parse_fasta(fasta)
-        assert len(records) == 1
-        assert records[0]["accession"] == "SIMPLE_ACC"
-        assert records[0]["entry_name"] is None
-
-    def test_isoform_accession_parsed(self):
-        fasta = ">sp|P12345-3|TEST_HUMAN Isoform 3 OS=Homo sapiens OX=9606 GN=TEST\nMKTAYIAK\n"
-        records = self.op._parse_fasta(fasta)
-        r = records[0]
-        assert r["accession"] == "P12345-3"
-        assert r["canonical_accession"] == "P12345"
-        assert r["is_canonical"] is False
-        assert r["isoform_index"] == 3
-
-    def test_canonical_accession_flagged(self):
-        records = self.op._parse_fasta(FASTA_ONE)
-        r = records[0]
-        assert r["canonical_accession"] == "P12345"
-        assert r["is_canonical"] is True
-        assert r["isoform_index"] is None
-
-    def test_reviewed_vs_unreviewed(self):
-        records = self.op._parse_fasta(FASTA_TWO)
-        assert records[0]["reviewed"] is True  # sp|
-        assert records[1]["reviewed"] is False  # tr|
-
-    def test_sequence_deduplication_by_hash(self):
-        """Two identical sequences produce the same hash."""
-        fasta = (
-            ">sp|P11111|A_HUMAN Prot A OS=Homo sapiens OX=9606\nMKTAYIAK\n"
-            ">sp|P22222|B_HUMAN Prot B OS=Homo sapiens OX=9606\nMKTAYIAK\n"
-        )
-        records = self.op._parse_fasta(fasta)
-        assert len(records) == 2
-        assert records[0]["sequence_hash"] == records[1]["sequence_hash"]
-
-    def test_multiline_sequence(self):
-        fasta = ">sp|P12345|TEST_HUMAN Test OS=Homo sapiens OX=9606\nMKTAY\nIAKQR\n"
-        records = self.op._parse_fasta(fasta)
-        assert records[0]["sequence"] == "MKTAYIAKQR"
-        assert records[0]["length"] == 10
-
-
-# ---------------------------------------------------------------------------
-# Unit tests — _decode_response
-# ---------------------------------------------------------------------------
-
-
-class TestDecodeResponse:
-    def setup_method(self):
-        self.op = InsertProteinsOperation()
-
-    def test_decode_uncompressed(self):
-        """Line 217: uncompressed path."""
-        resp = MagicMock()
-        resp.content = b"hello world"
-        result = self.op._decode_response(resp, compressed=False)
-        assert result == "hello world"
-
-    def test_decode_compressed(self):
-        """Lines 215-216: gzip decompression path."""
-        import gzip
-        from io import BytesIO
-
-        raw = b"compressed content"
-        buf = BytesIO()
-        with gzip.GzipFile(fileobj=buf, mode="wb") as f:
-            f.write(raw)
-        resp = MagicMock()
-        resp.content = buf.getvalue()
-        result = self.op._decode_response(resp, compressed=True)
-        assert result == "compressed content"
-
 
 # ---------------------------------------------------------------------------
 # Unit tests — _store_records
@@ -264,25 +165,8 @@ class TestStoreRecords:
 
     def test_updates_existing_protein(self):
         """Lines 350-394: existing protein gets conservative updates."""
-        from protea.infrastructure.orm.models.sequence.sequence import (
-            Sequence as SequenceModel,
-        )
-
-        seq_hash = SequenceModel.compute_hash("MKTAYIAK")
-        record = {
-            "accession": "P12345",
-            "entry_name": "TEST_HUMAN",
-            "canonical_accession": "P12345",
-            "is_canonical": True,
-            "isoform_index": None,
-            "organism": "Homo sapiens",
-            "taxonomy_id": "9606",
-            "gene_name": "TEST",
-            "reviewed": True,
-            "sequence": "MKTAYIAK",
-            "length": 8,
-            "sequence_hash": seq_hash,
-        }
+        record = _make_record()
+        seq_hash = record.sequence_hash
 
         # Existing protein with missing fields (triggers updates)
         existing_prot = MagicMock()
@@ -334,25 +218,7 @@ class TestStoreRecords:
 
     def test_inserts_new_sequence_when_missing(self):
         """Lines 318-334: new sequence inserted when hash not in DB."""
-        from protea.infrastructure.orm.models.sequence.sequence import (
-            Sequence as SequenceModel,
-        )
-
-        seq_hash = SequenceModel.compute_hash("MKTAYIAK")
-        record = {
-            "accession": "P12345",
-            "entry_name": "TEST_HUMAN",
-            "canonical_accession": "P12345",
-            "is_canonical": True,
-            "isoform_index": None,
-            "organism": "Homo sapiens",
-            "taxonomy_id": "9606",
-            "gene_name": "TEST",
-            "reviewed": True,
-            "sequence": "MKTAYIAK",
-            "length": 8,
-            "sequence_hash": seq_hash,
-        }
+        record = _make_record()
 
         session = MagicMock(spec=Session)
 
@@ -397,7 +263,7 @@ class TestInsertProteinsOperationExecute:
         session = _make_mock_session()
         emit = _capturing_emit()
 
-        with patch.object(self.op._http_client.session, "get", return_value=_make_mock_response(FASTA_ONE)):
+        with patch.object(self.op._uniprot_plugin._client.session, "get", return_value=_make_mock_response(FASTA_ONE)):
             result = self.op.execute(
                 session,
                 {"search_criteria": "organism_id:9606", "compressed": False},
@@ -414,7 +280,7 @@ class TestInsertProteinsOperationExecute:
         session = _make_mock_session()
         emit = _capturing_emit()
 
-        with patch.object(self.op._http_client.session, "get", return_value=_make_mock_response(FASTA_ONE)):
+        with patch.object(self.op._uniprot_plugin._client.session, "get", return_value=_make_mock_response(FASTA_ONE)):
             self.op.execute(
                 session,
                 {"search_criteria": "q", "compressed": False},
@@ -429,7 +295,7 @@ class TestInsertProteinsOperationExecute:
         session = _make_mock_session()
         emit = _capturing_emit()
 
-        with patch.object(self.op._http_client.session, "get", return_value=_make_mock_response(FASTA_TWO)):
+        with patch.object(self.op._uniprot_plugin._client.session, "get", return_value=_make_mock_response(FASTA_TWO)):
             result = self.op.execute(
                 session,
                 {"search_criteria": "q", "total_limit": 1, "compressed": False},
@@ -443,7 +309,7 @@ class TestInsertProteinsOperationExecute:
     def test_execute_calls_session_add_all_for_new_protein(self):
         session = _make_mock_session()
 
-        with patch.object(self.op._http_client.session, "get", return_value=_make_mock_response(FASTA_ONE)):
+        with patch.object(self.op._uniprot_plugin._client.session, "get", return_value=_make_mock_response(FASTA_ONE)):
             self.op.execute(
                 session,
                 {"search_criteria": "q", "compressed": False},
@@ -456,7 +322,7 @@ class TestInsertProteinsOperationExecute:
         session = _make_mock_session()
         emit = _capturing_emit()
 
-        with patch.object(self.op._http_client.session, "get", return_value=_make_mock_response(FASTA_TWO)):
+        with patch.object(self.op._uniprot_plugin._client.session, "get", return_value=_make_mock_response(FASTA_TWO)):
             result = self.op.execute(
                 session,
                 {"search_criteria": "q", "compressed": False},
@@ -466,20 +332,23 @@ class TestInsertProteinsOperationExecute:
         assert result.result["retrieved_records"] == 2
         assert result.result["proteins_inserted"] == 2
 
-    def test_empty_page_continues(self):
-        """Line 93: empty records list triggers continue."""
+    def test_empty_page_does_not_flush(self):
+        """Empty FASTA response → no records, no buffer flush, pages=0.
+
+        Per F2A.6-real, ``pages`` counts DB-side buffer flushes; an
+        HTTP page that returns zero records never triggers a flush.
+        """
         session = _make_mock_session()
         emit = _capturing_emit()
-        # First response is empty FASTA, no link header → single page with 0 records
         empty_resp = _make_mock_response("")
-        with patch.object(self.op._http_client.session, "get", return_value=empty_resp):
+        with patch.object(self.op._uniprot_plugin._client.session, "get", return_value=empty_resp):
             result = self.op.execute(
                 session,
                 {"search_criteria": "q", "compressed": False},
                 emit=emit,
             )
         assert result.result["retrieved_records"] == 0
-        assert result.result["pages"] == 1
+        assert result.result["pages"] == 0
 
     def test_total_limit_trims_to_zero_breaks(self):
         """Lines 96-98: when total_limit is already reached, records trimmed to empty → break."""
@@ -502,7 +371,7 @@ class TestInsertProteinsOperationExecute:
                 return page1_resp
             return page2_resp
 
-        with patch.object(self.op._http_client.session, "get", side_effect=get_side_effect):
+        with patch.object(self.op._uniprot_plugin._client.session, "get", side_effect=get_side_effect):
             result = self.op.execute(
                 session,
                 {"search_criteria": "q", "total_limit": 2, "compressed": False},
@@ -530,7 +399,7 @@ class TestInsertProteinsOperationExecute:
         resp.headers = {"link": ""}
         resp.raise_for_status = MagicMock()
 
-        with patch.object(self.op._http_client.session, "get", return_value=resp) as mock_get:
+        with patch.object(self.op._uniprot_plugin._client.session, "get", return_value=resp) as mock_get:
             self.op.execute(
                 session,
                 {"search_criteria": "q", "compressed": True},
@@ -540,41 +409,11 @@ class TestInsertProteinsOperationExecute:
         called_url = mock_get.call_args[0][0]
         assert "compressed=true" in called_url
 
-    def test_total_results_from_header(self):
-        """Line 200: X-Total-Results header is captured."""
-        session = _make_mock_session()
-        emit = _capturing_emit()
-
-        resp = _make_mock_response(FASTA_ONE)
-        resp.headers["X-Total-Results"] = "42"
-
-        op = InsertProteinsOperation()
-        with patch.object(op._http_client.session, "get", return_value=resp):
-            op.execute(
-                session,
-                {"search_criteria": "q", "compressed": False},
-                emit=emit,
-            )
-
-        assert op._total_results == 42
-
-    def test_total_results_invalid_header_ignored(self):
-        """Line 200: non-numeric X-Total-Results doesn't crash."""
-        session = _make_mock_session()
-        emit = _capturing_emit()
-
-        resp = _make_mock_response(FASTA_ONE)
-        resp.headers["X-Total-Results"] = "not-a-number"
-
-        op = InsertProteinsOperation()
-        with patch.object(op._http_client.session, "get", return_value=resp):
-            op.execute(
-                session,
-                {"search_criteria": "q", "compressed": False},
-                emit=emit,
-            )
-
-        assert op._total_results is None
+    # NOTE: tests for ``op._total_results`` (X-Total-Results capture)
+    # were removed in F2A.6-real step 3 (b). The plugin abstracts HTTP
+    # away from the operation, and X-Total-Results was nice-to-have for
+    # progress reporting, not load-bearing for correctness. Progress
+    # totals now only flow when ``total_limit`` is set.
 
     def test_cursor_pagination(self):
         """Lines 208-210: cursor-based pagination follows link headers."""
@@ -598,16 +437,20 @@ class TestInsertProteinsOperationExecute:
             return page2_resp
 
         op = InsertProteinsOperation()
-        with patch.object(op._http_client.session, "get", side_effect=get_side_effect):
+        with patch.object(op._uniprot_plugin._client.session, "get", side_effect=get_side_effect):
             result = op.execute(
                 session,
                 {"search_criteria": "q", "compressed": False},
                 emit=emit,
             )
 
-        assert result.result["pages"] == 2
+        # Per F2A.6-real, ``pages`` counts DB-side buffer flushes,
+        # not HTTP pages. With 2 records and the default page_size=500,
+        # only one final flush fires.
+        assert result.result["pages"] == 1
         assert result.result["retrieved_records"] == 2
-        # Second call URL should contain cursor
+        # Second HTTP call URL should contain cursor (HTTP-level pagination
+        # is the plugin's concern, but we verify the cursor was followed).
         assert "cursor=abc123" in called_urls[1]
 
     def test_network_failure_propagates(self):
@@ -618,7 +461,7 @@ class TestInsertProteinsOperationExecute:
         op = InsertProteinsOperation()
 
         with patch.object(
-            op._http_client.session,
+            op._uniprot_plugin._client.session,
             "get",
             side_effect=req.ConnectionError("network down"),
         ):
@@ -647,7 +490,7 @@ class TestInsertProteinsOperationExecute:
         )
         resp = _make_mock_response(fasta_with_isoform)
         op = InsertProteinsOperation()
-        with patch.object(op._http_client.session, "get", return_value=resp):
+        with patch.object(op._uniprot_plugin._client.session, "get", return_value=resp):
             result = op.execute(
                 session,
                 {"search_criteria": "q", "compressed": False},
@@ -656,19 +499,24 @@ class TestInsertProteinsOperationExecute:
 
         assert result.result["isoform_records"] == 1
 
-    def test_progress_emission_with_total(self):
-        """Progress events include _progress_current and _progress_total."""
+    def test_progress_emission_with_total_limit(self):
+        """Progress events include _progress_total when ``total_limit`` is set.
+
+        Per F2A.6-real, the operation no longer captures X-Total-Results
+        from the HTTP response; only the user-set ``total_limit`` flows
+        into ``_progress_total``. With ``page_size=1`` we force a flush
+        so the page_done event actually fires.
+        """
         session = _make_mock_session()
         emit = _capturing_emit()
 
         resp = _make_mock_response(FASTA_ONE)
-        resp.headers["X-Total-Results"] = "100"
-
         op = InsertProteinsOperation()
-        with patch.object(op._http_client.session, "get", return_value=resp):
+        with patch.object(op._uniprot_plugin._client.session, "get", return_value=resp):
             op.execute(
                 session,
-                {"search_criteria": "q", "compressed": False},
+                {"search_criteria": "q", "compressed": False,
+                 "total_limit": 100, "page_size": 1},
                 emit=emit,
             )
 
@@ -683,7 +531,7 @@ class TestInsertProteinsOperationExecute:
         session = _make_mock_session()
         resp = _make_mock_response(FASTA_ONE)
         op = InsertProteinsOperation()
-        with patch.object(op._http_client.session, "get", return_value=resp) as mock_get:
+        with patch.object(op._uniprot_plugin._client.session, "get", return_value=resp) as mock_get:
             op.execute(
                 session,
                 {"search_criteria": "q", "compressed": False, "include_isoforms": False},
@@ -708,7 +556,7 @@ def test_insert_proteins_integration(postgres_url: str):
     emit = _capturing_emit()
 
     with Session(engine, future=True) as session:
-        with patch.object(op._http_client.session, "get", return_value=_make_mock_response(FASTA_TWO)):
+        with patch.object(op._uniprot_plugin._client.session, "get", return_value=_make_mock_response(FASTA_TWO)):
             result = op.execute(
                 session,
                 {"search_criteria": "organism_id:9606", "compressed": False},
