@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import DateTime, ForeignKey, func
+from sqlalchemy import DateTime, ForeignKey, String, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -54,6 +54,7 @@ class EvaluationSet(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     stats: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    groundtruth_uri: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     old_annotation_set: Mapped[AnnotationSet] = relationship(
         "AnnotationSet", foreign_keys=[old_annotation_set_id]

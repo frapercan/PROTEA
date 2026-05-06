@@ -201,28 +201,44 @@ function RerankerCard({
           </div>
         </div>
         <div className="flex flex-wrap gap-4 mt-2 text-xs text-gray-500">
-          <span>AUC: <strong className="text-gray-700">{m.val_auc?.toFixed(4) ?? "—"}</strong></span>
-          <span>F1: <strong className="text-gray-700">{m.val_f1?.toFixed(4) ?? "—"}</strong></span>
-          <span>Precision: <strong className="text-gray-700">{m.val_precision?.toFixed(4) ?? "—"}</strong></span>
-          <span>Recall: <strong className="text-gray-700">{m.val_recall?.toFixed(4) ?? "—"}</strong></span>
-          <span>Positive rate: <strong className="text-gray-700">{m.positive_rate != null ? `${(m.positive_rate * 100).toFixed(2)}%` : "—"}</strong></span>
+          {m.test_fmax != null ? (
+            <>
+              <span>Test Fmax: <strong className="text-gray-700">{m.test_fmax.toFixed(4)}</strong></span>
+              <span>Best iter: <strong className="text-gray-700">{m.best_iteration ?? "—"}</strong></span>
+              {m.positive_rate_train != null && (
+                <span>Train pos. rate: <strong className="text-gray-700">{(m.positive_rate_train * 100).toFixed(2)}%</strong></span>
+              )}
+            </>
+          ) : (
+            <>
+              <span>AUC: <strong className="text-gray-700">{m.val_auc?.toFixed(4) ?? "—"}</strong></span>
+              <span>F1: <strong className="text-gray-700">{m.val_f1?.toFixed(4) ?? "—"}</strong></span>
+              <span>Precision: <strong className="text-gray-700">{m.val_precision?.toFixed(4) ?? "—"}</strong></span>
+              <span>Recall: <strong className="text-gray-700">{m.val_recall?.toFixed(4) ?? "—"}</strong></span>
+              <span>Positive rate: <strong className="text-gray-700">{m.positive_rate != null ? `${(m.positive_rate * 100).toFixed(2)}%` : "—"}</strong></span>
+            </>
+          )}
         </div>
       </div>
 
       {expanded && (
         <div className="border-t px-4 py-4 space-y-5">
-          {/* Validation metrics */}
+          {/* Training-time metrics */}
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Validation metrics</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Training-time metrics</p>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <MetricsBadge label="Test Fmax" value={m.test_fmax} />
+              <MetricsBadge label="Best iteration" value={m.best_iteration} />
               <MetricsBadge label="AUC" value={m.val_auc} />
               <MetricsBadge label="Log-loss" value={m.val_logloss} />
               <MetricsBadge label="F1" value={m.val_f1} />
-              <MetricsBadge label="Best iteration" value={m.best_iteration} />
             </div>
             <div className="flex flex-wrap gap-4 mt-2 text-xs text-gray-500">
-              <span>Train samples: {m.train_samples?.toLocaleString()}</span>
-              <span>Val samples: {m.val_samples?.toLocaleString()}</span>
+              {m.train_samples != null && <span>Train samples: {m.train_samples.toLocaleString()}</span>}
+              {m.val_samples != null && <span>Val samples: {m.val_samples.toLocaleString()}</span>}
+              {m.positive_rate_train != null && (
+                <span>Train positive rate: {(m.positive_rate_train * 100).toFixed(2)}%</span>
+              )}
             </div>
           </div>
 

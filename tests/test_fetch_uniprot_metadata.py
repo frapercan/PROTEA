@@ -17,6 +17,7 @@ from protea.infrastructure.orm.base import Base
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _noop_emit(event: str, message: str | None, fields: dict[str, object], level: str) -> None:
     pass
 
@@ -36,6 +37,7 @@ def _capturing_emit():
 # Unit tests — FetchUniProtMetadataPayload
 # ---------------------------------------------------------------------------
 
+
 class TestFetchUniProtMetadataPayload:
     def test_minimal_valid(self):
         p = FetchUniProtMetadataPayload.model_validate({"search_criteria": "organism_id:9606"})
@@ -46,20 +48,22 @@ class TestFetchUniProtMetadataPayload:
         assert p.update_protein_core is True
 
     def test_all_fields(self):
-        p = FetchUniProtMetadataPayload.model_validate({
-            "search_criteria": "organism_id:9606",
-            "page_size": 100,
-            "total_limit": 200,
-            "timeout_seconds": 30,
-            "compressed": False,
-            "max_retries": 3,
-            "backoff_base_seconds": 0.5,
-            "backoff_max_seconds": 10.0,
-            "jitter_seconds": 0.1,
-            "commit_every_page": False,
-            "update_protein_core": False,
-            "user_agent": "test/1.0",
-        })
+        p = FetchUniProtMetadataPayload.model_validate(
+            {
+                "search_criteria": "organism_id:9606",
+                "page_size": 100,
+                "total_limit": 200,
+                "timeout_seconds": 30,
+                "compressed": False,
+                "max_retries": 3,
+                "backoff_base_seconds": 0.5,
+                "backoff_max_seconds": 10.0,
+                "jitter_seconds": 0.1,
+                "commit_every_page": False,
+                "update_protein_core": False,
+                "user_agent": "test/1.0",
+            }
+        )
         assert p.page_size == 100
         assert p.total_limit == 200
         assert p.compressed is False
@@ -85,53 +89,26 @@ class TestFetchUniProtMetadataPayload:
             FetchUniProtMetadataPayload.model_validate({"search_criteria": "q", "total_limit": -1})
 
     def test_null_total_limit_allowed(self):
-        p = FetchUniProtMetadataPayload.model_validate({"search_criteria": "q", "total_limit": None})
+        p = FetchUniProtMetadataPayload.model_validate(
+            {"search_criteria": "q", "total_limit": None}
+        )
         assert p.total_limit is None
 
     def test_invalid_compressed_raises(self):
         with pytest.raises(ValueError, match="compressed"):
-            FetchUniProtMetadataPayload.model_validate({"search_criteria": "q", "compressed": "yes"})
+            FetchUniProtMetadataPayload.model_validate(
+                {"search_criteria": "q", "compressed": "yes"}
+            )
 
     def test_negative_backoff_raises(self):
         with pytest.raises(ValueError, match="backoff_base_seconds"):
-            FetchUniProtMetadataPayload.model_validate({"search_criteria": "q", "backoff_base_seconds": -1.0})
+            FetchUniProtMetadataPayload.model_validate(
+                {"search_criteria": "q", "backoff_base_seconds": -1.0}
+            )
 
     def test_search_criteria_is_stripped(self):
         p = FetchUniProtMetadataPayload.model_validate({"search_criteria": "  organism_id:9606  "})
         assert p.search_criteria == "organism_id:9606"
-
-
-# ---------------------------------------------------------------------------
-# Unit tests — _parse_tsv
-# ---------------------------------------------------------------------------
-
-class TestParseTsv:
-    def setup_method(self):
-        self.op = FetchUniProtMetadataOperation()
-
-    def test_parses_basic_tsv(self):
-        tsv = "Entry\tReviewed\tLength\nP12345\treviewed\t500\nQ99999\tunreviewed\t120\n"
-        rows = self.op._parse_tsv(tsv)
-        assert len(rows) == 2
-        assert rows[0]["Entry"] == "P12345"
-        assert rows[0]["Reviewed"] == "reviewed"
-        assert rows[1]["Length"] == "120"
-
-    def test_empty_tsv_returns_empty(self):
-        rows = self.op._parse_tsv("")
-        assert rows == []
-
-    def test_none_values_coerced_to_empty_string(self):
-        # DictReader returns None for missing fields in some edge cases;
-        # the implementation maps None -> ""
-        tsv = "Entry\tReviewed\nP12345\t\n"
-        rows = self.op._parse_tsv(tsv)
-        assert rows[0]["Reviewed"] == ""
-
-    def test_header_only_returns_empty(self):
-        tsv = "Entry\tReviewed\tLength\n"
-        rows = self.op._parse_tsv(tsv)
-        assert rows == []
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +151,7 @@ class TestFetchUniProtMetadataOperationExecute:
         session = self._mock_session()
         emit = _capturing_emit()
 
-        with patch.object(self.op._http, "get", return_value=_make_mock_response(TSV_RESPONSE)):
+        with patch.object(self.op._uniprot_plugin._client.session, "get", return_value=_make_mock_response(TSV_RESPONSE)):
             result = self.op.execute(
                 session,
                 {"search_criteria": "organism_id:9606", "page_size": 1, "compressed": False},
@@ -190,7 +167,7 @@ class TestFetchUniProtMetadataOperationExecute:
         session = self._mock_session()
         emit = _capturing_emit()
 
-        with patch.object(self.op._http, "get", return_value=_make_mock_response(TSV_RESPONSE)):
+        with patch.object(self.op._uniprot_plugin._client.session, "get", return_value=_make_mock_response(TSV_RESPONSE)):
             self.op.execute(
                 session,
                 {"search_criteria": "organism_id:9606", "compressed": False},
@@ -203,11 +180,16 @@ class TestFetchUniProtMetadataOperationExecute:
 
     def test_execute_respects_total_limit(self):
         # Two rows in TSV but total_limit=1 should stop after 1
-        tsv = TSV_RESPONSE + "Q99999\tunreviewed\tTEST2_HUMAN\tAnother\tT2\tMus musculus\t100\t" + "\t" * 17 + "\n"
+        tsv = (
+            TSV_RESPONSE
+            + "Q99999\tunreviewed\tTEST2_HUMAN\tAnother\tT2\tMus musculus\t100\t"
+            + "\t" * 17
+            + "\n"
+        )
         session = self._mock_session()
         emit = _capturing_emit()
 
-        with patch.object(self.op._http, "get", return_value=_make_mock_response(tsv)):
+        with patch.object(self.op._uniprot_plugin._client.session, "get", return_value=_make_mock_response(tsv)):
             result = self.op.execute(
                 session,
                 {"search_criteria": "q", "total_limit": 1, "compressed": False},
@@ -215,7 +197,9 @@ class TestFetchUniProtMetadataOperationExecute:
             )
 
         assert result.result["rows"] == 1
-        limit_events = [c for c in emit.calls if c["event"] == "fetch_uniprot_metadata.limit_reached"]
+        limit_events = [
+            c for c in emit.calls if c["event"] == "fetch_uniprot_metadata.limit_reached"
+        ]
         assert len(limit_events) == 1
 
     def test_execute_inserts_metadata_row(self):
@@ -223,7 +207,7 @@ class TestFetchUniProtMetadataOperationExecute:
         session = self._mock_session()
         emit = _noop_emit
 
-        with patch.object(self.op._http, "get", return_value=_make_mock_response(TSV_RESPONSE)):
+        with patch.object(self.op._uniprot_plugin._client.session, "get", return_value=_make_mock_response(TSV_RESPONSE)):
             self.op.execute(
                 session,
                 {"search_criteria": "q", "compressed": False},
@@ -237,6 +221,7 @@ class TestFetchUniProtMetadataOperationExecute:
 # Integration test — execute() against a real Postgres DB with mocked HTTP
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 def test_fetch_uniprot_metadata_integration(postgres_url: str):
     engine = create_engine(postgres_url, future=True)
@@ -247,10 +232,14 @@ def test_fetch_uniprot_metadata_integration(postgres_url: str):
     emit = _capturing_emit()
 
     with Session(engine, future=True) as session:
-        with patch.object(op._http, "get", return_value=_make_mock_response(TSV_RESPONSE)):
+        with patch.object(op._uniprot_plugin._client.session, "get", return_value=_make_mock_response(TSV_RESPONSE)):
             result = op.execute(
                 session,
-                {"search_criteria": "organism_id:9606", "compressed": False, "commit_every_page": False},
+                {
+                    "search_criteria": "organism_id:9606",
+                    "compressed": False,
+                    "commit_every_page": False,
+                },
                 emit=emit,
             )
             session.commit()
@@ -261,10 +250,14 @@ def test_fetch_uniprot_metadata_integration(postgres_url: str):
     # Second run with same data → upsert should not double-insert
     op2 = FetchUniProtMetadataOperation()
     with Session(engine, future=True) as session:
-        with patch.object(op2._http, "get", return_value=_make_mock_response(TSV_RESPONSE)):
+        with patch.object(op2._uniprot_plugin._client.session, "get", return_value=_make_mock_response(TSV_RESPONSE)):
             result2 = op2.execute(
                 session,
-                {"search_criteria": "organism_id:9606", "compressed": False, "commit_every_page": False},
+                {
+                    "search_criteria": "organism_id:9606",
+                    "compressed": False,
+                    "commit_every_page": False,
+                },
                 emit=_noop_emit,
             )
             session.commit()

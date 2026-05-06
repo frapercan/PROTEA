@@ -1,6 +1,20 @@
 How-to Guides
 =============
 
+.. contents:: On this page
+   :local:
+   :depth: 2
+
+.. admonition:: Audience and scope
+   :class: tip
+
+   **Read this if:** you have one specific task to accomplish — load an
+   ontology, upload a FASTA, train a re-ranker, scale a worker — and you
+   want the shortest path from a clean stack to a finished job.
+
+   **Read** :doc:`reproduction_guide` **instead if:** you want to regenerate
+   every figure and table in :doc:`/results` end-to-end.
+
 Submit a job via the API
 ------------------------
 
@@ -340,6 +354,113 @@ The prediction set must have been generated with
 
 Apply a trained re-ranker to new predictions via
 ``GET /scoring/prediction-sets/{id}/rerank.tsv?reranker_id=<uuid>``.
+
+Register a reranker from ``protea-reranker-lab``
+-------------------------------------------------
+
+Re-rankers trained offline in ``protea-reranker-lab`` (separate repo,
+contract-first integration) are registered in PROTEA in four steps:
+export a frozen dataset, train in the lab, register the resulting
+run, and invoke ``predict_go_terms`` with the new ``reranker_model_id``.
+
+**Step 1 — Export the frozen dataset.** Submit an
+``export_research_dataset`` job. The operation generates
+``train.parquet`` / ``eval.parquet`` / ``manifest.json`` and uploads
+them through the configured ``ArtifactStore`` under
+``datasets/<output_name>/``.
+
+.. code-block:: bash
+
+   curl -s -X POST http://127.0.0.1:8000/jobs \
+     -H "Content-Type: application/json" \
+     -d '{
+       "operation": "export_research_dataset",
+       "queue_name": "protea.jobs",
+       "payload": {
+         "embedding_config_id": "<config-uuid>",
+         "ontology_snapshot_id": "<snapshot-uuid>",
+         "train_versions": [200, 210, 215],
+         "test_versions": [220],
+         "annotation_source": "goa",
+         "output_name": "rkv8-full-aa-multisnap",
+         "k": 5,
+         "search_backend": "faiss",
+         "compute_alignments": true,
+         "compute_taxonomy": true,
+         "use_embedding_pca": true
+       }
+     }'
+
+The job emits ``export_research_dataset.published`` once the three
+files have been uploaded. The ``result`` dict contains ``train_uri``,
+``eval_uri`` and ``manifest_uri`` — ``file://…`` URIs with the local
+backend, ``s3://bucket/…`` with MinIO.
+
+**Step 2 — Train in the lab.** In a ``protea-reranker-lab`` checkout,
+point the lab's spec at the dataset URI and run its training CLI:
+
+.. code-block:: bash
+
+   cd ../protea-reranker-lab
+   poetry run python -m protea_reranker_lab.train \
+     --manifest file:///abs/path/storage/artifacts/datasets/rkv8-full-aa-multisnap/manifest.json \
+     --output-name rkv8-full-aa-multisnap
+
+The lab writes ``runs/<name>/`` containing ``run.json``, ``spec.yaml``
+and ``model.txt`` (the LightGBM booster).
+
+**Step 3 — Register the run in PROTEA.** ``scripts/register_reranker.py``
+parses the run directory, uploads the booster to the configured
+``ArtifactStore`` under ``rerankers/<run_id>/model.txt``, computes
+``feature_schema_sha`` via
+``protea_reranker_lab.contracts.compute_feature_schema_sha``, and
+inserts a ``RerankerModel`` row.
+
+.. code-block:: bash
+
+   poetry run python scripts/register_reranker.py \
+     --run-dir ../protea-reranker-lab/runs/rkv8-full-aa-multisnap
+
+The script prints the new ``RerankerModel`` UUID to stdout. Use
+``--prediction-set-id`` / ``--evaluation-set-id`` to back-link the row
+to existing DB artefacts, ``--name-override`` to pick a custom name,
+and ``--force`` to replace an existing row with the same name.
+
+**Step 4 — Predict with the reranker.** Reference the new model by
+UUID in the ``predict_go_terms`` payload:
+
+.. code-block:: bash
+
+   curl -s -X POST http://127.0.0.1:8000/jobs \
+     -H "Content-Type: application/json" \
+     -d '{
+       "operation": "predict_go_terms",
+       "queue_name": "protea.jobs",
+       "payload": {
+         "embedding_config_id": "<config-uuid>",
+         "annotation_set_id": "<annotation-set-uuid>",
+         "ontology_snapshot_id": "<snapshot-uuid>",
+         "limit_per_entry": 5,
+         "compute_alignments": true,
+         "compute_taxonomy": true,
+         "compute_v6_features": true,
+         "reranker_model_id": "<reranker-model-uuid>"
+       }
+     }'
+
+The coordinator validates that the row has both ``artifact_uri`` and
+``feature_schema_sha`` set, emits ``predict_go_terms.reranker_bound``,
+and snapshots both fields into every batch payload. Each batch worker
+computes a live feature-schema sha from its active feature flags and
+applies the booster **only** when shas match exactly; on mismatch it
+emits ``reranker.schema_mismatch`` and falls back to KNN distance
+ordering without crashing.
+
+.. note::
+   ``reranker_score`` is currently surfaced in-memory only and exposed
+   through the ``predict_go_terms_batch.done`` event — ``GOPrediction``
+   has no column for it yet. Persistence is tracked for a future
+   schema change.
 
 Use one-click annotation
 -------------------------

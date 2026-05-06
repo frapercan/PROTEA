@@ -2,6 +2,7 @@
 
 Database and queue are fully mocked -- no real infrastructure required.
 """
+
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -14,7 +15,34 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
 
+from protea.api.cache import invalidate as _cache_invalidate
 from protea.api.routers.annotations import router
+
+
+@pytest.fixture(autouse=True)
+def _reset_router_cache():
+    _cache_invalidate()
+    yield
+    _cache_invalidate()
+
+
+@pytest.fixture()
+def artifact_store():
+    """Stubbed ArtifactStore: bypasses MinIO and records put/get/delete calls."""
+    store = MagicMock()
+    store.get.return_value = b"stub-artifact-content"
+    with (
+        patch(
+            "protea.infrastructure.storage.factory.get_artifact_store",
+            return_value=store,
+        ),
+        patch(
+            "protea.infrastructure.storage.get_artifact_store",
+            return_value=store,
+        ),
+    ):
+        yield store
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -26,6 +54,7 @@ def _make_app(session_factory, amqp_url="amqp://guest:guest@localhost", artifact
     app.state.session_factory = session_factory
     app.state.amqp_url = amqp_url
     app.state.artifacts_dir = artifacts_dir or Path("/tmp/protea-test-artifacts")
+    app.state.benchmark_config = MagicMock()
     app.include_router(router)
     return app
 
@@ -46,7 +75,9 @@ def _make_snapshot(snap_id=None, obo_url="http://obo", obo_version="2024-01-01",
     return s
 
 
-def _make_annotation_set(set_id=None, source="goa", source_version="2024-01", snap_id=None, job_id=None):
+def _make_annotation_set(
+    set_id=None, source="goa", source_version="2024-01", snap_id=None, job_id=None
+):
     a = MagicMock()
     a.id = set_id or uuid4()
     a.source = source
@@ -71,7 +102,9 @@ def _make_evaluation_set(eval_id=None, old_id=None, new_id=None, job_id=None, st
     return e
 
 
-def _make_evaluation_result(result_id=None, eval_set_id=None, pred_set_id=None, scoring_id=None, job_id=None, results=None):
+def _make_evaluation_result(
+    result_id=None, eval_set_id=None, pred_set_id=None, scoring_id=None, job_id=None, results=None
+):
     r = MagicMock()
     r.id = result_id or uuid4()
     r.evaluation_set_id = eval_set_id or uuid4()
@@ -97,7 +130,9 @@ def factory(session):
 @pytest.fixture()
 def client(session, factory):
     app = _make_app(factory)
-    with patch("protea.api.routers.annotations.session_scope", side_effect=lambda _: _mock_scope(session)):
+    with patch(
+        "protea.api.routers.annotations.session_scope", side_effect=lambda _: _mock_scope(session)
+    ):
         with TestClient(app) as c:
             yield c, session
 
@@ -105,7 +140,9 @@ def client(session, factory):
 @pytest.fixture()
 def client_with_artifacts(session, factory, tmp_path):
     app = _make_app(factory, artifacts_dir=tmp_path)
-    with patch("protea.api.routers.annotations.session_scope", side_effect=lambda _: _mock_scope(session)):
+    with patch(
+        "protea.api.routers.annotations.session_scope", side_effect=lambda _: _mock_scope(session)
+    ):
         with TestClient(app) as c:
             yield c, session, tmp_path
 
@@ -191,8 +228,10 @@ class TestLoadOntologySnapshot:
 
         def add_side(obj):
             from protea.infrastructure.orm.models.job import Job
+
             if isinstance(obj, Job):
                 obj.id = uuid4()
+
         session.add.side_effect = add_side
 
         with patch("protea.api.routers.annotations.publish_job"):
@@ -297,8 +336,10 @@ class TestLoadGOAAnnotations:
 
         def add_side(obj):
             from protea.infrastructure.orm.models.job import Job
+
             if isinstance(obj, Job):
                 obj.id = uuid4()
+
         session.add.side_effect = add_side
 
         with patch("protea.api.routers.annotations.publish_job"):
@@ -330,8 +371,10 @@ class TestLoadQuickGOAnnotations:
 
         def add_side(obj):
             from protea.infrastructure.orm.models.job import Job
+
             if isinstance(obj, Job):
                 obj.id = uuid4()
+
         session.add.side_effect = add_side
 
         with patch("protea.api.routers.annotations.publish_job"):
@@ -369,22 +412,15 @@ class TestDependencyGuards:
         app.state.session_factory = MagicMock()
         # no amqp_url set
         app.include_router(router)
-        with patch("protea.api.routers.annotations.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.annotations.session_scope",
+            side_effect=lambda _: _mock_scope(session),
+        ):
             with TestClient(app, raise_server_exceptions=False) as c:
-                resp = c.post("/annotations/snapshots/load", json={"obo_url": "http://example.com/go.obo"})
+                resp = c.post(
+                    "/annotations/snapshots/load", json={"obo_url": "http://example.com/go.obo"}
+                )
         assert resp.status_code == 500
-
-    def test_missing_artifacts_dir_raises(self, session):
-        app = FastAPI()
-        app.state.session_factory = MagicMock()
-        # no artifacts_dir set
-        app.include_router(router)
-        eval_id = uuid4()
-        with patch("protea.api.routers.annotations.session_scope", side_effect=lambda _: _mock_scope(session)):
-            with TestClient(app, raise_server_exceptions=False) as c:
-                resp = c.delete(f"/annotations/evaluation-sets/{eval_id}")
-        assert resp.status_code == 500
-
 
 # ---------------------------------------------------------------------------
 # PATCH /annotations/snapshots/{snapshot_id}/ia-url (lines 146-158)
@@ -489,8 +525,10 @@ class TestGenerateEvaluationSet:
         # Mock Job creation
         def add_side(obj):
             from protea.infrastructure.orm.models.job import Job
+
             if isinstance(obj, Job):
                 obj.id = uuid4()
+
         session.add.side_effect = add_side
 
         with patch("protea.api.routers.annotations.publish_job"):
@@ -540,25 +578,27 @@ class TestListEvaluationSets:
 
 
 class TestDeleteEvaluationSet:
-    def test_delete_success(self, client_with_artifacts):
-        c, session, tmp_path = client_with_artifacts
+    def test_delete_success(self, client_with_artifacts, artifact_store):
+        c, session, _ = client_with_artifacts
         ev = _make_evaluation_set()
         session.get.side_effect = lambda model, id_: ev if id_ == ev.id else None
 
-        # Create a fake result with an artifact directory
         result_mock = MagicMock()
         result_mock.id = uuid4()
-        result_dir = tmp_path / str(result_mock.id)
-        result_dir.mkdir()
-        (result_dir / "output.tsv").write_text("test")
+        result_keys = [
+            f"eval_artifacts/{result_mock.id}/NK/pr.tsv",
+            f"eval_artifacts/{result_mock.id}/NK/metrics.json",
+        ]
+        result_mock.results = {"artifacts": {"keys": result_keys}}
 
         session.query.return_value.filter.return_value.all.return_value = [result_mock]
 
         resp = c.delete(f"/annotations/evaluation-sets/{ev.id}")
         assert resp.status_code == 204
         session.delete.assert_called_once_with(ev)
-        # Artifact directory should be removed
-        assert not result_dir.exists()
+        # Both per-result artifact keys + the ground-truth key are removed.
+        deleted_keys = {call.args[0] for call in artifact_store.delete.call_args_list}
+        assert set(result_keys).issubset(deleted_keys)
 
     def test_delete_not_found(self, client_with_artifacts):
         c, session, _ = client_with_artifacts
@@ -567,8 +607,8 @@ class TestDeleteEvaluationSet:
         resp = c.delete(f"/annotations/evaluation-sets/{uuid4()}")
         assert resp.status_code == 404
 
-    def test_delete_no_artifact_dir(self, client_with_artifacts):
-        c, session, tmp_path = client_with_artifacts
+    def test_delete_no_artifact_keys(self, client_with_artifacts, artifact_store):
+        c, session, _ = client_with_artifacts
         ev = _make_evaluation_set()
         session.get.side_effect = lambda model, id_: ev if id_ == ev.id else None
         session.query.return_value.filter.return_value.all.return_value = []
@@ -623,6 +663,7 @@ class TestGetEvaluationSet:
 
 class _EvalData:
     """Fake result of compute_evaluation_data."""
+
     def __init__(self, nk=None, lk=None, pk=None, known=None):
         self.nk = nk or {}
         self.lk = lk or {}
@@ -639,15 +680,19 @@ class TestDownloadGroundTruthNK:
         def get_side(model, id_):
             from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
             from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
+
             if model is EvaluationSet:
                 return ev
             if model is AnnotationSet:
                 return ann_old
             return None
+
         session.get.side_effect = get_side
 
         fake_data = _EvalData(nk={"P12345": {"GO:0003674", "GO:0008150"}})
-        with patch("protea.api.routers.annotations.compute_evaluation_data", return_value=fake_data):
+        with patch(
+            "protea.api.routers.annotations.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+        ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/ground-truth-NK.tsv")
         assert resp.status_code == 200
         assert "text/tab-separated-values" in resp.headers["content-type"]
@@ -672,15 +717,19 @@ class TestDownloadGroundTruthLK:
         def get_side(model, id_):
             from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
             from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
+
             if model is EvaluationSet:
                 return ev
             if model is AnnotationSet:
                 return ann_old
             return None
+
         session.get.side_effect = get_side
 
         fake_data = _EvalData(lk={"Q99999": {"GO:0005575"}})
-        with patch("protea.api.routers.annotations.compute_evaluation_data", return_value=fake_data):
+        with patch(
+            "protea.api.routers.annotations.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+        ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/ground-truth-LK.tsv")
         assert resp.status_code == 200
         lines = resp.text.strip().split("\n")
@@ -697,15 +746,19 @@ class TestDownloadGroundTruthPK:
         def get_side(model, id_):
             from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
             from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
+
             if model is EvaluationSet:
                 return ev
             if model is AnnotationSet:
                 return ann_old
             return None
+
         session.get.side_effect = get_side
 
         fake_data = _EvalData(pk={"A00001": {"GO:0003674"}})
-        with patch("protea.api.routers.annotations.compute_evaluation_data", return_value=fake_data):
+        with patch(
+            "protea.api.routers.annotations.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+        ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/ground-truth-PK.tsv")
         assert resp.status_code == 200
         assert "A00001\tGO:0003674" in resp.text
@@ -720,15 +773,19 @@ class TestDownloadKnownTerms:
         def get_side(model, id_):
             from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
             from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
+
             if model is EvaluationSet:
                 return ev
             if model is AnnotationSet:
                 return ann_old
             return None
+
         session.get.side_effect = get_side
 
         fake_data = _EvalData(known={"P12345": {"GO:0003674"}, "Q99999": {"GO:0005575"}})
-        with patch("protea.api.routers.annotations.compute_evaluation_data", return_value=fake_data):
+        with patch(
+            "protea.api.routers.annotations.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+        ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/known-terms.tsv")
         assert resp.status_code == 200
         lines = resp.text.strip().split("\n")
@@ -745,11 +802,13 @@ class TestDownloadDeltaFasta:
         def get_side(model, id_):
             from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
             from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
+
             if model is EvaluationSet:
                 return ev
             if model is AnnotationSet:
                 return ann_old
             return None
+
         session.get.side_effect = get_side
 
         if protein_rows is not None:
@@ -771,7 +830,9 @@ class TestDownloadDeltaFasta:
         fake_data = _EvalData(nk={"P12345": {"GO:0003674"}}, lk={})
         self._setup_session(session, ev, ann_old, fake_data, protein_rows=[(protein, seq)])
 
-        with patch("protea.api.routers.annotations.compute_evaluation_data", return_value=fake_data):
+        with patch(
+            "protea.api.routers.annotations.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+        ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/delta-proteins.fasta")
         assert resp.status_code == 200
         assert ">P12345" in resp.text
@@ -794,7 +855,9 @@ class TestDownloadDeltaFasta:
         fake_data = _EvalData(nk={"P12345": {"GO:0003674"}}, lk={"Q99999": {"GO:0005575"}})
         self._setup_session(session, ev, ann_old, fake_data, protein_rows=[(protein, seq)])
 
-        with patch("protea.api.routers.annotations.compute_evaluation_data", return_value=fake_data):
+        with patch(
+            "protea.api.routers.annotations.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+        ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/delta-proteins.fasta?category=nk")
         assert resp.status_code == 200
         assert ">P12345" in resp.text
@@ -807,7 +870,9 @@ class TestDownloadDeltaFasta:
         fake_data = _EvalData()
         self._setup_session(session, ev, ann_old, fake_data, protein_rows=[])
 
-        with patch("protea.api.routers.annotations.compute_evaluation_data", return_value=fake_data):
+        with patch(
+            "protea.api.routers.annotations.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+        ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/delta-proteins.fasta")
         assert resp.status_code == 200
         assert resp.text == ""
@@ -828,7 +893,9 @@ class TestDownloadDeltaFasta:
         fake_data = _EvalData(nk={"P12345": {"GO:0003674"}})
         self._setup_session(session, ev, ann_old, fake_data, protein_rows=[(protein, seq)])
 
-        with patch("protea.api.routers.annotations.compute_evaluation_data", return_value=fake_data):
+        with patch(
+            "protea.api.routers.annotations.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+        ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/delta-proteins.fasta")
         lines = resp.text.strip().split("\n")
         # header + 2 sequence lines
@@ -852,7 +919,9 @@ class TestDownloadDeltaFasta:
         fake_data = _EvalData(pk={"X00001": {"GO:0005575"}})
         self._setup_session(session, ev, ann_old, fake_data, protein_rows=[(protein, seq)])
 
-        with patch("protea.api.routers.annotations.compute_evaluation_data", return_value=fake_data):
+        with patch(
+            "protea.api.routers.annotations.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+        ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/delta-proteins.fasta?category=pk")
         assert resp.status_code == 200
         assert "(PK)" in resp.text
@@ -874,7 +943,9 @@ class TestDownloadDeltaFasta:
         fake_data = _EvalData(nk={}, lk={"Q99999": {"GO:0005575"}})
         self._setup_session(session, ev, ann_old, fake_data, protein_rows=[(protein, seq)])
 
-        with patch("protea.api.routers.annotations.compute_evaluation_data", return_value=fake_data):
+        with patch(
+            "protea.api.routers.annotations.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+        ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/delta-proteins.fasta?category=all")
         assert resp.status_code == 200
         assert "(LK)" in resp.text
@@ -895,8 +966,10 @@ class TestRunCafaEvaluation:
 
         def add_side(obj):
             from protea.infrastructure.orm.models.job import Job
+
             if isinstance(obj, Job):
                 obj.id = uuid4()
+
         session.add.side_effect = add_side
 
         with patch("protea.api.routers.annotations.publish_job"):
@@ -941,8 +1014,22 @@ class TestDownloadEvaluationMetrics:
             eval_set_id=eval_id,
             results={
                 "NK": {
-                    "BPO": {"fmax": 0.42, "precision": 0.5, "recall": 0.35, "tau": 0.3, "coverage": 0.8, "n_proteins": 100},
-                    "MFO": {"fmax": 0.55, "precision": 0.6, "recall": 0.5, "tau": 0.4, "coverage": 0.9, "n_proteins": 80},
+                    "BPO": {
+                        "fmax": 0.42,
+                        "precision": 0.5,
+                        "recall": 0.35,
+                        "tau": 0.3,
+                        "coverage": 0.8,
+                        "n_proteins": 100,
+                    },
+                    "MFO": {
+                        "fmax": 0.55,
+                        "precision": 0.6,
+                        "recall": 0.5,
+                        "tau": 0.4,
+                        "coverage": 0.9,
+                        "n_proteins": 80,
+                    },
                 },
                 "LK": {},
             },
@@ -993,26 +1080,25 @@ class TestDownloadEvaluationMetrics:
 
 
 class TestDownloadEvaluationArtifacts:
-    def test_success(self, client_with_artifacts):
-        c, session, tmp_path = client_with_artifacts
+    def test_success(self, client_with_artifacts, artifact_store):
+        c, session, _ = client_with_artifacts
         eval_id = uuid4()
         result = _make_evaluation_result(eval_set_id=eval_id)
+        prefix = f"eval_artifacts/{result.id}/"
+        keys = [prefix + "pr_curve.tsv", prefix + "metrics.json"]
+        result.results = {"artifacts": {"keys": keys}}
         session.get.return_value = result
 
-        # Create artifact directory with files
-        result_dir = tmp_path / str(result.id)
-        result_dir.mkdir()
-        (result_dir / "pr_curve.tsv").write_text("threshold\tprecision\trecall\n0.5\t0.8\t0.6")
-        (result_dir / "metrics.json").write_text('{"fmax": 0.42}')
+        # store.get returns the file bytes for any key
+        artifact_store.get.side_effect = lambda key: f"content of {key}".encode()
 
         resp = c.get(f"/annotations/evaluation-sets/{eval_id}/results/{result.id}/artifacts.zip")
         assert resp.status_code == 200
         assert "application/zip" in resp.headers["content-type"]
-        assert len(resp.content) > 0
 
-        # Verify it's a valid zip
         import io
         import zipfile
+
         with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
             names = zf.namelist()
             assert "pr_curve.tsv" in names
@@ -1026,12 +1112,13 @@ class TestDownloadEvaluationArtifacts:
         resp = c.get(f"/annotations/evaluation-sets/{eval_id}/results/{uuid4()}/artifacts.zip")
         assert resp.status_code == 404
 
-    def test_no_artifacts_directory(self, client_with_artifacts):
-        c, session, tmp_path = client_with_artifacts
+    def test_no_artifact_keys(self, client_with_artifacts, artifact_store):
+        c, session, _ = client_with_artifacts
         eval_id = uuid4()
         result = _make_evaluation_result(eval_set_id=eval_id)
+        # results blob has no artifacts.keys → 404
+        result.results = {}
         session.get.return_value = result
-        # No directory created for this result
 
         resp = c.get(f"/annotations/evaluation-sets/{eval_id}/results/{result.id}/artifacts.zip")
         assert resp.status_code == 404
@@ -1052,7 +1139,9 @@ class TestListEvaluationResults:
 
         # First call: session.get(EvaluationSet, eval_id) returns ev
         session.get.return_value = ev
-        session.query.return_value.filter.return_value.order_by.return_value.all.return_value = [result]
+        session.query.return_value.filter.return_value.order_by.return_value.all.return_value = [
+            result
+        ]
 
         resp = c.get(f"/annotations/evaluation-sets/{eval_id}/results")
         assert resp.status_code == 200
@@ -1085,21 +1174,19 @@ class TestListEvaluationResults:
 
 
 class TestDeleteEvaluationResult:
-    def test_success(self, client_with_artifacts):
-        c, session, tmp_path = client_with_artifacts
+    def test_success(self, client_with_artifacts, artifact_store):
+        c, session, _ = client_with_artifacts
         eval_id = uuid4()
         result = _make_evaluation_result(eval_set_id=eval_id)
+        keys = [f"eval_artifacts/{result.id}/NK/output.tsv"]
+        result.results = {"artifacts": {"keys": keys}}
         session.get.return_value = result
-
-        # Create artifact dir
-        result_dir = tmp_path / str(result.id)
-        result_dir.mkdir()
-        (result_dir / "output.tsv").write_text("data")
 
         resp = c.delete(f"/annotations/evaluation-sets/{eval_id}/results/{result.id}")
         assert resp.status_code == 204
         session.delete.assert_called_once_with(result)
-        assert not result_dir.exists()
+        deleted_keys = {call.args[0] for call in artifact_store.delete.call_args_list}
+        assert keys[0] in deleted_keys
 
     def test_not_found(self, client_with_artifacts):
         c, session, _ = client_with_artifacts
@@ -1118,14 +1205,16 @@ class TestDeleteEvaluationResult:
         resp = c.delete(f"/annotations/evaluation-sets/{eval_id}/results/{result.id}")
         assert resp.status_code == 404
 
-    def test_no_artifact_dir(self, client_with_artifacts):
-        c, session, tmp_path = client_with_artifacts
+    def test_no_artifact_keys(self, client_with_artifacts, artifact_store):
+        c, session, _ = client_with_artifacts
         eval_id = uuid4()
         result = _make_evaluation_result(eval_set_id=eval_id)
+        result.results = {}  # no artifacts.keys → store.delete never called
         session.get.return_value = result
 
         resp = c.delete(f"/annotations/evaluation-sets/{eval_id}/results/{result.id}")
         assert resp.status_code == 204
+        artifact_store.delete.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -1168,10 +1257,10 @@ class TestGetGoSubgraph:
         query_mock = session.query.return_value
         filter_mock = query_mock.filter.return_value
         filter_mock.all.side_effect = [
-            [seed],   # seed terms query
-            [rel],    # first BFS level relationships
-            [parent], # parent terms fetch
-            [],       # second BFS level relationships (no more)
+            [seed],  # seed terms query
+            [rel],  # first BFS level relationships
+            [parent],  # parent terms fetch
+            [],  # second BFS level relationships (no more)
         ]
 
         resp = c.get(f"/annotations/snapshots/{snap_id}/subgraph?go_ids=GO:0003674")
@@ -1215,7 +1304,7 @@ class TestGetGoSubgraph:
         filter_mock = query_mock.filter.return_value
         filter_mock.all.side_effect = [
             [t1, t2],  # seed terms
-            [],         # no relationships
+            [],  # no relationships
         ]
 
         resp = c.get(f"/annotations/snapshots/{snap.id}/subgraph?go_ids=GO:0003674,GO:0008150")
@@ -1237,10 +1326,10 @@ class TestGetGoSubgraph:
         query_mock = session.query.return_value
         filter_mock = query_mock.filter.return_value
         filter_mock.all.side_effect = [
-            [seed],    # seed terms
-            [rel1],    # first BFS: rel from 1->2
+            [seed],  # seed terms
+            [rel1],  # first BFS: rel from 1->2
             [parent],  # fetch parent 2
-            [],        # second BFS: no rels from frontier {2}
+            [],  # second BFS: no rels from frontier {2}
         ]
 
         resp = c.get(f"/annotations/snapshots/{snap.id}/subgraph?go_ids=GO:0003674&depth=5")

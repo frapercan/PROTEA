@@ -1,4 +1,5 @@
 """Unit tests for GenerateEvaluationSetOperation — DB mocked."""
+
 from __future__ import annotations
 
 import uuid
@@ -16,6 +17,7 @@ from protea.core.operations.generate_evaluation_set import (
 # Payload validator
 # ---------------------------------------------------------------------------
 
+
 class TestGenerateEvaluationSetPayload:
     def test_valid_uuids(self):
         old = str(uuid.uuid4())
@@ -26,11 +28,15 @@ class TestGenerateEvaluationSetPayload:
 
     def test_empty_old_raises(self):
         with pytest.raises(ValueError):
-            GenerateEvaluationSetPayload(old_annotation_set_id="  ", new_annotation_set_id=str(uuid.uuid4()))
+            GenerateEvaluationSetPayload(
+                old_annotation_set_id="  ", new_annotation_set_id=str(uuid.uuid4())
+            )
 
     def test_empty_new_raises(self):
         with pytest.raises(ValueError):
-            GenerateEvaluationSetPayload(old_annotation_set_id=str(uuid.uuid4()), new_annotation_set_id="")
+            GenerateEvaluationSetPayload(
+                old_annotation_set_id=str(uuid.uuid4()), new_annotation_set_id=""
+            )
 
     def test_strips_whitespace(self):
         uid = str(uuid.uuid4())
@@ -45,6 +51,7 @@ class TestGenerateEvaluationSetPayload:
 # Operation execute — mocked session
 # ---------------------------------------------------------------------------
 
+
 def _make_annotation_set(snapshot_id: uuid.UUID) -> MagicMock:
     s = MagicMock()
     s.ontology_snapshot_id = snapshot_id
@@ -57,6 +64,25 @@ def _make_eval_data() -> EvaluationData:
         lk={"P2": {"GO:0002"}},
         pk={},
     )
+
+
+@pytest.fixture(autouse=True)
+def _mock_artifact_store(request):
+    """Stub the artifact store for tests that exercise execute()."""
+    if not request.cls or request.cls.__name__ != "TestGenerateEvaluationSetExecute":
+        yield
+        return
+    with (
+        patch(
+            "protea.core.operations.generate_evaluation_set.get_artifact_store",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "protea.core.operations.generate_evaluation_set.load_settings",
+            return_value=MagicMock(),
+        ),
+    ):
+        yield
 
 
 class TestGenerateEvaluationSetExecute:
@@ -84,13 +110,61 @@ class TestGenerateEvaluationSetExecute:
         with pytest.raises(ValueError, match="not found"):
             self.op.execute(session, self._payload(), emit=self.emit)
 
-    def test_different_snapshot_raises(self):
+    def test_different_snapshot_dispatches_reconciled(self):
+        """Mismatched snapshots should invoke the reconciled compute path."""
         session = MagicMock()
         old_set = _make_annotation_set(uuid.uuid4())
         new_set = _make_annotation_set(uuid.uuid4())  # different snapshot
         session.get.side_effect = [old_set, new_set]
-        with pytest.raises(ValueError, match="same ontology snapshot"):
-            self.op.execute(session, self._payload(), emit=self.emit)
+
+        def add_side(obj):
+            obj.id = uuid.uuid4()
+
+        session.add.side_effect = add_side
+        session.flush = MagicMock()
+
+        with patch(
+            "protea.core.operations.generate_evaluation_set.compute_evaluation_data_reconciled",
+            return_value=_make_eval_data(),
+        ) as mock_reconciled:
+            with patch(
+                "protea.core.operations.generate_evaluation_set.compute_evaluation_data",
+            ) as mock_same:
+                self.op.execute(session, self._payload(), emit=self.emit)
+
+        assert mock_reconciled.called
+        assert not mock_same.called
+        # Pivot defaults to new_set.ontology_snapshot_id.
+        kwargs_or_args = mock_reconciled.call_args
+        assert kwargs_or_args.args[5] == new_set.ontology_snapshot_id
+
+    def test_explicit_pivot_snapshot(self):
+        """Explicit pivot with matching old+new snapshots still uses same-snapshot path."""
+        session = MagicMock()
+        snap_id = uuid.uuid4()
+        old_set = _make_annotation_set(snap_id)
+        new_set = _make_annotation_set(snap_id)
+        pivot_snap = MagicMock()
+        # session.get is called for old, new, and the pivot lookup.
+        session.get.side_effect = [old_set, new_set, pivot_snap]
+
+        def add_side(obj):
+            obj.id = uuid.uuid4()
+
+        session.add.side_effect = add_side
+        session.flush = MagicMock()
+
+        pivot_id = str(snap_id)  # same as old/new → same_snapshot mode
+        payload = self._payload()
+        payload["pivot_ontology_snapshot_id"] = pivot_id
+
+        with patch(
+            "protea.core.operations.generate_evaluation_set.compute_evaluation_data",
+            return_value=_make_eval_data(),
+        ) as mock_same:
+            self.op.execute(session, payload, emit=self.emit)
+
+        assert mock_same.called
 
     def test_successful_execution(self):
         session = MagicMock()

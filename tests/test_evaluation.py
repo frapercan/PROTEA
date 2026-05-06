@@ -1,20 +1,25 @@
 """Tests for protea.core.evaluation — pure-Python components + mocked DB tests."""
+
 import uuid
 from unittest.mock import MagicMock, patch
 
 from protea.core.evaluation import (
     EvaluationData,
+    _apply_negatives,
+    _bfs_closure,
     _build_negative_keys,
     _get_descendants,
     _load_children_map,
     _load_experimental_annotations_by_ns,
     _load_go_maps,
     compute_evaluation_data,
+    compute_evaluation_data_reconciled,
 )
 
 # ---------------------------------------------------------------------------
 # EvaluationData — dataclass properties
 # ---------------------------------------------------------------------------
+
 
 class TestEvaluationDataProperties:
     def _make(self, nk=None, lk=None, pk=None, known=None, pk_known=None):
@@ -86,8 +91,14 @@ class TestEvaluationDataProperties:
         ed = self._make()
         s = ed.stats()
         expected = {
-            "delta_proteins", "nk_proteins", "lk_proteins", "pk_proteins",
-            "nk_annotations", "lk_annotations", "pk_annotations", "known_terms_count",
+            "delta_proteins",
+            "nk_proteins",
+            "lk_proteins",
+            "pk_proteins",
+            "nk_annotations",
+            "lk_annotations",
+            "pk_annotations",
+            "known_terms_count",
         }
         assert set(s.keys()) == expected
 
@@ -112,6 +123,7 @@ class TestEvaluationDataProperties:
 # ---------------------------------------------------------------------------
 # _get_descendants — BFS over GO DAG
 # ---------------------------------------------------------------------------
+
 
 class TestGetDescendants:
     def test_no_children(self):
@@ -155,6 +167,7 @@ class TestGetDescendants:
 # _load_children_map — lines 124-137
 # ---------------------------------------------------------------------------
 
+
 class TestLoadChildrenMap:
     def test_loads_and_groups_by_parent(self):
         snap_id = uuid.uuid4()
@@ -192,6 +205,7 @@ class TestLoadChildrenMap:
 # _load_go_maps — lines 161-169
 # ---------------------------------------------------------------------------
 
+
 class TestLoadGoMaps:
     def test_basic_maps(self):
         mock_session = MagicMock()
@@ -226,6 +240,7 @@ class TestLoadGoMaps:
 # ---------------------------------------------------------------------------
 # _build_negative_keys — lines 182-204
 # ---------------------------------------------------------------------------
+
 
 class TestBuildNegativeKeys:
     def test_no_not_annotations(self):
@@ -281,6 +296,7 @@ class TestBuildNegativeKeys:
 # _load_experimental_annotations_by_ns — lines 219-238
 # ---------------------------------------------------------------------------
 
+
 class TestLoadExperimentalAnnotationsByNs:
     def _go_id_map(self):
         return {100: "GO:0001", 200: "GO:0002", 300: "GO:0003", 400: "GO:0004"}
@@ -334,9 +350,7 @@ class TestLoadExperimentalAnnotationsByNs:
     def test_empty_rows(self):
         mock_session = MagicMock()
         mock_session.execute.return_value.fetchall.return_value = []
-        result = _load_experimental_annotations_by_ns(
-            mock_session, uuid.uuid4(), set(), {}, {}
-        )
+        result = _load_experimental_annotations_by_ns(mock_session, uuid.uuid4(), set(), {}, {})
         assert result == {}
 
     def test_multiple_terms_same_namespace(self):
@@ -354,6 +368,7 @@ class TestLoadExperimentalAnnotationsByNs:
 # ---------------------------------------------------------------------------
 # compute_evaluation_data — lines 265-322
 # ---------------------------------------------------------------------------
+
 
 class TestComputeEvaluationData:
     def _ids(self):
@@ -515,7 +530,9 @@ class TestComputeEvaluationData:
     @patch("protea.core.evaluation._build_negative_keys")
     @patch("protea.core.evaluation._load_children_map")
     @patch("protea.core.evaluation._load_go_maps")
-    def test_protein_with_empty_new_namespaces(self, mock_go_maps, mock_children, mock_neg, mock_annots):
+    def test_protein_with_empty_new_namespaces(
+        self, mock_go_maps, mock_children, mock_neg, mock_annots
+    ):
         """Protein key in new but no namespace data -> new_all empty -> skip."""
         old_id, new_id, snap_id = self._ids()
         mock_go_maps.return_value = ({}, {})
@@ -562,3 +579,171 @@ class TestComputeEvaluationData:
         result = compute_evaluation_data(MagicMock(), old_id, new_id, snap_id)
         assert result.delta_proteins == 0
         assert result.known == {}
+
+
+# ---------------------------------------------------------------------------
+# Cross-OBO reconciliation helpers
+# ---------------------------------------------------------------------------
+
+
+class TestBfsClosure:
+    def test_empty_seeds(self):
+        assert _bfs_closure(set(), {"a": {"b"}}) == set()
+
+    def test_no_edges(self):
+        assert _bfs_closure({"a"}, {}) == {"a"}
+
+    def test_direct_neighbours(self):
+        assert _bfs_closure({"a"}, {"a": {"b", "c"}}) == {"a", "b", "c"}
+
+    def test_transitive_closure(self):
+        edges = {"a": {"b"}, "b": {"c"}, "c": {"d"}}
+        assert _bfs_closure({"a"}, edges) == {"a", "b", "c", "d"}
+
+    def test_diamond(self):
+        edges = {"a": {"b", "c"}, "b": {"d"}, "c": {"d"}}
+        assert _bfs_closure({"a"}, edges) == {"a", "b", "c", "d"}
+
+    def test_multi_seed_union(self):
+        edges = {"a": {"x"}, "b": {"y"}}
+        assert _bfs_closure({"a", "b"}, edges) == {"a", "b", "x", "y"}
+
+    def test_cycle_safe(self):
+        edges = {"a": {"b"}, "b": {"a"}}
+        assert _bfs_closure({"a"}, edges) == {"a", "b"}
+
+
+class TestApplyNegatives:
+    def test_no_negatives_passthrough(self):
+        exp = {"P1": {"F": {"GO:0001"}}}
+        out = _apply_negatives(exp, {})
+        assert out == {"P1": {"F": {"GO:0001"}}}
+
+    def test_negative_drops_term(self):
+        exp = {"P1": {"F": {"GO:0001", "GO:0002"}}}
+        out = _apply_negatives(exp, {"P1": {"GO:0001"}})
+        assert out == {"P1": {"F": {"GO:0002"}}}
+
+    def test_negative_empties_namespace(self):
+        exp = {"P1": {"F": {"GO:0001"}, "P": {"GO:0002"}}}
+        out = _apply_negatives(exp, {"P1": {"GO:0001"}})
+        assert out == {"P1": {"P": {"GO:0002"}}}
+
+    def test_negative_empties_all_namespaces_drops_protein(self):
+        exp = {"P1": {"F": {"GO:0001"}}}
+        out = _apply_negatives(exp, {"P1": {"GO:0001"}})
+        assert out == {}
+
+    def test_different_protein_negative_ignored(self):
+        exp = {"P1": {"F": {"GO:0001"}}}
+        out = _apply_negatives(exp, {"P2": {"GO:0001"}})
+        assert out == {"P1": {"F": {"GO:0001"}}}
+
+
+class TestComputeEvaluationDataReconciled:
+    def _ids(self):
+        return uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+
+    def _patches(self):
+        return [
+            patch("protea.core.evaluation._load_pivot_term_universe"),
+            patch("protea.core.evaluation._load_children_by_go_id"),
+            patch("protea.core.evaluation._reconcile_experimental_side"),
+            patch("protea.core.evaluation._reconcile_not_side"),
+        ]
+
+    def test_same_terms_no_delta(self):
+        old_id, new_id, old_snap, new_snap, pivot = self._ids()
+        with (
+            patch(
+                "protea.core.evaluation._load_pivot_term_universe",
+                return_value=({"GO:0001"}, {"GO:0001": "F"}),
+            ),
+            patch("protea.core.evaluation._load_children_by_go_id", return_value={}),
+            patch(
+                "protea.core.evaluation._reconcile_experimental_side",
+                side_effect=[
+                    {"P1": {"F": {"GO:0001"}}},
+                    {"P1": {"F": {"GO:0001"}}},
+                ],
+            ),
+            patch("protea.core.evaluation._reconcile_not_side", return_value={}),
+        ):
+            result = compute_evaluation_data_reconciled(
+                MagicMock(), old_id, new_id, old_snap, new_snap, pivot
+            )
+        assert result.delta_proteins == 0
+
+    def test_nk_protein_reconciled(self):
+        old_id, new_id, old_snap, new_snap, pivot = self._ids()
+        with (
+            patch(
+                "protea.core.evaluation._load_pivot_term_universe",
+                return_value=({"GO:0001"}, {"GO:0001": "F"}),
+            ),
+            patch("protea.core.evaluation._load_children_by_go_id", return_value={}),
+            patch(
+                "protea.core.evaluation._reconcile_experimental_side",
+                side_effect=[{}, {"P1": {"F": {"GO:0001"}}}],
+            ),
+            patch("protea.core.evaluation._reconcile_not_side", return_value={}),
+        ):
+            result = compute_evaluation_data_reconciled(
+                MagicMock(), old_id, new_id, old_snap, new_snap, pivot
+            )
+        assert result.nk == {"P1": {"GO:0001"}}
+        assert result.lk == {}
+        assert result.pk == {}
+
+    def test_pk_with_merged_negatives(self):
+        """NOT from new side excludes a term in old side (matches same-snapshot semantics)."""
+        old_id, new_id, old_snap, new_snap, pivot = self._ids()
+        with (
+            patch(
+                "protea.core.evaluation._load_pivot_term_universe",
+                return_value=({"GO:0001", "GO:0002", "GO:0003"}, {"GO:0001": "F", "GO:0002": "F", "GO:0003": "F"}),
+            ),
+            patch("protea.core.evaluation._load_children_by_go_id", return_value={}),
+            patch(
+                "protea.core.evaluation._reconcile_experimental_side",
+                side_effect=[
+                    {"P1": {"F": {"GO:0001", "GO:0002"}}},
+                    {"P1": {"F": {"GO:0001", "GO:0002", "GO:0003"}}},
+                ],
+            ),
+            patch(
+                "protea.core.evaluation._reconcile_not_side",
+                side_effect=[{}, {"P1": {"GO:0002"}}],  # NOT from new side
+            ),
+        ):
+            result = compute_evaluation_data_reconciled(
+                MagicMock(), old_id, new_id, old_snap, new_snap, pivot
+            )
+        # After applying the merged negatives, P1 old = {GO:0001}, new = {GO:0001, GO:0003}
+        # → PK with delta GO:0003
+        assert result.pk == {"P1": {"GO:0003"}}
+        assert result.pk_known == {"P1": {"GO:0001"}}
+
+    def test_lk_protein_reconciled(self):
+        old_id, new_id, old_snap, new_snap, pivot = self._ids()
+        with (
+            patch(
+                "protea.core.evaluation._load_pivot_term_universe",
+                return_value=({"GO:0001", "GO:0002"}, {"GO:0001": "F", "GO:0002": "P"}),
+            ),
+            patch("protea.core.evaluation._load_children_by_go_id", return_value={}),
+            patch(
+                "protea.core.evaluation._reconcile_experimental_side",
+                side_effect=[
+                    {"P1": {"F": {"GO:0001"}}},
+                    {"P1": {"F": {"GO:0001"}, "P": {"GO:0002"}}},
+                ],
+            ),
+            patch("protea.core.evaluation._reconcile_not_side", return_value={}),
+        ):
+            result = compute_evaluation_data_reconciled(
+                MagicMock(), old_id, new_id, old_snap, new_snap, pivot
+            )
+        assert result.lk == {"P1": {"GO:0002"}}
+        assert result.nk == {}
+        assert result.pk == {}

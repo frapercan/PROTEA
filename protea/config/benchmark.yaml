@@ -1,0 +1,51 @@
+# Benchmark matrix configuration.
+#
+# Controls how `/benchmark/matrix` classifies and orders evaluation results for
+# the UI. Adding a new scoring config or PLM should NOT require editing this
+# file unless you want a custom label or a different default stage.
+
+# Stage taxonomy -----------------------------------------------------------
+stages:
+  # Preferred stage to select on initial page load. The first entry that
+  # actually has data wins; otherwise falls back to the first stage seen.
+  # Baseline first so the landing view shows the widest coverage across PLMs.
+  preferred_default:
+    - embedding_only
+    - vote_fraction
+    - embedding_plus_alignment
+    - composite
+
+  # Scoring configs the frontend should highlight as the "reference / raw
+  # embedding" baseline in the leaderboard. The name must match an entry in
+  # `scoring_config.name`. Optional.
+  baseline_scoring_name: embedding_only
+
+  # Names to hide from the benchmark UI entirely (results still exist in the
+  # DB, they just are not returned by the matrix endpoint).
+  hidden: []
+
+  # Human-readable labels. Any scoring config not listed here falls back to
+  # a Title-Cased version of its own `name`.
+  labels:
+    embedding_only: "Embedding-only"
+    vote_fraction: "Vote fraction (KNN)"
+    alignment_only: "Alignment-only"
+    embedding_plus_alignment: "Embedding + alignment"
+    embedding_plus_vote: "Embedding + vote"
+    evidence_veto: "Evidence veto"
+    composite: "Composite"
+    reranker: "Re-ranker"
+
+# Evaluation set labels ----------------------------------------------------
+# Optional override for how evaluation sets appear in selectors.
+# Key: evaluation_set_id UUID. Value: label string.
+# When absent, the backend auto-generates a label from the annotation set
+# versions + delta stats.
+eval_set_labels: {}
+
+# GO namespace metadata ----------------------------------------------------
+# These are ontological constants, but exposing them here keeps the frontend
+# fully driven by the API response and allows non-standard evaluation splits
+# in the future (e.g. IEA-only vs experimental).
+categories: [NK, LK, PK]
+aspects: [BPO, MFO, CCO]

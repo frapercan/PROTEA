@@ -31,24 +31,20 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import text
 
 from protea.api.deps import get_session_factory
-from protea.core.evaluation import compute_evaluation_data
+from protea.core.evaluation import compute_evaluation_data, load_evaluation_data_for_set
 from protea.core.metrics import compute_cafa_metrics
-from protea.core.reranker import (
-    model_from_string,
-    model_to_string,
-)
+from protea.core.reranker import load_reranker, model_from_string
 from protea.core.reranker import (
     predict as reranker_predict,
-)
-from protea.core.reranker import (
-    train as reranker_train,
 )
 from protea.core.scoring import compute_score
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
@@ -59,10 +55,40 @@ from protea.infrastructure.orm.models.embedding.reranker_model import RerankerMo
 from protea.infrastructure.orm.models.embedding.scoring_config import (
     DEFAULT_EVIDENCE_WEIGHTS,
     DEFAULT_WEIGHTS,
+    FORMULA_EVIDENCE_WEIGHTED,
     VALID_FORMULAS,
     ScoringConfig,
 )
 from protea.infrastructure.session import session_scope
+from protea.infrastructure.settings import load_settings
+from protea.infrastructure.storage import get_artifact_store
+
+
+def _load_booster(rm: RerankerModel) -> Any:
+    """Load the LightGBM booster from either the legacy inline blob or
+    the new ``artifact_uri`` path.
+
+    Raises 409 when neither is available — the row exists but the
+    backing model is missing.
+    """
+    if rm.model_data:
+        return model_from_string(rm.model_data)
+    if rm.artifact_uri:
+        project_root = Path(__file__).resolve().parents[3]
+        store = get_artifact_store(load_settings(project_root))
+        return load_reranker(
+            rm.artifact_uri,
+            feature_schema_sha=rm.feature_schema_sha or rm.name,
+            store=store,
+        )
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            f"RerankerModel {rm.id} has no booster — both ``model_data`` "
+            f"(legacy inline) and ``artifact_uri`` (artifact-store path) are NULL."
+        ),
+    )
+
 
 router = APIRouter(prefix="/scoring", tags=["scoring"])
 
@@ -83,29 +109,50 @@ _PRESET_CONFIGS: list[dict[str, Any]] = [
             "identity_sw": 0.0,
             "evidence_weight": 0.0,
             "taxonomic_proximity": 0.0,
+            "neighbor_vote_fraction": 0.0,
         },
         "description": (
-            "Pure cosine similarity converted to [0, 1]. "
-            "Baseline config — no alignment, evidence, or taxonomy signals."
+            "Pure cosine similarity of the winning neighbour, converted to [0, 1]. "
+            "Baseline — tests the hypothesis that the nearest-neighbour distance "
+            "alone is enough signal."
         ),
     },
     {
-        "name": "embedding_plus_evidence",
-        "formula": "evidence_weighted",
+        "name": "vote_fraction",
+        "formula": "linear",
         "weights": {
-            "embedding_similarity": 1.0,
+            "embedding_similarity": 0.0,
             "identity_nw": 0.0,
             "identity_sw": 0.0,
-            "evidence_weight": 1.0,
+            "evidence_weight": 0.0,
             "taxonomic_proximity": 0.0,
+            "neighbor_vote_fraction": 1.0,
         },
         "description": (
-            "Embedding similarity multiplied by evidence code quality (evidence_weighted formula). "
-            "Penalises IEA-sourced annotations regardless of embedding distance."
+            "Canonical KNN score: fraction of the K neighbours that vote for each "
+            "GO term. Tests the hypothesis that consensus across neighbours beats "
+            "the raw cosine distance of the top-1 neighbour."
         ),
     },
     {
-        "name": "alignment_weighted",
+        "name": "alignment_only",
+        "formula": "linear",
+        "weights": {
+            "embedding_similarity": 0.0,
+            "identity_nw": 0.6,
+            "identity_sw": 0.4,
+            "evidence_weight": 0.0,
+            "taxonomic_proximity": 0.0,
+            "neighbor_vote_fraction": 0.0,
+        },
+        "description": (
+            "Pure sequence-identity score (NW global 60 % + SW local 40 %), no embedding. "
+            "Tests whether classical sequence alignment alone can match PLM-based KNN. "
+            "Requires compute_alignments=True."
+        ),
+    },
+    {
+        "name": "embedding_plus_alignment",
         "formula": "linear",
         "weights": {
             "embedding_similarity": 0.5,
@@ -113,45 +160,65 @@ _PRESET_CONFIGS: list[dict[str, Any]] = [
             "identity_sw": 0.2,
             "evidence_weight": 0.0,
             "taxonomic_proximity": 0.0,
+            "neighbor_vote_fraction": 0.0,
         },
         "description": (
-            "Combines embedding similarity (50 %) with global NW identity (30 %) "
-            "and local SW identity (20 %). "
-            "Requires PredictionSet computed with compute_alignments=True."
+            "Embedding (50 %) refined with global NW identity (30 %) and local SW "
+            "identity (20 %). Tests whether alignment adds a usable signal on top "
+            "of the embedding. Requires compute_alignments=True."
+        ),
+    },
+    {
+        "name": "embedding_plus_vote",
+        "formula": "linear",
+        "weights": {
+            "embedding_similarity": 0.5,
+            "identity_nw": 0.0,
+            "identity_sw": 0.0,
+            "evidence_weight": 0.0,
+            "taxonomic_proximity": 0.0,
+            "neighbor_vote_fraction": 0.5,
+        },
+        "description": (
+            "Nearest-neighbour distance (50 %) combined with K-neighbour consensus "
+            "(50 %). Tests whether adding voting on top of cosine distance improves "
+            "the ranking vs either signal alone."
+        ),
+    },
+    {
+        "name": "evidence_veto",
+        "formula": "evidence_weighted",
+        "weights": {
+            "embedding_similarity": 1.0,
+            "identity_nw": 0.0,
+            "identity_sw": 0.0,
+            "evidence_weight": 0.0,
+            "taxonomic_proximity": 0.0,
+            "neighbor_vote_fraction": 0.0,
+        },
+        "description": (
+            "Embedding similarity, multiplied by the resolved evidence weight as a "
+            "final veto (evidence_weighted formula with evidence_weight=0 in the "
+            "linear sum to avoid double-counting). Tests whether down-ranking IEA/ND "
+            "predictions via a clean multiplier beats feeding evidence into the sum."
         ),
     },
     {
         "name": "composite",
-        "formula": "evidence_weighted",
+        "formula": "linear",
         "weights": {
             "embedding_similarity": 0.4,
             "identity_nw": 0.2,
             "identity_sw": 0.1,
-            "evidence_weight": 0.2,
+            "evidence_weight": 0.0,
             "taxonomic_proximity": 0.1,
+            "neighbor_vote_fraction": 0.2,
         },
         "description": (
-            "Full composite: embedding + alignment + evidence quality + taxonomic proximity. "
-            "Requires compute_alignments=True and compute_taxonomy=True."
-        ),
-    },
-    {
-        "name": "evidence_primary",
-        "formula": "linear",
-        "weights": {
-            "embedding_similarity": 0.2,
-            "identity_nw": 0.0,
-            "identity_sw": 0.0,
-            "evidence_weight": 0.8,
-            "taxonomic_proximity": 0.0,
-        },
-        "description": (
-            "Evidence quality as primary signal (80%), embedding similarity as tiebreaker (20%). "
-            "Designed for datasets where cosine distances cluster tightly (>99% of predictions "
-            "within distance < 0.1), making distance a poor tau discriminator. "
-            "Creates three well-separated score tiers: "
-            "EXP/IDA → ~1.0, ISS/IBA → ~0.76, IEA → ~0.46. "
-            "Recommended when compute_alignments and compute_taxonomy are not available."
+            "Kitchen-sink linear mix: embedding + alignment + taxonomy + voting. "
+            "evidence_weight excluded from the linear sum (use evidence_veto when "
+            "you want the multiplier). Requires compute_alignments=True and "
+            "compute_taxonomy=True; tests whether more signals beat fewer."
         ),
     },
 ]
@@ -257,6 +324,72 @@ def _snapshot(c: ScoringConfig) -> ScoringConfig:
         evidence_weights=c.evidence_weights,
         description=c.description,
     )
+
+
+# Maps each scoring signal key to the GOPrediction column whose fill rate
+# determines whether the signal is usable for a given PredictionSet.
+_SIGNAL_TO_COLUMN: dict[str, str] = {
+    "embedding_similarity": "distance",
+    "identity_nw": "identity_nw",
+    "identity_sw": "identity_sw",
+    "evidence_weight": "evidence_code",
+    "taxonomic_proximity": "taxonomic_distance",
+    "neighbor_vote_fraction": "neighbor_vote_fraction",
+}
+
+
+def _check_signal_coverage(session, prediction_set_id, config_snap: ScoringConfig) -> None:
+    """Fail fast with 409 when the config needs signals absent from the PredictionSet.
+
+    For every signal with a non-zero weight in ``config_snap.weights`` (plus
+    ``evidence_code`` when the formula is ``evidence_weighted`` — the multiplier
+    is always applied), count how many rows in the PredictionSet have the
+    backing column non-NULL.  Zero coverage is a configuration mismatch
+    (typically a ``ScoringConfig`` that requires ``compute_alignments=True`` or
+    ``compute_taxonomy=True`` applied to a PredictionSet computed without
+    those flags).  Raise HTTP 409 with the list of missing signals instead of
+    silently producing a degraded score (``compute_score`` drops NULL signals
+    from both numerator and denominator).
+    """
+    weights = config_snap.weights or {}
+    required: list[tuple[str, str]] = []
+    for signal, col in _SIGNAL_TO_COLUMN.items():
+        if float(weights.get(signal, 0.0)) > 0.0:
+            required.append((signal, col))
+    if getattr(config_snap, "formula", "linear") == FORMULA_EVIDENCE_WEIGHTED and not any(
+        s == "evidence_weight" for s, _ in required
+    ):
+        required.append(("evidence_weight", "evidence_code"))
+    if not required:
+        return
+
+    cols_sql = ", ".join(f"COUNT({col}) AS cnt_{col}" for _, col in required)
+    row = (
+        session.execute(
+            text(
+                f"SELECT COUNT(*) AS total, {cols_sql} "  # noqa: S608 — col names are hard-coded
+                "FROM go_prediction WHERE prediction_set_id = :pid"
+            ),
+            {"pid": str(prediction_set_id)},
+        )
+        .mappings()
+        .one()
+    )
+    total = int(row["total"] or 0)
+    missing: list[str] = []
+    for signal, col in required:
+        cnt = int(row[f"cnt_{col}"] or 0)
+        if total == 0 or cnt == 0:
+            missing.append(f"{signal} (column '{col}': {cnt}/{total} rows)")
+    if missing:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "ScoringConfig requires signals absent from the PredictionSet: "
+                + "; ".join(missing)
+                + ". Re-predict with the corresponding compute_* flag enabled."
+            ),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -397,6 +530,7 @@ def download_scored_predictions(
         if config is None:
             raise HTTPException(status_code=404, detail="ScoringConfig not found")
         config_snap = _snapshot(config)
+        _check_signal_coverage(session, set_id, config_snap)
 
     def _generate() -> Iterator[bytes]:
         header = (
@@ -412,6 +546,7 @@ def download_scored_predictions(
                     "identity_nw",
                     "identity_sw",
                     "taxonomic_distance",
+                    "neighbor_vote_fraction",
                 ]
             )
             + "\n"
@@ -434,6 +569,7 @@ def download_scored_predictions(
                     "identity_sw": pred.identity_sw,
                     "evidence_code": pred.evidence_code,
                     "taxonomic_distance": pred.taxonomic_distance,
+                    "neighbor_vote_fraction": pred.neighbor_vote_fraction,
                 }
                 score = compute_score(pred_dict, config_snap)
                 if min_score is not None and score < min_score:
@@ -453,6 +589,9 @@ def download_scored_predictions(
                             str(pred.identity_sw) if pred.identity_sw is not None else "",
                             str(pred.taxonomic_distance)
                             if pred.taxonomic_distance is not None
+                            else "",
+                            str(pred.neighbor_vote_fraction)
+                            if pred.neighbor_vote_fraction is not None
                             else "",
                         ]
                     )
@@ -511,6 +650,7 @@ def compute_metrics(
         if config is None:
             raise HTTPException(status_code=404, detail="ScoringConfig not found")
         config_snap = _snapshot(config)
+        _check_signal_coverage(session, set_id, config_snap)
 
         eval_data = compute_evaluation_data(
             session,
@@ -536,6 +676,7 @@ def compute_metrics(
             "identity_sw": pred.identity_sw,
             "evidence_code": pred.evidence_code,
             "taxonomic_distance": pred.taxonomic_distance,
+            "neighbor_vote_fraction": pred.neighbor_vote_fraction,
         }
         pred_dict["score"] = compute_score(pred_dict, config_snap)
         scored.append(pred_dict)
@@ -610,8 +751,12 @@ _TRAINING_COLUMNS = [
 )
 def download_training_data(
     set_id: uuid.UUID,
-    evaluation_set_id: uuid.UUID = Query(..., description="EvaluationSet to derive ground-truth labels from"),
-    category: str = Query("nk", pattern="^(nk|lk|pk)$", description="Ground-truth category: nk, lk, or pk"),
+    evaluation_set_id: uuid.UUID = Query(
+        ..., description="EvaluationSet to derive ground-truth labels from"
+    ),
+    category: str = Query(
+        "nk", pattern="^(nk|lk|pk)$", description="Ground-truth category: nk, lk, or pk"
+    ),
     factory=Depends(get_session_factory),
 ) -> StreamingResponse:
     """Stream labeled training data for the re-ranker model.
@@ -670,39 +815,44 @@ def download_training_data(
                 def _v(val: object) -> str:
                     return "" if val is None else str(val)
 
-                row = "\t".join([
-                    pred.protein_accession,
-                    go_id,
-                    aspect or "",
-                    str(label),
-                    _v(pred.distance),
-                    pred.ref_protein_accession or "",
-                    pred.qualifier or "",
-                    pred.evidence_code or "",
-                    _v(pred.identity_nw),
-                    _v(pred.similarity_nw),
-                    _v(pred.alignment_score_nw),
-                    _v(pred.gaps_pct_nw),
-                    _v(pred.alignment_length_nw),
-                    _v(pred.identity_sw),
-                    _v(pred.similarity_sw),
-                    _v(pred.alignment_score_sw),
-                    _v(pred.gaps_pct_sw),
-                    _v(pred.alignment_length_sw),
-                    _v(pred.length_query),
-                    _v(pred.length_ref),
-                    _v(pred.query_taxonomy_id),
-                    _v(pred.ref_taxonomy_id),
-                    _v(pred.taxonomic_lca),
-                    _v(pred.taxonomic_distance),
-                    _v(pred.taxonomic_common_ancestors),
-                    pred.taxonomic_relation or "",
-                    _v(pred.vote_count),
-                    _v(pred.k_position),
-                    _v(pred.go_term_frequency),
-                    _v(pred.ref_annotation_density),
-                    _v(pred.neighbor_distance_std),
-                ]) + "\n"
+                row = (
+                    "\t".join(
+                        [
+                            pred.protein_accession,
+                            go_id,
+                            aspect or "",
+                            str(label),
+                            _v(pred.distance),
+                            pred.ref_protein_accession or "",
+                            pred.qualifier or "",
+                            pred.evidence_code or "",
+                            _v(pred.identity_nw),
+                            _v(pred.similarity_nw),
+                            _v(pred.alignment_score_nw),
+                            _v(pred.gaps_pct_nw),
+                            _v(pred.alignment_length_nw),
+                            _v(pred.identity_sw),
+                            _v(pred.similarity_sw),
+                            _v(pred.alignment_score_sw),
+                            _v(pred.gaps_pct_sw),
+                            _v(pred.alignment_length_sw),
+                            _v(pred.length_query),
+                            _v(pred.length_ref),
+                            _v(pred.query_taxonomy_id),
+                            _v(pred.ref_taxonomy_id),
+                            _v(pred.taxonomic_lca),
+                            _v(pred.taxonomic_distance),
+                            _v(pred.taxonomic_common_ancestors),
+                            pred.taxonomic_relation or "",
+                            _v(pred.vote_count),
+                            _v(pred.k_position),
+                            _v(pred.go_term_frequency),
+                            _v(pred.ref_annotation_density),
+                            _v(pred.neighbor_distance_std),
+                        ]
+                    )
+                    + "\n"
+                )
                 yield row.encode()
 
     filename = f"training_data_{set_id}_{category}.tsv"
@@ -719,37 +869,6 @@ def download_training_data(
 
 
 _ASPECT_MAP = {"bpo": "P", "mfo": "F", "cco": "C"}
-
-
-class _TrainingPair(BaseModel):
-    prediction_set_id: uuid.UUID
-    evaluation_set_id: uuid.UUID
-
-
-class RerankerTrainRequest(BaseModel):
-    """Request body for POST /scoring/rerankers/train."""
-
-    name: str = Field(..., min_length=1, max_length=255)
-    prediction_set_id: uuid.UUID
-    evaluation_set_id: uuid.UUID
-    category: str = Field("nk", pattern="^(nk|lk|pk)$")
-    aspect: str | None = Field(
-        default=None,
-        pattern="^(bpo|mfo|cco)$",
-        description="Train only on predictions for this GO aspect. None trains on all aspects.",
-    )
-    neg_pos_ratio: float | None = Field(
-        default=None,
-        ge=1.0,
-        description="Subsample negatives to this ratio vs positives (e.g. 1.0 for 1:1, 10.0 for 10:1). None keeps all.",
-    )
-    extra_pairs: list[_TrainingPair] | None = Field(
-        default=None,
-        description="Additional (prediction_set, evaluation_set) pairs to include in training data. "
-        "Data from all pairs is concatenated before training a single model.",
-    )
-
-    model_config = {"extra": "forbid"}
 
 
 class RerankerResponse(BaseModel):
@@ -778,138 +897,6 @@ def _reranker_to_response(m: RerankerModel) -> RerankerResponse:
         feature_importance=m.feature_importance,
         created_at=m.created_at,
     )
-
-
-def _collect_training_records(
-    session: Any,
-    prediction_set_id: uuid.UUID,
-    evaluation_set_id: uuid.UUID,
-    category: str,
-    aspect_filter_char: str | None,
-) -> list[dict[str, Any]]:
-    """Build labeled training records from a (PredictionSet, EvaluationSet) pair."""
-    ps = session.get(PredictionSet, prediction_set_id)
-    if ps is None:
-        raise HTTPException(status_code=404, detail=f"PredictionSet {prediction_set_id} not found")
-    es = session.get(EvaluationSet, evaluation_set_id)
-    if es is None:
-        raise HTTPException(status_code=404, detail=f"EvaluationSet {evaluation_set_id} not found")
-
-    eval_data = compute_evaluation_data(
-        session,
-        old_annotation_set_id=es.old_annotation_set_id,
-        new_annotation_set_id=es.new_annotation_set_id,
-        ontology_snapshot_id=ps.ontology_snapshot_id,
-    )
-
-    ground_truth: dict[str, set[str]] = getattr(eval_data, category)
-    gt_pairs: set[tuple[str, str]] = set()
-    for protein, go_ids in ground_truth.items():
-        for go_id in go_ids:
-            gt_pairs.add((protein, go_id))
-
-    records: list[dict[str, Any]] = []
-    q_preds = (
-        session.query(GOPrediction, GOTerm.go_id, GOTerm.aspect)
-        .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
-        .filter(GOPrediction.prediction_set_id == prediction_set_id)
-    )
-    if aspect_filter_char:
-        q_preds = q_preds.filter(GOTerm.aspect == aspect_filter_char)
-    for pred, go_id, aspect in q_preds.yield_per(5000):
-        label = 1 if (pred.protein_accession, go_id) in gt_pairs else 0
-        records.append({
-            "protein_accession": pred.protein_accession,
-            "go_id": go_id,
-            "aspect": aspect or "",
-            "label": label,
-            "distance": pred.distance,
-            "ref_protein_accession": pred.ref_protein_accession or "",
-            "qualifier": pred.qualifier or "",
-            "evidence_code": pred.evidence_code or "",
-            "identity_nw": pred.identity_nw,
-            "similarity_nw": pred.similarity_nw,
-            "alignment_score_nw": pred.alignment_score_nw,
-            "gaps_pct_nw": pred.gaps_pct_nw,
-            "alignment_length_nw": pred.alignment_length_nw,
-            "identity_sw": pred.identity_sw,
-            "similarity_sw": pred.similarity_sw,
-            "alignment_score_sw": pred.alignment_score_sw,
-            "gaps_pct_sw": pred.gaps_pct_sw,
-            "alignment_length_sw": pred.alignment_length_sw,
-            "length_query": pred.length_query,
-            "length_ref": pred.length_ref,
-            "query_taxonomy_id": pred.query_taxonomy_id,
-            "ref_taxonomy_id": pred.ref_taxonomy_id,
-            "taxonomic_lca": pred.taxonomic_lca,
-            "taxonomic_distance": pred.taxonomic_distance,
-            "taxonomic_common_ancestors": pred.taxonomic_common_ancestors,
-            "taxonomic_relation": pred.taxonomic_relation or "",
-            "vote_count": pred.vote_count,
-            "k_position": pred.k_position,
-            "go_term_frequency": pred.go_term_frequency,
-            "ref_annotation_density": pred.ref_annotation_density,
-            "neighbor_distance_std": pred.neighbor_distance_std,
-        })
-    return records
-
-
-@router.post("/rerankers/train", response_model=RerankerResponse, status_code=201)
-def train_reranker(
-    body: RerankerTrainRequest,
-    factory=Depends(get_session_factory),
-):
-    """Train a LightGBM re-ranker from one or more (PredictionSet, EvaluationSet) pairs.
-
-    When ``extra_pairs`` is provided, training data from all pairs is
-    concatenated before training a single model — useful for multi-temporal
-    holdout training where each pair represents a different GOA time split.
-    """
-    import pandas as pd
-
-    aspect_filter_char = _ASPECT_MAP.get(body.aspect) if body.aspect else None
-
-    with session_scope(factory) as session:
-        # Check name uniqueness
-        existing = session.query(RerankerModel).filter(RerankerModel.name == body.name).first()
-        if existing is not None:
-            raise HTTPException(status_code=409, detail=f"Reranker with name '{body.name}' already exists")
-
-        # Collect records from the primary pair
-        records = _collect_training_records(
-            session, body.prediction_set_id, body.evaluation_set_id,
-            body.category, aspect_filter_char,
-        )
-
-        # Collect records from extra pairs
-        if body.extra_pairs:
-            for pair in body.extra_pairs:
-                extra = _collect_training_records(
-                    session, pair.prediction_set_id, pair.evaluation_set_id,
-                    body.category, aspect_filter_char,
-                )
-                records.extend(extra)
-
-    if not records:
-        raise HTTPException(status_code=422, detail="No predictions found across all pairs")
-
-    df = pd.DataFrame(records)
-    result = reranker_train(df, neg_pos_ratio=body.neg_pos_ratio)
-
-    with session_scope(factory) as session:
-        model = RerankerModel(
-            name=body.name,
-            prediction_set_id=body.prediction_set_id,
-            evaluation_set_id=body.evaluation_set_id,
-            category=body.category,
-            aspect=body.aspect,
-            model_data=model_to_string(result.model),
-            metrics=result.metrics,
-            feature_importance=result.feature_importance,
-        )
-        session.add(model)
-        session.flush()
-        return _reranker_to_response(model)
 
 
 @router.get("/rerankers", response_model=list[RerankerResponse])
@@ -948,7 +935,9 @@ def delete_reranker(reranker_id: uuid.UUID, factory=Depends(get_session_factory)
 def download_reranked_predictions(
     set_id: uuid.UUID,
     reranker_id: uuid.UUID = Query(..., description="UUID of the trained RerankerModel to apply"),
-    min_score: float | None = Query(None, ge=0.0, le=1.0, description="Minimum re-ranker score threshold"),
+    min_score: float | None = Query(
+        None, ge=0.0, le=1.0, description="Minimum re-ranker score threshold"
+    ),
     factory=Depends(get_session_factory),
 ) -> StreamingResponse:
     """Stream predictions re-scored by a trained LightGBM model.
@@ -966,7 +955,7 @@ def download_reranked_predictions(
         rm = session.get(RerankerModel, reranker_id)
         if rm is None:
             raise HTTPException(status_code=404, detail="RerankerModel not found")
-        model_str = rm.model_data
+        model = _load_booster(rm)
 
         records: list[dict[str, Any]] = []
         for pred, go_id, aspect in (
@@ -975,43 +964,51 @@ def download_reranked_predictions(
             .filter(GOPrediction.prediction_set_id == set_id)
             .yield_per(5000)
         ):
-            records.append({
-                "protein_accession": pred.protein_accession,
-                "go_id": go_id,
-                "aspect": aspect or "",
-                "distance": pred.distance,
-                "ref_protein_accession": pred.ref_protein_accession or "",
-                "qualifier": pred.qualifier or "",
-                "evidence_code": pred.evidence_code or "",
-                "identity_nw": pred.identity_nw,
-                "similarity_nw": pred.similarity_nw,
-                "alignment_score_nw": pred.alignment_score_nw,
-                "gaps_pct_nw": pred.gaps_pct_nw,
-                "alignment_length_nw": pred.alignment_length_nw,
-                "identity_sw": pred.identity_sw,
-                "similarity_sw": pred.similarity_sw,
-                "alignment_score_sw": pred.alignment_score_sw,
-                "gaps_pct_sw": pred.gaps_pct_sw,
-                "alignment_length_sw": pred.alignment_length_sw,
-                "length_query": pred.length_query,
-                "length_ref": pred.length_ref,
-                "query_taxonomy_id": pred.query_taxonomy_id,
-                "ref_taxonomy_id": pred.ref_taxonomy_id,
-                "taxonomic_lca": pred.taxonomic_lca,
-                "taxonomic_distance": pred.taxonomic_distance,
-                "taxonomic_common_ancestors": pred.taxonomic_common_ancestors,
-                "taxonomic_relation": pred.taxonomic_relation or "",
-                "vote_count": pred.vote_count,
-                "k_position": pred.k_position,
-                "go_term_frequency": pred.go_term_frequency,
-                "ref_annotation_density": pred.ref_annotation_density,
-                "neighbor_distance_std": pred.neighbor_distance_std,
-                "label": 0,
-            })
+            records.append(
+                {
+                    "protein_accession": pred.protein_accession,
+                    "go_id": go_id,
+                    "aspect": aspect or "",
+                    "distance": pred.distance,
+                    "ref_protein_accession": pred.ref_protein_accession or "",
+                    "qualifier": pred.qualifier or "",
+                    "evidence_code": pred.evidence_code or "",
+                    "identity_nw": pred.identity_nw,
+                    "similarity_nw": pred.similarity_nw,
+                    "alignment_score_nw": pred.alignment_score_nw,
+                    "gaps_pct_nw": pred.gaps_pct_nw,
+                    "alignment_length_nw": pred.alignment_length_nw,
+                    "identity_sw": pred.identity_sw,
+                    "similarity_sw": pred.similarity_sw,
+                    "alignment_score_sw": pred.alignment_score_sw,
+                    "gaps_pct_sw": pred.gaps_pct_sw,
+                    "alignment_length_sw": pred.alignment_length_sw,
+                    "length_query": pred.length_query,
+                    "length_ref": pred.length_ref,
+                    "query_taxonomy_id": pred.query_taxonomy_id,
+                    "ref_taxonomy_id": pred.ref_taxonomy_id,
+                    "taxonomic_lca": pred.taxonomic_lca,
+                    "taxonomic_distance": pred.taxonomic_distance,
+                    "taxonomic_common_ancestors": pred.taxonomic_common_ancestors,
+                    "taxonomic_relation": pred.taxonomic_relation or "",
+                    "vote_count": pred.vote_count,
+                    "k_position": pred.k_position,
+                    "go_term_frequency": pred.go_term_frequency,
+                    "ref_annotation_density": pred.ref_annotation_density,
+                    "neighbor_distance_std": pred.neighbor_distance_std,
+                    # NOTE: do not add a ``label`` column here — its
+                    # presence makes ``predict`` route through
+                    # ``prepare_dataset`` which expects every training
+                    # column. At inference time we want the alignment
+                    # branch that fills missing v6 features as NaN.
+                }
+            )
 
     if not records:
+
         def _empty() -> Iterator[bytes]:
             yield b"protein_accession\tgo_id\taspect\treranker_score\tdistance\n"
+
         return StreamingResponse(
             _empty(),
             media_type="text/tab-separated-values",
@@ -1019,7 +1016,6 @@ def download_reranked_predictions(
         )
 
     df = pd.DataFrame(records)
-    model = model_from_string(model_str)
     scores = reranker_predict(model, df)
     df["reranker_score"] = scores
 
@@ -1027,8 +1023,14 @@ def download_reranked_predictions(
     df = df.sort_values(["protein_accession", "reranker_score"], ascending=[True, False])
 
     _RERANK_COLUMNS = [
-        "protein_accession", "go_id", "aspect", "reranker_score", "distance",
-        "ref_protein_accession", "evidence_code", "qualifier",
+        "protein_accession",
+        "go_id",
+        "aspect",
+        "reranker_score",
+        "distance",
+        "ref_protein_accession",
+        "evidence_code",
+        "qualifier",
     ]
 
     def _generate() -> Iterator[bytes]:
@@ -1036,16 +1038,21 @@ def download_reranked_predictions(
         for _, row in df.iterrows():
             if min_score is not None and row["reranker_score"] < min_score:
                 continue
-            line = "\t".join([
-                str(row["protein_accession"]),
-                str(row["go_id"]),
-                str(row["aspect"]),
-                f"{row['reranker_score']:.6f}",
-                str(row["distance"]) if pd.notna(row["distance"]) else "",
-                str(row["ref_protein_accession"]),
-                str(row["evidence_code"]),
-                str(row["qualifier"]),
-            ]) + "\n"
+            line = (
+                "\t".join(
+                    [
+                        str(row["protein_accession"]),
+                        str(row["go_id"]),
+                        str(row["aspect"]),
+                        f"{row['reranker_score']:.6f}",
+                        str(row["distance"]) if pd.notna(row["distance"]) else "",
+                        str(row["ref_protein_accession"]),
+                        str(row["evidence_code"]),
+                        str(row["qualifier"]),
+                    ]
+                )
+                + "\n"
+            )
             yield line.encode()
 
     filename = f"reranked_{set_id}.tsv"
@@ -1084,15 +1091,24 @@ def compute_reranker_metrics(
         if es is None:
             raise HTTPException(status_code=404, detail="EvaluationSet not found")
 
-        model_str = rm.model_data
+        # Booster load is deferred until after the empty-predictions check
+        # so a request against an empty PredictionSet doesn't pay the
+        # MinIO download cost.
         reranker_name = rm.name
 
-        eval_data = compute_evaluation_data(
-            session,
-            old_annotation_set_id=es.old_annotation_set_id,
-            new_annotation_set_id=es.new_annotation_set_id,
-            ontology_snapshot_id=ps.ontology_snapshot_id,
-        )
+        # Reuse the persisted ground-truth artifact when available (the only
+        # path that handles ``mode=reconciled`` correctly, where the eval set's
+        # underlying annotation snapshots differ from ``ps.ontology_snapshot_id``).
+        # Fall back to on-the-fly computation only for legacy same-snapshot rows.
+        if es.groundtruth_uri:
+            eval_data, _pivot_id = load_evaluation_data_for_set(session, es)
+        else:
+            eval_data = compute_evaluation_data(
+                session,
+                old_annotation_set_id=es.old_annotation_set_id,
+                new_annotation_set_id=es.new_annotation_set_id,
+                ontology_snapshot_id=ps.ontology_snapshot_id,
+            )
 
         records: list[dict[str, Any]] = []
         for pred, go_id in (
@@ -1101,52 +1117,60 @@ def compute_reranker_metrics(
             .filter(GOPrediction.prediction_set_id == set_id)
             .yield_per(5000)
         ):
-            records.append({
-                "protein_accession": pred.protein_accession,
-                "go_id": go_id,
-                "distance": pred.distance,
-                "qualifier": pred.qualifier or "",
-                "evidence_code": pred.evidence_code or "",
-                "identity_nw": pred.identity_nw,
-                "similarity_nw": pred.similarity_nw,
-                "alignment_score_nw": pred.alignment_score_nw,
-                "gaps_pct_nw": pred.gaps_pct_nw,
-                "alignment_length_nw": pred.alignment_length_nw,
-                "identity_sw": pred.identity_sw,
-                "similarity_sw": pred.similarity_sw,
-                "alignment_score_sw": pred.alignment_score_sw,
-                "gaps_pct_sw": pred.gaps_pct_sw,
-                "alignment_length_sw": pred.alignment_length_sw,
-                "length_query": pred.length_query,
-                "length_ref": pred.length_ref,
-                "query_taxonomy_id": pred.query_taxonomy_id,
-                "ref_taxonomy_id": pred.ref_taxonomy_id,
-                "taxonomic_lca": pred.taxonomic_lca,
-                "taxonomic_distance": pred.taxonomic_distance,
-                "taxonomic_common_ancestors": pred.taxonomic_common_ancestors,
-                "taxonomic_relation": pred.taxonomic_relation or "",
-                "vote_count": pred.vote_count,
-                "k_position": pred.k_position,
-                "go_term_frequency": pred.go_term_frequency,
-                "ref_annotation_density": pred.ref_annotation_density,
-                "neighbor_distance_std": pred.neighbor_distance_std,
-                "label": 0,
-            })
+            records.append(
+                {
+                    "protein_accession": pred.protein_accession,
+                    "go_id": go_id,
+                    "distance": pred.distance,
+                    "qualifier": pred.qualifier or "",
+                    "evidence_code": pred.evidence_code or "",
+                    "identity_nw": pred.identity_nw,
+                    "similarity_nw": pred.similarity_nw,
+                    "alignment_score_nw": pred.alignment_score_nw,
+                    "gaps_pct_nw": pred.gaps_pct_nw,
+                    "alignment_length_nw": pred.alignment_length_nw,
+                    "identity_sw": pred.identity_sw,
+                    "similarity_sw": pred.similarity_sw,
+                    "alignment_score_sw": pred.alignment_score_sw,
+                    "gaps_pct_sw": pred.gaps_pct_sw,
+                    "alignment_length_sw": pred.alignment_length_sw,
+                    "length_query": pred.length_query,
+                    "length_ref": pred.length_ref,
+                    "query_taxonomy_id": pred.query_taxonomy_id,
+                    "ref_taxonomy_id": pred.ref_taxonomy_id,
+                    "taxonomic_lca": pred.taxonomic_lca,
+                    "taxonomic_distance": pred.taxonomic_distance,
+                    "taxonomic_common_ancestors": pred.taxonomic_common_ancestors,
+                    "taxonomic_relation": pred.taxonomic_relation or "",
+                    "vote_count": pred.vote_count,
+                    "k_position": pred.k_position,
+                    "go_term_frequency": pred.go_term_frequency,
+                    "ref_annotation_density": pred.ref_annotation_density,
+                    "neighbor_distance_std": pred.neighbor_distance_std,
+                    # See note in download_reranked_predictions: omitting
+                    # ``label`` forces the alignment branch in ``predict``.
+                }
+            )
 
-    if not records:
-        return {
-            "prediction_set_id": str(set_id),
-            "reranker_id": str(reranker_id),
-            "reranker_name": reranker_name,
-            "category": category,
-            "fmax": 0.0,
-            "auc_pr": 0.0,
-            "n_predictions": 0,
-            "curve": [],
-        }
+        if not records:
+            return {
+                "prediction_set_id": str(set_id),
+                "reranker_id": str(reranker_id),
+                "reranker_name": reranker_name,
+                "category": category,
+                "fmax": 0.0,
+                "auc_pr": 0.0,
+                "n_predictions": 0,
+                "curve": [],
+            }
+
+        # Booster load and scoring stay inside the session scope: ``rm``'s lazy
+        # columns (``model_data`` / ``artifact_uri``) are loaded against the
+        # live session, then the heavy numeric work runs before the with-block
+        # closes (the eval_data + records are already fully materialised).
+        model = _load_booster(rm)
 
     df = pd.DataFrame(records)
-    model = model_from_string(model_str)
     scores = reranker_predict(model, df)
 
     scored: list[dict[str, Any]] = [

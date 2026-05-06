@@ -17,14 +17,16 @@ Evidence code quality is resolved through a two-level lookup:
 3. Codes unknown to both tables fall back to
    :data:`DEFAULT_EVIDENCE_WEIGHT_FALLBACK` (0.5).
 
-This means a ``ScoringConfig`` may carry a *partial* override — e.g. only
-changing the IEA weight from 0.3 to 0.0 — without having to redeclare every
-other code.  The resolution order ensures backwards compatibility: configs
-stored without ``evidence_weights`` behave identically to older configs.
+This means a ``ScoringConfig`` may carry a *partial* override — e.g. zeroing
+the IEA weight for an experiment-only study — without having to redeclare
+every other code.  The resolution order ensures backwards compatibility:
+configs stored without ``evidence_weights`` behave identically to older
+configs.
 """
 
 from __future__ import annotations
 
+from collections import defaultdict
 from typing import Any
 
 from protea.core.evidence_codes import ECO_TO_CODE
@@ -34,6 +36,17 @@ from protea.infrastructure.orm.models.embedding.scoring_config import (
     FORMULA_EVIDENCE_WEIGHTED,
     ScoringConfig,
 )
+
+__all__ = [
+    "DEFAULT_EVIDENCE_WEIGHT_FALLBACK",
+    "DEFAULT_EVIDENCE_WEIGHTS",
+    "FORMULA_EVIDENCE_WEIGHTED",
+    "evidence_weight",
+    "compute_score",
+    "score_predictions",
+    "propagate_scores_to_ancestors",
+    "propagate_ground_truth_to_ancestors",
+]
 
 # ---------------------------------------------------------------------------
 # Evidence-code weight resolution
@@ -104,6 +117,8 @@ def compute_score(pred: dict[str, Any], config: ScoringConfig) -> float:
         - ``identity_sw`` (float | None): SW local identity in [0, 1].
         - ``evidence_code`` (str | None): GO or ECO evidence code.
         - ``taxonomic_distance`` (float | None): raw taxonomic distance.
+        - ``neighbor_vote_fraction`` (float | None): fraction of K neighbours
+          that voted for this GO term, in [0, 1].
 
     config:
         A :class:`ScoringConfig` instance defining the formula, signal
@@ -149,6 +164,9 @@ def compute_score(pred: dict[str, Any], config: ScoringConfig) -> float:
     if tax_dist is not None:
         _add("taxonomic_proximity", 1.0 / (1.0 + float(tax_dist)))
 
+    # 6. Neighbour vote fraction: already in [0, 1] — no transformation.
+    _add("neighbor_vote_fraction", pred.get("neighbor_vote_fraction"))
+
     if total_w == 0.0:
         return 0.0
 
@@ -167,6 +185,101 @@ def compute_score(pred: dict[str, Any], config: ScoringConfig) -> float:
 # ---------------------------------------------------------------------------
 # Batch helper
 # ---------------------------------------------------------------------------
+
+
+def propagate_scores_to_ancestors(
+    scored_predictions: list[dict[str, Any]],
+    parent_map: dict[str, set[str]],
+) -> list[dict[str, Any]]:
+    """Max-propagate GO scores to ancestors per protein (True Path Rule).
+
+    For every (protein, go_id, score) row, ensures every ancestor ``a`` of
+    ``go_id`` in ``parent_map`` also has score ≥ that row's score for the
+    same protein. The final score of an ancestor is the max over all its
+    descendants predicted for the protein (including itself if predicted).
+
+    This mirrors cafaeval's behaviour: annotating a child implies every
+    ancestor, so predictions must propagate upward before PR metrics.
+    ``parent_map`` maps a child ``go_id`` (string) to the set of its direct
+    parent ``go_id`` strings — typically the union of ``is_a`` + ``part_of``
+    edges for the relevant ontology snapshot.
+
+    Returns a new list; the input is not modified. Rows that share a
+    (protein, go_id) collapse to a single row keyed by the max score.
+    """
+    ancestor_closure: dict[str, set[str]] = {}
+
+    def ancestors_of(go_id: str) -> set[str]:
+        cached = ancestor_closure.get(go_id)
+        if cached is not None:
+            return cached
+        seen: set[str] = set()
+        stack = [go_id]
+        while stack:
+            node = stack.pop()
+            for parent in parent_map.get(node, ()):
+                if parent not in seen:
+                    seen.add(parent)
+                    stack.append(parent)
+        ancestor_closure[go_id] = seen
+        return seen
+
+    by_protein: defaultdict[str, dict[str, float]] = defaultdict(dict)
+    for p in scored_predictions:
+        acc = p["protein_accession"]
+        gid = str(p["go_id"])
+        s = float(p["score"])
+        cur = by_protein[acc]
+        if s > cur.get(gid, -1.0):
+            cur[gid] = s
+
+    propagated: list[dict[str, Any]] = []
+    for acc, term_scores in by_protein.items():
+        expanded: dict[str, float] = dict(term_scores)
+        for gid, s in term_scores.items():
+            for anc in ancestors_of(gid):
+                if s > expanded.get(anc, -1.0):
+                    expanded[anc] = s
+        for gid, s in expanded.items():
+            propagated.append({"protein_accession": acc, "go_id": gid, "score": s})
+
+    return propagated
+
+
+def propagate_ground_truth_to_ancestors(
+    ground_truth: dict[str, set[str]],
+    parent_map: dict[str, set[str]],
+) -> dict[str, set[str]]:
+    """Expand each protein's GO set with every ancestor in ``parent_map``.
+
+    Returns a new dict; the input is not modified. Pair with
+    :func:`propagate_scores_to_ancestors` when the downstream metric treats
+    predictions and ground truth symmetrically (e.g. cafaeval-style Fmax).
+    """
+    ancestor_closure: dict[str, set[str]] = {}
+
+    def ancestors_of(go_id: str) -> set[str]:
+        cached = ancestor_closure.get(go_id)
+        if cached is not None:
+            return cached
+        seen: set[str] = set()
+        stack = [go_id]
+        while stack:
+            node = stack.pop()
+            for parent in parent_map.get(node, ()):
+                if parent not in seen:
+                    seen.add(parent)
+                    stack.append(parent)
+        ancestor_closure[go_id] = seen
+        return seen
+
+    expanded: dict[str, set[str]] = {}
+    for acc, gos in ground_truth.items():
+        full: set[str] = set(gos)
+        for gid in gos:
+            full.update(ancestors_of(str(gid)))
+        expanded[acc] = full
+    return expanded
 
 
 def score_predictions(

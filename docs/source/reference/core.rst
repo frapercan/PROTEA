@@ -1,6 +1,10 @@
 Core
 ====
 
+.. contents:: On this page
+   :local:
+   :depth: 2
+
 The ``protea.core`` package contains all domain logic. It has no dependency
 on the infrastructure layer: operations receive an open SQLAlchemy session
 and an ``emit`` callback, but they do not manage connections, queues, or
@@ -36,6 +40,51 @@ dispatch time; new operations are registered at process startup in
 ``scripts/worker.py`` without modifying any worker code.
 
 .. automodule:: protea.core.contracts.registry
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+``parent_progress`` exposes the shared
+``_update_parent_progress`` helper used by every coordinator
+operation (``compute_embeddings``, ``predict_go_terms``) to advance
+the parent job's progress as child workers finish their batches.
+Extracted to its own module in F0 (T0.7) to remove duplicated copies
+across coordinators.
+
+.. automodule:: protea.core.contracts.parent_progress
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Retry middleware
+----------------
+
+``protea.core.retry`` implements the ``with_retry`` decorator used by
+``BaseWorker`` to wrap the execute session against transient
+database errors (deadlocks, connection drops, serialisation
+failures). Exponential backoff with jitter; the maximum number of
+attempts and the backoff base are controlled by
+``settings.WorkerTuning.retry_max_attempts`` and
+``settings.WorkerTuning.retry_backoff_base`` (see
+:doc:`/appendix/configuration`). Added as part of F0 (T0.3) of the
+master plan v3.
+
+.. automodule:: protea.core.retry
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Operation catalogue
+-------------------
+
+``protea.core.operation_catalog`` builds the singleton
+``OperationRegistry`` that workers consult at message dispatch. The
+public function ``build_operation_registry()`` instantiates each
+operation class and registers it under its canonical name. Adding a
+new operation is a one-line edit here plus a new module under
+``protea/core/operations/``.
+
+.. automodule:: protea.core.operation_catalog
    :members:
    :undoc-members:
    :show-inheritance:
@@ -124,24 +173,66 @@ Re-ranker
 ---------
 
 ``protea.core.reranker`` implements a LightGBM binary classifier that
-re-scores GO term predictions using 19 numeric features (embedding distance,
-NW/SW alignment metrics, sequence lengths, taxonomic distance, and 5
-aggregate re-ranker signals) plus 3 categorical features (qualifier,
-evidence code, taxonomic relation).
+re-scores GO term predictions using 20 numeric features (embedding distance,
+NW/SW alignment metrics, sequence lengths, taxonomic distance and common
+ancestors, and 5 aggregate re-ranker signals) plus 3 categorical features
+(qualifier, evidence code, taxonomic relation). The full feature list is
+documented in :ref:`train_reranker <train-reranker-operation>`.
 
 The module provides:
 
-- ``prepare_dataset(df)`` — extracts and coerces feature columns.
-- ``train(df)`` — stratified train/val split with ``is_unbalance=True``,
-  returns a ``TrainResult`` with the model, validation metrics (AUC,
-  logloss, precision, recall, F1), and feature importance.
-- ``predict(model, df)`` — returns probability scores [0, 1].
+- ``prepare_dataset(df)`` — extracts and coerces feature columns. Numeric
+  columns are coerced with ``errors="coerce"`` (invalid strings become
+  ``NaN``); categorical columns are converted to pandas ``category`` dtype,
+  which LightGBM consumes directly without manual label encoding.
+- ``train(df)`` — stratified positive/negative split with early-stopping on a
+  held-out validation set (default 20 %). Returns a ``TrainResult`` with the
+  Booster, validation metrics (AUC, logloss, precision, recall, F1 at the
+  0.5 threshold), the best boosting iteration, and gain-based feature
+  importance.
+- ``predict(model, df)`` — returns probability scores in ``[0, 1]``.
 - ``model_to_string()`` / ``model_from_string()`` — serialization for DB
   storage in the ``RerankerModel`` table.
 - ``load_training_tsv()`` — parses a training data TSV as produced by the
   ``/scoring/prediction-sets/{id}/training-data.tsv`` endpoint.
 
+.. note::
+
+   ``load_reranker`` / ``apply_reranker`` / ``infer_active_feature_families``
+   were originally split into a sibling ``protea.core.reranking`` module;
+   they were folded back into ``protea.core.reranker`` to remove a naming
+   trap (``reranker`` vs ``reranking`` were impossible to grep apart).
+   This module is now the single inference-side surface.
+
 .. automodule:: protea.core.reranker
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Parquet export (``protea.core.parquet_export``)
+------------------------------------------------
+
+``protea.core.parquet_export`` consolidates per-split, per-category
+parquet shards produced by the KNN + feature pipeline into the frozen
+dataset layout consumed by ``protea-reranker-lab``: exactly
+``train.parquet``, ``eval.parquet`` and ``manifest.json`` under a single
+directory. The manifest follows ``ManifestV1`` (schema version ``v2``)
+and records PROTEA's ``producer_version`` + ``producer_git_sha``.
+
+The single public function ``export_reranker_parquets(...)`` is shared
+by two callers:
+
+- ``train_reranker._dump_frozen_dataset`` — thin wrapper that uses this
+  helper to emit the dataset alongside a training run.
+- ``ExportResearchDatasetOperation`` — stand-alone operation that only
+  materialises and publishes the dataset, without running LightGBM.
+
+When ``store`` is provided, the three consolidated files are
+additionally uploaded under ``key_prefix`` using the ``ArtifactStore``
+interface, and the returned dict includes ``train_uri`` / ``eval_uri``
+/ ``manifest_uri``.
+
+.. automodule:: protea.core.parquet_export
    :members:
    :undoc-members:
    :show-inheritance:
@@ -226,9 +317,10 @@ different namespaces simultaneously (e.g., LK in CCO and PK in BPO).
 Operations
 ----------
 
-PROTEA ships sixteen registered operation instances at worker startup in
-``scripts/worker.py``. Each operation is a class that implements the
-``Operation`` protocol: a ``name`` string and an ``execute`` method.
+PROTEA ships seventeen registered operation instances at worker startup
+via ``protea.core.operation_catalog.build_operation_registry``. Each
+operation is a class that implements the ``Operation`` protocol: a
+``name`` string and an ``execute`` method.
 Operations are stateless with respect to infrastructure — they receive a
 session and emit structured events, but do not open connections or manage
 transactions.
@@ -352,15 +444,91 @@ transactions.
    :undoc-members:
    :show-inheritance:
 
-**train_reranker**
-   Trains a LightGBM binary classifier re-ranker from a PredictionSet +
-   EvaluationSet pair. Uses temporal holdout labels and 22 features (embedding
-   distance, alignment metrics, taxonomy, aggregate signals). Stores the
-   serialized model, validation metrics, and feature importance in a
-   ``RerankerModel`` row. ``TrainRerankerAutoOperation`` is a convenience
-   variant that auto-selects training parameters.
+**export_research_dataset**
+   Publishes the frozen re-ranker dataset (``train.parquet`` /
+   ``eval.parquet`` / ``manifest.json``) consumed by
+   ``protea-reranker-lab``. Runs the KNN + feature-generation pipeline
+   via ``TrainRerankerAutoOperation`` in ``dump_only`` mode and uploads
+   the resulting artefacts through the configured ``ArtifactStore``
+   (local FS by default, MinIO when the ``storage`` compose profile is
+   active). Manifest records PROTEA's ``producer_version`` /
+   ``producer_git_sha`` for full traceability from lab runs back to
+   PROTEA HEAD.
 
-.. automodule:: protea.core.operations.train_reranker
+.. automodule:: protea.core.operations.export_research_dataset
    :members:
    :undoc-members:
    :show-inheritance:
+
+Training-dump helpers
+---------------------
+
+``protea.core.training_dump_helpers`` is the home of the KNN /
+feature-generation helpers that were extracted in F0 (T0.6) when
+``protea.core.operations.train_reranker`` was deleted. The module is
+deliberately not an operation — it is reused in-process by
+:class:`ExportResearchDatasetOperation` to materialise ``train`` and
+``eval`` shards before the ``parquet_export`` consolidation pass.
+LightGBM training itself lives in
+`protea-reranker-lab <https://github.com/frapercan/protea-reranker-lab>`_,
+which consumes the published ``Dataset`` rows produced by
+``export_research_dataset``.
+
+.. automodule:: protea.core.training_dump_helpers
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Internal helpers
+----------------
+
+These modules are imported by the operations and the feature
+engineering layer; they are documented here for completeness but are
+not part of the public API.
+
+- ``protea.core.anc2vec_embeddings`` — anc2vec ancestry embeddings for
+  GO terms, used as features by the re-ranker (see ADR D19 for the
+  GeOKG replacement candidate).
+- ``protea.core.annotation_intern`` — string interning helper for
+  reducing memory pressure when loading large annotation sets.
+- ``protea.core.disk_cache`` — generic on-disk cache with TTL used by
+  the KNN reference loader and the PCA cache.
+- ``protea.core.feature_enricher`` — orchestrator that combines
+  alignment, taxonomy and anc2vec features into a single
+  per-candidate row.
+- ``protea.core.pca_cache`` — per-PLM PCA projection cache, used to
+  pre-compute the ``emb_pca`` feature family.
+
+.. automodule:: protea.core.anc2vec_embeddings
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core.annotation_intern
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core.disk_cache
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core.feature_enricher
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core.pca_cache
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. seealso::
+
+   - :doc:`/architecture/operations` — narrative documentation for every
+     operation listed above, with payload examples and execution flow.
+   - :doc:`infrastructure` — the ORM models that ``protea.core`` reads and
+     writes.
+   - :doc:`/appendix/howto_guides` — task-oriented recipes that exercise
+     these modules end-to-end.

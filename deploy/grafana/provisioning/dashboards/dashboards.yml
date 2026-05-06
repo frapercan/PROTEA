@@ -1,0 +1,19 @@
+# Dashboard provisioning — tells Grafana where to find the JSON files that
+# should be imported automatically on startup. Files under
+# /var/lib/grafana/dashboards are re-scanned every 30 s; to update a
+# dashboard just edit the JSON on disk and Grafana will pick it up.
+
+apiVersion: 1
+
+providers:
+  - name: "PROTEA Dashboards"
+    orgId: 1
+    folder: "PROTEA"
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

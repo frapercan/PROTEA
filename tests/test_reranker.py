@@ -1,6 +1,13 @@
-"""Unit tests for the LightGBM re-ranker core module."""
+"""Unit tests for the re-ranker inference module.
+
+Training was moved to ``protea-reranker-lab``; the tests below cover
+only the helpers that remain in PROTEA: feature-column constants,
+``prepare_dataset``, ``predict``, and model serialization round-trips.
+"""
+
 from __future__ import annotations
 
+import lightgbm as lgb
 import numpy as np
 import pandas as pd
 
@@ -9,22 +16,14 @@ from protea.core.reranker import (
     CATEGORICAL_FEATURES,
     LABEL_COLUMN,
     NUMERIC_FEATURES,
-    TrainResult,
-    load_training_tsv,
     model_from_string,
-    model_to_string,
     predict,
     prepare_dataset,
-    train,
 )
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_training_df(n: int = 200, positive_rate: float = 0.3, seed: int = 42) -> pd.DataFrame:
-    """Generate a synthetic training DataFrame with realistic feature distributions."""
+    """Generate a synthetic DataFrame with realistic feature distributions."""
     rng = np.random.RandomState(seed)
 
     labels = (rng.random(n) < positive_rate).astype(int)
@@ -36,7 +35,6 @@ def _make_training_df(n: int = 200, positive_rate: float = 0.3, seed: int = 42) 
         "label": labels.tolist(),
     }
 
-    # Numeric features — positives get slightly better values
     for col in NUMERIC_FEATURES:
         if col == "distance":
             data[col] = (rng.random(n) * 0.5 + (1 - labels) * 0.3).tolist()
@@ -61,12 +59,40 @@ def _make_training_df(n: int = 200, positive_rate: float = 0.3, seed: int = 42) 
         else:
             data[col] = (rng.random(n) * 10).tolist()
 
-    # Categorical features
     data["qualifier"] = rng.choice(["enables", "involved_in", "located_in", ""], n).tolist()
     data["evidence_code"] = rng.choice(["IDA", "IEA", "ISS", "EXP", ""], n).tolist()
     data["taxonomic_relation"] = rng.choice(["self", "sibling", "ancestor", ""], n).tolist()
 
     return pd.DataFrame(data)
+
+
+def _fit_minimal_booster(df: pd.DataFrame, num_boost_round: int = 10) -> lgb.Booster:
+    """Train a minimal LightGBM booster inline — replaces the removed
+    ``protea.core.reranker.train`` helper, so tests still have a real
+    booster to exercise ``predict`` / ``model_from_string`` against.
+
+    Mirrors ``protea-reranker-lab.reranker.encode_categoricals``: label-
+    encode categoricals to int codes so the booster trained here matches
+    the booster shape PROTEA's ``predict`` (no-label branch) expects at
+    inference time.
+    """
+    X, y = prepare_dataset(df)
+    cat_cols = [c for c in CATEGORICAL_FEATURES if c in X.columns]
+    for col in cat_cols:
+        s = X[col].astype("object").where(X[col].notna(), None)
+        codes, _ = pd.factorize(s, use_na_sentinel=True)
+        X[col] = codes
+    dataset = lgb.Dataset(X, label=y, categorical_feature=cat_cols, free_raw_data=False)
+    return lgb.train(
+        {
+            "objective": "binary",
+            "metric": "binary_logloss",
+            "verbose": -1,
+            "seed": 42,
+        },
+        dataset,
+        num_boost_round=num_boost_round,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -81,11 +107,16 @@ class TestPrepareDataset:
         assert X.shape == (50, len(ALL_FEATURES))
         assert y.shape == (50,)
 
-    def test_categorical_columns_are_category_dtype(self):
+    def test_categorical_columns_are_int_codes(self):
+        # Mirror protea-reranker-lab encoding: categoricals are
+        # label-encoded to int64 codes (missing → -1), not pandas
+        # ``category`` dtype. Required so cross-instance lab boosters
+        # don't trip "train and valid dataset categorical_feature do
+        # not match" at inference time.
         df = _make_training_df(20)
         X, _ = prepare_dataset(df)
         for col in CATEGORICAL_FEATURES:
-            assert X[col].dtype.name == "category"
+            assert X[col].dtype.kind == "i", f"{col} dtype = {X[col].dtype}"
 
     def test_label_is_int(self):
         df = _make_training_df(20)
@@ -99,58 +130,13 @@ class TestPrepareDataset:
         assert "protein_accession" not in X.columns
         assert "go_id" not in X.columns
 
-    def test_empty_strings_become_na_for_categoricals(self):
+    def test_empty_strings_become_minus_one_codes(self):
+        # Empty-string qualifier collapses to None → factorize sentinel
+        # code -1, matching the lab's encode_categoricals contract.
         df = _make_training_df(20)
         df.loc[0, "qualifier"] = ""
         X, _ = prepare_dataset(df)
-        assert pd.isna(X.loc[0, "qualifier"])
-
-
-# ---------------------------------------------------------------------------
-# train
-# ---------------------------------------------------------------------------
-
-
-class TestTrain:
-    def test_returns_train_result(self):
-        df = _make_training_df(200)
-        result = train(df, num_boost_round=10, early_stopping_rounds=5)
-        assert isinstance(result, TrainResult)
-        assert result.model is not None
-        assert "val_auc" in result.metrics
-        assert "val_f1" in result.metrics
-        assert "best_iteration" in result.metrics
-        assert len(result.feature_importance) > 0
-
-    def test_metrics_are_reasonable(self):
-        df = _make_training_df(500, positive_rate=0.3)
-        result = train(df, num_boost_round=50, early_stopping_rounds=10)
-        assert 0.0 <= result.metrics["val_auc"] <= 1.0
-        assert 0.0 <= result.metrics["val_precision"] <= 1.0
-        assert 0.0 <= result.metrics["val_recall"] <= 1.0
-        assert result.metrics["train_samples"] > 0
-        assert result.metrics["val_samples"] > 0
-
-    def test_custom_params(self):
-        df = _make_training_df(200)
-        result = train(
-            df,
-            params={"num_leaves": 15, "learning_rate": 0.1},
-            num_boost_round=10,
-            early_stopping_rounds=5,
-        )
-        assert result.model is not None
-
-    def test_feature_importance_keys_are_features(self):
-        df = _make_training_df(200)
-        result = train(df, num_boost_round=10, early_stopping_rounds=5)
-        for key in result.feature_importance:
-            assert key in ALL_FEATURES
-
-    def test_positive_rate_in_metrics(self):
-        df = _make_training_df(200, positive_rate=0.4)
-        result = train(df, num_boost_round=10, early_stopping_rounds=5)
-        assert 0.2 < result.metrics["positive_rate"] < 0.6  # approximate
+        assert int(X.loc[0, "qualifier"]) == -1
 
 
 # ---------------------------------------------------------------------------
@@ -161,78 +147,32 @@ class TestTrain:
 class TestPredict:
     def test_returns_probabilities(self):
         df = _make_training_df(200)
-        result = train(df, num_boost_round=10, early_stopping_rounds=5)
-        scores = predict(result.model, df)
+        model = _fit_minimal_booster(df)
+        scores = predict(model, df)
         assert len(scores) == 200
         assert all(0.0 <= s <= 1.0 for s in scores)
 
     def test_scores_without_label_column(self):
         df = _make_training_df(200)
-        result = train(df, num_boost_round=10, early_stopping_rounds=5)
+        model = _fit_minimal_booster(df)
         df_no_label = df.drop(columns=[LABEL_COLUMN])
-        scores = predict(result.model, df_no_label)
+        scores = predict(model, df_no_label)
         assert len(scores) == 200
-
-    def test_higher_scores_for_positive_examples(self):
-        """On average, positive examples should get higher scores."""
-        df = _make_training_df(1000, positive_rate=0.3)
-        result = train(df, num_boost_round=50, early_stopping_rounds=10)
-        scores = predict(result.model, df)
-        pos_mean = np.mean(scores[df["label"] == 1])
-        neg_mean = np.mean(scores[df["label"] == 0])
-        assert pos_mean > neg_mean
 
 
 # ---------------------------------------------------------------------------
-# Serialization
+# Serialization round-trip — scoring router loads stored boosters via
+# model_from_string, so the roundtrip must yield identical scores.
 # ---------------------------------------------------------------------------
 
 
 class TestSerialization:
     def test_roundtrip(self):
         df = _make_training_df(200)
-        result = train(df, num_boost_round=10, early_stopping_rounds=5)
-        model_str = model_to_string(result.model)
-        assert isinstance(model_str, str)
-        assert len(model_str) > 100
-
+        model = _fit_minimal_booster(df)
+        model_str = model.model_to_string()
         restored = model_from_string(model_str)
-        original_scores = predict(result.model, df)
-        restored_scores = predict(restored, df)
-        np.testing.assert_array_almost_equal(original_scores, restored_scores)
-
-
-# ---------------------------------------------------------------------------
-# load_training_tsv
-# ---------------------------------------------------------------------------
-
-
-class TestLoadTrainingTSV:
-    def test_parses_tsv_string(self):
-        tsv = "distance\tvote_count\tlabel\n0.1\t3\t1\n0.5\t1\t0\n"
-        df = load_training_tsv(tsv)
-        assert len(df) == 2
-        assert df["distance"].dtype == float
-        assert np.issubdtype(df["vote_count"].dtype, np.number)
-        assert df["label"].dtype == int
-
-    def test_parses_tsv_bytes(self):
-        tsv = b"distance\tvote_count\tlabel\n0.1\t3\t1\n"
-        df = load_training_tsv(tsv)
-        assert len(df) == 1
-
-    def test_missing_values_become_nan(self):
-        tsv = "distance\tvote_count\tlabel\n\t\t0\n"
-        df = load_training_tsv(tsv)
-        assert pd.isna(df.loc[0, "distance"])
-        assert pd.isna(df.loc[0, "vote_count"])
-        assert df.loc[0, "label"] == 0
-
-    def test_handles_missing_columns_gracefully(self):
-        tsv = "distance\tlabel\n0.1\t1\n"
-        df = load_training_tsv(tsv)
-        assert "distance" in df.columns
-        assert "vote_count" not in df.columns
+        np.testing.assert_array_almost_equal(predict(model, df), predict(restored, df))
 
 
 # ---------------------------------------------------------------------------

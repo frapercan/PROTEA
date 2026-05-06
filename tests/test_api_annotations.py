@@ -2,6 +2,7 @@
 Unit tests for the FastAPI annotations router.
 Database and pika are fully mocked — no real infrastructure required.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -12,7 +13,16 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from protea.api.cache import invalidate as _cache_invalidate
 from protea.api.routers.annotations import router
+
+
+@pytest.fixture(autouse=True)
+def _reset_router_cache():
+    _cache_invalidate()
+    yield
+    _cache_invalidate()
+
 
 FAKE_AMQP = "amqp://guest:guest@localhost/"
 _SNAPSHOT_ID = uuid.uuid4()
@@ -71,7 +81,9 @@ def session():
 def client(session):
     factory = MagicMock()
     app = _make_app(factory)
-    with patch("protea.api.routers.annotations.session_scope", side_effect=lambda _: _mock_scope(session)):
+    with patch(
+        "protea.api.routers.annotations.session_scope", side_effect=lambda _: _mock_scope(session)
+    ):
         yield TestClient(app, raise_server_exceptions=True)
 
 
@@ -79,15 +91,21 @@ def client(session):
 # GET /annotations/snapshots
 # ---------------------------------------------------------------------------
 
+
 class TestListSnapshots:
     def test_returns_list(self, session):
         s = _make_snapshot(_SNAPSHOT_ID)
         # Router uses: session.query(...).outerjoin(...).order_by(...).all() → list of (snapshot, count) tuples
-        session.query.return_value.outerjoin.return_value.order_by.return_value.all.return_value = [(s, 42)]
+        session.query.return_value.outerjoin.return_value.order_by.return_value.all.return_value = [
+            (s, 42)
+        ]
 
         factory = MagicMock()
         app = _make_app(factory)
-        with patch("protea.api.routers.annotations.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.annotations.session_scope",
+            side_effect=lambda _: _mock_scope(session),
+        ):
             resp = TestClient(app).get("/annotations/snapshots")
 
         assert resp.status_code == 200
@@ -100,7 +118,10 @@ class TestListSnapshots:
 
         factory = MagicMock()
         app = _make_app(factory)
-        with patch("protea.api.routers.annotations.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.annotations.session_scope",
+            side_effect=lambda _: _mock_scope(session),
+        ):
             resp = TestClient(app).get("/annotations/snapshots")
 
         assert resp.status_code == 200
@@ -111,6 +132,7 @@ class TestListSnapshots:
 # GET /annotations/snapshots/{id}
 # ---------------------------------------------------------------------------
 
+
 class TestGetSnapshot:
     def test_returns_snapshot_with_term_count(self, session):
         s = _make_snapshot(_SNAPSHOT_ID)
@@ -119,7 +141,10 @@ class TestGetSnapshot:
 
         factory = MagicMock()
         app = _make_app(factory)
-        with patch("protea.api.routers.annotations.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.annotations.session_scope",
+            side_effect=lambda _: _mock_scope(session),
+        ):
             resp = TestClient(app).get(f"/annotations/snapshots/{_SNAPSHOT_ID}")
 
         assert resp.status_code == 200
@@ -132,8 +157,13 @@ class TestGetSnapshot:
 
         factory = MagicMock()
         app = _make_app(factory)
-        with patch("protea.api.routers.annotations.session_scope", side_effect=lambda _: _mock_scope(session)):
-            resp = TestClient(app, raise_server_exceptions=False).get(f"/annotations/snapshots/{uuid.uuid4()}")
+        with patch(
+            "protea.api.routers.annotations.session_scope",
+            side_effect=lambda _: _mock_scope(session),
+        ):
+            resp = TestClient(app, raise_server_exceptions=False).get(
+                f"/annotations/snapshots/{uuid.uuid4()}"
+            )
 
         assert resp.status_code == 404
 
@@ -142,6 +172,7 @@ class TestGetSnapshot:
 # POST /annotations/snapshots/load
 # ---------------------------------------------------------------------------
 
+
 class TestLoadOntologySnapshot:
     def test_valid_payload_creates_job(self, session):
         job = _make_job(operation="load_ontology_snapshot")
@@ -149,9 +180,14 @@ class TestLoadOntologySnapshot:
 
         factory = MagicMock()
         app = _make_app(factory)
-        with patch("protea.api.routers.annotations.session_scope", side_effect=lambda _: _mock_scope(session)), \
-             patch("protea.api.routers.annotations.publish_job"), \
-             patch("protea.api.routers.annotations.Job", return_value=job):
+        with (
+            patch(
+                "protea.api.routers.annotations.session_scope",
+                side_effect=lambda _: _mock_scope(session),
+            ),
+            patch("protea.api.routers.annotations.publish_job"),
+            patch("protea.api.routers.annotations.Job", return_value=job),
+        ):
             resp = TestClient(app).post(
                 "/annotations/snapshots/load",
                 json={"obo_url": "https://purl.obolibrary.org/obo/go.obo"},
@@ -165,7 +201,10 @@ class TestLoadOntologySnapshot:
     def test_invalid_payload_returns_422(self, session):
         factory = MagicMock()
         app = _make_app(factory)
-        with patch("protea.api.routers.annotations.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.annotations.session_scope",
+            side_effect=lambda _: _mock_scope(session),
+        ):
             resp = TestClient(app, raise_server_exceptions=False).post(
                 "/annotations/snapshots/load",
                 json={},  # missing obo_url
@@ -179,9 +218,14 @@ class TestLoadOntologySnapshot:
 
         factory = MagicMock()
         app = _make_app(factory)
-        with patch("protea.api.routers.annotations.session_scope", side_effect=lambda _: _mock_scope(session)), \
-             patch("protea.api.routers.annotations.publish_job") as mock_publish, \
-             patch("protea.api.routers.annotations.Job", return_value=job):
+        with (
+            patch(
+                "protea.api.routers.annotations.session_scope",
+                side_effect=lambda _: _mock_scope(session),
+            ),
+            patch("protea.api.routers.annotations.publish_job") as mock_publish,
+            patch("protea.api.routers.annotations.Job", return_value=job),
+        ):
             TestClient(app).post(
                 "/annotations/snapshots/load",
                 json={"obo_url": "https://purl.obolibrary.org/obo/go.obo"},
@@ -194,6 +238,7 @@ class TestLoadOntologySnapshot:
 # GET /annotations/sets
 # ---------------------------------------------------------------------------
 
+
 class TestListAnnotationSets:
     def test_returns_list(self, session):
         a = _make_annotation_set(_SET_ID, _SNAPSHOT_ID)
@@ -204,7 +249,10 @@ class TestListAnnotationSets:
 
         factory = MagicMock()
         app = _make_app(factory)
-        with patch("protea.api.routers.annotations.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.annotations.session_scope",
+            side_effect=lambda _: _mock_scope(session),
+        ):
             resp = TestClient(app).get("/annotations/sets")
 
         assert resp.status_code == 200
@@ -219,7 +267,10 @@ class TestListAnnotationSets:
 
         factory = MagicMock()
         app = _make_app(factory)
-        with patch("protea.api.routers.annotations.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.annotations.session_scope",
+            side_effect=lambda _: _mock_scope(session),
+        ):
             resp = TestClient(app).get("/annotations/sets?source=goa")
 
         assert resp.status_code == 200
@@ -230,6 +281,7 @@ class TestListAnnotationSets:
 # GET /annotations/sets/{id}
 # ---------------------------------------------------------------------------
 
+
 class TestGetAnnotationSet:
     def test_returns_set_with_annotation_count(self, session):
         a = _make_annotation_set(_SET_ID, _SNAPSHOT_ID)
@@ -238,7 +290,10 @@ class TestGetAnnotationSet:
 
         factory = MagicMock()
         app = _make_app(factory)
-        with patch("protea.api.routers.annotations.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.annotations.session_scope",
+            side_effect=lambda _: _mock_scope(session),
+        ):
             resp = TestClient(app).get(f"/annotations/sets/{_SET_ID}")
 
         assert resp.status_code == 200
@@ -250,8 +305,13 @@ class TestGetAnnotationSet:
 
         factory = MagicMock()
         app = _make_app(factory)
-        with patch("protea.api.routers.annotations.session_scope", side_effect=lambda _: _mock_scope(session)):
-            resp = TestClient(app, raise_server_exceptions=False).get(f"/annotations/sets/{uuid.uuid4()}")
+        with patch(
+            "protea.api.routers.annotations.session_scope",
+            side_effect=lambda _: _mock_scope(session),
+        ):
+            resp = TestClient(app, raise_server_exceptions=False).get(
+                f"/annotations/sets/{uuid.uuid4()}"
+            )
 
         assert resp.status_code == 404
 
@@ -259,6 +319,7 @@ class TestGetAnnotationSet:
 # ---------------------------------------------------------------------------
 # POST /annotations/sets/load-goa
 # ---------------------------------------------------------------------------
+
 
 class TestLoadGOAAnnotations:
     _VALID_PAYLOAD = {
@@ -273,9 +334,14 @@ class TestLoadGOAAnnotations:
 
         factory = MagicMock()
         app = _make_app(factory)
-        with patch("protea.api.routers.annotations.session_scope", side_effect=lambda _: _mock_scope(session)), \
-             patch("protea.api.routers.annotations.publish_job"), \
-             patch("protea.api.routers.annotations.Job", return_value=job):
+        with (
+            patch(
+                "protea.api.routers.annotations.session_scope",
+                side_effect=lambda _: _mock_scope(session),
+            ),
+            patch("protea.api.routers.annotations.publish_job"),
+            patch("protea.api.routers.annotations.Job", return_value=job),
+        ):
             resp = TestClient(app).post("/annotations/sets/load-goa", json=self._VALID_PAYLOAD)
 
         assert resp.status_code == 200
@@ -284,10 +350,15 @@ class TestLoadGOAAnnotations:
     def test_missing_fields_returns_422(self, session):
         factory = MagicMock()
         app = _make_app(factory)
-        with patch("protea.api.routers.annotations.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.annotations.session_scope",
+            side_effect=lambda _: _mock_scope(session),
+        ):
             resp = TestClient(app, raise_server_exceptions=False).post(
                 "/annotations/sets/load-goa",
-                json={"ontology_snapshot_id": str(_SNAPSHOT_ID)},  # missing gaf_url + source_version
+                json={
+                    "ontology_snapshot_id": str(_SNAPSHOT_ID)
+                },  # missing gaf_url + source_version
             )
 
         assert resp.status_code == 422
@@ -296,6 +367,7 @@ class TestLoadGOAAnnotations:
 # ---------------------------------------------------------------------------
 # POST /annotations/sets/load-quickgo
 # ---------------------------------------------------------------------------
+
 
 class TestLoadQuickGOAnnotations:
     _VALID_PAYLOAD = {
@@ -309,9 +381,14 @@ class TestLoadQuickGOAnnotations:
 
         factory = MagicMock()
         app = _make_app(factory)
-        with patch("protea.api.routers.annotations.session_scope", side_effect=lambda _: _mock_scope(session)), \
-             patch("protea.api.routers.annotations.publish_job"), \
-             patch("protea.api.routers.annotations.Job", return_value=job):
+        with (
+            patch(
+                "protea.api.routers.annotations.session_scope",
+                side_effect=lambda _: _mock_scope(session),
+            ),
+            patch("protea.api.routers.annotations.publish_job"),
+            patch("protea.api.routers.annotations.Job", return_value=job),
+        ):
             resp = TestClient(app).post("/annotations/sets/load-quickgo", json=self._VALID_PAYLOAD)
 
         assert resp.status_code == 200
@@ -320,7 +397,10 @@ class TestLoadQuickGOAnnotations:
     def test_missing_source_version_returns_422(self, session):
         factory = MagicMock()
         app = _make_app(factory)
-        with patch("protea.api.routers.annotations.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.annotations.session_scope",
+            side_effect=lambda _: _mock_scope(session),
+        ):
             resp = TestClient(app, raise_server_exceptions=False).post(
                 "/annotations/sets/load-quickgo",
                 json={"ontology_snapshot_id": str(_SNAPSHOT_ID)},  # missing source_version
@@ -334,9 +414,14 @@ class TestLoadQuickGOAnnotations:
 
         factory = MagicMock()
         app = _make_app(factory)
-        with patch("protea.api.routers.annotations.session_scope", side_effect=lambda _: _mock_scope(session)), \
-             patch("protea.api.routers.annotations.publish_job") as mock_publish, \
-             patch("protea.api.routers.annotations.Job", return_value=job):
+        with (
+            patch(
+                "protea.api.routers.annotations.session_scope",
+                side_effect=lambda _: _mock_scope(session),
+            ),
+            patch("protea.api.routers.annotations.publish_job") as mock_publish,
+            patch("protea.api.routers.annotations.Job", return_value=job),
+        ):
             TestClient(app).post("/annotations/sets/load-quickgo", json=self._VALID_PAYLOAD)
 
         mock_publish.assert_called_once_with(FAKE_AMQP, "protea.jobs", job.id)

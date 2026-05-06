@@ -6,6 +6,14 @@ queue:
 
 storage:
   artifacts_dir: storage/evaluation_artifacts
+  backend: minio                  # "local" | "minio"
+  root: storage/artifacts         # local backend root (relative → project root)
+  minio:
+    endpoint: localhost:9000
+    bucket: protea
+    access_key: minioadmin
+    secret_key: minioadmin
+    secure: false
 
 admin:
   token: protea-admin

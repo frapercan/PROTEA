@@ -1,0 +1,330 @@
+"""Unit tests for the /benchmark router.
+
+Covers the derived display metadata helper and the shapes of the two
+endpoints (``/benchmark/embeddings`` and ``/benchmark/matrix``).  The
+session is fully mocked.
+"""
+
+from __future__ import annotations
+
+from contextlib import contextmanager
+from unittest.mock import MagicMock, patch
+from uuid import uuid4
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from protea.api.routers.benchmark import _stage_of, router
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_app(factory):
+    from protea.infrastructure.benchmark_config import BenchmarkConfig
+
+    app = FastAPI()
+    app.state.session_factory = factory
+    app.state.benchmark_config = BenchmarkConfig(
+        preferred_default_stages=("alignment_weighted", "reranker"),
+        baseline_scoring_name="alignment_weighted",
+        hidden_stages=frozenset(),
+        stage_labels={"alignment_weighted": "Alignment-weighted", "reranker": "Reranker"},
+        eval_set_labels={},
+        categories=("NK", "LK", "PK"),
+        aspects=("BPO", "MFO", "CCO"),
+    )
+    app.include_router(router)
+    return app
+
+
+@contextmanager
+def _mock_scope(session):
+    yield session
+
+
+def _make_cfg(
+    model_name="esmc_300m",
+    backend="esm3c",
+    display_name=None,
+    family=None,
+    param_count=None,
+):
+    cfg = MagicMock()
+    cfg.id = uuid4()
+    cfg.model_name = model_name
+    cfg.model_backend = backend
+    cfg.description = None
+    cfg.pooling = "mean"
+    cfg.layer_agg = "mean"
+    # Display columns are now persisted on EmbeddingConfig (no more heuristics).
+    cfg.display_name = display_name
+    cfg.family = family
+    cfg.param_count = param_count
+    return cfg
+
+
+def _make_eval(results, scoring_config_id=None, reranker_model_id=None):
+    er = MagicMock()
+    er.id = uuid4()
+    er.evaluation_set_id = uuid4()
+    er.scoring_config_id = scoring_config_id
+    er.reranker_model_id = reranker_model_id
+    er.results = results
+    return er
+
+
+@pytest.fixture()
+def session():
+    return MagicMock()
+
+
+@pytest.fixture()
+def factory(session):
+    return MagicMock()
+
+
+@pytest.fixture()
+def client(session, factory):
+    app = _make_app(factory)
+    with patch(
+        "protea.api.routers.benchmark.session_scope",
+        side_effect=lambda _: _mock_scope(session),
+    ):
+        with TestClient(app) as c:
+            yield c, session
+
+
+# ---------------------------------------------------------------------------
+# _stage_of
+# ---------------------------------------------------------------------------
+
+
+class TestStageOf:
+    def test_returns_scoring_name_when_no_reranker(self):
+        er = _make_eval({}, scoring_config_id=uuid4())
+        assert _stage_of(er, "alignment_weighted") == "alignment_weighted"
+
+    def test_reranker_takes_precedence(self):
+        er = _make_eval({}, scoring_config_id=uuid4(), reranker_model_id=uuid4())
+        assert _stage_of(er, "alignment_weighted") == "reranker"
+
+    def test_returns_none_when_neither_scoring_nor_reranker(self):
+        # Evaluations without a scoring config or reranker are excluded from
+        # the matrix.
+        er = _make_eval({})
+        assert _stage_of(er, None) is None
+
+
+# ---------------------------------------------------------------------------
+# GET /benchmark/embeddings
+# ---------------------------------------------------------------------------
+
+
+class TestListBenchmarkEmbeddings:
+    def test_empty_database(self, client):
+        c, session = client
+        exec_result = MagicMock()
+        exec_result.scalars.return_value.all.return_value = []
+        session.execute.return_value = exec_result
+
+        resp = c.get("/benchmark/embeddings")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 0
+        assert data["embeddings"] == []
+
+    def test_returns_persisted_display_metadata(self, client):
+        c, session = client
+        # display_name / family / param_count are now persisted columns.
+        cfgs = [
+            _make_cfg(
+                "esmc_300m",
+                "esm3c",
+                display_name="ESMC-300M",
+                family="esmc",
+                param_count=300_000_000,
+            ),
+            _make_cfg(
+                "facebook/esm2_t33_650M_UR50D",
+                "esm",
+                display_name="ESM2-650M",
+                family="esm2",
+                param_count=650_000_000,
+            ),
+            _make_cfg(
+                "ElnaggarLab/ankh-base",
+                "ankh",
+                display_name="Ankh-base",
+                family="ankh",
+                param_count=None,
+            ),
+        ]
+        exec_result = MagicMock()
+        exec_result.scalars.return_value.all.return_value = cfgs
+        session.execute.return_value = exec_result
+
+        resp = c.get("/benchmark/embeddings")
+        data = resp.json()
+        assert data["total"] == 3
+        names = [e["display_name"] for e in data["embeddings"]]
+        assert "ESMC-300M" in names
+        assert "ESM2-650M" in names
+        assert "Ankh-base" in names
+        for e in data["embeddings"]:
+            assert e["family"]
+            assert "param_count" in e
+            assert "model_name" in e
+            assert "model_backend" in e
+
+
+# ---------------------------------------------------------------------------
+# GET /benchmark/matrix
+# ---------------------------------------------------------------------------
+
+
+class TestBenchmarkMatrix:
+    """The endpoint now executes two queries:
+
+    1. Main matrix: 4-tuples ``(er, embedding_id, k, scoring_name)``.
+    2. Eval set metadata enrichment: 7-tuples
+       ``(es, old_source, old_source_version, new_source, new_source_version,
+       old_obo_version, new_obo_version)``.
+
+    ``_dual_execute`` wires both behind a single ``session.execute`` mock.
+    """
+
+    @staticmethod
+    def _row(er, embedding_id, k=5, scoring_name="alignment_weighted"):
+        return (er, embedding_id, k, scoring_name)
+
+    @staticmethod
+    def _dual_execute(session, matrix_rows, eval_set_rows):
+        """Configure session.execute to return matrix_rows then eval_set_rows."""
+        first = MagicMock()
+        first.all.return_value = matrix_rows
+        second = MagicMock()
+        second.all.return_value = eval_set_rows
+        session.execute.side_effect = [first, second, second, second]
+
+    @staticmethod
+    def _eval_set_row(eval_set_id):
+        es = MagicMock()
+        es.id = eval_set_id
+        es.stats = {}
+        return (es, "goa", "210", "goa", "230", "2024-01-01", "2024-06-01")
+
+    def test_empty_database(self, client):
+        c, session = client
+        exec_result = MagicMock()
+        exec_result.all.return_value = []
+        session.execute.return_value = exec_result
+
+        resp = c.get("/benchmark/matrix")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 0
+        assert data["rows"] == []
+        assert data["evaluation_sets"] == []
+        assert data["embedding_config_ids"] == []
+        # Empty data → no stages observed
+        assert data["stages"] == []
+
+    def test_row_per_cell_and_deduplication(self, client):
+        c, session = client
+        embedding_id = uuid4()
+
+        er_low = _make_eval({"NK": {"BPO": {"fmax": 0.4}}}, scoring_config_id=uuid4())
+        er_high = _make_eval({"NK": {"BPO": {"fmax": 0.55}}}, scoring_config_id=uuid4())
+        eval_set_id = uuid4()
+        er_low.evaluation_set_id = eval_set_id
+        er_high.evaluation_set_id = eval_set_id
+
+        self._dual_execute(
+            session,
+            matrix_rows=[
+                self._row(er_low, embedding_id),
+                self._row(er_high, embedding_id),
+            ],
+            eval_set_rows=[self._eval_set_row(eval_set_id)],
+        )
+
+        resp = c.get("/benchmark/matrix")
+        data = resp.json()
+        assert data["total"] == 1
+        row = data["rows"][0]
+        assert row["fmax"] == 0.55
+        assert row["category"] == "NK"
+        assert row["aspect"] == "BPO"
+        assert row["stage"] == "alignment_weighted"
+        assert str(embedding_id) in data["embedding_config_ids"]
+        # evaluation_sets is now a list of dicts; assert the id is among them.
+        assert str(eval_set_id) in {es["id"] for es in data["evaluation_sets"]}
+
+    def test_stage_filter(self, client):
+        c, session = client
+        embedding_id = uuid4()
+
+        er_aw = _make_eval({"NK": {"BPO": {"fmax": 0.4}}}, scoring_config_id=uuid4())
+        er_reranker = _make_eval(
+            {"NK": {"BPO": {"fmax": 0.6}}},
+            reranker_model_id=uuid4(),
+        )
+        eval_set_id_a = uuid4()
+        eval_set_id_b = uuid4()
+        er_aw.evaluation_set_id = eval_set_id_a
+        er_reranker.evaluation_set_id = eval_set_id_b
+
+        self._dual_execute(
+            session,
+            matrix_rows=[
+                self._row(er_aw, embedding_id),
+                self._row(er_reranker, embedding_id),
+            ],
+            eval_set_rows=[
+                self._eval_set_row(eval_set_id_b),
+            ],
+        )
+
+        resp = c.get("/benchmark/matrix?stage=reranker")
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["rows"][0]["stage"] == "reranker"
+        assert data["rows"][0]["fmax"] == 0.6
+        assert data["filters"]["stage"] == "reranker"
+
+    def test_invalid_stage_filter_rejected(self, client):
+        c, _ = client
+        resp = c.get("/benchmark/matrix?stage=")
+        # An empty stage string passes through (no filter); we instead exercise
+        # the still-valid path. To prove that *unknown* stages just return zero
+        # results without 422, hit a real but unused stage:
+        resp = c.get("/benchmark/matrix?stage=unknown_stage_xyz")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 0
+
+    def test_missing_fmax_cells_are_skipped(self, client):
+        c, session = client
+        eval_set_id = uuid4()
+        er = _make_eval(
+            {
+                "NK": {"BPO": {"fmax": None}, "MFO": {"fmax": 0.4}},
+                "LK": {"CCO": {}},
+            },
+            scoring_config_id=uuid4(),
+        )
+        er.evaluation_set_id = eval_set_id
+        self._dual_execute(
+            session,
+            matrix_rows=[self._row(er, uuid4())],
+            eval_set_rows=[self._eval_set_row(eval_set_id)],
+        )
+
+        resp = c.get("/benchmark/matrix")
+        data = resp.json()
+        # Only NK/MFO has a real fmax → exactly one row
+        assert data["total"] == 1
+        assert data["rows"][0]["category"] == "NK"
+        assert data["rows"][0]["aspect"] == "MFO"

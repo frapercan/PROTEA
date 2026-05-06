@@ -9,10 +9,9 @@ from uuid import UUID
 
 import pika
 
-logger = logging.getLogger(__name__)
+from protea.config.tuning import get_tuning
 
-_MAX_ATTEMPTS = 5
-_BASE_DELAY = 1  # seconds; exponential backoff: 1, 2, 4, 8, 16 (capped at 30)
+logger = logging.getLogger(__name__)
 
 # Thread-local persistent connection to avoid opening/closing per publish.
 _local = threading.local()
@@ -39,9 +38,12 @@ def _close_cached_connection() -> None:
 
 def _publish(amqp_url: str, queue_name: str, body: bytes) -> None:
     """Core publish logic with retries and connection reuse."""
+    settings = get_tuning().queue
+    max_attempts = settings.publisher_max_attempts
+    base_delay = settings.publisher_base_delay
     last_exc: Exception | None = None
 
-    for attempt in range(1, _MAX_ATTEMPTS + 1):
+    for attempt in range(1, max_attempts + 1):
         try:
             connection = _get_connection(amqp_url)
             channel = connection.channel()
@@ -61,14 +63,14 @@ def _publish(amqp_url: str, queue_name: str, body: bytes) -> None:
             return
         except Exception as exc:
             last_exc = exc
-            # Connection is stale — discard it so next attempt creates a fresh one.
+            # Connection is stale: discard it so next attempt creates a fresh one.
             _close_cached_connection()
-            if attempt < _MAX_ATTEMPTS:
-                delay = min(_BASE_DELAY * (2 ** (attempt - 1)), 30)
+            if attempt < max_attempts:
+                delay = min(base_delay * (2 ** (attempt - 1)), 30)
                 logger.warning(
-                    "publish failed (attempt %d/%d), retrying in %ds. queue=%s error=%s",
+                    "publish failed (attempt %d/%d), retrying in %ss. queue=%s error=%s",
                     attempt,
-                    _MAX_ATTEMPTS,
+                    max_attempts,
                     delay,
                     queue_name,
                     exc,
@@ -77,13 +79,13 @@ def _publish(amqp_url: str, queue_name: str, body: bytes) -> None:
             else:
                 logger.error(
                     "publish failed after %d attempts. queue=%s error=%s",
-                    _MAX_ATTEMPTS,
+                    max_attempts,
                     queue_name,
                     exc,
                 )
 
     raise RuntimeError(
-        f"Failed to publish to queue {queue_name!r} after {_MAX_ATTEMPTS} attempts"
+        f"Failed to publish to queue {queue_name!r} after {max_attempts} attempts"
     ) from last_exc
 
 

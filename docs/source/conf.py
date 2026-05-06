@@ -13,7 +13,13 @@ extensions = [
     'sphinx.ext.intersphinx',
     'sphinx_copybutton',
     'sphinx_design',
+    'sphinxcontrib.bibtex',
 ]
+
+# sphinxcontrib-bibtex configuration
+bibtex_bibfiles = ['references.bib']
+bibtex_default_style = 'alpha'
+bibtex_reference_style = 'author_year'
 
 templates_path = ['_templates']
 exclude_patterns = []
@@ -23,7 +29,19 @@ html_title = 'PROTEA'
 html_theme = 'shibuya'
 
 autodoc_mock_imports = [
-    'yaml', 'pika',
+    'yaml',
+    'pika',
+    'torch',
+    'transformers',
+    'faiss',
+    'parasail',
+    'ete3',
+    'lightgbm',
+    'cafaeval',
+    'numpy',
+    'pandas',
+    'scipy',
+    'sklearn',
 ]
 
 master_doc = 'index'

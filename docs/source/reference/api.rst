@@ -1,6 +1,10 @@
 HTTP API
 ========
 
+.. contents:: On this page
+   :local:
+   :depth: 2
+
 The PROTEA HTTP API is a FastAPI application that exposes eleven routers.
 All state mutations flow through this layer: it writes ``Job`` rows to
 PostgreSQL and publishes messages to RabbitMQ. The API is stateless between
@@ -275,7 +279,7 @@ Endpoints summary
      - Retrieve a snapshot with its full list of GO terms.
    * - ``PATCH``
      - ``/annotations/snapshots/{id}/ia-url``
-     - Set the InterPro Archive URL on an ontology snapshot.
+     - Set the Information Accretion (IA) file URL on an ontology snapshot.
    * - ``POST``
      - ``/annotations/snapshots/load``
      - Queue a ``load_ontology_snapshot`` job.
@@ -537,3 +541,12 @@ Common payload examples by operation:
        "compute_reranker_features": false
      }
    }
+
+.. seealso::
+
+   - :doc:`/architecture/operations` — every operation referenced in a
+     payload, with field-level documentation.
+   - :doc:`/appendix/howto_guides` — concrete ``curl`` recipes that submit
+     each endpoint end-to-end.
+   - :doc:`/architecture/job_lifecycle` — how the API turns a request into a
+     persistent ``Job`` row and a queue message.

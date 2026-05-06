@@ -274,6 +274,7 @@ function EvaluationSetCard({
     const MAX_ATTEMPTS = 30;
 
     const interval = setInterval(async () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
       attempts++;
       try {
         const fresh = await listResults(e.id);

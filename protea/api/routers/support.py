@@ -3,21 +3,28 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from protea.api.deps import get_session_factory
+from protea.config.tuning import get_tuning
 from protea.infrastructure.orm.models.support_entry import SupportEntry
 from protea.infrastructure.session import session_scope
 
 router = APIRouter(prefix="/support", tags=["support"])
 
-_MAX_COMMENT_LENGTH = 500
-_RECENT_LIMIT = 20
-_PAGE_LIMIT = 100
-
 
 class SupportCreate(BaseModel):
-    comment: str | None = Field(default=None, max_length=_MAX_COMMENT_LENGTH)
+    comment: str | None = Field(default=None)
+
+    @field_validator("comment")
+    @classmethod
+    def comment_within_limit(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        max_len = get_tuning().api.max_comment_length
+        if len(v) > max_len:
+            raise ValueError(f"comment exceeds max length {max_len}")
+        return v
 
 
 @router.get("")
@@ -27,11 +34,13 @@ def get_support(
 ) -> dict[str, Any]:
     """Return total thumbs-up count and comments.
 
-    Pass ``all_comments=true`` to get all comments (up to 100) instead of the 20 most recent.
+    Pass ``all_comments=true`` to get all comments (up to the configured
+    page limit) instead of the recent_limit most recent.
     """
+    api_limits = get_tuning().api
     with session_scope(factory) as session:
         total = session.query(SupportEntry).count()
-        limit = _PAGE_LIMIT if all_comments else _RECENT_LIMIT
+        limit = api_limits.page_limit if all_comments else api_limits.recent_limit
         recent = (
             session.query(SupportEntry)
             .filter(SupportEntry.comment.isnot(None))

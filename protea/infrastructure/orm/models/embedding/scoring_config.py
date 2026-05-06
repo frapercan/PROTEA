@@ -27,6 +27,14 @@ evidence_weighted
     final multiplier on top of the weighted sum — even when its signal weight is
     0.  This allows down-ranking IEA-sourced predictions regardless of how
     strong the embedding or alignment signals are.
+
+    **Recommended usage**: set ``evidence_weight = 0`` in ``weights`` when
+    using this formula.  The multiplier is always applied, so including
+    ``evidence_weight`` in the linear sum compounds the evidence signal
+    twice — usually not intentional.  If you want a preset that only
+    *vetoes* low-evidence predictions without bending the rest of the
+    ranking, use ``formula=evidence_weighted`` with ``evidence_weight=0``
+    in ``weights``.
 """
 
 from __future__ import annotations
@@ -61,6 +69,7 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "identity_sw": 0.0,
     "evidence_weight": 0.0,
     "taxonomic_proximity": 0.0,
+    "neighbor_vote_fraction": 0.0,
 }
 
 # ---------------------------------------------------------------------------
@@ -76,11 +85,16 @@ DEFAULT_WEIGHTS: dict[str, float] = {
 # Default tier mapping:
 #   Experimental (EXP, IDA, IPI, IMP, IGI, IEP, HTP, HDA, HMP, HGI, HEP,
 #                 IC, TAS)                                          → 1.0
+#   Electronic annotation (IEA)                                    → 0.8
 #   Computational / Phylogenetic (ISS, ISO, ISA, ISM, IGC, IBA,
 #                                 IBD, IKR, IRD, RCA)              → 0.7
 #   Non-traceable author statement (NAS)                           → 0.5
-#   Electronic annotation (IEA)                                    → 0.3
 #   No biological data (ND)                                        → 0.1
+#
+# IEA is placed above the computational tier: GOA history shows that IEA
+# annotations are promoted to an experimental code at a higher rate than
+# ISS/IBA/NAS, so their prior quality is underestimated by the classic
+# GO-docs hierarchy that ranked IEA below every human-supplied code.
 
 DEFAULT_EVIDENCE_WEIGHTS: dict[str, float] = {
     # Experimental — direct biological evidence
@@ -110,7 +124,7 @@ DEFAULT_EVIDENCE_WEIGHTS: dict[str, float] = {
     "RCA": 0.7,  # Inferred from Reviewed Computational Analysis
     # Electronic / author statement — lowest-effort annotation
     "NAS": 0.5,  # Non-traceable Author Statement
-    "IEA": 0.3,  # Inferred from Electronic Annotation (automated, bulk)
+    "IEA": 0.8,  # Inferred from Electronic Annotation (automated, bulk)
     # No biological data — used only as a placeholder
     "ND": 0.1,  # No biological Data available
 }
@@ -162,33 +176,17 @@ class ScoringConfig(Base):
     """Persistent scoring formula definition.
 
     Instances are stored in the ``scoring_config`` table and referenced by
-    evaluation endpoints and the UI scoring selector.  Every field that
+    evaluation endpoints and the UI scoring selector. Every field that
     influences score computation is serialised, making any result fully
     reproducible by re-applying the same ``ScoringConfig`` to the raw
     ``GOPrediction`` rows.
 
-    Attributes
-    ----------
-    id:
-        UUID primary key.
-    name:
-        Human-readable label shown in the UI dropdown.
-    formula:
-        One of :data:`VALID_FORMULAS` — controls how the weighted average is
-        combined with the evidence multiplier.
-    weights:
-        JSONB dict mapping signal keys to their relative weights.  Valid keys
-        are the ones in :data:`DEFAULT_WEIGHTS`.  Weights of 0 deactivate a
-        signal; absent keys are treated as 0.
-    evidence_weights:
-        Optional JSONB dict mapping GO evidence codes (e.g. ``"IEA"``) to
-        per-code quality multipliers in [0, 1].  When ``None`` the system falls
-        back to :data:`DEFAULT_EVIDENCE_WEIGHTS`.  Partial dicts are allowed:
-        codes absent from the override still resolve via the default table.
-    description:
-        Free-text description shown as a tooltip in the UI.
-    created_at:
-        UTC timestamp set by the database at insert time.
+    The ``formula`` column must be one of :data:`VALID_FORMULAS`. The
+    ``weights`` JSONB maps signal keys (see :data:`DEFAULT_WEIGHTS`) to
+    their relative weights — a weight of 0 deactivates the signal. The
+    optional ``evidence_weights`` JSONB maps GO evidence codes to per-code
+    quality multipliers in [0, 1] and falls back to
+    :data:`DEFAULT_EVIDENCE_WEIGHTS` for absent codes.
     """
 
     __tablename__ = "scoring_config"

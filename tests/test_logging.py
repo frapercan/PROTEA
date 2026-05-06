@@ -1,4 +1,5 @@
 """Tests for protea/infrastructure/logging.py"""
+
 from __future__ import annotations
 
 import json
@@ -48,6 +49,7 @@ class TestJSONFormatter:
             raise ValueError("boom")
         except ValueError:
             import sys
+
             exc_info = sys.exc_info()
 
         record = self._make_record("error occurred", exc_info=exc_info)

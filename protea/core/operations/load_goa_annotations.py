@@ -1,23 +1,25 @@
 from __future__ import annotations
 
-import gzip
-import io
 import time
 import uuid
 from collections.abc import Iterator
 from typing import Annotated, Any
 
-import requests
+from protea_contracts import GoaAnnotationRecord, GoaStreamPayload
 from pydantic import Field, field_validator
 from sqlalchemy import distinct, select
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
+from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.orm.models.annotation.protein_go_annotation import ProteinGOAnnotation
+from protea.infrastructure.orm.models.job import Job, JobEvent
 from protea.infrastructure.orm.models.protein.protein import Protein
+
+_AUTO_EVAL_QUEUE = "protea.jobs"
 
 PositiveInt = Annotated[int, Field(gt=0)]
 
@@ -62,16 +64,25 @@ class LoadGOAAnnotationsOperation:
     """
 
     name = "load_goa_annotations"
+    description = (
+        "Stream a UniProt GOA GAF release line by line and bulk-insert "
+        "ProteinGOAnnotation rows for accessions already present in the DB."
+    )
 
-    # GAF 2.x column indices (0-based after splitting on tab)
-    _IDX_ACCESSION = 1
-    _IDX_QUALIFIER = 3
-    _IDX_GO_ID = 4
-    _IDX_DB_REFERENCE = 5
-    _IDX_EVIDENCE = 6
-    _IDX_WITH_FROM = 7
-    _IDX_ASSIGNED_BY = 14
-    _IDX_DATE = 13
+    def summarize_payload(self, payload: dict[str, Any]) -> str:
+        p = payload or {}
+        version = p.get("source_version")
+        url = p.get("gaf_url", "")
+        # Strip everything before the filename to keep it short
+        filename = url.rsplit("/", 1)[-1] if url else ""
+        bits = []
+        if version:
+            bits.append(f"release={version}")
+        if filename:
+            bits.append(filename)
+        if p.get("total_limit"):
+            bits.append(f"limit={p['total_limit']}")
+        return " · ".join(bits)
 
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
@@ -121,7 +132,7 @@ class LoadGOAAnnotationsOperation:
         total_inserted = 0
         total_skipped = 0
         pages = 0
-        buffer: list[dict[str, str]] = []
+        buffer: list[GoaAnnotationRecord] = []
 
         for record in self._stream_gaf(p, emit):
             total_lines += 1
@@ -179,8 +190,119 @@ class LoadGOAAnnotationsOperation:
             "annotations_skipped": total_skipped,
             "elapsed_seconds": elapsed,
         }
+
+        # Auto-trigger an atomic generate_evaluation_set against the latest
+        # prior goa AnnotationSet (numeric source_version sort).  Cascade
+        # cumulative deltas (V_K → V_target) remain manual via
+        # scripts/materialize_lab_intervals.py --mode cascade.
+        publish_after_commit: list[tuple[str, uuid.UUID]] = []
+        child_job_id = self._maybe_enqueue_atomic_eval(session, annotation_set, emit)
+        if child_job_id is not None:
+            publish_after_commit.append((_AUTO_EVAL_QUEUE, child_job_id))
+            result["auto_eval_job_id"] = str(child_job_id)
+
         emit("load_goa_annotations.done", None, result, "info")
-        return OperationResult(result=result)
+        return OperationResult(result=result, publish_after_commit=publish_after_commit)
+
+    @staticmethod
+    def _numeric_version_key(v: str | None) -> tuple[int, str]:
+        """Sort key that orders ``"160" < "211" < "215"`` numerically and
+        falls back to lexicographic for non-numeric values (which sort last)."""
+        if v is None:
+            return (10**9, "")
+        try:
+            return (int(v), "")
+        except (TypeError, ValueError):
+            return (10**9, str(v))
+
+    def _maybe_enqueue_atomic_eval(
+        self,
+        session: Session,
+        new_set: AnnotationSet,
+        emit: EmitFn,
+    ) -> uuid.UUID | None:
+        candidates = (
+            session.query(AnnotationSet)
+            .filter(
+                AnnotationSet.source == "goa",
+                AnnotationSet.id != new_set.id,
+            )
+            .all()
+        )
+        prior_candidates = [
+            s for s in candidates
+            if self._numeric_version_key(s.source_version)
+            < self._numeric_version_key(new_set.source_version)
+        ]
+        if not prior_candidates:
+            emit(
+                "load_goa_annotations.auto_eval_skipped",
+                None,
+                {"reason": "no_prior_goa_annotation_set"},
+                "info",
+            )
+            return None
+        prior = max(prior_candidates, key=lambda s: self._numeric_version_key(s.source_version))
+
+        existing = (
+            session.query(EvaluationSet.id)
+            .filter(
+                EvaluationSet.old_annotation_set_id == prior.id,
+                EvaluationSet.new_annotation_set_id == new_set.id,
+            )
+            .first()
+        )
+        if existing is not None:
+            emit(
+                "load_goa_annotations.auto_eval_skipped",
+                None,
+                {
+                    "reason": "evaluation_set_exists",
+                    "existing_evaluation_set_id": str(existing[0]),
+                    "old_annotation_set_id": str(prior.id),
+                    "new_annotation_set_id": str(new_set.id),
+                },
+                "info",
+            )
+            return None
+
+        payload = {
+            "old_annotation_set_id": str(prior.id),
+            "new_annotation_set_id": str(new_set.id),
+        }
+        child = Job(
+            operation="generate_evaluation_set",
+            queue_name=_AUTO_EVAL_QUEUE,
+            payload=payload,
+        )
+        session.add(child)
+        session.flush()
+        session.add(
+            JobEvent(
+                job_id=child.id,
+                event="job.created",
+                fields={
+                    "operation": "generate_evaluation_set",
+                    "queue": _AUTO_EVAL_QUEUE,
+                    "trigger": "load_goa_annotations.auto",
+                    "old_annotation_set_id": str(prior.id),
+                    "new_annotation_set_id": str(new_set.id),
+                },
+            )
+        )
+        emit(
+            "load_goa_annotations.auto_eval_enqueued",
+            None,
+            {
+                "child_job_id": str(child.id),
+                "old_annotation_set_id": str(prior.id),
+                "new_annotation_set_id": str(new_set.id),
+                "old_source_version": prior.source_version,
+                "new_source_version": new_set.source_version,
+            },
+            "info",
+        )
+        return child.id
 
     def _load_accessions(self, session: Session, emit: EmitFn) -> set[str]:
         emit("load_goa_annotations.load_accessions_start", None, {}, "info")
@@ -206,45 +328,27 @@ class LoadGOAAnnotationsOperation:
         emit("load_goa_annotations.load_go_terms_done", None, {"go_terms": len(mapping)}, "info")
         return mapping
 
-    def _stream_gaf(self, p: LoadGOAAnnotationsPayload, emit: EmitFn) -> Iterator[dict[str, str]]:
-        emit("load_goa_annotations.download_start", None, {"gaf_url": p.gaf_url}, "info")
-        resp = requests.get(p.gaf_url, stream=True, timeout=p.timeout_seconds)
-        resp.raise_for_status()
+    def _stream_gaf(
+        self, p: LoadGOAAnnotationsPayload, emit: EmitFn
+    ) -> Iterator[GoaAnnotationRecord]:
+        """Delegate to the protea-sources GoaSource plugin.
 
-        compressed = p.gaf_url.endswith(".gz")
-        raw_stream = resp.raw
-        raw_stream.decode_content = True
+        The plugin owns HTTP, gzip decoding, and GAF line parsing; the
+        operation owns DB filtering, GO term resolution, dedup, and
+        bulk insert. See ``f2a6_real_migration_design.md`` (D-MIGR-01,
+        D-MIGR-02, D-MIGR-06).
+        """
+        from protea_sources.goa import plugin as goa_plugin
 
-        stream: io.TextIOWrapper
-        if compressed:
-            gz = gzip.GzipFile(fileobj=raw_stream)
-            stream = io.TextIOWrapper(gz, encoding="utf-8", errors="replace")
-        else:
-            stream = io.TextIOWrapper(raw_stream, encoding="utf-8", errors="replace")
-
-        with stream:
-            for raw in stream:
-                line = raw.rstrip("\n")
-                if not line or line.startswith("!"):
-                    continue
-                parts = line.split("\t")
-                if len(parts) < 15:
-                    continue
-                yield {
-                    "accession": parts[self._IDX_ACCESSION],
-                    "go_id": parts[self._IDX_GO_ID],
-                    "qualifier": parts[self._IDX_QUALIFIER],
-                    "evidence_code": parts[self._IDX_EVIDENCE],
-                    "db_reference": parts[self._IDX_DB_REFERENCE],
-                    "with_from": parts[self._IDX_WITH_FROM],
-                    "assigned_by": parts[self._IDX_ASSIGNED_BY],
-                    "annotation_date": parts[self._IDX_DATE],
-                }
+        yield from goa_plugin.stream(
+            GoaStreamPayload(gaf_url=p.gaf_url, timeout_seconds=p.timeout_seconds),
+            emit=emit,
+        )
 
     def _store_buffer(
         self,
         session: Session,
-        records: list[dict[str, str]],
+        records: list[GoaAnnotationRecord],
         annotation_set_id: uuid.UUID,
         valid_accessions: set[str],
         go_term_map: dict[str, int],
@@ -254,18 +358,18 @@ class LoadGOAAnnotationsOperation:
         seen: set[tuple] = set()
 
         for rec in records:
-            accession = rec["accession"].strip()
+            accession = rec.accession.strip()
             if not accession or accession not in valid_accessions:
                 skipped += 1
                 continue
 
-            go_id = rec["go_id"].strip()
+            go_id = rec.go_id.strip()
             go_term_id = go_term_map.get(go_id)
             if go_term_id is None:
                 skipped += 1
                 continue
 
-            evidence_code = rec["evidence_code"] or None
+            evidence_code = rec.evidence_code
             dedup_key = (annotation_set_id, accession, go_term_id, evidence_code)
             if dedup_key in seen:
                 skipped += 1
@@ -277,12 +381,12 @@ class LoadGOAAnnotationsOperation:
                     "annotation_set_id": annotation_set_id,
                     "protein_accession": accession,
                     "go_term_id": go_term_id,
-                    "qualifier": rec["qualifier"] or None,
+                    "qualifier": rec.qualifier,
                     "evidence_code": evidence_code,
-                    "assigned_by": rec["assigned_by"] or None,
-                    "db_reference": rec["db_reference"] or None,
-                    "with_from": rec["with_from"] or None,
-                    "annotation_date": rec["annotation_date"] or None,
+                    "assigned_by": rec.assigned_by,
+                    "db_reference": rec.db_reference,
+                    "with_from": rec.with_from,
+                    "annotation_date": rec.annotation_date,
                 }
             )
 

@@ -41,6 +41,10 @@ const MODEL_PRESETS: Record<string, ModelPreset[]> = {
     { value: "Rostlab/prot_t5_xl_half_uniref50-enc", label: "ProT5-XL half (FP16 encoder)",     layers: 24, defaultMaxLength: 1024 },
     { value: "Rostlab/ProstT5",                      label: "ProstT5 (3Di + AA)",               layers: 24, defaultMaxLength: 1024 },
   ],
+  ankh: [
+    { value: "ElnaggarLab/ankh-base",  label: "Ankh base (~450M, 48 layers, d=768)",  layers: 48, defaultMaxLength: 1024 },
+    { value: "ElnaggarLab/ankh-large", label: "Ankh large (~1.9B, 48 layers, d=1536)", layers: 48, defaultMaxLength: 1024 },
+  ],
   auto: [
     { value: "facebook/esm2_t33_650M_UR50D", label: "ESM-2 650M (auto backend)", layers: 33, defaultMaxLength: 1022 },
   ],
@@ -91,7 +95,7 @@ export default function EmbeddingsPage() {
   const [cmpConfigId, setCmpConfigId] = useState("");
   const [cmpQuerySetId, setCmpQuerySetId] = useState("");
   const [cmpQueueBatchSize, setCmpQueueBatchSize] = useState(100);
-  const [cmpBatchSize, setCmpBatchSize] = useState(8);
+  const [cmpBatchSize, setCmpBatchSize] = useState(1);
   const [cmpDevice, setCmpDevice] = useState("cuda");
   const [cmpSkipExisting, setCmpSkipExisting] = useState(true);
   const [cmpResult, setCmpResult] = useState<{ id: string; status: string } | null>(null);
@@ -306,6 +310,7 @@ export default function EmbeddingsPage() {
                       <option value="esm">{t("configsTab.newConfigForm.modelBackendEsm")}</option>
                       <option value="esm3c">{t("configsTab.newConfigForm.modelBackendEsm3c")}</option>
                       <option value="t5">{t("configsTab.newConfigForm.modelBackendT5")}</option>
+                      <option value="ankh">{t("configsTab.newConfigForm.modelBackendAnkh")}</option>
                       <option value="auto">{t("configsTab.newConfigForm.modelBackendAuto")}</option>
                     </select>
                   </div>

@@ -2,6 +2,7 @@
 
 No real DB, network, or cafaeval binary required — everything is mocked.
 """
+
 from __future__ import annotations
 
 import gzip
@@ -133,7 +134,6 @@ class TestRunCafaEvaluationPayload:
         assert p.evaluation_set_id == EVAL_SET_ID
         assert p.prediction_set_id == PRED_SET_ID
         assert p.max_distance is None
-        assert p.artifacts_dir is None
         assert p.scoring_config_id is None
         assert p.ia_file is None
 
@@ -142,12 +142,10 @@ class TestRunCafaEvaluationPayload:
             evaluation_set_id=EVAL_SET_ID,
             prediction_set_id=PRED_SET_ID,
             max_distance=1.5,
-            artifacts_dir="/tmp/artifacts",
             scoring_config_id=SCORING_CONFIG_ID,
             ia_file="/tmp/ia.tsv",
         )
         assert p.max_distance == 1.5
-        assert p.artifacts_dir == "/tmp/artifacts"
         assert p.scoring_config_id == SCORING_CONFIG_ID
         assert p.ia_file == "/tmp/ia.tsv"
 
@@ -263,21 +261,50 @@ class TestParseResults:
 
     def test_parse_ignores_unknown_namespaces(self):
         df_f = pd.DataFrame(
-            [{"ns": "unknown_namespace", "f": 0.5, "pr": 0.5, "rc": 0.5, "tau": 0.1, "cov_max": 0.9, "n": 10}]
+            [
+                {
+                    "ns": "unknown_namespace",
+                    "f": 0.5,
+                    "pr": 0.5,
+                    "rc": 0.5,
+                    "tau": 0.1,
+                    "cov_max": 0.9,
+                    "n": 10,
+                }
+            ]
         )
         result = self.op._parse_results({"f": df_f})
         assert result == {}
 
     def test_parse_uses_cov_fallback_when_no_cov_max(self):
         df_f = pd.DataFrame(
-            [{"ns": "biological_process", "f": 0.5, "pr": 0.5, "rc": 0.5, "tau": 0.1, "cov": 0.85, "n": 10}]
+            [
+                {
+                    "ns": "biological_process",
+                    "f": 0.5,
+                    "pr": 0.5,
+                    "rc": 0.5,
+                    "tau": 0.1,
+                    "cov": 0.85,
+                    "n": 10,
+                }
+            ]
         )
         result = self.op._parse_results({"f": df_f})
         assert result["BPO"]["coverage"] == 0.85
 
     def test_parse_missing_n_column(self):
         df_f = pd.DataFrame(
-            [{"ns": "biological_process", "f": 0.5, "pr": 0.5, "rc": 0.5, "tau": 0.1, "cov_max": 0.9}]
+            [
+                {
+                    "ns": "biological_process",
+                    "f": 0.5,
+                    "pr": 0.5,
+                    "rc": 0.5,
+                    "tau": 0.1,
+                    "cov_max": 0.9,
+                }
+            ]
         )
         result = self.op._parse_results({"f": df_f})
         assert result["BPO"]["n_proteins"] is None
@@ -485,9 +512,7 @@ class TestWritePredictions:
         with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
             path = f.name
         try:
-            self.op._write_predictions(
-                session, uuid.uuid4(), {"P1"}, None, path, None
-            )
+            self.op._write_predictions(session, uuid.uuid4(), {"P1"}, None, path, None)
             with open(path) as f:
                 line = f.read().strip()
             # score = max(0, 1 - 0.4/2) = 0.8
@@ -518,9 +543,7 @@ class TestWritePredictions:
         with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
             path = f.name
         try:
-            self.op._write_predictions(
-                session, uuid.uuid4(), {"P1"}, None, path, None
-            )
+            self.op._write_predictions(session, uuid.uuid4(), {"P1"}, None, path, None)
             with open(path) as f:
                 lines = f.read().strip().split("\n")
             # Only the first (closest) prediction should be written
@@ -556,9 +579,7 @@ class TestWritePredictions:
         with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
             path = f.name
         try:
-            self.op._write_predictions(
-                session, uuid.uuid4(), {"P1"}, None, path, scoring_config
-            )
+            self.op._write_predictions(session, uuid.uuid4(), {"P1"}, None, path, scoring_config)
             with open(path) as f:
                 line = f.read().strip()
             assert line == "P1\tGO:0000001\t0.7500"
@@ -585,9 +606,7 @@ class TestWritePredictions:
         with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
             path = f.name
         try:
-            self.op._write_predictions(
-                session, uuid.uuid4(), {"P1"}, None, path, None
-            )
+            self.op._write_predictions(session, uuid.uuid4(), {"P1"}, None, path, None)
             with open(path) as f:
                 line = f.read().strip()
             # score = max(0, 1 - 0/2) = 1.0
@@ -615,9 +634,7 @@ class TestWritePredictions:
         with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
             path = f.name
         try:
-            self.op._write_predictions(
-                session, uuid.uuid4(), {"P1"}, 0.5, path, None
-            )
+            self.op._write_predictions(session, uuid.uuid4(), {"P1"}, 0.5, path, None)
             with open(path) as f:
                 line = f.read().strip()
             assert line == "P1\tGO:0000001\t0.8500"
@@ -646,9 +663,7 @@ class TestWritePredictions:
         with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
             path = f.name
         try:
-            self.op._write_predictions(
-                session, uuid.uuid4(), {"P1"}, None, path, None
-            )
+            self.op._write_predictions(session, uuid.uuid4(), {"P1"}, None, path, None)
             with open(path) as f:
                 line = f.read().strip()
             # score = max(0, 1 - 0/2) = 1.0 (None → 0.0)
@@ -691,17 +706,14 @@ class TestExecuteErrors:
                 emit=self.emit,
             )
 
-    @patch("protea.core.operations.run_cafa_evaluation.compute_evaluation_data")
+    @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
     def test_no_delta_proteins(self, mock_compute):
-        mock_compute.return_value = EvaluationData(
-            nk={}, lk={}, pk={}, known={}, pk_known={}
-        )
+        mock_compute.return_value = (EvaluationData(nk={}, lk={}, pk={}, known={}, pk_known={}), uuid.uuid4())
         session = MagicMock()
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
-        ann_old = _make_ann_old()
         snapshot = _make_snapshot()
-        session.get.side_effect = [eval_set, pred_set, ann_old, snapshot]
+        session.get.side_effect = [eval_set, pred_set, snapshot]
 
         with pytest.raises(ValueError, match="No delta proteins"):
             self.op.execute(
@@ -710,16 +722,15 @@ class TestExecuteErrors:
                 emit=self.emit,
             )
 
-    @patch("protea.core.operations.run_cafa_evaluation.compute_evaluation_data")
+    @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
     def test_missing_scoring_config(self, mock_compute):
-        mock_compute.return_value = _make_eval_data()
+        mock_compute.return_value = (_make_eval_data(), uuid.uuid4())
         session = MagicMock()
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
-        ann_old = _make_ann_old()
         snapshot = _make_snapshot()
         # get calls: eval_set, pred_set, ann_old, snapshot, scoring_config (None)
-        session.get.side_effect = [eval_set, pred_set, ann_old, snapshot, None]
+        session.get.side_effect = [eval_set, pred_set, snapshot, None]
 
         with pytest.raises(ValueError, match="ScoringConfig.*not found"):
             self.op.execute(
@@ -738,21 +749,43 @@ class TestExecuteErrors:
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _mock_artifact_store(request):
+    """Stub the ArtifactStore so happy-path tests don't try to reach MinIO.
+
+    Only applied to TestExecuteHappyPath and TestExecuteErrors — the other
+    classes in this file test pure helpers that don't touch the store.
+    """
+    if not request.cls or not request.cls.__name__.startswith("TestExecute"):
+        yield
+        return
+    with (
+        patch(
+            "protea.core.operations.run_cafa_evaluation.get_artifact_store",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "protea.core.operations.run_cafa_evaluation.load_settings",
+            return_value=MagicMock(),
+        ),
+    ):
+        yield
+
+
 class TestExecuteHappyPath:
     def setup_method(self):
         self.op = RunCafaEvaluationOperation()
         self.emit = _make_emit()
 
-    @patch("protea.core.operations.run_cafa_evaluation.compute_evaluation_data")
+    @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
     def test_full_run(self, mock_compute):
-        mock_compute.return_value = _make_eval_data()
+        mock_compute.return_value = (_make_eval_data(), uuid.uuid4())
 
         session = MagicMock()
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
-        ann_old = _make_ann_old()
         snapshot = _make_snapshot()
-        session.get.side_effect = [eval_set, pred_set, ann_old, snapshot]
+        session.get.side_effect = [eval_set, pred_set, snapshot]
 
         # Mock the DB query for _write_predictions
         query = MagicMock()
@@ -783,16 +816,15 @@ class TestExecuteHappyPath:
         session.add.assert_called_once()
         session.flush.assert_called_once()
 
-    @patch("protea.core.operations.run_cafa_evaluation.compute_evaluation_data")
+    @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
     def test_emit_events(self, mock_compute):
-        mock_compute.return_value = _make_eval_data()
+        mock_compute.return_value = (_make_eval_data(), uuid.uuid4())
 
         session = MagicMock()
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
-        ann_old = _make_ann_old()
         snapshot = _make_snapshot()
-        session.get.side_effect = [eval_set, pred_set, ann_old, snapshot]
+        session.get.side_effect = [eval_set, pred_set, snapshot]
 
         query = MagicMock()
         session.query.return_value = query
@@ -826,17 +858,16 @@ class TestExecuteHappyPath:
         assert emit_events.count("run_cafa_evaluation.evaluating") == 3
         assert emit_events.count("run_cafa_evaluation.setting_done") == 3
 
-    @patch("protea.core.operations.run_cafa_evaluation.compute_evaluation_data")
+    @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
     def test_cafa_eval_failure_catches_exception(self, mock_compute):
         """When cafa_eval raises for one setting, it should log warning and continue."""
-        mock_compute.return_value = _make_eval_data()
+        mock_compute.return_value = (_make_eval_data(), uuid.uuid4())
 
         session = MagicMock()
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
-        ann_old = _make_ann_old()
         snapshot = _make_snapshot()
-        session.get.side_effect = [eval_set, pred_set, ann_old, snapshot]
+        session.get.side_effect = [eval_set, pred_set, snapshot]
 
         query = MagicMock()
         session.query.return_value = query
@@ -866,17 +897,16 @@ class TestExecuteHappyPath:
         emit_events = [c[0][0] for c in self.emit.call_args_list]
         assert emit_events.count("run_cafa_evaluation.setting_failed") == 3
 
-    @patch("protea.core.operations.run_cafa_evaluation.compute_evaluation_data")
+    @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
     def test_ia_missing_warning(self, mock_compute):
         """When no IA file and no ia_url, a warning should be emitted."""
-        mock_compute.return_value = _make_eval_data()
+        mock_compute.return_value = (_make_eval_data(), uuid.uuid4())
 
         session = MagicMock()
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
-        ann_old = _make_ann_old()
         snapshot = _make_snapshot(ia_url=None)  # no ia_url
-        session.get.side_effect = [eval_set, pred_set, ann_old, snapshot]
+        session.get.side_effect = [eval_set, pred_set, snapshot]
 
         query = MagicMock()
         session.query.return_value = query
@@ -899,17 +929,16 @@ class TestExecuteHappyPath:
         emit_events = [c[0][0] for c in self.emit.call_args_list]
         assert "run_cafa_evaluation.ia_missing" in emit_events
 
-    @patch("protea.core.operations.run_cafa_evaluation.compute_evaluation_data")
+    @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
     def test_ia_url_download(self, mock_compute):
         """When snapshot has ia_url, _download_tsv should be called."""
-        mock_compute.return_value = _make_eval_data()
+        mock_compute.return_value = (_make_eval_data(), uuid.uuid4())
 
         session = MagicMock()
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
-        ann_old = _make_ann_old()
         snapshot = _make_snapshot(ia_url="https://example.com/ia.tsv")
-        session.get.side_effect = [eval_set, pred_set, ann_old, snapshot]
+        session.get.side_effect = [eval_set, pred_set, snapshot]
 
         query = MagicMock()
         session.query.return_value = query
@@ -918,12 +947,14 @@ class TestExecuteHappyPath:
         query.order_by.return_value = query
         query.yield_per.return_value = []
 
-        with patch.object(self.op, "_download_obo"), \
-             patch.object(self.op, "_download_tsv") as mock_dl_tsv, \
-             patch(
-                 "cafaeval.evaluation.cafa_eval",
-                 return_value=(MagicMock(), _dfs_best_fixture()),
-             ):
+        with (
+            patch.object(self.op, "_download_obo"),
+            patch.object(self.op, "_download_tsv") as mock_dl_tsv,
+            patch(
+                "cafaeval.evaluation.cafa_eval",
+                return_value=(MagicMock(), _dfs_best_fixture()),
+            ),
+        ):
             self.op.execute(
                 session,
                 {"evaluation_set_id": EVAL_SET_ID, "prediction_set_id": PRED_SET_ID},
@@ -937,17 +968,16 @@ class TestExecuteHappyPath:
         assert "run_cafa_evaluation.downloading_ia" in emit_events
         assert "run_cafa_evaluation.ia_resolved" in emit_events
 
-    @patch("protea.core.operations.run_cafa_evaluation.compute_evaluation_data")
+    @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
     def test_explicit_ia_file_takes_precedence(self, mock_compute):
         """Explicit ia_file in payload overrides snapshot ia_url."""
-        mock_compute.return_value = _make_eval_data()
+        mock_compute.return_value = (_make_eval_data(), uuid.uuid4())
 
         session = MagicMock()
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
-        ann_old = _make_ann_old()
         snapshot = _make_snapshot(ia_url="https://example.com/ia.tsv")
-        session.get.side_effect = [eval_set, pred_set, ann_old, snapshot]
+        session.get.side_effect = [eval_set, pred_set, snapshot]
 
         query = MagicMock()
         session.query.return_value = query
@@ -956,12 +986,14 @@ class TestExecuteHappyPath:
         query.order_by.return_value = query
         query.yield_per.return_value = []
 
-        with patch.object(self.op, "_download_obo"), \
-             patch.object(self.op, "_download_tsv") as mock_dl_tsv, \
-             patch(
-                 "cafaeval.evaluation.cafa_eval",
-                 return_value=(MagicMock(), _dfs_best_fixture()),
-             ):
+        with (
+            patch.object(self.op, "_download_obo"),
+            patch.object(self.op, "_download_tsv") as mock_dl_tsv,
+            patch(
+                "cafaeval.evaluation.cafa_eval",
+                return_value=(MagicMock(), _dfs_best_fixture()),
+            ),
+        ):
             self.op.execute(
                 session,
                 {
@@ -979,17 +1011,16 @@ class TestExecuteHappyPath:
         assert "run_cafa_evaluation.ia_resolved" in emit_events
         assert "run_cafa_evaluation.downloading_ia" not in emit_events
 
-    @patch("protea.core.operations.run_cafa_evaluation.compute_evaluation_data")
+    @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
     def test_session_commit_before_cafa_eval(self, mock_compute):
         """Session should be committed before cafa_eval to release DB connection."""
-        mock_compute.return_value = _make_eval_data()
+        mock_compute.return_value = (_make_eval_data(), uuid.uuid4())
 
         session = MagicMock()
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
-        ann_old = _make_ann_old()
         snapshot = _make_snapshot()
-        session.get.side_effect = [eval_set, pred_set, ann_old, snapshot]
+        session.get.side_effect = [eval_set, pred_set, snapshot]
 
         query = MagicMock()
         session.query.return_value = query
@@ -1004,7 +1035,10 @@ class TestExecuteHappyPath:
         with patch.object(self.op, "_download_obo"):
             with patch(
                 "cafaeval.evaluation.cafa_eval",
-                side_effect=lambda *a, **kw: (call_order.append("cafa_eval"), (MagicMock(), _dfs_best_fixture()))[-1],
+                side_effect=lambda *a, **kw: (
+                    call_order.append("cafa_eval"),
+                    (MagicMock(), _dfs_best_fixture()),
+                )[-1],
             ):
                 self.op.execute(
                     session,
@@ -1015,17 +1049,19 @@ class TestExecuteHappyPath:
         assert call_order[0] == "commit"
         assert "cafa_eval" in call_order
 
-    @patch("protea.core.operations.run_cafa_evaluation.compute_evaluation_data")
-    def test_artifacts_dir(self, mock_compute):
-        """When artifacts_dir is set, artifact directory should be created."""
-        mock_compute.return_value = _make_eval_data()
+    @patch("protea.core.operations.run_cafa_evaluation.get_artifact_store")
+    @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
+    def test_artifacts_uploaded_to_store(self, mock_compute, mock_get_store):
+        """Cafaeval output staged in a tempdir is uploaded via artifact_store.put."""
+        mock_compute.return_value = (_make_eval_data(), uuid.uuid4())
+        store = MagicMock()
+        mock_get_store.return_value = store
 
         session = MagicMock()
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
-        ann_old = _make_ann_old()
         snapshot = _make_snapshot()
-        session.get.side_effect = [eval_set, pred_set, ann_old, snapshot]
+        session.get.side_effect = [eval_set, pred_set, snapshot]
 
         query = MagicMock()
         session.query.return_value = query
@@ -1034,88 +1070,46 @@ class TestExecuteHappyPath:
         query.order_by.return_value = query
         query.yield_per.return_value = []
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with patch.object(self.op, "_download_obo"):
-                with patch(
-                    "cafaeval.evaluation.cafa_eval",
-                    return_value=(None, _dfs_best_fixture()),
-                ):
-                    result = self.op.execute(
-                        session,
-                        {
-                            "evaluation_set_id": EVAL_SET_ID,
-                            "prediction_set_id": PRED_SET_ID,
-                            "artifacts_dir": tmpdir,
-                        },
-                        emit=self.emit,
-                    )
-
-            result_id = result.result["evaluation_result_id"]
-            assert os.path.isdir(os.path.join(tmpdir, result_id))
-
-    @patch("protea.core.operations.run_cafa_evaluation.compute_evaluation_data")
-    def test_artifacts_dir_with_write_results(self, mock_compute):
-        """When artifacts_dir is set and df is not None, write_results is called."""
-        mock_compute.return_value = _make_eval_data()
-
-        session = MagicMock()
-        eval_set = _make_eval_set()
-        pred_set = _make_pred_set()
-        ann_old = _make_ann_old()
-        snapshot = _make_snapshot()
-        session.get.side_effect = [eval_set, pred_set, ann_old, snapshot]
-
-        query = MagicMock()
-        session.query.return_value = query
-        query.join.return_value = query
-        query.filter.return_value = query
-        query.order_by.return_value = query
-        query.yield_per.return_value = []
-
-        df_mock = MagicMock()  # non-None df triggers write_results
+        df_mock = MagicMock()  # non-None df triggers write_results inside the staging dir
         dfs_best = _dfs_best_fixture()
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with patch.object(self.op, "_download_obo"), \
-                 patch(
-                     "cafaeval.evaluation.cafa_eval",
-                     return_value=(df_mock, dfs_best),
-                 ), \
-                 patch(
-                     "cafaeval.evaluation.write_results"
-                 ) as mock_write:
-                result = self.op.execute(
-                    session,
-                    {
-                        "evaluation_set_id": EVAL_SET_ID,
-                        "prediction_set_id": PRED_SET_ID,
-                        "artifacts_dir": tmpdir,
-                    },
-                    emit=self.emit,
-                )
+        with (
+            patch.object(self.op, "_download_obo"),
+            patch(
+                "cafaeval.evaluation.cafa_eval",
+                return_value=(df_mock, dfs_best),
+            ),
+            patch("cafaeval.evaluation.write_results") as mock_write,
+        ):
+            result = self.op.execute(
+                session,
+                {"evaluation_set_id": EVAL_SET_ID, "prediction_set_id": PRED_SET_ID},
+                emit=self.emit,
+            )
 
-            # write_results called 3 times (NK, LK, PK)
-            assert mock_write.call_count == 3
-            result_id = result.result["evaluation_result_id"]
-            # Check setting subdirectories were created
-            for setting in ("NK", "LK", "PK"):
-                setting_dir = os.path.join(tmpdir, result_id, setting)
-                assert os.path.isdir(setting_dir)
+        # write_results called once per setting (NK, LK, PK)
+        assert mock_write.call_count == 3
+        # Result advertises the uploaded keys (via artifact_store.put)
+        assert "results" in result.result
+        # Test runs without MinIO; the artifact_store mock just records the calls.
+        # We don't assert exact count because the staging tempdir is empty under
+        # the cafaeval.write_results patch — what matters is the operation
+        # finishes cleanly and the store is consulted.
+        assert mock_get_store.called
 
-    @patch("protea.core.operations.run_cafa_evaluation.compute_evaluation_data")
+    @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
     def test_scoring_config_snapshot(self, mock_compute):
         """When scoring_config_id is provided and found, it snapshots the config."""
-        mock_compute.return_value = _make_eval_data()
+        mock_compute.return_value = (_make_eval_data(), uuid.uuid4())
 
         session = MagicMock()
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
-        ann_old = _make_ann_old()
         snapshot = _make_snapshot()
         scoring_cfg = MagicMock()
         scoring_cfg.formula = "linear"
         scoring_cfg.weights = {"embedding_similarity": 1.0}
-        session.get.side_effect = [eval_set, pred_set, ann_old, snapshot, scoring_cfg]
+        session.get.side_effect = [eval_set, pred_set, snapshot, scoring_cfg]
 
         query = MagicMock()
         session.query.return_value = query
@@ -1124,14 +1118,14 @@ class TestExecuteHappyPath:
         query.order_by.return_value = query
         query.yield_per.return_value = []
 
-        with patch.object(self.op, "_download_obo"), \
-             patch(
-                 "cafaeval.evaluation.cafa_eval",
-                 return_value=(MagicMock(), _dfs_best_fixture()),
-             ), \
-             patch(
-                 "protea.core.operations.run_cafa_evaluation.ScoringConfig"
-             ) as mock_sc_cls:
+        with (
+            patch.object(self.op, "_download_obo"),
+            patch(
+                "cafaeval.evaluation.cafa_eval",
+                return_value=(MagicMock(), _dfs_best_fixture()),
+            ),
+            patch("protea.core.operations.run_cafa_evaluation.ScoringConfig") as mock_sc_cls,
+        ):
             mock_sc_cls.return_value = MagicMock()
             result = self.op.execute(
                 session,

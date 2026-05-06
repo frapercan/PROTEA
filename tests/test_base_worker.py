@@ -2,6 +2,7 @@
 Unit tests for BaseWorker and StaleJobReaper.
 Uses a mocked session factory and a fake Operation — no real DB needed.
 """
+
 from __future__ import annotations
 
 import signal
@@ -20,6 +21,7 @@ from protea.workers.stale_job_reaper import StaleJobReaper
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_registry(op_name: str = "ping", result: OperationResult = None, raises=None):
     op = MagicMock()
@@ -57,6 +59,7 @@ def _make_factory(job):
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestBaseWorkerHandleJob:
     def test_unknown_job_id_does_nothing(self):
@@ -139,9 +142,9 @@ class TestBaseWorkerHandleJob:
         session = MagicMock()
         session.get.return_value = job
         factory = MagicMock(return_value=session)
-        registry, _ = _make_registry(result=OperationResult(
-            result={}, progress_current=5, progress_total=10
-        ))
+        registry, _ = _make_registry(
+            result=OperationResult(result={}, progress_current=5, progress_total=10)
+        )
 
         worker = BaseWorker(factory, registry, WorkerConfig(worker_name="test"))
         worker.handle_job(job.id)
@@ -185,14 +188,104 @@ class TestBaseWorkerHandleJob:
 
         assert exc_info.value.delay_seconds == 600
 
+    def test_retryable_db_error_is_retried_then_succeeds(self):
+        """Postgres deadlock during op.execute() retries until the op succeeds."""
+        from sqlalchemy.exc import OperationalError
+
+        job = _make_job()
+        session = MagicMock()
+        session.get.return_value = job
+        factory = MagicMock(return_value=session)
+
+        # First call raises retryable OperationalError; second succeeds.
+        attempts = {"n": 0}
+
+        def _execute(sess, payload, *, emit):
+            attempts["n"] += 1
+            if attempts["n"] == 1:
+                orig = MagicMock()
+                orig.pgcode = "40P01"  # deadlock_detected
+                err = OperationalError("stmt", {}, orig)
+                err.orig = orig
+                raise err
+            return OperationResult(result={"ok": True})
+
+        op = MagicMock()
+        op.name = "ping"
+        op.execute.side_effect = _execute
+        registry = OperationRegistry()
+        registry.register(op)
+
+        worker = BaseWorker(factory, registry, WorkerConfig(worker_name="test"))
+        with patch("protea.core.retry.time.sleep"):
+            worker.handle_job(job.id)
+
+        assert attempts["n"] == 2
+        assert job.status == JobStatus.SUCCEEDED
+
+    def test_retryable_db_error_max_attempts_then_fails(self):
+        """If retryable error keeps recurring, after max_attempts the job is FAILED."""
+        from sqlalchemy.exc import OperationalError
+
+        job = _make_job()
+        session = MagicMock()
+        session.get.return_value = job
+        factory = MagicMock(return_value=session)
+
+        def _always_deadlock(sess, payload, *, emit):
+            orig = MagicMock()
+            orig.pgcode = "40P01"
+            err = OperationalError("stmt", {}, orig)
+            err.orig = orig
+            raise err
+
+        op = MagicMock()
+        op.name = "ping"
+        op.execute.side_effect = _always_deadlock
+        registry = OperationRegistry()
+        registry.register(op)
+
+        worker = BaseWorker(factory, registry, WorkerConfig(worker_name="test"))
+        with patch("protea.core.retry.time.sleep"):
+            with pytest.raises(OperationalError):
+                worker.handle_job(job.id)
+
+        # 3 attempts (max_attempts=3 in handle_job).
+        assert op.execute.call_count == 3
+        # Retry-exhausted path uses the fallback session via sa_update,
+        # so the in-memory mock Job is not directly mutated. Verify the
+        # fallback session.execute was invoked instead.
+        # session was reused as the factory's only fixture, so an
+        # update statement should have run on it.
+        assert any(
+            "UPDATE" in str(call.args[0]).upper() if call.args else False
+            for call in session.execute.call_args_list
+        )
+
+    def test_non_retryable_error_does_not_retry(self):
+        """Non-infrastructure errors propagate immediately, single attempt."""
+        job = _make_job()
+        session = MagicMock()
+        session.get.return_value = job
+        factory = MagicMock(return_value=session)
+        registry, op = _make_registry(raises=ValueError("bad payload"))
+
+        worker = BaseWorker(factory, registry, WorkerConfig(worker_name="test"))
+        with pytest.raises(ValueError, match="bad payload"):
+            worker.handle_job(job.id)
+
+        assert op.execute.call_count == 1
+        assert job.status == JobStatus.FAILED
+
 
 # ---------------------------------------------------------------------------
 # StaleJobReaper
 # ---------------------------------------------------------------------------
 
+
 class TestStaleJobReaper:
     def test_reaps_stale_running_jobs(self):
-        """Jobs in RUNNING for longer than timeout should be marked FAILED."""
+        """Jobs RUNNING past the timeout with no recent events are marked FAILED."""
         stale_job = MagicMock(spec=Job)
         stale_job.id = uuid4()
         stale_job.status = JobStatus.RUNNING
@@ -201,6 +294,8 @@ class TestStaleJobReaper:
 
         session = MagicMock()
         session.query.return_value.filter.return_value.all.return_value = [stale_job]
+        # No recent events → scalar() returns None → job qualifies for reaping.
+        session.query.return_value.filter.return_value.scalar.return_value = None
         factory = MagicMock(return_value=session)
 
         reaper = StaleJobReaper(factory, timeout_seconds=3600)
@@ -211,6 +306,53 @@ class TestStaleJobReaper:
         assert stale_job.error_code == "JobTimeout"
         session.add.assert_called_once()  # JobEvent
         session.commit.assert_called_once()
+
+    def test_reaper_skips_job_with_recent_activity(self):
+        """A candidate job with a JobEvent inside the stall window is left alone."""
+        live_job = MagicMock(spec=Job)
+        live_job.id = uuid4()
+        live_job.status = JobStatus.RUNNING
+        live_job.operation = "compute_embeddings"
+        live_job.started_at = datetime.now(UTC) - timedelta(hours=8)
+
+        session = MagicMock()
+        session.query.return_value.filter.return_value.all.return_value = [live_job]
+        # Last event was 5 minutes ago — inside the 30-min stall window.
+        session.query.return_value.filter.return_value.scalar.return_value = datetime.now(
+            UTC
+        ) - timedelta(minutes=5)
+        factory = MagicMock(return_value=session)
+
+        reaper = StaleJobReaper(factory, timeout_seconds=3600, stall_seconds=1800)
+        count = reaper._reap()
+
+        assert count == 0
+        assert live_job.status == JobStatus.RUNNING  # unchanged
+        session.add.assert_not_called()
+        session.commit.assert_called_once()
+
+    def test_reaper_kills_job_with_stale_activity(self):
+        """A candidate whose most recent event is older than stall_seconds is reaped."""
+        stalled_job = MagicMock(spec=Job)
+        stalled_job.id = uuid4()
+        stalled_job.status = JobStatus.RUNNING
+        stalled_job.operation = "compute_embeddings"
+        stalled_job.started_at = datetime.now(UTC) - timedelta(hours=8)
+
+        session = MagicMock()
+        session.query.return_value.filter.return_value.all.return_value = [stalled_job]
+        # Last event was 2 hours ago — well outside the 30-min stall window.
+        session.query.return_value.filter.return_value.scalar.return_value = datetime.now(
+            UTC
+        ) - timedelta(hours=2)
+        factory = MagicMock(return_value=session)
+
+        reaper = StaleJobReaper(factory, timeout_seconds=3600, stall_seconds=1800)
+        count = reaper._reap()
+
+        assert count == 1
+        assert stalled_job.status == JobStatus.FAILED
+        assert stalled_job.error_code == "JobTimeout"
 
     def test_no_stale_jobs_returns_zero(self):
         """When no jobs are stale, reaper does nothing."""
@@ -255,14 +397,18 @@ class TestStaleJobReaper:
         # Make _reap set _stop=True so the loop exits after one iteration
         reaper._stop = False
         call_count = [0]
+
         def fake_reap():
             call_count[0] += 1
             reaper._stop = True
             return 0
+
         reaper._reap = fake_reap
 
-        with patch("protea.workers.stale_job_reaper.signal.signal") as mock_signal, \
-             patch("protea.workers.stale_job_reaper.time.sleep"):
+        with (
+            patch("protea.workers.stale_job_reaper.signal.signal") as mock_signal,
+            patch("protea.workers.stale_job_reaper.time.sleep"),
+        ):
             reaper.run(interval_seconds=1)
 
         # Should register both SIGINT and SIGTERM
@@ -284,8 +430,10 @@ class TestStaleJobReaper:
 
         reaper._reap = fake_reap
 
-        with patch("protea.workers.stale_job_reaper.signal.signal"), \
-             patch("protea.workers.stale_job_reaper.time.sleep"):
+        with (
+            patch("protea.workers.stale_job_reaper.signal.signal"),
+            patch("protea.workers.stale_job_reaper.time.sleep"),
+        ):
             reaper.run(interval_seconds=1)
 
         assert reap_count[0] == 3
@@ -301,9 +449,11 @@ class TestStaleJobReaper:
 
         reaper._reap = fake_reap
 
-        with patch("protea.workers.stale_job_reaper.signal.signal"), \
-             patch("protea.workers.stale_job_reaper.time.sleep"), \
-             patch("protea.workers.stale_job_reaper.logger") as mock_logger:
+        with (
+            patch("protea.workers.stale_job_reaper.signal.signal"),
+            patch("protea.workers.stale_job_reaper.time.sleep"),
+            patch("protea.workers.stale_job_reaper.logger") as mock_logger,
+        ):
             reaper.run(interval_seconds=1)
 
         # Should have logged the reaped count
@@ -325,9 +475,11 @@ class TestStaleJobReaper:
 
         reaper._reap = failing_reap
 
-        with patch("protea.workers.stale_job_reaper.signal.signal"), \
-             patch("protea.workers.stale_job_reaper.time.sleep"), \
-             patch("protea.workers.stale_job_reaper.logger") as mock_logger:
+        with (
+            patch("protea.workers.stale_job_reaper.signal.signal"),
+            patch("protea.workers.stale_job_reaper.time.sleep"),
+            patch("protea.workers.stale_job_reaper.logger") as mock_logger,
+        ):
             reaper.run(interval_seconds=1)
 
         # Should have logged the error but continued
@@ -347,20 +499,25 @@ class TestStaleJobReaper:
 # Feature engineering warmup
 # ---------------------------------------------------------------------------
 
+
 class TestTaxonomyWarmup:
     def test_warmup_calls_get_ncbi(self):
         from protea.core.feature_engineering import warmup_taxonomy_db
 
-        with patch("protea.core.feature_engineering._get_ncbi") as mock_get, \
-             patch("protea.core.feature_engineering._ETE3_AVAILABLE", True):
+        with (
+            patch("protea.core.feature_engineering._get_ncbi") as mock_get,
+            patch("protea.core.feature_engineering._ETE3_AVAILABLE", True),
+        ):
             warmup_taxonomy_db()
         mock_get.assert_called_once()
 
     def test_warmup_skips_when_ete3_unavailable(self):
         from protea.core.feature_engineering import warmup_taxonomy_db
 
-        with patch("protea.core.feature_engineering._ETE3_AVAILABLE", False), \
-             patch("protea.core.feature_engineering._get_ncbi") as mock_get:
+        with (
+            patch("protea.core.feature_engineering._ETE3_AVAILABLE", False),
+            patch("protea.core.feature_engineering._get_ncbi") as mock_get,
+        ):
             warmup_taxonomy_db()  # should not raise
         mock_get.assert_not_called()
 
@@ -368,6 +525,7 @@ class TestTaxonomyWarmup:
 # ---------------------------------------------------------------------------
 # BaseWorker — extended coverage
 # ---------------------------------------------------------------------------
+
 
 class TestBaseWorkerParentCancelled:
     """Cover parent_job_id cancellation detection (lines 93-106)."""
@@ -381,11 +539,13 @@ class TestBaseWorkerParentCancelled:
         parent_job.status = JobStatus.CANCELLED
 
         session = MagicMock()
+
         # session.get returns child_job by default, parent_job when queried by parent_id
         def get_side_effect(model, id_val):
             if id_val == parent_id:
                 return parent_job
             return child_job
+
         session.get.side_effect = get_side_effect
 
         factory = MagicMock(return_value=session)
@@ -407,10 +567,12 @@ class TestBaseWorkerParentCancelled:
         parent_job.status = JobStatus.RUNNING
 
         session = MagicMock()
+
         def get_side_effect(model, id_val):
             if id_val == parent_id:
                 return parent_job
             return child_job
+
         session.get.side_effect = get_side_effect
 
         factory = MagicMock(return_value=session)
@@ -487,6 +649,7 @@ class TestBaseWorkerTwoSessionPattern:
 
             def commit_side_effect():
                 status_log.append((current_call, job.status))
+
             s.commit.side_effect = commit_side_effect
             return s
 
@@ -536,9 +699,7 @@ class TestBaseWorkerProgressFromResult:
         session = MagicMock()
         session.get.return_value = job
         factory = MagicMock(return_value=session)
-        registry, _ = _make_registry(result=OperationResult(
-            result={}, progress_current=42
-        ))
+        registry, _ = _make_registry(result=OperationResult(result={}, progress_current=42))
 
         worker = BaseWorker(factory, registry, WorkerConfig(worker_name="test"))
         worker.handle_job(job.id)
@@ -570,9 +731,9 @@ class TestBaseWorkerDeferredResult:
         session = MagicMock()
         session.get.return_value = job
         factory = MagicMock(return_value=session)
-        registry, _ = _make_registry(result=OperationResult(
-            result={"dispatched": True}, deferred=True
-        ))
+        registry, _ = _make_registry(
+            result=OperationResult(result={"dispatched": True}, deferred=True)
+        )
 
         worker = BaseWorker(factory, registry, WorkerConfig(worker_name="test"))
         worker.handle_job(job.id)
@@ -592,13 +753,17 @@ class TestBaseWorkerPublishAfterCommit:
         session = MagicMock()
         session.get.return_value = job
         factory = MagicMock(return_value=session)
-        registry, _ = _make_registry(result=OperationResult(
-            result={},
-            publish_after_commit=[("protea.jobs", child_id)],
-        ))
+        registry, _ = _make_registry(
+            result=OperationResult(
+                result={},
+                publish_after_commit=[("protea.jobs", child_id)],
+            )
+        )
 
         worker = BaseWorker(
-            factory, registry, WorkerConfig(worker_name="test"),
+            factory,
+            registry,
+            WorkerConfig(worker_name="test"),
             amqp_url="amqp://localhost/",
         )
 
@@ -612,15 +777,19 @@ class TestBaseWorkerPublishAfterCommit:
         session = MagicMock()
         session.get.return_value = job
         factory = MagicMock(return_value=session)
-        registry, _ = _make_registry(result=OperationResult(
-            result={},
-            publish_operations=[
-                ("protea.embeddings.batch", {"batch_data": [1, 2]}),
-            ],
-        ))
+        registry, _ = _make_registry(
+            result=OperationResult(
+                result={},
+                publish_operations=[
+                    ("protea.embeddings.batch", {"batch_data": [1, 2]}),
+                ],
+            )
+        )
 
         worker = BaseWorker(
-            factory, registry, WorkerConfig(worker_name="test"),
+            factory,
+            registry,
+            WorkerConfig(worker_name="test"),
             amqp_url="amqp://localhost/",
         )
 
@@ -638,10 +807,12 @@ class TestBaseWorkerPublishAfterCommit:
         session = MagicMock()
         session.get.return_value = job
         factory = MagicMock(return_value=session)
-        registry, _ = _make_registry(result=OperationResult(
-            result={},
-            publish_after_commit=[("protea.jobs", child_id)],
-        ))
+        registry, _ = _make_registry(
+            result=OperationResult(
+                result={},
+                publish_after_commit=[("protea.jobs", child_id)],
+            )
+        )
 
         worker = BaseWorker(factory, registry, WorkerConfig(worker_name="test"))
 
@@ -658,6 +829,7 @@ class TestBaseWorkerEmitProgress:
         job = _make_job()
 
         sessions = []
+
         def make_session():
             s = MagicMock()
             s.get.return_value = job
@@ -701,10 +873,12 @@ class TestBaseWorkerForceFailJob:
             if current == 2:
                 # Execute session: commit raises on second call (after failure recording)
                 commit_count = [0]
+
                 def commit_side():
                     commit_count[0] += 1
                     if commit_count[0] == 1:
                         raise RuntimeError("DB connection dropped")
+
                 s.commit.side_effect = commit_side
             return s
 

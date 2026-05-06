@@ -74,6 +74,8 @@ class QuerySetEntry(Base):
         index=True,
     )
     accession: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    taxonomy_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    species: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

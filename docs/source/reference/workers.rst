@@ -110,3 +110,12 @@ seconds = 6 hours). It marks them as ``FAILED`` with error code
    :members:
    :undoc-members:
    :show-inheritance:
+
+.. seealso::
+
+   - :doc:`/architecture/job_lifecycle` — the two-session lifecycle and
+     parent-child coordinator pattern that ``BaseWorker`` implements.
+   - :doc:`/architecture/operations` — what these workers actually run.
+   - :doc:`/adr/002-two-session-worker-pattern` — design rationale.
+   - :doc:`/adr/003-queue-consumer-vs-operation-consumer` — when each
+     consumer subclass applies.

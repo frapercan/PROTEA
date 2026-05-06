@@ -1,0 +1,70 @@
+name: Security
+
+on:
+  push:
+  pull_request:
+  schedule:
+    # Weekly Monday 06:00 UTC: catches new CVEs against pinned deps
+    # even if no PR has landed.
+    - cron: "0 6 * * 1"
+
+jobs:
+  audit:
+    name: pip-audit
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12"]
+        poetry-version: ["2.1.0"]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: abatilo/actions-poetry@v3
+        with:
+          poetry-version: ${{ matrix.poetry-version }}
+
+      - name: Add poetry to PATH
+        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install production deps in the poetry venv
+        # poetry 2.x removed `poetry export`; install with the main group
+        # only and then audit the resolved environment in-place.
+        run: poetry install --only main
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: pip-audit (non-blocking in F0; blocking once F-OPS T-OPS.7 lands)
+        # F0 stance: surface findings without breaking the pipeline so
+        # the team can triage. F-OPS T-OPS.7 of master plan v3 will
+        # flip this to fail on severity HIGH.
+        run: poetry run pip-audit --strict --vulnerability-service osv || true
+
+  bandit:
+    name: bandit (security static analysis)
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12"]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install bandit
+        run: pip install "bandit[toml]"
+
+      - name: Run bandit on protea/
+        # Severity HIGH and confidence HIGH only at F0; tighten in F-OPS.
+        # Bandit reads its config from pyproject.toml ([tool.bandit]).
+        run: bandit --severity-level high --confidence-level high -r protea/ -c pyproject.toml || true

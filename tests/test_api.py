@@ -2,6 +2,7 @@
 Unit tests for the FastAPI jobs router.
 Database and pika are fully mocked — no real infrastructure required.
 """
+
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -45,6 +46,7 @@ def _make_app(session_factory, amqp_url=FAKE_AMQP):
     app = FastAPI()
     app.state.session_factory = session_factory
     app.state.amqp_url = amqp_url
+    app.state.operation_registry = MagicMock()
     app.include_router(router)
     return app
 
@@ -74,6 +76,7 @@ def client(session):
 # POST /jobs
 # ---------------------------------------------------------------------------
 
+
 class TestCreateJob:
     def test_returns_job_id_and_status(self, session):
         job = _make_job()
@@ -83,9 +86,13 @@ class TestCreateJob:
         factory = MagicMock()
         app = _make_app(factory)
 
-        with patch("protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)), \
-             patch("protea.api.routers.jobs.publish_job"), \
-             patch("protea.api.routers.jobs.Job", return_value=job):
+        with (
+            patch(
+                "protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)
+            ),
+            patch("protea.api.routers.jobs.publish_job"),
+            patch("protea.api.routers.jobs.Job", return_value=job),
+        ):
             c = TestClient(app)
             resp = c.post("/jobs", json={"operation": "ping", "queue_name": "test.q"})
 
@@ -98,7 +105,9 @@ class TestCreateJob:
         factory = MagicMock()
         app = _make_app(factory)
 
-        with patch("protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)
+        ):
             c = TestClient(app, raise_server_exceptions=False)
             resp = c.post("/jobs", json={"queue_name": "test.q"})
 
@@ -108,7 +117,9 @@ class TestCreateJob:
         factory = MagicMock()
         app = _make_app(factory)
 
-        with patch("protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)
+        ):
             c = TestClient(app, raise_server_exceptions=False)
             resp = c.post("/jobs", json={"operation": "ping"})
 
@@ -119,9 +130,13 @@ class TestCreateJob:
         factory = MagicMock()
         app = _make_app(factory)
 
-        with patch("protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)), \
-             patch("protea.api.routers.jobs.publish_job") as mock_publish, \
-             patch("protea.api.routers.jobs.Job", return_value=job):
+        with (
+            patch(
+                "protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)
+            ),
+            patch("protea.api.routers.jobs.publish_job") as mock_publish,
+            patch("protea.api.routers.jobs.Job", return_value=job),
+        ):
             c = TestClient(app)
             c.post("/jobs", json={"operation": "ping", "queue_name": "test.q"})
 
@@ -132,9 +147,13 @@ class TestCreateJob:
         factory = MagicMock()
         app = _make_app(factory)
 
-        with patch("protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)), \
-             patch("protea.api.routers.jobs.publish_job", side_effect=RuntimeError("broker down")), \
-             patch("protea.api.routers.jobs.Job", return_value=job):
+        with (
+            patch(
+                "protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)
+            ),
+            patch("protea.api.routers.jobs.publish_job", side_effect=RuntimeError("broker down")),
+            patch("protea.api.routers.jobs.Job", return_value=job),
+        ):
             c = TestClient(app, raise_server_exceptions=False)
             resp = c.post("/jobs", json={"operation": "ping", "queue_name": "test.q"})
 
@@ -144,6 +163,7 @@ class TestCreateJob:
 # ---------------------------------------------------------------------------
 # GET /jobs
 # ---------------------------------------------------------------------------
+
 
 class TestListJobs:
     def test_returns_list(self, session):
@@ -156,7 +176,9 @@ class TestListJobs:
         factory = MagicMock()
         app = _make_app(factory)
 
-        with patch("protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)
+        ):
             c = TestClient(app)
             resp = c.get("/jobs")
 
@@ -167,7 +189,9 @@ class TestListJobs:
         factory = MagicMock()
         app = _make_app(factory)
 
-        with patch("protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)
+        ):
             c = TestClient(app, raise_server_exceptions=False)
             resp = c.get("/jobs?status=not_a_status")
 
@@ -178,6 +202,7 @@ class TestListJobs:
 # GET /jobs/{id}
 # ---------------------------------------------------------------------------
 
+
 class TestGetJob:
     def test_returns_job(self, session):
         job = _make_job()
@@ -186,7 +211,9 @@ class TestGetJob:
         factory = MagicMock()
         app = _make_app(factory)
 
-        with patch("protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)
+        ):
             c = TestClient(app)
             resp = c.get(f"/jobs/{job.id}")
 
@@ -199,7 +226,9 @@ class TestGetJob:
         factory = MagicMock()
         app = _make_app(factory)
 
-        with patch("protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)
+        ):
             c = TestClient(app, raise_server_exceptions=False)
             resp = c.get(f"/jobs/{uuid4()}")
 
@@ -209,6 +238,7 @@ class TestGetJob:
 # ---------------------------------------------------------------------------
 # GET /jobs/{id}/events
 # ---------------------------------------------------------------------------
+
 
 class TestGetJobEvents:
     def test_returns_events(self, session):
@@ -231,7 +261,9 @@ class TestGetJobEvents:
         factory = MagicMock()
         app = _make_app(factory)
 
-        with patch("protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)
+        ):
             c = TestClient(app)
             resp = c.get(f"/jobs/{job.id}/events")
 
@@ -244,7 +276,9 @@ class TestGetJobEvents:
         factory = MagicMock()
         app = _make_app(factory)
 
-        with patch("protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)
+        ):
             c = TestClient(app, raise_server_exceptions=False)
             resp = c.get(f"/jobs/{uuid4()}/events")
 
@@ -255,9 +289,11 @@ class TestGetJobEvents:
 # POST /jobs/{id}/cancel
 # ---------------------------------------------------------------------------
 
+
 class TestCancelJob:
     def test_cancels_queued_job(self, session):
         from protea.infrastructure.orm.models.job import JobStatus
+
         job = _make_job()
         job.status = JobStatus.QUEUED
         session.get.return_value = job
@@ -265,7 +301,9 @@ class TestCancelJob:
         factory = MagicMock()
         app = _make_app(factory)
 
-        with patch("protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)
+        ):
             c = TestClient(app)
             resp = c.post(f"/jobs/{job.id}/cancel")
 
@@ -274,6 +312,7 @@ class TestCancelJob:
 
     def test_cancel_succeeded_job_is_noop(self, session):
         from protea.infrastructure.orm.models.job import JobStatus
+
         job = _make_job()
         job.status = JobStatus.SUCCEEDED
         session.get.return_value = job
@@ -281,7 +320,9 @@ class TestCancelJob:
         factory = MagicMock()
         app = _make_app(factory)
 
-        with patch("protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)
+        ):
             c = TestClient(app)
             resp = c.post(f"/jobs/{job.id}/cancel")
 
@@ -294,7 +335,9 @@ class TestCancelJob:
         factory = MagicMock()
         app = _make_app(factory)
 
-        with patch("protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)
+        ):
             c = TestClient(app, raise_server_exceptions=False)
             resp = c.post(f"/jobs/{uuid4()}/cancel")
 

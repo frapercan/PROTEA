@@ -1,0 +1,300 @@
+"""Runtime tuning settings (T-CONF.2).
+
+Externalises hardcoded module-level constants from ``protea/`` so an
+operator can tune throughput, retry policy and timeouts per
+deployment target (dev, prod-cloud, hpc-bsc, hpc-airgap) without
+touching code.
+
+Hierarchy (lowest to highest priority):
+
+  1. Defaults baked into the pydantic models below.
+  2. ``tuning:`` section in ``protea/config/system.yaml``.
+  3. Environment variables of the form ``PROTEA_TUNING__<group>__<field>``.
+
+Currently scoped to the ``QueueTuning`` group as a proof of concept.
+The remaining categories from ``docs/CONFIG_INVENTORY.md``
+(WorkerTuning, OperationTuning, APILimits, ResearchKnobs) follow the
+same pattern and will be added incrementally.
+
+Example::
+
+    from protea.config.tuning import get_tuning
+
+    settings = get_tuning()
+    for attempt in range(settings.queue.publisher_max_attempts):
+        ...
+"""
+
+from __future__ import annotations
+
+import os
+from functools import lru_cache
+from pathlib import Path
+from typing import Any
+
+import yaml
+from pydantic import BaseModel, Field
+
+ENV_PREFIX = "PROTEA_TUNING__"
+
+
+class QueueTuning(BaseModel):
+    """RabbitMQ publisher / consumer retry and dispatch knobs.
+
+    Sources: ``infrastructure/queue/publisher.py`` and
+    ``infrastructure/queue/consumer.py`` (ver
+    ``docs/CONFIG_INVENTORY.md`` §A).
+    """
+
+    publisher_max_attempts: int = Field(
+        default=12,
+        ge=1,
+        description=(
+            "Reintentos máximos al publicar a RabbitMQ. 12 attempts cubren "
+            "~4 min de broker downtime con backoff exponencial cap a 30s."
+        ),
+    )
+    publisher_base_delay: float = Field(
+        default=1.0,
+        ge=0.0,
+        description=(
+            "Backoff inicial publisher en segundos. Multiplica x2 por "
+            "intento hasta el cap interno de 30s."
+        ),
+    )
+    oom_max_retries: int = Field(
+        default=5,
+        ge=0,
+        description="Reintentos al hit CUDA OOM en GPU worker.",
+    )
+    oom_base_delay: int = Field(
+        default=5,
+        ge=0,
+        description="Backoff inicial OOM en segundos.",
+    )
+    oom_max_delay: int = Field(
+        default=300,
+        ge=1,
+        description="Cap del backoff OOM en segundos (5 min default).",
+    )
+
+
+class WorkerTuning(BaseModel):
+    """Pool sizes, in-process caches and reaper timeouts.
+
+    Sources: ``infrastructure/database/engine.py``,
+    ``infrastructure/operations/{compute_embeddings,predict_go_terms}.py``,
+    ``workers/stale_job_reaper.py``, ``api/cache.py`` (ver
+    ``docs/CONFIG_INVENTORY.md`` §B).
+    """
+
+    db_pool_size: int = Field(
+        default=20,
+        ge=1,
+        description="SQLAlchemy connection pool size. Tunear según concurrencia esperada.",
+    )
+    db_pool_max_overflow: int = Field(
+        default=40,
+        ge=0,
+        description="Conexiones extra permitidas sobre el pool size cuando hay pico.",
+    )
+    db_pool_recycle_seconds: int = Field(
+        default=3600,
+        ge=60,
+        description=(
+            "Reciclar conexiones tras N segundos para evitar idle-timeout silencioso del DB."
+        ),
+    )
+    model_cache_max: int = Field(
+        default=1,
+        ge=1,
+        description=(
+            "Modelos PLM en cache por proceso de embeddings. >1 acumula GB en GPU."
+        ),
+    )
+    ref_cache_max: int = Field(
+        default=1,
+        ge=1,
+        description="Reference data sets en cache por proceso predict.",
+    )
+    reaper_main_timeout_seconds: int = Field(
+        default=86400,
+        ge=300,
+        description=(
+            "Timeout duro antes de marcar jobs FAILED en producción (default 24h). "
+            "Coordinator jobs como compute_embeddings pueden correr <1d en datasets "
+            "grandes; este es el corte global."
+        ),
+    )
+    reaper_default_timeout_seconds: int = Field(
+        default=3600,
+        ge=300,
+        description="Default constructor de StaleJobReaper (sobrescrito por main).",
+    )
+    reaper_stall_seconds: int = Field(
+        default=1800,
+        ge=60,
+        description=(
+            "Tiempo sin JobEvent antes de considerar un job stalled candidato a reapear."
+        ),
+    )
+    api_cache_default_ttl_seconds: float = Field(
+        default=300.0,
+        ge=1.0,
+        description="TTL default cache HTTP (api/cache.py). 5 min por defecto.",
+    )
+
+
+class OperationTuning(BaseModel):
+    """Module-level chunk and batch sizes used inside operations.
+
+    HTTP retry policy and per-source timeouts live inside their
+    respective pydantic payloads (``InsertProteinsPayload``,
+    ``LoadGoaAnnotationsPayload``, etc.) because the caller picks
+    them per-job. The values here are infra-level: how to slice
+    work between memory and broker pressure constraints.
+
+    Sources: ``core/feature_enricher.py``, ``core/knn_search.py``,
+    ``core/operations/{predict_go_terms,training_dump_helpers}.py``
+    (ver ``docs/CONFIG_INVENTORY.md`` §C).
+    """
+
+    annotation_chunk_size: int = Field(
+        default=10_000,
+        ge=100,
+        description=(
+            "Filas por chunk al cargar/iterar anotaciones. Tunear "
+            "según RAM disponible: 1k-100k razonable."
+        ),
+    )
+    stream_chunk_size: int = Field(
+        default=2_000,
+        ge=100,
+        description=(
+            "Chunk size streaming PyArrow / SQLAlchemy yield_per. "
+            "Más bajo reduce pico Python-object; más alto reduce "
+            "round-trips. 500-10k razonable."
+        ),
+    )
+    store_chunk_size: int = Field(
+        default=10_000,
+        ge=500,
+        description=(
+            "Filas por chunk al publicar predictions a la cola "
+            "store. RabbitMQ cap 128 MB; 10k filas serializan "
+            "~20-25 MB. 5k-50k según mensaje promedio."
+        ),
+    )
+    numpy_query_chunk: int = Field(
+        default=500,
+        ge=10,
+        description=(
+            "Query chunk size para KNN numpy backend. Multiplicado "
+            "por n_refs determina el pico de la matriz de "
+            "distancias (500 x 500k x 4B ~ 1 GB)."
+        ),
+    )
+
+
+class APILimits(BaseModel):
+    """HTTP boundary limits enforced at the FastAPI router layer.
+
+    Sources: ``api/routers/{annotate,query_sets,support}.py`` (ver
+    ``docs/CONFIG_INVENTORY.md`` §D).
+    """
+
+    max_fasta_bytes: int = Field(
+        default=50 * 1024 * 1024,
+        ge=1024,
+        description=(
+            "Tope upload FASTA en bytes. 50 MB cubre la mayoría de "
+            "submissions; subir si el caso de uso lo justifica. "
+            "Hardcodeado antes en dos routers; este campo dedupica."
+        ),
+    )
+    max_comment_length: int = Field(
+        default=500,
+        ge=1,
+        description="Caracteres máximos por comentario en /support.",
+    )
+    recent_limit: int = Field(
+        default=20,
+        ge=1,
+        description="Items devueltos por defecto en /support/recent.",
+    )
+    page_limit: int = Field(
+        default=100,
+        ge=1,
+        description="Page size hard cap para list endpoints de soporte.",
+    )
+
+
+class TuningSettings(BaseModel):
+    """Root tuning model that composes per-category sub-models."""
+
+    queue: QueueTuning = Field(default_factory=QueueTuning)
+    worker: WorkerTuning = Field(default_factory=WorkerTuning)
+    operation: OperationTuning = Field(default_factory=OperationTuning)
+    api: APILimits = Field(default_factory=APILimits)
+
+
+def _load_yaml_tuning(project_root: Path) -> dict[str, Any]:
+    path = project_root / "protea" / "config" / "system.yaml"
+    if not path.exists():
+        return {}
+    with path.open("r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    raw = data.get("tuning") or {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _apply_env_overrides(merged: dict[str, Any]) -> dict[str, Any]:
+    """Merge env vars of the form PROTEA_TUNING__<group>__<field>=<value>.
+
+    The double underscore is the conventional path separator (matches
+    pydantic-settings env_nested_delimiter) so we don't collide with
+    legitimate single underscores inside field names like
+    ``publisher_max_attempts``.
+    """
+    for key, value in os.environ.items():
+        if not key.startswith(ENV_PREFIX):
+            continue
+        path = key[len(ENV_PREFIX):].split("__")
+        if len(path) < 2:
+            continue
+        group, field = path[0].lower(), "__".join(path[1:]).lower()
+        merged.setdefault(group, {})[field] = _coerce(value)
+    return merged
+
+
+def _coerce(value: str) -> Any:
+    """Best-effort string -> int/float/bool coercion for env values."""
+    lo = value.strip().lower()
+    if lo in {"true", "false"}:
+        return lo == "true"
+    try:
+        if "." in value:
+            return float(value)
+        return int(value)
+    except ValueError:
+        return value
+
+
+def _resolve_project_root() -> Path:
+    """Resolve the project root from this file's location.
+
+    ``protea/config/tuning.py`` -> parents[2] = project root.
+    """
+    return Path(__file__).resolve().parents[2]
+
+
+@lru_cache(maxsize=1)
+def get_tuning() -> TuningSettings:
+    """Load and cache the tuning settings.
+
+    Cache reset (mostly for tests):
+        ``get_tuning.cache_clear()``
+    """
+    raw = _load_yaml_tuning(_resolve_project_root())
+    raw = _apply_env_overrides(raw)
+    return TuningSettings.model_validate(raw)

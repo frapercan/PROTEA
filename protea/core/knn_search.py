@@ -49,6 +49,7 @@ def search_knn(
     distance_threshold: float | None = None,
     backend: str = "numpy",
     metric: str = "cosine",
+    pre_normalized: bool = False,
     faiss_index_type: str = "Flat",
     faiss_nlist: int = 100,
     faiss_nprobe: int = 10,
@@ -73,6 +74,11 @@ def search_knn(
         ``"numpy"`` (exact brute-force) or ``"faiss"``.
     metric:
         ``"cosine"`` or ``"l2"``.
+    pre_normalized:
+        When ``True`` and ``metric == "cosine"``, the caller guarantees that
+        ``ref_embeddings`` rows are already L2-normalised, so the backend
+        skips the per-call normalisation (which costs ~3 s on 500k × 1280
+        vectors and is the dominant non-matmul cost). No-op for ``l2``.
     faiss_index_type:
         One of ``"Flat"``, ``"IVFFlat"``, ``"HNSW"`` (ignored for numpy).
     faiss_nlist:
@@ -112,6 +118,7 @@ def search_knn(
             k,
             distance_threshold=distance_threshold,
             metric=metric,
+            pre_normalized=pre_normalized,
         )
     raise ValueError(f"Unknown search backend: {backend!r}. Choose 'numpy' or 'faiss'.")
 
@@ -119,6 +126,13 @@ def search_knn(
 # ---------------------------------------------------------------------------
 # NumPy backend
 # ---------------------------------------------------------------------------
+
+
+# Query chunk size lives in OperationTuning.numpy_query_chunk so the
+# memory ceiling is tunable per deployment (the full n_queries x n_refs
+# distance matrix would peak at n_queries x n_refs x 4 bytes; with 500k
+# refs a naive call materialises 10+ GB per aspect; 500 x 500k x 4B
+# is ~1 GB).
 
 
 def _search_numpy(
@@ -129,20 +143,85 @@ def _search_numpy(
     *,
     distance_threshold: float | None,
     metric: str,
+    pre_normalized: bool = False,
 ) -> list[list[tuple[str, float]]]:
-    """Exact brute-force search via matrix multiplication."""
-    dist = _compute_distance_matrix(Q, R, metric)  # (n_queries, n_refs)
+    """Exact brute-force search via chunked matrix multiplication.
+
+    Chunk-invariant work (R normalisation for cosine, ``||R||²`` for L2, and
+    the transposed ``R.T`` view) is computed once and reused across chunks.
+
+    Top-k selection uses ``np.argpartition`` (O(n_refs) per query) followed by
+    a partial sort of the k-slice, instead of a full ``argsort`` — for k ≪
+    n_refs this is ~30× faster on 500k-vector banks.
+    """
+    if metric == "cosine":
+        if pre_normalized:
+            R_ready = R
+        else:
+            R_ready = R / (np.linalg.norm(R, axis=1, keepdims=True) + 1e-9)
+        R2 = None
+    elif metric == "l2":
+        R_ready = R
+        R2 = (R**2).sum(axis=1)  # shape (n_refs,), reused by every chunk
+    else:
+        raise ValueError(f"Unknown metric: {metric!r}. Choose 'cosine' or 'l2'.")
+
+    R_T = R_ready.T  # contiguous view; shared by all chunks
+    n_refs = R.shape[0]
+    k_eff = min(k, n_refs)
+
     results: list[list[tuple[str, float]]] = []
-    for row in dist:
-        order = np.argsort(row)
-        if distance_threshold is not None:
-            order = order[row[order] <= distance_threshold]
-        top = order[:k]
-        results.append([(ref_accessions[i], float(row[i])) for i in top])
+    n_queries = Q.shape[0]
+    from protea.config.tuning import get_tuning
+
+    query_chunk = get_tuning().operation.numpy_query_chunk
+    for start in range(0, n_queries, query_chunk):
+        Q_chunk = Q[start : start + query_chunk]
+        if metric == "cosine":
+            if pre_normalized:
+                Q_n = Q_chunk / (np.linalg.norm(Q_chunk, axis=1, keepdims=True) + 1e-9)
+            else:
+                Q_n = Q_chunk / (np.linalg.norm(Q_chunk, axis=1, keepdims=True) + 1e-9)
+            dist = 1.0 - (Q_n @ R_T)
+        else:  # l2
+            Q2 = (Q_chunk**2).sum(axis=1, keepdims=True)
+            dist = np.maximum(0.0, Q2 + R2 - 2.0 * (Q_chunk @ R_T))
+
+        # Vectorised top-k via partition + per-row partial sort.
+        n_rows = dist.shape[0]
+        if k_eff < n_refs:
+            # argpartition ensures the k smallest distances are in the first k
+            # positions (unsorted); we then sort just those k per row.
+            part = np.argpartition(dist, k_eff - 1, axis=1)[:, :k_eff]
+            row_range = np.arange(n_rows)[:, None]
+            part_d = dist[row_range, part]
+            sort_in_part = np.argsort(part_d, axis=1)
+            top_per_row = part[row_range, sort_in_part]
+        else:
+            top_per_row = np.argsort(dist, axis=1)[:, :k_eff]
+
+        for row_i in range(n_rows):
+            row = dist[row_i]
+            top = top_per_row[row_i]
+            if distance_threshold is not None:
+                top = top[row[top] <= distance_threshold]
+            results.append([(ref_accessions[int(i)], float(row[i])) for i in top])
+        del dist
     return results
 
 
-def _compute_distance_matrix(Q: np.ndarray, R: np.ndarray, metric: str) -> np.ndarray:
+def _compute_distance_matrix(
+    Q: np.ndarray,
+    R: np.ndarray,
+    metric: str,
+) -> np.ndarray:
+    """Dense distance matrix between all query/ref pairs.
+
+    Kept as a standalone helper because ``tests/test_predict_go_terms.py``
+    imports it directly to exercise the metric-dispatch error path.
+    Production code (``_search_numpy``) inlines the computation so it can
+    hoist chunk-invariant work out of the loop.
+    """
     if metric == "cosine":
         Q_n = Q / (np.linalg.norm(Q, axis=1, keepdims=True) + 1e-9)
         R_n = R / (np.linalg.norm(R, axis=1, keepdims=True) + 1e-9)

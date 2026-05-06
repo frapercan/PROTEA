@@ -11,7 +11,8 @@ from pika.adapters.blocking_connection import BlockingChannel
 from pika.spec import Basic, BasicProperties
 from sqlalchemy.orm import Session, sessionmaker
 
-from protea.core.contracts.operation import RetryLaterError
+from protea.config.tuning import get_tuning
+from protea.core.contracts.operation import RetryLaterError, make_safe_emit
 from protea.core.contracts.registry import OperationRegistry
 from protea.infrastructure.orm.models.job import JobEvent
 from protea.infrastructure.queue.publisher import publish_operation
@@ -21,6 +22,12 @@ logger = logging.getLogger(__name__)
 
 _DLX_NAME = "protea.dlx"
 _DLQ_NAME = "protea.dead-letter"
+
+# CUDA OOM retry policy for OperationConsumer.
+# Configured via QueueTuning (oom_max_retries / oom_base_delay /
+# oom_max_delay). Defaults: 5 retries, 5s base, 300s cap, backoff
+# 5/10/20/40/80s. ~155s wait budget before dead-letter.
+_OOM_RETRY_HEADER = "x-oom-retry"
 
 
 def _setup_dead_letter(channel: BlockingChannel) -> None:
@@ -263,45 +270,39 @@ class OperationConsumer:
             except (ValueError, TypeError):
                 pass
 
+        # Current OOM retry count from message headers (0 for fresh messages).
+        incoming_headers = dict(properties.headers or {})
+        oom_retry_count = int(incoming_headers.get(_OOM_RETRY_HEADER, 0))
+
         op = self._registry.get(operation_name)
         session = self._factory()
         try:
 
-            def emit(
+            def raw_emit(
                 event: str,
                 message: str | None = None,
                 fields: dict[str, Any] | None = None,
                 level: str = "info",
             ) -> None:
                 logger.info("operation.%s fields=%s", event, fields or {})
-                if parent_job_id is not None:
-                    event_session = self._factory()
-                    try:
-                        event_session.add(
-                            JobEvent(
-                                job_id=parent_job_id,
-                                event=f"child.{event}",
-                                message=message,
-                                fields=fields or {},
-                                level=level,
-                            )
+                if parent_job_id is None:
+                    return
+                event_session = self._factory()
+                try:
+                    event_session.add(
+                        JobEvent(
+                            job_id=parent_job_id,
+                            event=f"child.{event}",
+                            message=message,
+                            fields=fields or {},
+                            level=level,
                         )
-                        event_session.commit()
-                    except Exception as emit_exc:
-                        logger.warning(
-                            "Failed to write child event to parent job. "
-                            "parent_job_id=%s error=%s",
-                            parent_job_id,
-                            emit_exc,
-                        )
-                        try:
-                            event_session.rollback()
-                        except Exception:
-                            pass
-                    finally:
-                        event_session.close()
+                    )
+                    event_session.commit()
+                finally:
+                    event_session.close()
 
-            result = op.execute(session, payload, emit=emit)
+            result = op.execute(session, payload, emit=make_safe_emit(raw_emit))
             session.commit()
             # Forward any downstream operation messages (e.g. GPU→write worker).
             for queue_name, op_payload in result.publish_operations or []:
@@ -309,9 +310,15 @@ class OperationConsumer:
             channel.basic_ack(delivery_tag=method.delivery_tag)
             logger.info("Operation acked. operation=%s", operation_name)
         except Exception as exc:
-            requeue = self._requeue_on_failure
-            # CUDA OOM: free the GPU cache and requeue so the batch is retried
-            # once memory is available (e.g. after other workers release theirs).
+            try:
+                session.rollback()
+            except Exception:
+                pass
+
+            # CUDA OOM: free the GPU cache, apply exponential backoff, and
+            # republish with an incremented retry counter in message headers.
+            # After _OOM_MAX_RETRIES the message is dead-lettered so the hot
+            # loop cannot burn the GPU for hours on an impossible batch size.
             if "CUDA out of memory" in str(exc):
                 try:
                     import torch
@@ -319,43 +326,138 @@ class OperationConsumer:
                     torch.cuda.empty_cache()
                 except Exception:
                     pass
-                requeue = True
-                logger.warning(
-                    "CUDA OOM — cache cleared, message requeued. operation=%s", operation_name
-                )
-            else:
-                logger.error("Operation failed. operation=%s error=%s", operation_name, exc)
-                # Record failure event on parent job so it's visible in the UI.
-                if parent_job_id is not None:
-                    err_session = self._factory()
+
+                qsettings = get_tuning().queue
+                if oom_retry_count < qsettings.oom_max_retries:
+                    next_count = oom_retry_count + 1
+                    delay = min(
+                        qsettings.oom_base_delay * (2**oom_retry_count),
+                        qsettings.oom_max_delay,
+                    )
+                    logger.warning(
+                        "CUDA OOM: backing off %ds (retry %d/%d). operation=%s",
+                        delay,
+                        next_count,
+                        qsettings.oom_max_retries,
+                        operation_name,
+                    )
+                    self._emit_parent_event(
+                        parent_job_id,
+                        "child.cuda_oom_retry",
+                        f"CUDA OOM on {operation_name}; retry {next_count}/{qsettings.oom_max_retries} "
+                        f"after {delay}s backoff",
+                        {
+                            "operation": operation_name,
+                            "retry_count": next_count,
+                            "max_retries": qsettings.oom_max_retries,
+                            "delay_seconds": delay,
+                        },
+                        level="warning",
+                    )
+                    # Block the consumer while honouring AMQP heartbeats.
                     try:
-                        err_session.add(
-                            JobEvent(
-                                job_id=parent_job_id,
-                                event="child.failed",
-                                message=str(exc)[:2000],
-                                fields={
-                                    "operation": operation_name,
-                                    "error_code": exc.__class__.__name__,
-                                },
-                                level="error",
-                            )
-                        )
-                        err_session.commit()
+                        channel.connection.sleep(delay)
                     except Exception:
-                        try:
-                            err_session.rollback()
-                        except Exception:
-                            pass
-                    finally:
-                        err_session.close()
+                        pass
+
+                    new_headers = {**incoming_headers, _OOM_RETRY_HEADER: next_count}
+                    try:
+                        channel.basic_publish(
+                            exchange="",
+                            routing_key=self._queue_name,
+                            body=body,
+                            properties=pika.BasicProperties(
+                                delivery_mode=pika.DeliveryMode.Persistent,
+                                headers=new_headers,
+                            ),
+                        )
+                        channel.basic_ack(delivery_tag=method.delivery_tag)
+                        return
+                    except Exception as republish_exc:
+                        logger.error(
+                            "Failed to republish OOM message; dead-lettering. "
+                            "operation=%s error=%s",
+                            operation_name,
+                            republish_exc,
+                        )
+                        # fall through to dead-letter path
+
+                # Retries exhausted — dead-letter the message.
+                logger.error(
+                    "CUDA OOM retries exhausted — dead-lettering. operation=%s retries=%d",
+                    operation_name,
+                    oom_retry_count,
+                )
+                self._emit_parent_event(
+                    parent_job_id,
+                    "child.cuda_oom_dead_letter",
+                    f"CUDA OOM on {operation_name} after {oom_retry_count} retries; "
+                    f"message dead-lettered",
+                    {
+                        "operation": operation_name,
+                        "retries": oom_retry_count,
+                        "error": str(exc)[:500],
+                    },
+                    level="error",
+                )
+                channel.basic_nack(
+                    delivery_tag=method.delivery_tag,
+                    requeue=False,
+                )
+                return
+
+            logger.error("Operation failed. operation=%s error=%s", operation_name, exc)
+            self._emit_parent_event(
+                parent_job_id,
+                "child.failed",
+                str(exc)[:2000],
+                {
+                    "operation": operation_name,
+                    "error_code": exc.__class__.__name__,
+                },
+                level="error",
+            )
+            channel.basic_nack(
+                delivery_tag=method.delivery_tag,
+                requeue=self._requeue_on_failure,
+            )
+        finally:
+            session.close()
+
+    def _emit_parent_event(
+        self,
+        parent_job_id: UUID | None,
+        event: str,
+        message: str | None,
+        fields: dict[str, Any],
+        *,
+        level: str = "info",
+    ) -> None:
+        """Write a ``JobEvent`` row against the parent job (best-effort)."""
+        if parent_job_id is None:
+            return
+        session = self._factory()
+        try:
+            session.add(
+                JobEvent(
+                    job_id=parent_job_id,
+                    event=event,
+                    message=message,
+                    fields=fields,
+                    level=level,
+                )
+            )
+            session.commit()
+        except Exception as exc:
+            logger.warning(
+                "Failed to write event to parent job. parent_job_id=%s event=%s error=%s",
+                parent_job_id,
+                event,
+                exc,
+            )
             try:
                 session.rollback()
             except Exception:
                 pass
-            channel.basic_nack(
-                delivery_tag=method.delivery_tag,
-                requeue=requeue,
-            )
         finally:
             session.close()

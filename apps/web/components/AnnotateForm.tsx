@@ -7,23 +7,40 @@ import {
   annotateProteins,
   getJob,
   launchPredictGoTerms,
+  listJobs,
   listPredictionSets,
   type AnnotateResult,
+  type Job,
 } from "@/lib/api";
 
 type Stage = "idle" | "uploading" | "embedding" | "predicting" | "done" | "error";
 
 const POLL_MS = 3_000;
+const QUEUE_POLL_MS = 30_000;
 
-const EXAMPLE_FASTA = `>sp|P04637|P53_HUMAN Cellular tumor antigen p53
+// Operations that occupy the shared GPU pipeline. While any of these is
+// queued or running we block new user annotation requests, since they won't
+// actually enter the queue in a reasonable time frame.
+const BLOCKING_OPERATIONS = new Set([
+  "compute_embeddings",
+  "compute_embeddings_batch",
+  "predict_go_terms",
+  "predict_go_terms_batch",
+]);
+
+const EXAMPLE_FASTA = `>sp|P01116|RASK_HUMAN GTPase KRas OS=Homo sapiens OX=9606 GN=KRAS PE=1 SV=1
+MTEYKLVVVGAGGVGKSALTIQLIQNHFVDEYDPTIEDSYRKQVVIDGETCLLDILDTAG
+QEEYSAMRDQYMRTGEGFLCVFAINNTKSFEDIHHYREQIKRVKDSEDVPMVLVGNKCDL
+PSRTVDTKQAQDLARSYGIPFIETSAKTRQRVEDAFYTLVREIRQYRLKKISKEEKTPGC
+VKIKKCIIM
+>sp|P04637|P53_HUMAN Cellular tumor antigen p53 OS=Homo sapiens OX=9606 GN=TP53 PE=1 SV=4
 MEEPQSDPSVEPPLSQETFSDLWKLLPENNVLSPLPSQAMDDLMLSPDDIEQWFTEDPGP
-DEAPRMPEAAPPVAPAPAAPTPAAPAPAPSWPLSSSVPSQKTYPQGLNGTVNLPGRNSFEV
-RVCACPGRDRRTEEENLHKTTGIDSFLHPEVEYFTPETDPAGPMCSRHFYQLAKTCPVQLW
-VDSTPPPGTRVRAMAIYKQSQHMTEVVRRCPHERCTCGGNHGISTTTGICLICQFFLVHKP
->sp|P38398|BRCA1_HUMAN Breast cancer type 1 susceptibility protein
-MDLSALRVEEVQNVINAMQKILECPICLELIKEPVSTKCDHIFCKFCMLKLLNQKKGPSQC
-PLCKNDITKRSLQESTRFSQLVEELLKIICAFQLDTGLEYANSYNFAKKENNSPEHLKDEV
-SIIQSMGYRNRAKRLLQSEPENPSLQETSLSVQLSNLGTVRTLRTKQRIQPQKTSVYIELG`;
+DEAPRMPEAAPPVAPAPAAPTPAAPAPAPSWPLSSSVPSQKTYQGSYGFRLGFLHSGTAK
+SVTCTYSPALNKMFCQLAKTCPVQLWVDSTPPPGTRVRAMAIYKQSQHMTEVVRRCPHHE
+RCSDSDGLAPPQHLIRVEGNLRVEYLDDRNTFRHSVVVPYEPPEVGSDCTTIHYNYMCNS
+SCMGGMNRRPILTIITLEDSSGNLLGRNSFEVRVCACPGRDRRTEEENLRKKGEPHHELP
+PGSTKRALPNNTSSSPQPKKKPLDGEYFTLQIRGRERFEMFRELNEALELKDAQAGKEPG
+GSRAHSSHLKSKKGQSTSRHKKLMFKTEGPDSD`;
 
 export function AnnotateForm() {
   const t = useTranslations("home");
@@ -40,6 +57,11 @@ export function AnnotateForm() {
 
   // Drag-and-drop state
   const [dragOver, setDragOver] = useState(false);
+
+  // Queue-awareness: poll active jobs and block submission while any
+  // embedding/prediction operation is queued or running, because our
+  // single-GPU setup can't absorb another request in reasonable time.
+  const [blockingJobs, setBlockingJobs] = useState<Job[] | null>(null);
 
   const handleFile = (file: File) => {
     const reader = new FileReader();
@@ -152,7 +174,49 @@ export function AnnotateForm() {
     };
   }, []);
 
+  // Poll for active embedding/prediction jobs to know whether the GPU
+  // pipeline is currently saturated.
+  useEffect(() => {
+    let cancelled = false;
+    const fetchBlocking = async () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      try {
+        const [queued, running] = await Promise.all([
+          listJobs({ limit: 100, status: "queued" }),
+          listJobs({ limit: 100, status: "running" }),
+        ]);
+        if (cancelled) return;
+        const merged = [...running, ...queued].filter((j) =>
+          BLOCKING_OPERATIONS.has(j.operation),
+        );
+        setBlockingJobs(merged);
+      } catch {
+        // ignore transient errors; keep prior state
+      }
+    };
+    fetchBlocking();
+    const id = setInterval(fetchBlocking, QUEUE_POLL_MS);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") fetchBlocking();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
+
   const isRunning = stage === "uploading" || stage === "embedding" || stage === "predicting";
+  // A running local annotation flow already owns the UI; don't double-block.
+  const isQueueBlocked = !isRunning && (blockingJobs?.length ?? 0) > 0;
+  const runningJob = blockingJobs?.find((j) => j.status === "running") ?? null;
+  const runningPct =
+    runningJob && runningJob.progress_total && runningJob.progress_current
+      ? Math.round((runningJob.progress_current / runningJob.progress_total) * 100)
+      : null;
+  const queuedCount =
+    blockingJobs?.filter((j) => j.status === "queued").length ?? 0;
 
   return (
     <section className="rounded-2xl border-2 border-blue-100 bg-gradient-to-b from-blue-50/60 to-white p-6 sm:p-8">
@@ -162,6 +226,41 @@ export function AnnotateForm() {
       <p className="text-sm text-gray-500 mb-5">
         {t("annotateDescription" as any)}
       </p>
+
+      {/* Queue-busy banner ─ blocks submission while the GPU pipeline is saturated */}
+      {isQueueBlocked && (
+        <div
+          role="status"
+          className="mb-5 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
+        >
+          <div className="flex items-start gap-2">
+            <span aria-hidden className="text-base leading-none">⏳</span>
+            <div className="flex-1">
+              <p className="font-semibold">
+                {t("annotateQueueBlockedTitle" as any)}
+              </p>
+              <p className="mt-1 text-amber-800">
+                {t("annotateQueueBlockedBody" as any)}
+              </p>
+              <ul className="mt-2 space-y-0.5 text-xs text-amber-800">
+                {runningJob && (
+                  <li>
+                    <span className="font-mono">{runningJob.operation}</span>
+                    {" — "}
+                    {t("annotateQueueRunningLabel" as any)}
+                    {runningPct != null ? ` (${runningPct}%)` : ""}
+                  </li>
+                )}
+                {queuedCount > 0 && (
+                  <li>
+                    {t("annotateQueueWaitingLabel" as any)}: {queuedCount}
+                  </li>
+                )}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* FASTA input */}
       <div
@@ -182,10 +281,10 @@ export function AnnotateForm() {
           onChange={(e) => setFasta(e.target.value)}
           placeholder={t("annotatePlaceholder" as any)}
           rows={6}
-          disabled={isRunning}
+          disabled={isRunning || isQueueBlocked}
           className="w-full rounded-lg p-4 text-xs font-mono text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-300 resize-y disabled:opacity-50 disabled:cursor-not-allowed bg-transparent"
         />
-        {!fasta && !isRunning && (
+        {!fasta && !isRunning && !isQueueBlocked && (
           <div className="absolute bottom-3 right-3 flex gap-2">
             <button
               type="button"
@@ -219,7 +318,8 @@ export function AnnotateForm() {
       <div className="mt-4 flex items-center gap-4">
         <button
           onClick={handleSubmit}
-          disabled={!fasta.trim() || isRunning}
+          disabled={!fasta.trim() || isRunning || isQueueBlocked}
+          title={isQueueBlocked ? t("annotateQueueBlockedTitle" as any) : undefined}
           className="rounded-lg bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isRunning ? (

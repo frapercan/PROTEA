@@ -56,7 +56,9 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 @pytest.fixture(scope="session")
 def postgres_url(pytestconfig: pytest.Config) -> str:
     if not pytestconfig.getoption("--with-postgres"):
-        pytest.skip("Pass --with-postgres to run integration tests with a temporary Postgres container.")
+        pytest.skip(
+            "Pass --with-postgres to run integration tests with a temporary Postgres container."
+        )
 
     user = os.getenv("PROTEA_PG_USER", "usuario")
     password = os.getenv("PROTEA_PG_PASSWORD", "clave")
@@ -65,12 +67,14 @@ def postgres_url(pytestconfig: pytest.Config) -> str:
 
     # If all connection params are provided via env vars, assume an external DB
     # is already running (e.g. a GitHub Actions service container) and skip Docker.
-    external_db = all([
-        os.getenv("PROTEA_PG_USER"),
-        os.getenv("PROTEA_PG_PASSWORD"),
-        os.getenv("PROTEA_PG_DB"),
-        host_port,
-    ])
+    external_db = all(
+        [
+            os.getenv("PROTEA_PG_USER"),
+            os.getenv("PROTEA_PG_PASSWORD"),
+            os.getenv("PROTEA_PG_DB"),
+            host_port,
+        ]
+    )
 
     if external_db:
         url = f"postgresql+psycopg://{user}:{password}@localhost:{host_port}/{db}"
@@ -109,7 +113,18 @@ def postgres_url(pytestconfig: pytest.Config) -> str:
         _wait_ready(container, user, db, timeout_s=int(os.getenv("PROTEA_PG_TIMEOUT", "60")))
 
         subprocess.run(
-            ["docker", "exec", container, "psql", "-U", user, "-d", db, "-c", "CREATE EXTENSION IF NOT EXISTS vector;"],
+            [
+                "docker",
+                "exec",
+                container,
+                "psql",
+                "-U",
+                user,
+                "-d",
+                db,
+                "-c",
+                "CREATE EXTENSION IF NOT EXISTS vector;",
+            ],
             text=True,
             capture_output=True,
         )

@@ -1,22 +1,42 @@
 from __future__ import annotations
 
-import os
 import time
 import uuid
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Any
 from uuid import UUID
 
 import numpy as np
-from pydantic import Field, field_validator
-from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
+from protea.core.annotation_intern import intern_string
+from protea.core.contracts.operation import EmitFn, OperationResult
+from protea.core.contracts.parent_progress import update_parent_progress
+from protea.core.disk_cache import (
+    _aspect_index_path,
+    _build_anno_csr,
+    _csr_lookup,
+    _derive_reference_views,
+    _load_anno_csr_from_disk,
+    _load_from_disk_cache,
+    _save_anno_csr_to_disk,
+    _save_to_disk_cache,
+)
+from protea.core.domain.aspect import ASPECT_CODES as _ASPECTS
 from protea.core.feature_engineering import compute_alignment, compute_taxonomy
+from protea.core.feature_enricher import NEW_V6_FEATURE_KEYS as _NEW_V6_FEATURE_KEYS
+from protea.core.feature_enricher import enrich_v6_features
 from protea.core.knn_search import search_knn
-from protea.core.utils import utcnow
+from protea.core.pca_cache import (
+    _load_or_fit_pca_state,
+)
+from protea.core.reranker import (
+    EMBEDDING_PCA_DIM,
+    apply_reranker,
+    infer_active_feature_families,
+    load_reranker,
+)
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
@@ -24,24 +44,26 @@ from protea.infrastructure.orm.models.annotation.protein_go_annotation import Pr
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
+from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
-from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
+from protea.infrastructure.orm.models.job import Job, JobStatus
 from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.orm.models.query.query_set import QuerySet, QuerySetEntry
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
+from protea.infrastructure.settings import load_settings
+from protea.infrastructure.storage import get_artifact_store
 
-PositiveInt = Annotated[int, Field(gt=0)]
+# Annotation and stream chunk sizes are configured via OperationTuning
+# (annotation_chunk_size, stream_chunk_size) and resolved at call time
+# inside the helpers below. At 1280 dims x 2 bytes (float16) x 2000 rows
+# the streaming reference query fetches ~5 MB per cursor round-trip,
+# keeping Python object pressure negligible.
 
-_ANNOTATION_CHUNK_SIZE = 10_000
 _BATCH_QUEUE = "protea.predictions.batch"
 _WRITE_QUEUE = "protea.predictions.write"
-# Rows fetched per round-trip when streaming reference embeddings from PostgreSQL.
-# At 1280 dims × 2 bytes (float16) × 2000 rows = ~5 MB per chunk — keeps Python
-# object pressure negligible while amortising cursor round-trips.
-_STREAM_CHUNK_SIZE = 2_000
 
-# GO aspect single-character codes used in GOTerm.aspect
-_ASPECTS = ("P", "F", "C")  # biological_process, molecular_function, cellular_component
+# GO aspect single-character codes used in GOTerm.aspect — imported above
+# from the canonical protea.core.domain.aspect module.
 
 # ---------------------------------------------------------------------------
 # Process-level reference cache
@@ -54,263 +76,90 @@ _ASPECTS = ("P", "F", "C")  # biological_process, molecular_function, cellular_c
 # Limited to 1 entry — evicts previous reference on config change.
 # ---------------------------------------------------------------------------
 _REF_CACHE: dict[tuple[str, str, bool], dict[str, Any]] = {}
-_REF_CACHE_MAX = 1
 
 # ---------------------------------------------------------------------------
-# Disk cache for reference embeddings
-# Survives worker restarts — avoids re-fetching GB of vectors from PostgreSQL.
-# Files: {cache_dir}/{emb_config_id}__{ann_set_id}_embeddings.npy
-#         {cache_dir}/{emb_config_id}__{ann_set_id}_accessions.npy
-# Invalidation: annotation sets are immutable once loaded, so the cache is
-# valid as long as the file exists. Delete files manually to force a reload.
+# v6 reranker feature constants
 # ---------------------------------------------------------------------------
-_DISK_CACHE_DIR = Path(os.environ.get("PROTEA_REF_CACHE_DIR", "data/ref_cache"))
+
+_STORE_FLOAT_KEYS: tuple[str, ...] = (
+    "identity_nw",
+    "similarity_nw",
+    "alignment_score_nw",
+    "gaps_pct_nw",
+    "alignment_length_nw",
+    "identity_sw",
+    "similarity_sw",
+    "alignment_score_sw",
+    "gaps_pct_sw",
+    "alignment_length_sw",
+    "length_query",
+    "length_ref",
+    "query_taxonomy_id",
+    "ref_taxonomy_id",
+    "taxonomic_lca",
+    "taxonomic_distance",
+    "taxonomic_common_ancestors",
+    "vote_count",
+    "k_position",
+    "go_term_frequency",
+    "ref_annotation_density",
+    "neighbor_distance_std",
+    "neighbor_vote_fraction",
+    "neighbor_min_distance",
+    "neighbor_mean_distance",
+    *_NEW_V6_FEATURE_KEYS,
+)
 
 
-def _disk_cache_paths(
-    embedding_config_id: uuid.UUID,
-    annotation_set_id: uuid.UUID,
-) -> tuple[Path, Path]:
-    """Return (embeddings_path, accessions_path) for the unified reference cache."""
-    key = f"{embedding_config_id}__{annotation_set_id}"
-    return (
-        _DISK_CACHE_DIR / f"{key}_embeddings.npy",
-        _DISK_CACHE_DIR / f"{key}_accessions.npy",
-    )
+def _clean_float(value: Any) -> Any:
+    """Return ``None`` for NaN / non-finite floats, pass-through otherwise.
 
-
-def _aspect_index_path(
-    embedding_config_id: uuid.UUID,
-    annotation_set_id: uuid.UUID,
-    aspect: str,
-) -> Path:
-    """Return the path for the per-aspect index array (int32 indices into the unified cache)."""
-    key = f"{embedding_config_id}__{annotation_set_id}"
-    return _DISK_CACHE_DIR / f"{key}__{aspect}_indices.npy"
-
-
-def _anno_disk_cache_paths(
-    embedding_config_id: uuid.UUID,
-    annotation_set_id: uuid.UUID,
-    aspect: str,
-) -> tuple[Path, Path, Path, Path]:
-    """Return (gtids, quals, ecodes, offsets) paths for the annotation CSR cache."""
-    key = f"{embedding_config_id}__{annotation_set_id}__{aspect}"
-    base = _DISK_CACHE_DIR
-    return (
-        base / f"{key}_anno_gtids.npy",
-        base / f"{key}_anno_quals.npy",
-        base / f"{key}_anno_ecodes.npy",
-        base / f"{key}_anno_offsets.npy",
-    )
-
-
-def _build_anno_csr(
-    accessions: list[str],
-    go_map: dict[str, list[dict[str, Any]]],
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Build a CSR-style annotation structure for the given accession list.
-
-    Returns (go_term_ids, qualifiers, evidence_codes, offsets) where
-    annotations for accessions[i] are at indices offsets[i]:offsets[i+1].
+    Postgres stores NaN as a real value in double precision columns, but
+    LightGBM treats NULL as missing (its native NA handling) while NaN can
+    trip numeric safeguards downstream. Keeping NaN out of the DB avoids
+    both footguns — feature columns read as ``None`` → pandas NA → LightGBM
+    missing.
     """
-    all_gtids: list[int] = []
-    all_quals: list[Any] = []
-    all_ecodes: list[Any] = []
-    offsets: list[int] = [0]
-    for acc in accessions:
-        for ann in go_map.get(acc, []):
-            all_gtids.append(ann["go_term_id"])
-            all_quals.append(ann.get("qualifier"))
-            all_ecodes.append(ann.get("evidence_code"))
-        offsets.append(len(all_gtids))
-    return (
-        np.array(all_gtids, dtype=np.int32),
-        np.array(all_quals, dtype=object),
-        np.array(all_ecodes, dtype=object),
-        np.array(offsets, dtype=np.int32),
-    )
-
-
-def _load_anno_csr_from_disk(
-    embedding_config_id: uuid.UUID,
-    annotation_set_id: uuid.UUID,
-    aspect: str,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
-    """Load annotation CSR arrays from disk. Returns None on miss or error."""
-    gtids_p, quals_p, ecodes_p, offsets_p = _anno_disk_cache_paths(
-        embedding_config_id, annotation_set_id, aspect
-    )
-    if not all(p.exists() for p in (gtids_p, quals_p, ecodes_p, offsets_p)):
+    if value is None:
         return None
-    try:
-        return (
-            np.load(gtids_p),
-            np.load(quals_p, allow_pickle=True),
-            np.load(ecodes_p, allow_pickle=True),
-            np.load(offsets_p),
-        )
-    except Exception:
-        return None
+    if isinstance(value, float):
+        if value != value or value in (float("inf"), float("-inf")):
+            return None
+    return value
 
 
-def _save_anno_csr_to_disk(
-    embedding_config_id: uuid.UUID,
-    annotation_set_id: uuid.UUID,
-    aspect: str,
-    gtids: np.ndarray,
-    quals: np.ndarray,
-    ecodes: np.ndarray,
-    offsets: np.ndarray,
-) -> None:
-    gtids_p, quals_p, ecodes_p, offsets_p = _anno_disk_cache_paths(
-        embedding_config_id, annotation_set_id, aspect
-    )
-    gtids_p.parent.mkdir(parents=True, exist_ok=True)
-    np.save(gtids_p, gtids)
-    np.save(quals_p, quals)
-    np.save(ecodes_p, ecodes)
-    np.save(offsets_p, offsets)
-
-
-def _csr_lookup(
-    query_accessions: set[str],
-    accessions: list[str],
-    acc_to_anno_idx: dict[str, int],
-    gtids: np.ndarray,
-    quals: np.ndarray,
-    ecodes: np.ndarray,
-    offsets: np.ndarray,
-) -> dict[str, list[dict[str, Any]]]:
-    """Return a go_map for query_accessions using the preloaded CSR annotation cache."""
-    go_map: dict[str, list[dict[str, Any]]] = {}
-    for acc in query_accessions:
-        idx = acc_to_anno_idx.get(acc)
-        if idx is None:
-            continue
-        start, end = int(offsets[idx]), int(offsets[idx + 1])
-        if start >= end:
-            continue
-        go_map[acc] = [
-            {
-                "go_term_id": int(gtids[j]),
-                "qualifier": quals[j] if quals[j] is not None else None,
-                "evidence_code": ecodes[j] if ecodes[j] is not None else None,
-            }
-            for j in range(start, end)
-        ]
-    return go_map
-
-
-def _load_from_disk_cache(
-    embedding_config_id: uuid.UUID,
-    annotation_set_id: uuid.UUID,
-) -> dict[str, Any] | None:
-    emb_path, acc_path = _disk_cache_paths(embedding_config_id, annotation_set_id)
-    if not emb_path.exists() or not acc_path.exists():
-        return None
-    try:
-        embeddings = np.load(emb_path)
-        accessions = list(np.load(acc_path))
-        return {"accessions": accessions, "embeddings": embeddings}
-    except Exception:
-        return None
-
-
-def _save_to_disk_cache(
-    embedding_config_id: uuid.UUID,
-    annotation_set_id: uuid.UUID,
-    accessions: list[str],
-    embeddings: np.ndarray,
-) -> None:
-    emb_path, acc_path = _disk_cache_paths(embedding_config_id, annotation_set_id)
-    emb_path.parent.mkdir(parents=True, exist_ok=True)
-    np.save(emb_path, embeddings)
-    np.save(acc_path, np.array(accessions))
+def _row_from_prediction(
+    pred: dict[str, Any],
+    prediction_set_id: uuid.UUID,
+) -> dict[str, Any]:
+    """Build a GOPrediction INSERT row from a predict-side prediction dict."""
+    row: dict[str, Any] = {
+        "prediction_set_id": prediction_set_id,
+        "protein_accession": pred["protein_accession"],
+        "go_term_id": pred["go_term_id"],
+        "ref_protein_accession": pred["ref_protein_accession"],
+        "distance": pred["distance"],
+        "qualifier": pred.get("qualifier"),
+        "evidence_code": pred.get("evidence_code"),
+        "taxonomic_relation": pred.get("taxonomic_relation"),
+    }
+    for key in _STORE_FLOAT_KEYS:
+        row[key] = _clean_float(pred.get(key))
+    return row
 
 
 # ---------------------------------------------------------------------------
 # Payloads
 # ---------------------------------------------------------------------------
+# T1.5 of master plan v3: payloads now live in protea-contracts.
+# Re-export here so existing imports of these classes from this module
+# keep working; new code should import from ``protea_contracts``.
 
-
-class PredictGOTermsPayload(ProteaPayload, frozen=True):
-    """Payload for the predict_go_terms coordinator job."""
-
-    embedding_config_id: str
-    annotation_set_id: str
-    ontology_snapshot_id: str
-    query_accessions: list[str] | None = None
-    query_set_id: str | None = None
-    limit_per_entry: PositiveInt = 5
-    distance_threshold: float | None = None
-    batch_size: PositiveInt = 1024
-
-    # Search backend
-    search_backend: str = "numpy"
-    metric: str = "cosine"
-    faiss_index_type: str = "Flat"
-    faiss_nlist: int = 100
-    faiss_nprobe: int = 10
-    faiss_hnsw_m: int = 32
-    faiss_hnsw_ef_search: int = 64
-
-    # Feature engineering (opt-in)
-    compute_alignments: bool = False
-    compute_taxonomy: bool = False
-    compute_reranker_features: bool = False
-
-    # Per-aspect KNN indices (opt-in)
-    # When True, three separate KNN indices are built — one per GO aspect (P/F/C).
-    # Each index contains only reference proteins annotated in that aspect, and only
-    # annotations of that aspect are transferred from matched neighbors.
-    # This guarantees that every query protein receives BPO, MFO, and CCO candidates
-    # even if its nearest neighbors in a unified index happen to be annotated only in
-    # one or two aspects (a common cause of BPO recall ceilings).
-    # Memory cost: 3× the reference embedding array; search time: 3 KNN calls per batch.
-    aspect_separated_knn: bool = True
-
-    @field_validator(
-        "embedding_config_id", "annotation_set_id", "ontology_snapshot_id", mode="before"
-    )
-    @classmethod
-    def must_be_non_empty(cls, v: str) -> str:
-        if not isinstance(v, str) or not v.strip():
-            raise ValueError("must be a non-empty string")
-        return v.strip()
-
-
-class PredictGOTermsBatchPayload(ProteaPayload, frozen=True):
-    """Payload for one KNN batch dispatched by the coordinator."""
-
-    embedding_config_id: str
-    annotation_set_id: str
-    prediction_set_id: str
-    parent_job_id: str
-    query_accessions: list[str]
-    query_set_id: str | None = None
-    limit_per_entry: PositiveInt = 5
-    distance_threshold: float | None = None
-    search_backend: str = "numpy"
-    metric: str = "cosine"
-    faiss_index_type: str = "Flat"
-    faiss_nlist: int = 100
-    faiss_nprobe: int = 10
-    faiss_hnsw_m: int = 32
-    faiss_hnsw_ef_search: int = 64
-    compute_alignments: bool = False
-    compute_taxonomy: bool = False
-    compute_reranker_features: bool = False
-    aspect_separated_knn: bool = True
-
-
-class StorePredictionsPayload(ProteaPayload, frozen=True):
-    """Payload carrying serialized prediction dicts to the write worker."""
-
-    parent_job_id: str
-    prediction_set_id: str
-    predictions: list[dict[str, Any]]
-
+from protea_contracts import (  # noqa: E402
+    PredictGOTermsBatchPayload,
+    PredictGOTermsPayload,
+    StorePredictionsPayload,
+)
 
 # ---------------------------------------------------------------------------
 # Coordinator
@@ -321,16 +170,69 @@ class PredictGOTermsOperation:
     """Coordinator: validates, creates PredictionSet, dispatches N batch messages.
 
     Pipeline:
-    1. Validate EmbeddingConfig / AnnotationSet / OntologySnapshot.
+
+    1. Validate ``EmbeddingConfig``, ``AnnotationSet`` and
+       ``OntologySnapshot``.
     2. Load query accessions that have embeddings (no embedding data — keeps
        the coordinator session light).
-    3. Create PredictionSet.
-    4. Partition accessions into batches and publish to protea.predictions.batch.
+    3. Create the ``PredictionSet``.
+    4. Partition accessions into batches and publish to
+       ``protea.predictions.batch``.
 
-    The actual KNN search and GO transfer happen inside PredictGOTermsBatchOperation.
+    The actual KNN search and GO transfer happen inside
+    ``PredictGOTermsBatchOperation``.
     """
 
     name = "predict_go_terms"
+    description = (
+        "Coordinator: create a PredictionSet and partition query proteins into "
+        "KNN batches dispatched to predict_go_terms_batch workers."
+    )
+
+    def summarize_payload(self, payload: dict[str, Any], *, session: Session | None = None) -> str:
+        p = payload or {}
+        bits: list[str] = []
+
+        cfg_id_raw = p.get("embedding_config_id")
+        if cfg_id_raw and session is not None:
+            try:
+                cfg = session.get(EmbeddingConfig, uuid.UUID(str(cfg_id_raw)))
+            except Exception:
+                cfg = None
+            if cfg is not None:
+                model_label = cfg.display_name or cfg.model_name or str(cfg.id)[:8]
+                bits.append(f"{model_label} ({cfg.model_backend})")
+        elif cfg_id_raw:
+            bits.append(f"cfg={str(cfg_id_raw)[:8]}")
+
+        ann_id_raw = p.get("annotation_set_id")
+        if ann_id_raw and session is not None:
+            try:
+                ann = session.get(AnnotationSet, uuid.UUID(str(ann_id_raw)))
+            except Exception:
+                ann = None
+            if ann is not None:
+                label = f"{ann.source}@{ann.source_version}" if ann.source_version else ann.source
+                bits.append(f"ref={label}")
+        elif ann_id_raw:
+            bits.append(f"ann={str(ann_id_raw)[:8]}")
+
+        if p.get("query_set_id"):
+            bits.append(f"qs={str(p['query_set_id'])[:8]}")
+        if p.get("limit_per_entry"):
+            bits.append(f"k={p['limit_per_entry']}")
+        if p.get("search_backend"):
+            backend = p["search_backend"]
+            if backend == "faiss" and p.get("faiss_index_type"):
+                backend = f"faiss/{p['faiss_index_type']}"
+            bits.append(backend)
+        if p.get("aspect_separated_knn"):
+            bits.append("aspect-knn")
+        if p.get("compute_alignments"):
+            bits.append("+align")
+        if p.get("compute_taxonomy"):
+            bits.append("+tax")
+        return " · ".join(bits)
 
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
@@ -362,6 +264,35 @@ class PredictGOTermsOperation:
             },
             "info",
         )
+
+        reranker_artifact_uri: str | None = None
+        reranker_feature_schema_sha: str | None = None
+        if p.reranker_model_id:
+            reranker_row = session.get(RerankerModel, uuid.UUID(p.reranker_model_id))
+            if reranker_row is None:
+                raise ValueError(f"RerankerModel {p.reranker_model_id} not found")
+            if not reranker_row.artifact_uri:
+                raise ValueError(
+                    f"RerankerModel {p.reranker_model_id} has no artifact_uri — "
+                    "register it via scripts/register_reranker.py"
+                )
+            if not reranker_row.feature_schema_sha:
+                raise ValueError(
+                    f"RerankerModel {p.reranker_model_id} has no feature_schema_sha — "
+                    "cannot validate feature alignment at inference time"
+                )
+            reranker_artifact_uri = reranker_row.artifact_uri
+            reranker_feature_schema_sha = reranker_row.feature_schema_sha
+            emit(
+                "predict_go_terms.reranker_bound",
+                None,
+                {
+                    "reranker_model_id": p.reranker_model_id,
+                    "reranker_name": reranker_row.name,
+                    "feature_schema_sha": reranker_feature_schema_sha,
+                },
+                "info",
+            )
 
         query_accessions = self._load_query_accessions(session, p, embedding_config_id, emit)
         if not query_accessions:
@@ -408,6 +339,7 @@ class PredictGOTermsOperation:
                         "payload": {
                             "embedding_config_id": p.embedding_config_id,
                             "annotation_set_id": p.annotation_set_id,
+                            "ontology_snapshot_id": p.ontology_snapshot_id,
                             "prediction_set_id": str(prediction_set.id),
                             "parent_job_id": str(parent_job_id),
                             "query_accessions": batch_accs,
@@ -424,7 +356,12 @@ class PredictGOTermsOperation:
                             "compute_alignments": p.compute_alignments,
                             "compute_taxonomy": p.compute_taxonomy,
                             "compute_reranker_features": p.compute_reranker_features,
+                            "compute_v6_features": p.compute_v6_features,
+                            "expand_votes_to_ancestors": p.expand_votes_to_ancestors,
                             "aspect_separated_knn": p.aspect_separated_knn,
+                            "reranker_model_id": p.reranker_model_id,
+                            "reranker_artifact_uri": reranker_artifact_uri,
+                            "reranker_feature_schema_sha": reranker_feature_schema_sha,
                         },
                     },
                 )
@@ -501,6 +438,15 @@ class PredictGOTermsBatchOperation:
     """
 
     name = "predict_go_terms_batch"
+    description = (
+        "CPU child job: KNN search and GO annotation transfer for one query "
+        "chunk; result is forwarded to store_predictions."
+    )
+
+    def summarize_payload(self, payload: dict[str, Any]) -> str:
+        p = payload or {}
+        n = len(p.get("query_accessions") or [])
+        return f"n={n}" if n else ""
 
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
@@ -528,7 +474,10 @@ class PredictGOTermsBatchOperation:
         cache_key = (p.embedding_config_id, p.annotation_set_id, p.aspect_separated_knn)
         if cache_key not in _REF_CACHE:
             # Evict oldest entry when cache is full to free numpy arrays from memory.
-            if len(_REF_CACHE) >= _REF_CACHE_MAX:
+            from protea.config.tuning import get_tuning
+
+            cache_max = get_tuning().worker.ref_cache_max
+            if len(_REF_CACHE) >= cache_max:
                 evict_key = next(iter(_REF_CACHE))
                 del _REF_CACHE[evict_key]
             emit(
@@ -559,8 +508,15 @@ class PredictGOTermsBatchOperation:
 
         t0 = time.perf_counter()
 
+        v6_ctx: dict[str, Any] | None = None
+
         if p.aspect_separated_knn:
-            prediction_dicts = self._run_aspect_separated_knn(
+            (
+                prediction_dicts,
+                neighbors_by_aspect,
+                go_map_by_aspect,
+                pair_features,
+            ) = self._run_aspect_separated_knn(
                 session,
                 valid_accessions,
                 query_embeddings,
@@ -569,14 +525,23 @@ class PredictGOTermsBatchOperation:
                 prediction_set_id,
                 p,
             )
+            if p.compute_v6_features:
+                v6_ctx = {
+                    "neighbors_by_aspect": neighbors_by_aspect,
+                    "go_map_by_aspect": go_map_by_aspect,
+                    "pair_features": pair_features,
+                }
         else:
             ref_data = _REF_CACHE[cache_key]
             if not ref_data["embeddings"].size:
                 emit("predict_go_terms_batch.no_references", None, {}, "warning")
                 return OperationResult(result={"predictions": 0})
 
-            # --- KNN: convert float16 cache → float32 for search ---
-            ref_embeddings_f32 = ref_data["embeddings"].astype(np.float32)
+            # --- KNN: use precomputed f32 (cosine-normalised if metric == cosine) ---
+            use_cos = p.metric == "cosine"
+            ref_embeddings_f32 = (
+                ref_data["embeddings_f32_cos"] if use_cos else ref_data["embeddings_f32"]
+            )
             neighbors = search_knn(
                 query_embeddings,
                 ref_embeddings_f32,
@@ -585,6 +550,7 @@ class PredictGOTermsBatchOperation:
                 distance_threshold=p.distance_threshold,
                 backend=p.search_backend,
                 metric=p.metric,
+                pre_normalized=use_cos,
                 faiss_index_type=p.faiss_index_type,
                 faiss_nlist=p.faiss_nlist,
                 faiss_nprobe=p.faiss_nprobe,
@@ -618,7 +584,7 @@ class PredictGOTermsBatchOperation:
                 "embeddings": ref_embeddings_f32,
                 "go_map": go_map,
             }
-            prediction_dicts = self._predict_batch(
+            prediction_dicts, neighbors, pair_features = self._predict_batch(
                 valid_accessions,
                 query_embeddings,
                 ref_data_with_annotations,
@@ -630,23 +596,170 @@ class PredictGOTermsBatchOperation:
                 ref_tax_ids=ref_tax_ids,
                 query_tax_ids=query_tax_ids,
             )
+            if p.compute_v6_features:
+                # Unified mode: collapse to a single synthetic aspect key so the
+                # enricher can partition GO terms via the aspect map.
+                v6_ctx = {
+                    "neighbors_by_aspect": {"": neighbors},
+                    "go_map_by_aspect": {"": go_map},
+                    "pair_features": pair_features,
+                }
+
+        # --- v6 feature enrichment (Anc2Vec + tax_voters + emb_pca) ---------
+        if p.compute_v6_features and v6_ctx is not None and prediction_dicts:
+            ref_unified = _REF_CACHE[cache_key]
+            # For aspect-separated mode, the cache is a per-aspect dict —
+            # concatenate f32 embeddings to fit PCA on the full pool.
+            if p.aspect_separated_knn:
+                pools = [
+                    ref_unified[a]["embeddings_f32"]
+                    for a in _ASPECTS
+                    if ref_unified[a].get("embeddings_f32") is not None
+                    and ref_unified[a]["embeddings_f32"].size
+                ]
+                pca_pool = (
+                    np.concatenate(pools, axis=0) if pools else np.empty((0,), dtype=np.float32)
+                )
+            else:
+                pca_pool = ref_unified.get("embeddings_f32", np.empty((0,), dtype=np.float32))
+
+            pca_state = _load_or_fit_pca_state(embedding_config_id, pca_pool)
+            enrich_v6_features(
+                prediction_dicts,
+                session=session,
+                valid_accessions=valid_accessions,
+                query_embeddings=query_embeddings,
+                neighbors_by_aspect=v6_ctx["neighbors_by_aspect"],
+                go_map_by_aspect=v6_ctx["go_map_by_aspect"],
+                pair_features=v6_ctx["pair_features"],
+                pca_state=pca_state,
+                compute_taxonomy=p.compute_taxonomy,
+            )
+            emit(
+                "predict_go_terms_batch.v6_features_done",
+                None,
+                {
+                    "pca_state_fit": pca_state is not None,
+                    "pca_dim": EMBEDDING_PCA_DIM if pca_state is not None else 0,
+                    "rows_enriched": len(prediction_dicts),
+                },
+                "info",
+            )
+
+        # Ancestor expansion — required for the lab booster's candidate
+        # distribution. Runs AFTER v6 enrichment so synthetic ancestor
+        # records inherit the leaf's anc2vec_/emb_pca_ values, mirroring
+        # what the dump helper emits.
+        if p.expand_votes_to_ancestors and prediction_dicts:
+            from sqlalchemy import select
+
+            from protea.core.feature_enricher import (
+                expand_predictions_to_ancestors,
+                load_parent_map,
+            )
+
+            # predict_go_terms keys candidates by integer ``go_term_id``;
+            # the expansion helper (and parent_map) operate on string GO
+            # accessions (``"GO:0006357"``). Materialise the map once for
+            # this batch's candidate set, then add ``go_id`` to each record
+            # before expanding. After expansion, synthetic ancestor records
+            # need ``go_term_id`` resolved back so the bulk insert can use
+            # the FK — pull both directions from ``go_term`` in one query.
+            parent_map = load_parent_map(session, uuid.UUID(p.ontology_snapshot_id))
+            unique_int_ids = {
+                rec["go_term_id"] for rec in prediction_dicts if rec.get("go_term_id")
+            }
+            id_pairs = session.execute(
+                select(GOTerm.id, GOTerm.go_id).where(GOTerm.id.in_(unique_int_ids))
+            ).all()
+            int_to_str = {gid: go_id for gid, go_id in id_pairs}
+            for rec in prediction_dicts:
+                gid = rec.get("go_term_id")
+                if gid is not None and gid in int_to_str:
+                    rec["go_id"] = int_to_str[gid]
+
+            n_before = len(prediction_dicts)
+            prediction_dicts = expand_predictions_to_ancestors(
+                prediction_dicts,
+                parent_map=parent_map,
+                k_limit=p.limit_per_entry,
+                ia_weights=None,
+            )
+
+            # Synthetic ancestors get a ``go_id`` string but no ``go_term_id``
+            # (the helper just clones the leaf record). Resolve the FK so
+            # store_predictions can insert the row.
+            ancestor_strs = {
+                rec["go_id"]
+                for rec in prediction_dicts
+                if rec.get("go_id") and rec["go_id"] not in {v for v in int_to_str.values()}
+            }
+            if ancestor_strs:
+                anc_pairs = session.execute(
+                    select(GOTerm.id, GOTerm.go_id).where(
+                        GOTerm.go_id.in_(ancestor_strs),
+                        GOTerm.ontology_snapshot_id == uuid.UUID(p.ontology_snapshot_id),
+                    )
+                ).all()
+                str_to_int = {go_id: gid for gid, go_id in anc_pairs}
+                str_to_int.update({v: k for k, v in int_to_str.items()})
+                # Drop ancestors that don't exist in this snapshot — predict
+                # cannot store rows without a valid go_term FK.
+                prediction_dicts = [
+                    {**rec, "go_term_id": str_to_int[rec["go_id"]]}
+                    for rec in prediction_dicts
+                    if rec.get("go_id") in str_to_int
+                ]
+
+            emit(
+                "predict_go_terms_batch.expanded_to_ancestors",
+                None,
+                {
+                    "rows_before": n_before,
+                    "rows_after": len(prediction_dicts),
+                    "expansion_ratio": (len(prediction_dicts) / n_before if n_before else 0.0),
+                },
+                "info",
+            )
+
+        reranker_stats: dict[str, Any] | None = None
+        if p.reranker_model_id and prediction_dicts:
+            reranker_stats = self._apply_reranker_if_aligned(session, prediction_dicts, p, emit)
 
         elapsed = time.perf_counter() - t0
 
+        done_fields: dict[str, Any] = {
+            "queries": len(valid_accessions),
+            "predictions": len(prediction_dicts),
+            "elapsed_seconds": elapsed,
+        }
+        if reranker_stats is not None:
+            done_fields["reranker"] = reranker_stats
         emit(
             "predict_go_terms_batch.done",
             None,
-            {
-                "queries": len(valid_accessions),
-                "predictions": len(prediction_dicts),
-                "elapsed_seconds": elapsed,
-            },
+            done_fields,
             "info",
         )
 
-        return OperationResult(
-            result={"predictions": len(prediction_dicts)},
-            publish_operations=[
+        # RabbitMQ caps message size at 128 MB; ancestor-expanded batches
+        # serialise to ~250-300 MB and silently land in the dead-letter
+        # queue. Split into ≤10k-row chunks (~20-25 MB each) so the write
+        # worker actually receives them and broker memory pressure stays low
+        # even when many batches publish concurrently. Only the final chunk
+        # advances the coordinator's batch counter (``is_final_chunk=True``)
+        # so the parent job doesn't mark itself succeeded after the first
+        # batch's chunks finish.
+        from protea.config.tuning import get_tuning
+
+        store_chunk_size = get_tuning().operation.store_chunk_size
+        chunks: list[list[dict[str, Any]]] = [
+            prediction_dicts[s : s + store_chunk_size]
+            for s in range(0, len(prediction_dicts), store_chunk_size)
+        ] or [[]]
+        store_messages: list[tuple[str, dict[str, Any]]] = []
+        for i, chunk in enumerate(chunks):
+            store_messages.append(
                 (
                     _WRITE_QUEUE,
                     {
@@ -655,14 +768,148 @@ class PredictGOTermsBatchOperation:
                         "payload": {
                             "parent_job_id": str(parent_job_id),
                             "prediction_set_id": str(prediction_set_id),
-                            "predictions": prediction_dicts,
+                            "predictions": chunk,
+                            "is_final_chunk": i == len(chunks) - 1,
                         },
                     },
                 )
-            ],
+            )
+
+        return OperationResult(
+            result={
+                "predictions": len(prediction_dicts),
+                "store_chunks": len(store_messages),
+            },
+            publish_operations=store_messages,
         )
 
     # ── helpers ──────────────────────────────────────────────────────────────
+
+    def _apply_reranker_if_aligned(
+        self,
+        session: Session,
+        prediction_dicts: list[dict[str, Any]],
+        p: PredictGOTermsBatchPayload,
+        emit: EmitFn,
+    ) -> dict[str, Any] | None:
+        """Score ``prediction_dicts`` with the configured reranker.
+
+        The booster is skipped (never crashed) whenever any of the load-
+        bearing preconditions fails:
+
+        * ``artifact_uri`` / ``feature_schema_sha`` missing in the payload
+          (coordinator bug — should not happen, but we log and continue).
+        * ``protea_reranker_lab.contracts`` is not importable (production
+          image without the dev dep).
+        * ``live_sha != expected_sha`` (feature set diverged since
+          training — silently fall back to KNN distance ordering).
+
+        On success the ``reranker_score`` float ends up on every prediction
+        dict in memory (not persisted — ``GOPrediction`` has no column for
+        it yet) and the method returns per-batch summary stats for the
+        ``predict_go_terms_batch.done`` event.
+        """
+        if not (p.reranker_artifact_uri and p.reranker_feature_schema_sha):
+            emit(
+                "reranker.skipped",
+                None,
+                {"reason": "missing_artifact_context", "reranker_model_id": p.reranker_model_id},
+                "warning",
+            )
+            return None
+
+        try:
+            # T1.8 boundary validation: live sha computed via the canonical
+            # protea_contracts implementation (single source of truth).
+            from protea_contracts import compute_feature_schema_sha
+        except Exception as exc:
+            emit(
+                "reranker.skipped",
+                None,
+                {
+                    "reason": "contracts_unavailable",
+                    "reranker_model_id": p.reranker_model_id,
+                    "error": str(exc),
+                },
+                "warning",
+            )
+            return None
+
+        live_families = infer_active_feature_families(
+            compute_alignments=p.compute_alignments,
+            compute_taxonomy=p.compute_taxonomy,
+            compute_v6_features=p.compute_v6_features,
+        )
+        live_sha = compute_feature_schema_sha(live_families)
+        if live_sha != p.reranker_feature_schema_sha:
+            emit(
+                "reranker.schema_mismatch",
+                None,
+                {
+                    "reranker_model_id": p.reranker_model_id,
+                    "expected_sha": p.reranker_feature_schema_sha,
+                    "live_sha": live_sha,
+                    "live_families": live_families,
+                },
+                "error",
+            )
+            return {
+                "applied": False,
+                "skipped_reason": "schema_mismatch",
+                "expected_sha": p.reranker_feature_schema_sha,
+                "live_sha": live_sha,
+            }
+
+        import pandas as pd
+
+        project_root = Path(__file__).resolve().parents[2]
+        settings = load_settings(project_root)
+        store = get_artifact_store(settings)
+        booster = load_reranker(
+            p.reranker_artifact_uri,
+            feature_schema_sha=p.reranker_feature_schema_sha,
+            store=store,
+        )
+
+        self._attach_go_term_aspect(session, prediction_dicts)
+        df = pd.DataFrame(prediction_dicts)
+        scores = apply_reranker(df, booster)
+
+        for rec, score in zip(prediction_dicts, scores.tolist(), strict=True):
+            rec["reranker_score"] = float(score)
+
+        if scores.size == 0:
+            return {"applied": True, "rows": 0}
+        return {
+            "applied": True,
+            "rows": int(scores.size),
+            "score_min": float(scores.min()),
+            "score_max": float(scores.max()),
+            "score_mean": float(scores.mean()),
+            "feature_schema_sha": live_sha,
+        }
+
+    def _attach_go_term_aspect(
+        self,
+        session: Session,
+        prediction_dicts: list[dict[str, Any]],
+    ) -> None:
+        """Look up ``GOTerm.aspect`` for every unique ``go_term_id`` and
+        write it back onto each prediction dict so the reranker's
+        categorical feature is populated.
+        """
+        unique_ids = {
+            rec["go_term_id"] for rec in prediction_dicts if rec.get("go_term_id") is not None
+        }
+        if not unique_ids:
+            return
+        aspect_by_id: dict[int, str] = dict(
+            session.query(GOTerm.id, GOTerm.aspect).filter(GOTerm.id.in_(unique_ids)).all()
+        )
+        for rec in prediction_dicts:
+            gid = rec.get("go_term_id")
+            if gid is not None and gid in aspect_by_id:
+                rec["aspect"] = aspect_by_id[gid]
 
     def _load_reference_data(
         self,
@@ -695,7 +942,7 @@ class PredictGOTermsBatchOperation:
                 },
                 "info",
             )
-            return cached
+            return _derive_reference_views(cached["accessions"], cached["embeddings"])
 
         annotated_accessions_sq = (
             session.query(ProteinGOAnnotation.protein_accession)
@@ -721,19 +968,24 @@ class PredictGOTermsBatchOperation:
         # materialises ~14 GB of Python float objects and hits swap.
         total = base_q.count()
         if total == 0:
-            return {"accessions": [], "embeddings": np.empty((0,), dtype=np.float16)}
+            return _derive_reference_views([], np.empty((0,), dtype=np.float16))
 
-        # Determine embedding dimension from a single row.
+        # Determine embedding dimension from a single row.  Rows come back as
+        # pgvector HalfVector instances after the 2026-04-11 halfvec migration —
+        # they expose .dimensions() and .to_numpy() but not len() / __array__.
         first_emb = base_q.limit(1).one()[1]
-        dim = len(first_emb)
+        dim = first_emb.dimensions()
 
         # Pre-allocate float16 array; fill row-by-row via yield_per so the
-        # cursor fetches _STREAM_CHUNK_SIZE rows at a time — peak Python-object
-        # memory stays at ~chunk_size × dim × 28 bytes ≈ tens of MB, not 14 GB.
+        # cursor fetches stream_chunk_size rows at a time, peak Python-object
+        # memory stays at ~chunk_size x dim x 28 bytes ~= tens of MB, not 14 GB.
+        from protea.config.tuning import get_tuning
+
+        stream_chunk = get_tuning().operation.stream_chunk_size
         embeddings = np.empty((total, dim), dtype=np.float16)
         accessions: list[str] = []
-        for i, (acc, emb) in enumerate(base_q.yield_per(_STREAM_CHUNK_SIZE)):
-            embeddings[i] = emb
+        for i, (acc, emb) in enumerate(base_q.yield_per(stream_chunk)):
+            embeddings[i] = emb.to_numpy()
             accessions.append(acc)
 
         _save_to_disk_cache(embedding_config_id, annotation_set_id, accessions, embeddings)
@@ -749,7 +1001,7 @@ class PredictGOTermsBatchOperation:
             "info",
         )
 
-        return {"accessions": accessions, "embeddings": embeddings}
+        return _derive_reference_views(accessions, embeddings)
 
     def _load_reference_data_per_aspect(
         self,
@@ -800,7 +1052,7 @@ class PredictGOTermsBatchOperation:
         unified = self._load_reference_data(session, embedding_config_id, annotation_set_id, emit)
         if not unified["accessions"]:
             return {
-                asp: {"accessions": [], "embeddings": np.empty((0,), dtype=np.float16)}
+                asp: _derive_reference_views([], np.empty((0,), dtype=np.float16))
                 for asp in _ASPECTS
             }
 
@@ -848,11 +1100,14 @@ class PredictGOTermsBatchOperation:
             for acc, asp, go_term_id, qualifier, evidence_code in rows:
                 if asp in aspect_to_accset:
                     aspect_to_accset[asp].add(acc)
-                    aspect_to_go_map[asp].setdefault(acc, []).append({
-                        "go_term_id": go_term_id,
-                        "qualifier": qualifier,
-                        "evidence_code": evidence_code,
-                    })
+                    aspect_to_go_map[asp].setdefault(acc, []).append(
+                        {
+                            "go_term_id": go_term_id,
+                            # Flyweight — see ``protea.core.annotation_intern``.
+                            "qualifier": intern_string(qualifier),
+                            "evidence_code": intern_string(evidence_code),
+                        }
+                    )
 
             for asp in missing_aspects:
                 # Save embedding index array
@@ -880,6 +1135,8 @@ class PredictGOTermsBatchOperation:
 
             aspect_accessions = [unified["accessions"][i] for i in indices]
             aspect_embeddings = unified["embeddings"][indices]  # float16 copy, ~300 MB max
+            aspect_embeddings_f32 = unified["embeddings_f32"][indices]
+            aspect_embeddings_f32_cos = unified["embeddings_f32_cos"][indices]
 
             anno_csr = _load_anno_csr_from_disk(embedding_config_id, annotation_set_id, aspect)
             anno_data: dict[str, Any] = {}
@@ -896,6 +1153,8 @@ class PredictGOTermsBatchOperation:
             result[aspect] = {
                 "accessions": aspect_accessions,
                 "embeddings": aspect_embeddings,
+                "embeddings_f32": aspect_embeddings_f32,
+                "embeddings_f32_cos": aspect_embeddings_f32_cos,
                 **anno_data,
             }
             total_refs += len(indices)
@@ -929,7 +1188,12 @@ class PredictGOTermsBatchOperation:
         annotation_set_id: uuid.UUID,
         prediction_set_id: uuid.UUID,
         p: PredictGOTermsBatchPayload,
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[
+        list[dict[str, Any]],
+        dict[str, list[list[tuple[str, float]]]],
+        dict[str, dict[str, list[dict[str, Any]]]],
+        dict[tuple[str, str], dict[str, Any]],
+    ]:
         """Run three independent KNN searches (one per GO aspect) and merge results.
 
         For each aspect ``a`` in (P, F, C):
@@ -946,50 +1210,15 @@ class PredictGOTermsBatchOperation:
         Feature engineering (alignments / taxonomy) is computed for the union of
         neighbors across all aspects to avoid redundant work on shared neighbors.
         """
-        # Collect all unique neighbors across aspects so feature engineering
-        # is computed once per pair regardless of how many aspects reference it.
-        neighbors_by_aspect: dict[str, list[list[tuple[str, float]]]] = {}
-        all_unique_neighbors: set[str] = set()
+        # ── 1. KNN per aspect ─────────────────────────────────────────
+        neighbors_by_aspect, all_unique_neighbors = self._run_knn_per_aspect(
+            valid_accessions, query_embeddings, ref_data_by_aspect, p
+        )
 
-        for aspect in _ASPECTS:
-            aspect_refs = ref_data_by_aspect[aspect]
-            if not aspect_refs["accessions"]:
-                neighbors_by_aspect[aspect] = [[] for _ in valid_accessions]
-                continue
-
-            ref_f32 = aspect_refs["embeddings"].astype(np.float32)
-            aspect_neighbors = search_knn(
-                query_embeddings,
-                ref_f32,
-                aspect_refs["accessions"],
-                k=p.limit_per_entry,
-                distance_threshold=p.distance_threshold,
-                backend=p.search_backend,
-                metric=p.metric,
-                faiss_index_type=p.faiss_index_type,
-                faiss_nlist=p.faiss_nlist,
-                faiss_nprobe=p.faiss_nprobe,
-                faiss_hnsw_m=p.faiss_hnsw_m,
-                faiss_hnsw_ef_search=p.faiss_hnsw_ef_search,
-            )
-            neighbors_by_aspect[aspect] = aspect_neighbors
-            for top_refs in aspect_neighbors:
-                for ref_acc, _ in top_refs:
-                    all_unique_neighbors.add(ref_acc)
-
-        # Feature engineering — computed over the union of all neighbors
-        ref_sequences: dict[str, str] = {}
-        query_sequences: dict[str, str] = {}
-        ref_tax_ids: dict[str, int | None] = {}
-        query_tax_ids: dict[str, int | None] = {}
-
-        if p.compute_alignments:
-            ref_sequences = self._load_sequences_for_proteins(session, all_unique_neighbors)
-            query_sequences = self._load_sequences_for_queries(session, p, valid_accessions)
-
-        if p.compute_taxonomy:
-            ref_tax_ids = self._load_taxonomy_ids_for_proteins(session, all_unique_neighbors)
-            query_tax_ids = self._load_taxonomy_ids_for_queries(session, p, valid_accessions)
+        # ── 2. Load feature-engineering inputs over the union of neighbors ──
+        ref_sequences, query_sequences, ref_tax_ids, query_tax_ids = (
+            self._load_feature_engineering_data(session, p, valid_accessions, all_unique_neighbors)
+        )
 
         # Build predictions per aspect, merging into a single list.
         # seen_terms is keyed per query protein to deduplicate across aspects.
@@ -1003,14 +1232,23 @@ class PredictGOTermsBatchOperation:
         rr_distance_std_per_query: dict[str, float] = {}
         rr_vote_count_per_query: dict[str, dict[int, int]] = {}
         rr_k_position_per_query: dict[str, dict[int, int]] = {}
+        # Consensus features: per (q_acc, gtid) min and sum of distances across
+        # the neighbors that voted for that term; mean is sum / vote_count.
+        rr_vote_min_d_per_query: dict[str, dict[int, float]] = {}
+        rr_vote_sum_d_per_query: dict[str, dict[int, float]] = {}
         # go_term_frequency and ref_annotation_density are computed per-aspect below
         all_go_term_freq: dict[int, int] = {}
         all_ref_ann_density: dict[str, int] = {}
+        # Track the per-aspect go_maps so the v6 feature enricher can see the
+        # full set of voting-neighbor annotations without re-querying.
+        go_map_by_aspect: dict[str, dict[str, list[dict[str, Any]]]] = {}
 
         if compute_rr:
             for q_idx, q_acc in enumerate(valid_accessions):
                 rr_vote_count_per_query[q_acc] = {}
                 rr_k_position_per_query[q_acc] = {}
+                rr_vote_min_d_per_query[q_acc] = {}
+                rr_vote_sum_d_per_query[q_acc] = {}
                 all_distances = []
                 for aspect in _ASPECTS:
                     aspect_neighbors = neighbors_by_aspect[aspect]
@@ -1043,6 +1281,8 @@ class PredictGOTermsBatchOperation:
                     session, annotation_set_id, unique_neighbors_aspect, aspect=aspect
                 )
 
+            go_map_by_aspect[aspect] = go_map
+
             # Pre-compute reranker aggregates for this aspect's go_map
             if compute_rr:
                 for acc, anns in go_map.items():
@@ -1053,18 +1293,24 @@ class PredictGOTermsBatchOperation:
                         gtid = ann["go_term_id"]
                         all_go_term_freq[gtid] = all_go_term_freq.get(gtid, 0) + 1
 
-                # vote_count and k_position per query per aspect
+                # vote_count, k_position and consensus per query per aspect
                 for q_idx, q_acc in enumerate(valid_accessions):
                     vc = rr_vote_count_per_query.setdefault(q_acc, {})
                     kp = rr_k_position_per_query.setdefault(q_acc, {})
+                    min_d = rr_vote_min_d_per_query.setdefault(q_acc, {})
+                    sum_d = rr_vote_sum_d_per_query.setdefault(q_acc, {})
                     aspect_neighbors = neighbors_by_aspect[aspect]
                     if q_idx < len(aspect_neighbors):
-                        for k_pos, (ref_acc, _) in enumerate(aspect_neighbors[q_idx], 1):
+                        for k_pos, (ref_acc, dist) in enumerate(aspect_neighbors[q_idx], 1):
                             for ann in go_map.get(ref_acc, []):
                                 gtid = ann["go_term_id"]
                                 vc[gtid] = vc.get(gtid, 0) + 1
                                 if gtid not in kp:
                                     kp[gtid] = k_pos
+                                prev_min = min_d.get(gtid)
+                                if prev_min is None or dist < prev_min:
+                                    min_d[gtid] = dist
+                                sum_d[gtid] = sum_d.get(gtid, 0.0) + dist
 
             for q_acc, top_refs in zip(valid_accessions, neighbors_by_aspect[aspect], strict=False):
                 seen_terms = seen_per_query[q_acc]
@@ -1105,11 +1351,24 @@ class PredictGOTermsBatchOperation:
                         if ann.get("evidence_code"):
                             pred["evidence_code"] = ann["evidence_code"]
                         if compute_rr:
-                            pred["vote_count"] = rr_vote_count_per_query.get(q_acc, {}).get(go_term_id, 1)
-                            pred["k_position"] = rr_k_position_per_query.get(q_acc, {}).get(go_term_id, 1)
+                            vc_val = rr_vote_count_per_query.get(q_acc, {}).get(go_term_id, 1)
+                            pred["vote_count"] = vc_val
+                            pred["k_position"] = rr_k_position_per_query.get(q_acc, {}).get(
+                                go_term_id, 1
+                            )
                             pred["go_term_frequency"] = all_go_term_freq.get(go_term_id, 0)
                             pred["ref_annotation_density"] = all_ref_ann_density.get(ref_acc, 0)
-                            pred["neighbor_distance_std"] = rr_distance_std_per_query.get(q_acc, 0.0)
+                            pred["neighbor_distance_std"] = rr_distance_std_per_query.get(
+                                q_acc, 0.0
+                            )
+                            pred["neighbor_vote_fraction"] = (
+                                vc_val / p.limit_per_entry if p.limit_per_entry else None
+                            )
+                            min_d_map = rr_vote_min_d_per_query.get(q_acc, {})
+                            sum_d_map = rr_vote_sum_d_per_query.get(q_acc, {})
+                            pred["neighbor_min_distance"] = min_d_map.get(go_term_id)
+                            if vc_val > 0 and go_term_id in sum_d_map:
+                                pred["neighbor_mean_distance"] = sum_d_map[go_term_id] / vc_val
                         for key in (
                             "identity_nw",
                             "similarity_nw",
@@ -1135,7 +1394,92 @@ class PredictGOTermsBatchOperation:
                                 pred[key] = val
                         predictions.append(pred)
 
-        return predictions
+        return predictions, neighbors_by_aspect, go_map_by_aspect, pair_features
+
+    def _run_knn_per_aspect(
+        self,
+        valid_accessions: list[str],
+        query_embeddings: np.ndarray,
+        ref_data_by_aspect: dict[str, dict[str, Any]],
+        p: PredictGOTermsBatchPayload,
+    ) -> tuple[dict[str, list[list[tuple[str, float]]]], set[str]]:
+        """Run one independent KNN search per GO aspect and accumulate
+        the union of all neighbors across aspects.
+
+        Returns ``(neighbors_by_aspect, all_unique_neighbors)`` — feature
+        engineering downstream is computed once per pair regardless of how
+        many aspects reference it, so the union is the right call surface.
+        """
+        neighbors_by_aspect: dict[str, list[list[tuple[str, float]]]] = {}
+        all_unique_neighbors: set[str] = set()
+
+        use_cos = p.metric == "cosine"
+        for aspect in _ASPECTS:
+            aspect_refs = ref_data_by_aspect[aspect]
+            if not aspect_refs["accessions"]:
+                neighbors_by_aspect[aspect] = [[] for _ in valid_accessions]
+                continue
+
+            ref_f32 = (
+                aspect_refs["embeddings_f32_cos"] if use_cos else aspect_refs["embeddings_f32"]
+            )
+            aspect_neighbors = search_knn(
+                query_embeddings,
+                ref_f32,
+                aspect_refs["accessions"],
+                k=p.limit_per_entry,
+                distance_threshold=p.distance_threshold,
+                backend=p.search_backend,
+                metric=p.metric,
+                pre_normalized=use_cos,
+                faiss_index_type=p.faiss_index_type,
+                faiss_nlist=p.faiss_nlist,
+                faiss_nprobe=p.faiss_nprobe,
+                faiss_hnsw_m=p.faiss_hnsw_m,
+                faiss_hnsw_ef_search=p.faiss_hnsw_ef_search,
+            )
+            neighbors_by_aspect[aspect] = aspect_neighbors
+            for top_refs in aspect_neighbors:
+                for ref_acc, _ in top_refs:
+                    all_unique_neighbors.add(ref_acc)
+
+        return neighbors_by_aspect, all_unique_neighbors
+
+    def _load_feature_engineering_data(
+        self,
+        session: Session,
+        p: PredictGOTermsBatchPayload,
+        valid_accessions: list[str],
+        all_unique_neighbors: set[str],
+    ) -> tuple[
+        dict[str, str],
+        dict[str, str],
+        dict[str, int | None],
+        dict[str, int | None],
+    ]:
+        """Load sequences and taxonomy IDs for downstream feature engineering.
+
+        Each tuple slot is empty when the corresponding flag
+        (``compute_alignments`` / ``compute_taxonomy``) is False, so the
+        caller can pass them straight into the per-pair feature builder
+        without further conditionals.
+
+        Returns ``(ref_sequences, query_sequences, ref_tax_ids, query_tax_ids)``.
+        """
+        ref_sequences: dict[str, str] = {}
+        query_sequences: dict[str, str] = {}
+        ref_tax_ids: dict[str, int | None] = {}
+        query_tax_ids: dict[str, int | None] = {}
+
+        if p.compute_alignments:
+            ref_sequences = self._load_sequences_for_proteins(session, all_unique_neighbors)
+            query_sequences = self._load_sequences_for_queries(session, p, valid_accessions)
+
+        if p.compute_taxonomy:
+            ref_tax_ids = self._load_taxonomy_ids_for_proteins(session, all_unique_neighbors)
+            query_tax_ids = self._load_taxonomy_ids_for_queries(session, p, valid_accessions)
+
+        return ref_sequences, query_sequences, ref_tax_ids, query_tax_ids
 
     def _load_annotations_for(
         self,
@@ -1159,11 +1503,14 @@ class PredictGOTermsBatchOperation:
         MFO-index neighbors transfer only MFO terms, etc.  The join to ``go_term``
         is added only when needed to keep the no-aspect path as fast as before.
         """
+        from protea.config.tuning import get_tuning
+
+        chunk_size = get_tuning().operation.annotation_chunk_size
         go_map: dict[str, list[dict[str, Any]]] = {}
         accessions_list = list(accessions)
 
-        for i in range(0, len(accessions_list), _ANNOTATION_CHUNK_SIZE):
-            chunk = accessions_list[i : i + _ANNOTATION_CHUNK_SIZE]
+        for i in range(0, len(accessions_list), chunk_size):
+            chunk = accessions_list[i : i + chunk_size]
             q = session.query(
                 ProteinGOAnnotation.protein_accession,
                 ProteinGOAnnotation.go_term_id,
@@ -1189,8 +1536,11 @@ class PredictGOTermsBatchOperation:
                 go_map.setdefault(acc, []).append(
                     {
                         "go_term_id": go_term_id,
-                        "qualifier": qualifier,
-                        "evidence_code": evidence_code,
+                        # Flyweight — qualifier / evidence_code take ~5-10 distinct
+                        # values across millions of rows; interning collapses every
+                        # duplicate to one shared string instance.
+                        "qualifier": intern_string(qualifier),
+                        "evidence_code": intern_string(evidence_code),
                     }
                 )
 
@@ -1241,7 +1591,8 @@ class PredictGOTermsBatchOperation:
             return np.empty((0,)), []
 
         valid_accessions = [r[0] for r in rows]
-        embeddings = np.array([list(r[1]) for r in rows], dtype=np.float32)
+        # Rows return pgvector HalfVector instances (halfvec column since 2026-04-11).
+        embeddings = np.array([r[1].to_list() for r in rows], dtype=np.float32)
         return embeddings, valid_accessions
 
     def _predict_batch(
@@ -1257,13 +1608,18 @@ class PredictGOTermsBatchOperation:
         query_sequences: dict[str, str] | None = None,
         ref_tax_ids: dict[str, int | None] | None = None,
         query_tax_ids: dict[str, int | None] | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[
+        list[dict[str, Any]],
+        list[list[tuple[str, float]]],
+        dict[tuple[str, str], dict[str, Any]],
+    ]:
         """Build serializable prediction dicts from KNN results.
 
         ``ref_data`` must have keys ``accessions``, ``embeddings``, and ``go_map``.
         If ``neighbors`` is provided (pre-computed by execute()), KNN is skipped.
-        Returns compact dicts — None-valued optional fields are omitted to reduce
-        message size.
+        Returns ``(predictions, neighbors, pair_features)`` — the last two are
+        used by ``_enrich_with_v6_features`` when ``compute_v6_features`` is on.
+        ``pair_features`` is keyed by ``(query_accession, ref_accession)``.
         """
         ref_sequences = ref_sequences or {}
         query_sequences = query_sequences or {}
@@ -1291,6 +1647,9 @@ class PredictGOTermsBatchOperation:
 
         go_map = ref_data["go_map"]
         predictions: list[dict[str, Any]] = []
+        # Global (q_acc, ref_acc) keying lets callers reuse the pair features
+        # for post-hoc v6 feature enrichment without recomputing taxonomy.
+        pair_features: dict[tuple[str, str], dict[str, Any]] = {}
 
         # Pre-compute reranker aggregates if requested
         compute_rr = p.compute_reranker_features
@@ -1305,23 +1664,31 @@ class PredictGOTermsBatchOperation:
 
         for q_acc, top_refs in zip(query_accessions, neighbors, strict=False):
             seen_terms: set[int] = set()
-            pair_features: dict[str, dict[str, Any]] = {}
 
             # Reranker: pre-compute per-query stats
             rr_distance_std: float | None = None
             rr_vote_count: dict[int, int] = {}
             rr_k_position: dict[int, int] = {}
+            rr_vote_min_d: dict[int, float] = {}
+            rr_vote_sum_d: dict[int, float] = {}
             if compute_rr and top_refs:
-                rr_distance_std = float(np.std([d for _, d in top_refs])) if len(top_refs) > 1 else 0.0
-                for k_pos, (ref_acc, _) in enumerate(top_refs, 1):
+                rr_distance_std = (
+                    float(np.std([d for _, d in top_refs])) if len(top_refs) > 1 else 0.0
+                )
+                for k_pos, (ref_acc, dist) in enumerate(top_refs, 1):
                     for ann in go_map.get(ref_acc, []):
                         gtid = ann["go_term_id"]
                         rr_vote_count[gtid] = rr_vote_count.get(gtid, 0) + 1
                         if gtid not in rr_k_position:
                             rr_k_position[gtid] = k_pos
+                        prev_min = rr_vote_min_d.get(gtid)
+                        if prev_min is None or dist < prev_min:
+                            rr_vote_min_d[gtid] = dist
+                        rr_vote_sum_d[gtid] = rr_vote_sum_d.get(gtid, 0.0) + dist
 
             for ref_acc, distance in top_refs:
-                if ref_acc not in pair_features:
+                pair_key = (q_acc, ref_acc)
+                if pair_key not in pair_features:
                     features: dict[str, Any] = {}
 
                     if p.compute_alignments:
@@ -1338,9 +1705,9 @@ class PredictGOTermsBatchOperation:
                         features["query_taxonomy_id"] = q_tid
                         features["ref_taxonomy_id"] = r_tid
 
-                    pair_features[ref_acc] = features
+                    pair_features[pair_key] = features
 
-                features = pair_features[ref_acc]
+                features = pair_features[pair_key]
 
                 for ann in go_map.get(ref_acc, []):
                     go_term_id = ann["go_term_id"]
@@ -1360,11 +1727,18 @@ class PredictGOTermsBatchOperation:
                     if ann.get("evidence_code"):
                         pred["evidence_code"] = ann["evidence_code"]
                     if compute_rr:
-                        pred["vote_count"] = rr_vote_count.get(go_term_id, 1)
+                        vc_val = rr_vote_count.get(go_term_id, 1)
+                        pred["vote_count"] = vc_val
                         pred["k_position"] = rr_k_position.get(go_term_id, 1)
                         pred["go_term_frequency"] = go_term_freq.get(go_term_id, 0)
                         pred["ref_annotation_density"] = ref_ann_density.get(ref_acc, 0)
                         pred["neighbor_distance_std"] = rr_distance_std
+                        pred["neighbor_vote_fraction"] = (
+                            vc_val / p.limit_per_entry if p.limit_per_entry else None
+                        )
+                        pred["neighbor_min_distance"] = rr_vote_min_d.get(go_term_id)
+                        if vc_val > 0 and go_term_id in rr_vote_sum_d:
+                            pred["neighbor_mean_distance"] = rr_vote_sum_d[go_term_id] / vc_val
                     for key in (
                         "identity_nw",
                         "similarity_nw",
@@ -1390,17 +1764,22 @@ class PredictGOTermsBatchOperation:
                             pred[key] = val
                     predictions.append(pred)
 
-        return predictions
+        return predictions, neighbors, pair_features
+
+    # ── v6 reranker features ─────────────────────────────────────────────────
 
     # ── feature-engineering helpers ───────────────────────────────────────────
 
     def _load_sequences_for_proteins(
         self, session: Session, accessions: set[str]
     ) -> dict[str, str]:
+        from protea.config.tuning import get_tuning
+
+        chunk_size = get_tuning().operation.annotation_chunk_size
         result: dict[str, str] = {}
         acc_list = list(accessions)
-        for i in range(0, len(acc_list), _ANNOTATION_CHUNK_SIZE):
-            chunk = acc_list[i : i + _ANNOTATION_CHUNK_SIZE]
+        for i in range(0, len(acc_list), chunk_size):
+            chunk = acc_list[i : i + chunk_size]
             rows = (
                 session.query(Protein.accession, Sequence.sequence)
                 .join(Protein.sequence)
@@ -1431,10 +1810,13 @@ class PredictGOTermsBatchOperation:
     def _load_taxonomy_ids_for_proteins(
         self, session: Session, accessions: set[str]
     ) -> dict[str, int | None]:
+        from protea.config.tuning import get_tuning
+
+        chunk_size = get_tuning().operation.annotation_chunk_size
         result: dict[str, int | None] = {}
         acc_list = list(accessions)
-        for i in range(0, len(acc_list), _ANNOTATION_CHUNK_SIZE):
-            chunk = acc_list[i : i + _ANNOTATION_CHUNK_SIZE]
+        for i in range(0, len(acc_list), chunk_size):
+            chunk = acc_list[i : i + chunk_size]
             rows = (
                 session.query(Protein.accession, Protein.taxonomy_id)
                 .filter(Protein.accession.in_(chunk))
@@ -1450,11 +1832,14 @@ class PredictGOTermsBatchOperation:
         p: PredictGOTermsBatchPayload,
         accessions: list[str],
     ) -> dict[str, int | None]:
+        from protea.config.tuning import get_tuning
+
+        chunk_size = get_tuning().operation.annotation_chunk_size
         acc_set = set(accessions)
         result: dict[str, int | None] = {acc: None for acc in acc_set}
         acc_list = list(acc_set)
-        for i in range(0, len(acc_list), _ANNOTATION_CHUNK_SIZE):
-            chunk = acc_list[i : i + _ANNOTATION_CHUNK_SIZE]
+        for i in range(0, len(acc_list), chunk_size):
+            chunk = acc_list[i : i + chunk_size]
             rows = (
                 session.query(Protein.accession, Protein.taxonomy_id)
                 .filter(Protein.accession.in_(chunk))
@@ -1480,6 +1865,15 @@ class StorePredictionsOperation:
     """
 
     name = "store_predictions"
+    description = (
+        "CPU child job: bulk-insert GOPrediction rows from a batch and "
+        "atomically advance the parent predict_go_terms progress counter."
+    )
+
+    def summarize_payload(self, payload: dict[str, Any]) -> str:
+        p = payload or {}
+        n = len(p.get("predictions") or [])
+        return f"n={n}" if n else ""
 
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
@@ -1498,41 +1892,7 @@ class StorePredictionsOperation:
         if p.predictions:
             session.execute(
                 pg_insert(GOPrediction).on_conflict_do_nothing(),
-                [
-                    {
-                        "prediction_set_id": prediction_set_id,
-                        "protein_accession": pred["protein_accession"],
-                        "go_term_id": pred["go_term_id"],
-                        "ref_protein_accession": pred["ref_protein_accession"],
-                        "distance": pred["distance"],
-                        "qualifier": pred.get("qualifier"),
-                        "evidence_code": pred.get("evidence_code"),
-                        "identity_nw": pred.get("identity_nw"),
-                        "similarity_nw": pred.get("similarity_nw"),
-                        "alignment_score_nw": pred.get("alignment_score_nw"),
-                        "gaps_pct_nw": pred.get("gaps_pct_nw"),
-                        "alignment_length_nw": pred.get("alignment_length_nw"),
-                        "identity_sw": pred.get("identity_sw"),
-                        "similarity_sw": pred.get("similarity_sw"),
-                        "alignment_score_sw": pred.get("alignment_score_sw"),
-                        "gaps_pct_sw": pred.get("gaps_pct_sw"),
-                        "alignment_length_sw": pred.get("alignment_length_sw"),
-                        "length_query": pred.get("length_query"),
-                        "length_ref": pred.get("length_ref"),
-                        "query_taxonomy_id": pred.get("query_taxonomy_id"),
-                        "ref_taxonomy_id": pred.get("ref_taxonomy_id"),
-                        "taxonomic_lca": pred.get("taxonomic_lca"),
-                        "taxonomic_distance": pred.get("taxonomic_distance"),
-                        "taxonomic_common_ancestors": pred.get("taxonomic_common_ancestors"),
-                        "taxonomic_relation": pred.get("taxonomic_relation"),
-                        "vote_count": pred.get("vote_count"),
-                        "k_position": pred.get("k_position"),
-                        "go_term_frequency": pred.get("go_term_frequency"),
-                        "ref_annotation_density": pred.get("ref_annotation_density"),
-                        "neighbor_distance_std": pred.get("neighbor_distance_std"),
-                    }
-                    for pred in p.predictions
-                ],
+                [_row_from_prediction(pred, prediction_set_id) for pred in p.predictions],
             )
 
         emit(
@@ -1545,40 +1905,15 @@ class StorePredictionsOperation:
             "info",
         )
 
-        self._update_parent_progress(session, parent_job_id, emit)
+        if p.is_final_chunk:
+            self._update_parent_progress(session, parent_job_id, emit)
 
         return OperationResult(result={"predictions_inserted": len(p.predictions)})
 
     def _update_parent_progress(self, session: Session, parent_job_id: UUID, emit: EmitFn) -> None:
-        row = session.execute(
-            sa_update(Job)
-            .where(Job.id == parent_job_id, Job.status == JobStatus.RUNNING)
-            .values(progress_current=Job.progress_current + 1)
-            .returning(Job.progress_current, Job.progress_total)
-        ).fetchone()
-
-        if row is None or row.progress_current != row.progress_total:
-            return
-
-        closed = session.execute(
-            sa_update(Job)
-            .where(Job.id == parent_job_id, Job.status == JobStatus.RUNNING)
-            .values(status=JobStatus.SUCCEEDED, finished_at=utcnow())
-            .returning(Job.id)
-        ).fetchone()
-
-        if closed:
-            session.add(
-                JobEvent(
-                    job_id=parent_job_id,
-                    event="job.succeeded",
-                    fields={"via": "last_batch_stored"},
-                    level="info",
-                )
-            )
-            emit(
-                "store_predictions.parent_succeeded",
-                None,
-                {"parent_job_id": str(parent_job_id)},
-                "info",
-            )
+        update_parent_progress(
+            session,
+            parent_job_id,
+            emit,
+            event_name="store_predictions.parent_succeeded",
+        )

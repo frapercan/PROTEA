@@ -82,6 +82,11 @@ class GOPrediction(Base):
     ref_annotation_density: Mapped[int | None] = mapped_column(Integer, nullable=True)
     neighbor_distance_std: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    # --- Consensus features (per candidate term, computed over voting neighbors) ---
+    neighbor_vote_fraction: Mapped[float | None] = mapped_column(Float, nullable=True)
+    neighbor_min_distance: Mapped[float | None] = mapped_column(Float, nullable=True)
+    neighbor_mean_distance: Mapped[float | None] = mapped_column(Float, nullable=True)
+
     # --- Taxonomy features ---
     query_taxonomy_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ref_taxonomy_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -89,6 +94,37 @@ class GOPrediction(Base):
     taxonomic_distance: Mapped[int | None] = mapped_column(Integer, nullable=True)
     taxonomic_common_ancestors: Mapped[int | None] = mapped_column(Integer, nullable=True)
     taxonomic_relation: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
+    # --- Anc2Vec semantic-coherence features (GO 2020-10 pretrained) ---
+    anc2vec_neighbor_cos: Mapped[float | None] = mapped_column(Float, nullable=True)
+    anc2vec_neighbor_maxcos: Mapped[float | None] = mapped_column(Float, nullable=True)
+    anc2vec_has_emb: Mapped[float | None] = mapped_column(Float, nullable=True)
+    anc2vec_query_known_cos: Mapped[float | None] = mapped_column(Float, nullable=True)
+    anc2vec_query_known_maxcos: Mapped[float | None] = mapped_column(Float, nullable=True)
+    anc2vec_query_known_count: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # --- Taxonomic consensus across voting neighbors ---
+    tax_voters_same_frac: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tax_voters_close_frac: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tax_voters_mean_common_ancestors: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # --- Sequence-embedding PCA: per-query projection (16 components) ---
+    emb_pca_query_0: Mapped[float | None] = mapped_column(Float, nullable=True)
+    emb_pca_query_1: Mapped[float | None] = mapped_column(Float, nullable=True)
+    emb_pca_query_2: Mapped[float | None] = mapped_column(Float, nullable=True)
+    emb_pca_query_3: Mapped[float | None] = mapped_column(Float, nullable=True)
+    emb_pca_query_4: Mapped[float | None] = mapped_column(Float, nullable=True)
+    emb_pca_query_5: Mapped[float | None] = mapped_column(Float, nullable=True)
+    emb_pca_query_6: Mapped[float | None] = mapped_column(Float, nullable=True)
+    emb_pca_query_7: Mapped[float | None] = mapped_column(Float, nullable=True)
+    emb_pca_query_8: Mapped[float | None] = mapped_column(Float, nullable=True)
+    emb_pca_query_9: Mapped[float | None] = mapped_column(Float, nullable=True)
+    emb_pca_query_10: Mapped[float | None] = mapped_column(Float, nullable=True)
+    emb_pca_query_11: Mapped[float | None] = mapped_column(Float, nullable=True)
+    emb_pca_query_12: Mapped[float | None] = mapped_column(Float, nullable=True)
+    emb_pca_query_13: Mapped[float | None] = mapped_column(Float, nullable=True)
+    emb_pca_query_14: Mapped[float | None] = mapped_column(Float, nullable=True)
+    emb_pca_query_15: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     prediction_set: Mapped[PredictionSet] = relationship(
         "PredictionSet", back_populates="predictions"

@@ -12,11 +12,19 @@ from protea.infrastructure.orm.base import Base
 
 
 class RerankerModel(Base):
-    """A trained LightGBM re-ranker model stored in the database.
+    """A trained LightGBM re-ranker model.
 
-    The model is serialized as a LightGBM model string and stored in
-    ``model_data``.  Training metrics and feature importance are stored
-    as JSONB for easy querying and display.
+    The booster can be stored inline (``model_data``, legacy) or by
+    reference (``artifact_uri``, preferred). Rows registered through
+    ``scripts/register_reranker.py`` always point at the artifact store;
+    older rows still serialize the booster inline.
+
+    Provenance columns (``feature_schema_sha``, ``producer_version``,
+    ``producer_git_sha``, ``spec_yaml``) let us reproduce and audit a
+    model without re-running the lab. ``feature_schema_sha`` is
+    load-bearing at inference time: the predict operation refuses to use
+    a booster whose expected feature schema does not match the live
+    pipeline (fallback to no-reranking).
     """
 
     __tablename__ = "reranker_model"
@@ -37,7 +45,50 @@ class RerankerModel(Base):
     )
     category: Mapped[str] = mapped_column(String(10), nullable=False)
     aspect: Mapped[str | None] = mapped_column(String(3), nullable=True)
-    model_data: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # Legacy inline booster string. Nullable — new rows carry
+    # ``artifact_uri`` and leave this NULL.
+    model_data: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Artifact-store URI for the booster (``file://…`` or ``s3://…``).
+    artifact_uri: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+    # Feature-family-aware schema fingerprint (12 hex chars) from
+    # ``protea_reranker_lab.contracts.compute_feature_schema_sha``.
+    feature_schema_sha: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
+    embedding_config_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("embedding_config.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    ontology_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("ontology_snapshot.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    producer_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    producer_git_sha: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+    # External provenance — set when the booster was trained in
+    # ``protea-reranker-lab`` (or any future offline trainer) rather than
+    # by a PROTEA-internal operation. ``dataset_id`` points at the
+    # ``Dataset`` row consumed by the lab run; ``external_source`` is a
+    # free-form tag such as ``"protea-reranker-lab@<git-sha>"``.
+    dataset_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("dataset.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    external_source: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+    # Full ExperimentSpec YAML for reproducibility.
+    spec_yaml: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     metrics: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     feature_importance: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(

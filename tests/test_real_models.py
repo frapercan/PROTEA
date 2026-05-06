@@ -8,6 +8,7 @@ All tests are marked ``slow`` — run with:
 Model used: facebook/esm2_t6_8M_UR50D (~30 MB, CPU — fast).
 Large models (650M, T5) are covered by the synthetic tests in test_compute_embeddings.py.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -20,6 +21,7 @@ SEQS = ["ACDEFGHIK", "LMNPQRSTVW", "ACDE", "GHIKLM"]
 
 def _esm_cfg(model_name: str, *, normalize: bool = True):
     from unittest.mock import MagicMock
+
     cfg = MagicMock()
     cfg.model_name = model_name
     cfg.model_backend = "esm"
@@ -46,6 +48,7 @@ class TestESM2_8M:
     @pytest.fixture(scope="class")
     def model_and_tokenizer(self):
         from transformers import AutoTokenizer, EsmModel
+
         tokenizer = AutoTokenizer.from_pretrained(self.MODEL)
         model = EsmModel.from_pretrained(self.MODEL, output_hidden_states=True)
         model.eval()
@@ -72,7 +75,7 @@ class TestESM2_8M:
     def test_deterministic(self, model_and_tokenizer):
         model, tokenizer = model_and_tokenizer
         cfg = _esm_cfg(self.MODEL, normalize=False)
-        first  = [_embed_esm(model, tokenizer, [s], cfg, self.DEVICE)[0][0].vector for s in SEQS]
+        first = [_embed_esm(model, tokenizer, [s], cfg, self.DEVICE)[0][0].vector for s in SEQS]
         second = [_embed_esm(model, tokenizer, [s], cfg, self.DEVICE)[0][0].vector for s in SEQS]
         for i in range(len(SEQS)):
             np.testing.assert_array_equal(first[i], second[i], err_msg=f"seq{i}: non-deterministic")
@@ -84,10 +87,15 @@ class TestESM2_8M:
         for batch_size in (2, 4):
             results = []
             for i in range(0, len(SEQS), batch_size):
-                for chunks in _embed_esm(model, tokenizer, SEQS[i:i + batch_size], cfg, self.DEVICE):
+                for chunks in _embed_esm(
+                    model, tokenizer, SEQS[i : i + batch_size], cfg, self.DEVICE
+                ):
                     results.append(chunks[0].vector)
             for i in range(len(SEQS)):
                 np.testing.assert_allclose(
-                    results[i], ref[i], rtol=1e-5, atol=1e-6,
+                    results[i],
+                    ref[i],
+                    rtol=1e-5,
+                    atol=1e-6,
                     err_msg=f"batch_size={batch_size}: mismatch at seq {i}",
                 )

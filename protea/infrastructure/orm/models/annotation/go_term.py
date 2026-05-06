@@ -21,7 +21,7 @@ class GOTerm(Base):
 
     GO terms are scoped to an ``OntologySnapshot`` so that the meaning of a
     term at a specific ontology release is preserved. ``(go_id,
-    ontology_snapshot_id)`` is unique — the same GO:XXXXXXX can exist in
+    ontology_snapshot_id)`` is unique — the same ``GO:XXXXXXX`` can exist in
     multiple snapshots with potentially different names or definitions.
     """
 

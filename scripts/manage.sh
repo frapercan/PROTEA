@@ -85,6 +85,7 @@ cmd_start() {
     printf "\n${BOLD}[3] Core workers${RESET}\n"
     _start_bg worker-ping        poetry run python scripts/worker.py --queue protea.ping
     _start_bg worker-jobs        poetry run python scripts/worker.py --queue protea.jobs
+    _start_bg worker-training    poetry run python scripts/worker.py --queue protea.training
 
     # Embeddings pipeline
     printf "\n${BOLD}[4] Embeddings pipeline${RESET}\n"
@@ -97,20 +98,44 @@ cmd_start() {
 
     # Predictions pipeline
     printf "\n${BOLD}[5] Predictions pipeline${RESET}\n"
+    _start_bg worker-predictions-coord poetry run python scripts/worker.py --queue protea.predictions
     for i in $(seq 1 "$BATCH_WORKERS"); do
         _start_bg "worker-predictions-batch-${i}" \
             poetry run python scripts/worker.py --queue protea.predictions.batch
     done
     _start_bg worker-predictions-write poetry run python scripts/worker.py --queue protea.predictions.write
 
+    # Evaluations pipeline
+    printf "\n${BOLD}[6] Evaluations pipeline${RESET}\n"
+    _start_bg worker-evaluations poetry run python scripts/worker.py --queue protea.evaluations
+
     # Stale job reaper
-    printf "\n${BOLD}[6] Stale job reaper${RESET}\n"
+    printf "\n${BOLD}[7] Stale job reaper${RESET}\n"
     _start_bg worker-reaper poetry run python scripts/worker.py --queue reaper
 
     # Frontend
-    printf "\n${BOLD}[7] Frontend${RESET}\n"
+    # Production mode by default: the dev server serves unminified Turbopack
+    # chunks + HMR websocket, which destroys any bandwidth-capped tunnel
+    # (ngrok, Cloudflare free tier, etc). Override with FRONTEND_MODE=dev for
+    # local hacking where HMR is actually useful.
+    local FRONTEND_MODE="${FRONTEND_MODE:-prod}"
+    printf "\n${BOLD}[8] Frontend (%s)${RESET}\n" "$FRONTEND_MODE"
     cd "$ROOT/apps/web"
-    _start_bg frontend npm run dev
+    if [[ "$FRONTEND_MODE" == "prod" ]]; then
+        printf "  Building production bundle (this may take ~30-60s)...\n"
+        if npm run build >> "$LOG_DIR/frontend-build.log" 2>&1; then
+            printf "  ${GREEN}✓${RESET} build OK → logs/frontend-build.log\n"
+        else
+            printf "  ${RED}✗ build FAILED${RESET} — see logs/frontend-build.log\n"
+            printf "  ${YELLOW}Falling back to dev mode.${RESET}\n"
+            FRONTEND_MODE="dev"
+        fi
+    fi
+    if [[ "$FRONTEND_MODE" == "prod" ]]; then
+        _start_bg frontend npm run start
+    else
+        _start_bg frontend npm run dev
+    fi
     sleep 6
     curl -sf http://localhost:3000 -o /dev/null \
         && printf "  ${GREEN}Frontend OK${RESET} → http://localhost:3000\n" \

@@ -6,11 +6,27 @@ risking data corruption.  Instead, this lightweight reaper runs on a timer
 and transitions any job that has been in RUNNING status for longer than
 ``timeout_seconds`` to FAILED with error_code ``JobTimeout``.
 
+Progress-aware grace period
+---------------------------
+Deferred coordinator jobs (e.g. ``compute_embeddings``, ``predict_go_terms``)
+may legitimately run longer than ``timeout_seconds`` because the actual work
+is done by child batch messages on downstream queues.  Killing these jobs
+at the global wall-clock threshold would drop hours of successful work on
+the floor.
+
+To avoid that, the reaper applies a second check to every candidate: if the
+job has produced any ``JobEvent`` within the last ``stall_seconds`` window,
+it is considered *alive* and left in place.  Only truly stalled jobs — no
+events for ``stall_seconds`` — are marked FAILED.  The hard ``timeout_seconds``
+still acts as the lower bound (a job under the timeout is never touched),
+so this is strictly more permissive than the previous behaviour.
+
 Usage::
 
-    reaper = StaleJobReaper(session_factory, timeout_seconds=3600)
+    reaper = StaleJobReaper(session_factory, timeout_seconds=21600)
     reaper.run(interval_seconds=60)  # checks every minute
 """
+
 from __future__ import annotations
 
 import logging
@@ -18,6 +34,7 @@ import signal
 import time
 from datetime import timedelta
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.core.utils import utcnow
@@ -31,9 +48,12 @@ class StaleJobReaper:
         self,
         session_factory: sessionmaker[Session],
         timeout_seconds: int = 3600,
+        *,
+        stall_seconds: int = 1800,
     ) -> None:
         self._factory = session_factory
         self._timeout = timedelta(seconds=timeout_seconds)
+        self._stall = timedelta(seconds=stall_seconds)
         self._stop = False
 
     def run(self, interval_seconds: int = 60) -> None:
@@ -41,8 +61,9 @@ class StaleJobReaper:
         signal.signal(signal.SIGTERM, self._handle_stop)
 
         logger.info(
-            "StaleJobReaper started. timeout=%ss interval=%ss",
+            "StaleJobReaper started. timeout=%ss stall=%ss interval=%ss",
             self._timeout.total_seconds(),
+            self._stall.total_seconds(),
             interval_seconds,
         )
         while not self._stop:
@@ -60,10 +81,12 @@ class StaleJobReaper:
         self._stop = True
 
     def _reap(self) -> int:
-        cutoff = utcnow() - self._timeout
+        now = utcnow()
+        cutoff = now - self._timeout
+        stall_cutoff = now - self._stall
         session = self._factory()
         try:
-            stale_jobs = (
+            candidates = (
                 session.query(Job)
                 .filter(
                     Job.status == JobStatus.RUNNING,
@@ -71,30 +94,51 @@ class StaleJobReaper:
                 )
                 .all()
             )
-            for job in stale_jobs:
+            reaped = 0
+            for job in candidates:
+                last_event_ts = (
+                    session.query(func.max(JobEvent.ts)).filter(JobEvent.job_id == job.id).scalar()
+                )
+                if last_event_ts is not None and last_event_ts > stall_cutoff:
+                    logger.debug(
+                        "Reaper skipped live job. job_id=%s operation=%s last_event=%s",
+                        job.id,
+                        job.operation,
+                        last_event_ts,
+                    )
+                    continue
+
                 job.status = JobStatus.FAILED
-                job.finished_at = utcnow()
+                job.finished_at = now
                 job.error_code = "JobTimeout"
                 job.error_message = (
-                    f"Job exceeded timeout of {self._timeout.total_seconds():.0f}s"
+                    f"Job stalled: no activity in {self._stall.total_seconds():.0f}s "
+                    f"(started >{self._timeout.total_seconds():.0f}s ago)"
                 )
                 session.add(
                     JobEvent(
                         job_id=job.id,
                         event="job.timeout",
                         message=job.error_message,
-                        fields={"timeout_seconds": self._timeout.total_seconds()},
+                        fields={
+                            "timeout_seconds": self._timeout.total_seconds(),
+                            "stall_seconds": self._stall.total_seconds(),
+                            "last_event_ts": (last_event_ts.isoformat() if last_event_ts else None),
+                        },
                         level="error",
                     )
                 )
                 logger.warning(
-                    "Marking stale job FAILED. job_id=%s operation=%s started_at=%s",
+                    "Marking stalled job FAILED. job_id=%s operation=%s "
+                    "started_at=%s last_event=%s",
                     job.id,
                     job.operation,
                     job.started_at,
+                    last_event_ts,
                 )
+                reaped += 1
             session.commit()
-            return len(stale_jobs)
+            return reaped
         except Exception:
             try:
                 session.rollback()

@@ -20,6 +20,17 @@ Install dependencies
    cd PROTEA
    poetry install          # installs runtime + dev dependencies
 
+Optional extras:
+
+.. code-block:: bash
+
+   poetry install -E storage   # adds the 'minio' client for the
+                               # MinIO artifact-store backend
+
+The ``[storage]`` extra is only required when ``storage.backend: minio``
+is set in ``system.yaml`` (or ``PROTEA_STORAGE_BACKEND=minio``). The
+default local-filesystem backend works with the base install.
+
 Configuration
 -------------
 
@@ -71,6 +82,19 @@ Start the dev stack
 
    bash scripts/manage.sh start [N]   # N = batch workers per pipeline (default 1)
 
+.. note::
+   The optional MinIO artifact store is declared under a dedicated
+   Compose profile and is **not** started by the default
+   ``docker compose up``. To bring it up alongside the rest of the
+   infrastructure containers, use:
+
+   .. code-block:: bash
+
+      docker compose --profile storage up -d minio
+
+   The MinIO console is then available at http://localhost:9001
+   (default credentials ``minioadmin`` / ``minioadmin``).
+
 This starts all processes in the background and writes PIDs to ``logs/pids/``:
 
 .. list-table::
@@ -88,21 +112,27 @@ This starts all processes in the background and writes PIDs to ``logs/pids/``:
    * - Worker — ``protea.jobs``
      - —
      - ``logs/worker-jobs.log``
-   * - Worker — ``protea.embeddings``
+   * - Worker — ``protea.training``
      - —
-     - ``logs/worker-embeddings.log``
+     - ``logs/worker-training.log``
+   * - Worker — ``protea.embeddings`` (serialised coordinator)
+     - —
+     - ``logs/worker-embeddings-coord.log``
    * - Worker — ``protea.embeddings.batch`` (×N)
      - —
      - ``logs/worker-embeddings-batch-*.log``
-   * - Worker — ``protea.embeddings.write`` (×N)
+   * - Worker — ``protea.embeddings.write``
      - —
-     - ``logs/worker-embeddings-write-*.log``
+     - ``logs/worker-embeddings-write.log``
    * - Worker — ``protea.predictions.batch`` (×N)
      - —
      - ``logs/worker-predictions-batch-*.log``
-   * - Worker — ``protea.predictions.write`` (×N)
+   * - Worker — ``protea.predictions.write``
      - —
-     - ``logs/worker-predictions-write-*.log``
+     - ``logs/worker-predictions-write.log``
+   * - Stale job reaper (``reaper``)
+     - —
+     - ``logs/worker-reaper.log``
    * - Next.js frontend
      - http://127.0.0.1:3000
      - ``logs/frontend.log``

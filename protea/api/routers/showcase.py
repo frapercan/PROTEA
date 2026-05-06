@@ -1,160 +1,209 @@
-"""Showcase endpoint — aggregates platform stats and best evaluation results."""
+"""Showcase endpoint — aggregates platform stats and the single best evaluation
+result with full embedding attribution.
+
+Unlike :mod:`protea.api.routers.benchmark`, which exposes the full per-model
+per-stage matrix, this module is deliberately minimal: it returns **one**
+"spotlight" result that the Home page can use for its hero card, plus the
+pipeline stage counts.
+
+Background
+----------
+The previous implementation collapsed every evaluation into three method
+buckets (``knn_baseline`` / ``knn_scored`` / ``knn_reranker``) and took the
+maximum Fmax across *all* embeddings in each bucket.  That hid which concrete
+embedding won a given cell, and silently dropped losing embeddings from the
+UI entirely.  With the introduction of the 8-model benchmark, that collapse
+is actively misleading — so this endpoint now returns a single named winner
+and a link to ``/benchmark`` for the full matrix.
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import func
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.deps import get_session_factory
+from protea.api.stages import stage_of
+from protea.core.domain.aspect import ASPECT_CAFA_CODES as _ASPECTS
 from protea.infrastructure.orm.models.annotation.evaluation_result import EvaluationResult
-from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
+from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
 from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
-from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
+from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
 from protea.infrastructure.orm.models.protein.protein import Protein
-from protea.infrastructure.orm.models.sequence.sequence import Sequence
 from protea.infrastructure.session import session_scope
 
 router = APIRouter(prefix="/showcase", tags=["showcase"])
 
-
-def _derive_method(
-    scoring_config_id: Any, reranker_model_id: Any
-) -> tuple[str, str]:
-    """Return (method_key, human_label) from nullable FK columns."""
-    if reranker_model_id is not None:
-        return "knn_reranker", "KNN + Re-ranker"
-    if scoring_config_id is not None:
-        return "knn_scored", "KNN + Scoring"
-    return "knn_baseline", "KNN (embedding distance)"
+_CATEGORIES = ("NK", "LK", "PK")
 
 
-# Method display order
-_METHOD_ORDER = ["knn_baseline", "knn_scored", "knn_reranker"]
-_ASPECTS = ["BPO", "MFO", "CCO"]
+def _approx_count(session: Session, table: str) -> int:
+    """Fast approximate row count via pg_class.reltuples. Accurate enough for
+    a UI spotlight, and O(1) instead of a full table scan on 40M+ row tables."""
+    n = session.execute(
+        text("SELECT reltuples::bigint FROM pg_class WHERE relname = :t"),
+        {"t": table},
+    ).scalar()
+    return int(n) if n is not None and n >= 0 else 0
+
+
+def _avg_fmax(results: dict[str, Any]) -> float | None:
+    """Mean Fmax across the 9 (category × aspect) cells, ignoring missing ones.
+
+    Returns ``None`` if the ``results`` blob is empty or has no Fmax values —
+    that way a malformed or partial evaluation does not pretend to be
+    "the best".
+    """
+    values: list[float] = []
+    for cat in _CATEGORIES:
+        cat_data = results.get(cat) or {}
+        for asp in _ASPECTS:
+            cell = cat_data.get(asp) or {}
+            fmax = cell.get("fmax")
+            if fmax is not None:
+                values.append(float(fmax))
+    if not values:
+        return None
+    return sum(values) / len(values)
 
 
 @router.get("", summary="Platform showcase data")
 def get_showcase(
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
-    """Aggregate stats, best evaluation metrics, and method comparison for the
-    landing page.  Returns a single JSON object so the frontend needs only one
-    fetch on mount."""
+    """Aggregate pipeline stage counts and return the single best evaluation
+    result (by mean Fmax across the 9 cells) along with the embedding that
+    produced it.
+
+    Empty-state contract:
+
+    - ``best`` is ``None`` when no ``EvaluationResult`` exists yet
+    - ``pipeline_stages`` always returns five entries, with ``count = 0``
+      for stages that have not been populated yet
+    - ``counts`` always returns the same keys, defaulting to 0
+
+    The frontend is expected to render sensible placeholder copy when ``best``
+    is ``None`` rather than hiding the page.
+    """
 
     with session_scope(factory) as session:
-        # ── Protein stats (mirrors /proteins/stats but lighter) ──────────
-        total_proteins = session.query(func.count(Protein.accession)).scalar() or 0
+        # ── Pipeline stage counts ────────────────────────────────────────
+        # Large tables (protein/sequence/sequence_embedding/go_prediction) use
+        # pg_class.reltuples — exact COUNT(*) on go_prediction takes 20-30s.
+        # Small tables keep exact counts.
+        total_proteins = _approx_count(session, "protein")
         canonical_proteins = (
-            session.query(func.count(Protein.accession))
-            .filter(Protein.is_canonical.is_(True))
-            .scalar()
+            session.scalar(
+                select(func.count(Protein.accession)).where(Protein.is_canonical.is_(True))
+            )
             or 0
         )
+        total_sequences = _approx_count(session, "sequence")
+        total_embeddings = _approx_count(session, "sequence_embedding")
+        total_prediction_sets = session.scalar(select(func.count(PredictionSet.id))) or 0
+        total_predictions = _approx_count(session, "go_prediction")
+        total_rerankers = session.scalar(select(func.count(RerankerModel.id))) or 0
 
-        # ── Counts ───────────────────────────────────────────────────────
-        total_sequences = session.query(func.count(Sequence.id)).scalar() or 0
-        total_embeddings = session.query(func.count(SequenceEmbedding.id)).scalar() or 0
-        total_prediction_sets = session.query(func.count(PredictionSet.id)).scalar() or 0
-        total_predictions = session.query(func.count(GOPrediction.id)).scalar() or 0
-        total_rerankers = session.query(func.count(RerankerModel.id)).scalar() or 0
-
-        # ── Evaluation results ───────────────────────────────────────────
-        eval_rows = session.query(EvaluationResult).all()
-        total_evaluations = len(eval_rows)
-
-        # Group by category → method, track best fmax per aspect
-        _CATEGORIES = ["NK", "LK", "PK"]
-        # best_fmax[category][aspect] = {fmax, method, ...}
-        best_fmax: dict[str, dict[str, dict[str, Any]]] = {}
-        # method_best[category][method_key] = {label, BPO: {fmax}, ...}
-        method_best: dict[str, dict[str, dict[str, Any]]] = {}
-
-        for er in eval_rows:
-            method_key, method_label = _derive_method(
-                er.scoring_config_id, er.reranker_model_id
+        # ── Pick the single best evaluation result ──────────────────────
+        rows = session.execute(
+            select(EvaluationResult, EmbeddingConfig, ScoringConfig.name)
+            .join(PredictionSet, PredictionSet.id == EvaluationResult.prediction_set_id)
+            .join(EmbeddingConfig, EmbeddingConfig.id == PredictionSet.embedding_config_id)
+            .outerjoin(
+                ScoringConfig, ScoringConfig.id == EvaluationResult.scoring_config_id
             )
-            results = er.results or {}
+        ).all()
 
-            for cat in _CATEGORIES:
-                cat_data = results.get(cat, {})
-                if not cat_data:
-                    continue
+        total_evaluations = len(rows)
+        best: dict[str, Any] | None = None
+        best_score: float = -1.0
 
-                if cat not in method_best:
-                    method_best[cat] = {}
-                if method_key not in method_best[cat]:
-                    method_best[cat][method_key] = {
-                        "label": method_label,
-                        **{a: {"fmax": None} for a in _ASPECTS},
-                    }
+        for er, cfg, scoring_name in rows:
+            score = _avg_fmax(er.results or {})
+            if score is None:
+                continue
+            if score > best_score:
+                best_score = score
+                stage = stage_of(er, scoring_name)
+                best = {
+                    "evaluation_result_id": str(er.id),
+                    "evaluation_set_id": str(er.evaluation_set_id),
+                    "stage": stage,
+                    "avg_fmax": round(score, 4),
+                    "embedding": {
+                        "id": str(cfg.id),
+                        "model_name": cfg.model_name,
+                        "model_backend": cfg.model_backend,
+                        "display_name": cfg.display_name or cfg.model_name,
+                        "family": cfg.family or cfg.model_backend,
+                        "param_count": cfg.param_count,
+                    },
+                    "per_cell": _flatten_cells(er.results or {}),
+                }
 
-                for aspect in _ASPECTS:
-                    aspect_data = cat_data.get(aspect, {})
-                    fmax = aspect_data.get("fmax")
-                    if fmax is None:
-                        continue
-
-                    # Update method-level best for this category
-                    cur = method_best[cat][method_key][aspect].get("fmax")
-                    if cur is None or fmax > cur:
-                        method_best[cat][method_key][aspect] = {"fmax": round(fmax, 4)}
-
-                    # Update global best for this category
-                    if cat not in best_fmax:
-                        best_fmax[cat] = {}
-                    if aspect not in best_fmax[cat] or fmax > best_fmax[cat][aspect]["fmax"]:
-                        best_fmax[cat][aspect] = {
-                            "fmax": round(fmax, 4),
-                            "method": method_key,
-                            "method_label": method_label,
-                            "evaluation_result_id": str(er.id),
-                        }
-
-        # Build ordered method_comparison per category
-        method_comparison: dict[str, list[dict[str, Any]]] = {}
-        for cat in _CATEGORIES:
-            cat_methods = method_best.get(cat, {})
-            cat_list: list[dict[str, Any]] = []
-            for mk in _METHOD_ORDER:
-                if mk in cat_methods:
-                    entry: dict[str, Any] = {
-                        "method": mk,
-                        "label": cat_methods[mk]["label"],
-                    }
-                    for aspect in _ASPECTS:
-                        entry[aspect] = cat_methods[mk][aspect]
-                    cat_list.append(entry)
-            if cat_list:
-                method_comparison[cat] = cat_list
-
-        # Pipeline stages
         pipeline_stages = [
-            {"name": "sequences", "count": total_sequences, "href": "/proteins"},
-            {"name": "embeddings", "count": total_embeddings, "href": "/embeddings"},
-            {"name": "predictions", "count": total_predictions, "href": "/functional-annotation"},
-            {"name": "reranker_models", "count": total_rerankers, "href": "/reranker"},
-            {"name": "evaluations", "count": total_evaluations, "href": "/evaluation"},
+            {"name": "sequences", "count": int(total_sequences), "href": "/proteins"},
+            {"name": "embeddings", "count": int(total_embeddings), "href": "/embeddings"},
+            {
+                "name": "predictions",
+                "count": int(total_predictions),
+                "href": "/functional-annotation",
+            },
+            {"name": "reranker_models", "count": int(total_rerankers), "href": "/reranker"},
+            {"name": "evaluations", "count": int(total_evaluations), "href": "/benchmark"},
         ]
 
         return {
             "protein_stats": {
-                "total": total_proteins,
-                "canonical": canonical_proteins,
+                "total": int(total_proteins),
+                "canonical": int(canonical_proteins),
             },
-            "best_fmax": best_fmax if best_fmax else {},
-            "method_comparison": method_comparison,
+            "best": best,
             "counts": {
-                "proteins": total_proteins,
-                "sequences": total_sequences,
-                "embeddings": total_embeddings,
-                "prediction_sets": total_prediction_sets,
-                "predictions": total_predictions,
-                "reranker_models": total_rerankers,
-                "evaluations": total_evaluations,
+                "proteins": int(total_proteins),
+                "sequences": int(total_sequences),
+                "embeddings": int(total_embeddings),
+                "prediction_sets": int(total_prediction_sets),
+                "predictions": int(total_predictions),
+                "reranker_models": int(total_rerankers),
+                "evaluations": int(total_evaluations),
             },
             "pipeline_stages": pipeline_stages,
         }
+
+
+def _flatten_cells(results: dict[str, Any]) -> list[dict[str, Any]]:
+    """Serialise the nested (category → aspect) Fmax blob as a flat list.
+
+    Kept on the showcase response so the Home page can render a compact
+    "per-tier breakdown" tile without a second fetch.  Only cells with a
+    non-null ``fmax`` are included.
+    """
+    out: list[dict[str, Any]] = []
+    for cat in _CATEGORIES:
+        cat_data = results.get(cat) or {}
+        for asp in _ASPECTS:
+            cell = cat_data.get(asp) or {}
+            fmax = cell.get("fmax")
+            if fmax is None:
+                continue
+            out.append(
+                {
+                    "category": cat,
+                    "aspect": asp,
+                    "fmax": round(float(fmax), 4),
+                    "precision": (
+                        round(float(cell["precision"]), 4)
+                        if cell.get("precision") is not None
+                        else None
+                    ),
+                    "recall": (
+                        round(float(cell["recall"]), 4) if cell.get("recall") is not None else None
+                    ),
+                }
+            )
+    return out

@@ -8,11 +8,6 @@ import { getShowcase, type ShowcaseData } from "../../lib/api";
 import { AnnotateForm } from "../../components/AnnotateForm";
 
 const ASPECTS = ["MFO", "BPO", "CCO"] as const;
-const ASPECT_COLORS: Record<string, string> = {
-  MFO: "blue",
-  BPO: "green",
-  CCO: "purple",
-};
 const ASPECT_LABELS: Record<string, string> = {
   MFO: "Molecular Function",
   BPO: "Biological Process",
@@ -24,12 +19,6 @@ const CATEGORY_LABELS: Record<string, string> = {
   NK: "No Knowledge",
   LK: "Limited Knowledge",
   PK: "Partial Knowledge",
-};
-
-const METHOD_KEYS: Record<string, string> = {
-  knn_baseline: "knnBaseline",
-  knn_scored: "knnScored",
-  knn_reranker: "knnReranker",
 };
 
 const STAGE_ICONS: Record<string, string> = {
@@ -48,12 +37,30 @@ const STAGE_I18N: Record<string, string> = {
   evaluations: "stageEvaluation",
 };
 
+const STAGE_LABELS: Record<string, string> = {
+  baseline: "pipelineStageBaseline",
+  alignment_weighted: "pipelineStageAlignmentWeighted",
+  reranker: "pipelineStageReranker",
+};
+
+const STAGE_BADGE: Record<string, string> = {
+  baseline: "bg-gray-100 text-gray-700",
+  alignment_weighted: "bg-amber-100 text-amber-800",
+  reranker: "bg-blue-100 text-blue-800",
+};
+
+function formatParamCount(n: number | null): string {
+  if (n == null) return "";
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(n >= 10_000_000_000 ? 0 : 1)}B`;
+  if (n >= 1_000_000) return `${Math.round(n / 1_000_000)}M`;
+  return `${n}`;
+}
+
 export default function HomePage() {
   const t = useTranslations("home");
   const router = useRouter();
   const [data, setData] = useState<ShowcaseData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [activeCategory, setActiveCategory] = useState<string>("NK");
 
   useEffect(() => {
     getShowcase().then(setData).catch((e) => setError(e.message));
@@ -65,7 +72,12 @@ export default function HomePage() {
         <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center">
           <p className="text-red-800 text-sm">{error}</p>
           <button
-            onClick={() => { setError(null); getShowcase().then(setData).catch((e) => setError(e.message)); }}
+            onClick={() => {
+              setError(null);
+              getShowcase()
+                .then(setData)
+                .catch((e) => setError(e.message));
+            }}
             className="mt-3 text-sm text-red-600 underline hover:text-red-800"
           >
             Retry
@@ -79,28 +91,26 @@ export default function HomePage() {
     return (
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-12 space-y-8">
         <div className="h-8 w-96 bg-gray-100 rounded animate-pulse" />
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {[0, 1, 2].map((i) => (
-            <div key={i} className="h-32 bg-gray-100 rounded-lg animate-pulse" />
-          ))}
-        </div>
+        <div className="h-32 bg-gray-100 rounded-lg animate-pulse" />
         <div className="h-48 bg-gray-100 rounded-lg animate-pulse" />
       </div>
     );
   }
 
-  const hasFmax = data.best_fmax && Object.keys(data.best_fmax).length > 0;
-  const hasComparison = data.method_comparison && Object.keys(data.method_comparison).length > 0;
+  const best = data.best;
+  const paramBadge = best ? formatParamCount(best.embedding.param_count) : "";
 
-  // Available categories (only those with data)
-  const availableCategories = CATEGORIES.filter(
-    (cat) => data.best_fmax?.[cat] || data.method_comparison?.[cat]
-  );
-
-  // Current category data
-  const catFmax = data.best_fmax?.[activeCategory] ?? {};
-  const catMethods = data.method_comparison?.[activeCategory] ?? [];
-  const baseline = catMethods.find((m) => m.method === "knn_baseline");
+  // Derive a per-aspect summary (mean over the 3 categories) from the flat
+  // per_cell list the backend returns, so we can show 3 big Fmax tiles without
+  // imposing a specific category on the user.
+  const perAspect: Record<string, { sum: number; count: number }> = {};
+  if (best) {
+    for (const cell of best.per_cell) {
+      if (!perAspect[cell.aspect]) perAspect[cell.aspect] = { sum: 0, count: 0 };
+      perAspect[cell.aspect].sum += cell.fmax;
+      perAspect[cell.aspect].count += 1;
+    }
+  }
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-10">
@@ -109,145 +119,81 @@ export default function HomePage() {
         <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 tracking-tight">
           PROTEA
         </h1>
-        <p className="text-lg text-gray-500 max-w-2xl mx-auto">
-          {t("subtitle")}
-        </p>
+        <p className="text-lg text-gray-500 max-w-2xl mx-auto">{t("subtitle")}</p>
       </section>
 
       {/* ── Annotate form ─────────────────────────────────────────── */}
       <AnnotateForm />
 
-      {/* ── Category tabs ─────────────────────────────────────────── */}
-      {hasFmax ? (
-        <>
-          <section>
-            <div className="flex items-center gap-4 mb-4">
-              <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wider">
-                {t("bestResults")}
-              </h2>
-              <div className="flex gap-1 rounded-lg bg-gray-100 p-0.5">
-                {availableCategories.map((cat) => (
-                  <button
-                    key={cat}
-                    onClick={() => setActiveCategory(cat)}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                      activeCategory === cat
-                        ? "bg-white text-gray-900 shadow-sm"
-                        : "text-gray-500 hover:text-gray-700"
-                    }`}
-                    title={CATEGORY_LABELS[cat]}
+      {/* ── Best result spotlight ─────────────────────────────────── */}
+      {best ? (
+        <section>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wider">
+              {t("bestOverall")}
+            </h2>
+            <Link
+              href="/benchmark"
+              className="text-xs text-blue-600 hover:text-blue-800 underline underline-offset-2"
+            >
+              {t("viewBenchmark")} →
+            </Link>
+          </div>
+
+          <div className="rounded-2xl border bg-white p-6 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-2xl font-bold text-gray-900">
+                    {best.embedding.display_name}
+                  </span>
+                  {paramBadge && (
+                    <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 tabular-nums">
+                      {paramBadge}
+                    </span>
+                  )}
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${STAGE_BADGE[best.stage]}`}
                   >
-                    {cat}
-                  </button>
-                ))}
+                    {t(STAGE_LABELS[best.stage] as any)}
+                  </span>
+                </div>
+                <div className="text-xs text-gray-400 mt-1 font-mono">
+                  {best.embedding.model_name}
+                </div>
               </div>
-              <span className="text-xs text-gray-400" title={CATEGORY_LABELS[activeCategory]}>
-                {CATEGORY_LABELS[activeCategory]}
-              </span>
+
+              <div className="text-right">
+                <div className="text-4xl font-bold text-gray-900 tabular-nums">
+                  {best.avg_fmax.toFixed(3)}
+                </div>
+                <div className="text-xs text-gray-500 mt-1">{t("avgFmaxAcrossCells")}</div>
+              </div>
             </div>
 
-            {/* ── Fmax cards ────────────────────────────────────────── */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {/* Per-aspect mini tiles (mean across NK/LK/PK) */}
+            <div className="mt-5 grid grid-cols-3 gap-3">
               {ASPECTS.map((aspect) => {
-                const d = catFmax[aspect];
-                if (!d) return null;
-                const color = ASPECT_COLORS[aspect];
+                const agg = perAspect[aspect];
+                const value = agg ? agg.sum / agg.count : null;
                 return (
                   <div
                     key={aspect}
-                    className={`rounded-xl border-2 p-5 text-center`}
-                    style={{
-                      borderColor: `var(--color-${color}-200, #bfdbfe)`,
-                      backgroundColor: `var(--color-${color}-50, #eff6ff)`,
-                    }}
+                    className="rounded-lg border bg-gray-50 p-3 text-center"
+                    title={ASPECT_LABELS[aspect]}
                   >
-                    <div className="text-4xl font-bold text-gray-900 tabular-nums">
-                      {d.fmax.toFixed(2)}
+                    <div className="text-xl font-semibold text-gray-900 tabular-nums">
+                      {value != null ? value.toFixed(3) : "—"}
                     </div>
-                    <div className="text-sm font-semibold text-gray-600 mt-1">
-                      {t("fmax")} {aspect}
-                    </div>
-                    <div className="text-xs text-gray-400 mt-1">
-                      {ASPECT_LABELS[aspect]}
-                    </div>
-                    <div className="text-xs text-gray-400 mt-1">
-                      {d.method_label}
+                    <div className="text-[10px] uppercase tracking-wide text-gray-500 mt-1">
+                      {aspect}
                     </div>
                   </div>
                 );
               })}
             </div>
-          </section>
-
-          {/* ── Method comparison table ───────────────────────────── */}
-          {catMethods.length > 0 && (
-            <section>
-              <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-3">
-                {t("methodComparison")}
-                <span className="ml-2 text-xs font-normal normal-case text-gray-400">
-                  ({activeCategory})
-                </span>
-              </h2>
-              <div className="overflow-x-auto rounded-lg border">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-gray-50 text-left">
-                      <th className="px-4 py-3 font-medium text-gray-600">{t("method")}</th>
-                      {ASPECTS.map((a) => (
-                        <th key={a} className="px-4 py-3 font-medium text-gray-600 text-center">
-                          {a}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {catMethods.map((row, i) => {
-                      const isBest = ASPECTS.some(
-                        (a) => catFmax[a]?.method === row.method
-                      );
-                      return (
-                        <tr
-                          key={row.method}
-                          className={`border-t ${isBest ? "bg-blue-50" : i % 2 === 0 ? "bg-white" : "bg-gray-50/50"}`}
-                        >
-                          <td className="px-4 py-3 font-medium text-gray-900">
-                            {t(METHOD_KEYS[row.method] ?? row.method)}
-                            {isBest && (
-                              <span className="ml-2 text-xs text-blue-600 font-normal">best</span>
-                            )}
-                          </td>
-                          {ASPECTS.map((aspect) => {
-                            const val = (row as any)[aspect]?.fmax;
-                            const baseVal = baseline ? (baseline as any)[aspect]?.fmax : null;
-                            const delta = val != null && baseVal != null && row.method !== "knn_baseline"
-                              ? val - baseVal
-                              : null;
-                            return (
-                              <td key={aspect} className="px-4 py-3 text-center tabular-nums">
-                                {val != null ? (
-                                  <span>
-                                    <span className="font-semibold">{val.toFixed(3)}</span>
-                                    {delta != null && (
-                                      <span className={`ml-1.5 text-xs ${delta > 0 ? "text-green-600" : delta < 0 ? "text-red-600" : "text-gray-400"}`}>
-                                        {delta > 0 ? "+" : ""}{delta.toFixed(3)}
-                                      </span>
-                                    )}
-                                  </span>
-                                ) : (
-                                  <span className="text-gray-300">&mdash;</span>
-                                )}
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          )}
-        </>
+          </div>
+        </section>
       ) : (
         <section className="rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 p-8 text-center">
           <p className="text-gray-500">{t("noDataYet")}</p>
@@ -309,12 +255,14 @@ export default function HomePage() {
           {t("stats")}
         </h2>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {([
-            ["proteins", data.counts.proteins],
-            ["sequences", data.counts.sequences],
-            ["embeddings", data.counts.embeddings],
-            ["predictions", data.counts.predictions],
-          ] as [string, number][]).map(([key, count]) => (
+          {(
+            [
+              ["proteins", data.counts.proteins],
+              ["sequences", data.counts.sequences],
+              ["embeddings", data.counts.embeddings],
+              ["predictions", data.counts.predictions],
+            ] as [string, number][]
+          ).map(([key, count]) => (
             <div key={key} className="rounded-lg border bg-white p-3 text-center">
               <div className="text-2xl font-bold text-gray-900 tabular-nums">
                 {count.toLocaleString()}
@@ -328,7 +276,7 @@ export default function HomePage() {
       {/* ── CTAs ──────────────────────────────────────────────────── */}
       <section className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
         <Link
-          href="/evaluation"
+          href="/benchmark"
           className="rounded-md bg-blue-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
         >
           {t("exploreResults")}

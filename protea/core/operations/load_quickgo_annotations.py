@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-import io
 import time
 import uuid
 from collections.abc import Iterator
 from typing import Annotated, Any
 
-import requests
+from protea_contracts import (
+    EcoMappingPayload,
+    QuickGoAnnotationRecord,
+    QuickGoStreamPayload,
+)
 from pydantic import Field, field_validator
 from sqlalchemy import distinct, select
 from sqlalchemy.orm import Session
@@ -71,6 +74,19 @@ class LoadQuickGOAnnotationsOperation:
     """
 
     name = "load_quickgo_annotations"
+    description = (
+        "Stream GO annotations from QuickGO's bulk download endpoint and insert "
+        "ProteinGOAnnotation rows for accessions already present in the DB."
+    )
+
+    def summarize_payload(self, payload: dict[str, Any]) -> str:
+        p = payload or {}
+        bits = []
+        if p.get("source_version"):
+            bits.append(f"source={p['source_version']}")
+        if p.get("total_limit"):
+            bits.append(f"limit={p['total_limit']}")
+        return " · ".join(bits)
 
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
@@ -124,7 +140,7 @@ class LoadQuickGOAnnotationsOperation:
         total_inserted = 0
         total_skipped = 0
         pages = 0
-        buffer: list[dict[str, str]] = []
+        buffer: list[QuickGoAnnotationRecord] = []
 
         for record in self._stream_quickgo(p, emit, gene_product_ids=effective_gp_ids):
             total_lines += 1
@@ -233,116 +249,54 @@ class LoadQuickGOAnnotationsOperation:
         return mapping
 
     def _load_eco_mapping(self, p: LoadQuickGOAnnotationsPayload, emit: EmitFn) -> dict[str, str]:
-        """Download and parse gaf-eco-mapping-derived.txt → {ECO:XXXXXXX: CODE}."""
+        """Delegate to the protea-sources QuickGoSource auxiliary fetch.
+
+        D-MIGR-05 of F2A.6-real: ECO mapping is a separate small-file
+        fetch (single shot, in-memory dict). The operation calls it
+        once before iterating ``_stream_quickgo`` and caches the
+        result for the duration of the load.
+        """
         if not p.eco_mapping_url:
             return {}
-        emit("load_quickgo_annotations.eco_mapping_start", None, {"url": p.eco_mapping_url}, "info")
-        resp = requests.get(p.eco_mapping_url, timeout=60)
-        resp.raise_for_status()
-        mapping: dict[str, str] = {}
-        for line in resp.text.splitlines():
-            parts = line.strip().split()
-            if len(parts) >= 2 and parts[0].startswith("ECO:"):
-                mapping[parts[0]] = parts[1]
-        emit("load_quickgo_annotations.eco_mapping_done", None, {"entries": len(mapping)}, "info")
-        return mapping
+        from protea_sources.quickgo import plugin as quickgo_plugin
+
+        return quickgo_plugin.fetch_eco_mapping(
+            EcoMappingPayload(url=p.eco_mapping_url),
+            emit=emit,
+        )
 
     def _stream_quickgo(
         self,
         p: LoadQuickGOAnnotationsPayload,
         emit: EmitFn,
         gene_product_ids: list[str] | None = None,
-    ) -> Iterator[dict[str, str]]:
+    ) -> Iterator[QuickGoAnnotationRecord]:
+        """Delegate to the protea-sources QuickGoSource plugin.
+
+        The plugin owns HTTP, TSV header detection, multi-batch URL
+        construction (to dodge QuickGO's 400-on-long-URL response), and
+        record construction. The operation owns DB filtering, GO term
+        resolution, ECO map application, and bulk insert. See
+        ``f2a6_real_migration_design.md`` (D-MIGR-01, D-MIGR-02,
+        D-MIGR-05).
+        """
+        from protea_sources.quickgo import plugin as quickgo_plugin
+
         effective_ids = gene_product_ids or p.gene_product_ids
-
-        # If no ID filter, do a single unbatched request
-        if not effective_ids:
-            yield from self._fetch_quickgo_page(
-                p, emit, gp_ids=None, batch_index=0, total_batches=1
-            )
-            return
-
-        # Batch accessions to avoid URL length limits (QuickGO returns 400 for very long URLs)
-        batches = [
-            effective_ids[i : i + p.gene_product_batch_size]
-            for i in range(0, len(effective_ids), p.gene_product_batch_size)
-        ]
-        total_batches = len(batches)
-        emit(
-            "load_quickgo_annotations.batching",
-            None,
-            {
-                "total_accessions": len(effective_ids),
-                "total_batches": total_batches,
-                "batch_size": p.gene_product_batch_size,
-            },
-            "info",
+        yield from quickgo_plugin.stream(
+            QuickGoStreamPayload(
+                quickgo_base_url=p.quickgo_base_url,
+                gene_product_ids=effective_ids,
+                gene_product_batch_size=p.gene_product_batch_size,
+                timeout_seconds=p.timeout_seconds,
+            ),
+            emit=emit,
         )
-
-        for batch_index, batch in enumerate(batches):
-            yield from self._fetch_quickgo_page(
-                p, emit, gp_ids=batch, batch_index=batch_index, total_batches=total_batches
-            )
-
-    def _fetch_quickgo_page(
-        self,
-        p: LoadQuickGOAnnotationsPayload,
-        emit: EmitFn,
-        gp_ids: list[str] | None,
-        batch_index: int,
-        total_batches: int,
-    ) -> Iterator[dict[str, str]]:
-        params: dict[str, Any] = {"geneProductType": "protein"}
-        if gp_ids:
-            params["geneProductId"] = ",".join(gp_ids)
-
-        headers = {
-            "Accept": "text/tsv",
-            "User-Agent": "PROTEA/load_quickgo_annotations",
-        }
-        emit(
-            "load_quickgo_annotations.download_start",
-            None,
-            {
-                "batch": batch_index + 1,
-                "of": total_batches,
-                "accessions_in_batch": len(gp_ids) if gp_ids else "all",
-                "_progress_current": batch_index + 1,
-                "_progress_total": total_batches,
-            },
-            "info",
-        )
-
-        resp = requests.get(
-            p.quickgo_base_url,
-            params=params,
-            headers=headers,
-            stream=True,
-            timeout=p.timeout_seconds,
-        )
-        resp.raise_for_status()
-
-        resp.raw.decode_content = True
-        stream = io.TextIOWrapper(resp.raw, encoding="utf-8", errors="replace")
-
-        header: list[str] | None = None
-        with stream:
-            for raw in stream:
-                line = raw.rstrip("\n")
-                if not line:
-                    continue
-                parts = line.split("\t")
-                if header is None:
-                    header = parts
-                    continue
-                if len(parts) < len(header):
-                    continue
-                yield dict(zip(header, parts, strict=False))
 
     def _store_buffer(
         self,
         session: Session,
-        records: list[dict[str, str]],
+        records: list[QuickGoAnnotationRecord],
         annotation_set_id: uuid.UUID,
         valid_accessions: set[str],
         go_term_map: dict[str, int],
@@ -351,32 +305,31 @@ class LoadQuickGOAnnotationsOperation:
         to_add: list[dict] = []
         skipped = 0
 
-        for row in records:
-            accession = row.get("GENE PRODUCT ID", "").strip()
-            if not accession or accession not in valid_accessions:
+        for rec in records:
+            if rec.accession not in valid_accessions:
                 skipped += 1
                 continue
 
-            go_id = row.get("GO TERM", "").strip()
-            go_term_id = go_term_map.get(go_id)
+            go_term_id = go_term_map.get(rec.go_id)
             if go_term_id is None:
                 skipped += 1
                 continue
 
-            eco_id = row.get("ECO ID", "").strip() or None
-            evidence_code = eco_map.get(eco_id, eco_id) if eco_id else None
+            evidence_code = (
+                eco_map.get(rec.eco_id, rec.eco_id) if rec.eco_id else None
+            )
 
             to_add.append(
                 {
                     "annotation_set_id": annotation_set_id,
-                    "protein_accession": accession,
+                    "protein_accession": rec.accession,
                     "go_term_id": go_term_id,
-                    "qualifier": row.get("QUALIFIER", "").strip() or None,
+                    "qualifier": rec.qualifier,
                     "evidence_code": evidence_code,
-                    "assigned_by": row.get("ASSIGNED BY", "").strip() or None,
-                    "db_reference": row.get("REFERENCE", "").strip() or None,
-                    "with_from": row.get("WITH/FROM", "").strip() or None,
-                    "annotation_date": row.get("DATE", "").strip() or None,
+                    "assigned_by": rec.assigned_by,
+                    "db_reference": rec.db_reference,
+                    "with_from": rec.with_from,
+                    "annotation_date": rec.annotation_date,
                 }
             )
 

@@ -2,6 +2,7 @@
 
 Database is fully mocked -- no real infrastructure required.
 """
+
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -12,11 +13,20 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from protea.api.cache import invalidate as _cache_invalidate
 from protea.api.routers.proteins import router
+
+
+@pytest.fixture(autouse=True)
+def _reset_router_cache():
+    _cache_invalidate()
+    yield
+    _cache_invalidate()
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_app(session_factory):
     app = FastAPI()
@@ -54,10 +64,24 @@ def _make_protein(**overrides):
 def _make_metadata():
     meta = MagicMock()
     for attr in (
-        "function_cc", "ec_number", "catalytic_activity", "pathway",
-        "keywords", "cofactor", "activity_regulation", "absorption",
-        "kinetics", "ph_dependence", "redox_potential", "temperature_dependence",
-        "active_site", "binding_site", "dna_binding", "rhea_id", "site", "features",
+        "function_cc",
+        "ec_number",
+        "catalytic_activity",
+        "pathway",
+        "keywords",
+        "cofactor",
+        "activity_regulation",
+        "absorption",
+        "kinetics",
+        "ph_dependence",
+        "redox_potential",
+        "temperature_dependence",
+        "active_site",
+        "binding_site",
+        "dna_binding",
+        "rhea_id",
+        "site",
+        "features",
     ):
         setattr(meta, attr, f"mock_{attr}")
     return meta
@@ -66,6 +90,7 @@ def _make_metadata():
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def session():
@@ -92,6 +117,7 @@ def client(session, factory):
 # GET /proteins/stats
 # ---------------------------------------------------------------------------
 
+
 class TestProteinStats:
     def test_returns_all_stat_keys(self, client):
         c, session = client
@@ -105,8 +131,14 @@ class TestProteinStats:
         assert resp.status_code == 200
         data = resp.json()
         for key in (
-            "total", "canonical", "isoforms", "reviewed",
-            "unreviewed", "with_metadata", "with_embeddings", "with_go_annotations",
+            "total",
+            "canonical",
+            "isoforms",
+            "reviewed",
+            "unreviewed",
+            "with_metadata",
+            "with_embeddings",
+            "with_go_annotations",
         ):
             assert key in data
 
@@ -126,6 +158,7 @@ class TestProteinStats:
 # ---------------------------------------------------------------------------
 # GET /proteins
 # ---------------------------------------------------------------------------
+
 
 class TestListProteins:
     def test_returns_paginated_list(self, client):
@@ -210,6 +243,7 @@ class TestListProteins:
 # GET /proteins/{accession}
 # ---------------------------------------------------------------------------
 
+
 class TestGetProtein:
     def test_returns_protein_with_metadata(self, client):
         c, session = client
@@ -258,7 +292,10 @@ class TestGetProtein:
         iso1.accession = "P12345-2"
         iso2 = MagicMock()
         iso2.accession = "P12345-3"
-        session.query.return_value.filter.return_value.order_by.return_value.all.return_value = [iso1, iso2]
+        session.query.return_value.filter.return_value.order_by.return_value.all.return_value = [
+            iso1,
+            iso2,
+        ]
 
         resp = c.get("/proteins/P12345")
         assert resp.status_code == 200
@@ -282,11 +319,21 @@ class TestGetProtein:
 # GET /proteins/{accession}/annotations
 # ---------------------------------------------------------------------------
 
+
 class TestGetProteinAnnotations:
-    def _make_annotation_row(self, go_id="GO:0003674", name="molecular_function",
-                              aspect="F", qualifier="enables", evidence="IDA",
-                              assigned_by="UniProt", db_ref="PMID:123",
-                              ann_set_id=None, source="goa", version="2024-01"):
+    def _make_annotation_row(
+        self,
+        go_id="GO:0003674",
+        name="molecular_function",
+        aspect="F",
+        qualifier="enables",
+        evidence="IDA",
+        assigned_by="UniProt",
+        db_ref="PMID:123",
+        ann_set_id=None,
+        source="goa",
+        version="2024-01",
+    ):
         ann = MagicMock()
         ann.qualifier = qualifier
         ann.evidence_code = evidence

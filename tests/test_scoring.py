@@ -1,4 +1,5 @@
 """Tests for protea.core.scoring and related evidence weight resolution."""
+
 from unittest.mock import MagicMock
 
 import pytest
@@ -14,6 +15,7 @@ from protea.infrastructure.orm.models.embedding.scoring_config import (
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _config(
     weights: dict,
@@ -31,6 +33,7 @@ def _config(
 # evidence_weight
 # ---------------------------------------------------------------------------
 
+
 class TestEvidenceWeight:
     def test_none_code_returns_fallback(self):
         assert evidence_weight(None) == DEFAULT_EVIDENCE_WEIGHT_FALLBACK
@@ -42,7 +45,7 @@ class TestEvidenceWeight:
         assert evidence_weight("IDA") == 1.0
 
     def test_known_electronic_code(self):
-        assert evidence_weight("IEA") == 0.3
+        assert evidence_weight("IEA") == 0.8
 
     def test_known_computational_code(self):
         assert evidence_weight("IBA") == 0.7
@@ -60,9 +63,10 @@ class TestEvidenceWeight:
     def test_eco_id_normalized(self):
         # ECO:0000501 maps to IEA
         from protea.core.evidence_codes import ECO_TO_CODE
+
         eco_ids = [eco for eco, go in ECO_TO_CODE.items() if go == "IEA"]
         if eco_ids:
-            assert evidence_weight(eco_ids[0]) == pytest.approx(0.3)
+            assert evidence_weight(eco_ids[0]) == pytest.approx(0.8)
 
     def test_override_with_none_overrides_arg(self):
         # overrides=None should not crash
@@ -72,6 +76,7 @@ class TestEvidenceWeight:
 # ---------------------------------------------------------------------------
 # compute_score — pure embedding
 # ---------------------------------------------------------------------------
+
 
 class TestComputeScoreEmbeddingOnly:
     def setup_method(self):
@@ -106,6 +111,7 @@ class TestComputeScoreEmbeddingOnly:
 # ---------------------------------------------------------------------------
 # compute_score — multi-signal
 # ---------------------------------------------------------------------------
+
 
 class TestComputeScoreMultiSignal:
     def test_nw_identity_contributes(self):
@@ -158,10 +164,36 @@ class TestComputeScoreMultiSignal:
         score = compute_score({"identity_nw": 1.5}, cfg)
         assert score == pytest.approx(1.0)
 
+    def test_vote_fraction_signal(self):
+        cfg = _config({"neighbor_vote_fraction": 1.0})
+        score = compute_score({"neighbor_vote_fraction": 0.7}, cfg)
+        assert score == pytest.approx(0.7)
+
+    def test_vote_fraction_unanimous(self):
+        cfg = _config({"neighbor_vote_fraction": 1.0})
+        score = compute_score({"neighbor_vote_fraction": 1.0}, cfg)
+        assert score == pytest.approx(1.0)
+
+    def test_vote_fraction_combined_with_embedding(self):
+        cfg = _config({"embedding_similarity": 0.5, "neighbor_vote_fraction": 0.5})
+        # embedding similarity = 1.0 (distance=0), vote_fraction = 0.6
+        # → (0.5*1.0 + 0.5*0.6)/1.0 = 0.8
+        pred = {"distance": 0.0, "neighbor_vote_fraction": 0.6}
+        score = compute_score(pred, cfg)
+        assert score == pytest.approx(0.8)
+
+    def test_vote_fraction_none_excluded(self):
+        cfg = _config({"embedding_similarity": 0.5, "neighbor_vote_fraction": 0.5})
+        # vote_fraction is None → only embedding_similarity contributes,
+        # denominator collapses so score = 1.0
+        score = compute_score({"distance": 0.0, "neighbor_vote_fraction": None}, cfg)
+        assert score == pytest.approx(1.0)
+
 
 # ---------------------------------------------------------------------------
 # compute_score — evidence_weighted formula
 # ---------------------------------------------------------------------------
+
 
 class TestComputeScoreEvidenceWeighted:
     def test_iea_downgrades_score(self):
@@ -192,6 +224,7 @@ class TestComputeScoreEvidenceWeighted:
 # ---------------------------------------------------------------------------
 # score_predictions
 # ---------------------------------------------------------------------------
+
 
 class TestScorePredictions:
     def setup_method(self):

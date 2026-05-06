@@ -10,8 +10,9 @@ from sqlalchemy import func
 from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session, sessionmaker
 
-from protea.core.contracts.operation import OperationResult, RetryLaterError
+from protea.core.contracts.operation import OperationResult, RetryLaterError, make_safe_emit
 from protea.core.contracts.registry import OperationRegistry
+from protea.core.retry import is_retryable, with_retry
 from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
 from protea.infrastructure.queue.publisher import publish_job, publish_operation
@@ -54,17 +55,44 @@ class BaseWorker:
         Claim and execute a single job identified by ``job_id``.
 
         Silently returns if the job does not exist or is not in QUEUED status.
-        Re-raises any exception from the operation after recording FAILED status.
+        Transient infrastructure failures (Postgres deadlocks, brief
+        connection resets) are retried up to 3 times with exponential
+        backoff before the job is marked FAILED. Re-raises any exception
+        from the operation after recording FAILED status.
         """
-        # Claim + run with DB-backed state.
+        if not self._claim_job(job_id):
+            return
+        try:
+            with_retry(
+                self._execute_with_session,
+                job_id,
+                max_attempts=3,
+                base_delay=1.0,
+                max_delay=10.0,
+                jitter_ratio=0.3,
+            )
+        except RetryLaterError:
+            # Consumer re-publishes; job is already QUEUED.
+            raise
+        except Exception as exc:
+            # If retry was exhausted on a retryable error, the job is still
+            # in RUNNING with no FAILED transition recorded. Force-mark FAILED
+            # via fallback session so it never gets stuck.
+            if is_retryable(exc):
+                self._force_fail_job(job_id, exc)
+            raise
+
+    def _claim_job(self, job_id: UUID) -> bool:
+        """Transition the job from QUEUED to RUNNING in its own session.
+
+        Returns True if claim succeeded; False if the job is missing or
+        already in a non-QUEUED state.
+        """
         session = self._factory()
         try:
             job = session.get(Job, job_id)
-            if job is None:
-                return
-
-            if job.status != JobStatus.QUEUED:
-                return
+            if job is None or job.status != JobStatus.QUEUED:
+                return False
 
             job.status = JobStatus.RUNNING
             job.started_at = utcnow()
@@ -77,161 +105,191 @@ class BaseWorker:
                 level="info",
             )
             session.commit()
+            return True
         finally:
             session.close()
 
-        # Execute in a separate session
+    def _execute_with_session(self, job_id: UUID) -> None:
+        """Run the operation in a fresh session.
+
+        Called by ``handle_job`` through ``with_retry`` so transient
+        infrastructure failures (deadlocks, etc.) get a clean session
+        on each attempt. Non-retryable exceptions propagate through to
+        the FAILED-handling branch below; ``RetryLaterError`` is also
+        propagated so the consumer can re-publish.
+        """
         session = self._factory()
         try:
             job = session.get(Job, job_id)
             if job is None:
                 return
 
-            # If the parent was cancelled while this child was being claimed,
-            # cancel ourselves and stop without executing.
-            if job.parent_job_id is not None:
-                parent = session.get(Job, job.parent_job_id)
-                if parent is not None and parent.status == JobStatus.CANCELLED:
-                    job.status = JobStatus.CANCELLED
-                    job.finished_at = utcnow()
-                    self._emit(
-                        session,
-                        job_id,
-                        "job.cancelled",
-                        None,
-                        {"reason": "parent_cancelled"},
-                        level="info",
-                    )
-                    session.commit()
-                    return
+            if self._cancel_if_parent_cancelled(session, job, job_id):
+                return
 
             op = self._registry.get(job.operation)
-
-            def emit(
-                event: str,
-                message: str | None = None,
-                fields: dict[str, Any] | None = None,
-                level: str = "info",
-            ) -> None:
-                # Dedicated short-lived session that commits immediately so
-                # events are visible in real time, not just at job completion.
-                f = fields or {}
-                event_session = self._factory()
-                try:
-                    self._emit(event_session, job_id, event, message, f, level=level)
-                    # Allow operations to report live progress via reserved fields.
-                    if "_progress_current" in f or "_progress_total" in f:
-                        j = event_session.get(Job, job_id)
-                        if j is not None:
-                            if "_progress_current" in f:
-                                j.progress_current = int(f["_progress_current"])
-                            if "_progress_total" in f:
-                                j.progress_total = int(f["_progress_total"])
-                    event_session.commit()
-                finally:
-                    event_session.close()
+            emit = make_safe_emit(self._build_emit(job_id))
+            enhanced_payload = {**job.payload, "_job_id": str(job.id)}
 
             try:
-                # Inject runtime context into payload so operations can reference their own job.
-                enhanced_payload = {**job.payload, "_job_id": str(job.id)}
                 result: OperationResult = op.execute(session, enhanced_payload, emit=emit)
-
-                if result.progress_current is not None:
-                    job.progress_current = int(result.progress_current)
-                if result.progress_total is not None:
-                    job.progress_total = int(result.progress_total)
-
-                if result.deferred:
-                    # Coordinator job: children will mark it SUCCEEDED when done.
-                    self._emit(
-                        session,
-                        job_id,
-                        "job.dispatched",
-                        None,
-                        {"result": result.result},
-                        level="info",
-                    )
-                else:
-                    job.status = JobStatus.SUCCEEDED
-                    job.finished_at = utcnow()
-                    self._emit(
-                        session,
-                        job_id,
-                        "job.succeeded",
-                        None,
-                        {"result": result.result},
-                        level="info",
-                    )
-
-                session.commit()
-
-                # Publish child jobs to RabbitMQ after commit so workers always find the DB row.
-                if result.publish_after_commit and self._amqp_url:
-                    for queue_name, child_job_id in result.publish_after_commit:
-                        publish_job(self._amqp_url, queue_name, child_job_id)
-
-                # Publish ephemeral operation messages (e.g. embedding batches).
-                if result.publish_operations and self._amqp_url:
-                    for queue_name, op_payload in result.publish_operations:
-                        publish_operation(self._amqp_url, queue_name, op_payload)
-
+                self._on_operation_success(session, job, job_id, result)
             except RetryLaterError as e:
-                # Resource busy — reset to QUEUED so the consumer can re-publish.
-                # Adaptive backoff: count previous retries and increase delay.
-                retry_count = (
-                    session.query(func.count(JobEvent.id))
-                    .filter(JobEvent.job_id == job_id, JobEvent.event == "job.retry_later")
-                    .scalar()
-                    or 0
-                )
-                base_delay = e.delay_seconds
-                delay = min(base_delay * (2 ** retry_count), 600)  # cap at 10 min
-
-                job.status = JobStatus.QUEUED
-                job.started_at = None
-                self._emit(
-                    session,
-                    job_id,
-                    "job.retry_later",
-                    str(e),
-                    {"delay_seconds": delay, "retry_count": retry_count + 1},
-                    level="info",
-                )
-                session.commit()
-                # Propagate adaptive delay to the consumer.
-                e.delay_seconds = delay
-                raise  # consumer handles re-publish
-
+                self._on_retry_later(session, job, job_id, e)
+                raise
             except Exception as e:
-                job.status = JobStatus.FAILED
-                job.finished_at = utcnow()
-                job.error_code = e.__class__.__name__
-                job.error_message = str(e)
-                self._emit(
-                    session,
-                    job_id,
-                    "job.failed",
-                    str(e),
-                    {"error_code": job.error_code},
-                    level="error",
-                )
-                if job.parent_job_id is not None:
-                    self._maybe_fail_parent(session, job.parent_job_id)
-                try:
-                    session.commit()
-                except Exception as commit_exc:
-                    # Execute session is corrupted (e.g. DB connection dropped during a
-                    # long operation).  Fall back to a fresh session so the job is never
-                    # left permanently stuck in RUNNING.
-                    logger.error(
-                        "Execute session commit failed; using fallback session. job_id=%s error=%s",
-                        job_id,
-                        commit_exc,
-                    )
-                    self._force_fail_job(job_id, e)
+                if is_retryable(e):
+                    # Let with_retry handle this; rollback so the next
+                    # attempt sees a clean session state.
+                    try:
+                        session.rollback()
+                    except Exception:
+                        pass
+                    raise
+                self._on_operation_failure(session, job, job_id, e)
                 raise
         finally:
             session.close()
+
+    def _build_emit(self, job_id: UUID):
+        """Build the raw emit closure that writes JobEvent rows.
+
+        Returned callable opens a short-lived session per event so
+        progress is visible in real time. Wrapped by ``make_safe_emit``
+        before being handed to operations so emit failures never crash
+        the job.
+        """
+
+        def raw_emit(
+            event: str,
+            message: str | None = None,
+            fields: dict[str, Any] | None = None,
+            level: str = "info",
+        ) -> None:
+            f = fields or {}
+            event_session = self._factory()
+            try:
+                self._emit(event_session, job_id, event, message, f, level=level)
+                if "_progress_current" in f or "_progress_total" in f:
+                    j = event_session.get(Job, job_id)
+                    if j is not None:
+                        if "_progress_current" in f:
+                            j.progress_current = int(f["_progress_current"])
+                        if "_progress_total" in f:
+                            j.progress_total = int(f["_progress_total"])
+                event_session.commit()
+            finally:
+                event_session.close()
+
+        return raw_emit
+
+    def _cancel_if_parent_cancelled(
+        self, session: Session, job: Job, job_id: UUID
+    ) -> bool:
+        if job.parent_job_id is None:
+            return False
+        parent = session.get(Job, job.parent_job_id)
+        if parent is None or parent.status != JobStatus.CANCELLED:
+            return False
+        job.status = JobStatus.CANCELLED
+        job.finished_at = utcnow()
+        self._emit(
+            session,
+            job_id,
+            "job.cancelled",
+            None,
+            {"reason": "parent_cancelled"},
+            level="info",
+        )
+        session.commit()
+        return True
+
+    def _on_operation_success(
+        self, session: Session, job: Job, job_id: UUID, result: OperationResult
+    ) -> None:
+        if result.progress_current is not None:
+            job.progress_current = int(result.progress_current)
+        if result.progress_total is not None:
+            job.progress_total = int(result.progress_total)
+
+        if result.deferred:
+            self._emit(
+                session,
+                job_id,
+                "job.dispatched",
+                None,
+                {"result": result.result},
+                level="info",
+            )
+        else:
+            job.status = JobStatus.SUCCEEDED
+            job.finished_at = utcnow()
+            self._emit(
+                session,
+                job_id,
+                "job.succeeded",
+                None,
+                {"result": result.result},
+                level="info",
+            )
+        session.commit()
+
+        if result.publish_after_commit and self._amqp_url:
+            for queue_name, child_job_id in result.publish_after_commit:
+                publish_job(self._amqp_url, queue_name, child_job_id)
+        if result.publish_operations and self._amqp_url:
+            for queue_name, op_payload in result.publish_operations:
+                publish_operation(self._amqp_url, queue_name, op_payload)
+
+    def _on_retry_later(
+        self, session: Session, job: Job, job_id: UUID, exc: RetryLaterError
+    ) -> None:
+        retry_count = (
+            session.query(func.count(JobEvent.id))
+            .filter(JobEvent.job_id == job_id, JobEvent.event == "job.retry_later")
+            .scalar()
+            or 0
+        )
+        delay = min(exc.delay_seconds * (2**retry_count), 600)
+        job.status = JobStatus.QUEUED
+        job.started_at = None
+        self._emit(
+            session,
+            job_id,
+            "job.retry_later",
+            str(exc),
+            {"delay_seconds": delay, "retry_count": retry_count + 1},
+            level="info",
+        )
+        session.commit()
+        exc.delay_seconds = delay
+
+    def _on_operation_failure(
+        self, session: Session, job: Job, job_id: UUID, exc: Exception
+    ) -> None:
+        job.status = JobStatus.FAILED
+        job.finished_at = utcnow()
+        job.error_code = exc.__class__.__name__
+        job.error_message = str(exc)
+        self._emit(
+            session,
+            job_id,
+            "job.failed",
+            str(exc),
+            {"error_code": job.error_code},
+            level="error",
+        )
+        if job.parent_job_id is not None:
+            self._maybe_fail_parent(session, job.parent_job_id)
+        try:
+            session.commit()
+        except Exception as commit_exc:
+            logger.error(
+                "Execute session commit failed; using fallback session. job_id=%s error=%s",
+                job_id,
+                commit_exc,
+            )
+            self._force_fail_job(job_id, exc)
 
     def _force_fail_job(self, job_id: UUID, original_exc: Exception) -> None:
         """Mark a job FAILED using a fresh session.

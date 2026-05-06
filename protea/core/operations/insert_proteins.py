@@ -1,21 +1,16 @@
 from __future__ import annotations
 
-import gzip
-import re
 import time
-from collections.abc import Iterable
+from collections.abc import Iterator
 from collections.abc import Sequence as Seq
-from io import BytesIO
 from typing import Annotated, Any
-from urllib.parse import quote
 
-import requests
+from protea_contracts import UniProtFastaStreamPayload, UniProtProteinRecord
 from pydantic import Field, field_validator
-from requests import Response
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, Operation, OperationResult, ProteaPayload
-from protea.core.utils import UniProtHttpMixin, chunks
+from protea.core.utils import chunks
 from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.orm.models.sequence.sequence import Sequence as SequenceModel
 
@@ -44,7 +39,7 @@ class InsertProteinsPayload(ProteaPayload, frozen=True):
         return v.strip()
 
 
-class InsertProteinsOperation(UniProtHttpMixin, Operation):
+class InsertProteinsOperation(Operation):
     """Fetches protein sequences from UniProt (FASTA) and upserts them into the DB.
 
     Uses cursor-based pagination, exponential backoff with jitter, and MD5-based
@@ -54,25 +49,35 @@ class InsertProteinsOperation(UniProtHttpMixin, Operation):
     """
 
     name = "insert_proteins"
-    UNIPROT_SEARCH_URL = "https://rest.uniprot.org/uniprotkb/search"
+    description = (
+        "Fetch protein sequences from UniProt (FASTA, cursor-paginated) and upsert "
+        "Protein + Sequence rows; isoforms are stored grouped by canonical accession."
+    )
 
-    _re_os = re.compile(r"\bOS=([^=]+?)\sOX=")
-    _re_ox = re.compile(r"\bOX=(\d+)")
-    _re_gn = re.compile(r"\bGN=([^\s]+)")
+    def summarize_payload(self, payload: dict[str, Any]) -> str:
+        criteria = (payload or {}).get("search_criteria")
+        limit = (payload or {}).get("total_limit")
+        bits = []
+        if criteria:
+            short = str(criteria)
+            if len(short) > 60:
+                short = short[:57] + "..."
+            bits.append(f"query={short}")
+        if limit:
+            bits.append(f"limit={limit}")
+        return " · ".join(bits)
 
     def __init__(self) -> None:
-        self._http_requests = 0
-        self._http_retries = 0
-        self._total_results: int | None = None
-        self._http = requests.Session()
+        # Plugin instance is reused across executions for connection
+        # pooling; counters are reset by the plugin at the start of
+        # each ``stream_fasta`` call.
+        from protea_sources.uniprot import plugin as _uniprot_plugin
+
+        self._uniprot_plugin = _uniprot_plugin
 
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        self._http_requests = 0
-        self._http_retries = 0
-        self._total_results = None
-
         p = InsertProteinsPayload.model_validate(payload)
 
         t0 = time.perf_counter()
@@ -91,214 +96,111 @@ class InsertProteinsOperation(UniProtHttpMixin, Operation):
         sequences_inserted = 0
         sequences_reused = 0
 
-        for page_idx, records in enumerate(self._fetch_fasta_pages(p, emit), start=1):
-            pages = page_idx
-            if not records:
-                continue
-
-            if p.total_limit is not None and (retrieved + len(records)) > p.total_limit:
-                records = records[: max(0, p.total_limit - retrieved)]
-            if not records:
+        # Buffer per-record into operation-controlled pages of size
+        # ``p.page_size``. The plugin yields one record at a time
+        # (D-MIGR-01); the operation owns batching policy.
+        buffer: list[UniProtProteinRecord] = []
+        for record in self._stream_fasta(p, emit):
+            if p.total_limit is not None and retrieved >= p.total_limit:
+                emit(
+                    "insert_proteins.limit_reached",
+                    None,
+                    {"total_limit": p.total_limit},
+                    "warning",
+                )
                 break
 
-            retrieved += len(records)
-            isoforms += sum(1 for r in records if r["isoform_index"] is not None)
+            buffer.append(record)
+            retrieved += 1
+            if record.isoform_index is not None:
+                isoforms += 1
 
-            ins_p, upd_p, ins_s, re_s = self._store_records(session, records, emit)
+            if len(buffer) >= p.page_size:
+                pages += 1
+                ins_p, upd_p, ins_s, re_s = self._store_records(session, buffer, emit)
+                proteins_inserted += ins_p
+                proteins_updated += upd_p
+                sequences_inserted += ins_s
+                sequences_reused += re_s
+                buffer.clear()
+
+                http_req, http_ret = self._uniprot_plugin.http_counters
+                emit(
+                    "insert_proteins.page_done",
+                    None,
+                    {
+                        "page": pages,
+                        "retrieved_total": retrieved,
+                        "proteins_inserted_total": proteins_inserted,
+                        "proteins_updated_total": proteins_updated,
+                        "sequences_inserted_total": sequences_inserted,
+                        "sequences_reused_total": sequences_reused,
+                        "http_requests": http_req,
+                        "http_retries": http_ret,
+                        "_progress_current": retrieved,
+                        **(
+                            {"_progress_total": p.total_limit}
+                            if p.total_limit
+                            else {}
+                        ),
+                    },
+                    "info",
+                )
+
+        # Flush remaining buffer.
+        if buffer:
+            pages += 1
+            ins_p, upd_p, ins_s, re_s = self._store_records(session, buffer, emit)
             proteins_inserted += ins_p
             proteins_updated += upd_p
             sequences_inserted += ins_s
             sequences_reused += re_s
 
-            emit(
-                "insert_proteins.page_done",
-                None,
-                {
-                    "page": page_idx,
-                    "retrieved_total": retrieved,
-                    "proteins_inserted_total": proteins_inserted,
-                    "proteins_updated_total": proteins_updated,
-                    "sequences_inserted_total": sequences_inserted,
-                    "sequences_reused_total": sequences_reused,
-                    "http_requests": self._http_requests,
-                    "http_retries": self._http_retries,
-                    "_progress_current": retrieved,
-                    **(
-                        {"_progress_total": p.total_limit or self._total_results}
-                        if (p.total_limit or self._total_results)
-                        else {}
-                    ),
-                },
-                "info",
-            )
-
-            if p.total_limit is not None and retrieved >= p.total_limit:
-                emit(
-                    "insert_proteins.limit_reached", None, {"total_limit": p.total_limit}, "warning"
-                )
-                break
-
         elapsed = time.perf_counter() - t0
-        emit(
-            "insert_proteins.done",
-            None,
-            {
-                "pages": pages,
-                "retrieved_records": retrieved,
-                "isoform_records": isoforms,
-                "proteins_inserted": proteins_inserted,
-                "proteins_updated": proteins_updated,
-                "sequences_inserted": sequences_inserted,
-                "sequences_reused": sequences_reused,
-                "http_requests": self._http_requests,
-                "http_retries": self._http_retries,
-                "elapsed_seconds": elapsed,
-            },
-            "info",
-        )
-
-        return OperationResult(
-            result={
-                "pages": pages,
-                "retrieved_records": retrieved,
-                "isoform_records": isoforms,
-                "proteins_inserted": proteins_inserted,
-                "proteins_updated": proteins_updated,
-                "sequences_inserted": sequences_inserted,
-                "sequences_reused": sequences_reused,
-                "http_requests": self._http_requests,
-                "http_retries": self._http_retries,
-                "elapsed_seconds": elapsed,
-            }
-        )
-
-    # ---- HTTP paging ----
-    def _fetch_fasta_pages(
-        self, p: InsertProteinsPayload, emit: EmitFn
-    ) -> Iterable[list[dict[str, Any]]]:
-        encoded_query = quote(p.search_criteria)
-        params = ["format=fasta", f"query={encoded_query}", f"size={p.page_size}"]
-        if p.include_isoforms:
-            params.append("includeIsoform=true")
-        if p.compressed:
-            params.append("compressed=true")
-
-        base_url = f"{self.UNIPROT_SEARCH_URL}?{'&'.join(params)}"
-        next_cursor: str | None = None
-        page = 0
-
-        while True:
-            page += 1
-            url = base_url if not next_cursor else f"{base_url}&cursor={next_cursor}"
-            emit(
-                "uniprot.fetch_page_start",
-                None,
-                {"page": page, "has_cursor": bool(next_cursor)},
-                "info",
-            )
-
-            resp = self._get_with_retries(url, p, emit)
-            if self._total_results is None:
-                try:
-                    self._total_results = int(resp.headers.get("X-Total-Results", 0)) or None
-                except (ValueError, TypeError):
-                    pass
-            text = self._decode_response(resp, p.compressed)
-            records = self._parse_fasta(text)
-
-            emit("uniprot.fetch_page_done", None, {"page": page, "records": len(records)}, "info")
-            yield records
-
-            next_cursor = self._extract_next_cursor(resp.headers.get("link", ""))
-            if not next_cursor:
-                break
-
-    def _decode_response(self, resp: Response, compressed: bool) -> str:
-        content = resp.content
-        if compressed:
-            with gzip.GzipFile(fileobj=BytesIO(content)) as f:
-                return f.read().decode("utf-8", errors="replace")
-        return content.decode("utf-8", errors="replace")
-
-    # ---- FASTA parsing ----
-    def _parse_fasta(self, fasta_text: str) -> list[dict[str, Any]]:
-        records: list[dict[str, Any]] = []
-        header: str | None = None
-        seq_lines: list[str] = []
-
-        def flush() -> None:
-            nonlocal header, seq_lines
-            if not header:
-                return
-            seq = "".join(seq_lines).replace(" ", "").strip()
-            if not seq:
-                header = None
-                seq_lines = []
-                return
-
-            parsed = self._parse_header(header)
-            parsed["sequence"] = seq
-            parsed["length"] = len(seq)
-            parsed["sequence_hash"] = SequenceModel.compute_hash(seq)
-            records.append(parsed)
-
-            header = None
-            seq_lines = []
-
-        for line in fasta_text.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            if line.startswith(">"):
-                flush()
-                header = line[1:]
-            else:
-                seq_lines.append(line)
-        flush()
-        return records
-
-    def _parse_header(self, header: str) -> dict[str, Any]:
-        parts = header.split("|")
-        reviewed = header.startswith("sp|")
-
-        if len(parts) >= 3:
-            accession = parts[1].strip()
-            entry_name = parts[2].split(" ", 1)[0].strip()
-        else:
-            accession = header.split(" ", 1)[0].strip()
-            entry_name = None
-
-        canonical, is_canonical, iso_idx = Protein.parse_isoform(accession)
-
-        organism = None
-        taxonomy_id = None
-        gene_name = None
-
-        m = self._re_os.search(header)
-        if m:
-            organism = m.group(1).strip()
-        m = self._re_ox.search(header)
-        if m:
-            taxonomy_id = m.group(1).strip()
-        m = self._re_gn.search(header)
-        if m:
-            gene_name = m.group(1).strip()
-
-        return {
-            "accession": accession,
-            "entry_name": entry_name,
-            "canonical_accession": canonical,
-            "is_canonical": is_canonical,
-            "isoform_index": iso_idx,
-            "organism": organism,
-            "taxonomy_id": taxonomy_id,
-            "gene_name": gene_name,
-            "reviewed": reviewed,
+        http_req, http_ret = self._uniprot_plugin.http_counters
+        result_dict = {
+            "pages": pages,
+            "retrieved_records": retrieved,
+            "isoform_records": isoforms,
+            "proteins_inserted": proteins_inserted,
+            "proteins_updated": proteins_updated,
+            "sequences_inserted": sequences_inserted,
+            "sequences_reused": sequences_reused,
+            "http_requests": http_req,
+            "http_retries": http_ret,
+            "elapsed_seconds": elapsed,
         }
+        emit("insert_proteins.done", None, result_dict, "info")
+        return OperationResult(result=result_dict)
+
+    def _stream_fasta(
+        self, p: InsertProteinsPayload, emit: EmitFn
+    ) -> Iterator[UniProtProteinRecord]:
+        """Delegate to the protea-sources UniProtSource plugin.
+
+        Plugin owns HTTP retries, cursor pagination, gzip decoding,
+        and FASTA parsing. The operation owns batching, dedup, and
+        bulk insert. See ``f2a6_real_migration_design.md``.
+        """
+        yield from self._uniprot_plugin.stream_fasta(
+            UniProtFastaStreamPayload(
+                search_criteria=p.search_criteria,
+                page_size=p.page_size,
+                timeout_seconds=p.timeout_seconds,
+                include_isoforms=p.include_isoforms,
+                compressed=p.compressed,
+                max_retries=p.max_retries,
+                backoff_base_seconds=p.backoff_base_seconds,
+                backoff_max_seconds=p.backoff_max_seconds,
+                jitter_seconds=p.jitter_seconds,
+                user_agent=p.user_agent,
+            ),
+            emit=emit,
+        )
 
     # ---- DB storage ----
     def _store_records(
-        self, session: Session, records: list[dict[str, Any]], emit: EmitFn
+        self, session: Session, records: list[UniProtProteinRecord], emit: EmitFn
     ) -> tuple[int, int, int, int]:
         if not records:
             return 0, 0, 0, 0
@@ -306,9 +208,8 @@ class InsertProteinsOperation(UniProtHttpMixin, Operation):
         # 1) Deduplicate sequences
         hash_to_seq: dict[str, str] = {}
         for r in records:
-            h = r["sequence_hash"]
-            if h not in hash_to_seq:
-                hash_to_seq[h] = r["sequence"]
+            if r.sequence_hash not in hash_to_seq:
+                hash_to_seq[r.sequence_hash] = r.sequence
 
         unique_hashes = list(hash_to_seq.keys())
         emit("db.lookup_sequences_start", None, {"count": len(unique_hashes)}, "info")
@@ -338,7 +239,7 @@ class InsertProteinsOperation(UniProtHttpMixin, Operation):
             emit("db.insert_sequences_done", None, {"rows": sequences_inserted}, "info")
 
         # 2) Load existing proteins
-        accessions = [r["accession"] for r in records]
+        accessions = [r.accession for r in records]
         existing_prot = self._load_existing_proteins(session, accessions)
 
         # 3) Upsert proteins (insert new, conservative update existing)
@@ -347,51 +248,50 @@ class InsertProteinsOperation(UniProtHttpMixin, Operation):
         to_add: list[Protein] = []
 
         for r in records:
-            acc = r["accession"]
-            seq_id = existing_seq_ids[r["sequence_hash"]]
+            seq_id = existing_seq_ids[r.sequence_hash]
 
-            if acc in existing_prot:
-                p = existing_prot[acc]
+            if r.accession in existing_prot:
+                p = existing_prot[r.accession]
                 changed = False
 
                 if getattr(p, "sequence_id", None) is None and seq_id is not None:
                     p.sequence_id = seq_id
                     changed = True
 
-                if getattr(p, "entry_name", None) in (None, "") and r.get("entry_name"):
-                    p.entry_name = r["entry_name"]
+                if getattr(p, "entry_name", None) in (None, "") and r.entry_name:
+                    p.entry_name = r.entry_name
                     changed = True
 
-                if getattr(p, "canonical_accession", None) != r["canonical_accession"]:
-                    p.canonical_accession = r["canonical_accession"]
+                if getattr(p, "canonical_accession", None) != r.canonical_accession:
+                    p.canonical_accession = r.canonical_accession
                     changed = True
 
-                if getattr(p, "is_canonical", None) != r["is_canonical"]:
-                    p.is_canonical = r["is_canonical"]
+                if getattr(p, "is_canonical", None) != r.is_canonical:
+                    p.is_canonical = r.is_canonical
                     changed = True
 
-                if getattr(p, "isoform_index", None) != r["isoform_index"]:
-                    p.isoform_index = r["isoform_index"]
+                if getattr(p, "isoform_index", None) != r.isoform_index:
+                    p.isoform_index = r.isoform_index
                     changed = True
 
-                if getattr(p, "reviewed", None) is None and r.get("reviewed") is not None:
-                    p.reviewed = r["reviewed"]
+                if getattr(p, "reviewed", None) is None:
+                    p.reviewed = r.reviewed
                     changed = True
 
-                if getattr(p, "taxonomy_id", None) in (None, "") and r.get("taxonomy_id"):
-                    p.taxonomy_id = r["taxonomy_id"]
+                if getattr(p, "taxonomy_id", None) in (None, "") and r.taxonomy_id:
+                    p.taxonomy_id = r.taxonomy_id
                     changed = True
 
-                if getattr(p, "organism", None) in (None, "") and r.get("organism"):
-                    p.organism = r["organism"]
+                if getattr(p, "organism", None) in (None, "") and r.organism:
+                    p.organism = r.organism
                     changed = True
 
-                if getattr(p, "gene_name", None) in (None, "") and r.get("gene_name"):
-                    p.gene_name = r["gene_name"]
+                if getattr(p, "gene_name", None) in (None, "") and r.gene_name:
+                    p.gene_name = r.gene_name
                     changed = True
 
-                if getattr(p, "length", None) is None and r.get("length"):
-                    p.length = int(r["length"])
+                if getattr(p, "length", None) is None:
+                    p.length = r.length
                     changed = True
 
                 if changed:
@@ -400,16 +300,16 @@ class InsertProteinsOperation(UniProtHttpMixin, Operation):
             else:
                 to_add.append(
                     Protein(
-                        accession=acc,
-                        canonical_accession=r["canonical_accession"],
-                        is_canonical=r["is_canonical"],
-                        isoform_index=r["isoform_index"],
-                        reviewed=r.get("reviewed"),
-                        entry_name=r.get("entry_name"),
-                        organism=r.get("organism"),
-                        taxonomy_id=r.get("taxonomy_id"),
-                        gene_name=r.get("gene_name"),
-                        length=int(r["length"]) if r.get("length") else None,
+                        accession=r.accession,
+                        canonical_accession=r.canonical_accession,
+                        is_canonical=r.is_canonical,
+                        isoform_index=r.isoform_index,
+                        reviewed=r.reviewed,
+                        entry_name=r.entry_name,
+                        organism=r.organism,
+                        taxonomy_id=r.taxonomy_id,
+                        gene_name=r.gene_name,
+                        length=r.length,
                         sequence_id=seq_id,
                     )
                 )

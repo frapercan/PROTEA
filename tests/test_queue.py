@@ -2,6 +2,7 @@
 Unit tests for the queue consumer and publisher.
 Pika is fully mocked — no RabbitMQ server required.
 """
+
 from __future__ import annotations
 
 import json
@@ -17,6 +18,7 @@ from protea.infrastructure.queue.publisher import publish_job
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_worker(raises=None):
     worker = MagicMock()
@@ -47,6 +49,7 @@ def _consumer(worker=None, requeue_on_failure=False):
 # ---------------------------------------------------------------------------
 # QueueConsumer._on_message
 # ---------------------------------------------------------------------------
+
 
 class TestOnMessage:
     def setup_method(self):
@@ -127,6 +130,7 @@ class TestOnMessage:
 # QueueConsumer.run (pika connection fully mocked)
 # ---------------------------------------------------------------------------
 
+
 class TestConsumerRun:
     def _mock_pika(self, consumer):
         """
@@ -138,7 +142,9 @@ class TestConsumerRun:
         conn.channel.return_value = channel
         conn.is_open = False  # skip close attempt
 
-        with patch("protea.infrastructure.queue.consumer.pika.BlockingConnection", return_value=conn):
+        with patch(
+            "protea.infrastructure.queue.consumer.pika.BlockingConnection", return_value=conn
+        ):
             consumer.run()
 
         return conn, channel
@@ -183,6 +189,7 @@ class TestConsumerRun:
 # publish_job
 # ---------------------------------------------------------------------------
 
+
 class TestPublishJob:
     def test_publishes_correct_body(self):
         job_id = uuid4()
@@ -191,8 +198,12 @@ class TestPublishJob:
         conn.channel.return_value = channel
         conn.is_open = True
 
-        with patch("protea.infrastructure.queue.publisher.pika.BlockingConnection", return_value=conn), \
-             patch("protea.infrastructure.queue.publisher._local", threading.local()):
+        with (
+            patch(
+                "protea.infrastructure.queue.publisher.pika.BlockingConnection", return_value=conn
+            ),
+            patch("protea.infrastructure.queue.publisher._local", threading.local()),
+        ):
             publish_job("amqp://localhost/", "test.jobs", job_id)
 
         channel.basic_publish.assert_called_once()
@@ -208,8 +219,12 @@ class TestPublishJob:
         conn.channel.return_value = channel
         conn.is_open = True
 
-        with patch("protea.infrastructure.queue.publisher.pika.BlockingConnection", return_value=conn), \
-             patch("protea.infrastructure.queue.publisher._local", threading.local()):
+        with (
+            patch(
+                "protea.infrastructure.queue.publisher.pika.BlockingConnection", return_value=conn
+            ),
+            patch("protea.infrastructure.queue.publisher._local", threading.local()),
+        ):
             publish_job("amqp://localhost/", "q", uuid4())
 
         conn.close.assert_not_called()
@@ -221,14 +236,18 @@ class TestPublishJob:
         conn.channel.return_value = channel
         conn.is_open = True
 
-        with patch("protea.infrastructure.queue.publisher.pika.BlockingConnection", return_value=conn), \
-             patch("protea.infrastructure.queue.publisher.time.sleep"), \
-             patch("protea.infrastructure.queue.publisher._local", threading.local()):
+        with (
+            patch(
+                "protea.infrastructure.queue.publisher.pika.BlockingConnection", return_value=conn
+            ),
+            patch("protea.infrastructure.queue.publisher.time.sleep"),
+            patch("protea.infrastructure.queue.publisher._local", threading.local()),
+        ):
             with pytest.raises(RuntimeError, match="Failed to publish to queue"):
                 publish_job("amqp://localhost/", "q", uuid4())
 
-        # _close_cached_connection calls conn.close() once per failed attempt (5 total)
-        assert conn.close.call_count == 5
+        # _close_cached_connection calls conn.close() once per failed attempt (12 total)
+        assert conn.close.call_count == 12
 
     def test_declares_durable_queue(self):
         conn = MagicMock()
@@ -236,8 +255,12 @@ class TestPublishJob:
         conn.channel.return_value = channel
         conn.is_open = False
 
-        with patch("protea.infrastructure.queue.publisher.pika.BlockingConnection", return_value=conn), \
-             patch("protea.infrastructure.queue.publisher._local", threading.local()):
+        with (
+            patch(
+                "protea.infrastructure.queue.publisher.pika.BlockingConnection", return_value=conn
+            ),
+            patch("protea.infrastructure.queue.publisher._local", threading.local()),
+        ):
             publish_job("amqp://localhost/", "my.queue", uuid4())
 
         channel.queue_declare.assert_called_once_with(
@@ -253,19 +276,28 @@ class TestPublishJob:
         conn.is_open = True
 
         sleep_calls = []
-        with patch("protea.infrastructure.queue.publisher.pika.BlockingConnection", return_value=conn), \
-             patch("protea.infrastructure.queue.publisher.time.sleep", side_effect=lambda d: sleep_calls.append(d)), \
-             patch("protea.infrastructure.queue.publisher._local", threading.local()):
+        with (
+            patch(
+                "protea.infrastructure.queue.publisher.pika.BlockingConnection", return_value=conn
+            ),
+            patch(
+                "protea.infrastructure.queue.publisher.time.sleep",
+                side_effect=lambda d: sleep_calls.append(d),
+            ),
+            patch("protea.infrastructure.queue.publisher._local", threading.local()),
+        ):
             with pytest.raises(RuntimeError, match="Failed to publish"):
                 publish_job("amqp://localhost/", "q", uuid4())
 
-        # 5 attempts → 4 sleeps: 1, 2, 4, 8
-        assert sleep_calls == [1, 2, 4, 8]
+        # 12 attempts -> 11 sleeps: 1, 2, 4, 8, 16, 30, 30, 30, 30, 30, 30
+        # Exponential up to attempt 5 (16s); capped at 30s for the rest.
+        assert sleep_calls == [1, 2, 4, 8, 16, 30, 30, 30, 30, 30, 30]
 
 
 # ---------------------------------------------------------------------------
 # OperationConsumer — emit writes to parent job
 # ---------------------------------------------------------------------------
+
 
 class TestOperationConsumerEmit:
     """Verify that OperationConsumer's emit writes JobEvent rows to the parent job."""
@@ -284,10 +316,12 @@ class TestOperationConsumerEmit:
 
         # Track sessions created by the factory
         sessions = []
+
         def make_session():
             s = MagicMock()
             sessions.append(s)
             return s
+
         factory = MagicMock(side_effect=make_session)
 
         consumer = OperationConsumer(
@@ -298,11 +332,13 @@ class TestOperationConsumerEmit:
         )
 
         # Build a valid message with a parent job_id
-        body = json.dumps({
-            "operation": "test_op",
-            "job_id": str(parent_job_id),
-            "payload": {"key": "value"},
-        }).encode()
+        body = json.dumps(
+            {
+                "operation": "test_op",
+                "job_id": str(parent_job_id),
+                "payload": {"key": "value"},
+            }
+        ).encode()
 
         channel = MagicMock()
         method = _make_method()
@@ -326,10 +362,12 @@ class TestOperationConsumerEmit:
         registry.get.return_value = op
 
         sessions = []
+
         def make_session():
             s = MagicMock()
             sessions.append(s)
             return s
+
         factory = MagicMock(side_effect=make_session)
 
         consumer = OperationConsumer(
@@ -339,11 +377,13 @@ class TestOperationConsumerEmit:
             session_factory=factory,
         )
 
-        body = json.dumps({
-            "operation": "test_op",
-            "job_id": str(parent_job_id),
-            "payload": {},
-        }).encode()
+        body = json.dumps(
+            {
+                "operation": "test_op",
+                "job_id": str(parent_job_id),
+                "payload": {},
+            }
+        ).encode()
 
         channel = MagicMock()
         method = _make_method()
@@ -366,6 +406,7 @@ class TestOperationConsumerEmit:
 # OperationConsumer._on_message — extended coverage
 # ---------------------------------------------------------------------------
 
+
 class TestOperationConsumerOnMessage:
     """Cover uncovered lines in OperationConsumer._on_message."""
 
@@ -384,6 +425,7 @@ class TestOperationConsumerOnMessage:
         registry.get.return_value = op
 
         sessions = []
+
         def make_session():
             s = MagicMock()
             sessions.append(s)
@@ -441,23 +483,58 @@ class TestOperationConsumerOnMessage:
 
         channel.basic_nack.assert_called_once_with(delivery_tag=21, requeue=True)
 
-    def test_cuda_oom_clears_cache_and_requeues(self):
+    def test_cuda_oom_first_failure_republishes_with_backoff(self):
+        """First OOM: cache cleared, message republished with retry header, original acked."""
         exc = RuntimeError("CUDA out of memory. Tried to allocate 2 GiB")
         consumer, sessions, _, _ = self._make_consumer(raises=exc)
         channel = MagicMock()
         method = _make_method(30)
+        properties = MagicMock()
+        properties.headers = None  # fresh message, no retry header yet
 
-        with patch("protea.infrastructure.queue.consumer.torch", create=True):
-            # Import torch inside the handler — we patch at module level
-            import sys
-            mock_module = MagicMock()
-            with patch.dict(sys.modules, {"torch": mock_module}):
-                consumer._on_message(channel, method, MagicMock(), self._body())
+        import sys
 
-        # Should requeue regardless of requeue_on_failure flag
-        channel.basic_nack.assert_called_once()
-        call_kwargs = channel.basic_nack.call_args.kwargs
-        assert call_kwargs["requeue"] is True
+        mock_torch = MagicMock()
+        with patch.dict(sys.modules, {"torch": mock_torch}):
+            consumer._on_message(channel, method, properties, self._body())
+
+        # Torch cache was cleared.
+        mock_torch.cuda.empty_cache.assert_called_once()
+        # Original message was acked (not nacked) after republish.
+        channel.basic_ack.assert_called_once_with(delivery_tag=30)
+        channel.basic_nack.assert_not_called()
+        # A new copy was republished with incremented retry header.
+        channel.basic_publish.assert_called_once()
+        republish_kwargs = channel.basic_publish.call_args.kwargs
+        assert republish_kwargs["routing_key"] == "test.ops"
+        assert republish_kwargs["properties"].headers == {"x-oom-retry": 1}
+        # Handler slept before republishing (5s for retry 1).
+        channel.connection.sleep.assert_called_once_with(5)
+
+    def test_cuda_oom_retries_exhausted_dead_letters(self):
+        """After oom_max_retries failures the message is nack'd without requeue."""
+        from protea.config.tuning import get_tuning
+
+        exc = RuntimeError("CUDA out of memory. Tried to allocate 2 GiB")
+        consumer, sessions, _, _ = self._make_consumer(raises=exc)
+        channel = MagicMock()
+        method = _make_method(31)
+        properties = MagicMock()
+        # Message has already retried the maximum number of times.
+        properties.headers = {"x-oom-retry": get_tuning().queue.oom_max_retries}
+
+        import sys
+
+        mock_torch = MagicMock()
+        with patch.dict(sys.modules, {"torch": mock_torch}):
+            consumer._on_message(channel, method, properties, self._body())
+
+        # Should dead-letter, not requeue or republish.
+        channel.basic_publish.assert_not_called()
+        channel.basic_ack.assert_not_called()
+        channel.basic_nack.assert_called_once_with(delivery_tag=31, requeue=False)
+        # No further sleeps on the final attempt.
+        channel.connection.sleep.assert_not_called()
 
     def test_unparseable_message_nacks_without_requeue(self):
         consumer, _, _, _ = self._make_consumer()
@@ -552,6 +629,7 @@ class TestOperationConsumerOnMessage:
         op.execute.side_effect = _execute
 
         sessions_created = []
+
         def make_session():
             s = MagicMock()
             sessions_created.append(s)
@@ -561,6 +639,7 @@ class TestOperationConsumerOnMessage:
             return s
 
         from protea.infrastructure.queue.consumer import OperationConsumer
+
         registry = MagicMock()
         registry.get.return_value = op
         factory = MagicMock(side_effect=make_session)
@@ -634,11 +713,13 @@ class TestOperationConsumerOnMessage:
         channel = MagicMock()
         method = _make_method()
 
-        body = json.dumps({
-            "operation": "test_op",
-            "job_id": "not-a-uuid",
-            "payload": {},
-        }).encode()
+        body = json.dumps(
+            {
+                "operation": "test_op",
+                "job_id": "not-a-uuid",
+                "payload": {},
+            }
+        ).encode()
 
         consumer._on_message(channel, method, MagicMock(), body)
 
@@ -651,6 +732,7 @@ class TestOperationConsumerOnMessage:
         parent_id = uuid4()
 
         sessions_created = []
+
         def make_session():
             s = MagicMock()
             sessions_created.append(s)
@@ -660,6 +742,7 @@ class TestOperationConsumerOnMessage:
             return s
 
         from protea.infrastructure.queue.consumer import OperationConsumer
+
         op = MagicMock()
         op.execute.side_effect = ValueError("boom")
         registry = MagicMock()
@@ -686,6 +769,7 @@ class TestOperationConsumerOnMessage:
 # ---------------------------------------------------------------------------
 # QueueConsumer._on_message — RetryLaterError handling
 # ---------------------------------------------------------------------------
+
 
 class TestQueueConsumerRetryLater:
     """Cover RetryLaterError handling in QueueConsumer._on_message (lines 142-151)."""
@@ -732,6 +816,7 @@ class TestQueueConsumerRetryLater:
 # OperationConsumer._handle_stop
 # ---------------------------------------------------------------------------
 
+
 class TestOperationConsumerHandleStop:
     def test_handle_stop_sets_flag(self):
         from protea.infrastructure.queue.consumer import OperationConsumer
@@ -751,6 +836,7 @@ class TestOperationConsumerHandleStop:
 # OperationConsumer.run (pika fully mocked)
 # ---------------------------------------------------------------------------
 
+
 class TestOperationConsumerRun:
     def test_run_declares_queue_and_starts_consuming(self):
         from protea.infrastructure.queue.consumer import OperationConsumer
@@ -768,7 +854,9 @@ class TestOperationConsumerRun:
         conn.channel.return_value = channel
         conn.is_open = False
 
-        with patch("protea.infrastructure.queue.consumer.pika.BlockingConnection", return_value=conn):
+        with patch(
+            "protea.infrastructure.queue.consumer.pika.BlockingConnection", return_value=conn
+        ):
             consumer.run()
 
         channel.queue_declare.assert_any_call(

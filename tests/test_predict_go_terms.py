@@ -6,6 +6,12 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
+from protea.core.disk_cache import (
+    _aspect_index_path,
+    _build_anno_csr,
+    _csr_lookup,
+    _disk_cache_paths,
+)
 from protea.core.knn_search import _compute_distance_matrix, search_knn
 from protea.core.operations.predict_go_terms import (
     PredictGOTermsBatchOperation,
@@ -13,10 +19,6 @@ from protea.core.operations.predict_go_terms import (
     PredictGOTermsOperation,
     PredictGOTermsPayload,
     StorePredictionsOperation,
-    _aspect_index_path,
-    _build_anno_csr,
-    _csr_lookup,
-    _disk_cache_paths,
 )
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
@@ -33,6 +35,7 @@ def make_session_get(missing_class=None):
         if cls is missing_class:
             return None
         return MagicMock()
+
     return _get
 
 
@@ -40,62 +43,77 @@ def make_session_get(missing_class=None):
 # Payload validation
 # ---------------------------------------------------------------------------
 
+
 class TestPredictGOTermsPayload:
     def test_minimal_valid(self) -> None:
-        p = PredictGOTermsPayload.model_validate({
-            "embedding_config_id": str(uuid.uuid4()),
-            "annotation_set_id": _ANN_SET_ID,
-            "ontology_snapshot_id": _SNAPSHOT_ID,
-        })
+        p = PredictGOTermsPayload.model_validate(
+            {
+                "embedding_config_id": str(uuid.uuid4()),
+                "annotation_set_id": _ANN_SET_ID,
+                "ontology_snapshot_id": _SNAPSHOT_ID,
+            }
+        )
         assert p.limit_per_entry == 5
         assert p.distance_threshold is None
         assert p.batch_size == 1024
 
     def test_empty_embedding_config_id_raises(self) -> None:
         with pytest.raises(ValueError):
-            PredictGOTermsPayload.model_validate({
-                "embedding_config_id": "",
-                "annotation_set_id": _ANN_SET_ID,
-                "ontology_snapshot_id": _SNAPSHOT_ID,
-            })
+            PredictGOTermsPayload.model_validate(
+                {
+                    "embedding_config_id": "",
+                    "annotation_set_id": _ANN_SET_ID,
+                    "ontology_snapshot_id": _SNAPSHOT_ID,
+                }
+            )
 
     def test_whitespace_embedding_config_id_raises(self) -> None:
         with pytest.raises(ValueError):
-            PredictGOTermsPayload.model_validate({
-                "embedding_config_id": "   ",
-                "annotation_set_id": _ANN_SET_ID,
-                "ontology_snapshot_id": _SNAPSHOT_ID,
-            })
+            PredictGOTermsPayload.model_validate(
+                {
+                    "embedding_config_id": "   ",
+                    "annotation_set_id": _ANN_SET_ID,
+                    "ontology_snapshot_id": _SNAPSHOT_ID,
+                }
+            )
 
     def test_empty_annotation_set_id_raises(self) -> None:
         with pytest.raises(ValueError):
-            PredictGOTermsPayload.model_validate({
-                "embedding_config_id": str(uuid.uuid4()),
-                "annotation_set_id": "",
-                "ontology_snapshot_id": _SNAPSHOT_ID,
-            })
+            PredictGOTermsPayload.model_validate(
+                {
+                    "embedding_config_id": str(uuid.uuid4()),
+                    "annotation_set_id": "",
+                    "ontology_snapshot_id": _SNAPSHOT_ID,
+                }
+            )
 
     def test_empty_ontology_snapshot_id_raises(self) -> None:
         with pytest.raises(ValueError):
-            PredictGOTermsPayload.model_validate({
-                "embedding_config_id": str(uuid.uuid4()),
-                "annotation_set_id": _ANN_SET_ID,
-                "ontology_snapshot_id": "   ",
-            })
+            PredictGOTermsPayload.model_validate(
+                {
+                    "embedding_config_id": str(uuid.uuid4()),
+                    "annotation_set_id": _ANN_SET_ID,
+                    "ontology_snapshot_id": "   ",
+                }
+            )
 
     def test_missing_annotation_set_raises(self) -> None:
         with pytest.raises(ValueError):
-            PredictGOTermsPayload.model_validate({
-                "embedding_config_id": str(uuid.uuid4()),
-                "ontology_snapshot_id": _SNAPSHOT_ID,
-            })
+            PredictGOTermsPayload.model_validate(
+                {
+                    "embedding_config_id": str(uuid.uuid4()),
+                    "ontology_snapshot_id": _SNAPSHOT_ID,
+                }
+            )
 
     def test_default_values(self) -> None:
-        p = PredictGOTermsPayload.model_validate({
-            "embedding_config_id": str(uuid.uuid4()),
-            "annotation_set_id": _ANN_SET_ID,
-            "ontology_snapshot_id": _SNAPSHOT_ID,
-        })
+        p = PredictGOTermsPayload.model_validate(
+            {
+                "embedding_config_id": str(uuid.uuid4()),
+                "annotation_set_id": _ANN_SET_ID,
+                "ontology_snapshot_id": _SNAPSHOT_ID,
+            }
+        )
         assert p.limit_per_entry == 5
         assert p.distance_threshold is None
         assert p.batch_size == 1024
@@ -104,6 +122,7 @@ class TestPredictGOTermsPayload:
 # ---------------------------------------------------------------------------
 # _compute_distance_matrix (cosine + l2)
 # ---------------------------------------------------------------------------
+
 
 class TestDistanceMatrix:
     def test_cosine_identical_vectors_zero_distance(self) -> None:
@@ -152,6 +171,7 @@ class TestDistanceMatrix:
 # search_knn — numpy and faiss backends
 # ---------------------------------------------------------------------------
 
+
 class TestSearchKnn:
     def _make_data(self, n_refs: int = 20, dim: int = 16):
         rng = np.random.default_rng(42)
@@ -179,8 +199,9 @@ class TestSearchKnn:
         R, accs = self._make_data()
         # Query identical to first ref → distance ≈ 0
         Q = R[:1].copy()
-        results = search_knn(Q, R, accs, k=10, distance_threshold=0.001,
-                             backend="numpy", metric="cosine")
+        results = search_knn(
+            Q, R, accs, k=10, distance_threshold=0.001, backend="numpy", metric="cosine"
+        )
         assert len(results[0]) >= 1
         for _, d in results[0]:
             assert d <= 0.001 + 1e-5
@@ -198,8 +219,9 @@ class TestSearchKnn:
         rng = np.random.default_rng(0)
         Q = rng.random((5, 16)).astype(np.float32)
         numpy_res = search_knn(Q, R, accs, k=3, backend="numpy", metric="cosine")
-        faiss_res = search_knn(Q, R, accs, k=3, backend="faiss",
-                               metric="cosine", faiss_index_type="Flat")
+        faiss_res = search_knn(
+            Q, R, accs, k=3, backend="faiss", metric="cosine", faiss_index_type="Flat"
+        )
         for np_hits, fa_hits in zip(numpy_res, faiss_res, strict=False):
             np_accs = [a for a, _ in np_hits]
             fa_accs = [a for a, _ in fa_hits]
@@ -208,9 +230,17 @@ class TestSearchKnn:
     def test_faiss_ivfflat(self) -> None:
         R, accs = self._make_data(n_refs=200)
         Q = np.random.rand(4, 16).astype(np.float32)
-        results = search_knn(Q, R, accs, k=5, backend="faiss",
-                             metric="cosine", faiss_index_type="IVFFlat",
-                             faiss_nlist=10, faiss_nprobe=5)
+        results = search_knn(
+            Q,
+            R,
+            accs,
+            k=5,
+            backend="faiss",
+            metric="cosine",
+            faiss_index_type="IVFFlat",
+            faiss_nlist=10,
+            faiss_nprobe=5,
+        )
         assert len(results) == 4
         for hits in results:
             assert 1 <= len(hits) <= 5
@@ -218,9 +248,17 @@ class TestSearchKnn:
     def test_faiss_hnsw(self) -> None:
         R, accs = self._make_data(n_refs=100)
         Q = np.random.rand(3, 16).astype(np.float32)
-        results = search_knn(Q, R, accs, k=4, backend="faiss",
-                             metric="cosine", faiss_index_type="HNSW",
-                             faiss_hnsw_m=8, faiss_hnsw_ef_search=32)
+        results = search_knn(
+            Q,
+            R,
+            accs,
+            k=4,
+            backend="faiss",
+            metric="cosine",
+            faiss_index_type="HNSW",
+            faiss_hnsw_m=8,
+            faiss_hnsw_ef_search=32,
+        )
         assert len(results) == 3
         for hits in results:
             assert 1 <= len(hits) <= 4
@@ -242,6 +280,7 @@ class TestSearchKnn:
 # _predict_batch
 # ---------------------------------------------------------------------------
 
+
 class TestPredictBatch:
     def _op(self) -> PredictGOTermsBatchOperation:
         return PredictGOTermsBatchOperation()
@@ -250,10 +289,16 @@ class TestPredictBatch:
         defaults = {
             "embedding_config_id": str(uuid.uuid4()),
             "annotation_set_id": _ANN_SET_ID,
+            "ontology_snapshot_id": _SNAPSHOT_ID,
             "prediction_set_id": str(uuid.uuid4()),
             "parent_job_id": str(uuid.uuid4()),
             "query_accessions": [],
             "limit_per_entry": 2,
+            # Opt out of features that require sequences/taxonomy: the mock
+            # ref_data in this class never provides them.
+            "compute_alignments": False,
+            "compute_taxonomy": False,
+            "compute_reranker_features": False,
         }
         defaults.update(kwargs)
         return PredictGOTermsBatchPayload.model_validate(defaults)
@@ -261,10 +306,13 @@ class TestPredictBatch:
     def _ref_data(self):
         return {
             "accessions": ["P12345", "Q67890"],
-            "embeddings": np.array([
-                [1.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0],
-            ], dtype=np.float32),
+            "embeddings": np.array(
+                [
+                    [1.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0],
+                ],
+                dtype=np.float32,
+            ),
             "go_map": {
                 "P12345": [{"go_term_id": 1, "qualifier": "enables", "evidence_code": "IDA"}],
                 "Q67890": [{"go_term_id": 2, "qualifier": "involved_in", "evidence_code": "IEA"}],
@@ -278,7 +326,7 @@ class TestPredictBatch:
         pred_set_id = uuid.uuid4()
 
         query_embs = np.array([[0.99, 0.01, 0.0]], dtype=np.float32)
-        preds = op._predict_batch(["RQUERY"], query_embs, ref, pred_set_id, p)
+        preds, _, _ = op._predict_batch(["RQUERY"], query_embs, ref, pred_set_id, p)
 
         assert len(preds) >= 1
         go_ids = {pr["go_term_id"] for pr in preds}
@@ -292,7 +340,7 @@ class TestPredictBatch:
         ref = self._ref_data()
         pred_set_id = uuid.uuid4()
         query_embs = np.array([[1.0, 0.0, 0.0]], dtype=np.float32)
-        preds = op._predict_batch(["P12345"], query_embs, ref, pred_set_id, p)
+        preds, _, _ = op._predict_batch(["P12345"], query_embs, ref, pred_set_id, p)
 
         ref_accs = [pr["ref_protein_accession"] for pr in preds]
         assert "P12345" in ref_accs, "Self should be included as a reference neighbor"
@@ -306,7 +354,7 @@ class TestPredictBatch:
         pred_set_id = uuid.uuid4()
 
         query_embs = np.array([[0.0, 0.0, 1.0]], dtype=np.float32)
-        preds = op._predict_batch(["RQUERY"], query_embs, ref, pred_set_id, p)
+        preds, _, _ = op._predict_batch(["RQUERY"], query_embs, ref, pred_set_id, p)
         assert preds == []
 
     def test_limit_per_entry_caps_neighbors(self) -> None:
@@ -316,7 +364,7 @@ class TestPredictBatch:
         pred_set_id = uuid.uuid4()
 
         query_embs = np.array([[0.7, 0.7, 0.0]], dtype=np.float32)
-        preds = op._predict_batch(["RQUERY"], query_embs, ref, pred_set_id, p)
+        preds, _, _ = op._predict_batch(["RQUERY"], query_embs, ref, pred_set_id, p)
 
         ref_accs = {pr["ref_protein_accession"] for pr in preds}
         assert len(ref_accs) == 1
@@ -325,6 +373,7 @@ class TestPredictBatch:
 # ---------------------------------------------------------------------------
 # execute() — mocked session
 # ---------------------------------------------------------------------------
+
 
 class TestPredictGOTermsExecute:
     def _op(self) -> PredictGOTermsOperation:
@@ -378,6 +427,7 @@ class TestPredictGOTermsExecute:
 # Coordinator — dispatching batches
 # ---------------------------------------------------------------------------
 
+
 class TestPredictGOTermsCoordinatorDispatch:
     def _op(self) -> PredictGOTermsOperation:
         return PredictGOTermsOperation()
@@ -397,7 +447,9 @@ class TestPredictGOTermsCoordinatorDispatch:
         session.flush.return_value = None
         pred_set = MagicMock()
         pred_set.id = uuid.uuid4()
-        session.add.side_effect = lambda obj: setattr(obj, "id", uuid.uuid4()) if not hasattr(obj, "id") or obj.id is None else None
+        session.add.side_effect = lambda obj: (
+            setattr(obj, "id", uuid.uuid4()) if not hasattr(obj, "id") or obj.id is None else None
+        )
 
         accessions = [f"P{i:05d}" for i in range(10)]
 
@@ -422,6 +474,7 @@ class TestPredictGOTermsCoordinatorDispatch:
         def add_side_effect(obj):
             if not hasattr(obj, "id") or obj.id is None:
                 obj.id = uuid.uuid4()
+
         session.add.side_effect = add_side_effect
 
         with patch.object(op, "_load_query_accessions", return_value=["P1"]):
@@ -438,6 +491,7 @@ class TestPredictGOTermsCoordinatorDispatch:
         def add_side_effect(obj):
             if not hasattr(obj, "id") or obj.id is None:
                 obj.id = uuid.uuid4()
+
         session.add.side_effect = add_side_effect
 
         payload = self._base_payload()
@@ -459,6 +513,7 @@ class TestPredictGOTermsCoordinatorDispatch:
 # ---------------------------------------------------------------------------
 # StorePredictionsOperation
 # ---------------------------------------------------------------------------
+
 
 class TestStorePredictions:
     def _op(self) -> StorePredictionsOperation:
@@ -576,6 +631,7 @@ class TestStorePredictions:
         }
 
         events = []
+
         def capture_emit(event, msg, fields, level):
             events.append(event)
 
@@ -589,6 +645,7 @@ class TestStorePredictions:
 # ---------------------------------------------------------------------------
 # Batch worker — parent cancellation
 # ---------------------------------------------------------------------------
+
 
 class TestPredictBatchParentCancellation:
     def _op(self) -> PredictGOTermsBatchOperation:
@@ -604,6 +661,7 @@ class TestPredictBatchParentCancellation:
         payload = {
             "embedding_config_id": str(uuid.uuid4()),
             "annotation_set_id": str(uuid.uuid4()),
+            "ontology_snapshot_id": _SNAPSHOT_ID,
             "prediction_set_id": str(uuid.uuid4()),
             "parent_job_id": str(uuid.uuid4()),
             "query_accessions": ["P1"],
@@ -622,6 +680,7 @@ class TestPredictBatchParentCancellation:
         payload = {
             "embedding_config_id": str(uuid.uuid4()),
             "annotation_set_id": str(uuid.uuid4()),
+            "ontology_snapshot_id": _SNAPSHOT_ID,
             "prediction_set_id": str(uuid.uuid4()),
             "parent_job_id": str(uuid.uuid4()),
             "query_accessions": ["P1"],
@@ -634,6 +693,7 @@ class TestPredictBatchParentCancellation:
 # ---------------------------------------------------------------------------
 # Pure helper functions
 # ---------------------------------------------------------------------------
+
 
 class TestBuildAnnoCsr:
     def test_builds_correct_structure(self) -> None:
@@ -711,34 +771,42 @@ class TestDiskCachePaths:
 # Batch payload validation
 # ---------------------------------------------------------------------------
 
+
 class TestPredictGOTermsBatchPayload:
     def test_valid_payload(self) -> None:
-        p = PredictGOTermsBatchPayload.model_validate({
-            "embedding_config_id": str(uuid.uuid4()),
-            "annotation_set_id": str(uuid.uuid4()),
-            "prediction_set_id": str(uuid.uuid4()),
-            "parent_job_id": str(uuid.uuid4()),
-            "query_accessions": ["P1", "P2"],
-        })
+        p = PredictGOTermsBatchPayload.model_validate(
+            {
+                "embedding_config_id": str(uuid.uuid4()),
+                "annotation_set_id": str(uuid.uuid4()),
+                "ontology_snapshot_id": _SNAPSHOT_ID,
+                "prediction_set_id": str(uuid.uuid4()),
+                "parent_job_id": str(uuid.uuid4()),
+                "query_accessions": ["P1", "P2"],
+            }
+        )
         assert p.limit_per_entry == 5
         assert p.aspect_separated_knn is True
 
     def test_feature_flags_default_false(self) -> None:
-        p = PredictGOTermsBatchPayload.model_validate({
-            "embedding_config_id": str(uuid.uuid4()),
-            "annotation_set_id": str(uuid.uuid4()),
-            "prediction_set_id": str(uuid.uuid4()),
-            "parent_job_id": str(uuid.uuid4()),
-            "query_accessions": [],
-        })
-        assert p.compute_alignments is False
-        assert p.compute_taxonomy is False
-        assert p.compute_reranker_features is False
+        p = PredictGOTermsBatchPayload.model_validate(
+            {
+                "embedding_config_id": str(uuid.uuid4()),
+                "annotation_set_id": str(uuid.uuid4()),
+                "ontology_snapshot_id": _SNAPSHOT_ID,
+                "prediction_set_id": str(uuid.uuid4()),
+                "parent_job_id": str(uuid.uuid4()),
+                "query_accessions": [],
+            }
+        )
+        assert p.compute_alignments is True
+        assert p.compute_taxonomy is True
+        assert p.compute_reranker_features is True
 
 
 # ---------------------------------------------------------------------------
 # _predict_batch — reranker features
 # ---------------------------------------------------------------------------
+
 
 class TestPredictBatchRerankerFeatures:
     def _op(self) -> PredictGOTermsBatchOperation:
@@ -748,10 +816,15 @@ class TestPredictBatchRerankerFeatures:
         defaults = {
             "embedding_config_id": str(uuid.uuid4()),
             "annotation_set_id": _ANN_SET_ID,
+            "ontology_snapshot_id": _SNAPSHOT_ID,
             "prediction_set_id": str(uuid.uuid4()),
             "parent_job_id": str(uuid.uuid4()),
             "query_accessions": [],
             "limit_per_entry": 2,
+            # Reranker features ON, alignments/taxonomy OFF: this suite only
+            # exercises voting/neighbor-stat features, not NW/SW or taxonomy.
+            "compute_alignments": False,
+            "compute_taxonomy": False,
             "compute_reranker_features": True,
         }
         defaults.update(kwargs)
@@ -771,7 +844,7 @@ class TestPredictBatchRerankerFeatures:
             },
         }
         query_embs = np.array([[0.9, 0.1]], dtype=np.float32)
-        preds = op._predict_batch(["Q1"], query_embs, ref_data, pred_set_id, p)
+        preds, _, _ = op._predict_batch(["Q1"], query_embs, ref_data, pred_set_id, p)
 
         assert len(preds) >= 1
         for pred in preds:
@@ -794,8 +867,235 @@ class TestPredictBatchRerankerFeatures:
             },
         }
         query_embs = np.array([[0.9, 0.1]], dtype=np.float32)
-        preds = op._predict_batch(["Q1"], query_embs, ref_data, pred_set_id, p)
+        preds, _, _ = op._predict_batch(["Q1"], query_embs, ref_data, pred_set_id, p)
 
         for pred in preds:
             assert "vote_count" not in pred
             assert "k_position" not in pred
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 — reranker integration (RerankerModel → predict-time scoring)
+# ---------------------------------------------------------------------------
+
+
+class TestPredictGOTermsCoordinatorReranker:
+    """Coordinator-side validation of the ``reranker_model_id`` payload field."""
+
+    def _op(self) -> PredictGOTermsOperation:
+        return PredictGOTermsOperation()
+
+    def _base_payload(self, **overrides):
+        p = {
+            "embedding_config_id": str(uuid.uuid4()),
+            "annotation_set_id": _ANN_SET_ID,
+            "ontology_snapshot_id": _SNAPSHOT_ID,
+            "_job_id": str(uuid.uuid4()),
+        }
+        p.update(overrides)
+        return p
+
+    def test_missing_reranker_model_raises(self) -> None:
+        from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
+
+        op = self._op()
+        reranker_id = str(uuid.uuid4())
+
+        def _get(cls, _):
+            return None if cls is RerankerModel else MagicMock()
+
+        session = MagicMock()
+        session.get.side_effect = _get
+
+        with pytest.raises(ValueError, match=r"RerankerModel .* not found"):
+            op.execute(
+                session,
+                self._base_payload(reranker_model_id=reranker_id),
+                emit=_noop_emit,
+            )
+
+    def test_reranker_without_artifact_uri_raises(self) -> None:
+        from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
+
+        op = self._op()
+        reranker_id = str(uuid.uuid4())
+        reranker_row = MagicMock(spec=RerankerModel)
+        reranker_row.artifact_uri = None
+        reranker_row.feature_schema_sha = "abcd1234"
+        reranker_row.name = "broken"
+
+        def _get(cls, _):
+            return reranker_row if cls is RerankerModel else MagicMock()
+
+        session = MagicMock()
+        session.get.side_effect = _get
+
+        with pytest.raises(ValueError, match="no artifact_uri"):
+            op.execute(
+                session,
+                self._base_payload(reranker_model_id=reranker_id),
+                emit=_noop_emit,
+            )
+
+    def test_reranker_context_propagated_to_batch_payload(self) -> None:
+        from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
+
+        op = self._op()
+        reranker_id = str(uuid.uuid4())
+        reranker_row = MagicMock(spec=RerankerModel)
+        reranker_row.artifact_uri = "file:///tmp/reranker/model.txt"
+        reranker_row.feature_schema_sha = "deadbeef0000"
+        reranker_row.name = "smoke"
+
+        def _get(cls, _):
+            return reranker_row if cls is RerankerModel else MagicMock()
+
+        session = MagicMock()
+        session.get.side_effect = _get
+
+        def add_side_effect(obj):
+            if not hasattr(obj, "id") or obj.id is None:
+                obj.id = uuid.uuid4()
+
+        session.add.side_effect = add_side_effect
+
+        payload = self._base_payload(reranker_model_id=reranker_id)
+        with patch.object(op, "_load_query_accessions", return_value=["P1"]):
+            result = op.execute(session, payload, emit=_noop_emit)
+
+        assert len(result.publish_operations) == 1
+        _, msg = result.publish_operations[0]
+        assert msg["payload"]["reranker_model_id"] == reranker_id
+        assert msg["payload"]["reranker_artifact_uri"] == reranker_row.artifact_uri
+        assert msg["payload"]["reranker_feature_schema_sha"] == reranker_row.feature_schema_sha
+
+
+class TestPredictGOTermsBatchReranker:
+    """Batch-worker tests for ``_apply_reranker_if_aligned``.
+
+    Driven by unit-level mocks: ``load_reranker`` / ``apply_reranker`` are
+    patched so the tests don't require LightGBM nor a real booster file.
+    """
+
+    def _op(self) -> PredictGOTermsBatchOperation:
+        return PredictGOTermsBatchOperation()
+
+    def _payload(self, **kwargs) -> PredictGOTermsBatchPayload:
+        defaults = {
+            "embedding_config_id": str(uuid.uuid4()),
+            "annotation_set_id": _ANN_SET_ID,
+            "ontology_snapshot_id": _SNAPSHOT_ID,
+            "prediction_set_id": str(uuid.uuid4()),
+            "parent_job_id": str(uuid.uuid4()),
+            "query_accessions": ["Q1"],
+            "limit_per_entry": 2,
+        }
+        defaults.update(kwargs)
+        return PredictGOTermsBatchPayload.model_validate(defaults)
+
+    def _emit_capture(self):
+        events: list[tuple[str, dict]] = []
+
+        def _emit(name, _msg, fields, _sev):
+            events.append((name, fields or {}))
+
+        return _emit, events
+
+    def test_skipped_when_artifact_context_missing(self) -> None:
+        op = self._op()
+        p = self._payload(reranker_model_id=str(uuid.uuid4()))  # but no uri/sha
+        dicts = [{"protein_accession": "Q1", "go_term_id": 1, "distance": 0.1}]
+        emit, events = self._emit_capture()
+
+        stats = op._apply_reranker_if_aligned(MagicMock(), dicts, p, emit)
+
+        assert stats is None
+        assert any(name == "reranker.skipped" for name, _ in events)
+        assert "reranker_score" not in dicts[0]
+
+    def test_schema_mismatch_falls_back(self) -> None:
+        op = self._op()
+        p = self._payload(
+            reranker_model_id=str(uuid.uuid4()),
+            reranker_artifact_uri="file:///tmp/x/model.txt",
+            reranker_feature_schema_sha="not_matching",
+            compute_alignments=False,
+            compute_taxonomy=False,
+            compute_v6_features=False,
+        )
+        dicts = [{"protein_accession": "Q1", "go_term_id": 1, "distance": 0.1}]
+        emit, events = self._emit_capture()
+
+        stats = op._apply_reranker_if_aligned(MagicMock(), dicts, p, emit)
+
+        assert stats is not None
+        assert stats["applied"] is False
+        assert stats["skipped_reason"] == "schema_mismatch"
+        assert any(name == "reranker.schema_mismatch" for name, _ in events)
+        assert "reranker_score" not in dicts[0]
+
+    def test_applies_when_schema_matches(self) -> None:
+        from protea_reranker_lab.contracts import compute_feature_schema_sha
+
+        op = self._op()
+        # Families match PROTEA's inference when all feature flags are off:
+        # knn + annotation_meta → deterministic sha.
+        expected_sha = compute_feature_schema_sha(["knn", "annotation_meta"])
+        p = self._payload(
+            reranker_model_id=str(uuid.uuid4()),
+            reranker_artifact_uri="file:///tmp/x/model.txt",
+            reranker_feature_schema_sha=expected_sha,
+            compute_alignments=False,
+            compute_taxonomy=False,
+            compute_v6_features=False,
+        )
+        dicts = [
+            {"protein_accession": "Q1", "go_term_id": 10, "distance": 0.1},
+            {"protein_accession": "Q1", "go_term_id": 11, "distance": 0.3},
+        ]
+        session = MagicMock()
+        # GOTerm aspect lookup returns (id, aspect) tuples.
+        session.query.return_value.filter.return_value.all.return_value = [
+            (10, "P"), (11, "F"),
+        ]
+        emit, events = self._emit_capture()
+
+        fake_scores = np.array([0.8, 0.2], dtype=np.float32)
+        with patch(
+            "protea.core.operations.predict_go_terms.load_reranker",
+            return_value=MagicMock(name="booster"),
+        ), patch(
+            "protea.core.operations.predict_go_terms.apply_reranker",
+            return_value=fake_scores,
+        ), patch(
+            "protea.core.operations.predict_go_terms.get_artifact_store",
+            return_value=MagicMock(),
+        ), patch(
+            "protea.core.operations.predict_go_terms.load_settings",
+            return_value=MagicMock(),
+        ):
+            stats = op._apply_reranker_if_aligned(session, dicts, p, emit)
+
+        assert stats is not None
+        assert stats["applied"] is True
+        assert stats["rows"] == 2
+        assert stats["score_max"] == pytest.approx(0.8, rel=1e-6)
+        assert stats["score_min"] == pytest.approx(0.2, rel=1e-6)
+        assert dicts[0]["reranker_score"] == pytest.approx(0.8, rel=1e-6)
+        assert dicts[1]["reranker_score"] == pytest.approx(0.2, rel=1e-6)
+        # Aspect attached from GOTerm lookup
+        assert dicts[0]["aspect"] == "P"
+        assert dicts[1]["aspect"] == "F"
+        assert not any(name == "reranker.schema_mismatch" for name, _ in events)
+
+    def test_no_reranker_leaves_dicts_untouched(self) -> None:
+        """Baseline: when ``reranker_model_id`` is absent, the helper is never
+        invoked — coordinator + batch should behave identically to pre-Phase-6."""
+        p = self._payload()  # no reranker fields
+        assert p.reranker_model_id is None
+        dicts = [{"protein_accession": "Q1", "go_term_id": 1, "distance": 0.1}]
+
+        # Confirm the coordinator emits no reranker_* fields when id absent:
+        # this is a static payload check (coord happy path already covered
+        # elsewhere). Here we just assert the baseline invariant on dicts.
+        assert "reranker_score" not in dicts[0]

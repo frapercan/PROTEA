@@ -57,6 +57,7 @@ export default function JobsPage() {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   async function refresh(status = statusFilter, showLoader = false) {
+    if (!showLoader && typeof document !== "undefined" && document.visibilityState === "hidden") return;
     if (showLoader) setLoading(true);
     try {
       setError("");
@@ -75,7 +76,9 @@ export default function JobsPage() {
     refresh(statusFilter, true);
   }, [statusFilter]);
 
-  // Auto-refresh: faster when there are active jobs, slower otherwise
+  // Auto-refresh: faster when there are active jobs, slower otherwise.
+  // Pauses automatically when the tab is hidden (refresh() checks
+  // document.visibilityState) and forces a refresh on visibilitychange.
   useEffect(() => {
     if (!autoRefresh) {
       if (intervalRef.current) clearInterval(intervalRef.current);
@@ -86,7 +89,14 @@ export default function JobsPage() {
       return hasActive ? 3000 : 8000;
     }
     intervalRef.current = setInterval(() => refresh(), schedule());
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [autoRefresh, statusFilter, jobs]);
 
   const activeCount = jobs.filter((j) => j.status === "running" || j.status === "queued").length;
@@ -157,6 +167,12 @@ export default function JobsPage() {
               <span className="text-xs text-gray-400">{formatDate(j.created_at)}</span>
             </div>
             <p className="mt-1.5 text-sm font-medium text-gray-800">{j.operation}</p>
+            {j.operation_description && (
+              <p className="text-xs text-gray-500 leading-snug">{j.operation_description}</p>
+            )}
+            {j.operation_summary && (
+              <p className="mt-1 text-xs font-mono text-gray-700 break-words">{j.operation_summary}</p>
+            )}
             <InlineProgress current={j.progress_current} total={j.progress_total} />
             <p className="mt-1 font-mono text-xs text-gray-400 truncate">{j.id}</p>
           </Link>
@@ -165,10 +181,10 @@ export default function JobsPage() {
 
       {/* Desktop table */}
       <div className="mt-4 hidden lg:block overflow-hidden rounded-lg border bg-white shadow-sm">
-        <div className="grid grid-cols-[140px_180px_1fr_180px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
+        <div className="grid grid-cols-[140px_220px_1fr_180px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
           <div>{t("status")}</div>
           <div>{t("operation")}</div>
-          <div>{t("jobId")}</div>
+          <div>{t("operationContext")}</div>
           <div>{t("created")}</div>
         </div>
 
@@ -180,14 +196,24 @@ export default function JobsPage() {
           <Link
             key={j.id}
             href={`/jobs/${j.id}`}
-            className="grid grid-cols-[140px_180px_1fr_180px] gap-2 border-b px-4 py-3 text-sm hover:bg-blue-50 transition-colors last:border-0 items-start"
+            className="grid grid-cols-[140px_220px_1fr_180px] gap-2 border-b px-4 py-3 text-sm hover:bg-blue-50 transition-colors last:border-0 items-start"
           >
             <div><StatusBadge status={j.status} /></div>
             <div>
-              <span className="text-gray-700 truncate block">{j.operation}</span>
+              <span className="text-gray-700 font-medium block truncate">{j.operation}</span>
+              {j.operation_description && (
+                <span className="text-xs text-gray-500 leading-snug line-clamp-2 block">{j.operation_description}</span>
+              )}
               <InlineProgress current={j.progress_current} total={j.progress_total} />
             </div>
-            <div className="font-mono text-xs text-gray-400 truncate">{j.id}</div>
+            <div className="space-y-0.5">
+              {j.operation_summary ? (
+                <span className="text-xs font-mono text-gray-700 break-words block">{j.operation_summary}</span>
+              ) : (
+                <span className="text-xs text-gray-300">—</span>
+              )}
+              <span className="font-mono text-[10px] text-gray-400 truncate block">{j.id}</span>
+            </div>
             <div className="text-gray-500 text-xs">{formatDate(j.created_at)}</div>
           </Link>
         ))}

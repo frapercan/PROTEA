@@ -13,8 +13,8 @@ metadata enrichment, and job orchestration.
 
    <div style="margin: 1rem 0;"></div>
 
-.. grid:: 1 2 2 3
-   :gutter: 2
+.. grid:: 1 2 2 2
+   :gutter: 3
    :margin: 2 0 2 0
 
    .. grid-item-card:: Quickstart
@@ -23,8 +23,8 @@ metadata enrichment, and job orchestration.
       :shadow: md
       :text-align: left
 
-      Set up PROTEA and run your first job. :bdg:`5 min` :bdg-primary:`Beginner`
-      See :doc:`Start here → <appendix/installation_and_quickstart>`.
+      :bdg-primary:`Start here` Bring up the full stack from a fresh checkout
+      and run your first job in about ten minutes.
 
    .. grid-item-card:: Architecture
       :link: architecture/index
@@ -32,26 +32,8 @@ metadata enrichment, and job orchestration.
       :shadow: md
       :text-align: left
 
-      System design, job lifecycle, and data model. :bdg-info:`Design` :bdg:`Clean Architecture`
-      Explore :doc:`architecture/index`.
-
-   .. grid-item-card:: Operations
-      :link: architecture/operations
-      :link-type: doc
-      :shadow: md
-      :text-align: left
-
-      16 registered operations: ingestion, embedding, prediction, evaluation, re-ranking. :bdg-success:`UniProt`
-      See :doc:`architecture/operations`.
-
-   .. grid-item-card:: Results
-      :link: results
-      :link-type: doc
-      :shadow: md
-      :text-align: left
-
-      Benchmark, ablation studies, and data leakage analysis. :bdg-danger:`Evaluation`
-      See :doc:`results`.
+      :bdg-info:`Design` System layers, job lifecycle, data model, all 16
+      operations, the CAFA evaluation protocol, and the ADRs that explain *why*.
 
    .. grid-item-card:: API Reference
       :link: reference/index
@@ -59,26 +41,17 @@ metadata enrichment, and job orchestration.
       :shadow: md
       :text-align: left
 
-      Autodoc-driven reference for all modules. :bdg-secondary:`autodoc`
-      Browse :doc:`reference/index`.
+      :bdg-secondary:`autodoc` Symbol-level documentation for ``protea.core``,
+      ``protea.infrastructure``, the FastAPI routers, and every worker class.
 
-   .. grid-item-card:: Configuration
-      :link: appendix/configuration
+   .. grid-item-card:: Results
+      :link: results
       :link-type: doc
       :shadow: md
       :text-align: left
 
-      YAML and environment-variable settings. :bdg:`system.yaml`
-      See :doc:`appendix/configuration`.
-
-   .. grid-item-card:: How-to Guides
-      :link: appendix/howto_guides
-      :link-type: doc
-      :shadow: md
-      :text-align: left
-
-      Adding operations, running workers, extending the system. :bdg-warning:`Guides`
-      Go to :doc:`appendix/howto_guides`.
+      :bdg-danger:`Evaluation` Benchmark numbers, ablation studies, the
+      re-ranker training pipeline, and the figures that back the thesis.
 
 .. raw:: html
 
@@ -98,9 +71,13 @@ metadata enrichment, and job orchestration.
 
    abstract
    introduction
+   related_work
    architecture/index
+   plugin-authoring
    results
    appendix/index
+   glossary
+   references
 
 .. toctree::
    :caption: API Reference

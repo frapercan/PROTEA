@@ -1,4 +1,5 @@
 """Unit tests for the scoring API router — no real DB required."""
+
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -22,6 +23,7 @@ from protea.infrastructure.orm.models.embedding.scoring_config import (
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 def _make_config(name="test", formula=FORMULA_LINEAR, weights=None, ev_weights=None):
     cfg = MagicMock(spec=ScoringConfig)
@@ -56,13 +58,16 @@ def session():
 @pytest.fixture()
 def client(session):
     app, factory, _ = _make_app(session)
-    with patch("protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session)):
+    with patch(
+        "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session)
+    ):
         yield TestClient(app, raise_server_exceptions=True)
 
 
 # ---------------------------------------------------------------------------
 # GET /configs
 # ---------------------------------------------------------------------------
+
 
 class TestListScoringConfigs:
     def test_empty_list(self, client, session):
@@ -85,6 +90,7 @@ class TestListScoringConfigs:
 # POST /configs
 # ---------------------------------------------------------------------------
 
+
 class TestCreateScoringConfig:
     def test_create_valid(self, client, session):
         cfg = _make_config("new-config")
@@ -96,46 +102,61 @@ class TestCreateScoringConfig:
 
         session.add.side_effect = add_side_effect
 
-        resp = client.post("/scoring/configs", json={
-            "name": "new-config",
-            "formula": "linear",
-            "weights": {"embedding_similarity": 1.0},
-        })
+        resp = client.post(
+            "/scoring/configs",
+            json={
+                "name": "new-config",
+                "formula": "linear",
+                "weights": {"embedding_similarity": 1.0},
+            },
+        )
         assert resp.status_code == 201
         assert resp.json()["name"] == "new-config"
 
     def test_invalid_formula_returns_422(self, client, session):
-        resp = client.post("/scoring/configs", json={
-            "name": "bad",
-            "formula": "nonexistent_formula",
-            "weights": {"embedding_similarity": 1.0},
-        })
+        resp = client.post(
+            "/scoring/configs",
+            json={
+                "name": "bad",
+                "formula": "nonexistent_formula",
+                "weights": {"embedding_similarity": 1.0},
+            },
+        )
         assert resp.status_code == 422
 
     def test_unknown_signal_key_returns_422(self, client, session):
-        resp = client.post("/scoring/configs", json={
-            "name": "bad",
-            "formula": "linear",
-            "weights": {"nonexistent_signal": 1.0},
-        })
+        resp = client.post(
+            "/scoring/configs",
+            json={
+                "name": "bad",
+                "formula": "linear",
+                "weights": {"nonexistent_signal": 1.0},
+            },
+        )
         assert resp.status_code == 422
 
     def test_invalid_evidence_weight_value_returns_422(self, client, session):
-        resp = client.post("/scoring/configs", json={
-            "name": "bad",
-            "formula": "linear",
-            "weights": {"embedding_similarity": 1.0},
-            "evidence_weights": {"IEA": 1.5},
-        })
+        resp = client.post(
+            "/scoring/configs",
+            json={
+                "name": "bad",
+                "formula": "linear",
+                "weights": {"embedding_similarity": 1.0},
+                "evidence_weights": {"IEA": 1.5},
+            },
+        )
         assert resp.status_code == 422
 
     def test_unknown_evidence_code_returns_422(self, client, session):
-        resp = client.post("/scoring/configs", json={
-            "name": "bad",
-            "formula": "linear",
-            "weights": {"embedding_similarity": 1.0},
-            "evidence_weights": {"BADCODE": 0.5},
-        })
+        resp = client.post(
+            "/scoring/configs",
+            json={
+                "name": "bad",
+                "formula": "linear",
+                "weights": {"embedding_similarity": 1.0},
+                "evidence_weights": {"BADCODE": 0.5},
+            },
+        )
         assert resp.status_code == 422
 
     def test_evidence_weighted_formula_accepted(self, client, session):
@@ -148,17 +169,21 @@ class TestCreateScoringConfig:
 
         session.add.side_effect = add_side_effect
 
-        resp = client.post("/scoring/configs", json={
-            "name": "ew-config",
-            "formula": "evidence_weighted",
-            "weights": {"embedding_similarity": 1.0},
-        })
+        resp = client.post(
+            "/scoring/configs",
+            json={
+                "name": "ew-config",
+                "formula": "evidence_weighted",
+                "weights": {"embedding_similarity": 1.0},
+            },
+        )
         assert resp.status_code == 201
 
 
 # ---------------------------------------------------------------------------
 # GET /configs/{config_id}
 # ---------------------------------------------------------------------------
+
 
 class TestGetScoringConfig:
     def test_found(self, client, session):
@@ -178,6 +203,7 @@ class TestGetScoringConfig:
 # DELETE /configs/{config_id}
 # ---------------------------------------------------------------------------
 
+
 class TestDeleteScoringConfig:
     def test_delete_existing(self, client, session):
         cfg = _make_config()
@@ -196,6 +222,7 @@ class TestDeleteScoringConfig:
 # POST /configs/presets
 # ---------------------------------------------------------------------------
 
+
 class TestCreatePresets:
     def test_creates_all_presets_when_none_exist(self, client, session):
         session.query.return_value.all.return_value = []
@@ -207,6 +234,7 @@ class TestCreatePresets:
 
     def test_skips_existing_presets(self, client, session):
         from protea.api.routers.scoring import _PRESET_CONFIGS
+
         all_names = [(p["name"],) for p in _PRESET_CONFIGS]
         session.query.return_value.all.return_value = all_names
         resp = client.post("/scoring/configs/presets")
@@ -218,12 +246,12 @@ class TestCreatePresets:
 # GET /prediction-sets/{set_id}/score.tsv — 404 preflight checks
 # ---------------------------------------------------------------------------
 
+
 class TestScoredTSV:
     def test_prediction_set_not_found(self, client, session):
         session.get.return_value = None
         resp = client.get(
-            f"/scoring/prediction-sets/{uuid4()}/score.tsv"
-            f"?scoring_config_id={uuid4()}"
+            f"/scoring/prediction-sets/{uuid4()}/score.tsv?scoring_config_id={uuid4()}"
         )
         assert resp.status_code == 404
 
@@ -231,8 +259,7 @@ class TestScoredTSV:
         # First get (PredictionSet) found, second (ScoringConfig) not found
         session.get.side_effect = [MagicMock(), None]
         resp = client.get(
-            f"/scoring/prediction-sets/{uuid4()}/score.tsv"
-            f"?scoring_config_id={uuid4()}"
+            f"/scoring/prediction-sets/{uuid4()}/score.tsv?scoring_config_id={uuid4()}"
         )
         assert resp.status_code == 404
 
@@ -258,6 +285,7 @@ class TestScoredTSV:
         def get_side(model, id_):
             from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
             from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
+
             if model is PredictionSet:
                 return pred_set
             if model is ScoringConfig:
@@ -274,11 +302,12 @@ class TestScoredTSV:
         factory = MagicMock()
         app.state.session_factory = factory
         app.include_router(router)
-        with patch("protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session)
+        ):
             with TestClient(app) as c:
                 resp = c.get(
-                    f"/scoring/prediction-sets/{set_id}/score.tsv"
-                    f"?scoring_config_id={config_id}"
+                    f"/scoring/prediction-sets/{set_id}/score.tsv?scoring_config_id={config_id}"
                 )
         assert resp.status_code == 200
         assert "text/tab-separated-values" in resp.headers["content-type"]
@@ -309,6 +338,7 @@ class TestScoredTSV:
         def get_side(model, id_):
             from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
             from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
+
             if model is PredictionSet:
                 return MagicMock()
             if model is ScoringConfig:
@@ -325,7 +355,9 @@ class TestScoredTSV:
         factory = MagicMock()
         app.state.session_factory = factory
         app.include_router(router)
-        with patch("protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session)
+        ):
             with TestClient(app) as c:
                 resp = c.get(
                     f"/scoring/prediction-sets/{set_id}/score.tsv"
@@ -358,6 +390,7 @@ class TestScoredTSV:
         def get_side(model, id_):
             from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
             from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
+
             if model is PredictionSet:
                 return MagicMock()
             if model is ScoringConfig:
@@ -374,7 +407,9 @@ class TestScoredTSV:
         factory = MagicMock()
         app.state.session_factory = factory
         app.include_router(router)
-        with patch("protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session)
+        ):
             with TestClient(app) as c:
                 resp = c.get(
                     f"/scoring/prediction-sets/{set_id}/score.tsv"
@@ -387,8 +422,102 @@ class TestScoredTSV:
 
 
 # ---------------------------------------------------------------------------
+# Signal coverage guard — 409 when the ScoringConfig requires signals absent
+# from the target PredictionSet (e.g. alignment_weighted on a KNN-only set).
+# ---------------------------------------------------------------------------
+
+
+class TestSignalCoverageGuard:
+    def _wire_session(
+        self, session, cfg, *, total: int, counts: dict[str, int]
+    ) -> None:
+        """Configure session.get and session.execute for the guard test."""
+        from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
+        from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
+
+        def get_side(model, _id):
+            if model is PredictionSet:
+                return MagicMock()
+            if model is ScoringConfig:
+                return cfg
+            return None
+
+        session.get.side_effect = get_side
+        mapping = {"total": total, **counts}
+        session.execute.return_value.mappings.return_value.one.return_value = mapping
+
+    def test_missing_identity_nw_returns_409(self, client, session):
+        set_id, config_id = uuid4(), uuid4()
+        cfg = _make_config(
+            "align",
+            weights={"embedding_similarity": 0.5, "identity_nw": 0.5},
+        )
+        cfg.id = config_id
+        self._wire_session(
+            session,
+            cfg,
+            total=100,
+            counts={"cnt_distance": 100, "cnt_identity_nw": 0},
+        )
+        resp = client.get(
+            f"/scoring/prediction-sets/{set_id}/score.tsv?scoring_config_id={config_id}"
+        )
+        assert resp.status_code == 409
+        assert "identity_nw" in resp.json()["detail"]
+
+    def test_full_coverage_passes_guard(self, client, session):
+        """When every required column is filled, the guard lets the stream start."""
+        set_id, config_id = uuid4(), uuid4()
+        cfg = _make_config(
+            "align",
+            weights={"embedding_similarity": 0.5, "identity_nw": 0.5},
+        )
+        cfg.id = config_id
+        self._wire_session(
+            session,
+            cfg,
+            total=100,
+            counts={"cnt_distance": 100, "cnt_identity_nw": 100},
+        )
+        # Empty yield_per so the stream produces only the header
+        session.query.return_value.join.return_value.filter.return_value.yield_per.return_value = []
+        resp = client.get(
+            f"/scoring/prediction-sets/{set_id}/score.tsv?scoring_config_id={config_id}"
+        )
+        assert resp.status_code == 200
+        assert resp.text.strip().startswith("protein_accession")
+
+    def test_evidence_weighted_always_requires_evidence_code(self, client, session):
+        """formula=evidence_weighted applies the multiplier regardless of weights,
+        so evidence_code must be present even when its weight is 0."""
+        from protea.infrastructure.orm.models.embedding.scoring_config import (
+            FORMULA_EVIDENCE_WEIGHTED,
+        )
+
+        set_id, config_id = uuid4(), uuid4()
+        cfg = _make_config(
+            "veto",
+            formula=FORMULA_EVIDENCE_WEIGHTED,
+            weights={"embedding_similarity": 1.0, "evidence_weight": 0.0},
+        )
+        cfg.id = config_id
+        self._wire_session(
+            session,
+            cfg,
+            total=100,
+            counts={"cnt_distance": 100, "cnt_evidence_code": 0},
+        )
+        resp = client.get(
+            f"/scoring/prediction-sets/{set_id}/score.tsv?scoring_config_id={config_id}"
+        )
+        assert resp.status_code == 409
+        assert "evidence_weight" in resp.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
 # GET /prediction-sets/{set_id}/metrics — 404 preflight checks
 # ---------------------------------------------------------------------------
+
 
 class TestMetricsEndpoint:
     def _url(self):
@@ -434,6 +563,7 @@ class TestMetricsEndpoint:
         def get_side(model, id_):
             from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
             from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
+
             if model is PredictionSet:
                 return pred_set
             if model is ScoringConfig:
@@ -495,6 +625,7 @@ class TestMetricsEndpoint:
         def get_side(model, id_):
             from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
             from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
+
             if model is PredictionSet:
                 return MagicMock()
             if model is ScoringConfig:
@@ -521,7 +652,11 @@ class TestMetricsEndpoint:
         assert resp.status_code == 200
         mock_metrics.assert_called_once()
         call_kwargs = mock_metrics.call_args
-        assert call_kwargs[1]["category"] == "lk" or call_kwargs[0][2] == "lk" if len(call_kwargs[0]) > 2 else call_kwargs[1].get("category") == "lk"
+        assert (
+            call_kwargs[1]["category"] == "lk" or call_kwargs[0][2] == "lk"
+            if len(call_kwargs[0]) > 2
+            else call_kwargs[1].get("category") == "lk"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -534,6 +669,11 @@ def _make_eval_set():
     es.id = uuid4()
     es.old_annotation_set_id = uuid4()
     es.new_annotation_set_id = uuid4()
+    # When None, scoring router takes the on-the-fly compute_evaluation_data
+    # branch (which tests mock); a truthy MagicMock pulls the persisted
+    # artifact path that needs a real UUID for pivot_ontology_snapshot_id.
+    es.groundtruth_uri = None
+    es.stats = None
     return es
 
 
@@ -631,7 +771,9 @@ class TestTrainingDataEndpoint:
         app = FastAPI()
         app.state.session_factory = MagicMock()
         app.include_router(router)
-        with patch("protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session)
+        ):
             with TestClient(app) as c:
                 resp = c.get(self._url(ps.id, es.id, "nk"))
 
@@ -673,7 +815,9 @@ class TestTrainingDataEndpoint:
         app = FastAPI()
         app.state.session_factory = MagicMock()
         app.include_router(router)
-        with patch("protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session)
+        ):
             with TestClient(app) as c:
                 resp = c.get(self._url(ps.id, es.id, "nk"))
 
@@ -709,7 +853,9 @@ class TestTrainingDataEndpoint:
         app = FastAPI()
         app.state.session_factory = MagicMock()
         app.include_router(router)
-        with patch("protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session)
+        ):
             with TestClient(app) as c:
                 resp = c.get(self._url(ps.id, es.id))
 
@@ -748,7 +894,9 @@ class TestTrainingDataEndpoint:
         app = FastAPI()
         app.state.session_factory = MagicMock()
         app.include_router(router)
-        with patch("protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session)
+        ):
             with TestClient(app) as c:
                 resp = c.get(self._url(ps.id, es.id, "pk"))
 
@@ -790,7 +938,9 @@ class TestTrainingDataEndpoint:
         app = FastAPI()
         app.state.session_factory = MagicMock()
         app.include_router(router)
-        with patch("protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session)):
+        with patch(
+            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session)
+        ):
             with TestClient(app) as c:
                 resp = c.get(self._url(ps.id, es.id))
 
@@ -871,101 +1021,10 @@ class TestDeleteReranker:
         assert resp.status_code == 404
 
 
-class TestTrainReranker:
-    def test_prediction_set_not_found(self, client, session):
-        session.get.return_value = None
-        session.query.return_value.filter.return_value.first.return_value = None
-        resp = client.post("/scoring/rerankers/train", json={
-            "name": "test",
-            "prediction_set_id": str(uuid4()),
-            "evaluation_set_id": str(uuid4()),
-        })
-        assert resp.status_code == 404
-        assert "PredictionSet" in resp.json()["detail"]
-
-    def test_evaluation_set_not_found(self, client, session):
-        ps = _make_pred_set()
-        session.query.return_value.filter.return_value.first.return_value = None
-
-        def get_side(model, id_):
-            if model is PredictionSet:
-                return ps
-            return None
-
-        session.get.side_effect = get_side
-        resp = client.post("/scoring/rerankers/train", json={
-            "name": "test",
-            "prediction_set_id": str(ps.id),
-            "evaluation_set_id": str(uuid4()),
-        })
-        assert resp.status_code == 404
-        assert "EvaluationSet" in resp.json()["detail"]
-
-    def test_duplicate_name_returns_409(self, client, session):
-        ps = _make_pred_set()
-        es = _make_eval_set()
-
-        def get_side(model, id_):
-            if model is PredictionSet:
-                return ps
-            if model is EvaluationSet:
-                return es
-            return None
-
-        session.get.side_effect = get_side
-        session.query.return_value.filter.return_value.first.return_value = _make_reranker_model()
-
-        resp = client.post("/scoring/rerankers/train", json={
-            "name": "existing-name",
-            "prediction_set_id": str(ps.id),
-            "evaluation_set_id": str(es.id),
-        })
-        assert resp.status_code == 409
-
-    def test_empty_predictions_returns_422(self, client, session):
-        ps = _make_pred_set()
-        es = _make_eval_set()
-
-        def get_side(model, id_):
-            if model is PredictionSet:
-                return ps
-            if model is EvaluationSet:
-                return es
-            return None
-
-        session.get.side_effect = get_side
-        session.query.return_value.filter.return_value.first.return_value = None
-
-        eval_data = MagicMock()
-        eval_data.nk = {}
-
-        with patch("protea.api.routers.scoring.compute_evaluation_data", return_value=eval_data):
-            # Empty result set
-            session.query.return_value.join.return_value.filter.return_value.all.return_value = []
-            resp = client.post("/scoring/rerankers/train", json={
-                "name": "empty-test",
-                "prediction_set_id": str(ps.id),
-                "evaluation_set_id": str(es.id),
-            })
-        assert resp.status_code == 422
-
-    def test_invalid_category_returns_422(self, client, session):
-        resp = client.post("/scoring/rerankers/train", json={
-            "name": "test",
-            "prediction_set_id": str(uuid4()),
-            "evaluation_set_id": str(uuid4()),
-            "category": "invalid",
-        })
-        assert resp.status_code == 422
-
-
 class TestRerankedTSV:
     def test_prediction_set_not_found(self, client, session):
         session.get.return_value = None
-        resp = client.get(
-            f"/scoring/prediction-sets/{uuid4()}/rerank.tsv"
-            f"?reranker_id={uuid4()}"
-        )
+        resp = client.get(f"/scoring/prediction-sets/{uuid4()}/rerank.tsv?reranker_id={uuid4()}")
         assert resp.status_code == 404
         assert "PredictionSet" in resp.json()["detail"]
 
@@ -978,10 +1037,7 @@ class TestRerankedTSV:
             return None
 
         session.get.side_effect = get_side
-        resp = client.get(
-            f"/scoring/prediction-sets/{ps.id}/rerank.tsv"
-            f"?reranker_id={uuid4()}"
-        )
+        resp = client.get(f"/scoring/prediction-sets/{ps.id}/rerank.tsv?reranker_id={uuid4()}")
         assert resp.status_code == 404
         assert "RerankerModel" in resp.json()["detail"]
 
@@ -1019,6 +1075,7 @@ class TestRerankerMetrics:
         rm = _make_reranker_model()
 
         call_count = 0
+
         def get_side(model, id_):
             nonlocal call_count
             call_count += 1
@@ -1046,7 +1103,9 @@ class TestRerankerMetrics:
     @patch("protea.api.routers.scoring.reranker_predict")
     @patch("protea.api.routers.scoring.model_from_string")
     @patch("protea.api.routers.scoring.compute_evaluation_data")
-    def test_returns_metrics(self, mock_eval, mock_from_str, mock_predict, mock_metrics, client, session):
+    def test_returns_metrics(
+        self, mock_eval, mock_from_str, mock_predict, mock_metrics, client, session
+    ):
         ps = _make_pred_set()
         rm = _make_reranker_model(name="test-rr")
         es = _make_eval_set()
@@ -1069,6 +1128,7 @@ class TestRerankerMetrics:
         ]
 
         import numpy as np
+
         mock_from_str.return_value = MagicMock()
         mock_predict.return_value = np.array([0.85])
 
