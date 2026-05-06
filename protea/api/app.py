@@ -18,6 +18,7 @@ from protea.api.routers import jobs as jobs_router
 from protea.api.routers import maintenance as maintenance_router
 from protea.api.routers import proteins as proteins_router
 from protea.api.routers import query_sets as query_sets_router
+from protea.api.routers import registry as registry_router
 from protea.api.routers import reranker_models as reranker_models_router
 from protea.api.routers import scoring as scoring_router
 from protea.api.routers import showcase as showcase_router
@@ -182,6 +183,7 @@ def create_app(project_root: Path | None = None) -> FastAPI:
     app.include_router(support_router.router)
     app.include_router(datasets_router.router)
     app.include_router(reranker_models_router.router)
+    app.include_router(registry_router.router)
 
     sphinx_build = project_root / "docs" / "build" / "html"
     if sphinx_build.exists():
