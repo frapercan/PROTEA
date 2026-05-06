@@ -23,7 +23,7 @@ dependencies = [
     "faiss-cpu (>=1.7.0)",
     "parasail (>=1.3.4)",
     "ete3 (>=3.1.3)",
-    "cafaeval-protea @ file:///home/frapercan/Thesis/repositories/cafaeval-protea",
+    "cafaeval-protea @ git+https://github.com/frapercan/cafaeval-protea.git@main",
     "lightgbm (>=4.6.0,<5.0.0)",
     "pyarrow (>=23.0.1,<24.0.0)",
 ]

@@ -487,8 +487,10 @@ docs = ["furo (>=2024.1)", "sphinx (>=7)"]
 fast = ["pyarrow (>=12)"]
 
 [package.source]
-type = "directory"
-url = "../cafaeval-protea"
+type = "git"
+url = "https://github.com/frapercan/cafaeval-protea.git"
+reference = "main"
+resolved_reference = "836f35390b36eb808d56abfaab84fcf6d52cda44"
 
 [[package]]
 name = "certifi"
@@ -3455,13 +3457,20 @@ develop = true
 numpy = ">=1.24"
 protea-contracts = {path = "../protea-contracts", develop = true}
 
+[package.extras]
+all = ["esm (>=3.1)", "sentencepiece (>=0.2)", "torch (>=2.1)", "transformers (>=4.40)"]
+ankh = ["sentencepiece (>=0.2)", "torch (>=2.1)", "transformers (>=4.40)"]
+esm = ["torch (>=2.1)", "transformers (>=4.40)"]
+esm3c = ["esm (>=3.1)", "torch (>=2.1)"]
+t5 = ["sentencepiece (>=0.2)", "torch (>=2.1)", "transformers (>=4.40)"]
+
 [package.source]
 type = "directory"
 url = "../protea-backends"
 
 [[package]]
 name = "protea-contracts"
-version = "0.0.1"
+version = "0.1.0"
 description = "Shared ABCs, payload schemas, feature registry contract and compute_schema_sha helper for the PROTEA stack."
 optional = false
 python-versions = ">=3.12,<4.0"
@@ -6091,4 +6100,4 @@ storage = ["minio"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "9d6d78a4fadabf20d04a86de20085774d552e1b099c2ba704c567cbfacef676a"
+content-hash = "d7a06d556a15d61ea61381ee73a6d5474f837543a2d1547887532ddbb1f958c7"
