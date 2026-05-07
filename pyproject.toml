@@ -1,6 +1,6 @@
 [project]
 name = "protea"
-version = "0.7.2"
+version = "0.8.0"
 description = ""
 authors = [
     {name = "frapercan",email = "frapercan1@alum.us.es"}

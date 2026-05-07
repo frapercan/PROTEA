@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.8.0](https://github.com/frapercan/PROTEA/compare/v0.7.2...v0.8.0) (2026-05-07)
+
+
+### Features
+
+* **eval:** surface IA-weighted Fmax + micro-Fmax in JSONB result ([#29](https://github.com/frapercan/PROTEA/issues/29)) ([32f5943](https://github.com/frapercan/PROTEA/commit/32f59435a2afd8a5ab4ff0dc56b13d0c9d2dad94))
+* **scripts:** bootstrap_fmax_ci protein-level CI helper ([#30](https://github.com/frapercan/PROTEA/issues/30)) ([ac61fcb](https://github.com/frapercan/PROTEA/commit/ac61fcbac03240512835d83e7ce4d675caab7f09))
+* **scripts:** cafaeval-parity propagation for bootstrap_fmax_ci ([#32](https://github.com/frapercan/PROTEA/issues/32)) ([26e4462](https://github.com/frapercan/PROTEA/commit/26e4462969d4fc8d2bf158c108ec88741eceb912))
+
 ## [0.7.2](https://github.com/frapercan/PROTEA/compare/v0.7.1...v0.7.2) (2026-05-07)
 
 
