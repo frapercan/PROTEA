@@ -233,7 +233,7 @@ class TestCreatePresets:
         assert len(data["created"]) > 0
 
     def test_skips_existing_presets(self, client, session):
-        from protea.api.routers.scoring import _PRESET_CONFIGS
+        from protea.services.scoring_service import PRESET_CONFIGS as _PRESET_CONFIGS
 
         all_names = [(p["name"],) for p in _PRESET_CONFIGS]
         session.query.return_value.all.return_value = all_names
@@ -263,7 +263,7 @@ class TestScoredTSV:
         )
         assert resp.status_code == 404
 
-    @patch("protea.api.routers.scoring.compute_score", return_value=0.85)
+    @patch("protea.services.scoring_service.compute_score", return_value=0.85)
     def test_streams_tsv_with_data(self, mock_score, session):
         """Full streaming path: header + data rows."""
         set_id = uuid4()
@@ -303,7 +303,9 @@ class TestScoredTSV:
         app.state.session_factory = factory
         app.include_router(router)
         with patch(
-            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session)
+                        "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session),
+        ), patch(
+            "protea.services.scoring_service.session_scope", side_effect=lambda _: _mock_scope(session)
         ):
             with TestClient(app) as c:
                 resp = c.get(
@@ -317,7 +319,7 @@ class TestScoredTSV:
         assert "P12345" in lines[1]
         assert "GO:0003674" in lines[1]
 
-    @patch("protea.api.routers.scoring.compute_score", return_value=0.3)
+    @patch("protea.services.scoring_service.compute_score", return_value=0.3)
     def test_min_score_filters_rows(self, mock_score, session):
         """Rows below min_score are excluded from the stream."""
         set_id = uuid4()
@@ -356,7 +358,9 @@ class TestScoredTSV:
         app.state.session_factory = factory
         app.include_router(router)
         with patch(
-            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session)
+                        "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session),
+        ), patch(
+            "protea.services.scoring_service.session_scope", side_effect=lambda _: _mock_scope(session)
         ):
             with TestClient(app) as c:
                 resp = c.get(
@@ -369,7 +373,7 @@ class TestScoredTSV:
         assert len(lines) == 1
         assert lines[0].startswith("protein_accession")
 
-    @patch("protea.api.routers.scoring.compute_score", return_value=0.9)
+    @patch("protea.services.scoring_service.compute_score", return_value=0.9)
     def test_accession_filter(self, mock_score, session):
         """Accession query parameter is forwarded to the DB query."""
         set_id = uuid4()
@@ -408,7 +412,9 @@ class TestScoredTSV:
         app.state.session_factory = factory
         app.include_router(router)
         with patch(
-            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session)
+                        "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session),
+        ), patch(
+            "protea.services.scoring_service.session_scope", side_effect=lambda _: _mock_scope(session)
         ):
             with TestClient(app) as c:
                 resp = c.get(
@@ -550,9 +556,9 @@ class TestMetricsEndpoint:
         )
         assert resp.status_code == 422
 
-    @patch("protea.api.routers.scoring.compute_cafa_metrics")
-    @patch("protea.api.routers.scoring.compute_evaluation_data")
-    @patch("protea.api.routers.scoring.compute_score", return_value=0.9)
+    @patch("protea.services.scoring_service.compute_cafa_metrics")
+    @patch("protea.services.scoring_service.compute_evaluation_data")
+    @patch("protea.services.scoring_service.compute_score", return_value=0.9)
     def test_returns_metrics_with_curve(self, mock_score, mock_eval, mock_metrics, client, session):
         set_id = uuid4()
         config_id = uuid4()
@@ -613,9 +619,9 @@ class TestMetricsEndpoint:
         assert len(data["curve"]) == 1
         assert data["curve"][0]["threshold"] == 0.5
 
-    @patch("protea.api.routers.scoring.compute_cafa_metrics")
-    @patch("protea.api.routers.scoring.compute_evaluation_data")
-    @patch("protea.api.routers.scoring.compute_score", return_value=0.5)
+    @patch("protea.services.scoring_service.compute_cafa_metrics")
+    @patch("protea.services.scoring_service.compute_evaluation_data")
+    @patch("protea.services.scoring_service.compute_score", return_value=0.5)
     def test_lk_category(self, mock_score, mock_eval, mock_metrics, client, session):
         set_id = uuid4()
         config_id = uuid4()
@@ -744,7 +750,7 @@ class TestTrainingDataEndpoint:
         )
         assert resp.status_code == 422
 
-    @patch("protea.api.routers.scoring.compute_evaluation_data")
+    @patch("protea.services.scoring_service.compute_evaluation_data")
     def test_streams_labeled_data_positive(self, mock_eval, session):
         """Prediction matching ground truth gets label=1."""
         ps = _make_pred_set()
@@ -772,7 +778,9 @@ class TestTrainingDataEndpoint:
         app.state.session_factory = MagicMock()
         app.include_router(router)
         with patch(
-            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session)
+            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session),
+        ), patch(
+            "protea.services.scoring_service.session_scope", side_effect=lambda _: _mock_scope(session)
         ):
             with TestClient(app) as c:
                 resp = c.get(self._url(ps.id, es.id, "nk"))
@@ -788,7 +796,7 @@ class TestTrainingDataEndpoint:
         label_idx = header.index("label")
         assert row[label_idx] == "1"
 
-    @patch("protea.api.routers.scoring.compute_evaluation_data")
+    @patch("protea.services.scoring_service.compute_evaluation_data")
     def test_streams_labeled_data_negative(self, mock_eval, session):
         """Prediction NOT in ground truth gets label=0."""
         ps = _make_pred_set()
@@ -816,7 +824,9 @@ class TestTrainingDataEndpoint:
         app.state.session_factory = MagicMock()
         app.include_router(router)
         with patch(
-            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session)
+            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session),
+        ), patch(
+            "protea.services.scoring_service.session_scope", side_effect=lambda _: _mock_scope(session)
         ):
             with TestClient(app) as c:
                 resp = c.get(self._url(ps.id, es.id, "nk"))
@@ -827,7 +837,7 @@ class TestTrainingDataEndpoint:
         label_idx = header.index("label")
         assert row[label_idx] == "0"
 
-    @patch("protea.api.routers.scoring.compute_evaluation_data")
+    @patch("protea.services.scoring_service.compute_evaluation_data")
     def test_all_columns_present(self, mock_eval, session):
         """Verify all 32 columns are in the TSV header."""
         ps = _make_pred_set()
@@ -854,7 +864,9 @@ class TestTrainingDataEndpoint:
         app.state.session_factory = MagicMock()
         app.include_router(router)
         with patch(
-            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session)
+            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session),
+        ), patch(
+            "protea.services.scoring_service.session_scope", side_effect=lambda _: _mock_scope(session)
         ):
             with TestClient(app) as c:
                 resp = c.get(self._url(ps.id, es.id))
@@ -865,7 +877,7 @@ class TestTrainingDataEndpoint:
         assert header[3] == "label"
         assert header[-1] == "neighbor_distance_std"
 
-    @patch("protea.api.routers.scoring.compute_evaluation_data")
+    @patch("protea.services.scoring_service.compute_evaluation_data")
     def test_pk_category(self, mock_eval, session):
         """PK category uses eval_data.pk for ground truth."""
         ps = _make_pred_set()
@@ -895,7 +907,9 @@ class TestTrainingDataEndpoint:
         app.state.session_factory = MagicMock()
         app.include_router(router)
         with patch(
-            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session)
+            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session),
+        ), patch(
+            "protea.services.scoring_service.session_scope", side_effect=lambda _: _mock_scope(session)
         ):
             with TestClient(app) as c:
                 resp = c.get(self._url(ps.id, es.id, "pk"))
@@ -906,7 +920,7 @@ class TestTrainingDataEndpoint:
         label_idx = header.index("label")
         assert row[label_idx] == "1"
 
-    @patch("protea.api.routers.scoring.compute_evaluation_data")
+    @patch("protea.services.scoring_service.compute_evaluation_data")
     def test_none_features_render_as_empty(self, mock_eval, session):
         """None values are rendered as empty strings in the TSV."""
         ps = _make_pred_set()
@@ -939,7 +953,9 @@ class TestTrainingDataEndpoint:
         app.state.session_factory = MagicMock()
         app.include_router(router)
         with patch(
-            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session)
+            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session),
+        ), patch(
+            "protea.services.scoring_service.session_scope", side_effect=lambda _: _mock_scope(session)
         ):
             with TestClient(app) as c:
                 resp = c.get(self._url(ps.id, es.id))
@@ -1099,10 +1115,10 @@ class TestRerankerMetrics:
         )
         assert resp.status_code == 422
 
-    @patch("protea.api.routers.scoring.compute_cafa_metrics")
-    @patch("protea.api.routers.scoring.reranker_predict")
-    @patch("protea.api.routers.scoring.model_from_string")
-    @patch("protea.api.routers.scoring.compute_evaluation_data")
+    @patch("protea.services.scoring_service.compute_cafa_metrics")
+    @patch("protea.services.scoring_service._reranker_predict")
+    @patch("protea.services.scoring_service.model_from_string")
+    @patch("protea.services.scoring_service.compute_evaluation_data")
     def test_returns_metrics(
         self, mock_eval, mock_from_str, mock_predict, mock_metrics, client, session
     ):
@@ -1160,7 +1176,7 @@ class TestRerankerMetrics:
         assert "curve" in data
         assert len(data["curve"]) == 1
 
-    @patch("protea.api.routers.scoring.compute_evaluation_data")
+    @patch("protea.services.scoring_service.compute_evaluation_data")
     def test_empty_predictions_returns_zero_metrics(self, mock_eval, client, session):
         ps = _make_pred_set()
         rm = _make_reranker_model()
