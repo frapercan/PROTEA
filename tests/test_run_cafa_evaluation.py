@@ -9,6 +9,7 @@ import gzip
 import os
 import tempfile
 import uuid
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -84,8 +85,13 @@ def _make_scoring_config():
     return sc
 
 
-def _dfs_best_fixture():
-    """Build a dfs_best dict matching cafaeval output format."""
+def _dfs_best_fixture(*, with_weighted: bool = False):
+    """Build a dfs_best dict matching cafaeval output format.
+
+    When ``with_weighted`` is True, also include the ``f_w``,
+    ``f_micro`` and ``f_micro_w`` frames cafaeval emits when an IA
+    file is supplied.
+    """
     df_f = pd.DataFrame(
         [
             {
@@ -117,7 +123,30 @@ def _dfs_best_fixture():
             },
         ]
     )
-    return {"f": df_f}
+    out: dict[str, Any] = {"f": df_f}
+    if with_weighted:
+        out["f_w"] = pd.DataFrame(
+            [
+                {"ns": "biological_process", "f_w": 0.40},
+                {"ns": "molecular_function", "f_w": 0.55},
+                {"ns": "cellular_component", "f_w": 0.62},
+            ]
+        )
+        out["f_micro"] = pd.DataFrame(
+            [
+                {"ns": "biological_process", "f_micro": 0.30},
+                {"ns": "molecular_function", "f_micro": 0.50},
+                {"ns": "cellular_component", "f_micro": 0.58},
+            ]
+        )
+        out["f_micro_w"] = pd.DataFrame(
+            [
+                {"ns": "biological_process", "f_micro_w": 0.25},
+                {"ns": "molecular_function", "f_micro_w": 0.45},
+                {"ns": "cellular_component", "f_micro_w": 0.50},
+            ]
+        )
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +304,38 @@ class TestParseResults:
         )
         result = self.op._parse_results({"f": df_f})
         assert result == {}
+
+    def test_parse_unweighted_only_omits_weighted_keys(self):
+        dfs_best = _dfs_best_fixture()
+        result = self.op._parse_results(dfs_best)
+        bpo = result["BPO"]
+        assert "fmax_w" not in bpo
+        assert "f_micro" not in bpo
+        assert "f_micro_w" not in bpo
+
+    def test_parse_with_weighted_surfaces_extra_keys(self):
+        dfs_best = _dfs_best_fixture(with_weighted=True)
+        result = self.op._parse_results(dfs_best)
+        bpo = result["BPO"]
+        assert bpo["fmax"] == 0.45
+        assert bpo["fmax_w"] == 0.40
+        assert bpo["f_micro"] == 0.30
+        assert bpo["f_micro_w"] == 0.25
+        cco = result["CCO"]
+        assert cco["fmax_w"] == 0.62
+        assert cco["f_micro_w"] == 0.50
+
+    def test_parse_weighted_handles_missing_namespace_in_extra_frame(self):
+        dfs_best = _dfs_best_fixture(with_weighted=True)
+        # Drop one ns from the f_w frame — it should NOT remove the
+        # unweighted keys for that namespace, only skip the _w one.
+        dfs_best["f_w"] = dfs_best["f_w"][dfs_best["f_w"]["ns"] != "molecular_function"]
+        result = self.op._parse_results(dfs_best)
+        mfo = result["MFO"]
+        assert mfo["fmax"] == 0.60
+        assert "fmax_w" not in mfo
+        # Other namespaces still get both
+        assert result["BPO"]["fmax_w"] == 0.40
 
     def test_parse_uses_cov_fallback_when_no_cov_max(self):
         df_f = pd.DataFrame(
