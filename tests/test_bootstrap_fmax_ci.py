@@ -92,3 +92,52 @@ def test_paired_bootstrap_delta_length_mismatch_raises():
     b = np.array([0.1])
     with pytest.raises(ValueError, match="paired bootstrap"):
         boot.paired_bootstrap_delta(a, b)
+
+
+# ---------------------------------------------------------------------------
+# Aspect filter
+# ---------------------------------------------------------------------------
+
+
+def test_load_aspect_map_normalises_letter_codes(tmp_path):
+    p = tmp_path / "a.tsv"
+    p.write_text("GO:0000001\tP\nGO:0000002\tF\nGO:0000003\tC\n")
+    out = boot._load_aspect_map(str(p))
+    assert out == {
+        "GO:0000001": "BPO",
+        "GO:0000002": "MFO",
+        "GO:0000003": "CCO",
+    }
+
+
+def test_load_aspect_map_keeps_cafa_codes(tmp_path):
+    p = tmp_path / "a.tsv"
+    p.write_text("GO:1\tBPO\nGO:2\tMFO\n")
+    out = boot._load_aspect_map(str(p))
+    assert out["GO:1"] == "BPO"
+    assert out["GO:2"] == "MFO"
+
+
+def test_load_aspect_map_skips_blank_or_short_lines(tmp_path):
+    p = tmp_path / "a.tsv"
+    p.write_text("\nGO:1\nGO:2\tF\n\n")
+    out = boot._load_aspect_map(str(p))
+    assert out == {"GO:2": "MFO"}
+
+
+def test_filter_by_aspect_keeps_matching_only():
+    aspect_map = {"GO:1": "MFO", "GO:2": "BPO", "GO:3": "MFO"}
+    preds = [("P1", "GO:1", 0.9), ("P1", "GO:2", 0.7), ("P2", "GO:3", 0.5)]
+    gt = [("P1", "GO:1"), ("P1", "GO:2"), ("P2", "GO:3")]
+    p_out, g_out = boot.filter_by_aspect(preds, gt, aspect_map, "MFO")
+    assert {(p, g) for (p, g, _) in p_out} == {("P1", "GO:1"), ("P2", "GO:3")}
+    assert set(g_out) == {("P1", "GO:1"), ("P2", "GO:3")}
+
+
+def test_filter_by_aspect_drops_unmapped_terms():
+    aspect_map = {"GO:1": "MFO"}
+    preds = [("P1", "GO:1", 0.9), ("P1", "GO:UNKNOWN", 0.8)]
+    gt = [("P1", "GO:1"), ("P1", "GO:UNKNOWN")]
+    p_out, g_out = boot.filter_by_aspect(preds, gt, aspect_map, "MFO")
+    assert len(p_out) == 1 and p_out[0][1] == "GO:1"
+    assert g_out == [("P1", "GO:1")]

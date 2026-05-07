@@ -67,6 +67,48 @@ def _load_gt(client: Minio, bucket: str, key: str) -> list[tuple[str, str]]:
     return rows
 
 
+_ASPECT_LETTER_TO_CAFA = {
+    "P": "BPO",
+    "F": "MFO",
+    "C": "CCO",
+}
+
+
+def _load_aspect_map(path: str) -> dict[str, str]:
+    """Read a 2-col ``(go_id, aspect)`` TSV.
+
+    Aspect may be the single-letter PROTEA encoding (``P``/``F``/``C``)
+    or the CAFA code (``BPO``/``MFO``/``CCO``); both are normalised to
+    the CAFA code in the returned dict. Lines that don't have at least
+    two columns are skipped silently.
+    """
+    out: dict[str, str] = {}
+    with open(path) as f:
+        for line in f:
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) < 2:
+                continue
+            go_id, aspect_raw = parts[0].strip(), parts[1].strip()
+            if not go_id or not aspect_raw:
+                continue
+            aspect = _ASPECT_LETTER_TO_CAFA.get(aspect_raw, aspect_raw)
+            out[go_id] = aspect
+    return out
+
+
+def filter_by_aspect(
+    pred_rows: list[tuple[str, str, float]],
+    gt_rows: list[tuple[str, str]],
+    aspect_map: dict[str, str],
+    aspect: str,
+) -> tuple[list[tuple[str, str, float]], list[tuple[str, str]]]:
+    """Keep only rows whose GO id maps to ``aspect`` (CAFA code)."""
+    keep_ids = {go for go, asp in aspect_map.items() if asp == aspect}
+    preds = [(p, g, s) for (p, g, s) in pred_rows if g in keep_ids]
+    gt = [(p, g) for (p, g) in gt_rows if g in keep_ids]
+    return preds, gt
+
+
 def per_protein_fmax(
     pred_rows: list[tuple[str, str, float]],
     gt_rows: list[tuple[str, str]],
@@ -176,11 +218,18 @@ def _fmax_for_eval(
     eval_id: str,
     tier: str,
     n_thresholds: int,
+    aspect_map: dict[str, str] | None = None,
+    aspect: str | None = None,
 ) -> dict[str, float]:
     base = f"eval_artifacts/{eval_id}"
     preds = _load_predictions(client, bucket, f"{base}/predictions/predictions.tsv")
     gt = _load_gt(client, bucket, f"{base}/gt_{tier}.tsv")
-    print(f"  {eval_id} {tier}: {len(preds)} pred rows, {len(gt)} gt rows")
+    if aspect_map and aspect:
+        preds, gt = filter_by_aspect(preds, gt, aspect_map, aspect)
+        suffix = f" filtered to {aspect}"
+    else:
+        suffix = ""
+    print(f"  {eval_id} {tier}: {len(preds)} pred rows, {len(gt)} gt rows{suffix}")
     return per_protein_fmax(preds, gt, n_thresholds=n_thresholds)
 
 
@@ -193,6 +242,18 @@ def main() -> None:
         help="If set, paired delta vs this baseline cell.",
     )
     parser.add_argument("--tier", required=True, choices=["NK", "LK", "PK"])
+    parser.add_argument(
+        "--aspect",
+        default=None,
+        choices=["MFO", "BPO", "CCO"],
+        help="If set, filter predictions + gt to this aspect; requires --aspect-tsv.",
+    )
+    parser.add_argument(
+        "--aspect-tsv",
+        default=None,
+        help="Path to a 2-col (go_id, aspect) TSV; "
+        "needed when --aspect is set. Aspect may be P/F/C or BPO/MFO/CCO.",
+    )
     parser.add_argument("--n-resamples", type=int, default=1000)
     parser.add_argument("--n-thresholds", type=int, default=100)
     parser.add_argument("--seed", type=int, default=0)
@@ -205,12 +266,34 @@ def main() -> None:
 
     client = _make_client(args)
 
-    print(f"Computing per-protein Fmax (tier={args.tier}, thresholds={args.n_thresholds})")
-    fmax_a = _fmax_for_eval(client, args.bucket, args.eval_result_id, args.tier, args.n_thresholds)
+    if (args.aspect is None) != (args.aspect_tsv is None):
+        raise SystemExit("--aspect and --aspect-tsv must be set together (or both unset)")
+    aspect_map = _load_aspect_map(args.aspect_tsv) if args.aspect_tsv else None
+
+    suffix = f" / {args.aspect}" if args.aspect else ""
+    print(
+        f"Computing per-protein Fmax (tier={args.tier}{suffix}, "
+        f"thresholds={args.n_thresholds})"
+    )
+    fmax_a = _fmax_for_eval(
+        client,
+        args.bucket,
+        args.eval_result_id,
+        args.tier,
+        args.n_thresholds,
+        aspect_map=aspect_map,
+        aspect=args.aspect,
+    )
 
     if args.baseline_eval_result_id:
         fmax_b = _fmax_for_eval(
-            client, args.bucket, args.baseline_eval_result_id, args.tier, args.n_thresholds
+            client,
+            args.bucket,
+            args.baseline_eval_result_id,
+            args.tier,
+            args.n_thresholds,
+            aspect_map=aspect_map,
+            aspect=args.aspect,
         )
         common = sorted(set(fmax_a.keys()) & set(fmax_b.keys()))
         if not common:
