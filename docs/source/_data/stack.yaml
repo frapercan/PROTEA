@@ -1,0 +1,94 @@
+# PROTEA stack registry: single source of truth.
+#
+# Edit this file to add, rename, or retire a repository. Then run:
+#     poetry run python scripts/sync_stack.py
+# to regenerate the README block in this repo and the Sphinx page.
+#
+# Statuses:
+#   active   : in regular use, accepting changes
+#   beta     : released but small surface area, expect breakage
+#   skeleton : bootstrapped, no real code yet (F2 plugin migration pending)
+#   archived : no longer maintained
+#
+# Roles group repos in the navigation tables.
+
+repos:
+  - name: PROTEA
+    slug: protea-core
+    role: platform
+    role_label: Platform
+    status: active
+    summary: Backend platform. Hosts the ORM, job queue, FastAPI surface, frontend, and orchestration.
+    github_url: https://github.com/frapercan/PROTEA
+    docs_url: https://frapercan.github.io/PROTEA/
+    package_url: null
+
+  - name: protea-contracts
+    slug: protea-contracts
+    role: contracts
+    role_label: Contracts
+    status: beta
+    summary: Shared contract surface. ABCs, pydantic payloads, feature schema, schema_sha. Imported by every other repo.
+    github_url: https://github.com/frapercan/protea-contracts
+    docs_url: null
+    package_url: https://github.com/frapercan/protea-contracts/releases
+
+  - name: protea-method
+    slug: protea-method
+    role: inference
+    role_label: Inference
+    status: skeleton
+    summary: Pure inference path (KNN, feature compute, reranker apply). Target of the F2C extraction. Bind-mounted by the LAFA containers.
+    github_url: https://github.com/frapercan/protea-method
+    docs_url: null
+    package_url: null
+
+  - name: protea-sources
+    slug: protea-sources
+    role: plugin
+    role_label: Source plugin
+    status: skeleton
+    summary: Annotation source plugins (GOA, QuickGO, UniProt). Discovered via Python entry_points.
+    github_url: https://github.com/frapercan/protea-sources
+    docs_url: null
+    package_url: null
+
+  - name: protea-runners
+    slug: protea-runners
+    role: plugin
+    role_label: Runner plugin
+    status: skeleton
+    summary: Experiment runner plugins (LightGBM lab, KNN baseline, future GNN). Discovered via Python entry_points.
+    github_url: https://github.com/frapercan/protea-runners
+    docs_url: null
+    package_url: null
+
+  - name: protea-backends
+    slug: protea-backends
+    role: plugin
+    role_label: Backend plugin
+    status: skeleton
+    summary: Protein language model embedding backends (ESM family, T5/ProstT5, Ankh, ESM3-C). Discovered via Python entry_points.
+    github_url: https://github.com/frapercan/protea-backends
+    docs_url: null
+    package_url: null
+
+  - name: protea-reranker-lab
+    slug: protea-reranker-lab
+    role: lab
+    role_label: Lab
+    status: active
+    summary: LightGBM reranker training lab. Pulls datasets from PROTEA, trains boosters, publishes them back via /reranker-models/import-by-reference.
+    github_url: https://github.com/frapercan/protea-reranker-lab
+    docs_url: null
+    package_url: null
+
+  - name: cafaeval-protea
+    slug: cafaeval-protea
+    role: tool
+    role_label: Evaluator
+    status: active
+    summary: Standalone fork of cafaeval (CAFA-evaluator-PK) with the PK-coverage fix and a bit-exact parity guarantee against the upstream.
+    github_url: https://github.com/frapercan/cafaeval-protea
+    docs_url: null
+    package_url: null
