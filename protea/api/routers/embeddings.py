@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import csv
-import io
 from typing import Any
 from uuid import UUID
 
@@ -22,8 +20,11 @@ from protea.infrastructure.orm.models.job import Job, JobEvent
 from protea.infrastructure.queue.publisher import publish_job
 from protea.infrastructure.session import session_scope
 from protea.services.embeddings_service import (
+    EntityNotFoundError,
     InvalidEmbeddingConfigError,
+    assert_prediction_set_exists,
     config_to_dict,
+    iter_predictions_tsv,
     validate_embedding_config_body,
 )
 
@@ -560,44 +561,6 @@ def get_go_term_distribution(
         }
 
 
-_TSV_COLUMNS = [
-    "protein_accession",
-    "go_id",
-    "go_name",
-    "go_aspect",
-    "distance",
-    "ref_protein_accession",
-    "qualifier",
-    "evidence_code",
-    # NW alignment
-    "identity_nw",
-    "similarity_nw",
-    "alignment_score_nw",
-    "gaps_pct_nw",
-    "alignment_length_nw",
-    # SW alignment
-    "identity_sw",
-    "similarity_sw",
-    "alignment_score_sw",
-    "gaps_pct_sw",
-    "alignment_length_sw",
-    # Lengths
-    "length_query",
-    "length_ref",
-    # Taxonomy
-    "query_taxonomy_id",
-    "ref_taxonomy_id",
-    "taxonomic_lca",
-    "taxonomic_distance",
-    "taxonomic_common_ancestors",
-    "taxonomic_relation",
-    # Re-ranker features
-    "vote_count",
-    "k_position",
-    "go_term_frequency",
-    "ref_annotation_density",
-    "neighbor_distance_std",
-]
 
 
 @router.get(
@@ -625,91 +588,24 @@ def download_predictions_tsv(
     The response streams rows directly from the database — suitable for large
     prediction sets without loading everything into memory.
     """
-    from protea.infrastructure.orm.models.annotation.go_term import GOTerm
-
-    # Verify existence before starting the stream so 404 can be returned properly.
-    with session_scope(factory) as _check:
-        if _check.get(PredictionSet, set_id) is None:
-            raise HTTPException(status_code=404, detail="PredictionSet not found")
-
-    def _generate():
-        with session_scope(factory) as session:
-            buf = io.StringIO()
-            writer = csv.writer(buf, delimiter="\t", lineterminator="\n")
-            writer.writerow(_TSV_COLUMNS)
-            yield buf.getvalue()
-
-            q = (
-                session.query(GOPrediction, GOTerm)
-                .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
-                .filter(GOPrediction.prediction_set_id == set_id)
-            )
-            if accession:
-                q = q.filter(GOPrediction.protein_accession == accession)
-            if aspect:
-                q = q.filter(GOTerm.aspect == aspect.upper())
-            if max_distance is not None:
-                q = q.filter(GOPrediction.distance <= max_distance)
-
-            q = q.order_by(GOPrediction.protein_accession, GOPrediction.distance)
-
-            for pred, gt in q.yield_per(1000):
-                buf = io.StringIO()
-                writer = csv.writer(buf, delimiter="\t", lineterminator="\n")
-                writer.writerow(
-                    [
-                        pred.protein_accession,
-                        gt.go_id,
-                        gt.name,
-                        gt.aspect,
-                        pred.distance,
-                        pred.ref_protein_accession,
-                        pred.qualifier or "",
-                        pred.evidence_code or "",
-                        _fmt(pred.identity_nw),
-                        _fmt(pred.similarity_nw),
-                        _fmt(pred.alignment_score_nw),
-                        _fmt(pred.gaps_pct_nw),
-                        _fmt(pred.alignment_length_nw),
-                        _fmt(pred.identity_sw),
-                        _fmt(pred.similarity_sw),
-                        _fmt(pred.alignment_score_sw),
-                        _fmt(pred.gaps_pct_sw),
-                        _fmt(pred.alignment_length_sw),
-                        pred.length_query if pred.length_query is not None else "",
-                        pred.length_ref if pred.length_ref is not None else "",
-                        pred.query_taxonomy_id if pred.query_taxonomy_id is not None else "",
-                        pred.ref_taxonomy_id if pred.ref_taxonomy_id is not None else "",
-                        pred.taxonomic_lca if pred.taxonomic_lca is not None else "",
-                        pred.taxonomic_distance if pred.taxonomic_distance is not None else "",
-                        pred.taxonomic_common_ancestors
-                        if pred.taxonomic_common_ancestors is not None
-                        else "",
-                        pred.taxonomic_relation or "",
-                        pred.vote_count if pred.vote_count is not None else "",
-                        pred.k_position if pred.k_position is not None else "",
-                        pred.go_term_frequency if pred.go_term_frequency is not None else "",
-                        pred.ref_annotation_density
-                        if pred.ref_annotation_density is not None
-                        else "",
-                        _fmt(pred.neighbor_distance_std),
-                    ]
-                )
-                yield buf.getvalue()
+    try:
+        with session_scope(factory) as _check:
+            assert_prediction_set_exists(_check, set_id)
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     filename = f"predictions_{set_id}.tsv"
     return StreamingResponse(
-        _generate(),
+        iter_predictions_tsv(
+            factory,
+            prediction_set_id=set_id,
+            accession=accession,
+            aspect=aspect,
+            max_distance=max_distance,
+        ),
         media_type="text/tab-separated-values",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
-
-
-def _fmt(v: float | None) -> str:
-    """Format a nullable float for TSV output."""
-    if v is None:
-        return ""
-    return f"{v:.6g}"
 
 
 @router.get(

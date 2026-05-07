@@ -1,9 +1,9 @@
 """Embeddings service — pure-logic helpers extracted from
 ``protea.api.routers.embeddings``.
 
-Validation rules and ORM ↔ dict serialisers live here so non-router
-callers (CLI tools, batch scripts) can reuse them without pulling
-FastAPI in.
+Validation rules, ORM ↔ dict serialisers, and the predictions-TSV
+streaming generator live here so non-router callers (CLI tools,
+batch scripts) can reuse them without pulling FastAPI in.
 
 The router translates the domain exceptions raised here to HTTP
 responses:
@@ -11,13 +11,24 @@ responses:
 - :class:`InvalidEmbeddingConfigError` → ``422 Unprocessable Entity``
   (validation errors carry a list of human-readable messages in
   ``.errors``).
+- :class:`EntityNotFoundError` → ``404 Not Found`` (e.g. a
+  ``PredictionSet`` UUID does not resolve).
 """
 
 from __future__ import annotations
 
+import csv
+import io
+import uuid
 from typing import Any
 
+from sqlalchemy.orm import Session
+
+from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
+from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
+from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
+from protea.infrastructure.session import session_scope
 
 # Allowed values for the embedding config fields. Mirror the (de
 # facto) public API contract; new backends/aggs/poolings are added by
@@ -29,6 +40,19 @@ VALID_POOLING: frozenset[str] = frozenset({"mean", "max", "cls", "mean_max"})
 
 class EmbeddingsServiceError(Exception):
     """Base class for embeddings-service domain errors."""
+
+
+class EntityNotFoundError(EmbeddingsServiceError):
+    """Generic 404 — a referenced entity does not exist.
+
+    ``entity`` is a human-readable label (e.g. ``"PredictionSet"``)
+    used in the error message; ``entity_id`` is the looked-up UUID.
+    """
+
+    def __init__(self, entity: str, entity_id: uuid.UUID) -> None:
+        self.entity = entity
+        self.entity_id = entity_id
+        super().__init__(f"{entity} not found")
 
 
 class InvalidEmbeddingConfigError(EmbeddingsServiceError):
@@ -167,12 +191,153 @@ def config_to_dict(c: EmbeddingConfig, embedding_count: int | None = None) -> di
     return out
 
 
+PREDICTIONS_TSV_COLUMNS: tuple[str, ...] = (
+    "protein_accession",
+    "go_id",
+    "go_name",
+    "go_aspect",
+    "distance",
+    "ref_protein_accession",
+    "qualifier",
+    "evidence_code",
+    # NW alignment
+    "identity_nw",
+    "similarity_nw",
+    "alignment_score_nw",
+    "gaps_pct_nw",
+    "alignment_length_nw",
+    # SW alignment
+    "identity_sw",
+    "similarity_sw",
+    "alignment_score_sw",
+    "gaps_pct_sw",
+    "alignment_length_sw",
+    # Lengths
+    "length_query",
+    "length_ref",
+    # Taxonomy
+    "query_taxonomy_id",
+    "ref_taxonomy_id",
+    "taxonomic_lca",
+    "taxonomic_distance",
+    "taxonomic_common_ancestors",
+    "taxonomic_relation",
+    # Re-ranker features
+    "vote_count",
+    "k_position",
+    "go_term_frequency",
+    "ref_annotation_density",
+    "neighbor_distance_std",
+)
+
+
+def _format_float(v: float | None) -> str:
+    """Format a nullable float for TSV output (``""`` for ``None``)."""
+    if v is None:
+        return ""
+    return f"{v:.6g}"
+
+
+def _format_optional(v: Any) -> Any:
+    """Render ``None`` as the empty string; otherwise pass through."""
+    return "" if v is None else v
+
+
+def assert_prediction_set_exists(session: Session, prediction_set_id: uuid.UUID) -> None:
+    """Raise :class:`EntityNotFoundError` if the PredictionSet UUID is unknown."""
+    if session.get(PredictionSet, prediction_set_id) is None:
+        raise EntityNotFoundError("PredictionSet", prediction_set_id)
+
+
+def iter_predictions_tsv(
+    factory: Any,
+    *,
+    prediction_set_id: uuid.UUID,
+    accession: str | None = None,
+    aspect: str | None = None,
+    max_distance: float | None = None,
+) -> Any:
+    """Yield TSV rows (as ``str``) of every GOPrediction in a set.
+
+    Opens its own session inside the generator so the caller's
+    existence-check session can close cleanly. The first yielded
+    chunk is the header line; one row per ``(GOPrediction, GOTerm)``
+    pair follows, ordered by ``(protein_accession, distance)``.
+
+    Optional filters: ``accession`` (single query protein),
+    ``aspect`` (``F`` / ``P`` / ``C``), ``max_distance``.
+    """
+    with session_scope(factory) as session:
+        buf = io.StringIO()
+        writer = csv.writer(buf, delimiter="\t", lineterminator="\n")
+        writer.writerow(PREDICTIONS_TSV_COLUMNS)
+        yield buf.getvalue()
+
+        q = (
+            session.query(GOPrediction, GOTerm)
+            .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
+            .filter(GOPrediction.prediction_set_id == prediction_set_id)
+        )
+        if accession:
+            q = q.filter(GOPrediction.protein_accession == accession)
+        if aspect:
+            q = q.filter(GOTerm.aspect == aspect.upper())
+        if max_distance is not None:
+            q = q.filter(GOPrediction.distance <= max_distance)
+
+        q = q.order_by(GOPrediction.protein_accession, GOPrediction.distance)
+
+        for pred, gt in q.yield_per(1000):
+            buf = io.StringIO()
+            writer = csv.writer(buf, delimiter="\t", lineterminator="\n")
+            writer.writerow(
+                [
+                    pred.protein_accession,
+                    gt.go_id,
+                    gt.name,
+                    gt.aspect,
+                    pred.distance,
+                    pred.ref_protein_accession,
+                    pred.qualifier or "",
+                    pred.evidence_code or "",
+                    _format_float(pred.identity_nw),
+                    _format_float(pred.similarity_nw),
+                    _format_float(pred.alignment_score_nw),
+                    _format_float(pred.gaps_pct_nw),
+                    _format_float(pred.alignment_length_nw),
+                    _format_float(pred.identity_sw),
+                    _format_float(pred.similarity_sw),
+                    _format_float(pred.alignment_score_sw),
+                    _format_float(pred.gaps_pct_sw),
+                    _format_float(pred.alignment_length_sw),
+                    _format_optional(pred.length_query),
+                    _format_optional(pred.length_ref),
+                    _format_optional(pred.query_taxonomy_id),
+                    _format_optional(pred.ref_taxonomy_id),
+                    _format_optional(pred.taxonomic_lca),
+                    _format_optional(pred.taxonomic_distance),
+                    _format_optional(pred.taxonomic_common_ancestors),
+                    pred.taxonomic_relation or "",
+                    _format_optional(pred.vote_count),
+                    _format_optional(pred.k_position),
+                    _format_optional(pred.go_term_frequency),
+                    _format_optional(pred.ref_annotation_density),
+                    _format_float(pred.neighbor_distance_std),
+                ]
+            )
+            yield buf.getvalue()
+
+
 __all__ = [
+    "PREDICTIONS_TSV_COLUMNS",
     "VALID_BACKENDS",
     "VALID_LAYER_AGG",
     "VALID_POOLING",
     "EmbeddingsServiceError",
+    "EntityNotFoundError",
     "InvalidEmbeddingConfigError",
+    "assert_prediction_set_exists",
     "config_to_dict",
+    "iter_predictions_tsv",
     "validate_embedding_config_body",
 ]

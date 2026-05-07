@@ -75,6 +75,9 @@ def client(session):
     app = _make_app(factory)
     with patch(
         "protea.api.routers.embeddings.session_scope", side_effect=lambda _: _mock_scope(session)
+    ), patch(
+        "protea.services.embeddings_service.session_scope",
+        side_effect=lambda _: _mock_scope(session),
     ):
         yield TestClient(app, raise_server_exceptions=True)
 
@@ -443,17 +446,17 @@ class TestDownloadPredictionsTSV:
 
 class TestFmt:
     def test_none_returns_empty(self):
-        from protea.api.routers.embeddings import _fmt
+        from protea.services.embeddings_service import _format_float as _fmt
 
         assert _fmt(None) == ""
 
     def test_float_returns_formatted(self):
-        from protea.api.routers.embeddings import _fmt
+        from protea.services.embeddings_service import _format_float as _fmt
 
         assert _fmt(0.123456789) == "0.123457"
 
     def test_zero_returns_formatted(self):
-        from protea.api.routers.embeddings import _fmt
+        from protea.services.embeddings_service import _format_float as _fmt
 
         assert _fmt(0.0) == "0"
 
