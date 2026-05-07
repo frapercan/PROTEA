@@ -96,6 +96,35 @@ class SignalCoverageError(ScoringServiceError):
         )
 
 
+class RerankerResponse(BaseModel):
+    """Serialised representation of a stored :class:`RerankerModel`."""
+
+    id: uuid.UUID
+    name: str
+    prediction_set_id: uuid.UUID | None
+    evaluation_set_id: uuid.UUID | None
+    category: str
+    aspect: str | None
+    metrics: dict[str, Any]
+    feature_importance: dict[str, Any]
+    created_at: Any
+
+
+def to_reranker_response(m: RerankerModel) -> RerankerResponse:
+    """Convert an ORM :class:`RerankerModel` to its API response model."""
+    return RerankerResponse(
+        id=m.id,
+        name=m.name,
+        prediction_set_id=m.prediction_set_id,
+        evaluation_set_id=m.evaluation_set_id,
+        category=m.category,
+        aspect=m.aspect,
+        metrics=m.metrics,
+        feature_importance=m.feature_importance,
+        created_at=m.created_at,
+    )
+
+
 class ScoringConfigCreate(BaseModel):
     """Request body for ``POST /scoring/configs``.
 
@@ -1044,6 +1073,7 @@ __all__ = [
     "PRESET_CONFIGS",
     "BoosterUnavailableError",
     "EntityNotFoundError",
+    "RerankerResponse",
     "ScoringConfigCreate",
     "ScoringConfigResponse",
     "ScoringServiceError",
@@ -1058,6 +1088,7 @@ __all__ = [
     "prepare_training_data_request",
     "score_predictions_with_reranker",
     "snapshot_config",
+    "to_reranker_response",
     "to_response",
     "validate_scoring_request",
 ]

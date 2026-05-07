@@ -30,17 +30,13 @@ continue to use the system default at score-computation time.
 from __future__ import annotations
 
 import uuid
-from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 
 from protea.api.deps import get_session_factory
 from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
 from protea.infrastructure.orm.models.embedding.scoring_config import (
-    DEFAULT_WEIGHTS,
-    VALID_FORMULAS,
     ScoringConfig,
 )
 from protea.infrastructure.session import session_scope
@@ -48,35 +44,21 @@ from protea.services.scoring_service import (
     PRESET_CONFIGS,
     BoosterUnavailableError,
     EntityNotFoundError,
+    RerankerResponse,
     ScoringConfigCreate,
     ScoringConfigResponse,
     SignalCoverageError,
-    check_signal_coverage,
     compute_prediction_metrics,
     compute_reranker_metrics_data,
     iter_reranked_predictions_tsv,
     iter_scored_predictions,
     iter_training_data,
-    load_booster,
     prepare_training_data_request,
     score_predictions_with_reranker,
-    snapshot_config,
+    to_reranker_response,
     to_response,
     validate_scoring_request,
 )
-
-
-def _load_booster(rm: RerankerModel) -> Any:
-    """Translate :class:`BoosterUnavailableError` to HTTP 409.
-
-    Thin shim over :func:`protea.services.scoring_service.load_booster`
-    so existing call sites in this router keep working unchanged.
-    """
-    try:
-        return load_booster(rm)
-    except BoosterUnavailableError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-
 
 router = APIRouter(prefix="/scoring", tags=["scoring"])
 
@@ -92,29 +74,6 @@ router = APIRouter(prefix="/scoring", tags=["scoring"])
 # module; the router re-imports them so route signatures keep working.
 
 
-def _to_response(c: ScoringConfig) -> ScoringConfigResponse:
-    """Backwards-compatible alias for :func:`scoring_service.to_response`."""
-    return to_response(c)
-
-
-def _snapshot(c: ScoringConfig) -> ScoringConfig:
-    """Backwards-compatible alias for :func:`scoring_service.snapshot_config`."""
-    return snapshot_config(c)
-
-
-def _check_signal_coverage(session, prediction_set_id, config_snap: ScoringConfig) -> None:
-    """Translate :class:`SignalCoverageError` to HTTP 409.
-
-    Thin shim over
-    :func:`protea.services.scoring_service.check_signal_coverage` so
-    existing call sites in this router keep working unchanged.
-    """
-    try:
-        check_signal_coverage(session, prediction_set_id, config_snap)
-    except SignalCoverageError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-
 # ---------------------------------------------------------------------------
 # ScoringConfig CRUD
 # ---------------------------------------------------------------------------
@@ -125,7 +84,7 @@ def list_scoring_configs(factory=Depends(get_session_factory)):
     """Return all stored ScoringConfigs ordered by creation time."""
     with session_scope(factory) as session:
         configs = session.query(ScoringConfig).order_by(ScoringConfig.created_at).all()
-        return [_to_response(c) for c in configs]
+        return [to_response(c) for c in configs]
 
 
 @router.post("/configs", response_model=ScoringConfigResponse, status_code=201)
@@ -139,22 +98,9 @@ def create_scoring_config(
     key in ``weights`` is a recognised signal name.  Evidence weight validation
     is handled by the Pydantic model.
     """
-    if body.formula not in VALID_FORMULAS:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Invalid formula {body.formula!r}. Valid options: {list(VALID_FORMULAS)}",
-        )
-    known_signals = set(DEFAULT_WEIGHTS.keys())
-    unknown_signals = set(body.weights.keys()) - known_signals
-    if unknown_signals:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"Unknown signal weight keys: {sorted(unknown_signals)}. "
-                f"Valid keys: {sorted(known_signals)}"
-            ),
-        )
-
+    # Pydantic field validators on ScoringConfigCreate already enforce
+    # `formula in VALID_FORMULAS` and reject unknown signal keys via
+    # 422 before this body runs; no manual re-check needed here.
     with session_scope(factory) as session:
         config = ScoringConfig(
             name=body.name,
@@ -165,7 +111,7 @@ def create_scoring_config(
         )
         session.add(config)
         session.flush()
-        return _to_response(config)
+        return to_response(config)
 
 
 @router.post("/configs/presets", status_code=201)
@@ -196,7 +142,7 @@ def get_scoring_config(
         config = session.get(ScoringConfig, config_id)
         if config is None:
             raise HTTPException(status_code=404, detail="ScoringConfig not found")
-        return _to_response(config)
+        return to_response(config)
 
 
 @router.delete("/configs/{config_id}", status_code=204)
@@ -380,35 +326,7 @@ def download_training_data(
 # ---------------------------------------------------------------------------
 
 
-_ASPECT_MAP = {"bpo": "P", "mfo": "F", "cco": "C"}
-
-
-class RerankerResponse(BaseModel):
-    """Serialised representation of a stored RerankerModel."""
-
-    id: uuid.UUID
-    name: str
-    prediction_set_id: uuid.UUID | None
-    evaluation_set_id: uuid.UUID | None
-    category: str
-    aspect: str | None
-    metrics: dict[str, Any]
-    feature_importance: dict[str, Any]
-    created_at: Any
-
-
-def _reranker_to_response(m: RerankerModel) -> RerankerResponse:
-    return RerankerResponse(
-        id=m.id,
-        name=m.name,
-        prediction_set_id=m.prediction_set_id,
-        evaluation_set_id=m.evaluation_set_id,
-        category=m.category,
-        aspect=m.aspect,
-        metrics=m.metrics,
-        feature_importance=m.feature_importance,
-        created_at=m.created_at,
-    )
+# RerankerResponse + to_reranker_response are exported by the service module.
 
 
 @router.get("/rerankers", response_model=list[RerankerResponse])
@@ -416,7 +334,7 @@ def list_rerankers(factory=Depends(get_session_factory)):
     """Return all stored re-ranker models ordered by creation time."""
     with session_scope(factory) as session:
         models = session.query(RerankerModel).order_by(RerankerModel.created_at).all()
-        return [_reranker_to_response(m) for m in models]
+        return [to_reranker_response(m) for m in models]
 
 
 @router.get("/rerankers/{reranker_id}", response_model=RerankerResponse)
@@ -426,7 +344,7 @@ def get_reranker(reranker_id: uuid.UUID, factory=Depends(get_session_factory)):
         model = session.get(RerankerModel, reranker_id)
         if model is None:
             raise HTTPException(status_code=404, detail="RerankerModel not found")
-        return _reranker_to_response(model)
+        return to_reranker_response(model)
 
 
 @router.delete("/rerankers/{reranker_id}", status_code=204)
