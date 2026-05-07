@@ -88,13 +88,30 @@ def _load_manifest(bundle: Path) -> dict[str, Any]:
 
 
 def _load_refs(bundle: Path) -> tuple[list[str], np.ndarray]:
+    """Load (accessions, embeddings) without materialising a Python
+    list-of-lists.
+
+    The embedding column is parquet ``list<float>``; ``to_pylist``
+    would convert it to nested Python lists (~5x peak RAM cost).
+    Instead we flatten the values once via the pyarrow chunked API
+    and reshape into a contiguous ``(n, dim)`` float32 matrix.
+    """
     table = pq.read_table(bundle / "reference_embeddings.parquet")
     accs = [str(a) for a in table.column("accession").to_pylist()]
-    raw = table.column("embedding").to_pylist()
-    embeddings = np.asarray(raw, dtype=np.float32)
-    if embeddings.ndim == 1:
-        embeddings = np.stack([np.asarray(v, dtype=np.float32) for v in raw])
-    return accs, embeddings
+
+    # ChunkedArray of list<float>: flatten to a flat float buffer,
+    # then reshape using the recovered embedding dimension.
+    embedding_col = table.column("embedding")
+    flat = embedding_col.combine_chunks().flatten().to_numpy(zero_copy_only=False)
+    n = len(accs)
+    if n == 0:
+        return accs, np.empty((0, 0), dtype=np.float32)
+    if flat.size == 0 or flat.size % n != 0:
+        raise ValueError(
+            f"Reference embeddings parquet inconsistent: {flat.size} flat values vs {n} rows.",
+        )
+    dim = flat.size // n
+    return accs, flat.reshape(n, dim).astype(np.float32, copy=False)
 
 
 def _load_annotations(bundle: Path) -> dict[str, list[dict[str, Any]]]:
