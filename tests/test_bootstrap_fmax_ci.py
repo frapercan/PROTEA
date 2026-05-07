@@ -229,3 +229,64 @@ def test_all_ancestors_handles_diamond():
 def test_all_ancestors_unknown_term_returns_self_only():
     parents = {"GO:1": []}
     assert boot.all_ancestors("GO:UNKNOWN", parents) == {"GO:UNKNOWN"}
+
+
+# ---------------------------------------------------------------------------
+# Propagation helpers
+# ---------------------------------------------------------------------------
+
+
+def test_propagate_predictions_emits_ancestors():
+    parents = {"GO:1": [], "GO:2": ["GO:1"]}
+    preds = [("P1", "GO:2", 0.7)]
+    out = sorted(boot.propagate_predictions(preds, parents))
+    assert out == [("P1", "GO:1", 0.7), ("P1", "GO:2", 0.7)]
+
+
+def test_propagate_predictions_takes_max_score_per_ancestor():
+    parents = {"GO:1": [], "GO:2": ["GO:1"], "GO:3": ["GO:1"]}
+    preds = [("P1", "GO:2", 0.4), ("P1", "GO:3", 0.9)]
+    out = {(p, g): s for (p, g, s) in boot.propagate_predictions(preds, parents)}
+    assert out[("P1", "GO:1")] == 0.9
+    assert out[("P1", "GO:2")] == 0.4
+    assert out[("P1", "GO:3")] == 0.9
+
+
+def test_propagate_predictions_separate_proteins_dont_collide():
+    parents = {"GO:1": [], "GO:2": ["GO:1"]}
+    preds = [("P1", "GO:2", 0.3), ("P2", "GO:2", 0.8)]
+    out = {(p, g): s for (p, g, s) in boot.propagate_predictions(preds, parents)}
+    assert out[("P1", "GO:1")] == 0.3
+    assert out[("P2", "GO:1")] == 0.8
+
+
+def test_propagate_gt_dedupes_ancestors():
+    parents = {"GO:1": [], "GO:2": ["GO:1"], "GO:3": ["GO:1"]}
+    gt = [("P1", "GO:2"), ("P1", "GO:3")]
+    out = set(boot.propagate_gt(gt, parents))
+    assert out == {("P1", "GO:1"), ("P1", "GO:2"), ("P1", "GO:3")}
+
+
+def test_propagate_predictions_unknown_go_keeps_self_only():
+    parents = {"GO:1": []}
+    preds = [("P1", "GO:UNKNOWN", 0.5)]
+    out = list(boot.propagate_predictions(preds, parents))
+    assert out == [("P1", "GO:UNKNOWN", 0.5)]
+
+
+def test_propagation_changes_per_protein_fmax():
+    # Without propagation: pred=GO:2, gt=GO:1 — no overlap → F=0.
+    # With propagation: pred set is now {GO:1, GO:2} (the parent inherits
+    # the leaf's score). gt stays {GO:1} since it has no ancestors.
+    # → tp=1 (GO:1), pr=1/2=0.5, rc=1/1=1.0, F = 2 * 0.5 * 1 / 1.5 = 0.667.
+    parents = {"GO:1": [], "GO:2": ["GO:1"]}
+    preds = [("P1", "GO:2", 0.9)]
+    gt = [("P1", "GO:1")]
+    fmax_raw = boot.per_protein_fmax(preds, gt, n_thresholds=10)
+    assert fmax_raw["P1"] == 0.0
+    fmax_prop = boot.per_protein_fmax(
+        boot.propagate_predictions(preds, parents),
+        boot.propagate_gt(gt, parents),
+        n_thresholds=10,
+    )
+    assert fmax_prop["P1"] == pytest.approx(2 / 3, abs=1e-6)

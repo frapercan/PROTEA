@@ -134,6 +134,49 @@ def all_ancestors(go_id: str, parents: dict[str, list[str]]) -> set[str]:
     return out
 
 
+def propagate_predictions(
+    pred_rows: list[tuple[str, str, float]],
+    parents: dict[str, list[str]],
+) -> list[tuple[str, str, float]]:
+    """Propagate predicted GO terms up the ancestor closure.
+
+    Each ``(prot, go, score)`` row contributes its score to every
+    ancestor of ``go``. When the same ``(prot, ancestor)`` pair is
+    reached from multiple leaves, the maximum score wins (matches
+    cafaeval's ``prop="fill"`` semantics).
+    """
+    best: dict[tuple[str, str], float] = {}
+    cache: dict[str, set[str]] = {}
+    for prot, go, score in pred_rows:
+        anc = cache.get(go)
+        if anc is None:
+            anc = all_ancestors(go, parents)
+            cache[go] = anc
+        for a in anc:
+            key = (prot, a)
+            cur = best.get(key)
+            if cur is None or score > cur:
+                best[key] = score
+    return [(p, g, s) for (p, g), s in best.items()]
+
+
+def propagate_gt(
+    gt_rows: list[tuple[str, str]],
+    parents: dict[str, list[str]],
+) -> list[tuple[str, str]]:
+    """Propagate ground-truth GO terms up the ancestor closure (deduped)."""
+    out: set[tuple[str, str]] = set()
+    cache: dict[str, set[str]] = {}
+    for prot, go in gt_rows:
+        anc = cache.get(go)
+        if anc is None:
+            anc = all_ancestors(go, parents)
+            cache[go] = anc
+        for a in anc:
+            out.add((prot, a))
+    return list(out)
+
+
 _ASPECT_LETTER_TO_CAFA = {
     "P": "BPO",
     "F": "MFO",
@@ -287,10 +330,19 @@ def _fmax_for_eval(
     n_thresholds: int,
     aspect_map: dict[str, str] | None = None,
     aspect: str | None = None,
+    parents: dict[str, list[str]] | None = None,
 ) -> dict[str, float]:
     base = f"eval_artifacts/{eval_id}"
     preds = _load_predictions(client, bucket, f"{base}/predictions/predictions.tsv")
     gt = _load_gt(client, bucket, f"{base}/gt_{tier}.tsv")
+    if parents is not None:
+        before = len(preds), len(gt)
+        preds = propagate_predictions(preds, parents)
+        gt = propagate_gt(gt, parents)
+        print(f"  {eval_id} {tier}: propagated {before[0]}→{len(preds)} preds, "
+              f"{before[1]}→{len(gt)} gt rows")
+    # Aspect filter must run AFTER propagation so cross-aspect ancestors
+    # (e.g. the all-aspects root) get pruned away.
     if aspect_map and aspect:
         preds, gt = filter_by_aspect(preds, gt, aspect_map, aspect)
         suffix = f" filtered to {aspect}"
@@ -321,6 +373,13 @@ def main() -> None:
         help="Path to a 2-col (go_id, aspect) TSV; "
         "needed when --aspect is set. Aspect may be P/F/C or BPO/MFO/CCO.",
     )
+    parser.add_argument(
+        "--obo-path",
+        default=None,
+        help="If set, propagate predictions + gt to ancestors via the OBO "
+        "DAG (is_a + part_of edges) before computing per-protein Fmax. "
+        "Use this to approach cafaeval's `prop=fill` numbers.",
+    )
     parser.add_argument("--n-resamples", type=int, default=1000)
     parser.add_argument("--n-thresholds", type=int, default=100)
     parser.add_argument("--seed", type=int, default=0)
@@ -336,8 +395,14 @@ def main() -> None:
     if (args.aspect is None) != (args.aspect_tsv is None):
         raise SystemExit("--aspect and --aspect-tsv must be set together (or both unset)")
     aspect_map = _load_aspect_map(args.aspect_tsv) if args.aspect_tsv else None
+    parents = parse_obo_parents(args.obo_path) if args.obo_path else None
 
-    suffix = f" / {args.aspect}" if args.aspect else ""
+    suffix_parts = []
+    if args.aspect:
+        suffix_parts.append(args.aspect)
+    if parents is not None:
+        suffix_parts.append(f"propagated ({len(parents)} OBO terms)")
+    suffix = (" / " + ", ".join(suffix_parts)) if suffix_parts else ""
     print(
         f"Computing per-protein Fmax (tier={args.tier}{suffix}, "
         f"thresholds={args.n_thresholds})"
@@ -350,6 +415,7 @@ def main() -> None:
         args.n_thresholds,
         aspect_map=aspect_map,
         aspect=args.aspect,
+        parents=parents,
     )
 
     if args.baseline_eval_result_id:
@@ -361,6 +427,7 @@ def main() -> None:
             args.n_thresholds,
             aspect_map=aspect_map,
             aspect=args.aspect,
+            parents=parents,
         )
         common = sorted(set(fmax_a.keys()) & set(fmax_b.keys()))
         if not common:
