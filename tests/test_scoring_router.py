@@ -233,7 +233,7 @@ class TestCreatePresets:
         assert len(data["created"]) > 0
 
     def test_skips_existing_presets(self, client, session):
-        from protea.api.routers.scoring import _PRESET_CONFIGS
+        from protea.services.scoring_service import PRESET_CONFIGS as _PRESET_CONFIGS
 
         all_names = [(p["name"],) for p in _PRESET_CONFIGS]
         session.query.return_value.all.return_value = all_names

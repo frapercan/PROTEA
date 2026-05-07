@@ -34,20 +34,21 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel
 
 from protea.api.deps import get_session_factory
 from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
 from protea.infrastructure.orm.models.embedding.scoring_config import (
-    DEFAULT_EVIDENCE_WEIGHTS,
     DEFAULT_WEIGHTS,
     VALID_FORMULAS,
     ScoringConfig,
 )
 from protea.infrastructure.session import session_scope
 from protea.services.scoring_service import (
+    PRESET_CONFIGS,
     BoosterUnavailableError,
     EntityNotFoundError,
+    ScoringConfigCreate,
     ScoringConfigResponse,
     SignalCoverageError,
     check_signal_coverage,
@@ -79,136 +80,7 @@ def _load_booster(rm: RerankerModel) -> Any:
 
 router = APIRouter(prefix="/scoring", tags=["scoring"])
 
-# ---------------------------------------------------------------------------
-# Built-in preset configurations
-# ---------------------------------------------------------------------------
-# These cover the most common use-cases and are designed to be instructive
-# as reference points for custom configs.  None of them override evidence
-# weights so they document what the system defaults produce.
-
-_PRESET_CONFIGS: list[dict[str, Any]] = [
-    {
-        "name": "embedding_only",
-        "formula": "linear",
-        "weights": {
-            "embedding_similarity": 1.0,
-            "identity_nw": 0.0,
-            "identity_sw": 0.0,
-            "evidence_weight": 0.0,
-            "taxonomic_proximity": 0.0,
-            "neighbor_vote_fraction": 0.0,
-        },
-        "description": (
-            "Pure cosine similarity of the winning neighbour, converted to [0, 1]. "
-            "Baseline — tests the hypothesis that the nearest-neighbour distance "
-            "alone is enough signal."
-        ),
-    },
-    {
-        "name": "vote_fraction",
-        "formula": "linear",
-        "weights": {
-            "embedding_similarity": 0.0,
-            "identity_nw": 0.0,
-            "identity_sw": 0.0,
-            "evidence_weight": 0.0,
-            "taxonomic_proximity": 0.0,
-            "neighbor_vote_fraction": 1.0,
-        },
-        "description": (
-            "Canonical KNN score: fraction of the K neighbours that vote for each "
-            "GO term. Tests the hypothesis that consensus across neighbours beats "
-            "the raw cosine distance of the top-1 neighbour."
-        ),
-    },
-    {
-        "name": "alignment_only",
-        "formula": "linear",
-        "weights": {
-            "embedding_similarity": 0.0,
-            "identity_nw": 0.6,
-            "identity_sw": 0.4,
-            "evidence_weight": 0.0,
-            "taxonomic_proximity": 0.0,
-            "neighbor_vote_fraction": 0.0,
-        },
-        "description": (
-            "Pure sequence-identity score (NW global 60 % + SW local 40 %), no embedding. "
-            "Tests whether classical sequence alignment alone can match PLM-based KNN. "
-            "Requires compute_alignments=True."
-        ),
-    },
-    {
-        "name": "embedding_plus_alignment",
-        "formula": "linear",
-        "weights": {
-            "embedding_similarity": 0.5,
-            "identity_nw": 0.3,
-            "identity_sw": 0.2,
-            "evidence_weight": 0.0,
-            "taxonomic_proximity": 0.0,
-            "neighbor_vote_fraction": 0.0,
-        },
-        "description": (
-            "Embedding (50 %) refined with global NW identity (30 %) and local SW "
-            "identity (20 %). Tests whether alignment adds a usable signal on top "
-            "of the embedding. Requires compute_alignments=True."
-        ),
-    },
-    {
-        "name": "embedding_plus_vote",
-        "formula": "linear",
-        "weights": {
-            "embedding_similarity": 0.5,
-            "identity_nw": 0.0,
-            "identity_sw": 0.0,
-            "evidence_weight": 0.0,
-            "taxonomic_proximity": 0.0,
-            "neighbor_vote_fraction": 0.5,
-        },
-        "description": (
-            "Nearest-neighbour distance (50 %) combined with K-neighbour consensus "
-            "(50 %). Tests whether adding voting on top of cosine distance improves "
-            "the ranking vs either signal alone."
-        ),
-    },
-    {
-        "name": "evidence_veto",
-        "formula": "evidence_weighted",
-        "weights": {
-            "embedding_similarity": 1.0,
-            "identity_nw": 0.0,
-            "identity_sw": 0.0,
-            "evidence_weight": 0.0,
-            "taxonomic_proximity": 0.0,
-            "neighbor_vote_fraction": 0.0,
-        },
-        "description": (
-            "Embedding similarity, multiplied by the resolved evidence weight as a "
-            "final veto (evidence_weighted formula with evidence_weight=0 in the "
-            "linear sum to avoid double-counting). Tests whether down-ranking IEA/ND "
-            "predictions via a clean multiplier beats feeding evidence into the sum."
-        ),
-    },
-    {
-        "name": "composite",
-        "formula": "linear",
-        "weights": {
-            "embedding_similarity": 0.4,
-            "identity_nw": 0.2,
-            "identity_sw": 0.1,
-            "evidence_weight": 0.0,
-            "taxonomic_proximity": 0.1,
-            "neighbor_vote_fraction": 0.2,
-        },
-        "description": (
-            "Kitchen-sink linear mix: embedding + alignment + taxonomy + voting. "
-            "evidence_weight excluded from the linear sum (use evidence_veto when "
-            "you want the multiplier). Requires compute_alignments=True and "
-            "compute_taxonomy=True; tests whether more signals beat fewer."
-        ),
-    },
-]
+# Preset ScoringConfigs are defined in protea.services.scoring_service.PRESET_CONFIGS.
 
 
 # ---------------------------------------------------------------------------
@@ -216,64 +88,8 @@ _PRESET_CONFIGS: list[dict[str, Any]] = [
 # ---------------------------------------------------------------------------
 
 
-class ScoringConfigCreate(BaseModel):
-    """Request body for POST /scoring/configs.
-
-    Attributes
-    ----------
-    name:
-        Unique display name (1–255 characters).
-    formula:
-        Aggregation formula.  One of ``"linear"`` or ``"evidence_weighted"``.
-    weights:
-        Signal weights dict.  Valid keys: ``embedding_similarity``,
-        ``identity_nw``, ``identity_sw``, ``evidence_weight``,
-        ``taxonomic_proximity``.  Missing keys default to 0.
-    evidence_weights:
-        Optional per-GO-evidence-code quality overrides.  Keys must be valid
-        GO evidence codes (e.g. ``"IEA"``); values must be in [0, 1].
-        When ``None`` the system defaults from
-        :data:`DEFAULT_EVIDENCE_WEIGHTS` are used at score-computation time.
-        Partial dicts are allowed.
-    description:
-        Free-text description stored for display in the UI.
-    """
-
-    name: str = Field(..., min_length=1, max_length=255)
-    formula: str = Field("linear")
-    weights: dict[str, float] = Field(default_factory=lambda: dict(DEFAULT_WEIGHTS))
-    evidence_weights: dict[str, float] | None = Field(
-        default=None,
-        description=(
-            "Per-GO-evidence-code quality overrides in [0, 1]. "
-            "NULL means use system defaults. Partial dicts are valid."
-        ),
-    )
-    description: str | None = None
-
-    model_config = {"extra": "forbid"}
-
-    @field_validator("evidence_weights")
-    @classmethod
-    def validate_evidence_weights(cls, v: dict[str, float] | None) -> dict[str, float] | None:
-        """Ensure all keys are known GO codes and all values are in [0, 1]."""
-        if v is None:
-            return None
-        known_codes = set(DEFAULT_EVIDENCE_WEIGHTS.keys())
-        unknown = set(v.keys()) - known_codes
-        if unknown:
-            raise ValueError(
-                f"Unknown evidence codes: {sorted(unknown)}. Valid codes: {sorted(known_codes)}"
-            )
-        out_of_range = {k: val for k, val in v.items() if not (0.0 <= val <= 1.0)}
-        if out_of_range:
-            raise ValueError(f"Evidence weights must be in [0, 1]. Out-of-range: {out_of_range}")
-        return v
-
-
-# ScoringConfigResponse is exported by the service module and re-imported
-# here so existing route signatures (``response_model=ScoringConfigResponse``)
-# keep working unchanged.
+# ScoringConfigCreate / ScoringConfigResponse are exported by the service
+# module; the router re-imports them so route signatures keep working.
 
 
 def _to_response(c: ScoringConfig) -> ScoringConfigResponse:
@@ -362,7 +178,7 @@ def create_preset_configs(factory=Depends(get_session_factory)):
     created: list[str] = []
     with session_scope(factory) as session:
         existing_names = {row[0] for row in session.query(ScoringConfig.name).all()}
-        for preset in _PRESET_CONFIGS:
+        for preset in PRESET_CONFIGS:
             if preset["name"] in existing_names:
                 continue
             session.add(ScoringConfig(**preset))
