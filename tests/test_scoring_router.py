@@ -550,9 +550,9 @@ class TestMetricsEndpoint:
         )
         assert resp.status_code == 422
 
-    @patch("protea.api.routers.scoring.compute_cafa_metrics")
-    @patch("protea.api.routers.scoring.compute_evaluation_data")
-    @patch("protea.api.routers.scoring.compute_score", return_value=0.9)
+    @patch("protea.services.scoring_service.compute_cafa_metrics")
+    @patch("protea.services.scoring_service.compute_evaluation_data")
+    @patch("protea.services.scoring_service.compute_score", return_value=0.9)
     def test_returns_metrics_with_curve(self, mock_score, mock_eval, mock_metrics, client, session):
         set_id = uuid4()
         config_id = uuid4()
@@ -613,9 +613,9 @@ class TestMetricsEndpoint:
         assert len(data["curve"]) == 1
         assert data["curve"][0]["threshold"] == 0.5
 
-    @patch("protea.api.routers.scoring.compute_cafa_metrics")
-    @patch("protea.api.routers.scoring.compute_evaluation_data")
-    @patch("protea.api.routers.scoring.compute_score", return_value=0.5)
+    @patch("protea.services.scoring_service.compute_cafa_metrics")
+    @patch("protea.services.scoring_service.compute_evaluation_data")
+    @patch("protea.services.scoring_service.compute_score", return_value=0.5)
     def test_lk_category(self, mock_score, mock_eval, mock_metrics, client, session):
         set_id = uuid4()
         config_id = uuid4()

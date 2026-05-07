@@ -58,9 +58,11 @@ from protea.infrastructure.orm.models.embedding.scoring_config import (
 from protea.infrastructure.session import session_scope
 from protea.services.scoring_service import (
     BoosterUnavailableError,
+    EntityNotFoundError,
     ScoringConfigResponse,
     SignalCoverageError,
     check_signal_coverage,
+    compute_prediction_metrics,
     load_booster,
     snapshot_config,
     to_response,
@@ -552,61 +554,21 @@ def compute_metrics(
     category:
         ``"nk"`` (no-knowledge) or ``"lk"`` (limited-knowledge) protein set.
     """
-    with session_scope(factory) as session:
-        if session.get(PredictionSet, set_id) is None:
-            raise HTTPException(status_code=404, detail="PredictionSet not found")
-        config = session.get(ScoringConfig, scoring_config_id)
-        if config is None:
-            raise HTTPException(status_code=404, detail="ScoringConfig not found")
-        config_snap = _snapshot(config)
-        _check_signal_coverage(session, set_id, config_snap)
-
-        eval_data = compute_evaluation_data(
-            session,
-            old_annotation_set_id=old_annotation_set_id,
-            new_annotation_set_id=new_annotation_set_id,
-            ontology_snapshot_id=ontology_snapshot_id,
-        )
-
-        rows = (
-            session.query(GOPrediction, GOTerm.go_id)
-            .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
-            .filter(GOPrediction.prediction_set_id == set_id)
-            .all()
-        )
-
-    scored: list[dict[str, Any]] = []
-    for pred, go_id in rows:
-        pred_dict: dict[str, Any] = {
-            "protein_accession": pred.protein_accession,
-            "go_id": go_id,
-            "distance": pred.distance,
-            "identity_nw": pred.identity_nw,
-            "identity_sw": pred.identity_sw,
-            "evidence_code": pred.evidence_code,
-            "taxonomic_distance": pred.taxonomic_distance,
-            "neighbor_vote_fraction": pred.neighbor_vote_fraction,
-        }
-        pred_dict["score"] = compute_score(pred_dict, config_snap)
-        scored.append(pred_dict)
-
-    metrics = compute_cafa_metrics(scored, eval_data, category=category)
-
-    return {
-        "prediction_set_id": str(set_id),
-        "scoring_config_id": str(scoring_config_id),
-        "scoring_config_name": config_snap.name,
-        **metrics.summary(),
-        "curve": [
-            {
-                "threshold": p.threshold,
-                "precision": p.precision,
-                "recall": p.recall,
-                "f1": p.f1,
-            }
-            for p in metrics.curve
-        ],
-    }
+    try:
+        with session_scope(factory) as session:
+            return compute_prediction_metrics(
+                session,
+                prediction_set_id=set_id,
+                scoring_config_id=scoring_config_id,
+                old_annotation_set_id=old_annotation_set_id,
+                new_annotation_set_id=new_annotation_set_id,
+                ontology_snapshot_id=ontology_snapshot_id,
+                category=category,
+            )
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SignalCoverageError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------

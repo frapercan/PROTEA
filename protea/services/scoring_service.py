@@ -26,7 +26,13 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from protea.core.evaluation import compute_evaluation_data
+from protea.core.metrics import compute_cafa_metrics
 from protea.core.reranker import load_reranker, model_from_string
+from protea.core.scoring import compute_score
+from protea.infrastructure.orm.models.annotation.go_term import GOTerm
+from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
+from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
 from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
 from protea.infrastructure.orm.models.embedding.scoring_config import (
     FORMULA_EVIDENCE_WEIGHTED,
@@ -38,6 +44,19 @@ from protea.infrastructure.storage import get_artifact_store
 
 class ScoringServiceError(Exception):
     """Base class for scoring-service domain errors."""
+
+
+class EntityNotFoundError(ScoringServiceError):
+    """Generic 404 — a referenced entity does not exist.
+
+    ``entity`` is a human-readable label (e.g. ``"PredictionSet"``)
+    used in the error message; ``entity_id`` is the looked-up UUID.
+    """
+
+    def __init__(self, entity: str, entity_id: uuid.UUID) -> None:
+        self.entity = entity
+        self.entity_id = entity_id
+        super().__init__(f"{entity} not found")
 
 
 class BoosterUnavailableError(ScoringServiceError):
@@ -199,12 +218,100 @@ def check_signal_coverage(
         raise SignalCoverageError(missing)
 
 
+def compute_prediction_metrics(
+    session: Session,
+    *,
+    prediction_set_id: uuid.UUID,
+    scoring_config_id: uuid.UUID,
+    old_annotation_set_id: uuid.UUID,
+    new_annotation_set_id: uuid.UUID,
+    ontology_snapshot_id: uuid.UUID,
+    category: str,
+) -> dict[str, Any]:
+    """Compute CAFA Fmax and AUC-PR for a PredictionSet under a ScoringConfig.
+
+    Loads ``PredictionSet`` and ``ScoringConfig``, validates signal
+    coverage, materialises the temporal NK/LK ground-truth delta from
+    the two AnnotationSets via :func:`compute_evaluation_data`,
+    applies the config's formula to every ``GOPrediction`` row via
+    :func:`compute_score`, and feeds the scored predictions through
+    :func:`compute_cafa_metrics`. Returns a JSON-ready dict with the
+    summary metrics + the full precision-recall curve.
+
+    The session is read-only here; no flush/commit. The function
+    returns plain Python types and does not depend on FastAPI.
+
+    Raises
+    ------
+    EntityNotFoundError
+        Either ``PredictionSet`` or ``ScoringConfig`` does not exist.
+    SignalCoverageError
+        The config requires signals absent from the PredictionSet.
+    """
+    if session.get(PredictionSet, prediction_set_id) is None:
+        raise EntityNotFoundError("PredictionSet", prediction_set_id)
+    config = session.get(ScoringConfig, scoring_config_id)
+    if config is None:
+        raise EntityNotFoundError("ScoringConfig", scoring_config_id)
+    config_snap = snapshot_config(config)
+    check_signal_coverage(session, prediction_set_id, config_snap)
+
+    eval_data = compute_evaluation_data(
+        session,
+        old_annotation_set_id=old_annotation_set_id,
+        new_annotation_set_id=new_annotation_set_id,
+        ontology_snapshot_id=ontology_snapshot_id,
+    )
+
+    rows = (
+        session.query(GOPrediction, GOTerm.go_id)
+        .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
+        .filter(GOPrediction.prediction_set_id == prediction_set_id)
+        .all()
+    )
+
+    scored: list[dict[str, Any]] = []
+    for pred, go_id in rows:
+        pred_dict: dict[str, Any] = {
+            "protein_accession": pred.protein_accession,
+            "go_id": go_id,
+            "distance": pred.distance,
+            "identity_nw": pred.identity_nw,
+            "identity_sw": pred.identity_sw,
+            "evidence_code": pred.evidence_code,
+            "taxonomic_distance": pred.taxonomic_distance,
+            "neighbor_vote_fraction": pred.neighbor_vote_fraction,
+        }
+        pred_dict["score"] = compute_score(pred_dict, config_snap)
+        scored.append(pred_dict)
+
+    metrics = compute_cafa_metrics(scored, eval_data, category=category)
+
+    return {
+        "prediction_set_id": str(prediction_set_id),
+        "scoring_config_id": str(scoring_config_id),
+        "scoring_config_name": config_snap.name,
+        **metrics.summary(),
+        "curve": [
+            {
+                "threshold": p.threshold,
+                "precision": p.precision,
+                "recall": p.recall,
+                "f1": p.f1,
+            }
+            for p in metrics.curve
+        ],
+    }
+
+
 __all__ = [
     "BoosterUnavailableError",
+    "EntityNotFoundError",
     "ScoringConfigResponse",
     "ScoringServiceError",
     "SignalCoverageError",
     "check_signal_coverage",
+    "compute_prediction_metrics",
     "load_booster",
     "snapshot_config",
     "to_response",
