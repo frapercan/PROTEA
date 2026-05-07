@@ -24,7 +24,10 @@ from protea.services.embeddings_service import (
     InvalidEmbeddingConfigError,
     assert_prediction_set_exists,
     config_to_dict,
+    get_go_term_distribution_data,
+    get_predictions_for_protein,
     iter_predictions_tsv,
+    list_proteins_in_prediction_set,
     validate_embedding_config_body,
 )
 
@@ -350,90 +353,17 @@ def list_prediction_set_proteins(
 ) -> dict[str, Any]:
     """Paginated list of proteins in a prediction set with their predicted GO count, minimum distance,
     known annotation count, and how many predictions match known annotations (precision proxy)."""
-    with session_scope(factory) as session:
-        ps = session.get(PredictionSet, set_id)
-        if ps is None:
-            raise HTTPException(status_code=404, detail="PredictionSet not found")
-
-        from protea.infrastructure.orm.models.annotation.protein_go_annotation import (
-            ProteinGOAnnotation,
-        )
-        from protea.infrastructure.orm.models.protein.protein import Protein
-
-        q = (
-            session.query(
-                GOPrediction.protein_accession,
-                func.count(GOPrediction.id).label("go_count"),
-                func.min(GOPrediction.distance).label("min_distance"),
+    try:
+        with session_scope(factory) as session:
+            return list_proteins_in_prediction_set(
+                session,
+                prediction_set_id=set_id,
+                search=search,
+                limit=limit,
+                offset=offset,
             )
-            .filter(GOPrediction.prediction_set_id == set_id)
-            .group_by(GOPrediction.protein_accession)
-        )
-        if search:
-            q = q.filter(GOPrediction.protein_accession.ilike(f"%{search}%"))
-
-        total = q.count()
-        rows = q.order_by(GOPrediction.protein_accession).offset(offset).limit(limit).all()
-
-        accessions = [r[0] for r in rows]
-        protein_map = {
-            p.accession: p
-            for p in session.query(Protein).filter(Protein.accession.in_(accessions)).all()
-        }
-
-        ann_counts: dict[str, int] = {}
-        match_counts: dict[str, int] = {}
-        if accessions:
-            ann_counts = {
-                acc: cnt
-                for acc, cnt in session.query(
-                    ProteinGOAnnotation.protein_accession,
-                    func.count(ProteinGOAnnotation.id),
-                )
-                .filter(
-                    ProteinGOAnnotation.protein_accession.in_(accessions),
-                    ProteinGOAnnotation.annotation_set_id == ps.annotation_set_id,
-                )
-                .group_by(ProteinGOAnnotation.protein_accession)
-                .all()
-            }
-
-            match_counts = {
-                acc: cnt
-                for acc, cnt in session.query(
-                    GOPrediction.protein_accession,
-                    func.count(func.distinct(GOPrediction.go_term_id)),
-                )
-                .join(
-                    ProteinGOAnnotation,
-                    (ProteinGOAnnotation.go_term_id == GOPrediction.go_term_id)
-                    & (ProteinGOAnnotation.protein_accession == GOPrediction.protein_accession)
-                    & (ProteinGOAnnotation.annotation_set_id == ps.annotation_set_id),
-                )
-                .filter(
-                    GOPrediction.prediction_set_id == set_id,
-                    GOPrediction.protein_accession.in_(accessions),
-                )
-                .group_by(GOPrediction.protein_accession)
-                .all()
-            }
-
-        return {
-            "total": total,
-            "offset": offset,
-            "limit": limit,
-            "items": [
-                {
-                    "accession": acc,
-                    "go_count": go_count,
-                    "min_distance": round(min_dist, 4) if min_dist is not None else None,
-                    "annotation_count": ann_counts.get(acc, 0),
-                    "match_count": match_counts.get(acc, 0),
-                    "in_db": acc in protein_map,
-                }
-                for acc, go_count, min_dist in rows
-            ],
-        }
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get(
@@ -446,64 +376,13 @@ def get_protein_predictions(
 ) -> list[dict[str, Any]]:
     """Return all predicted GO terms for a protein in a prediction set, sorted by distance (nearest first).
     Includes GO term details plus optional alignment (NW/SW) and taxonomy fields when computed."""
-    with session_scope(factory) as session:
-        from protea.infrastructure.orm.models.annotation.go_term import GOTerm
-
-        ps = session.get(PredictionSet, set_id)
-        if ps is None:
-            raise HTTPException(status_code=404, detail="PredictionSet not found")
-
-        rows = (
-            session.query(GOPrediction, GOTerm)
-            .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
-            .filter(
-                GOPrediction.prediction_set_id == set_id,
-                GOPrediction.protein_accession == accession,
+    try:
+        with session_scope(factory) as session:
+            return get_predictions_for_protein(
+                session, prediction_set_id=set_id, accession=accession
             )
-            .order_by(GOPrediction.distance)
-            .all()
-        )
-
-        return [
-            {
-                "go_id": gt.go_id,
-                "name": gt.name,
-                "aspect": gt.aspect,
-                "distance": round(pred.distance, 4),
-                "ref_protein_accession": pred.ref_protein_accession,
-                "qualifier": pred.qualifier,
-                "evidence_code": pred.evidence_code,
-                # Alignment — NW
-                "identity_nw": pred.identity_nw,
-                "similarity_nw": pred.similarity_nw,
-                "alignment_score_nw": pred.alignment_score_nw,
-                "gaps_pct_nw": pred.gaps_pct_nw,
-                "alignment_length_nw": pred.alignment_length_nw,
-                # Alignment — SW
-                "identity_sw": pred.identity_sw,
-                "similarity_sw": pred.similarity_sw,
-                "alignment_score_sw": pred.alignment_score_sw,
-                "gaps_pct_sw": pred.gaps_pct_sw,
-                "alignment_length_sw": pred.alignment_length_sw,
-                # Lengths
-                "length_query": pred.length_query,
-                "length_ref": pred.length_ref,
-                # Taxonomy
-                "query_taxonomy_id": pred.query_taxonomy_id,
-                "ref_taxonomy_id": pred.ref_taxonomy_id,
-                "taxonomic_lca": pred.taxonomic_lca,
-                "taxonomic_distance": pred.taxonomic_distance,
-                "taxonomic_common_ancestors": pred.taxonomic_common_ancestors,
-                "taxonomic_relation": pred.taxonomic_relation,
-                # Re-ranker features
-                "vote_count": pred.vote_count,
-                "k_position": pred.k_position,
-                "go_term_frequency": pred.go_term_frequency,
-                "ref_annotation_density": pred.ref_annotation_density,
-                "neighbor_distance_std": pred.neighbor_distance_std,
-            }
-            for pred, gt in rows
-        ]
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get(
@@ -516,49 +395,13 @@ def get_go_term_distribution(
 ) -> dict[str, Any]:
     """Return the most frequently predicted GO terms grouped by aspect (F/P/C)
     and the total prediction counts per aspect."""
-    with session_scope(factory) as session:
-        from protea.infrastructure.orm.models.annotation.go_term import GOTerm
-
-        ps = session.get(PredictionSet, set_id)
-        if ps is None:
-            raise HTTPException(status_code=404, detail="PredictionSet not found")
-
-        rows = (
-            session.query(
-                GOTerm.go_id,
-                GOTerm.name,
-                GOTerm.aspect,
-                func.count(GOPrediction.id).label("count"),
+    try:
+        with session_scope(factory) as session:
+            return get_go_term_distribution_data(
+                session, prediction_set_id=set_id, limit=limit
             )
-            .join(GOPrediction, GOPrediction.go_term_id == GOTerm.id)
-            .filter(GOPrediction.prediction_set_id == set_id)
-            .group_by(GOTerm.go_id, GOTerm.name, GOTerm.aspect)
-            .order_by(func.count(GOPrediction.id).desc())
-            .limit(limit)
-            .all()
-        )
-
-        by_aspect: dict[str, list] = {"F": [], "P": [], "C": [], "other": []}
-        for go_id, name, aspect, count in rows:
-            entry = {"go_id": go_id, "name": name, "count": count}
-            by_aspect.get(aspect or "other", by_aspect["other"]).append(entry)
-
-        aspect_counts = (
-            session.query(GOTerm.aspect, func.count(GOPrediction.id))
-            .join(GOPrediction, GOPrediction.go_term_id == GOTerm.id)
-            .filter(GOPrediction.prediction_set_id == set_id)
-            .group_by(GOTerm.aspect)
-            .all()
-        )
-
-        return {
-            "by_aspect": by_aspect,
-            "aspect_totals": {asp or "other": cnt for asp, cnt in aspect_counts},
-            "top_terms": [
-                {"go_id": go_id, "name": name, "aspect": aspect, "count": count}
-                for go_id, name, aspect, count in rows
-            ],
-        }
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 
