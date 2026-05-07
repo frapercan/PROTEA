@@ -3524,7 +3524,7 @@ protea-contracts = {git = "https://github.com/frapercan/protea-contracts.git", b
 type = "git"
 url = "https://github.com/frapercan/protea-method.git"
 reference = "master"
-resolved_reference = "24664c2fe704baf840f7a1988574ed5f340202e5"
+resolved_reference = "9c6d7d2e1ab499de713e2553680f2c82564c4fa6"
 
 [[package]]
 name = "protea-reranker-lab"

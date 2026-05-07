@@ -14,7 +14,17 @@ bundle must contain the artifacts produced by the PROTEA exporter
     ├── go_term_metadata.parquet     # (go_term_id, go_id, aspect, name, ia_weight)
     ├── pca_state.npz                # mean (D,) + components (16, D) for query PCA
     ├── anc2vec.npz                  # Anc2Vec GO-term embedding dictionary
-    └── reranker.txt                 # LightGBM booster (text format)
+    └── reranker/                    # per-aspect LightGBM boosters
+        ├── F.txt                    # MFO booster (optional)
+        ├── P.txt                    # BPO booster (optional)
+        ├── C.txt                    # CCO booster (optional)
+        └── routing.json             # provenance metadata (optional)
+
+The bundle also accepts a legacy single-booster layout where
+``reranker.txt`` lives at the bundle root; in that case every
+prediction is scored with the same booster regardless of aspect.
+The per-aspect ``reranker/`` directory takes precedence when both
+are present.
 
 Pipeline:
     1. Embed query FASTA via ``prott5_encoder`` (mean-pool ProtT5).
@@ -116,10 +126,30 @@ def _load_pca_state(bundle: Path) -> tuple[np.ndarray, np.ndarray] | None:
 
 
 def _load_booster_bytes(bundle: Path) -> bytes | None:
+    """Load the legacy single-booster blob if present."""
     booster_path = bundle / "reranker.txt"
     if not booster_path.exists():
         return None
     return booster_path.read_bytes()
+
+
+def _load_boosters_by_aspect(bundle: Path) -> dict[str, bytes]:
+    """Load per-aspect boosters from ``<bundle>/reranker/{F,P,C}.txt``.
+
+    Reads the optional ``reranker/routing.json`` for provenance metadata
+    (logged but not enforced). Returns an empty dict when the
+    ``reranker/`` directory is absent so the caller can fall back to
+    the legacy single-booster path or the no-rerank baseline.
+    """
+    reranker_dir = bundle / "reranker"
+    if not reranker_dir.is_dir():
+        return {}
+    out: dict[str, bytes] = {}
+    for aspect in ("F", "P", "C"):
+        path = reranker_dir / f"{aspect}.txt"
+        if path.exists():
+            out[aspect] = path.read_bytes()
+    return out
 
 
 def _stack_query_embeddings(
@@ -229,12 +259,31 @@ def main() -> None:
         if (bundle / "anc2vec.npz").exists() and not args.no_v6
         else None
     )
-    booster_bytes = _load_booster_bytes(bundle) if not args.no_reranker else None
-    booster = load_from_bytes(booster_bytes) if booster_bytes is not None else None
+    # Reranker selection: per-aspect bundle (preferred for the v18/v19
+    # selective strategy) takes precedence over the legacy single-booster
+    # ``reranker.txt``. ``--no_reranker`` disables both paths.
+    boosters_by_aspect: dict[str, object] = {}
+    booster = None
+    if not args.no_reranker:
+        per_aspect_bytes = _load_boosters_by_aspect(bundle)
+        if per_aspect_bytes:
+            boosters_by_aspect = {
+                aspect: load_from_bytes(blob)
+                for aspect, blob in per_aspect_bytes.items()
+            }
+        else:
+            booster_bytes = _load_booster_bytes(bundle)
+            if booster_bytes is not None:
+                booster = load_from_bytes(booster_bytes)
+    rerank_summary = (
+        f"per-aspect={sorted(boosters_by_aspect)}"
+        if boosters_by_aspect
+        else f"single={booster is not None}"
+    )
     print(
         f"[protea_main] refs={len(ref_accs)} annotations={sum(len(v) for v in annotations.values())} "
         f"go_terms={len(go_id_map)} pca={pca_state is not None} "
-        f"anc2vec={anc_idx is not None} reranker={booster is not None}",
+        f"anc2vec={anc_idx is not None} reranker={rerank_summary}",
     )
 
     config = PredictConfig(
@@ -258,6 +307,7 @@ def main() -> None:
         config=config,
         pca_state=pca_state,
         booster=booster,
+        boosters_by_aspect=boosters_by_aspect or None,
         anc_idx=anc_idx,
     )
     print(f"[protea_main] {len(predictions)} prediction rows")

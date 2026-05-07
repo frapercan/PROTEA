@@ -28,6 +28,7 @@ if str(_CONTAINER_DIR) not in sys.path:
 from protea_main import (  # noqa: E402
     _load_annotations,
     _load_booster_bytes,
+    _load_boosters_by_aspect,
     _load_go_metadata,
     _load_manifest,
     _load_pca_state,
@@ -191,3 +192,31 @@ def test_score_for_output_falls_back_to_distance() -> None:
 def test_score_for_output_clamps_to_zero() -> None:
     pred = {"min_distance": 1.5, "distance": 1.5}
     assert _score_for_output(pred) == pytest.approx(0.0)
+
+
+def test_load_boosters_by_aspect_empty_when_dir_missing(tmp_path: Path) -> None:
+    bundle = _make_bundle(tmp_path)
+    assert _load_boosters_by_aspect(bundle) == {}
+
+
+def test_load_boosters_by_aspect_reads_present_files(tmp_path: Path) -> None:
+    bundle = _make_bundle(tmp_path, with_booster=False)
+    reranker_dir = bundle / "reranker"
+    reranker_dir.mkdir()
+    rng = np.random.default_rng(0)
+    x = rng.random((40, 3)).astype(np.float32)
+    y = rng.integers(0, 2, 40)
+    train = lgb.Dataset(x, label=y)
+    booster = lgb.train(
+        {"objective": "binary", "verbose": -1, "num_leaves": 7},
+        train,
+        num_boost_round=3,
+    )
+    blob = booster.model_to_string().encode("utf-8")
+    (reranker_dir / "F.txt").write_bytes(blob)
+    (reranker_dir / "C.txt").write_bytes(blob)
+    # P missing on purpose to test partial coverage.
+    out = _load_boosters_by_aspect(bundle)
+    assert sorted(out) == ["C", "F"]
+    assert out["F"] == blob
+    assert out["C"] == blob
