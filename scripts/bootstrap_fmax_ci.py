@@ -28,9 +28,12 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
+from typing import TYPE_CHECKING
 
 import numpy as np
-from minio import Minio
+
+if TYPE_CHECKING:
+    from minio import Minio
 
 
 def _load_predictions(client: Minio, bucket: str, key: str) -> list[tuple[str, str, float]]:
@@ -157,6 +160,8 @@ def paired_bootstrap_delta(
 
 
 def _make_client(args: argparse.Namespace) -> Minio:
+    from minio import Minio  # lazy: keeps the script importable without the storage extra
+
     return Minio(
         args.endpoint,
         access_key=args.access_key,
