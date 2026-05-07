@@ -43,7 +43,6 @@ from protea.core.metrics import compute_cafa_metrics
 from protea.core.reranker import (
     predict as reranker_predict,
 )
-from protea.core.scoring import compute_score
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
@@ -63,9 +62,11 @@ from protea.services.scoring_service import (
     SignalCoverageError,
     check_signal_coverage,
     compute_prediction_metrics,
+    iter_scored_predictions,
     load_booster,
     snapshot_config,
     to_response,
+    validate_scoring_request,
 )
 
 
@@ -434,85 +435,23 @@ def download_scored_predictions(
     protein_accession, go_id, score, distance, ref_protein_accession,
     evidence_code, qualifier, identity_nw, identity_sw, taxonomic_distance.
     """
-    with session_scope(factory) as session:
-        if session.get(PredictionSet, set_id) is None:
-            raise HTTPException(status_code=404, detail="PredictionSet not found")
-        config = session.get(ScoringConfig, scoring_config_id)
-        if config is None:
-            raise HTTPException(status_code=404, detail="ScoringConfig not found")
-        config_snap = _snapshot(config)
-        _check_signal_coverage(session, set_id, config_snap)
-
-    def _generate() -> Iterator[bytes]:
-        header = (
-            "\t".join(
-                [
-                    "protein_accession",
-                    "go_id",
-                    "score",
-                    "distance",
-                    "ref_protein_accession",
-                    "evidence_code",
-                    "qualifier",
-                    "identity_nw",
-                    "identity_sw",
-                    "taxonomic_distance",
-                    "neighbor_vote_fraction",
-                ]
-            )
-            + "\n"
-        )
-        yield header.encode()
-
+    try:
         with session_scope(factory) as session:
-            q = (
-                session.query(GOPrediction, GOTerm.go_id)
-                .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
-                .filter(GOPrediction.prediction_set_id == set_id)
-            )
-            if accession:
-                q = q.filter(GOPrediction.protein_accession == accession)
-
-            for pred, go_id in q.yield_per(1000):
-                pred_dict = {
-                    "distance": pred.distance,
-                    "identity_nw": pred.identity_nw,
-                    "identity_sw": pred.identity_sw,
-                    "evidence_code": pred.evidence_code,
-                    "taxonomic_distance": pred.taxonomic_distance,
-                    "neighbor_vote_fraction": pred.neighbor_vote_fraction,
-                }
-                score = compute_score(pred_dict, config_snap)
-                if min_score is not None and score < min_score:
-                    continue
-
-                row = (
-                    "\t".join(
-                        [
-                            pred.protein_accession,
-                            go_id,
-                            str(score),
-                            str(pred.distance) if pred.distance is not None else "",
-                            pred.ref_protein_accession or "",
-                            pred.evidence_code or "",
-                            pred.qualifier or "",
-                            str(pred.identity_nw) if pred.identity_nw is not None else "",
-                            str(pred.identity_sw) if pred.identity_sw is not None else "",
-                            str(pred.taxonomic_distance)
-                            if pred.taxonomic_distance is not None
-                            else "",
-                            str(pred.neighbor_vote_fraction)
-                            if pred.neighbor_vote_fraction is not None
-                            else "",
-                        ]
-                    )
-                    + "\n"
-                )
-                yield row.encode()
+            config_snap = validate_scoring_request(session, set_id, scoring_config_id)
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SignalCoverageError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     filename = f"scored_{set_id}_{scoring_config_id}.tsv"
     return StreamingResponse(
-        _generate(),
+        iter_scored_predictions(
+            factory,
+            prediction_set_id=set_id,
+            config_snap=config_snap,
+            min_score=min_score,
+            accession=accession,
+        ),
         media_type="text/tab-separated-values",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
