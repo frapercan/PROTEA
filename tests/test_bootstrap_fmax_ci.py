@@ -141,3 +141,152 @@ def test_filter_by_aspect_drops_unmapped_terms():
     p_out, g_out = boot.filter_by_aspect(preds, gt, aspect_map, "MFO")
     assert len(p_out) == 1 and p_out[0][1] == "GO:1"
     assert g_out == [("P1", "GO:1")]
+
+
+# ---------------------------------------------------------------------------
+# OBO parent map + ancestor walk (cafaeval-parity prep)
+# ---------------------------------------------------------------------------
+
+
+def _write_obo(tmp_path, terms: list[str]) -> str:
+    """Helper: write an OBO file with ``[Term]`` blocks from a list of strings."""
+    p = tmp_path / "tiny.obo"
+    p.write_text("format-version: 1.2\n\n" + "\n\n".join(terms) + "\n")
+    return str(p)
+
+
+def test_parse_obo_parents_is_a_only(tmp_path):
+    obo = _write_obo(
+        tmp_path,
+        [
+            "[Term]\nid: GO:0000001\nname: root\nnamespace: biological_process",
+            "[Term]\nid: GO:0000002\nname: child\nnamespace: biological_process\nis_a: GO:0000001 ! root",
+        ],
+    )
+    out = boot.parse_obo_parents(obo)
+    assert out["GO:0000001"] == []
+    assert out["GO:0000002"] == ["GO:0000001"]
+
+
+def test_parse_obo_parents_part_of_relationship(tmp_path):
+    obo = _write_obo(
+        tmp_path,
+        [
+            "[Term]\nid: GO:0000010\nname: process",
+            "[Term]\nid: GO:0000011\nname: subprocess\nrelationship: part_of GO:0000010 ! process",
+        ],
+    )
+    out = boot.parse_obo_parents(obo)
+    assert out["GO:0000011"] == ["GO:0000010"]
+
+
+def test_parse_obo_parents_skips_obsolete(tmp_path):
+    obo = _write_obo(
+        tmp_path,
+        [
+            "[Term]\nid: GO:0000020\nname: live",
+            "[Term]\nid: GO:0000021\nname: dead\nis_a: GO:0000020 ! live\nis_obsolete: true",
+        ],
+    )
+    out = boot.parse_obo_parents(obo)
+    assert "GO:0000020" in out
+    assert "GO:0000021" not in out
+
+
+def test_parse_obo_parents_ignores_unrelated_relationships(tmp_path):
+    obo = _write_obo(
+        tmp_path,
+        [
+            "[Term]\nid: GO:0000030\nname: x",
+            "[Term]\nid: GO:0000031\nname: y\nrelationship: regulates GO:0000030 ! x",
+        ],
+    )
+    out = boot.parse_obo_parents(obo)
+    assert out["GO:0000031"] == []
+
+
+def test_all_ancestors_includes_self_for_root():
+    parents = {"GO:1": [], "GO:2": ["GO:1"], "GO:3": ["GO:2"]}
+    assert boot.all_ancestors("GO:1", parents) == {"GO:1"}
+
+
+def test_all_ancestors_walks_chain():
+    parents = {"GO:1": [], "GO:2": ["GO:1"], "GO:3": ["GO:2"]}
+    assert boot.all_ancestors("GO:3", parents) == {"GO:1", "GO:2", "GO:3"}
+
+
+def test_all_ancestors_handles_diamond():
+    # GO:4 has two parents that share an ancestor
+    parents = {
+        "GO:1": [],
+        "GO:2": ["GO:1"],
+        "GO:3": ["GO:1"],
+        "GO:4": ["GO:2", "GO:3"],
+    }
+    assert boot.all_ancestors("GO:4", parents) == {"GO:1", "GO:2", "GO:3", "GO:4"}
+
+
+def test_all_ancestors_unknown_term_returns_self_only():
+    parents = {"GO:1": []}
+    assert boot.all_ancestors("GO:UNKNOWN", parents) == {"GO:UNKNOWN"}
+
+
+# ---------------------------------------------------------------------------
+# Propagation helpers
+# ---------------------------------------------------------------------------
+
+
+def test_propagate_predictions_emits_ancestors():
+    parents = {"GO:1": [], "GO:2": ["GO:1"]}
+    preds = [("P1", "GO:2", 0.7)]
+    out = sorted(boot.propagate_predictions(preds, parents))
+    assert out == [("P1", "GO:1", 0.7), ("P1", "GO:2", 0.7)]
+
+
+def test_propagate_predictions_takes_max_score_per_ancestor():
+    parents = {"GO:1": [], "GO:2": ["GO:1"], "GO:3": ["GO:1"]}
+    preds = [("P1", "GO:2", 0.4), ("P1", "GO:3", 0.9)]
+    out = {(p, g): s for (p, g, s) in boot.propagate_predictions(preds, parents)}
+    assert out[("P1", "GO:1")] == 0.9
+    assert out[("P1", "GO:2")] == 0.4
+    assert out[("P1", "GO:3")] == 0.9
+
+
+def test_propagate_predictions_separate_proteins_dont_collide():
+    parents = {"GO:1": [], "GO:2": ["GO:1"]}
+    preds = [("P1", "GO:2", 0.3), ("P2", "GO:2", 0.8)]
+    out = {(p, g): s for (p, g, s) in boot.propagate_predictions(preds, parents)}
+    assert out[("P1", "GO:1")] == 0.3
+    assert out[("P2", "GO:1")] == 0.8
+
+
+def test_propagate_gt_dedupes_ancestors():
+    parents = {"GO:1": [], "GO:2": ["GO:1"], "GO:3": ["GO:1"]}
+    gt = [("P1", "GO:2"), ("P1", "GO:3")]
+    out = set(boot.propagate_gt(gt, parents))
+    assert out == {("P1", "GO:1"), ("P1", "GO:2"), ("P1", "GO:3")}
+
+
+def test_propagate_predictions_unknown_go_keeps_self_only():
+    parents = {"GO:1": []}
+    preds = [("P1", "GO:UNKNOWN", 0.5)]
+    out = list(boot.propagate_predictions(preds, parents))
+    assert out == [("P1", "GO:UNKNOWN", 0.5)]
+
+
+def test_propagation_changes_per_protein_fmax():
+    # Without propagation: pred=GO:2, gt=GO:1 — no overlap → F=0.
+    # With propagation: pred set is now {GO:1, GO:2} (the parent inherits
+    # the leaf's score). gt stays {GO:1} since it has no ancestors.
+    # → tp=1 (GO:1), pr=1/2=0.5, rc=1/1=1.0, F = 2 * 0.5 * 1 / 1.5 = 0.667.
+    parents = {"GO:1": [], "GO:2": ["GO:1"]}
+    preds = [("P1", "GO:2", 0.9)]
+    gt = [("P1", "GO:1")]
+    fmax_raw = boot.per_protein_fmax(preds, gt, n_thresholds=10)
+    assert fmax_raw["P1"] == 0.0
+    fmax_prop = boot.per_protein_fmax(
+        boot.propagate_predictions(preds, parents),
+        boot.propagate_gt(gt, parents),
+        n_thresholds=10,
+    )
+    assert fmax_prop["P1"] == pytest.approx(2 / 3, abs=1e-6)

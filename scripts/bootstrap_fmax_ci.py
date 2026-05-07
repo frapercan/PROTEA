@@ -67,6 +67,116 @@ def _load_gt(client: Minio, bucket: str, key: str) -> list[tuple[str, str]]:
     return rows
 
 
+def parse_obo_parents(obo_path: str) -> dict[str, list[str]]:
+    """Return ``go_id → list of immediate parents`` from an OBO file.
+
+    Edges followed: ``is_a`` and ``relationship: part_of`` (matches
+    cafaeval's ``prop="fill"`` propagation rules). Obsolete terms are
+    dropped (no parents recorded). Unknown relationship types are
+    ignored.
+
+    Parents are buffered per-term and only committed at end-of-term so
+    that ``is_obsolete`` flags appearing after ``is_a`` lines still
+    drop the term cleanly.
+    """
+    parents: dict[str, list[str]] = {}
+    current_id: str | None = None
+    pending_parents: list[str] = []
+    in_term = False
+    obsolete = False
+
+    def _flush() -> None:
+        nonlocal current_id, obsolete, pending_parents
+        if current_id and not obsolete:
+            parents[current_id] = list(pending_parents)
+        current_id = None
+        pending_parents = []
+        obsolete = False
+
+    with open(obo_path) as f:
+        for raw in f:
+            line = raw.rstrip("\n").strip()
+            if line == "[Term]":
+                _flush()
+                in_term = True
+                continue
+            if line.startswith("[") and line != "[Term]":
+                _flush()
+                in_term = False
+                continue
+            if not in_term or not line:
+                continue
+            if line.startswith("id: GO:"):
+                current_id = line.split(None, 1)[1].strip()
+            elif line == "is_obsolete: true":
+                obsolete = True
+            elif line.startswith("is_a: GO:"):
+                p = line.split(None, 1)[1].split("!")[0].strip()
+                pending_parents.append(p)
+            elif line.startswith("relationship: part_of GO:"):
+                tail = line[len("relationship: part_of "):]
+                p = tail.split("!")[0].strip()
+                pending_parents.append(p)
+    _flush()
+    return parents
+
+
+def all_ancestors(go_id: str, parents: dict[str, list[str]]) -> set[str]:
+    """Return ``{go_id} ∪ all reachable ancestors`` (BFS over ``parents``)."""
+    out = {go_id}
+    stack = [go_id]
+    while stack:
+        node = stack.pop()
+        for p in parents.get(node, ()):
+            if p not in out:
+                out.add(p)
+                stack.append(p)
+    return out
+
+
+def propagate_predictions(
+    pred_rows: list[tuple[str, str, float]],
+    parents: dict[str, list[str]],
+) -> list[tuple[str, str, float]]:
+    """Propagate predicted GO terms up the ancestor closure.
+
+    Each ``(prot, go, score)`` row contributes its score to every
+    ancestor of ``go``. When the same ``(prot, ancestor)`` pair is
+    reached from multiple leaves, the maximum score wins (matches
+    cafaeval's ``prop="fill"`` semantics).
+    """
+    best: dict[tuple[str, str], float] = {}
+    cache: dict[str, set[str]] = {}
+    for prot, go, score in pred_rows:
+        anc = cache.get(go)
+        if anc is None:
+            anc = all_ancestors(go, parents)
+            cache[go] = anc
+        for a in anc:
+            key = (prot, a)
+            cur = best.get(key)
+            if cur is None or score > cur:
+                best[key] = score
+    return [(p, g, s) for (p, g), s in best.items()]
+
+
+def propagate_gt(
+    gt_rows: list[tuple[str, str]],
+    parents: dict[str, list[str]],
+) -> list[tuple[str, str]]:
+    """Propagate ground-truth GO terms up the ancestor closure (deduped)."""
+    out: set[tuple[str, str]] = set()
+    cache: dict[str, set[str]] = {}
+    for prot, go in gt_rows:
+        anc = cache.get(go)
+        if anc is None:
+            anc = all_ancestors(go, parents)
+            cache[go] = anc
+        for a in anc:
+            out.add((prot, a))
+    return list(out)
+
+
 _ASPECT_LETTER_TO_CAFA = {
     "P": "BPO",
     "F": "MFO",
@@ -212,6 +322,27 @@ def _make_client(args: argparse.Namespace) -> Minio:
     )
 
 
+def _resolve_predictions_key(client: Minio, bucket: str, eval_id: str, tier: str) -> str:
+    """Pick the right predictions.tsv layout for this eval bundle.
+
+    Reranked runs (selective per-tier scoring) write
+    ``predictions_<TIER>/predictions.tsv`` so each tier sees its own
+    scores. Older / unified bundles share a single
+    ``predictions/predictions.tsv``. We prefer the per-tier path when
+    it exists; that lets the bootstrap helper see different scores
+    for the rerank run vs the baseline run on the same prediction
+    set.
+    """
+    from minio.error import S3Error  # type: ignore[import-not-found]
+
+    per_tier = f"eval_artifacts/{eval_id}/predictions_{tier}/predictions.tsv"
+    try:
+        client.stat_object(bucket, per_tier)
+        return per_tier
+    except S3Error:
+        return f"eval_artifacts/{eval_id}/predictions/predictions.tsv"
+
+
 def _fmax_for_eval(
     client: Minio,
     bucket: str,
@@ -220,10 +351,20 @@ def _fmax_for_eval(
     n_thresholds: int,
     aspect_map: dict[str, str] | None = None,
     aspect: str | None = None,
+    parents: dict[str, list[str]] | None = None,
 ) -> dict[str, float]:
     base = f"eval_artifacts/{eval_id}"
-    preds = _load_predictions(client, bucket, f"{base}/predictions/predictions.tsv")
+    preds_key = _resolve_predictions_key(client, bucket, eval_id, tier)
+    preds = _load_predictions(client, bucket, preds_key)
     gt = _load_gt(client, bucket, f"{base}/gt_{tier}.tsv")
+    if parents is not None:
+        before = len(preds), len(gt)
+        preds = propagate_predictions(preds, parents)
+        gt = propagate_gt(gt, parents)
+        print(f"  {eval_id} {tier}: propagated {before[0]}→{len(preds)} preds, "
+              f"{before[1]}→{len(gt)} gt rows")
+    # Aspect filter must run AFTER propagation so cross-aspect ancestors
+    # (e.g. the all-aspects root) get pruned away.
     if aspect_map and aspect:
         preds, gt = filter_by_aspect(preds, gt, aspect_map, aspect)
         suffix = f" filtered to {aspect}"
@@ -254,6 +395,13 @@ def main() -> None:
         help="Path to a 2-col (go_id, aspect) TSV; "
         "needed when --aspect is set. Aspect may be P/F/C or BPO/MFO/CCO.",
     )
+    parser.add_argument(
+        "--obo-path",
+        default=None,
+        help="If set, propagate predictions + gt to ancestors via the OBO "
+        "DAG (is_a + part_of edges) before computing per-protein Fmax. "
+        "Use this to approach cafaeval's `prop=fill` numbers.",
+    )
     parser.add_argument("--n-resamples", type=int, default=1000)
     parser.add_argument("--n-thresholds", type=int, default=100)
     parser.add_argument("--seed", type=int, default=0)
@@ -269,8 +417,14 @@ def main() -> None:
     if (args.aspect is None) != (args.aspect_tsv is None):
         raise SystemExit("--aspect and --aspect-tsv must be set together (or both unset)")
     aspect_map = _load_aspect_map(args.aspect_tsv) if args.aspect_tsv else None
+    parents = parse_obo_parents(args.obo_path) if args.obo_path else None
 
-    suffix = f" / {args.aspect}" if args.aspect else ""
+    suffix_parts = []
+    if args.aspect:
+        suffix_parts.append(args.aspect)
+    if parents is not None:
+        suffix_parts.append(f"propagated ({len(parents)} OBO terms)")
+    suffix = (" / " + ", ".join(suffix_parts)) if suffix_parts else ""
     print(
         f"Computing per-protein Fmax (tier={args.tier}{suffix}, "
         f"thresholds={args.n_thresholds})"
@@ -283,6 +437,7 @@ def main() -> None:
         args.n_thresholds,
         aspect_map=aspect_map,
         aspect=args.aspect,
+        parents=parents,
     )
 
     if args.baseline_eval_result_id:
@@ -294,6 +449,7 @@ def main() -> None:
             args.n_thresholds,
             aspect_map=aspect_map,
             aspect=args.aspect,
+            parents=parents,
         )
         common = sorted(set(fmax_a.keys()) & set(fmax_b.keys()))
         if not common:
