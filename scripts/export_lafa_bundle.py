@@ -69,7 +69,6 @@ from protea.infrastructure.storage import get_artifact_store
 
 _ANC2VEC_SOURCE = (
     Path(__file__).resolve().parents[1]
-    / "protea"
     / "artifacts"
     / "anc2vec"
     / "anc2vec_2020-10.npz"
@@ -112,7 +111,13 @@ def _export_reference_embeddings(
             continue
         seen.add(canonical)
         accessions.append(canonical)
-        rows.append(np.asarray(embedding, dtype=np.float32))
+        # SequenceEmbedding.embedding is a pgvector HalfVector since the
+        # 2026-04-11 halfvec migration; expose .to_numpy() instead of
+        # passing through np.asarray (which can't introspect the type).
+        if hasattr(embedding, "to_numpy"):
+            rows.append(embedding.to_numpy().astype(np.float32, copy=False))
+        else:
+            rows.append(np.asarray(embedding, dtype=np.float32))
 
     if not accessions:
         raise ValueError(
