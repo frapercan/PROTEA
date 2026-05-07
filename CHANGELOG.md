@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.0](https://github.com/frapercan/PROTEA/compare/v0.6.0...v0.7.0) (2026-05-07)
+
+
+### Features
+
+* **lafa:** multi-booster bundle for v18/v19 selective reranker ([#21](https://github.com/frapercan/PROTEA/issues/21)) ([60b3ea9](https://github.com/frapercan/PROTEA/commit/60b3ea948bbad2f1241cd85fdda78e3d70dffb25))
+
+
+### Documentation
+
+* **lafa:** F-LAFA.5 method card draft ([#20](https://github.com/frapercan/PROTEA/issues/20)) ([a515429](https://github.com/frapercan/PROTEA/commit/a515429b5417d8cc36be71eabfc142e942a0d988))
+
 ## [0.6.0](https://github.com/frapercan/PROTEA/compare/v0.5.0...v0.6.0) (2026-05-07)
 
 
