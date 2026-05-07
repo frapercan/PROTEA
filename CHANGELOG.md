@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/frapercan/PROTEA/compare/v0.7.1...v0.7.2) (2026-05-07)
+
+
+### Bug Fixes
+
+* **lafa:** runtime deps + transformers pin + parquet zero-copy load ([#26](https://github.com/frapercan/PROTEA/issues/26)) ([6333877](https://github.com/frapercan/PROTEA/commit/6333877e8cd088fc7227bfbd861892e266e6afc0))
+
 ## [0.7.1](https://github.com/frapercan/PROTEA/compare/v0.7.0...v0.7.1) (2026-05-07)
 
 
