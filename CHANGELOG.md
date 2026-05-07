@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.1](https://github.com/frapercan/PROTEA/compare/v0.7.0...v0.7.1) (2026-05-07)
+
+
+### Bug Fixes
+
+* **lafa:** container syspath fallback no IndexError ([#25](https://github.com/frapercan/PROTEA/issues/25)) ([8b8951b](https://github.com/frapercan/PROTEA/commit/8b8951b03b91499330585cb5ee0b8dd09fb981e0))
+* **lafa:** exporter HalfVector + anc2vec path ([#23](https://github.com/frapercan/PROTEA/issues/23)) ([6717790](https://github.com/frapercan/PROTEA/commit/67177900fa6f5c9b0623afd26049c6dbd134142c))
+
 ## [0.7.0](https://github.com/frapercan/PROTEA/compare/v0.6.0...v0.7.0) (2026-05-07)
 
 
