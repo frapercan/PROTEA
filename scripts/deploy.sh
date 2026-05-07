@@ -134,6 +134,15 @@ if [[ "$DO_DEPS" == "1" ]]; then
 fi
 
 if [[ "$DO_BUILD" == "1" ]]; then
+  # apps/web/.env.local is gitignored. Seed a default if missing so the
+  # build picks up NEXT_PUBLIC_API_URL. Default to a same-origin proxy
+  # path that Next rewrites server-side; override via PROTEA_PUBLIC_API_URL.
+  local_env="apps/web/.env.local"
+  if [[ ! -f "$local_env" ]]; then
+    api_url="${PROTEA_PUBLIC_API_URL:-/api-proxy}"
+    echo "${C_BOLD}seeding $local_env${C_RESET} (NEXT_PUBLIC_API_URL=$api_url)"
+    printf 'NEXT_PUBLIC_API_URL=%s\n' "$api_url" >"$local_env"
+  fi
   echo "${C_BOLD}npm install + build...${C_RESET}"
   ( cd apps/web && npm ci --silent && npm run build ) | tail -5
 fi
