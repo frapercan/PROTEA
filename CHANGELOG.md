@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.6.0](https://github.com/frapercan/PROTEA/compare/v0.5.0...v0.6.0) (2026-05-07)
+
+
+### Features
+
+* **lafa:** F-LAFA minimal viable container (frozen-data + reranker) ([#16](https://github.com/frapercan/PROTEA/issues/16)) ([ad051bc](https://github.com/frapercan/PROTEA/commit/ad051bcaa6eae18ca9a7183e98ca06f5ed607ab0))
+* **lafa:** F-LAFA.1 frozen-data bundle exporter ([#17](https://github.com/frapercan/PROTEA/issues/17)) ([eafb8e4](https://github.com/frapercan/PROTEA/commit/eafb8e40f2bef7ab82cb5bc45d24f0a0a957de8b))
+* **lafa:** F-LAFA.4 Dockerfile + GHA workflow for ghcr.io image ([#18](https://github.com/frapercan/PROTEA/issues/18)) ([e852dc7](https://github.com/frapercan/PROTEA/commit/e852dc7236ae0b4764b1e686248541827c3a6bef))
+
 ## [0.5.0](https://github.com/frapercan/PROTEA/compare/v0.4.0...v0.5.0) (2026-05-06)
 
 
