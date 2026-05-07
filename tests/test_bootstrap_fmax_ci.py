@@ -141,3 +141,91 @@ def test_filter_by_aspect_drops_unmapped_terms():
     p_out, g_out = boot.filter_by_aspect(preds, gt, aspect_map, "MFO")
     assert len(p_out) == 1 and p_out[0][1] == "GO:1"
     assert g_out == [("P1", "GO:1")]
+
+
+# ---------------------------------------------------------------------------
+# OBO parent map + ancestor walk (cafaeval-parity prep)
+# ---------------------------------------------------------------------------
+
+
+def _write_obo(tmp_path, terms: list[str]) -> str:
+    """Helper: write an OBO file with ``[Term]`` blocks from a list of strings."""
+    p = tmp_path / "tiny.obo"
+    p.write_text("format-version: 1.2\n\n" + "\n\n".join(terms) + "\n")
+    return str(p)
+
+
+def test_parse_obo_parents_is_a_only(tmp_path):
+    obo = _write_obo(
+        tmp_path,
+        [
+            "[Term]\nid: GO:0000001\nname: root\nnamespace: biological_process",
+            "[Term]\nid: GO:0000002\nname: child\nnamespace: biological_process\nis_a: GO:0000001 ! root",
+        ],
+    )
+    out = boot.parse_obo_parents(obo)
+    assert out["GO:0000001"] == []
+    assert out["GO:0000002"] == ["GO:0000001"]
+
+
+def test_parse_obo_parents_part_of_relationship(tmp_path):
+    obo = _write_obo(
+        tmp_path,
+        [
+            "[Term]\nid: GO:0000010\nname: process",
+            "[Term]\nid: GO:0000011\nname: subprocess\nrelationship: part_of GO:0000010 ! process",
+        ],
+    )
+    out = boot.parse_obo_parents(obo)
+    assert out["GO:0000011"] == ["GO:0000010"]
+
+
+def test_parse_obo_parents_skips_obsolete(tmp_path):
+    obo = _write_obo(
+        tmp_path,
+        [
+            "[Term]\nid: GO:0000020\nname: live",
+            "[Term]\nid: GO:0000021\nname: dead\nis_a: GO:0000020 ! live\nis_obsolete: true",
+        ],
+    )
+    out = boot.parse_obo_parents(obo)
+    assert "GO:0000020" in out
+    assert "GO:0000021" not in out
+
+
+def test_parse_obo_parents_ignores_unrelated_relationships(tmp_path):
+    obo = _write_obo(
+        tmp_path,
+        [
+            "[Term]\nid: GO:0000030\nname: x",
+            "[Term]\nid: GO:0000031\nname: y\nrelationship: regulates GO:0000030 ! x",
+        ],
+    )
+    out = boot.parse_obo_parents(obo)
+    assert out["GO:0000031"] == []
+
+
+def test_all_ancestors_includes_self_for_root():
+    parents = {"GO:1": [], "GO:2": ["GO:1"], "GO:3": ["GO:2"]}
+    assert boot.all_ancestors("GO:1", parents) == {"GO:1"}
+
+
+def test_all_ancestors_walks_chain():
+    parents = {"GO:1": [], "GO:2": ["GO:1"], "GO:3": ["GO:2"]}
+    assert boot.all_ancestors("GO:3", parents) == {"GO:1", "GO:2", "GO:3"}
+
+
+def test_all_ancestors_handles_diamond():
+    # GO:4 has two parents that share an ancestor
+    parents = {
+        "GO:1": [],
+        "GO:2": ["GO:1"],
+        "GO:3": ["GO:1"],
+        "GO:4": ["GO:2", "GO:3"],
+    }
+    assert boot.all_ancestors("GO:4", parents) == {"GO:1", "GO:2", "GO:3", "GO:4"}
+
+
+def test_all_ancestors_unknown_term_returns_self_only():
+    parents = {"GO:1": []}
+    assert boot.all_ancestors("GO:UNKNOWN", parents) == {"GO:UNKNOWN"}

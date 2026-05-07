@@ -67,6 +67,73 @@ def _load_gt(client: Minio, bucket: str, key: str) -> list[tuple[str, str]]:
     return rows
 
 
+def parse_obo_parents(obo_path: str) -> dict[str, list[str]]:
+    """Return ``go_id → list of immediate parents`` from an OBO file.
+
+    Edges followed: ``is_a`` and ``relationship: part_of`` (matches
+    cafaeval's ``prop="fill"`` propagation rules). Obsolete terms are
+    dropped (no parents recorded). Unknown relationship types are
+    ignored.
+
+    Parents are buffered per-term and only committed at end-of-term so
+    that ``is_obsolete`` flags appearing after ``is_a`` lines still
+    drop the term cleanly.
+    """
+    parents: dict[str, list[str]] = {}
+    current_id: str | None = None
+    pending_parents: list[str] = []
+    in_term = False
+    obsolete = False
+
+    def _flush() -> None:
+        nonlocal current_id, obsolete, pending_parents
+        if current_id and not obsolete:
+            parents[current_id] = list(pending_parents)
+        current_id = None
+        pending_parents = []
+        obsolete = False
+
+    with open(obo_path) as f:
+        for raw in f:
+            line = raw.rstrip("\n").strip()
+            if line == "[Term]":
+                _flush()
+                in_term = True
+                continue
+            if line.startswith("[") and line != "[Term]":
+                _flush()
+                in_term = False
+                continue
+            if not in_term or not line:
+                continue
+            if line.startswith("id: GO:"):
+                current_id = line.split(None, 1)[1].strip()
+            elif line == "is_obsolete: true":
+                obsolete = True
+            elif line.startswith("is_a: GO:"):
+                p = line.split(None, 1)[1].split("!")[0].strip()
+                pending_parents.append(p)
+            elif line.startswith("relationship: part_of GO:"):
+                tail = line[len("relationship: part_of "):]
+                p = tail.split("!")[0].strip()
+                pending_parents.append(p)
+    _flush()
+    return parents
+
+
+def all_ancestors(go_id: str, parents: dict[str, list[str]]) -> set[str]:
+    """Return ``{go_id} ∪ all reachable ancestors`` (BFS over ``parents``)."""
+    out = {go_id}
+    stack = [go_id]
+    while stack:
+        node = stack.pop()
+        for p in parents.get(node, ()):
+            if p not in out:
+                out.add(p)
+                stack.append(p)
+    return out
+
+
 _ASPECT_LETTER_TO_CAFA = {
     "P": "BPO",
     "F": "MFO",
