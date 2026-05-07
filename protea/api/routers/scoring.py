@@ -31,18 +31,15 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterator
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import text
 
 from protea.api.deps import get_session_factory
 from protea.core.evaluation import compute_evaluation_data, load_evaluation_data_for_set
 from protea.core.metrics import compute_cafa_metrics
-from protea.core.reranker import load_reranker, model_from_string
 from protea.core.reranker import (
     predict as reranker_predict,
 )
@@ -55,39 +52,31 @@ from protea.infrastructure.orm.models.embedding.reranker_model import RerankerMo
 from protea.infrastructure.orm.models.embedding.scoring_config import (
     DEFAULT_EVIDENCE_WEIGHTS,
     DEFAULT_WEIGHTS,
-    FORMULA_EVIDENCE_WEIGHTED,
     VALID_FORMULAS,
     ScoringConfig,
 )
 from protea.infrastructure.session import session_scope
-from protea.infrastructure.settings import load_settings
-from protea.infrastructure.storage import get_artifact_store
+from protea.services.scoring_service import (
+    BoosterUnavailableError,
+    ScoringConfigResponse,
+    SignalCoverageError,
+    check_signal_coverage,
+    load_booster,
+    snapshot_config,
+    to_response,
+)
 
 
 def _load_booster(rm: RerankerModel) -> Any:
-    """Load the LightGBM booster from either the legacy inline blob or
-    the new ``artifact_uri`` path.
+    """Translate :class:`BoosterUnavailableError` to HTTP 409.
 
-    Raises 409 when neither is available — the row exists but the
-    backing model is missing.
+    Thin shim over :func:`protea.services.scoring_service.load_booster`
+    so existing call sites in this router keep working unchanged.
     """
-    if rm.model_data:
-        return model_from_string(rm.model_data)
-    if rm.artifact_uri:
-        project_root = Path(__file__).resolve().parents[3]
-        store = get_artifact_store(load_settings(project_root))
-        return load_reranker(
-            rm.artifact_uri,
-            feature_schema_sha=rm.feature_schema_sha or rm.name,
-            store=store,
-        )
-    raise HTTPException(
-        status_code=409,
-        detail=(
-            f"RerankerModel {rm.id} has no booster — both ``model_data`` "
-            f"(legacy inline) and ``artifact_uri`` (artifact-store path) are NULL."
-        ),
-    )
+    try:
+        return load_booster(rm)
+    except BoosterUnavailableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 router = APIRouter(prefix="/scoring", tags=["scoring"])
@@ -284,112 +273,32 @@ class ScoringConfigCreate(BaseModel):
         return v
 
 
-class ScoringConfigResponse(BaseModel):
-    """Serialised representation of a stored ScoringConfig."""
-
-    id: uuid.UUID
-    name: str
-    formula: str
-    weights: dict[str, Any]
-    evidence_weights: dict[str, Any] | None
-    description: str | None
-    created_at: Any
+# ScoringConfigResponse is exported by the service module and re-imported
+# here so existing route signatures (``response_model=ScoringConfigResponse``)
+# keep working unchanged.
 
 
 def _to_response(c: ScoringConfig) -> ScoringConfigResponse:
-    """Convert an ORM ScoringConfig to its API response model."""
-    return ScoringConfigResponse(
-        id=c.id,
-        name=c.name,
-        formula=c.formula,
-        weights=c.weights,
-        evidence_weights=c.evidence_weights,
-        description=c.description,
-        created_at=c.created_at,
-    )
+    """Backwards-compatible alias for :func:`scoring_service.to_response`."""
+    return to_response(c)
 
 
 def _snapshot(c: ScoringConfig) -> ScoringConfig:
-    """Create a detached ScoringConfig copy safe to use after a session closes.
-
-    The scoring endpoints close the DB session before streaming the response
-    body.  This helper captures all scoring-relevant fields into a plain ORM
-    instance that does not require an open session.
-    """
-    return ScoringConfig(
-        id=c.id,
-        name=c.name,
-        formula=c.formula,
-        weights=c.weights,
-        evidence_weights=c.evidence_weights,
-        description=c.description,
-    )
-
-
-# Maps each scoring signal key to the GOPrediction column whose fill rate
-# determines whether the signal is usable for a given PredictionSet.
-_SIGNAL_TO_COLUMN: dict[str, str] = {
-    "embedding_similarity": "distance",
-    "identity_nw": "identity_nw",
-    "identity_sw": "identity_sw",
-    "evidence_weight": "evidence_code",
-    "taxonomic_proximity": "taxonomic_distance",
-    "neighbor_vote_fraction": "neighbor_vote_fraction",
-}
+    """Backwards-compatible alias for :func:`scoring_service.snapshot_config`."""
+    return snapshot_config(c)
 
 
 def _check_signal_coverage(session, prediction_set_id, config_snap: ScoringConfig) -> None:
-    """Fail fast with 409 when the config needs signals absent from the PredictionSet.
+    """Translate :class:`SignalCoverageError` to HTTP 409.
 
-    For every signal with a non-zero weight in ``config_snap.weights`` (plus
-    ``evidence_code`` when the formula is ``evidence_weighted`` — the multiplier
-    is always applied), count how many rows in the PredictionSet have the
-    backing column non-NULL.  Zero coverage is a configuration mismatch
-    (typically a ``ScoringConfig`` that requires ``compute_alignments=True`` or
-    ``compute_taxonomy=True`` applied to a PredictionSet computed without
-    those flags).  Raise HTTP 409 with the list of missing signals instead of
-    silently producing a degraded score (``compute_score`` drops NULL signals
-    from both numerator and denominator).
+    Thin shim over
+    :func:`protea.services.scoring_service.check_signal_coverage` so
+    existing call sites in this router keep working unchanged.
     """
-    weights = config_snap.weights or {}
-    required: list[tuple[str, str]] = []
-    for signal, col in _SIGNAL_TO_COLUMN.items():
-        if float(weights.get(signal, 0.0)) > 0.0:
-            required.append((signal, col))
-    if getattr(config_snap, "formula", "linear") == FORMULA_EVIDENCE_WEIGHTED and not any(
-        s == "evidence_weight" for s, _ in required
-    ):
-        required.append(("evidence_weight", "evidence_code"))
-    if not required:
-        return
-
-    cols_sql = ", ".join(f"COUNT({col}) AS cnt_{col}" for _, col in required)
-    row = (
-        session.execute(
-            text(
-                f"SELECT COUNT(*) AS total, {cols_sql} "  # noqa: S608 — col names are hard-coded
-                "FROM go_prediction WHERE prediction_set_id = :pid"
-            ),
-            {"pid": str(prediction_set_id)},
-        )
-        .mappings()
-        .one()
-    )
-    total = int(row["total"] or 0)
-    missing: list[str] = []
-    for signal, col in required:
-        cnt = int(row[f"cnt_{col}"] or 0)
-        if total == 0 or cnt == 0:
-            missing.append(f"{signal} (column '{col}': {cnt}/{total} rows)")
-    if missing:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "ScoringConfig requires signals absent from the PredictionSet: "
-                + "; ".join(missing)
-                + ". Re-predict with the corresponding compute_* flag enabled."
-            ),
-        )
+    try:
+        check_signal_coverage(session, prediction_set_id, config_snap)
+    except SignalCoverageError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------

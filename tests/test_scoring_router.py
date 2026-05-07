@@ -1101,7 +1101,7 @@ class TestRerankerMetrics:
 
     @patch("protea.api.routers.scoring.compute_cafa_metrics")
     @patch("protea.api.routers.scoring.reranker_predict")
-    @patch("protea.api.routers.scoring.model_from_string")
+    @patch("protea.services.scoring_service.model_from_string")
     @patch("protea.api.routers.scoring.compute_evaluation_data")
     def test_returns_metrics(
         self, mock_eval, mock_from_str, mock_predict, mock_metrics, client, session
