@@ -35,9 +35,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# git is needed to install protea-method via git+https.
+# System deps:
+#  - git: install protea-method via git+https.
+#  - ca-certificates: TLS for the install + HuggingFace fetches.
+#  - libgomp1: OpenMP runtime required by LightGBM at import time
+#    (python:3.12-slim does not ship it; without it lightgbm fails
+#    with "libgomp.so.1: cannot open shared object file").
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git ca-certificates \
+    && apt-get install -y --no-install-recommends git ca-certificates libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python deps. protea-method pulls numpy, pandas, lightgbm,
@@ -47,9 +52,9 @@ ARG PROTEA_METHOD_REF=master
 RUN pip install \
     "protea-method @ git+https://github.com/frapercan/protea-method.git@${PROTEA_METHOD_REF}" \
     "pyarrow>=14" \
-    "transformers>=4.30" \
+    "transformers>=4.40,<4.50" \
     "torch>=2.0" \
-    "sentencepiece>=0.1.99"
+    "sentencepiece>=0.2.1,<0.3"
 
 WORKDIR /app
 COPY apps/lafa_container/protea_main.py /app/protea_main.py
