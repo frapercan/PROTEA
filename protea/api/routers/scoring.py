@@ -30,7 +30,6 @@ continue to use the system default at score-computation time.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterator
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -62,10 +61,12 @@ from protea.services.scoring_service import (
     SignalCoverageError,
     check_signal_coverage,
     compute_prediction_metrics,
+    iter_reranked_predictions_tsv,
     iter_scored_predictions,
     iter_training_data,
     load_booster,
     prepare_training_data_request,
+    score_predictions_with_reranker,
     snapshot_config,
     to_response,
     validate_scoring_request,
@@ -649,118 +650,21 @@ def download_reranked_predictions(
     column (probability 0–1, higher = more likely correct).  Rows are sorted
     by descending score within each protein.
     """
-    import pandas as pd
-
-    with session_scope(factory) as session:
-        ps = session.get(PredictionSet, set_id)
-        if ps is None:
-            raise HTTPException(status_code=404, detail="PredictionSet not found")
-        rm = session.get(RerankerModel, reranker_id)
-        if rm is None:
-            raise HTTPException(status_code=404, detail="RerankerModel not found")
-        model = _load_booster(rm)
-
-        records: list[dict[str, Any]] = []
-        for pred, go_id, aspect in (
-            session.query(GOPrediction, GOTerm.go_id, GOTerm.aspect)
-            .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
-            .filter(GOPrediction.prediction_set_id == set_id)
-            .yield_per(5000)
-        ):
-            records.append(
-                {
-                    "protein_accession": pred.protein_accession,
-                    "go_id": go_id,
-                    "aspect": aspect or "",
-                    "distance": pred.distance,
-                    "ref_protein_accession": pred.ref_protein_accession or "",
-                    "qualifier": pred.qualifier or "",
-                    "evidence_code": pred.evidence_code or "",
-                    "identity_nw": pred.identity_nw,
-                    "similarity_nw": pred.similarity_nw,
-                    "alignment_score_nw": pred.alignment_score_nw,
-                    "gaps_pct_nw": pred.gaps_pct_nw,
-                    "alignment_length_nw": pred.alignment_length_nw,
-                    "identity_sw": pred.identity_sw,
-                    "similarity_sw": pred.similarity_sw,
-                    "alignment_score_sw": pred.alignment_score_sw,
-                    "gaps_pct_sw": pred.gaps_pct_sw,
-                    "alignment_length_sw": pred.alignment_length_sw,
-                    "length_query": pred.length_query,
-                    "length_ref": pred.length_ref,
-                    "query_taxonomy_id": pred.query_taxonomy_id,
-                    "ref_taxonomy_id": pred.ref_taxonomy_id,
-                    "taxonomic_lca": pred.taxonomic_lca,
-                    "taxonomic_distance": pred.taxonomic_distance,
-                    "taxonomic_common_ancestors": pred.taxonomic_common_ancestors,
-                    "taxonomic_relation": pred.taxonomic_relation or "",
-                    "vote_count": pred.vote_count,
-                    "k_position": pred.k_position,
-                    "go_term_frequency": pred.go_term_frequency,
-                    "ref_annotation_density": pred.ref_annotation_density,
-                    "neighbor_distance_std": pred.neighbor_distance_std,
-                    # NOTE: do not add a ``label`` column here — its
-                    # presence makes ``predict`` route through
-                    # ``prepare_dataset`` which expects every training
-                    # column. At inference time we want the alignment
-                    # branch that fills missing v6 features as NaN.
-                }
+    try:
+        with session_scope(factory) as session:
+            df = score_predictions_with_reranker(
+                session,
+                prediction_set_id=set_id,
+                reranker_id=reranker_id,
             )
-
-    if not records:
-
-        def _empty() -> Iterator[bytes]:
-            yield b"protein_accession\tgo_id\taspect\treranker_score\tdistance\n"
-
-        return StreamingResponse(
-            _empty(),
-            media_type="text/tab-separated-values",
-            headers={"Content-Disposition": f'attachment; filename="reranked_{set_id}.tsv"'},
-        )
-
-    df = pd.DataFrame(records)
-    scores = reranker_predict(model, df)
-    df["reranker_score"] = scores
-
-    # Sort by protein then descending score
-    df = df.sort_values(["protein_accession", "reranker_score"], ascending=[True, False])
-
-    _RERANK_COLUMNS = [
-        "protein_accession",
-        "go_id",
-        "aspect",
-        "reranker_score",
-        "distance",
-        "ref_protein_accession",
-        "evidence_code",
-        "qualifier",
-    ]
-
-    def _generate() -> Iterator[bytes]:
-        yield ("\t".join(_RERANK_COLUMNS) + "\n").encode()
-        for _, row in df.iterrows():
-            if min_score is not None and row["reranker_score"] < min_score:
-                continue
-            line = (
-                "\t".join(
-                    [
-                        str(row["protein_accession"]),
-                        str(row["go_id"]),
-                        str(row["aspect"]),
-                        f"{row['reranker_score']:.6f}",
-                        str(row["distance"]) if pd.notna(row["distance"]) else "",
-                        str(row["ref_protein_accession"]),
-                        str(row["evidence_code"]),
-                        str(row["qualifier"]),
-                    ]
-                )
-                + "\n"
-            )
-            yield line.encode()
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except BoosterUnavailableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     filename = f"reranked_{set_id}.tsv"
     return StreamingResponse(
-        _generate(),
+        iter_reranked_predictions_tsv(df, min_score=min_score),
         media_type="text/tab-separated-values",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
