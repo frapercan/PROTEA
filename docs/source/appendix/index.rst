@@ -5,6 +5,12 @@ Operational material that complements the architecture and reference
 sections: how to install PROTEA, how to configure it, recipes for common
 tasks, the script to reproduce the thesis results, and the on-call runbook.
 
+:doc:`stack`
+   The eight repositories that make up the PROTEA stack: the platform,
+   the contracts package, the inference layer, source / runner / backend
+   plugins, the LightGBM lab, and the cafaeval fork. Read this first when
+   you need to jump between repositories.
+
 :doc:`installation_and_quickstart`
    Bring up the full stack from a fresh checkout: dependencies, ``manage.sh``,
    the eleven process roles, and a ten-minute end-to-end smoke test.
@@ -32,6 +38,7 @@ tasks, the script to reproduce the thesis results, and the on-call runbook.
    :maxdepth: 2
    :hidden:
 
+   stack
    installation_and_quickstart
    configuration
    howto_guides
