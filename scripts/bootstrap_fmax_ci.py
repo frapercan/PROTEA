@@ -322,6 +322,27 @@ def _make_client(args: argparse.Namespace) -> Minio:
     )
 
 
+def _resolve_predictions_key(client: Minio, bucket: str, eval_id: str, tier: str) -> str:
+    """Pick the right predictions.tsv layout for this eval bundle.
+
+    Reranked runs (selective per-tier scoring) write
+    ``predictions_<TIER>/predictions.tsv`` so each tier sees its own
+    scores. Older / unified bundles share a single
+    ``predictions/predictions.tsv``. We prefer the per-tier path when
+    it exists; that lets the bootstrap helper see different scores
+    for the rerank run vs the baseline run on the same prediction
+    set.
+    """
+    from minio.error import S3Error  # type: ignore[import-not-found]
+
+    per_tier = f"eval_artifacts/{eval_id}/predictions_{tier}/predictions.tsv"
+    try:
+        client.stat_object(bucket, per_tier)
+        return per_tier
+    except S3Error:
+        return f"eval_artifacts/{eval_id}/predictions/predictions.tsv"
+
+
 def _fmax_for_eval(
     client: Minio,
     bucket: str,
@@ -333,7 +354,8 @@ def _fmax_for_eval(
     parents: dict[str, list[str]] | None = None,
 ) -> dict[str, float]:
     base = f"eval_artifacts/{eval_id}"
-    preds = _load_predictions(client, bucket, f"{base}/predictions/predictions.tsv")
+    preds_key = _resolve_predictions_key(client, bucket, eval_id, tier)
+    preds = _load_predictions(client, bucket, preds_key)
     gt = _load_gt(client, bucket, f"{base}/gt_{tier}.tsv")
     if parents is not None:
         before = len(preds), len(gt)
