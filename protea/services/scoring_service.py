@@ -325,6 +325,155 @@ def iter_scored_predictions(
             yield row.encode()
 
 
+_TRAINING_TSV_COLUMNS: tuple[str, ...] = (
+    "protein_accession",
+    "go_id",
+    "aspect",
+    "label",
+    "distance",
+    "ref_protein_accession",
+    "qualifier",
+    "evidence_code",
+    # NW alignment
+    "identity_nw",
+    "similarity_nw",
+    "alignment_score_nw",
+    "gaps_pct_nw",
+    "alignment_length_nw",
+    # SW alignment
+    "identity_sw",
+    "similarity_sw",
+    "alignment_score_sw",
+    "gaps_pct_sw",
+    "alignment_length_sw",
+    # Lengths
+    "length_query",
+    "length_ref",
+    # Taxonomy
+    "query_taxonomy_id",
+    "ref_taxonomy_id",
+    "taxonomic_lca",
+    "taxonomic_distance",
+    "taxonomic_common_ancestors",
+    "taxonomic_relation",
+    # Re-ranker features
+    "vote_count",
+    "k_position",
+    "go_term_frequency",
+    "ref_annotation_density",
+    "neighbor_distance_std",
+)
+
+
+def prepare_training_data_request(
+    session: Session,
+    *,
+    prediction_set_id: uuid.UUID,
+    evaluation_set_id: uuid.UUID,
+    category: str,
+) -> set[tuple[str, str]]:
+    """Validate the request and compute the ``(protein, go_id)`` ground-truth pair set.
+
+    Looks up the PredictionSet and EvaluationSet, computes the temporal
+    NK/LK/PK delta via :func:`compute_evaluation_data`, then flattens the
+    requested category's ``{protein → set[go_id]}`` mapping into a flat
+    set of pairs the streaming generator can probe in O(1) per row.
+
+    Raises
+    ------
+    EntityNotFoundError
+        Either ``PredictionSet`` or ``EvaluationSet`` does not exist.
+    """
+    from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
+
+    ps = session.get(PredictionSet, prediction_set_id)
+    if ps is None:
+        raise EntityNotFoundError("PredictionSet", prediction_set_id)
+    es = session.get(EvaluationSet, evaluation_set_id)
+    if es is None:
+        raise EntityNotFoundError("EvaluationSet", evaluation_set_id)
+
+    eval_data = compute_evaluation_data(
+        session,
+        old_annotation_set_id=es.old_annotation_set_id,
+        new_annotation_set_id=es.new_annotation_set_id,
+        ontology_snapshot_id=ps.ontology_snapshot_id,
+    )
+
+    ground_truth: dict[str, set[str]] = getattr(eval_data, category)
+    gt_pairs: set[tuple[str, str]] = set()
+    for protein, go_ids in ground_truth.items():
+        for go_id in go_ids:
+            gt_pairs.add((protein, go_id))
+    return gt_pairs
+
+
+def iter_training_data(
+    factory: Any,
+    *,
+    prediction_set_id: uuid.UUID,
+    gt_pairs: set[tuple[str, str]],
+) -> Any:
+    """Yield TSV rows (as bytes) of labeled training data for the re-ranker.
+
+    Streaming generator over GOPrediction rows; opens its own session
+    inside so the caller can close the validation session before
+    streaming starts. Each row carries the canonical GOPrediction
+    feature vector plus a binary ``label`` (1 if the
+    ``(protein_accession, go_id)`` pair is in ``gt_pairs``, else 0).
+    """
+    yield ("\t".join(_TRAINING_TSV_COLUMNS) + "\n").encode()
+
+    with session_scope(factory) as session:
+        q = (
+            session.query(GOPrediction, GOTerm.go_id, GOTerm.aspect)
+            .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
+            .filter(GOPrediction.prediction_set_id == prediction_set_id)
+        )
+
+        for pred, go_id, aspect in q.yield_per(1000):
+            label = 1 if (pred.protein_accession, go_id) in gt_pairs else 0
+            row = (
+                "\t".join(
+                    [
+                        pred.protein_accession,
+                        go_id,
+                        aspect or "",
+                        str(label),
+                        _format_optional(pred.distance),
+                        pred.ref_protein_accession or "",
+                        pred.qualifier or "",
+                        pred.evidence_code or "",
+                        _format_optional(pred.identity_nw),
+                        _format_optional(pred.similarity_nw),
+                        _format_optional(pred.alignment_score_nw),
+                        _format_optional(pred.gaps_pct_nw),
+                        _format_optional(pred.alignment_length_nw),
+                        _format_optional(pred.identity_sw),
+                        _format_optional(pred.similarity_sw),
+                        _format_optional(pred.alignment_score_sw),
+                        _format_optional(pred.gaps_pct_sw),
+                        _format_optional(pred.alignment_length_sw),
+                        _format_optional(pred.length_query),
+                        _format_optional(pred.length_ref),
+                        _format_optional(pred.query_taxonomy_id),
+                        _format_optional(pred.ref_taxonomy_id),
+                        _format_optional(pred.taxonomic_lca),
+                        _format_optional(pred.taxonomic_distance),
+                        _format_optional(pred.taxonomic_common_ancestors),
+                        pred.taxonomic_relation or "",
+                        _format_optional(pred.vote_count),
+                        _format_optional(pred.k_position),
+                        _format_optional(pred.go_term_frequency),
+                        _format_optional(pred.ref_annotation_density),
+                        _format_optional(pred.neighbor_distance_std),
+                    ]
+                )
+                + "\n"
+            )
+            yield row.encode()
+
+
 def compute_prediction_metrics(
     session: Session,
     *,
@@ -420,7 +569,9 @@ __all__ = [
     "check_signal_coverage",
     "compute_prediction_metrics",
     "iter_scored_predictions",
+    "iter_training_data",
     "load_booster",
+    "prepare_training_data_request",
     "snapshot_config",
     "to_response",
     "validate_scoring_request",

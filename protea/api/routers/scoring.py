@@ -63,7 +63,9 @@ from protea.services.scoring_service import (
     check_signal_coverage,
     compute_prediction_metrics,
     iter_scored_predictions,
+    iter_training_data,
     load_booster,
+    prepare_training_data_request,
     snapshot_config,
     to_response,
     validate_scoring_request,
@@ -514,46 +516,6 @@ def compute_metrics(
 # Training data endpoint (re-ranker)
 # ---------------------------------------------------------------------------
 
-_TRAINING_COLUMNS = [
-    "protein_accession",
-    "go_id",
-    "aspect",
-    "label",
-    "distance",
-    "ref_protein_accession",
-    "qualifier",
-    "evidence_code",
-    # NW alignment
-    "identity_nw",
-    "similarity_nw",
-    "alignment_score_nw",
-    "gaps_pct_nw",
-    "alignment_length_nw",
-    # SW alignment
-    "identity_sw",
-    "similarity_sw",
-    "alignment_score_sw",
-    "gaps_pct_sw",
-    "alignment_length_sw",
-    # Lengths
-    "length_query",
-    "length_ref",
-    # Taxonomy
-    "query_taxonomy_id",
-    "ref_taxonomy_id",
-    "taxonomic_lca",
-    "taxonomic_distance",
-    "taxonomic_common_ancestors",
-    "taxonomic_relation",
-    # Re-ranker features
-    "vote_count",
-    "k_position",
-    "go_term_frequency",
-    "ref_annotation_density",
-    "neighbor_distance_std",
-]
-
-
 @router.get(
     "/prediction-sets/{set_id}/training-data.tsv",
     summary="Export labeled training data for the re-ranker",
@@ -585,89 +547,20 @@ def download_training_data(
         ``"nk"`` (no-knowledge), ``"lk"`` (limited-knowledge), or
         ``"pk"`` (partial-knowledge).
     """
-    with session_scope(factory) as session:
-        ps = session.get(PredictionSet, set_id)
-        if ps is None:
-            raise HTTPException(status_code=404, detail="PredictionSet not found")
-
-        es = session.get(EvaluationSet, evaluation_set_id)
-        if es is None:
-            raise HTTPException(status_code=404, detail="EvaluationSet not found")
-
-        ontology_snapshot_id = ps.ontology_snapshot_id
-
-        eval_data = compute_evaluation_data(
-            session,
-            old_annotation_set_id=es.old_annotation_set_id,
-            new_annotation_set_id=es.new_annotation_set_id,
-            ontology_snapshot_id=ontology_snapshot_id,
-        )
-
-    ground_truth: dict[str, set[str]] = getattr(eval_data, category)
-    gt_pairs: set[tuple[str, str]] = set()
-    for protein, go_ids in ground_truth.items():
-        for go_id in go_ids:
-            gt_pairs.add((protein, go_id))
-
-    def _generate() -> Iterator[bytes]:
-        yield ("\t".join(_TRAINING_COLUMNS) + "\n").encode()
-
+    try:
         with session_scope(factory) as session:
-            q = (
-                session.query(GOPrediction, GOTerm.go_id, GOTerm.aspect)
-                .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
-                .filter(GOPrediction.prediction_set_id == set_id)
+            gt_pairs = prepare_training_data_request(
+                session,
+                prediction_set_id=set_id,
+                evaluation_set_id=evaluation_set_id,
+                category=category,
             )
-
-            for pred, go_id, aspect in q.yield_per(1000):
-                label = 1 if (pred.protein_accession, go_id) in gt_pairs else 0
-
-                def _v(val: object) -> str:
-                    return "" if val is None else str(val)
-
-                row = (
-                    "\t".join(
-                        [
-                            pred.protein_accession,
-                            go_id,
-                            aspect or "",
-                            str(label),
-                            _v(pred.distance),
-                            pred.ref_protein_accession or "",
-                            pred.qualifier or "",
-                            pred.evidence_code or "",
-                            _v(pred.identity_nw),
-                            _v(pred.similarity_nw),
-                            _v(pred.alignment_score_nw),
-                            _v(pred.gaps_pct_nw),
-                            _v(pred.alignment_length_nw),
-                            _v(pred.identity_sw),
-                            _v(pred.similarity_sw),
-                            _v(pred.alignment_score_sw),
-                            _v(pred.gaps_pct_sw),
-                            _v(pred.alignment_length_sw),
-                            _v(pred.length_query),
-                            _v(pred.length_ref),
-                            _v(pred.query_taxonomy_id),
-                            _v(pred.ref_taxonomy_id),
-                            _v(pred.taxonomic_lca),
-                            _v(pred.taxonomic_distance),
-                            _v(pred.taxonomic_common_ancestors),
-                            pred.taxonomic_relation or "",
-                            _v(pred.vote_count),
-                            _v(pred.k_position),
-                            _v(pred.go_term_frequency),
-                            _v(pred.ref_annotation_density),
-                            _v(pred.neighbor_distance_std),
-                        ]
-                    )
-                    + "\n"
-                )
-                yield row.encode()
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     filename = f"training_data_{set_id}_{category}.tsv"
     return StreamingResponse(
-        _generate(),
+        iter_training_data(factory, prediction_set_id=set_id, gt_pairs=gt_pairs),
         media_type="text/tab-separated-values",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

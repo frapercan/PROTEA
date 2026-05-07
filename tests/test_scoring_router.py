@@ -750,7 +750,7 @@ class TestTrainingDataEndpoint:
         )
         assert resp.status_code == 422
 
-    @patch("protea.api.routers.scoring.compute_evaluation_data")
+    @patch("protea.services.scoring_service.compute_evaluation_data")
     def test_streams_labeled_data_positive(self, mock_eval, session):
         """Prediction matching ground truth gets label=1."""
         ps = _make_pred_set()
@@ -778,7 +778,9 @@ class TestTrainingDataEndpoint:
         app.state.session_factory = MagicMock()
         app.include_router(router)
         with patch(
-            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session)
+            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session),
+        ), patch(
+            "protea.services.scoring_service.session_scope", side_effect=lambda _: _mock_scope(session)
         ):
             with TestClient(app) as c:
                 resp = c.get(self._url(ps.id, es.id, "nk"))
@@ -794,7 +796,7 @@ class TestTrainingDataEndpoint:
         label_idx = header.index("label")
         assert row[label_idx] == "1"
 
-    @patch("protea.api.routers.scoring.compute_evaluation_data")
+    @patch("protea.services.scoring_service.compute_evaluation_data")
     def test_streams_labeled_data_negative(self, mock_eval, session):
         """Prediction NOT in ground truth gets label=0."""
         ps = _make_pred_set()
@@ -822,7 +824,9 @@ class TestTrainingDataEndpoint:
         app.state.session_factory = MagicMock()
         app.include_router(router)
         with patch(
-            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session)
+            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session),
+        ), patch(
+            "protea.services.scoring_service.session_scope", side_effect=lambda _: _mock_scope(session)
         ):
             with TestClient(app) as c:
                 resp = c.get(self._url(ps.id, es.id, "nk"))
@@ -833,7 +837,7 @@ class TestTrainingDataEndpoint:
         label_idx = header.index("label")
         assert row[label_idx] == "0"
 
-    @patch("protea.api.routers.scoring.compute_evaluation_data")
+    @patch("protea.services.scoring_service.compute_evaluation_data")
     def test_all_columns_present(self, mock_eval, session):
         """Verify all 32 columns are in the TSV header."""
         ps = _make_pred_set()
@@ -860,7 +864,9 @@ class TestTrainingDataEndpoint:
         app.state.session_factory = MagicMock()
         app.include_router(router)
         with patch(
-            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session)
+            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session),
+        ), patch(
+            "protea.services.scoring_service.session_scope", side_effect=lambda _: _mock_scope(session)
         ):
             with TestClient(app) as c:
                 resp = c.get(self._url(ps.id, es.id))
@@ -871,7 +877,7 @@ class TestTrainingDataEndpoint:
         assert header[3] == "label"
         assert header[-1] == "neighbor_distance_std"
 
-    @patch("protea.api.routers.scoring.compute_evaluation_data")
+    @patch("protea.services.scoring_service.compute_evaluation_data")
     def test_pk_category(self, mock_eval, session):
         """PK category uses eval_data.pk for ground truth."""
         ps = _make_pred_set()
@@ -901,7 +907,9 @@ class TestTrainingDataEndpoint:
         app.state.session_factory = MagicMock()
         app.include_router(router)
         with patch(
-            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session)
+            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session),
+        ), patch(
+            "protea.services.scoring_service.session_scope", side_effect=lambda _: _mock_scope(session)
         ):
             with TestClient(app) as c:
                 resp = c.get(self._url(ps.id, es.id, "pk"))
@@ -912,7 +920,7 @@ class TestTrainingDataEndpoint:
         label_idx = header.index("label")
         assert row[label_idx] == "1"
 
-    @patch("protea.api.routers.scoring.compute_evaluation_data")
+    @patch("protea.services.scoring_service.compute_evaluation_data")
     def test_none_features_render_as_empty(self, mock_eval, session):
         """None values are rendered as empty strings in the TSV."""
         ps = _make_pred_set()
@@ -945,7 +953,9 @@ class TestTrainingDataEndpoint:
         app.state.session_factory = MagicMock()
         app.include_router(router)
         with patch(
-            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session)
+            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session),
+        ), patch(
+            "protea.services.scoring_service.session_scope", side_effect=lambda _: _mock_scope(session)
         ):
             with TestClient(app) as c:
                 resp = c.get(self._url(ps.id, es.id))
