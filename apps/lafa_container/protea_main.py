@@ -55,10 +55,16 @@ import numpy as np
 
 # Make ``protea_method`` importable when the container is run from a
 # checkout (the published wheel is the canonical install path; this
-# fallback is only for local development).
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
+# fallback is only for local development). In the container image the
+# script lives at ``/app/protea_main.py`` and protea_method is already
+# pip-installed, so the parents[2] lookup raises IndexError and we skip
+# the path injection.
+try:
+    _REPO_ROOT = Path(__file__).resolve().parents[2]
+    if str(_REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(_REPO_ROOT))
+except IndexError:
+    pass
 
 import pyarrow.parquet as pq  # noqa: E402
 from protea_method.anc2vec import Anc2VecIndex  # noqa: E402
