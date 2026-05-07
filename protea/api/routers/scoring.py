@@ -37,15 +37,6 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
 from protea.api.deps import get_session_factory
-from protea.core.evaluation import compute_evaluation_data, load_evaluation_data_for_set
-from protea.core.metrics import compute_cafa_metrics
-from protea.core.reranker import (
-    predict as reranker_predict,
-)
-from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
-from protea.infrastructure.orm.models.annotation.go_term import GOTerm
-from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
-from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
 from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
 from protea.infrastructure.orm.models.embedding.scoring_config import (
     DEFAULT_EVIDENCE_WEIGHTS,
@@ -61,6 +52,7 @@ from protea.services.scoring_service import (
     SignalCoverageError,
     check_signal_coverage,
     compute_prediction_metrics,
+    compute_reranker_metrics_data,
     iter_reranked_predictions_tsv,
     iter_scored_predictions,
     iter_training_data,
@@ -685,124 +677,16 @@ def compute_reranker_metrics(
 
     This closes the full re-ranker loop: train → apply → evaluate.
     """
-    import pandas as pd
-
-    with session_scope(factory) as session:
-        ps = session.get(PredictionSet, set_id)
-        if ps is None:
-            raise HTTPException(status_code=404, detail="PredictionSet not found")
-        rm = session.get(RerankerModel, reranker_id)
-        if rm is None:
-            raise HTTPException(status_code=404, detail="RerankerModel not found")
-        es = session.get(EvaluationSet, evaluation_set_id)
-        if es is None:
-            raise HTTPException(status_code=404, detail="EvaluationSet not found")
-
-        # Booster load is deferred until after the empty-predictions check
-        # so a request against an empty PredictionSet doesn't pay the
-        # MinIO download cost.
-        reranker_name = rm.name
-
-        # Reuse the persisted ground-truth artifact when available (the only
-        # path that handles ``mode=reconciled`` correctly, where the eval set's
-        # underlying annotation snapshots differ from ``ps.ontology_snapshot_id``).
-        # Fall back to on-the-fly computation only for legacy same-snapshot rows.
-        if es.groundtruth_uri:
-            eval_data, _pivot_id = load_evaluation_data_for_set(session, es)
-        else:
-            eval_data = compute_evaluation_data(
+    try:
+        with session_scope(factory) as session:
+            return compute_reranker_metrics_data(
                 session,
-                old_annotation_set_id=es.old_annotation_set_id,
-                new_annotation_set_id=es.new_annotation_set_id,
-                ontology_snapshot_id=ps.ontology_snapshot_id,
+                prediction_set_id=set_id,
+                reranker_id=reranker_id,
+                evaluation_set_id=evaluation_set_id,
+                category=category,
             )
-
-        records: list[dict[str, Any]] = []
-        for pred, go_id in (
-            session.query(GOPrediction, GOTerm.go_id)
-            .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
-            .filter(GOPrediction.prediction_set_id == set_id)
-            .yield_per(5000)
-        ):
-            records.append(
-                {
-                    "protein_accession": pred.protein_accession,
-                    "go_id": go_id,
-                    "distance": pred.distance,
-                    "qualifier": pred.qualifier or "",
-                    "evidence_code": pred.evidence_code or "",
-                    "identity_nw": pred.identity_nw,
-                    "similarity_nw": pred.similarity_nw,
-                    "alignment_score_nw": pred.alignment_score_nw,
-                    "gaps_pct_nw": pred.gaps_pct_nw,
-                    "alignment_length_nw": pred.alignment_length_nw,
-                    "identity_sw": pred.identity_sw,
-                    "similarity_sw": pred.similarity_sw,
-                    "alignment_score_sw": pred.alignment_score_sw,
-                    "gaps_pct_sw": pred.gaps_pct_sw,
-                    "alignment_length_sw": pred.alignment_length_sw,
-                    "length_query": pred.length_query,
-                    "length_ref": pred.length_ref,
-                    "query_taxonomy_id": pred.query_taxonomy_id,
-                    "ref_taxonomy_id": pred.ref_taxonomy_id,
-                    "taxonomic_lca": pred.taxonomic_lca,
-                    "taxonomic_distance": pred.taxonomic_distance,
-                    "taxonomic_common_ancestors": pred.taxonomic_common_ancestors,
-                    "taxonomic_relation": pred.taxonomic_relation or "",
-                    "vote_count": pred.vote_count,
-                    "k_position": pred.k_position,
-                    "go_term_frequency": pred.go_term_frequency,
-                    "ref_annotation_density": pred.ref_annotation_density,
-                    "neighbor_distance_std": pred.neighbor_distance_std,
-                    # See note in download_reranked_predictions: omitting
-                    # ``label`` forces the alignment branch in ``predict``.
-                }
-            )
-
-        if not records:
-            return {
-                "prediction_set_id": str(set_id),
-                "reranker_id": str(reranker_id),
-                "reranker_name": reranker_name,
-                "category": category,
-                "fmax": 0.0,
-                "auc_pr": 0.0,
-                "n_predictions": 0,
-                "curve": [],
-            }
-
-        # Booster load and scoring stay inside the session scope: ``rm``'s lazy
-        # columns (``model_data`` / ``artifact_uri``) are loaded against the
-        # live session, then the heavy numeric work runs before the with-block
-        # closes (the eval_data + records are already fully materialised).
-        model = _load_booster(rm)
-
-    df = pd.DataFrame(records)
-    scores = reranker_predict(model, df)
-
-    scored: list[dict[str, Any]] = [
-        {
-            "protein_accession": records[i]["protein_accession"],
-            "go_id": records[i]["go_id"],
-            "score": float(scores[i]),
-        }
-        for i in range(len(records))
-    ]
-
-    metrics = compute_cafa_metrics(scored, eval_data, category=category)
-
-    return {
-        "prediction_set_id": str(set_id),
-        "reranker_id": str(reranker_id),
-        "reranker_name": reranker_name,
-        **metrics.summary(),
-        "curve": [
-            {
-                "threshold": p.threshold,
-                "precision": p.precision,
-                "recall": p.recall,
-                "f1": p.f1,
-            }
-            for p in metrics.curve
-        ],
-    }
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except BoosterUnavailableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
