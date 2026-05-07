@@ -37,6 +37,14 @@ from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
 from protea.infrastructure.queue.publisher import publish_job
 from protea.infrastructure.session import session_scope
+from protea.services.annotations_service import (
+    EntityNotFoundError,
+    get_snapshot_data,
+    list_snapshots_data,
+)
+from protea.services.annotations_service import (
+    set_snapshot_ia_url as _set_snapshot_ia_url_service,
+)
 
 router = APIRouter(prefix="/annotations", tags=["annotations"])
 
@@ -59,31 +67,7 @@ def list_snapshots(
 
     def _compute() -> list[dict[str, Any]]:
         with session_scope(factory) as session:
-            count_sub = (
-                session.query(
-                    GOTerm.ontology_snapshot_id,
-                    func.count(GOTerm.id).label("cnt"),
-                )
-                .group_by(GOTerm.ontology_snapshot_id)
-                .subquery()
-            )
-            rows = (
-                session.query(OntologySnapshot, count_sub.c.cnt)
-                .outerjoin(count_sub, OntologySnapshot.id == count_sub.c.ontology_snapshot_id)
-                .order_by(OntologySnapshot.loaded_at.desc())
-                .all()
-            )
-            return [
-                {
-                    "id": str(s.id),
-                    "obo_url": s.obo_url,
-                    "obo_version": s.obo_version,
-                    "ia_url": s.ia_url,
-                    "loaded_at": s.loaded_at.isoformat(),
-                    "go_term_count": cnt or 0,
-                }
-                for s, cnt in rows
-            ]
+            return list_snapshots_data(session)
 
     return cached("annotations:snapshots", 300.0, _compute)
 
@@ -94,25 +78,11 @@ def get_snapshot(
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
     """Retrieve a single ontology snapshot with its GO term count."""
-    with session_scope(factory) as session:
-        s = session.get(OntologySnapshot, snapshot_id)
-        if s is None:
-            raise HTTPException(status_code=404, detail="OntologySnapshot not found")
-
-        term_count = (
-            session.query(func.count(GOTerm.id))
-            .filter(GOTerm.ontology_snapshot_id == snapshot_id)
-            .scalar()
-        )
-
-        return {
-            "id": str(s.id),
-            "obo_url": s.obo_url,
-            "obo_version": s.obo_version,
-            "ia_url": s.ia_url,
-            "loaded_at": s.loaded_at.isoformat(),
-            "go_term_count": term_count,
-        }
+    try:
+        with session_scope(factory) as session:
+            return get_snapshot_data(session, snapshot_id)
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.patch("/snapshots/{snapshot_id}/ia-url", summary="Set IA URL on an ontology snapshot")
@@ -135,23 +105,15 @@ def set_snapshot_ia_url(
     This endpoint only touches ``ia_url``; the OBO file and GO term data are
     not affected.
     """
-    ia_url = body.get("ia_url")
     if "ia_url" not in body:
         raise HTTPException(
             status_code=422, detail="Body must contain 'ia_url' key (string or null)"
         )
-
-    with session_scope(factory) as session:
-        s = session.get(OntologySnapshot, snapshot_id)
-        if s is None:
-            raise HTTPException(status_code=404, detail="OntologySnapshot not found")
-        s.ia_url = ia_url or None
-        session.flush()
-        return {
-            "id": str(s.id),
-            "obo_version": s.obo_version,
-            "ia_url": s.ia_url,
-        }
+    try:
+        with session_scope(factory) as session:
+            return _set_snapshot_ia_url_service(session, snapshot_id, body.get("ia_url"))
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/snapshots/load", summary="Trigger ontology snapshot load")
