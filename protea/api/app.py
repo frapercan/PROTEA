@@ -22,6 +22,7 @@ from protea.api.routers import registry as registry_router
 from protea.api.routers import reranker_models as reranker_models_router
 from protea.api.routers import scoring as scoring_router
 from protea.api.routers import showcase as showcase_router
+from protea.api.routers import stack as stack_router
 from protea.api.routers import support as support_router
 from protea.core.operation_catalog import build_operation_registry
 from protea.infrastructure.benchmark_config import load_benchmark_config
@@ -101,6 +102,14 @@ def create_app(project_root: Path | None = None) -> FastAPI:
                 "description": (
                     "Register lab-trained LightGBM boosters — multipart "
                     "upload or by-reference import of artefacts already in MinIO."
+                ),
+            },
+            {
+                "name": "stack",
+                "description": (
+                    "Cross-repository navigation: registry of the eight "
+                    "repositories that make up the PROTEA stack and a "
+                    "live aggregate of their open pull requests."
                 ),
             },
         ],
@@ -184,6 +193,7 @@ def create_app(project_root: Path | None = None) -> FastAPI:
     app.include_router(datasets_router.router)
     app.include_router(reranker_models_router.router)
     app.include_router(registry_router.router)
+    app.include_router(stack_router.router)
 
     sphinx_build = project_root / "docs" / "build" / "html"
     if sphinx_build.exists():

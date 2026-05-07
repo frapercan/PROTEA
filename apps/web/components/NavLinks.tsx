@@ -100,6 +100,7 @@ export function NavLinks({ mobileExtras }: { mobileExtras?: React.ReactNode }) {
       items: [
         { href: "/jobs", label: t("jobs") },
         { href: "/maintenance", label: t("maintenance") },
+        { href: "/stack", label: t("stack" as any) },
       ],
     },
   ];
