@@ -18,10 +18,15 @@ import uuid
 from typing import Any
 
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
+from protea.infrastructure.orm.models.annotation.evaluation_result import EvaluationResult
+from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
+from protea.infrastructure.orm.models.annotation.protein_go_annotation import ProteinGOAnnotation
 
 
 class AnnotationsServiceError(Exception):
@@ -43,6 +48,13 @@ class EntityNotFoundError(AnnotationsServiceError):
 
     def __reduce__(self) -> tuple[type, tuple[str, uuid.UUID]]:
         return (self.__class__, (self.entity, self.entity_id))
+
+
+class AnnotationSetReferencedError(AnnotationsServiceError):
+    """An :class:`AnnotationSet` cannot be deleted because PredictionSet
+    rows still reference it; the FK CASCADE is intentionally absent.
+    Maps to HTTP 409 at the router boundary.
+    """
 
 
 def snapshot_to_dict(s: OntologySnapshot, term_count: int) -> dict[str, Any]:
@@ -125,10 +137,171 @@ def set_snapshot_ia_url(
     }
 
 
+def annotation_set_to_dict(a: AnnotationSet, count: int) -> dict[str, Any]:
+    """Serialise an :class:`AnnotationSet` to its API dict shape."""
+    return {
+        "id": str(a.id),
+        "source": a.source,
+        "source_version": a.source_version,
+        "ontology_snapshot_id": str(a.ontology_snapshot_id),
+        "job_id": str(a.job_id) if a.job_id else None,
+        "created_at": a.created_at.isoformat(),
+        "meta": a.meta,
+        "annotation_count": count,
+    }
+
+
+def list_annotation_sets_data(
+    session: Session,
+    source: str | None = None,
+) -> list[dict[str, Any]]:
+    """List all annotation sets with their per-set annotation counts (newest first).
+
+    Optionally filter by ``source`` (e.g. ``goa`` or ``quickgo``).
+    Pure read; the caller caches at the API boundary.
+    """
+    count_sub = (
+        session.query(
+            ProteinGOAnnotation.annotation_set_id,
+            func.count(ProteinGOAnnotation.id).label("cnt"),
+        )
+        .group_by(ProteinGOAnnotation.annotation_set_id)
+        .subquery()
+    )
+    q = session.query(AnnotationSet, count_sub.c.cnt).outerjoin(
+        count_sub, AnnotationSet.id == count_sub.c.annotation_set_id
+    )
+    if source is not None:
+        q = q.filter(AnnotationSet.source == source)
+    rows = q.order_by(AnnotationSet.created_at.desc()).all()
+    return [annotation_set_to_dict(a, cnt or 0) for a, cnt in rows]
+
+
+def get_annotation_set_data(
+    session: Session,
+    set_id: uuid.UUID,
+) -> dict[str, Any]:
+    """Return a single annotation set with its annotation count.
+
+    Raises :class:`EntityNotFoundError` when the UUID does not resolve.
+    """
+    a = session.get(AnnotationSet, set_id)
+    if a is None:
+        raise EntityNotFoundError("AnnotationSet", set_id)
+    annotation_count = (
+        session.query(func.count(ProteinGOAnnotation.id))
+        .filter(ProteinGOAnnotation.annotation_set_id == set_id)
+        .scalar()
+    )
+    return annotation_set_to_dict(a, annotation_count or 0)
+
+
+def delete_annotation_set_data(
+    session: Session,
+    set_id: uuid.UUID,
+) -> dict[str, Any]:
+    """Delete an annotation set and all its annotations.
+
+    Returns the deletion summary dict. Raises:
+    - :class:`EntityNotFoundError` if the UUID does not resolve.
+    - :class:`AnnotationSetReferencedError` if a PredictionSet
+      references this set (router maps to 409).
+    """
+    a = session.get(AnnotationSet, set_id)
+    if a is None:
+        raise EntityNotFoundError("AnnotationSet", set_id)
+    annotation_count = (
+        session.query(func.count(ProteinGOAnnotation.id))
+        .filter(ProteinGOAnnotation.annotation_set_id == set_id)
+        .scalar()
+    )
+    try:
+        session.delete(a)
+        session.flush()
+    except IntegrityError as exc:
+        raise AnnotationSetReferencedError(
+            "This annotation set is referenced by one or more prediction "
+            "sets. Delete those first."
+        ) from exc
+    return {"deleted": str(set_id), "annotations_deleted": annotation_count or 0}
+
+
+def evaluation_set_to_dict(e: EvaluationSet) -> dict[str, Any]:
+    """Serialise an :class:`EvaluationSet` to its API dict shape."""
+    return {
+        "id": str(e.id),
+        "old_annotation_set_id": str(e.old_annotation_set_id),
+        "new_annotation_set_id": str(e.new_annotation_set_id),
+        "job_id": str(e.job_id) if e.job_id else None,
+        "created_at": e.created_at.isoformat(),
+        "stats": e.stats,
+    }
+
+
+def list_evaluation_sets_data(session: Session) -> list[dict[str, Any]]:
+    """List all evaluation sets, newest first."""
+    rows = session.query(EvaluationSet).order_by(EvaluationSet.created_at.desc()).all()
+    return [evaluation_set_to_dict(e) for e in rows]
+
+
+def get_evaluation_set_data(
+    session: Session,
+    eval_id: uuid.UUID,
+) -> dict[str, Any]:
+    """Return a single evaluation set.
+
+    Raises :class:`EntityNotFoundError` when the UUID does not resolve.
+    """
+    e = session.get(EvaluationSet, eval_id)
+    if e is None:
+        raise EntityNotFoundError("EvaluationSet", eval_id)
+    return evaluation_set_to_dict(e)
+
+
+def delete_evaluation_set_collect_keys(
+    session: Session,
+    eval_id: uuid.UUID,
+) -> list[str]:
+    """Delete the EvaluationSet and return the artifact-store keys to clean.
+
+    The DB delete cascades to ``EvaluationResult`` rows; this helper
+    walks the results before deleting and returns the union of all
+    artifact keys those rows referenced (per-result cafaeval outputs)
+    so the caller can wipe them from the store. The caller is also
+    expected to delete the set's ground-truth artifact via
+    ``protea.core.evaluation.groundtruth_key_for(eval_id)`` —
+    that key is not included here because it is a fixed function of
+    ``eval_id``.
+
+    Raises :class:`EntityNotFoundError` when the UUID does not resolve.
+    """
+    e = session.get(EvaluationSet, eval_id)
+    if e is None:
+        raise EntityNotFoundError("EvaluationSet", eval_id)
+    result_keys: list[str] = []
+    for r in (
+        session.query(EvaluationResult)
+        .filter(EvaluationResult.evaluation_set_id == eval_id)
+        .all()
+    ):
+        result_keys.extend((r.results or {}).get("artifacts", {}).get("keys") or [])
+    session.delete(e)
+    return result_keys
+
+
 __all__ = [
+    "AnnotationSetReferencedError",
     "AnnotationsServiceError",
     "EntityNotFoundError",
+    "annotation_set_to_dict",
+    "delete_annotation_set_data",
+    "delete_evaluation_set_collect_keys",
+    "evaluation_set_to_dict",
+    "get_annotation_set_data",
+    "get_evaluation_set_data",
     "get_snapshot_data",
+    "list_annotation_sets_data",
+    "list_evaluation_sets_data",
     "list_snapshots_data",
     "set_snapshot_ia_url",
     "snapshot_to_dict",

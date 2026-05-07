@@ -10,8 +10,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
-from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.cache import cached
@@ -24,13 +23,11 @@ from protea.core.operations.load_ontology_snapshot import LoadOntologySnapshotPa
 from protea.core.operations.load_quickgo_annotations import LoadQuickGOAnnotationsPayload
 from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationPayload
 from protea.infrastructure.benchmark_config import BenchmarkConfig
-from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.evaluation_result import EvaluationResult
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.go_term_relationship import GOTermRelationship
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
-from protea.infrastructure.orm.models.annotation.protein_go_annotation import ProteinGOAnnotation
 from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
 from protea.infrastructure.orm.models.job import Job, JobEvent
 from protea.infrastructure.orm.models.protein.protein import Protein
@@ -38,8 +35,15 @@ from protea.infrastructure.orm.models.sequence.sequence import Sequence
 from protea.infrastructure.queue.publisher import publish_job
 from protea.infrastructure.session import session_scope
 from protea.services.annotations_service import (
+    AnnotationSetReferencedError,
     EntityNotFoundError,
+    delete_annotation_set_data,
+    delete_evaluation_set_collect_keys,
+    get_annotation_set_data,
+    get_evaluation_set_data,
     get_snapshot_data,
+    list_annotation_sets_data,
+    list_evaluation_sets_data,
     list_snapshots_data,
 )
 from protea.services.annotations_service import (
@@ -165,33 +169,7 @@ def list_annotation_sets(
 
     def _compute() -> list[dict[str, Any]]:
         with session_scope(factory) as session:
-            count_sub = (
-                session.query(
-                    ProteinGOAnnotation.annotation_set_id,
-                    func.count(ProteinGOAnnotation.id).label("cnt"),
-                )
-                .group_by(ProteinGOAnnotation.annotation_set_id)
-                .subquery()
-            )
-            q = session.query(AnnotationSet, count_sub.c.cnt).outerjoin(
-                count_sub, AnnotationSet.id == count_sub.c.annotation_set_id
-            )
-            if source is not None:
-                q = q.filter(AnnotationSet.source == source)
-            rows = q.order_by(AnnotationSet.created_at.desc()).all()
-            return [
-                {
-                    "id": str(a.id),
-                    "source": a.source,
-                    "source_version": a.source_version,
-                    "ontology_snapshot_id": str(a.ontology_snapshot_id),
-                    "job_id": str(a.job_id) if a.job_id else None,
-                    "created_at": a.created_at.isoformat(),
-                    "meta": a.meta,
-                    "annotation_count": cnt or 0,
-                }
-                for a, cnt in rows
-            ]
+            return list_annotation_sets_data(session, source)
 
     return cached(f"annotations:sets:{source or '*'}", 300.0, _compute)
 
@@ -202,27 +180,11 @@ def get_annotation_set(
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
     """Retrieve a single annotation set with its total annotation count."""
-    with session_scope(factory) as session:
-        a = session.get(AnnotationSet, set_id)
-        if a is None:
-            raise HTTPException(status_code=404, detail="AnnotationSet not found")
-
-        annotation_count = (
-            session.query(func.count(ProteinGOAnnotation.id))
-            .filter(ProteinGOAnnotation.annotation_set_id == set_id)
-            .scalar()
-        )
-
-        return {
-            "id": str(a.id),
-            "source": a.source,
-            "source_version": a.source_version,
-            "ontology_snapshot_id": str(a.ontology_snapshot_id),
-            "job_id": str(a.job_id) if a.job_id else None,
-            "created_at": a.created_at.isoformat(),
-            "meta": a.meta,
-            "annotation_count": annotation_count,
-        }
+    try:
+        with session_scope(factory) as session:
+            return get_annotation_set_data(session, set_id)
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.delete("/sets/{set_id}", summary="Delete an annotation set")
@@ -231,24 +193,13 @@ def delete_annotation_set(
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
     """Delete an annotation set and all its annotations. Returns 409 if referenced by a prediction set."""
-    with session_scope(factory) as session:
-        a = session.get(AnnotationSet, set_id)
-        if a is None:
-            raise HTTPException(status_code=404, detail="AnnotationSet not found")
-        annotation_count = (
-            session.query(func.count(ProteinGOAnnotation.id))
-            .filter(ProteinGOAnnotation.annotation_set_id == set_id)
-            .scalar()
-        )
-        try:
-            session.delete(a)
-            session.flush()
-        except IntegrityError:
-            raise HTTPException(
-                status_code=409,
-                detail="This annotation set is referenced by one or more prediction sets. Delete those first.",
-            ) from None
-        return {"deleted": str(set_id), "annotations_deleted": annotation_count}
+    try:
+        with session_scope(factory) as session:
+            return delete_annotation_set_data(session, set_id)
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except AnnotationSetReferencedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/sets/load-goa", summary="Trigger GOA annotation load")
@@ -354,18 +305,7 @@ def list_evaluation_sets(
 ) -> list[dict[str, Any]]:
     """List all evaluation sets, newest first."""
     with session_scope(factory) as session:
-        rows = session.query(EvaluationSet).order_by(EvaluationSet.created_at.desc()).all()
-        return [
-            {
-                "id": str(e.id),
-                "old_annotation_set_id": str(e.old_annotation_set_id),
-                "new_annotation_set_id": str(e.new_annotation_set_id),
-                "job_id": str(e.job_id) if e.job_id else None,
-                "created_at": e.created_at.isoformat(),
-                "stats": e.stats,
-            }
-            for e in rows
-        ]
+        return list_evaluation_sets_data(session)
 
 
 @router.delete("/evaluation-sets/{eval_id}", summary="Delete an evaluation set", status_code=204)
@@ -380,18 +320,11 @@ def delete_evaluation_set(
     from protea.infrastructure.settings import load_settings
     from protea.infrastructure.storage import get_artifact_store
 
-    with session_scope(factory) as session:
-        e = session.get(EvaluationSet, eval_id)
-        if e is None:
-            raise HTTPException(status_code=404, detail="EvaluationSet not found")
-        result_keys: list[str] = []
-        for r in (
-            session.query(EvaluationResult)
-            .filter(EvaluationResult.evaluation_set_id == eval_id)
-            .all()
-        ):
-            result_keys.extend((r.results or {}).get("artifacts", {}).get("keys") or [])
-        session.delete(e)
+    try:
+        with session_scope(factory) as session:
+            result_keys = delete_evaluation_set_collect_keys(session, eval_id)
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     project_root = Path(__file__).resolve().parents[3]
     store = get_artifact_store(load_settings(project_root))
@@ -405,18 +338,11 @@ def get_evaluation_set(
     eval_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
-    with session_scope(factory) as session:
-        e = session.get(EvaluationSet, eval_id)
-        if e is None:
-            raise HTTPException(status_code=404, detail="EvaluationSet not found")
-        return {
-            "id": str(e.id),
-            "old_annotation_set_id": str(e.old_annotation_set_id),
-            "new_annotation_set_id": str(e.new_annotation_set_id),
-            "job_id": str(e.job_id) if e.job_id else None,
-            "created_at": e.created_at.isoformat(),
-            "stats": e.stats,
-        }
+    try:
+        with session_scope(factory) as session:
+            return get_evaluation_set_data(session, eval_id)
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 def _eval_set_or_404(session: Session, eval_id: UUID) -> EvaluationSet:
