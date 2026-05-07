@@ -1057,7 +1057,17 @@ class RunCafaEvaluationOperation:
                 f.write(f"{row['protein_accession']}\t{row['go_id']}\t{row['score']:.4f}\n")
 
     def _parse_results(self, dfs_best: dict) -> dict[str, Any]:
-        """Extract per-namespace Fmax metrics from cafaeval dfs_best."""
+        """Extract per-namespace Fmax metrics from cafaeval dfs_best.
+
+        The unweighted metrics are read from ``dfs_best["f"]`` (one row
+        per namespace at the threshold optimising the protein-mean
+        Fmax). When an IA file was supplied to cafaeval, the IA-weighted
+        equivalents land in ``dfs_best["f_w"]`` (best by IA-weighted
+        Fmax) and the micro-averaged Fmax in ``dfs_best["f_micro"]`` /
+        ``dfs_best["f_micro_w"]``; these are surfaced here as the
+        ``_w`` / ``_micro`` / ``_micro_w`` keys so chapter-6 tables can
+        pull them without re-reading the per-tier TSV artifacts.
+        """
         ns_results: dict[str, Any] = {}
 
         df_f = dfs_best.get("f")
@@ -1078,5 +1088,22 @@ class RunCafaEvaluationOperation:
                 "coverage": round(float(row.get("cov_max", row.get("cov", 0))), 4),
                 "n_proteins": int(row.get("n", 0)) if "n" in row else None,
             }
+
+        for key, fmt in (
+            ("f_w", "fmax_w"),
+            ("f_micro", "f_micro"),
+            ("f_micro_w", "f_micro_w"),
+        ):
+            df_extra = dfs_best.get(key)
+            if df_extra is None or df_extra.empty:
+                continue
+            df_extra = df_extra.reset_index()
+            col = key  # the metric column matches the dfs_best key name
+            for _, row in df_extra.iterrows():
+                ns_long = str(row.get("ns", ""))
+                ns = _NS_LABELS.get(ns_long)
+                if ns is None or ns not in ns_results:
+                    continue
+                ns_results[ns][fmt] = round(float(row.get(col, 0)), 4)
 
         return ns_results
