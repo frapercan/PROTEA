@@ -54,14 +54,20 @@ class ScoringServiceError(Exception):
 class EntityNotFoundError(ScoringServiceError):
     """Generic 404 — a referenced entity does not exist.
 
-    ``entity`` is a human-readable label (e.g. ``"PredictionSet"``)
-    used in the error message; ``entity_id`` is the looked-up UUID.
+    Construct with the entity label (e.g. ``"PredictionSet"``) and
+    the looked-up UUID; the message becomes ``"<entity> not found"``.
+    Pickle-safe via ``__reduce__`` so the structured ``entity`` /
+    ``entity_id`` attributes survive a round-trip without tripping
+    flake8-bugbear's B042 rule about argument forwarding.
     """
 
-    def __init__(self, entity: str, entity_id: uuid.UUID) -> None:
+    def __init__(self, entity: str, entity_id: uuid.UUID) -> None:  # noqa: B042
+        super().__init__(f"{entity} not found")
         self.entity = entity
         self.entity_id = entity_id
-        super().__init__(f"{entity} not found")
+
+    def __reduce__(self) -> tuple[type, tuple[str, uuid.UUID]]:
+        return (self.__class__, (self.entity, self.entity_id))
 
 
 class BoosterUnavailableError(ScoringServiceError):
@@ -732,7 +738,6 @@ def score_predictions_with_reranker(
         reachable.
     """
     import pandas as pd
-
 
     if session.get(PredictionSet, prediction_set_id) is None:
         raise EntityNotFoundError("PredictionSet", prediction_set_id)
