@@ -231,22 +231,19 @@ def _copy_anc2vec(output_path: Path) -> None:
     print(f"[export_lafa_bundle] anc2vec: copied from {_ANC2VEC_SOURCE.name}")
 
 
-def _export_reranker(
+def _fetch_reranker_text(
     session: Session,
     name: str | None,
     model_id: uuid.UUID | None,
-    output_path: Path,
-) -> dict[str, Any]:
-    """Materialise the booster text under ``reranker.txt``.
+) -> tuple[RerankerModel, str]:
+    """Resolve a RerankerModel row + load its booster text.
 
-    Source priority: ``--reranker_model_id`` > ``--reranker_model_name``.
-    Loads the bytes from inline ``model_data`` if present; else falls
-    back to ``artifact_uri`` via the live PROTEA artifact store.
+    Source priority: ``model_id`` > ``name``. Booster text comes from
+    the inline ``model_data`` column if present, else from the
+    ``artifact_uri`` via the live PROTEA artifact store.
     """
     if model_id is None and name is None:
-        raise ValueError(
-            "Provide either --reranker_model_id or --reranker_model_name.",
-        )
+        raise ValueError("Provide either model_id or name.")
 
     stmt = select(RerankerModel)
     if model_id is not None:
@@ -258,19 +255,27 @@ def _export_reranker(
         raise ValueError(f"RerankerModel not found (name={name!r} id={model_id})")
 
     if row.model_data:
-        text = row.model_data
-    elif row.artifact_uri:
+        return row, row.model_data
+    if row.artifact_uri:
         store = get_artifact_store(load_settings(Path.cwd()))
-        # Reuse the same _uri_to_key heuristic that protea.core.reranker.load_reranker uses.
         from protea.core.reranker import _uri_to_key
 
         key = _uri_to_key(row.artifact_uri, store)
-        text = store.get(key).decode("utf-8")
-    else:
-        raise ValueError(
-            f"RerankerModel {row.id} has neither model_data nor artifact_uri.",
-        )
+        return row, store.get(key).decode("utf-8")
+    raise ValueError(f"RerankerModel {row.id} has neither model_data nor artifact_uri.")
 
+
+def _export_reranker(
+    session: Session,
+    name: str | None,
+    model_id: uuid.UUID | None,
+    output_path: Path,
+) -> dict[str, Any]:
+    """Legacy single-booster export. Writes ``output_path`` (typically
+    ``<bundle>/reranker.txt``) and returns provenance metadata for the
+    manifest.
+    """
+    row, text = _fetch_reranker_text(session, name, model_id)
     output_path.write_bytes(text.encode("utf-8"))
     print(
         f"[export_lafa_bundle] reranker: {row.name} "
@@ -282,6 +287,62 @@ def _export_reranker(
         "reranker_name": row.name,
         "feature_schema_sha": row.feature_schema_sha or "",
         "external_source": row.external_source or "",
+    }
+
+
+def _export_rerankers_by_aspect(
+    session: Session,
+    by_aspect: dict[str, str],
+    output_dir: Path,
+) -> dict[str, Any]:
+    """Multi-booster export. Materialises ``<output_dir>/reranker/<aspect>.txt``
+    for each provided aspect and writes ``routing.json`` with per-aspect
+    provenance. Returns aggregated metadata for the manifest.
+    """
+    reranker_dir = output_dir / "reranker"
+    reranker_dir.mkdir(parents=True, exist_ok=True)
+
+    routing: dict[str, dict[str, str]] = {}
+    schemas: set[str] = set()
+    for aspect, name in by_aspect.items():
+        if aspect not in {"F", "P", "C"}:
+            raise ValueError(f"Unknown GO aspect for reranker routing: {aspect!r}")
+        row, text = _fetch_reranker_text(session, name, None)
+        path = reranker_dir / f"{aspect}.txt"
+        path.write_bytes(text.encode("utf-8"))
+        routing[aspect] = {
+            "filename": path.name,
+            "reranker_model_id": str(row.id),
+            "reranker_name": row.name,
+            "feature_schema_sha": row.feature_schema_sha or "",
+            "external_source": row.external_source or "",
+        }
+        if row.feature_schema_sha:
+            schemas.add(row.feature_schema_sha)
+        print(
+            f"[export_lafa_bundle] reranker[{aspect}]: {row.name} "
+            f"(schema_sha={row.feature_schema_sha[:12] if row.feature_schema_sha else '?'}, "
+            f"{len(text)} chars)",
+        )
+
+    (reranker_dir / "routing.json").write_text(
+        json.dumps({"version": "1", "boosters": routing}, indent=2, sort_keys=True),
+    )
+
+    if len(schemas) > 1:
+        print(
+            f"[export_lafa_bundle] WARNING: per-aspect boosters have "
+            f"divergent feature_schema_sha: {sorted(schemas)}",
+        )
+
+    # Pick one canonical schema_sha for the manifest. When all boosters
+    # agree it is the shared sha; otherwise the manifest records the
+    # alphabetically-first one and the warning above flags the drift.
+    canonical_sha = sorted(schemas)[0] if schemas else ""
+    return {
+        "reranker_routing": "per_aspect",
+        "reranker_aspects": sorted(by_aspect.keys()),
+        "feature_schema_sha": canonical_sha,
     }
 
 
@@ -329,9 +390,31 @@ def main() -> None:
         default=None,
         help="Default: derived from the AnnotationSet row.",
     )
-    reranker_group = parser.add_mutually_exclusive_group(required=True)
-    reranker_group.add_argument("--reranker_model_id", type=uuid.UUID)
-    reranker_group.add_argument("--reranker_model_name", type=str)
+    parser.add_argument(
+        "--reranker_model_id",
+        type=uuid.UUID,
+        help="Legacy single-booster path; writes reranker.txt at the bundle root.",
+    )
+    parser.add_argument(
+        "--reranker_model_name",
+        type=str,
+        help="Legacy single-booster path; writes reranker.txt at the bundle root.",
+    )
+    parser.add_argument(
+        "--reranker_for_F",
+        type=str,
+        help="Per-aspect MFO booster name (writes reranker/F.txt).",
+    )
+    parser.add_argument(
+        "--reranker_for_P",
+        type=str,
+        help="Per-aspect BPO booster name (writes reranker/P.txt).",
+    )
+    parser.add_argument(
+        "--reranker_for_C",
+        type=str,
+        help="Per-aspect CCO booster name (writes reranker/C.txt).",
+    )
     parser.add_argument("--output_dir", required=True, type=Path)
     parser.add_argument("--cutoff_version", required=True, type=str)
     parser.add_argument(
@@ -389,12 +472,31 @@ def main() -> None:
             args.output_dir / "pca_state.npz",
         )
         _copy_anc2vec(args.output_dir / "anc2vec.npz")
-        reranker_meta = _export_reranker(
-            session,
-            args.reranker_model_name,
-            args.reranker_model_id,
-            args.output_dir / "reranker.txt",
-        )
+
+        per_aspect = {
+            aspect: getattr(args, f"reranker_for_{aspect}")
+            for aspect in ("F", "P", "C")
+            if getattr(args, f"reranker_for_{aspect}")
+        }
+        if per_aspect:
+            reranker_meta = _export_rerankers_by_aspect(
+                session, per_aspect, args.output_dir,
+            )
+        elif args.reranker_model_name or args.reranker_model_id:
+            reranker_meta = _export_reranker(
+                session,
+                args.reranker_model_name,
+                args.reranker_model_id,
+                args.output_dir / "reranker.txt",
+            )
+        else:
+            print(
+                "[export_lafa_bundle] error: provide either --reranker_model_id /"
+                " --reranker_model_name (legacy) or --reranker_for_{F,P,C} "
+                "(per-aspect).",
+                file=sys.stderr,
+            )
+            sys.exit(2)
         _write_manifest(
             args.output_dir,
             embedding_config_id=args.embedding_config_id,
