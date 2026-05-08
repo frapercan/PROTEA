@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import signal
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,33 @@ from protea.core.contracts.operation import EmitFn
 from protea.core.evaluation import EvaluationData
 from protea.core.operations import _run_cafa_artifacts as _artifacts
 from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
+
+
+@dataclass(frozen=True)
+class CafaEvalRunContext:
+    """Bundle of per-run inputs consumed by :func:`evaluate_all_settings`.
+
+    Groups the 16 per-call inputs (artifact paths, reranker bundles,
+    delta cohort, scoring snapshot) so the entry-point signature stays
+    under flake8-bugbear's parameter ceiling.
+    """
+
+    pred_set_id: uuid.UUID
+    delta_proteins: set[str]
+    max_distance: float | None
+    artifacts_root: Path
+    has_rerankers: bool
+    reranker_models: dict[str, dict[str, dict[str, Any]]]
+    scoring_config_snapshot: ScoringConfig | None
+    data: EvaluationData
+    obo_path: str
+    nk_path: str
+    lk_path: str
+    pk_path: str
+    pk_known_path: str
+    ia_path: str | None
+    toi_path: str
+    shared_pred_dir: str
 
 
 def _write_setting_predictions(
@@ -160,60 +188,45 @@ def _run_cafaeval_for_setting(
 def evaluate_all_settings(
     session: Session,
     *,
-    pred_set_id: uuid.UUID,
-    delta_proteins: set[str],
-    max_distance: float | None,
-    artifacts_root: Path,
-    has_rerankers: bool,
-    reranker_models: dict[str, dict[str, dict[str, Any]]],
-    scoring_config_snapshot: ScoringConfig | None,
-    data: EvaluationData,
-    obo_path: str,
-    nk_path: str,
-    lk_path: str,
-    pk_path: str,
-    pk_known_path: str,
-    ia_path: str | None,
-    toi_path: str,
-    shared_pred_dir: str,
+    ctx: CafaEvalRunContext,
     emit: EmitFn,
 ) -> dict[str, dict[str, Any]]:
     """Drive the per-setting NK / LK / PK cafaeval loop.
 
     Writes per-setting predictions when a reranker applies (otherwise
-    reuses ``shared_pred_dir``), invokes cafaeval, parses results,
+    reuses ``ctx.shared_pred_dir``), invokes cafaeval, parses results,
     persists the full cafaeval artifact tree, and emits per-setting
     audit events. Returns ``{setting → namespace metrics dict}``.
     """
     results: dict[str, dict[str, Any]] = {}
     for setting, gt_file, known_file in [
-        ("NK", nk_path, None),
-        ("LK", lk_path, None),
-        ("PK", pk_path, pk_known_path),
+        ("NK", ctx.nk_path, None),
+        ("LK", ctx.lk_path, None),
+        ("PK", ctx.pk_path, ctx.pk_known_path),
     ]:
-        if has_rerankers:
+        if ctx.has_rerankers:
             pred_dir = _write_setting_predictions(
                 session,
                 setting=setting,
-                pred_set_id=pred_set_id,
-                delta_proteins=delta_proteins,
-                max_distance=max_distance,
-                artifacts_root=artifacts_root,
-                reranker_models=reranker_models,
-                scoring_config_snapshot=scoring_config_snapshot,
-                data=data,
+                pred_set_id=ctx.pred_set_id,
+                delta_proteins=ctx.delta_proteins,
+                max_distance=ctx.max_distance,
+                artifacts_root=ctx.artifacts_root,
+                reranker_models=ctx.reranker_models,
+                scoring_config_snapshot=ctx.scoring_config_snapshot,
+                data=ctx.data,
             )
         else:
-            pred_dir = shared_pred_dir
+            pred_dir = ctx.shared_pred_dir
         results[setting] = _run_cafaeval_for_setting(
             setting=setting,
-            obo_path=obo_path,
+            obo_path=ctx.obo_path,
             pred_dir=pred_dir,
             gt_file=gt_file,
-            ia_path=ia_path,
+            ia_path=ctx.ia_path,
             known_file=known_file,
-            toi_path=toi_path,
-            artifacts_root=artifacts_root,
+            toi_path=ctx.toi_path,
+            artifacts_root=ctx.artifacts_root,
             emit=emit,
         )
     return results
