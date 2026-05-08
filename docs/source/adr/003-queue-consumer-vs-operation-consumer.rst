@@ -25,7 +25,8 @@ Two consumers coexist:
 
 - Receives ``{"job_id": "<uuid>"}`` and delegates to
   ``BaseWorker.handle_job()``.
-- Used by: ``protea.ping``, ``protea.jobs``, ``protea.embeddings``.
+- Used by: ``protea.ping``, ``protea.jobs``, ``protea.training``,
+  ``protea.embeddings``, ``protea.predictions``, ``protea.evaluations``.
 
 **OperationConsumer** — for ephemeral batches with no individual DB row:
 
