@@ -23,10 +23,8 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from protea.core.evaluation import compute_evaluation_data
 from protea.core.reranker import load_reranker, model_from_string
 from protea.core.scoring import compute_score
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
@@ -36,7 +34,6 @@ from protea.infrastructure.orm.models.embedding.reranker_model import RerankerMo
 from protea.infrastructure.orm.models.embedding.scoring_config import (
     DEFAULT_EVIDENCE_WEIGHTS,
     DEFAULT_WEIGHTS,
-    FORMULA_EVIDENCE_WEIGHTED,
     VALID_FORMULAS,
     ScoringConfig,
 )
@@ -449,14 +446,11 @@ def load_booster(rm: RerankerModel) -> Any:
 
 # Maps each scoring signal key to the GOPrediction column whose fill rate
 # determines whether the signal is usable for a given PredictionSet.
-_SIGNAL_TO_COLUMN: dict[str, str] = {
-    "embedding_similarity": "distance",
-    "identity_nw": "identity_nw",
-    "identity_sw": "identity_sw",
-    "evidence_weight": "evidence_code",
-    "taxonomic_proximity": "taxonomic_distance",
-    "neighbor_vote_fraction": "neighbor_vote_fraction",
-}
+# _SIGNAL_TO_COLUMN + compute_missing_signals canonically defined in
+# _scoring_validation_helpers; service wrapper raises SignalCoverageError.
+from protea.services._scoring_validation_helpers import (  # noqa: E402
+    compute_missing_signals,
+)
 
 
 def check_signal_coverage(
@@ -466,47 +460,13 @@ def check_signal_coverage(
 ) -> None:
     """Fail fast when the config needs signals absent from the PredictionSet.
 
-    For every signal with a non-zero weight in ``config_snap.weights``
-    (plus ``evidence_code`` when the formula is ``evidence_weighted`` —
-    the multiplier is always applied), count how many rows in the
-    PredictionSet have the backing column non-NULL. Zero coverage is a
-    configuration mismatch (typically a ``ScoringConfig`` that requires
-    ``compute_alignments=True`` or ``compute_taxonomy=True`` applied to
-    a PredictionSet computed without those flags). Raise
-    :class:`SignalCoverageError` with the list of missing signals
-    instead of silently producing a degraded score (``compute_score``
-    drops NULL signals from both numerator and denominator).
+    Body lives in
+    :func:`_scoring_validation_helpers.compute_missing_signals`; this
+    wrapper raises :class:`SignalCoverageError` when that helper
+    returns a non-empty list. Keeping the raise in the service module
+    keeps the helper free of domain-exception coupling.
     """
-    weights = config_snap.weights or {}
-    required: list[tuple[str, str]] = []
-    for signal, col in _SIGNAL_TO_COLUMN.items():
-        if float(weights.get(signal, 0.0)) > 0.0:
-            required.append((signal, col))
-    if getattr(config_snap, "formula", "linear") == FORMULA_EVIDENCE_WEIGHTED and not any(
-        s == "evidence_weight" for s, _ in required
-    ):
-        required.append(("evidence_weight", "evidence_code"))
-    if not required:
-        return
-
-    cols_sql = ", ".join(f"COUNT({col}) AS cnt_{col}" for _, col in required)
-    row = (
-        session.execute(
-            text(
-                f"SELECT COUNT(*) AS total, {cols_sql} "  # noqa: S608 — col names hard-coded
-                "FROM go_prediction WHERE prediction_set_id = :pid"
-            ),
-            {"pid": str(prediction_set_id)},
-        )
-        .mappings()
-        .one()
-    )
-    total = int(row["total"] or 0)
-    missing: list[str] = []
-    for signal, col in required:
-        cnt = int(row[f"cnt_{col}"] or 0)
-        if total == 0 or cnt == 0:
-            missing.append(f"{signal} (column '{col}': {cnt}/{total} rows)")
+    missing = compute_missing_signals(session, prediction_set_id, config_snap)
     if missing:
         raise SignalCoverageError(missing)
 
@@ -636,17 +596,14 @@ def prepare_training_data_request(
 ) -> set[tuple[str, str]]:
     """Validate the request and compute the ``(protein, go_id)`` ground-truth pair set.
 
-    Looks up the PredictionSet and EvaluationSet, computes the temporal
-    NK/LK/PK delta via :func:`compute_evaluation_data`, then flattens the
-    requested category's ``{protein → set[go_id]}`` mapping into a flat
-    set of pairs the streaming generator can probe in O(1) per row.
-
-    Raises
-    ------
-    EntityNotFoundError
-        Either ``PredictionSet`` or ``EvaluationSet`` does not exist.
+    Body lives in
+    :func:`_scoring_validation_helpers.build_training_gt_pairs`; this
+    wrapper resolves the two ORM rows and raises
+    :class:`EntityNotFoundError` for missing ids, keeping the helper
+    free of domain-exception coupling.
     """
     from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
+    from protea.services._scoring_validation_helpers import build_training_gt_pairs
 
     ps = session.get(PredictionSet, prediction_set_id)
     if ps is None:
@@ -654,20 +611,12 @@ def prepare_training_data_request(
     es = session.get(EvaluationSet, evaluation_set_id)
     if es is None:
         raise EntityNotFoundError("EvaluationSet", evaluation_set_id)
-
-    eval_data = compute_evaluation_data(
+    return build_training_gt_pairs(
         session,
-        old_annotation_set_id=es.old_annotation_set_id,
-        new_annotation_set_id=es.new_annotation_set_id,
-        ontology_snapshot_id=ps.ontology_snapshot_id,
+        prediction_set=ps,
+        evaluation_set=es,
+        category=category,
     )
-
-    ground_truth: dict[str, set[str]] = getattr(eval_data, category)
-    gt_pairs: set[tuple[str, str]] = set()
-    for protein, go_ids in ground_truth.items():
-        for go_id in go_ids:
-            gt_pairs.add((protein, go_id))
-    return gt_pairs
 
 
 def iter_training_data(
