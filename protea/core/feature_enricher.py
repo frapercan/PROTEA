@@ -21,6 +21,13 @@ from protea_method.feature_enricher import NEW_V6_FEATURE_KEYS
 from protea_method.feature_enricher import enrich_v6_features as _lib_enrich_v6_features
 from sqlalchemy.orm import Session
 
+from protea.core._feature_enricher_helpers import (
+    LabelConfig,
+    compute_ia_weight,
+    make_ancestor_closure,
+    merge_into_existing_leaf,
+    update_synth_entry,
+)
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 
 
@@ -158,36 +165,7 @@ def expand_predictions_to_ancestors(
     if not predictions:
         return predictions
 
-    pm: dict[str, frozenset[str]] = {
-        c: frozenset(parents) for c, parents in (parent_map or {}).items()
-    }
-    closure: dict[str, frozenset[str]] = {}
-
-    def _ancestors(gid: str) -> frozenset[str]:
-        cached = closure.get(gid)
-        if cached is not None:
-            return cached
-        seen: set[str] = set()
-        stack = [gid]
-        while stack:
-            node = stack.pop()
-            for parent in pm.get(node, ()):
-                if parent not in seen:
-                    seen.add(parent)
-                    stack.append(parent)
-        result = frozenset(seen)
-        closure[gid] = result
-        return result
-
-    def _ia_weight(anc_gid: str, leaf_gid: str) -> float:
-        if not ia_weights:
-            return 1.0
-        anc_w = float(ia_weights.get(anc_gid, 0.0))
-        leaf_w = float(ia_weights.get(leaf_gid, 0.0))
-        if leaf_w <= 0.0:
-            return 1.0
-        return anc_w / leaf_w
-
+    ancestors = make_ancestor_closure(parent_map)
     k_limit_f = float(k_limit) if k_limit > 0 else 1.0
 
     groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
@@ -197,45 +175,21 @@ def expand_predictions_to_ancestors(
 
     out: list[dict[str, Any]] = []
     for (q_acc, _aspect), recs in groups.items():
+        label_ctx = LabelConfig(
+            q_acc=q_acc, gt_pairs=gt_pairs, column=label_column, present=label_field_present
+        )
         leaf_by_gid: dict[str, dict[str, Any]] = {r["go_id"]: r for r in recs}
         synth: dict[str, dict[str, Any]] = {}
         for leaf_gid, leaf_rec in list(leaf_by_gid.items()):
             leaf_d = float(leaf_rec.get("distance", 1.0))
-            for anc in _ancestors(leaf_gid):
-                w = _ia_weight(anc, leaf_gid)
+            for anc in ancestors(leaf_gid):
+                vote_increment = compute_ia_weight(anc, leaf_gid, ia_weights) / k_limit_f
                 if anc in leaf_by_gid:
-                    leaf_anc = leaf_by_gid[anc]
-                    leaf_anc["neighbor_vote_fraction"] = min(
-                        1.0,
-                        float(leaf_anc.get("neighbor_vote_fraction", 0.0))
-                        + w / k_limit_f,
+                    merge_into_existing_leaf(
+                        leaf_by_gid[anc], leaf_rec, vote_increment, leaf_d
                     )
-                    lmd = float(leaf_rec.get("neighbor_min_distance", leaf_d))
-                    cur_md = float(leaf_anc.get("neighbor_min_distance", leaf_d))
-                    if lmd < cur_md:
-                        leaf_anc["neighbor_min_distance"] = lmd
                     continue
-                entry = synth.get(anc)
-                if entry is None or leaf_d < float(entry.get("distance", float("inf"))):
-                    base = dict(leaf_rec)
-                    base["go_id"] = anc
-                    if label_field_present:
-                        base[label_column] = (
-                            1 if (gt_pairs and (q_acc, anc) in gt_pairs) else 0
-                        )
-                    prior_frac = (
-                        float(entry["neighbor_vote_fraction"])
-                        if entry is not None
-                        else 0.0
-                    )
-                    base["neighbor_vote_fraction"] = min(1.0, prior_frac + w / k_limit_f)
-                    synth[anc] = base
-                else:
-                    entry["neighbor_vote_fraction"] = min(
-                        1.0,
-                        float(entry["neighbor_vote_fraction"]) + w / k_limit_f,
-                    )
-
+                update_synth_entry(synth, anc, leaf_rec, leaf_d, vote_increment, label_ctx)
         out.extend(leaf_by_gid.values())
         out.extend(synth.values())
     return out

@@ -49,9 +49,11 @@ PROTEA runs as a set of cooperative processes managed by ``scripts/manage.sh``:
    │                         ┌─────────────────────────┐                 │
    │                         │  protea.ping            │                 │
    │                         │  protea.jobs            │                 │
+   │                         │  protea.training        │ coordinator     │
    │                         │  protea.embeddings      │ coordinator     │
    │                         │  protea.embeddings.batch│ ephemeral       │
    │                         │  protea.embeddings.write│ ephemeral       │
+   │                         │  protea.predictions     │ coordinator     │
    │                         │  protea.predictions.batch│ ephemeral      │
    │                         │  protea.predictions.write│ ephemeral      │
    │                         └───────────┬─────────────┘                 │
@@ -92,7 +94,6 @@ Services and data stores
         - QueueConsumer
         - ``insert_proteins``, ``fetch_uniprot_metadata``, ``load_ontology_snapshot``,
           ``load_goa_annotations``, ``load_quickgo_annotations``,
-          ``compute_embeddings`` (coordinator), ``predict_go_terms`` (coordinator),
           ``generate_evaluation_set``, ``run_cafa_evaluation``
       * - ``protea.training``
         - QueueConsumer
@@ -108,6 +109,9 @@ Services and data stores
       * - ``protea.embeddings.write``
         - OperationConsumer
         - ``store_embeddings`` — bulk pgvector insert (ephemeral, no DB Job row)
+      * - ``protea.predictions``
+        - QueueConsumer
+        - ``predict_go_terms`` coordinator (serialised; fans out KNN batches)
       * - ``protea.predictions.batch``
         - OperationConsumer
         - ``predict_go_terms_batch`` — KNN search + GO transfer (ephemeral, no DB Job row)
@@ -197,10 +201,11 @@ Code layout
      api/                 FastAPI application and routers
        routers/           jobs, proteins, annotations, embeddings,
                           query_sets, maintenance, admin, scoring,
-                          annotate, showcase, support
+                          annotate, showcase, support, benchmark,
+                          datasets, registry, reranker_models, stack
      core/
        contracts/         Operation protocol, ProteaPayload, OperationResult
-       operations/        Domain logic (12 operation modules, 17 registered instances)
+       operations/        Domain logic (11 operation modules, 15 registered instances)
        knn_search.py      KNN backends: numpy brute-force and FAISS (Flat/IVFFlat/HNSW)
        feature_engineering.py  Alignment (parasail NW/SW) and taxonomy (ete3 NCBITaxa)
        scoring.py         Scoring engine (weighted formulas, composite scores)
@@ -223,7 +228,7 @@ Code layout
      web/                 Next.js frontend
    scripts/
      manage.sh            Unified stack manager (start/stop/status/logs/scale)
-     worker.py            Worker entry point (registers all 16 operations)
+     worker.py            Worker entry point (registers all 15 operations)
      init_db.py           Schema initialisation
 
 Technology stack

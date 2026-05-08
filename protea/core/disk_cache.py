@@ -26,11 +26,30 @@ from __future__ import annotations
 import os
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import numpy as np
 
 _DISK_CACHE_DIR = Path(os.environ.get("PROTEA_REF_CACHE_DIR", "data/ref_cache"))
+
+
+class AnnoCsr(NamedTuple):
+    """CSR-style annotation cache for one ``(EmbeddingConfig, AnnotationSet, aspect)``.
+
+    Bundles the four parallel arrays produced by :func:`_build_anno_csr`
+    and consumed by :func:`_csr_lookup` / :func:`_save_anno_csr_to_disk`.
+    NamedTuple so existing 4-tuple unpacking patterns
+    (``gtids, quals, ecodes, offsets = csr``) keep working alongside
+    the named accessors (``csr.gtids``).
+
+    Layout: annotations for accession ``i`` live at index range
+    ``offsets[i]:offsets[i + 1]`` in the three flat arrays.
+    """
+
+    gtids: np.ndarray
+    quals: np.ndarray
+    ecodes: np.ndarray
+    offsets: np.ndarray
 
 
 def _disk_cache_paths(
@@ -74,11 +93,12 @@ def _anno_disk_cache_paths(
 def _build_anno_csr(
     accessions: list[str],
     go_map: dict[str, list[dict[str, Any]]],
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> AnnoCsr:
     """Build a CSR-style annotation structure for the given accession list.
 
-    Returns (go_term_ids, qualifiers, evidence_codes, offsets) where
-    annotations for accessions[i] are at indices offsets[i]:offsets[i+1].
+    Returns an :class:`AnnoCsr` whose flat arrays satisfy the layout
+    invariant: annotations for ``accessions[i]`` live at indices
+    ``offsets[i]:offsets[i + 1]``.
     """
     all_gtids: list[int] = []
     all_quals: list[Any] = []
@@ -90,11 +110,11 @@ def _build_anno_csr(
             all_quals.append(ann.get("qualifier"))
             all_ecodes.append(ann.get("evidence_code"))
         offsets.append(len(all_gtids))
-    return (
-        np.array(all_gtids, dtype=np.int32),
-        np.array(all_quals, dtype=object),
-        np.array(all_ecodes, dtype=object),
-        np.array(offsets, dtype=np.int32),
+    return AnnoCsr(
+        gtids=np.array(all_gtids, dtype=np.int32),
+        quals=np.array(all_quals, dtype=object),
+        ecodes=np.array(all_ecodes, dtype=object),
+        offsets=np.array(offsets, dtype=np.int32),
     )
 
 
@@ -102,7 +122,7 @@ def _load_anno_csr_from_disk(
     embedding_config_id: uuid.UUID,
     annotation_set_id: uuid.UUID,
     aspect: str,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
+) -> AnnoCsr | None:
     """Load annotation CSR arrays from disk. Returns None on miss or error."""
     gtids_p, quals_p, ecodes_p, offsets_p = _anno_disk_cache_paths(
         embedding_config_id, annotation_set_id, aspect
@@ -110,11 +130,11 @@ def _load_anno_csr_from_disk(
     if not all(p.exists() for p in (gtids_p, quals_p, ecodes_p, offsets_p)):
         return None
     try:
-        return (
-            np.load(gtids_p),
-            np.load(quals_p, allow_pickle=True),
-            np.load(ecodes_p, allow_pickle=True),
-            np.load(offsets_p),
+        return AnnoCsr(
+            gtids=np.load(gtids_p),
+            quals=np.load(quals_p, allow_pickle=True),
+            ecodes=np.load(ecodes_p, allow_pickle=True),
+            offsets=np.load(offsets_p),
         )
     except Exception:
         return None
@@ -124,31 +144,25 @@ def _save_anno_csr_to_disk(
     embedding_config_id: uuid.UUID,
     annotation_set_id: uuid.UUID,
     aspect: str,
-    gtids: np.ndarray,
-    quals: np.ndarray,
-    ecodes: np.ndarray,
-    offsets: np.ndarray,
+    csr: AnnoCsr,
 ) -> None:
     gtids_p, quals_p, ecodes_p, offsets_p = _anno_disk_cache_paths(
         embedding_config_id, annotation_set_id, aspect
     )
     gtids_p.parent.mkdir(parents=True, exist_ok=True)
-    np.save(gtids_p, gtids)
-    np.save(quals_p, quals)
-    np.save(ecodes_p, ecodes)
-    np.save(offsets_p, offsets)
+    np.save(gtids_p, csr.gtids)
+    np.save(quals_p, csr.quals)
+    np.save(ecodes_p, csr.ecodes)
+    np.save(offsets_p, csr.offsets)
 
 
 def _csr_lookup(
     query_accessions: set[str],
-    accessions: list[str],
     acc_to_anno_idx: dict[str, int],
-    gtids: np.ndarray,
-    quals: np.ndarray,
-    ecodes: np.ndarray,
-    offsets: np.ndarray,
+    csr: AnnoCsr,
 ) -> dict[str, list[dict[str, Any]]]:
     """Return a go_map for query_accessions using the preloaded CSR annotation cache."""
+    gtids, quals, ecodes, offsets = csr
     go_map: dict[str, list[dict[str, Any]]] = {}
     for acc in query_accessions:
         idx = acc_to_anno_idx.get(acc)
