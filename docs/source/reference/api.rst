@@ -5,7 +5,7 @@ HTTP API
    :local:
    :depth: 2
 
-The PROTEA HTTP API is a FastAPI application that exposes eleven routers.
+The PROTEA HTTP API is a FastAPI application that exposes sixteen routers.
 All state mutations flow through this layer: it writes ``Job`` rows to
 PostgreSQL and publishes messages to RabbitMQ. The API is stateless between
 requests — the session factory and AMQP URL are injected via ``app.state``
@@ -103,20 +103,21 @@ loading the full result set into memory.
 Scoring router
 --------------
 
-The ``/scoring`` router provides endpoints for training and applying LightGBM
-re-ranker models. The re-ranker is a binary classifier trained on temporal
-holdout data: predictions made with annotations at time t0 are labeled against
-ground truth derived from t1 annotations.
+The ``/scoring`` router exposes scoring configurations, the training-data
+export, and read-only endpoints for applying LightGBM re-ranker models.
+In-process re-ranker training was retired in F0/T0.6: boosters are now
+trained offline in ``protea-reranker-lab`` and registered through the
+:ref:`reranker-models-router` (``POST /reranker-models/import``).
 
 Key endpoints:
 
 - ``GET /scoring/prediction-sets/{id}/training-data.tsv`` — generates a
-  31-column TSV with binary labels from temporal ground truth, suitable for
-  LightGBM training.
-- ``POST /scoring/rerankers/train`` — trains a LightGBM model from a
-  PredictionSet + EvaluationSet pair and stores it in the DB.
-- ``GET /scoring/rerankers`` / ``GET /scoring/rerankers/{id}`` / ``DELETE`` —
-  CRUD for trained re-ranker models.
+  31-column TSV with binary labels from temporal ground truth, consumed
+  by ``protea-reranker-lab`` to fit a booster.
+- ``GET /scoring/rerankers`` / ``GET /scoring/rerankers/{id}`` /
+  ``DELETE /scoring/rerankers/{id}`` — read/delete operations for
+  registered re-ranker models. Creation lives at
+  ``POST /reranker-models/import``.
 - ``GET /scoring/prediction-sets/{id}/rerank.tsv`` — applies a trained
   re-ranker to a prediction set, streaming re-scored predictions.
 - ``GET /scoring/prediction-sets/{id}/reranker-metrics`` — computes CAFA-style
@@ -205,6 +206,91 @@ the total thumbs-up count and recent comments. ``POST /support`` submits a
 new thumbs-up with an optional comment (max 500 characters).
 
 .. automodule:: protea.api.routers.support
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Benchmark router
+----------------
+
+The ``/benchmark`` router powers the per-PLM comparison grid in the UI.
+Where ``/showcase`` collapses every model into a few buckets and reports
+the maximum, this router preserves *which* embedding produced each number
+and *which* scoring config was used, exposing one stage per distinct
+``ScoringConfig.name`` plus an implicit ``"reranker"`` stage for evaluations
+that used a re-ranker. Stage labels, GO categories, and the baseline tag are
+read from ``protea/config/benchmark.yaml`` — no hardcoded constants.
+
+.. automodule:: protea.api.routers.benchmark
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Datasets router
+---------------
+
+The ``/datasets`` router is the registry for frozen re-ranker training
+datasets. ``POST /datasets`` enqueues an ``export_research_dataset`` job
+that runs the KNN + feature pipeline, publishes the
+``train.parquet`` / ``eval.parquet`` / ``manifest.json`` triple to the
+configured ``ArtifactStore`` (local FS or MinIO), and inserts a
+``Dataset`` row once the upload completes. ``GET /datasets`` and
+``GET /datasets/{id_or_name}`` expose the registry to
+``protea-reranker-lab``'s ``pull_dataset.py`` and to UI consumers.
+
+.. automodule:: protea.api.routers.datasets
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Registry router
+---------------
+
+The ``/backends``, ``/sources``, and ``/runners`` endpoints list the plugins
+discovered at runtime via ``importlib.metadata.entry_points`` for the three
+plugin groups: embedding backends, annotation sources, and experiment
+runners. The router is intentionally stateless — it re-scans entry points
+on every call rather than caching, so a worker that has just been restarted
+with a newly-installed extra surfaces in the next request without an API
+restart.
+
+.. automodule:: protea.api.routers.registry
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. _reranker-models-router:
+
+Reranker models router
+----------------------
+
+The ``/reranker-models`` router accepts boosters trained offline in
+``protea-reranker-lab`` (or any compatible trainer) and registers them
+in PROTEA. ``POST /reranker-models/import`` is the multipart flow:
+the lab sends ``model.txt`` + ``spec.yaml`` + ``run.json`` inline and
+the server uploads ``model.txt`` to the artifact store under
+``rerankers/<run_id>/``. ``POST /reranker-models/import-by-reference``
+is the production flow: the lab pre-uploads ``model.txt`` to MinIO under
+its own key and posts JSON with ``artifact_uri`` + ``run_json`` +
+``spec_yaml``. Both flows share ``_register_model`` so the resulting
+``RerankerModel`` row is identical.
+
+.. automodule:: protea.api.routers.reranker_models
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Stack router
+------------
+
+The ``/stack`` router exposes metadata about the eight-repo PROTEA stack
+to the UI. ``GET /stack`` returns the registry from
+``docs/source/_data/stack.yaml``. ``GET /stack/pulls`` aggregates open
+pull requests across every repo in the stack via the GitHub REST API and
+caches the result in-process to stay under the unauthenticated 60 req/h
+rate limit (set ``PROTEA_GITHUB_TOKEN`` to lift to 5000 req/h).
+
+.. automodule:: protea.api.routers.stack
    :members:
    :undoc-members:
    :show-inheritance:
@@ -414,9 +500,6 @@ Endpoints summary
    * - ``GET``
      - ``/scoring/prediction-sets/{id}/training-data.tsv``
      - Export labeled training data for the re-ranker.
-   * - ``POST``
-     - ``/scoring/rerankers/train``
-     - Train a LightGBM re-ranker from a PredictionSet + EvaluationSet.
    * - ``GET``
      - ``/scoring/rerankers``
      - List all trained re-ranker models.
@@ -495,6 +578,62 @@ Endpoints summary
    * - ``POST``
      - ``/support``
      - Submit a thumbs-up with optional comment.
+
+   * -
+     - **Benchmark**
+     -
+   * - ``GET``
+     - ``/benchmark/embeddings``
+     - List embedding configs with persisted display metadata.
+   * - ``GET``
+     - ``/benchmark/matrix``
+     - Per-embedding / per-stage Fmax matrix across all evaluation results.
+
+   * -
+     - **Datasets**
+     -
+   * - ``POST``
+     - ``/datasets``
+     - Enqueue an ``export_research_dataset`` job.
+   * - ``GET``
+     - ``/datasets``
+     - List registered re-ranker datasets.
+   * - ``GET``
+     - ``/datasets/{id_or_name}``
+     - Get a dataset by id or name.
+
+   * -
+     - **Plugin Registry**
+     -
+   * - ``GET``
+     - ``/backends``
+     - List installed embedding-backend plugins.
+   * - ``GET``
+     - ``/sources``
+     - List installed annotation-source plugins.
+   * - ``GET``
+     - ``/runners``
+     - List installed experiment-runner plugins.
+
+   * -
+     - **Reranker Models**
+     -
+   * - ``POST``
+     - ``/reranker-models/import``
+     - Import a lab-trained booster (multipart).
+   * - ``POST``
+     - ``/reranker-models/import-by-reference``
+     - Import a booster already uploaded to the artifact store (JSON).
+
+   * -
+     - **Stack**
+     -
+   * - ``GET``
+     - ``/stack``
+     - Return the eight-repo PROTEA stack registry.
+   * - ``GET``
+     - ``/stack/pulls``
+     - Aggregate open pull requests across every repo in the stack.
 
 Request body for ``POST /jobs``
 --------------------------------
