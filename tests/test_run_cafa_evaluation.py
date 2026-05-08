@@ -17,6 +17,7 @@ import pytest
 from pydantic import ValidationError
 
 from protea.core.evaluation import EvaluationData
+from protea.core.operations._run_cafa_artifacts import WritePredictionsContext
 from protea.core.operations.run_cafa_evaluation import (
     _NS_LABELS,
     _NS_SHORT,
@@ -573,7 +574,15 @@ class TestWritePredictions:
         with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
             path = f.name
         try:
-            self.op._write_predictions(session, uuid.uuid4(), {"P1"}, None, path, None)
+            self.op._write_predictions(
+                session,
+                WritePredictionsContext(
+                    pred_set_id=uuid.uuid4(),
+                    delta_proteins={"P1"},
+                    max_distance=None,
+                    path=path,
+                ),
+            )
             with open(path) as f:
                 line = f.read().strip()
             # score = max(0, 1 - 0.4/2) = 0.8
@@ -604,7 +613,15 @@ class TestWritePredictions:
         with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
             path = f.name
         try:
-            self.op._write_predictions(session, uuid.uuid4(), {"P1"}, None, path, None)
+            self.op._write_predictions(
+                session,
+                WritePredictionsContext(
+                    pred_set_id=uuid.uuid4(),
+                    delta_proteins={"P1"},
+                    max_distance=None,
+                    path=path,
+                ),
+            )
             with open(path) as f:
                 lines = f.read().strip().split("\n")
             # Only the first (closest) prediction should be written
@@ -640,7 +657,16 @@ class TestWritePredictions:
         with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
             path = f.name
         try:
-            self.op._write_predictions(session, uuid.uuid4(), {"P1"}, None, path, scoring_config)
+            self.op._write_predictions(
+                session,
+                WritePredictionsContext(
+                    pred_set_id=uuid.uuid4(),
+                    delta_proteins={"P1"},
+                    max_distance=None,
+                    path=path,
+                ),
+                scoring_config=scoring_config,
+            )
             with open(path) as f:
                 line = f.read().strip()
             assert line == "P1\tGO:0000001\t0.7500"
@@ -667,7 +693,15 @@ class TestWritePredictions:
         with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
             path = f.name
         try:
-            self.op._write_predictions(session, uuid.uuid4(), {"P1"}, None, path, None)
+            self.op._write_predictions(
+                session,
+                WritePredictionsContext(
+                    pred_set_id=uuid.uuid4(),
+                    delta_proteins={"P1"},
+                    max_distance=None,
+                    path=path,
+                ),
+            )
             with open(path) as f:
                 line = f.read().strip()
             # score = max(0, 1 - 0/2) = 1.0
@@ -695,7 +729,15 @@ class TestWritePredictions:
         with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
             path = f.name
         try:
-            self.op._write_predictions(session, uuid.uuid4(), {"P1"}, 0.5, path, None)
+            self.op._write_predictions(
+                session,
+                WritePredictionsContext(
+                    pred_set_id=uuid.uuid4(),
+                    delta_proteins={"P1"},
+                    max_distance=0.5,
+                    path=path,
+                ),
+            )
             with open(path) as f:
                 line = f.read().strip()
             assert line == "P1\tGO:0000001\t0.8500"
@@ -724,7 +766,15 @@ class TestWritePredictions:
         with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
             path = f.name
         try:
-            self.op._write_predictions(session, uuid.uuid4(), {"P1"}, None, path, None)
+            self.op._write_predictions(
+                session,
+                WritePredictionsContext(
+                    pred_set_id=uuid.uuid4(),
+                    delta_proteins={"P1"},
+                    max_distance=None,
+                    path=path,
+                ),
+            )
             with open(path) as f:
                 line = f.read().strip()
             # score = max(0, 1 - 0/2) = 1.0 (None → 0.0)
