@@ -61,9 +61,9 @@ metadata enrichment, and job orchestration.
    :class: tip
 
    A platform for protein functional annotation: from sequence ingestion through
-   GPU embedding computation (ESM-2, ESM3c, T5) and KNN-based GO term prediction
-   to CAFA evaluation and LightGBM re-ranking — with clean separation of
-   infrastructure, execution flow, and domain logic.
+   GPU embedding computation (ESM-2, ESM-C, T5/ProstT5, Ankh) and KNN-based GO
+   term prediction to CAFA evaluation and LightGBM re-ranking — with clean
+   separation of infrastructure, execution flow, and domain logic.
 
 .. toctree::
    :caption: Documentation
