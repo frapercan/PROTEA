@@ -149,5 +149,7 @@ any entry from another page.
 
    manage.sh
       The shell script under ``scripts/manage.sh`` that starts, stops,
-      scales, and inspects the nine long-running processes that make up the
-      PROTEA dev stack. The reference for everyday operations.
+      scales, and inspects the long-running processes that make up the
+      PROTEA dev stack: the FastAPI server, the eleven RabbitMQ workers
+      (one per queue plus the stale-job reaper), and the Next.js
+      frontend. The reference for everyday operations.
