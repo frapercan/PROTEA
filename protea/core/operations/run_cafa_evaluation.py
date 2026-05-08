@@ -25,20 +25,17 @@ from protea.core.operations._run_cafa_helpers import (  # noqa: F401
     _record_from_pred,
     eval_artifact_key,
 )
-from protea.core.reranker import load_reranker
+from protea.core.operations._run_cafa_reranker_loader import (
+    load_reranker_models_for_payload,
+)
 from protea.infrastructure.orm.models.annotation.evaluation_result import EvaluationResult
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
-from protea.infrastructure.orm.models.embedding.reranker_model import (
-    RerankerModel as RerankerModelORM,
-)
 from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
 from protea.infrastructure.settings import load_settings
-from protea.infrastructure.settings import load_settings as _load_settings_for_reranker
 from protea.infrastructure.storage import get_artifact_store
-from protea.infrastructure.storage import get_artifact_store as _get_store_for_reranker
 
 
 class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
@@ -242,94 +239,17 @@ class RunCafaEvaluationOperation:
                 weights=dict(sc.weights),
             )
 
-        # Load per-category (and optionally per-aspect) reranker models before session commit.
-        # reranker_models: setting → aspect → {"model": model_str, "cat_codes": dict|None}
-        # aspect="" means single model for all aspects (legacy flat field).
-        reranker_models: dict[str, dict[str, dict[str, Any]]] = {}
-        reranker_config_snapshot: dict[str, dict[str, str]] | None = (
-            None  # for persisting in EvaluationResult
+        # Load per-category (and optionally per-aspect) reranker models before
+        # session commit. Body lives in
+        # ``_run_cafa_reranker_loader.load_reranker_models_for_payload``.
+        reranker_models, reranker_config_snapshot = load_reranker_models_for_payload(
+            session,
+            rerankers_nested=p.rerankers,
+            reranker_id_nk=p.reranker_id_nk,
+            reranker_id_lk=p.reranker_id_lk,
+            reranker_id_pk=p.reranker_id_pk,
+            emit=emit,
         )
-
-        def _resolve_model_bundle(rm: RerankerModelORM) -> dict[str, Any]:
-            """Return ``{"model": str, "cat_codes": dict|None}`` from either the
-            legacy inline blob or the ``artifact_uri`` cache. Boosters trained
-            by the lab and imported via ``/reranker-models/import`` only set
-            ``artifact_uri`` and leave ``model_data`` NULL, so the operation
-            must transparently support both paths.
-
-            ``cat_codes`` (if present in the imported run.json under
-            ``__categorical_codes__``) is the lab's per-column sorted-unique
-            string vocabulary, used at predict time to reproduce the encoding
-            seen during training. Without it, ``reranker_predict`` falls back
-            to ``pd.factorize`` over the inference batch — which silently
-            produces the wrong codes for per-aspect inference and tanks the
-            LK / PK fmax. See ``protea.core.reranker.predict``.
-            """
-            if rm.model_data:
-                model_str = rm.model_data
-            elif rm.artifact_uri:
-                project_root = Path(__file__).resolve().parents[3]
-                store = _get_store_for_reranker(_load_settings_for_reranker(project_root))
-                booster = load_reranker(
-                    rm.artifact_uri,
-                    feature_schema_sha=rm.feature_schema_sha or rm.name,
-                    store=store,
-                )
-                model_str = booster.model_to_string()
-            else:
-                raise ValueError(
-                    f"RerankerModel {rm.id} has no booster — both ``model_data`` "
-                    f"(legacy inline) and ``artifact_uri`` (artifact-store path) are NULL."
-                )
-            cat_codes = (rm.metrics or {}).get("__categorical_codes__")
-            return {"model": model_str, "cat_codes": cat_codes}
-
-        if p.rerankers:
-            # New nested mapping: {"nk": {"bpo": "uuid", "mfo": "uuid", ...}, ...}
-            reranker_config_snapshot = {}
-            _aspect_map = {"bpo": "P", "mfo": "F", "cco": "C"}
-            for cat_key, aspect_map in p.rerankers.items():
-                setting = cat_key.upper()
-                reranker_models[setting] = {}
-                reranker_config_snapshot[cat_key] = {}
-                for aspect_key, rid_str in aspect_map.items():
-                    rid = uuid.UUID(rid_str)
-                    rm = session.get(RerankerModelORM, rid)
-                    if rm is None:
-                        raise ValueError(f"RerankerModel {rid_str} not found")
-                    aspect_char = _aspect_map.get(aspect_key, aspect_key)
-                    reranker_models[setting][aspect_char] = _resolve_model_bundle(rm)
-                    reranker_config_snapshot[cat_key][aspect_key] = rid_str
-                    emit(
-                        "run_cafa_evaluation.reranker_loaded",
-                        None,
-                        {
-                            "setting": setting,
-                            "aspect": aspect_key,
-                            "reranker_id": str(rid),
-                            "name": rm.name,
-                        },
-                        "info",
-                    )
-        else:
-            # Legacy flat fields: one model per category (all aspects)
-            for setting, field in [
-                ("NK", p.reranker_id_nk),
-                ("LK", p.reranker_id_lk),
-                ("PK", p.reranker_id_pk),
-            ]:
-                if field:
-                    rid = uuid.UUID(field)
-                    rm = session.get(RerankerModelORM, rid)
-                    if rm is None:
-                        raise ValueError(f"RerankerModel {field} not found")
-                    reranker_models[setting] = {"": _resolve_model_bundle(rm)}  # "" = all aspects
-                    emit(
-                        "run_cafa_evaluation.reranker_loaded",
-                        None,
-                        {"setting": setting, "reranker_id": str(rid), "name": rm.name},
-                        "info",
-                    )
 
         # Pre-generate result_id so the artifact-store prefix matches the DB row.
         result_id = uuid.uuid4()

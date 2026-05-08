@@ -20,8 +20,8 @@
       "kind": "class",
       "path": "protea/core/operations/run_cafa_evaluation.py",
       "name": "RunCafaEvaluationOperation",
-      "line": 90,
-      "metric": 581,
+      "line": 87,
+      "metric": 504,
       "threshold": 500
     },
     {
@@ -175,6 +175,15 @@
       "name": "write_predictions_per_aspect",
       "line": 206,
       "metric": 74,
+      "threshold": 60
+    },
+    {
+      "key": "method::protea/core/operations/_run_cafa_reranker_loader.py::load_reranker_models_for_payload",
+      "kind": "method",
+      "path": "protea/core/operations/_run_cafa_reranker_loader.py",
+      "name": "load_reranker_models_for_payload",
+      "line": 70,
+      "metric": 70,
       "threshold": 60
     },
     {
@@ -398,8 +407,8 @@
       "kind": "method",
       "path": "protea/core/operations/run_cafa_evaluation.py",
       "name": "RunCafaEvaluationOperation.execute",
-      "line": 173,
-      "metric": 472,
+      "line": 170,
+      "metric": 395,
       "threshold": 60
     },
     {
