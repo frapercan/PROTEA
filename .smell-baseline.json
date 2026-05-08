@@ -16,15 +16,6 @@
       "threshold": 500
     },
     {
-      "key": "class::protea/core/operations/run_cafa_evaluation.py::RunCafaEvaluationOperation",
-      "kind": "class",
-      "path": "protea/core/operations/run_cafa_evaluation.py",
-      "name": "RunCafaEvaluationOperation",
-      "line": 87,
-      "metric": 504,
-      "threshold": 500
-    },
-    {
       "key": "class::protea/core/training_dump_helpers.py::TrainRerankerAutoOperation",
       "kind": "class",
       "path": "protea/core/training_dump_helpers.py",
@@ -407,8 +398,8 @@
       "kind": "method",
       "path": "protea/core/operations/run_cafa_evaluation.py",
       "name": "RunCafaEvaluationOperation.execute",
-      "line": 170,
-      "metric": 395,
+      "line": 171,
+      "metric": 342,
       "threshold": 60
     },
     {
