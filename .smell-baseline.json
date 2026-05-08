@@ -70,15 +70,6 @@
       "threshold": 800
     },
     {
-      "key": "file::protea/services/scoring_service.py::",
-      "kind": "file",
-      "path": "protea/services/scoring_service.py",
-      "name": "",
-      "line": 0,
-      "metric": 862,
-      "threshold": 800
-    },
-    {
       "key": "method::protea/api/app.py::create_app",
       "kind": "method",
       "path": "protea/api/app.py",
@@ -535,15 +526,6 @@
       "name": "get_predictions_for_protein",
       "line": 570,
       "metric": 61,
-      "threshold": 60
-    },
-    {
-      "key": "method::protea/services/scoring_service.py::iter_training_data",
-      "kind": "method",
-      "path": "protea/services/scoring_service.py",
-      "name": "iter_training_data",
-      "line": 703,
-      "metric": 64,
       "threshold": 60
     },
     {
