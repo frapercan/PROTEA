@@ -127,14 +127,37 @@ def factory(session):
     return MagicMock()
 
 
+_ANN_SUBMODULES = (
+    "protea.api.routers.annotations._common",
+    "protea.api.routers.annotations.snapshots",
+    "protea.api.routers.annotations.sets",
+    "protea.api.routers.annotations.evaluation_sets",
+    "protea.api.routers.annotations.evaluation_results",
+)
+
+
+def _patch_session_scope_everywhere(session):
+    """Stack patches for every annotations submodule's ``session_scope``."""
+    from contextlib import ExitStack
+
+    stack = ExitStack()
+    for mod in _ANN_SUBMODULES:
+        stack.enter_context(
+            patch(f"{mod}.session_scope", side_effect=lambda _, s=session: _mock_scope(s))
+        )
+    stack.enter_context(
+        patch(
+            "protea.services.jobs_service.session_scope",
+            side_effect=lambda _, s=session: _mock_scope(s),
+        )
+    )
+    return stack
+
+
 @pytest.fixture()
 def client(session, factory):
     app = _make_app(factory)
-    with patch(
-        "protea.api.routers.annotations.session_scope", side_effect=lambda _: _mock_scope(session)
-    ), patch(
-        "protea.services.jobs_service.session_scope", side_effect=lambda _: _mock_scope(session)
-    ):
+    with _patch_session_scope_everywhere(session):
         with TestClient(app) as c:
             yield c, session
 
@@ -142,11 +165,7 @@ def client(session, factory):
 @pytest.fixture()
 def client_with_artifacts(session, factory, tmp_path):
     app = _make_app(factory, artifacts_dir=tmp_path)
-    with patch(
-        "protea.api.routers.annotations.session_scope", side_effect=lambda _: _mock_scope(session)
-    ), patch(
-        "protea.services.jobs_service.session_scope", side_effect=lambda _: _mock_scope(session)
-    ):
+    with _patch_session_scope_everywhere(session):
         with TestClient(app) as c:
             yield c, session, tmp_path
 
@@ -416,10 +435,7 @@ class TestDependencyGuards:
         app.state.session_factory = MagicMock()
         # no amqp_url set
         app.include_router(router)
-        with patch(
-            "protea.api.routers.annotations.session_scope",
-            side_effect=lambda _: _mock_scope(session),
-        ):
+        with _patch_session_scope_everywhere(session):
             with TestClient(app, raise_server_exceptions=False) as c:
                 resp = c.post(
                     "/annotations/snapshots/load", json={"obo_url": "http://example.com/go.obo"}
@@ -976,7 +992,7 @@ class TestRunCafaEvaluation:
 
         session.add.side_effect = add_side
 
-        with patch("protea.api.routers.annotations.publish_job"):
+        with patch("protea.api.routers.annotations.evaluation_sets.publish_job"):
             resp = c.post(
                 f"/annotations/evaluation-sets/{eval_id}/run",
                 json={"prediction_set_id": pred_set_id},
@@ -997,7 +1013,7 @@ class TestRunCafaEvaluation:
         pred_set_id = str(uuid4())
         session.get.return_value = None
 
-        with patch("protea.api.routers.annotations.publish_job"):
+        with patch("protea.api.routers.annotations.evaluation_sets.publish_job"):
             resp = c.post(
                 f"/annotations/evaluation-sets/{eval_id}/run",
                 json={"prediction_set_id": pred_set_id},
