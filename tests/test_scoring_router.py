@@ -263,7 +263,7 @@ class TestScoredTSV:
         )
         assert resp.status_code == 404
 
-    @patch("protea.services.scoring_service.compute_score", return_value=0.85)
+    @patch("protea.services._scoring_streaming_helpers.compute_score", return_value=0.85)
     def test_streams_tsv_with_data(self, mock_score, session):
         """Full streaming path: header + data rows."""
         set_id = uuid4()
@@ -305,7 +305,7 @@ class TestScoredTSV:
         with patch(
                         "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session),
         ), patch(
-            "protea.services.scoring_service.session_scope", side_effect=lambda _: _mock_scope(session)
+            "protea.services._scoring_streaming_helpers.session_scope", side_effect=lambda _: _mock_scope(session)
         ):
             with TestClient(app) as c:
                 resp = c.get(
@@ -319,7 +319,7 @@ class TestScoredTSV:
         assert "P12345" in lines[1]
         assert "GO:0003674" in lines[1]
 
-    @patch("protea.services.scoring_service.compute_score", return_value=0.3)
+    @patch("protea.services._scoring_streaming_helpers.compute_score", return_value=0.3)
     def test_min_score_filters_rows(self, mock_score, session):
         """Rows below min_score are excluded from the stream."""
         set_id = uuid4()
@@ -360,7 +360,7 @@ class TestScoredTSV:
         with patch(
                         "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session),
         ), patch(
-            "protea.services.scoring_service.session_scope", side_effect=lambda _: _mock_scope(session)
+            "protea.services._scoring_streaming_helpers.session_scope", side_effect=lambda _: _mock_scope(session)
         ):
             with TestClient(app) as c:
                 resp = c.get(
@@ -373,7 +373,7 @@ class TestScoredTSV:
         assert len(lines) == 1
         assert lines[0].startswith("protein_accession")
 
-    @patch("protea.services.scoring_service.compute_score", return_value=0.9)
+    @patch("protea.services._scoring_streaming_helpers.compute_score", return_value=0.9)
     def test_accession_filter(self, mock_score, session):
         """Accession query parameter is forwarded to the DB query."""
         set_id = uuid4()
@@ -414,7 +414,7 @@ class TestScoredTSV:
         with patch(
                         "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session),
         ), patch(
-            "protea.services.scoring_service.session_scope", side_effect=lambda _: _mock_scope(session)
+            "protea.services._scoring_streaming_helpers.session_scope", side_effect=lambda _: _mock_scope(session)
         ):
             with TestClient(app) as c:
                 resp = c.get(
@@ -780,7 +780,7 @@ class TestTrainingDataEndpoint:
         with patch(
             "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session),
         ), patch(
-            "protea.services.scoring_service.session_scope", side_effect=lambda _: _mock_scope(session)
+            "protea.services._scoring_streaming_helpers.session_scope", side_effect=lambda _: _mock_scope(session)
         ):
             with TestClient(app) as c:
                 resp = c.get(self._url(ps.id, es.id, "nk"))
@@ -826,7 +826,7 @@ class TestTrainingDataEndpoint:
         with patch(
             "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session),
         ), patch(
-            "protea.services.scoring_service.session_scope", side_effect=lambda _: _mock_scope(session)
+            "protea.services._scoring_streaming_helpers.session_scope", side_effect=lambda _: _mock_scope(session)
         ):
             with TestClient(app) as c:
                 resp = c.get(self._url(ps.id, es.id, "nk"))
@@ -866,7 +866,7 @@ class TestTrainingDataEndpoint:
         with patch(
             "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session),
         ), patch(
-            "protea.services.scoring_service.session_scope", side_effect=lambda _: _mock_scope(session)
+            "protea.services._scoring_streaming_helpers.session_scope", side_effect=lambda _: _mock_scope(session)
         ):
             with TestClient(app) as c:
                 resp = c.get(self._url(ps.id, es.id))
@@ -909,7 +909,7 @@ class TestTrainingDataEndpoint:
         with patch(
             "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session),
         ), patch(
-            "protea.services.scoring_service.session_scope", side_effect=lambda _: _mock_scope(session)
+            "protea.services._scoring_streaming_helpers.session_scope", side_effect=lambda _: _mock_scope(session)
         ):
             with TestClient(app) as c:
                 resp = c.get(self._url(ps.id, es.id, "pk"))
@@ -955,7 +955,7 @@ class TestTrainingDataEndpoint:
         with patch(
             "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session),
         ), patch(
-            "protea.services.scoring_service.session_scope", side_effect=lambda _: _mock_scope(session)
+            "protea.services._scoring_streaming_helpers.session_scope", side_effect=lambda _: _mock_scope(session)
         ):
             with TestClient(app) as c:
                 resp = c.get(self._url(ps.id, es.id))
