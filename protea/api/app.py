@@ -66,7 +66,10 @@ _OPENAPI_TAGS: list[dict[str, str]] = [
     },
     {
         "name": "benchmark",
-        "description": "Per-embedding / per-stage Fmax matrix across every evaluation result. Powers the /benchmark page in the UI.",
+        "description": (
+            "Per-embedding / per-stage Fmax matrix across every "
+            "evaluation result. Powers the /benchmark page in the UI."
+        ),
     },
     {"name": "support", "description": "Community thumbs-up and comments."},
     {
@@ -75,15 +78,25 @@ _OPENAPI_TAGS: list[dict[str, str]] = [
     },
     {
         "name": "datasets",
-        "description": "Frozen re-ranker datasets — enqueue export jobs, list/fetch registered dumps, resolve URIs for the lab.",
+        "description": (
+            "Frozen re-ranker datasets — enqueue export jobs, "
+            "list/fetch registered dumps, resolve URIs for the lab."
+        ),
     },
     {
         "name": "reranker-models",
-        "description": "Register lab-trained LightGBM boosters — multipart upload or by-reference import of artefacts already in MinIO.",
+        "description": (
+            "Register lab-trained LightGBM boosters — multipart "
+            "upload or by-reference import of artefacts already in MinIO."
+        ),
     },
     {
         "name": "stack",
-        "description": "Cross-repository navigation: registry of the eight repositories that make up the PROTEA stack and a live aggregate of their open pull requests.",
+        "description": (
+            "Cross-repository navigation: registry of the eight "
+            "repositories that make up the PROTEA stack and a "
+            "live aggregate of their open pull requests."
+        ),
     },
 ]
 
