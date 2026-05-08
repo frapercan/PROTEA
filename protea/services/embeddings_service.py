@@ -179,7 +179,6 @@ def assert_prediction_set_exists(session: Session, prediction_set_id: uuid.UUID)
         raise EntityNotFoundError("PredictionSet", prediction_set_id)
 
 
-
 def list_prediction_sets_data(session: Session) -> list[dict[str, Any]]:
     """Top 100 most-recent ``PredictionSet`` rows joined with their context.
 
