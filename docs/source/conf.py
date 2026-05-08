@@ -40,6 +40,7 @@ autodoc_mock_imports = [
     'cafaeval',
     'numpy',
     'pandas',
+    'pyarrow',
     'scipy',
     'sklearn',
 ]
