@@ -895,6 +895,62 @@ def _embed_ankh(
 # ---------------------------------------------------------------------------
 
 
+def _embed_esm3c_one(
+    model: Any,
+    seq_str: str,
+    config: EmbeddingConfig,
+    device_obj: Any,
+) -> list[ChunkEmbedding]:
+    """ESM3c forward pass + pooling for one sequence.
+
+    Used by :func:`_embed_esm3c` to keep the per-batch loop body readable.
+    Strips BOS (position 0) and EOS (position -1) tokens before residue-level
+    pooling, matching PIS / FANTASIA behaviour.
+    """
+    import torch
+    import torch.nn.functional as F
+    from esm.sdk.api import ESMProtein, LogitsConfig
+
+    protein = ESMProtein(sequence=seq_str[: config.max_length])
+    with torch.autocast(
+        device_type=device_obj.type,
+        dtype=torch.float16,
+        enabled=(device_obj.type == "cuda"),
+    ):
+        protein_tensor = model.encode(protein)
+        logits_output = model.logits(
+            protein_tensor,
+            LogitsConfig(sequence=True, return_hidden_states=True),
+        )
+
+    hs = logits_output.hidden_states
+    if hs is None:
+        raise RuntimeError(f"ESM3c returned no hidden_states for sequence {seq_str[:20]!r}")
+    if isinstance(hs, torch.Tensor):
+        hs = [hs[i] for i in range(hs.shape[0])]
+
+    valid_layers = _validate_layers(config.layer_indices, hs, "ESM3c", seq_str[:20])
+
+    if config.pooling == "cls":
+        # BOS token at position 0 (before stripping)
+        layer_tensors_1d = [hs[-(li + 1)][0, 0, :].float() for li in valid_layers]
+        pooled = _aggregate_1d(layer_tensors_1d, config.layer_agg)
+        if config.normalize:
+            pooled = F.normalize(pooled.unsqueeze(0), p=2, dim=1).squeeze(0)
+        chunks = [ChunkEmbedding(0, None, pooled.cpu().numpy())]
+    else:
+        # Strip BOS (0) and EOS (-1): positions [1:-1]
+        layer_tensors_2d = [hs[-(li + 1)][0, 1:-1, :].float() for li in valid_layers]
+        residues = _aggregate_residue_layers(layer_tensors_2d, config.layer_agg)
+        if config.normalize_residues:
+            residues = F.normalize(residues, p=2, dim=1)
+        chunks = _chunk_and_pool(residues, config)
+
+    del logits_output, hs
+    torch.cuda.empty_cache()
+    return chunks
+
+
 def _embed_esm3c(
     model: Any,
     sequences: list[str],
@@ -906,60 +962,14 @@ def _embed_esm3c(
     Uses the ESM SDK directly — no external tokenizer.  The model must have
     been loaded with ``ESMC.from_pretrained`` and cast to FP16.  Hidden states
     are returned via ``LogitsConfig(return_hidden_states=True)``.
-
-    BOS (position 0) and EOS (position -1) tokens are stripped before all
-    residue-level operations, matching PIS / FANTASIA behaviour.
     """
     import torch
-    import torch.nn.functional as F
-    from esm.sdk.api import ESMProtein, LogitsConfig
 
     device_obj = torch.device(device) if isinstance(device, str) else device
     results: list[list[ChunkEmbedding]] = []
-
     with torch.no_grad():
         for seq_str in sequences:
-            protein = ESMProtein(sequence=seq_str[: config.max_length])
-
-            with torch.autocast(
-                device_type=device_obj.type,
-                dtype=torch.float16,
-                enabled=(device_obj.type == "cuda"),
-            ):
-                protein_tensor = model.encode(protein)
-                logits_output = model.logits(
-                    protein_tensor,
-                    LogitsConfig(sequence=True, return_hidden_states=True),
-                )
-
-            hs = logits_output.hidden_states
-            if hs is None:
-                raise RuntimeError(f"ESM3c returned no hidden_states for sequence {seq_str[:20]!r}")
-
-            # Normalise to a list of per-layer tensors [1, L, D]
-            if isinstance(hs, torch.Tensor):
-                hs = [hs[i] for i in range(hs.shape[0])]
-
-            valid_layers = _validate_layers(config.layer_indices, hs, "ESM3c", seq_str[:20])
-
-            if config.pooling == "cls":
-                # BOS token at position 0 (before stripping)
-                layer_tensors_1d = [hs[-(li + 1)][0, 0, :].float() for li in valid_layers]
-                pooled = _aggregate_1d(layer_tensors_1d, config.layer_agg)
-                if config.normalize:
-                    pooled = F.normalize(pooled.unsqueeze(0), p=2, dim=1).squeeze(0)
-                results.append([ChunkEmbedding(0, None, pooled.cpu().numpy())])
-            else:
-                # Strip BOS (0) and EOS (-1): positions [1:-1]
-                layer_tensors_2d = [hs[-(li + 1)][0, 1:-1, :].float() for li in valid_layers]
-                residues = _aggregate_residue_layers(layer_tensors_2d, config.layer_agg)
-                if config.normalize_residues:
-                    residues = F.normalize(residues, p=2, dim=1)
-                results.append(_chunk_and_pool(residues, config))
-
-            del logits_output, hs
-            torch.cuda.empty_cache()
-
+            results.append(_embed_esm3c_one(model, seq_str, config, device_obj))
     return results
 
 
