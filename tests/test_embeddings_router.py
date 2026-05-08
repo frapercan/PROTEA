@@ -78,6 +78,9 @@ def client(session):
     ), patch(
         "protea.services.embeddings_service.session_scope",
         side_effect=lambda _: _mock_scope(session),
+    ), patch(
+        "protea.services._embeddings_predictions_helpers.session_scope",
+        side_effect=lambda _: _mock_scope(session),
     ):
         yield TestClient(app, raise_server_exceptions=True)
 

@@ -484,21 +484,12 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/services/embeddings_service.py::iter_predictions_tsv",
+      "key": "method::protea/services/_embeddings_predictions_helpers.py::iter_predictions_tsv",
       "kind": "method",
-      "path": "protea/services/embeddings_service.py",
+      "path": "protea/services/_embeddings_predictions_helpers.py",
       "name": "iter_predictions_tsv",
-      "line": 224,
+      "line": 72,
       "metric": 77,
-      "threshold": 60
-    },
-    {
-      "key": "method::protea/services/embeddings_service.py::get_predictions_for_protein",
-      "kind": "method",
-      "path": "protea/services/embeddings_service.py",
-      "name": "get_predictions_for_protein",
-      "line": 570,
-      "metric": 61,
       "threshold": 60
     },
     {
