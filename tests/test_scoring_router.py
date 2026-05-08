@@ -1115,10 +1115,10 @@ class TestRerankerMetrics:
         )
         assert resp.status_code == 422
 
-    @patch("protea.services.scoring_service.compute_cafa_metrics")
-    @patch("protea.services.scoring_service._reranker_predict")
+    @patch("protea.services._scoring_metrics_helpers.compute_cafa_metrics")
+    @patch("protea.services._scoring_metrics_helpers._reranker_predict")
     @patch("protea.services.scoring_service.model_from_string")
-    @patch("protea.services.scoring_service.compute_evaluation_data")
+    @patch("protea.services._scoring_metrics_helpers.compute_evaluation_data")
     def test_returns_metrics(
         self, mock_eval, mock_from_str, mock_predict, mock_metrics, client, session
     ):
