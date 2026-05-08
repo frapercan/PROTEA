@@ -21,6 +21,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from protea.core.evaluation import load_evaluation_data_for_set
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.evaluation_result import EvaluationResult
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
@@ -226,6 +227,35 @@ def delete_annotation_set_data(
     return {"deleted": str(set_id), "annotations_deleted": annotation_count or 0}
 
 
+def iter_groundtruth_tsv(
+    session: Session,
+    eval_id: uuid.UUID,
+    category: str,
+) -> list[str]:
+    """Return the rows for a CAFA ``ground_truth_<CATEGORY>.tsv`` download.
+
+    ``category`` is ``"nk"``, ``"lk"``, ``"pk"`` or ``"known"``.
+    Each row is ``"<protein>\\t<go_id>\\n"``; sorted by protein then GO id
+    so the output is deterministic. The caller wraps the list in a
+    ``StreamingResponse`` (the materialised list is small enough — a
+    few thousand rows for typical CAFA splits — to fit in memory and
+    keeps the streaming generator simple).
+
+    Raises :class:`EntityNotFoundError` when the EvaluationSet does
+    not resolve.
+    """
+    e = session.get(EvaluationSet, eval_id)
+    if e is None:
+        raise EntityNotFoundError("EvaluationSet", eval_id)
+    data, _ = load_evaluation_data_for_set(session, e)
+    source: dict[str, set[str]] = getattr(data, category)
+    return [
+        f"{protein}\t{go_id}\n"
+        for protein, go_ids in sorted(source.items())
+        for go_id in sorted(go_ids)
+    ]
+
+
 def evaluation_set_to_dict(e: EvaluationSet) -> dict[str, Any]:
     """Serialise an :class:`EvaluationSet` to its API dict shape."""
     return {
@@ -300,6 +330,7 @@ __all__ = [
     "get_annotation_set_data",
     "get_evaluation_set_data",
     "get_snapshot_data",
+    "iter_groundtruth_tsv",
     "list_annotation_sets_data",
     "list_evaluation_sets_data",
     "list_snapshots_data",

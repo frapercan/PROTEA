@@ -41,6 +41,7 @@ from protea.services.annotations_service import (
     get_annotation_set_data,
     get_evaluation_set_data,
     get_snapshot_data,
+    iter_groundtruth_tsv,
     list_annotation_sets_data,
     list_evaluation_sets_data,
     list_snapshots_data,
@@ -332,6 +333,29 @@ def _eval_set_or_404(session: Session, eval_id: UUID) -> EvaluationSet:
     return e
 
 
+def _stream_groundtruth(
+    factory: sessionmaker[Session],
+    eval_id: UUID,
+    category: str,
+    filename: str,
+) -> StreamingResponse:
+    """Wrap :func:`iter_groundtruth_tsv` in a TSV streaming response.
+
+    Translates ``EntityNotFoundError`` to HTTP 404 at the boundary;
+    same shape used by the four GT/known-terms download endpoints.
+    """
+    try:
+        with session_scope(factory) as session:
+            lines = iter_groundtruth_tsv(session, eval_id, category)
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return StreamingResponse(
+        iter(lines),
+        media_type="text/tab-separated-values",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.get(
     "/evaluation-sets/{eval_id}/ground-truth-NK.tsv",
     response_class=StreamingResponse,
@@ -344,19 +368,7 @@ def download_gt_nk(
     """Download No-Knowledge ground truth: delta proteins with zero prior experimental annotations.
     Format: ``protein_accession\\tgo_id`` (no header, 2 columns).
     """
-    with session_scope(factory) as session:
-        e = _eval_set_or_404(session, eval_id)
-        data, _ = load_evaluation_data_for_set(session, e)
-        lines = [
-            f"{protein}\t{go_id}\n"
-            for protein, go_ids in sorted(data.nk.items())
-            for go_id in sorted(go_ids)
-        ]
-    return StreamingResponse(
-        iter(lines),
-        media_type="text/tab-separated-values",
-        headers={"Content-Disposition": 'attachment; filename="ground_truth_NK.tsv"'},
-    )
+    return _stream_groundtruth(factory, eval_id, "nk", "ground_truth_NK.tsv")
 
 
 @router.get(
@@ -371,19 +383,7 @@ def download_gt_lk(
     """Download Limited-Knowledge ground truth: delta proteins with prior experimental annotations.
     Format: ``protein_accession\\tgo_id`` (no header, 2 columns).
     """
-    with session_scope(factory) as session:
-        e = _eval_set_or_404(session, eval_id)
-        data, _ = load_evaluation_data_for_set(session, e)
-        lines = [
-            f"{protein}\t{go_id}\n"
-            for protein, go_ids in sorted(data.lk.items())
-            for go_id in sorted(go_ids)
-        ]
-    return StreamingResponse(
-        iter(lines),
-        media_type="text/tab-separated-values",
-        headers={"Content-Disposition": 'attachment; filename="ground_truth_LK.tsv"'},
-    )
+    return _stream_groundtruth(factory, eval_id, "lk", "ground_truth_LK.tsv")
 
 
 @router.get(
@@ -400,19 +400,7 @@ def download_gt_pk(
     Use together with ``known-terms.tsv`` passed as ``-known`` to the CAFA evaluator.
     Format: ``protein_accession\\tgo_id`` (no header, 2 columns).
     """
-    with session_scope(factory) as session:
-        e = _eval_set_or_404(session, eval_id)
-        data, _ = load_evaluation_data_for_set(session, e)
-        lines = [
-            f"{protein}\t{go_id}\n"
-            for protein, go_ids in sorted(data.pk.items())
-            for go_id in sorted(go_ids)
-        ]
-    return StreamingResponse(
-        iter(lines),
-        media_type="text/tab-separated-values",
-        headers={"Content-Disposition": 'attachment; filename="ground_truth_PK.tsv"'},
-    )
+    return _stream_groundtruth(factory, eval_id, "pk", "ground_truth_PK.tsv")
 
 
 @router.get(
@@ -428,19 +416,7 @@ def download_known_terms(
     Format: ``protein_accession\\tgo_id`` (no header, 2 columns).
     Pass this as ``-known`` to the CAFA evaluator to enable PK scoring.
     """
-    with session_scope(factory) as session:
-        e = _eval_set_or_404(session, eval_id)
-        data, _ = load_evaluation_data_for_set(session, e)
-        lines = [
-            f"{protein}\t{go_id}\n"
-            for protein, go_ids in sorted(data.known.items())
-            for go_id in sorted(go_ids)
-        ]
-    return StreamingResponse(
-        iter(lines),
-        media_type="text/tab-separated-values",
-        headers={"Content-Disposition": 'attachment; filename="known_terms.tsv"'},
-    )
+    return _stream_groundtruth(factory, eval_id, "known", "known_terms.tsv")
 
 
 @router.get(
