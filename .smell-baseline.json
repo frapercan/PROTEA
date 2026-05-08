@@ -475,15 +475,6 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/workers/stale_job_reaper.py::StaleJobReaper._reap",
-      "kind": "method",
-      "path": "protea/workers/stale_job_reaper.py",
-      "name": "StaleJobReaper._reap",
-      "line": 83,
-      "metric": 67,
-      "threshold": 60
-    },
-    {
       "key": "params::protea/api/routers/jobs.py::list_jobs",
       "kind": "params",
       "path": "protea/api/routers/jobs.py",
