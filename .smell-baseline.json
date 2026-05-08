@@ -7,7 +7,7 @@
   },
   "offenders": [
     {
-      "key": "class::protea/core/operations/predict_go_terms.py::PredictGOTermsBatchOperation::430",
+      "key": "class::protea/core/operations/predict_go_terms.py::PredictGOTermsBatchOperation",
       "kind": "class",
       "path": "protea/core/operations/predict_go_terms.py",
       "name": "PredictGOTermsBatchOperation",
@@ -16,16 +16,16 @@
       "threshold": 500
     },
     {
-      "key": "class::protea/core/operations/run_cafa_evaluation.py::RunCafaEvaluationOperation::243",
+      "key": "class::protea/core/operations/run_cafa_evaluation.py::RunCafaEvaluationOperation",
       "kind": "class",
       "path": "protea/core/operations/run_cafa_evaluation.py",
       "name": "RunCafaEvaluationOperation",
-      "line": 243,
+      "line": 92,
       "metric": 867,
       "threshold": 500
     },
     {
-      "key": "class::protea/core/training_dump_helpers.py::TrainRerankerAutoOperation::1105",
+      "key": "class::protea/core/training_dump_helpers.py::TrainRerankerAutoOperation",
       "kind": "class",
       "path": "protea/core/training_dump_helpers.py",
       "name": "TrainRerankerAutoOperation",
@@ -34,7 +34,7 @@
       "threshold": 500
     },
     {
-      "key": "file::protea/core/operations/compute_embeddings.py::::0",
+      "key": "file::protea/core/operations/compute_embeddings.py::",
       "kind": "file",
       "path": "protea/core/operations/compute_embeddings.py",
       "name": "",
@@ -43,7 +43,7 @@
       "threshold": 800
     },
     {
-      "key": "file::protea/core/operations/predict_go_terms.py::::0",
+      "key": "file::protea/core/operations/predict_go_terms.py::",
       "kind": "file",
       "path": "protea/core/operations/predict_go_terms.py",
       "name": "",
@@ -52,16 +52,16 @@
       "threshold": 800
     },
     {
-      "key": "file::protea/core/operations/run_cafa_evaluation.py::::0",
+      "key": "file::protea/core/operations/run_cafa_evaluation.py::",
       "kind": "file",
       "path": "protea/core/operations/run_cafa_evaluation.py",
       "name": "",
       "line": 0,
-      "metric": 1109,
+      "metric": 958,
       "threshold": 800
     },
     {
-      "key": "file::protea/core/training_dump_helpers.py::::0",
+      "key": "file::protea/core/training_dump_helpers.py::",
       "kind": "file",
       "path": "protea/core/training_dump_helpers.py",
       "name": "",
@@ -70,7 +70,7 @@
       "threshold": 800
     },
     {
-      "key": "file::protea/services/embeddings_service.py::::0",
+      "key": "file::protea/services/embeddings_service.py::",
       "kind": "file",
       "path": "protea/services/embeddings_service.py",
       "name": "",
@@ -79,7 +79,7 @@
       "threshold": 800
     },
     {
-      "key": "file::protea/services/scoring_service.py::::0",
+      "key": "file::protea/services/scoring_service.py::",
       "kind": "file",
       "path": "protea/services/scoring_service.py",
       "name": "",
@@ -88,7 +88,7 @@
       "threshold": 800
     },
     {
-      "key": "method::protea/api/app.py::create_app::33",
+      "key": "method::protea/api/app.py::create_app",
       "kind": "method",
       "path": "protea/api/app.py",
       "name": "create_app",
@@ -97,7 +97,7 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/api/routers/annotate.py::annotate::78",
+      "key": "method::protea/api/routers/annotate.py::annotate",
       "kind": "method",
       "path": "protea/api/routers/annotate.py",
       "name": "annotate",
@@ -106,7 +106,7 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/api/routers/benchmark.py::get_benchmark_matrix::143",
+      "key": "method::protea/api/routers/benchmark.py::get_benchmark_matrix",
       "kind": "method",
       "path": "protea/api/routers/benchmark.py",
       "name": "get_benchmark_matrix",
@@ -115,7 +115,7 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/api/routers/proteins.py::get_protein::145",
+      "key": "method::protea/api/routers/proteins.py::get_protein",
       "kind": "method",
       "path": "protea/api/routers/proteins.py",
       "name": "get_protein",
@@ -124,7 +124,7 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/api/routers/query_sets.py::create_query_set::99",
+      "key": "method::protea/api/routers/query_sets.py::create_query_set",
       "kind": "method",
       "path": "protea/api/routers/query_sets.py",
       "name": "create_query_set",
@@ -133,7 +133,7 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/api/routers/reranker_models.py::_register_model::99",
+      "key": "method::protea/api/routers/reranker_models.py::_register_model",
       "kind": "method",
       "path": "protea/api/routers/reranker_models.py",
       "name": "_register_model",
@@ -142,7 +142,7 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/api/routers/showcase.py::get_showcase::75",
+      "key": "method::protea/api/routers/showcase.py::get_showcase",
       "kind": "method",
       "path": "protea/api/routers/showcase.py",
       "name": "get_showcase",
@@ -151,7 +151,7 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/api/routers/stack.py::list_open_pulls::123",
+      "key": "method::protea/api/routers/stack.py::list_open_pulls",
       "kind": "method",
       "path": "protea/api/routers/stack.py",
       "name": "list_open_pulls",
@@ -160,7 +160,7 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/evaluation.py::compute_evaluation_data::258",
+      "key": "method::protea/core/evaluation.py::compute_evaluation_data",
       "kind": "method",
       "path": "protea/core/evaluation.py",
       "name": "compute_evaluation_data",
@@ -169,7 +169,7 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/evaluation.py::compute_evaluation_data_reconciled::549",
+      "key": "method::protea/core/evaluation.py::compute_evaluation_data_reconciled",
       "kind": "method",
       "path": "protea/core/evaluation.py",
       "name": "compute_evaluation_data_reconciled",
@@ -178,7 +178,7 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/feature_enricher.py::expand_predictions_to_ancestors::116",
+      "key": "method::protea/core/feature_enricher.py::expand_predictions_to_ancestors",
       "kind": "method",
       "path": "protea/core/feature_enricher.py",
       "name": "expand_predictions_to_ancestors",
@@ -187,7 +187,7 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/metrics.py::compute_cafa_metrics::70",
+      "key": "method::protea/core/metrics.py::compute_cafa_metrics",
       "kind": "method",
       "path": "protea/core/metrics.py",
       "name": "compute_cafa_metrics",
@@ -196,34 +196,34 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/compute_embeddings.py::execute::196",
+      "key": "method::protea/core/operations/compute_embeddings.py::ComputeEmbeddingsOperation.execute",
       "kind": "method",
       "path": "protea/core/operations/compute_embeddings.py",
-      "name": "execute",
+      "name": "ComputeEmbeddingsOperation.execute",
       "line": 196,
       "metric": 79,
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/compute_embeddings.py::execute::367",
+      "key": "method::protea/core/operations/compute_embeddings.py::ComputeEmbeddingsBatchOperation.execute",
       "kind": "method",
       "path": "protea/core/operations/compute_embeddings.py",
-      "name": "execute",
+      "name": "ComputeEmbeddingsBatchOperation.execute",
       "line": 367,
       "metric": 90,
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/compute_embeddings.py::execute::511",
+      "key": "method::protea/core/operations/compute_embeddings.py::StoreEmbeddingsOperation.execute",
       "kind": "method",
       "path": "protea/core/operations/compute_embeddings.py",
-      "name": "execute",
+      "name": "StoreEmbeddingsOperation.execute",
       "line": 511,
       "metric": 77,
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/compute_embeddings.py::_embed_esm::712",
+      "key": "method::protea/core/operations/compute_embeddings.py::_embed_esm",
       "kind": "method",
       "path": "protea/core/operations/compute_embeddings.py",
       "name": "_embed_esm",
@@ -232,7 +232,7 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/compute_embeddings.py::_embed_t5::780",
+      "key": "method::protea/core/operations/compute_embeddings.py::_embed_t5",
       "kind": "method",
       "path": "protea/core/operations/compute_embeddings.py",
       "name": "_embed_t5",
@@ -241,7 +241,7 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/compute_embeddings.py::_embed_esm3c::951",
+      "key": "method::protea/core/operations/compute_embeddings.py::_embed_esm3c",
       "kind": "method",
       "path": "protea/core/operations/compute_embeddings.py",
       "name": "_embed_esm3c",
@@ -250,205 +250,196 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/export_research_dataset.py::execute::110",
+      "key": "method::protea/core/operations/export_research_dataset.py::ExportResearchDatasetOperation.execute",
       "kind": "method",
       "path": "protea/core/operations/export_research_dataset.py",
-      "name": "execute",
+      "name": "ExportResearchDatasetOperation.execute",
       "line": 110,
       "metric": 129,
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/fetch_uniprot_metadata.py::execute::135",
+      "key": "method::protea/core/operations/fetch_uniprot_metadata.py::FetchUniProtMetadataOperation.execute",
       "kind": "method",
       "path": "protea/core/operations/fetch_uniprot_metadata.py",
-      "name": "execute",
+      "name": "FetchUniProtMetadataOperation.execute",
       "line": 135,
       "metric": 86,
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/fetch_uniprot_metadata.py::_store_rows::249",
+      "key": "method::protea/core/operations/fetch_uniprot_metadata.py::FetchUniProtMetadataOperation._store_rows",
       "kind": "method",
       "path": "protea/core/operations/fetch_uniprot_metadata.py",
-      "name": "_store_rows",
+      "name": "FetchUniProtMetadataOperation._store_rows",
       "line": 249,
       "metric": 78,
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/generate_evaluation_set.py::execute::82",
+      "key": "method::protea/core/operations/generate_evaluation_set.py::GenerateEvaluationSetOperation.execute",
       "kind": "method",
       "path": "protea/core/operations/generate_evaluation_set.py",
-      "name": "execute",
+      "name": "GenerateEvaluationSetOperation.execute",
       "line": 82,
       "metric": 89,
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/insert_proteins.py::execute::78",
+      "key": "method::protea/core/operations/insert_proteins.py::InsertProteinsOperation.execute",
       "kind": "method",
       "path": "protea/core/operations/insert_proteins.py",
-      "name": "execute",
+      "name": "InsertProteinsOperation.execute",
       "line": 78,
       "metric": 97,
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/insert_proteins.py::_store_records::202",
+      "key": "method::protea/core/operations/insert_proteins.py::InsertProteinsOperation._store_records",
       "kind": "method",
       "path": "protea/core/operations/insert_proteins.py",
-      "name": "_store_records",
+      "name": "InsertProteinsOperation._store_records",
       "line": 202,
       "metric": 123,
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/load_goa_annotations.py::execute::87",
+      "key": "method::protea/core/operations/load_goa_annotations.py::LoadGOAAnnotationsOperation.execute",
       "kind": "method",
       "path": "protea/core/operations/load_goa_annotations.py",
-      "name": "execute",
+      "name": "LoadGOAAnnotationsOperation.execute",
       "line": 87,
       "metric": 119,
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/load_goa_annotations.py::_maybe_enqueue_atomic_eval::218",
+      "key": "method::protea/core/operations/load_goa_annotations.py::LoadGOAAnnotationsOperation._maybe_enqueue_atomic_eval",
       "kind": "method",
       "path": "protea/core/operations/load_goa_annotations.py",
-      "name": "_maybe_enqueue_atomic_eval",
+      "name": "LoadGOAAnnotationsOperation._maybe_enqueue_atomic_eval",
       "line": 218,
       "metric": 88,
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/load_ontology_snapshot.py::execute::59",
+      "key": "method::protea/core/operations/load_ontology_snapshot.py::LoadOntologySnapshotOperation.execute",
       "kind": "method",
       "path": "protea/core/operations/load_ontology_snapshot.py",
-      "name": "execute",
+      "name": "LoadOntologySnapshotOperation.execute",
       "line": 59,
       "metric": 154,
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/load_quickgo_annotations.py::execute::91",
+      "key": "method::protea/core/operations/load_quickgo_annotations.py::LoadQuickGOAnnotationsOperation.execute",
       "kind": "method",
       "path": "protea/core/operations/load_quickgo_annotations.py",
-      "name": "execute",
+      "name": "LoadQuickGOAnnotationsOperation.execute",
       "line": 91,
       "metric": 121,
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/predict_go_terms.py::execute::237",
+      "key": "method::protea/core/operations/predict_go_terms.py::PredictGOTermsOperation.execute",
       "kind": "method",
       "path": "protea/core/operations/predict_go_terms.py",
-      "name": "execute",
+      "name": "PredictGOTermsOperation.execute",
       "line": 237,
       "metric": 144,
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/predict_go_terms.py::execute::451",
+      "key": "method::protea/core/operations/predict_go_terms.py::PredictGOTermsBatchOperation.execute",
       "kind": "method",
       "path": "protea/core/operations/predict_go_terms.py",
-      "name": "execute",
+      "name": "PredictGOTermsBatchOperation.execute",
       "line": 451,
       "metric": 334,
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/predict_go_terms.py::_apply_reranker_if_aligned::788",
+      "key": "method::protea/core/operations/predict_go_terms.py::PredictGOTermsBatchOperation._apply_reranker_if_aligned",
       "kind": "method",
       "path": "protea/core/operations/predict_go_terms.py",
-      "name": "_apply_reranker_if_aligned",
+      "name": "PredictGOTermsBatchOperation._apply_reranker_if_aligned",
       "line": 788,
       "metric": 103,
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/predict_go_terms.py::_load_reference_data::914",
+      "key": "method::protea/core/operations/predict_go_terms.py::PredictGOTermsBatchOperation._load_reference_data",
       "kind": "method",
       "path": "protea/core/operations/predict_go_terms.py",
-      "name": "_load_reference_data",
+      "name": "PredictGOTermsBatchOperation._load_reference_data",
       "line": 914,
       "metric": 91,
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/predict_go_terms.py::_load_reference_data_per_aspect::1006",
+      "key": "method::protea/core/operations/predict_go_terms.py::PredictGOTermsBatchOperation._load_reference_data_per_aspect",
       "kind": "method",
       "path": "protea/core/operations/predict_go_terms.py",
-      "name": "_load_reference_data_per_aspect",
+      "name": "PredictGOTermsBatchOperation._load_reference_data_per_aspect",
       "line": 1006,
       "metric": 175,
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/predict_go_terms.py::_run_aspect_separated_knn::1182",
+      "key": "method::protea/core/operations/predict_go_terms.py::PredictGOTermsBatchOperation._run_aspect_separated_knn",
       "kind": "method",
       "path": "protea/core/operations/predict_go_terms.py",
-      "name": "_run_aspect_separated_knn",
+      "name": "PredictGOTermsBatchOperation._run_aspect_separated_knn",
       "line": 1182,
       "metric": 216,
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/predict_go_terms.py::_load_annotations_for::1484",
+      "key": "method::protea/core/operations/predict_go_terms.py::PredictGOTermsBatchOperation._load_annotations_for",
       "kind": "method",
       "path": "protea/core/operations/predict_go_terms.py",
-      "name": "_load_annotations_for",
+      "name": "PredictGOTermsBatchOperation._load_annotations_for",
       "line": 1484,
       "metric": 64,
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/predict_go_terms.py::_predict_batch::1598",
+      "key": "method::protea/core/operations/predict_go_terms.py::PredictGOTermsBatchOperation._predict_batch",
       "kind": "method",
       "path": "protea/core/operations/predict_go_terms.py",
-      "name": "_predict_batch",
+      "name": "PredictGOTermsBatchOperation._predict_batch",
       "line": 1598,
       "metric": 170,
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/run_cafa_evaluation.py::_patch_query_known_features::115",
+      "key": "method::protea/core/operations/run_cafa_evaluation.py::RunCafaEvaluationOperation.execute",
       "kind": "method",
       "path": "protea/core/operations/run_cafa_evaluation.py",
-      "name": "_patch_query_known_features",
-      "line": 115,
-      "metric": 80,
-      "threshold": 60
-    },
-    {
-      "key": "method::protea/core/operations/run_cafa_evaluation.py::execute::326",
-      "kind": "method",
-      "path": "protea/core/operations/run_cafa_evaluation.py",
-      "name": "execute",
-      "line": 326,
+      "name": "RunCafaEvaluationOperation.execute",
+      "line": 175,
       "metric": 472,
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/run_cafa_evaluation.py::_write_predictions::859",
+      "key": "method::protea/core/operations/run_cafa_evaluation.py::RunCafaEvaluationOperation._write_predictions",
       "kind": "method",
       "path": "protea/core/operations/run_cafa_evaluation.py",
-      "name": "_write_predictions",
-      "line": 859,
+      "name": "RunCafaEvaluationOperation._write_predictions",
+      "line": 708,
       "metric": 67,
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/run_cafa_evaluation.py::_write_predictions_per_aspect::980",
+      "key": "method::protea/core/operations/run_cafa_evaluation.py::RunCafaEvaluationOperation._write_predictions_per_aspect",
       "kind": "method",
       "path": "protea/core/operations/run_cafa_evaluation.py",
-      "name": "_write_predictions_per_aspect",
-      "line": 980,
+      "name": "RunCafaEvaluationOperation._write_predictions_per_aspect",
+      "line": 829,
       "metric": 78,
       "threshold": 60
     },
     {
-      "key": "method::protea/core/parquet_export.py::export_reranker_parquets::82",
+      "key": "method::protea/core/parquet_export.py::export_reranker_parquets",
       "kind": "method",
       "path": "protea/core/parquet_export.py",
       "name": "export_reranker_parquets",
@@ -457,7 +448,7 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/scoring.py::compute_score::101",
+      "key": "method::protea/core/scoring.py::compute_score",
       "kind": "method",
       "path": "protea/core/scoring.py",
       "name": "compute_score",
@@ -466,7 +457,7 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/training_dump_helpers.py::_preload_all_embeddings::153",
+      "key": "method::protea/core/training_dump_helpers.py::_preload_all_embeddings",
       "kind": "method",
       "path": "protea/core/training_dump_helpers.py",
       "name": "_preload_all_embeddings",
@@ -475,7 +466,7 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/training_dump_helpers.py::_build_reference_from_cache::228",
+      "key": "method::protea/core/training_dump_helpers.py::_build_reference_from_cache",
       "kind": "method",
       "path": "protea/core/training_dump_helpers.py",
       "name": "_build_reference_from_cache",
@@ -484,7 +475,7 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/training_dump_helpers.py::_knn_transfer_and_label::346",
+      "key": "method::protea/core/training_dump_helpers.py::_knn_transfer_and_label",
       "kind": "method",
       "path": "protea/core/training_dump_helpers.py",
       "name": "_knn_transfer_and_label",
@@ -493,25 +484,25 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/training_dump_helpers.py::execute::1209",
+      "key": "method::protea/core/training_dump_helpers.py::TrainRerankerAutoOperation.execute",
       "kind": "method",
       "path": "protea/core/training_dump_helpers.py",
-      "name": "execute",
+      "name": "TrainRerankerAutoOperation.execute",
       "line": 1209,
       "metric": 659,
       "threshold": 60
     },
     {
-      "key": "method::protea/infrastructure/queue/consumer.py::_on_message::241",
+      "key": "method::protea/infrastructure/queue/consumer.py::OperationConsumer._on_message",
       "kind": "method",
       "path": "protea/infrastructure/queue/consumer.py",
-      "name": "_on_message",
+      "name": "OperationConsumer._on_message",
       "line": 241,
       "metric": 185,
       "threshold": 60
     },
     {
-      "key": "method::protea/infrastructure/settings.py::load_settings::41",
+      "key": "method::protea/infrastructure/settings.py::load_settings",
       "kind": "method",
       "path": "protea/infrastructure/settings.py",
       "name": "load_settings",
@@ -520,7 +511,7 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/services/annotations_service.py::iter_delta_proteins_fasta::263",
+      "key": "method::protea/services/annotations_service.py::iter_delta_proteins_fasta",
       "kind": "method",
       "path": "protea/services/annotations_service.py",
       "name": "iter_delta_proteins_fasta",
@@ -529,7 +520,7 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/services/annotations_service.py::get_go_subgraph_data::328",
+      "key": "method::protea/services/annotations_service.py::get_go_subgraph_data",
       "kind": "method",
       "path": "protea/services/annotations_service.py",
       "name": "get_go_subgraph_data",
@@ -538,7 +529,7 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/services/embeddings_service.py::validate_embedding_config_body::132",
+      "key": "method::protea/services/embeddings_service.py::validate_embedding_config_body",
       "kind": "method",
       "path": "protea/services/embeddings_service.py",
       "name": "validate_embedding_config_body",
@@ -547,7 +538,7 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/services/embeddings_service.py::iter_predictions_tsv::313",
+      "key": "method::protea/services/embeddings_service.py::iter_predictions_tsv",
       "kind": "method",
       "path": "protea/services/embeddings_service.py",
       "name": "iter_predictions_tsv",
@@ -556,7 +547,7 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/services/embeddings_service.py::list_proteins_in_prediction_set::652",
+      "key": "method::protea/services/embeddings_service.py::list_proteins_in_prediction_set",
       "kind": "method",
       "path": "protea/services/embeddings_service.py",
       "name": "list_proteins_in_prediction_set",
@@ -565,7 +556,7 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/services/embeddings_service.py::get_predictions_for_protein::751",
+      "key": "method::protea/services/embeddings_service.py::get_predictions_for_protein",
       "kind": "method",
       "path": "protea/services/embeddings_service.py",
       "name": "get_predictions_for_protein",
@@ -574,7 +565,7 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/services/scoring_service.py::iter_training_data::705",
+      "key": "method::protea/services/scoring_service.py::iter_training_data",
       "kind": "method",
       "path": "protea/services/scoring_service.py",
       "name": "iter_training_data",
@@ -583,7 +574,7 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/services/scoring_service.py::score_predictions_with_reranker::783",
+      "key": "method::protea/services/scoring_service.py::score_predictions_with_reranker",
       "kind": "method",
       "path": "protea/services/scoring_service.py",
       "name": "score_predictions_with_reranker",
@@ -592,7 +583,7 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/services/scoring_service.py::compute_reranker_metrics_data::912",
+      "key": "method::protea/services/scoring_service.py::compute_reranker_metrics_data",
       "kind": "method",
       "path": "protea/services/scoring_service.py",
       "name": "compute_reranker_metrics_data",
@@ -601,7 +592,7 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/services/scoring_service.py::compute_prediction_metrics::1058",
+      "key": "method::protea/services/scoring_service.py::compute_prediction_metrics",
       "kind": "method",
       "path": "protea/services/scoring_service.py",
       "name": "compute_prediction_metrics",
@@ -610,16 +601,16 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/workers/stale_job_reaper.py::_reap::83",
+      "key": "method::protea/workers/stale_job_reaper.py::StaleJobReaper._reap",
       "kind": "method",
       "path": "protea/workers/stale_job_reaper.py",
-      "name": "_reap",
+      "name": "StaleJobReaper._reap",
       "line": 83,
       "metric": 67,
       "threshold": 60
     },
     {
-      "key": "params::protea/api/routers/jobs.py::list_jobs::119",
+      "key": "params::protea/api/routers/jobs.py::list_jobs",
       "kind": "params",
       "path": "protea/api/routers/jobs.py",
       "name": "list_jobs",
@@ -628,7 +619,7 @@
       "threshold": 6
     },
     {
-      "key": "params::protea/api/routers/reranker_models.py::_register_model::99",
+      "key": "params::protea/api/routers/reranker_models.py::_register_model",
       "kind": "params",
       "path": "protea/api/routers/reranker_models.py",
       "name": "_register_model",
@@ -637,7 +628,7 @@
       "threshold": 6
     },
     {
-      "key": "params::protea/api/routers/reranker_models.py::import_reranker_model_multipart::192",
+      "key": "params::protea/api/routers/reranker_models.py::import_reranker_model_multipart",
       "kind": "params",
       "path": "protea/api/routers/reranker_models.py",
       "name": "import_reranker_model_multipart",
@@ -646,7 +637,7 @@
       "threshold": 6
     },
     {
-      "key": "params::protea/api/routers/scoring.py::compute_metrics::179",
+      "key": "params::protea/api/routers/scoring.py::compute_metrics",
       "kind": "params",
       "path": "protea/api/routers/scoring.py",
       "name": "compute_metrics",
@@ -655,7 +646,7 @@
       "threshold": 6
     },
     {
-      "key": "params::protea/core/disk_cache.py::_save_anno_csr_to_disk::123",
+      "key": "params::protea/core/disk_cache.py::_save_anno_csr_to_disk",
       "kind": "params",
       "path": "protea/core/disk_cache.py",
       "name": "_save_anno_csr_to_disk",
@@ -664,7 +655,7 @@
       "threshold": 6
     },
     {
-      "key": "params::protea/core/disk_cache.py::_csr_lookup::142",
+      "key": "params::protea/core/disk_cache.py::_csr_lookup",
       "kind": "params",
       "path": "protea/core/disk_cache.py",
       "name": "_csr_lookup",
@@ -673,7 +664,7 @@
       "threshold": 6
     },
     {
-      "key": "params::protea/core/feature_enricher.py::enrich_v6_features::75",
+      "key": "params::protea/core/feature_enricher.py::enrich_v6_features",
       "kind": "params",
       "path": "protea/core/feature_enricher.py",
       "name": "enrich_v6_features",
@@ -682,7 +673,7 @@
       "threshold": 6
     },
     {
-      "key": "params::protea/core/feature_enricher.py::expand_predictions_to_ancestors::116",
+      "key": "params::protea/core/feature_enricher.py::expand_predictions_to_ancestors",
       "kind": "params",
       "path": "protea/core/feature_enricher.py",
       "name": "expand_predictions_to_ancestors",
@@ -691,7 +682,7 @@
       "threshold": 6
     },
     {
-      "key": "params::protea/core/operations/compute_embeddings.py::_embed_t5::780",
+      "key": "params::protea/core/operations/compute_embeddings.py::_embed_t5",
       "kind": "params",
       "path": "protea/core/operations/compute_embeddings.py",
       "name": "_embed_t5",
@@ -700,61 +691,61 @@
       "threshold": 6
     },
     {
-      "key": "params::protea/core/operations/load_quickgo_annotations.py::_store_buffer::296",
+      "key": "params::protea/core/operations/load_quickgo_annotations.py::LoadQuickGOAnnotationsOperation._store_buffer",
       "kind": "params",
       "path": "protea/core/operations/load_quickgo_annotations.py",
-      "name": "_store_buffer",
+      "name": "LoadQuickGOAnnotationsOperation._store_buffer",
       "line": 296,
       "metric": 7,
       "threshold": 6
     },
     {
-      "key": "params::protea/core/operations/predict_go_terms.py::_run_aspect_separated_knn::1182",
+      "key": "params::protea/core/operations/predict_go_terms.py::PredictGOTermsBatchOperation._run_aspect_separated_knn",
       "kind": "params",
       "path": "protea/core/operations/predict_go_terms.py",
-      "name": "_run_aspect_separated_knn",
+      "name": "PredictGOTermsBatchOperation._run_aspect_separated_knn",
       "line": 1182,
       "metric": 8,
       "threshold": 6
     },
     {
-      "key": "params::protea/core/operations/predict_go_terms.py::_predict_batch::1598",
+      "key": "params::protea/core/operations/predict_go_terms.py::PredictGOTermsBatchOperation._predict_batch",
       "kind": "params",
       "path": "protea/core/operations/predict_go_terms.py",
-      "name": "_predict_batch",
+      "name": "PredictGOTermsBatchOperation._predict_batch",
       "line": 1598,
       "metric": 11,
       "threshold": 6
     },
     {
-      "key": "params::protea/core/operations/run_cafa_evaluation.py::_write_predictions::859",
+      "key": "params::protea/core/operations/run_cafa_evaluation.py::RunCafaEvaluationOperation._write_predictions",
       "kind": "params",
       "path": "protea/core/operations/run_cafa_evaluation.py",
-      "name": "_write_predictions",
-      "line": 859,
+      "name": "RunCafaEvaluationOperation._write_predictions",
+      "line": 708,
       "metric": 10,
       "threshold": 6
     },
     {
-      "key": "params::protea/core/operations/run_cafa_evaluation.py::_write_predictions_reranked::927",
+      "key": "params::protea/core/operations/run_cafa_evaluation.py::RunCafaEvaluationOperation._write_predictions_reranked",
       "kind": "params",
       "path": "protea/core/operations/run_cafa_evaluation.py",
-      "name": "_write_predictions_reranked",
-      "line": 927,
+      "name": "RunCafaEvaluationOperation._write_predictions_reranked",
+      "line": 776,
       "metric": 9,
       "threshold": 6
     },
     {
-      "key": "params::protea/core/operations/run_cafa_evaluation.py::_write_predictions_per_aspect::980",
+      "key": "params::protea/core/operations/run_cafa_evaluation.py::RunCafaEvaluationOperation._write_predictions_per_aspect",
       "kind": "params",
       "path": "protea/core/operations/run_cafa_evaluation.py",
-      "name": "_write_predictions_per_aspect",
-      "line": 980,
+      "name": "RunCafaEvaluationOperation._write_predictions_per_aspect",
+      "line": 829,
       "metric": 8,
       "threshold": 6
     },
     {
-      "key": "params::protea/core/parquet_export.py::export_reranker_parquets::82",
+      "key": "params::protea/core/parquet_export.py::export_reranker_parquets",
       "kind": "params",
       "path": "protea/core/parquet_export.py",
       "name": "export_reranker_parquets",
@@ -763,7 +754,7 @@
       "threshold": 6
     },
     {
-      "key": "params::protea/core/retry.py::with_retry::67",
+      "key": "params::protea/core/retry.py::with_retry",
       "kind": "params",
       "path": "protea/core/retry.py",
       "name": "with_retry",
@@ -772,7 +763,7 @@
       "threshold": 6
     },
     {
-      "key": "params::protea/core/training_dump_helpers.py::_knn_transfer_and_label::346",
+      "key": "params::protea/core/training_dump_helpers.py::_knn_transfer_and_label",
       "kind": "params",
       "path": "protea/core/training_dump_helpers.py",
       "name": "_knn_transfer_and_label",
@@ -781,25 +772,25 @@
       "threshold": 6
     },
     {
-      "key": "params::protea/core/training_dump_helpers.py::_dump_frozen_dataset::1162",
+      "key": "params::protea/core/training_dump_helpers.py::TrainRerankerAutoOperation._dump_frozen_dataset",
       "kind": "params",
       "path": "protea/core/training_dump_helpers.py",
-      "name": "_dump_frozen_dataset",
+      "name": "TrainRerankerAutoOperation._dump_frozen_dataset",
       "line": 1162,
       "metric": 11,
       "threshold": 6
     },
     {
-      "key": "params::protea/infrastructure/queue/consumer.py::__init__::181",
+      "key": "params::protea/infrastructure/queue/consumer.py::OperationConsumer.__init__",
       "kind": "params",
       "path": "protea/infrastructure/queue/consumer.py",
-      "name": "__init__",
+      "name": "OperationConsumer.__init__",
       "line": 181,
       "metric": 7,
       "threshold": 6
     },
     {
-      "key": "params::protea/services/scoring_service.py::compute_prediction_metrics::1058",
+      "key": "params::protea/services/scoring_service.py::compute_prediction_metrics",
       "kind": "params",
       "path": "protea/services/scoring_service.py",
       "name": "compute_prediction_metrics",
