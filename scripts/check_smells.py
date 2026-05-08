@@ -13,9 +13,11 @@ worsen an existing one. Removed offenders shrink the baseline silently
 on --write-baseline.
 
 Usage:
-  python scripts/check_smells.py                   # check vs baseline
+  python scripts/check_smells.py                   # auto-detects src/ or protea/
   python scripts/check_smells.py --write-baseline  # seed/refresh after a legit refactor
-  python scripts/check_smells.py --target src      # different package root
+  python scripts/check_smells.py --target foo      # explicit package override
+
+Single-source-of-truth file: keep all repo copies identical via mechanical sync.
 """
 
 from __future__ import annotations
@@ -210,7 +212,12 @@ def fmt_offender(o: Offender) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--target", type=Path, default=Path("protea"))
+    parser.add_argument(
+        "--target",
+        type=Path,
+        default=None,
+        help="Package root to scan. Auto-detects src/ or protea/ if omitted.",
+    )
     parser.add_argument("--baseline", type=Path, default=Path(".smell-baseline.json"))
     parser.add_argument(
         "--write-baseline",
@@ -224,6 +231,15 @@ def main() -> int:
         help="Substring exclusion (repeatable). Replaces defaults if used.",
     )
     args = parser.parse_args()
+
+    if args.target is None:
+        for candidate in (Path("src"), Path("protea")):
+            if candidate.is_dir():
+                args.target = candidate
+                break
+        if args.target is None:
+            print("could not auto-detect target; pass --target", file=sys.stderr)
+            return 2
 
     if not args.target.exists():
         print(f"target {args.target} does not exist", file=sys.stderr)
