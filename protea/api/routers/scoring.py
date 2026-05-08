@@ -36,12 +36,8 @@ from fastapi.responses import StreamingResponse
 
 from protea.api.deps import get_session_factory
 from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
-from protea.infrastructure.orm.models.embedding.scoring_config import (
-    ScoringConfig,
-)
 from protea.infrastructure.session import session_scope
 from protea.services.scoring_service import (
-    PRESET_CONFIGS,
     BoosterUnavailableError,
     EntityNotFoundError,
     RerankerResponse,
@@ -50,41 +46,30 @@ from protea.services.scoring_service import (
     SignalCoverageError,
     compute_prediction_metrics,
     compute_reranker_metrics_data,
+    create_preset_configs_data,
+    create_scoring_config_data,
+    delete_scoring_config_data,
+    get_scoring_config_data,
     iter_reranked_predictions_tsv,
     iter_scored_predictions,
     iter_training_data,
+    list_scoring_configs_data,
     prepare_training_data_request,
     score_predictions_with_reranker,
     to_reranker_response,
-    to_response,
     validate_scoring_request,
 )
 
 router = APIRouter(prefix="/scoring", tags=["scoring"])
 
-# Preset ScoringConfigs are defined in protea.services.scoring_service.PRESET_CONFIGS.
-
-
-# ---------------------------------------------------------------------------
-# Request / response models
-# ---------------------------------------------------------------------------
-
-
-# ScoringConfigCreate / ScoringConfigResponse are exported by the service
-# module; the router re-imports them so route signatures keep working.
-
-
-# ---------------------------------------------------------------------------
-# ScoringConfig CRUD
-# ---------------------------------------------------------------------------
+# ScoringConfig CRUD ---------------------------------------------------------
 
 
 @router.get("/configs", response_model=list[ScoringConfigResponse])
 def list_scoring_configs(factory=Depends(get_session_factory)):
     """Return all stored ScoringConfigs ordered by creation time."""
     with session_scope(factory) as session:
-        configs = session.query(ScoringConfig).order_by(ScoringConfig.created_at).all()
-        return [to_response(c) for c in configs]
+        return list_scoring_configs_data(session)
 
 
 @router.post("/configs", response_model=ScoringConfigResponse, status_code=201)
@@ -92,44 +77,21 @@ def create_scoring_config(
     body: ScoringConfigCreate,
     factory=Depends(get_session_factory),
 ):
-    """Create a new ScoringConfig.
-
-    Validates that ``formula`` is one of the supported values and that every
-    key in ``weights`` is a recognised signal name.  Evidence weight validation
-    is handled by the Pydantic model.
-    """
-    # Pydantic field validators on ScoringConfigCreate already enforce
-    # `formula in VALID_FORMULAS` and reject unknown signal keys via
-    # 422 before this body runs; no manual re-check needed here.
+    """Create a new ScoringConfig. Pydantic validators on ``ScoringConfigCreate``
+    already enforce ``formula`` membership + signal-name allowlist (422)."""
     with session_scope(factory) as session:
-        config = ScoringConfig(
-            name=body.name,
-            formula=body.formula,
-            weights=body.weights,
-            evidence_weights=body.evidence_weights,
-            description=body.description,
-        )
-        session.add(config)
-        session.flush()
-        return to_response(config)
+        return create_scoring_config_data(session, body)
 
 
 @router.post("/configs/presets", status_code=201)
 def create_preset_configs(factory=Depends(get_session_factory)):
     """Seed the database with the four built-in preset ScoringConfigs.
 
-    Idempotent — presets that already exist (matched by name) are silently
-    skipped.  Returns the list of names that were actually created.
+    Idempotent — presets matched by name are skipped silently. Returns
+    the list of preset names that were actually created.
     """
-    created: list[str] = []
     with session_scope(factory) as session:
-        existing_names = {row[0] for row in session.query(ScoringConfig.name).all()}
-        for preset in PRESET_CONFIGS:
-            if preset["name"] in existing_names:
-                continue
-            session.add(ScoringConfig(**preset))
-            created.append(preset["name"])
-    return {"created": created}
+        return {"created": create_preset_configs_data(session)}
 
 
 @router.get("/configs/{config_id}", response_model=ScoringConfigResponse)
@@ -138,11 +100,11 @@ def get_scoring_config(
     factory=Depends(get_session_factory),
 ):
     """Retrieve a single ScoringConfig by UUID."""
-    with session_scope(factory) as session:
-        config = session.get(ScoringConfig, config_id)
-        if config is None:
-            raise HTTPException(status_code=404, detail="ScoringConfig not found")
-        return to_response(config)
+    try:
+        with session_scope(factory) as session:
+            return get_scoring_config_data(session, config_id)
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.delete("/configs/{config_id}", status_code=204)
@@ -151,17 +113,14 @@ def delete_scoring_config(
     factory=Depends(get_session_factory),
 ):
     """Delete a ScoringConfig by UUID."""
-    with session_scope(factory) as session:
-        config = session.get(ScoringConfig, config_id)
-        if config is None:
-            raise HTTPException(status_code=404, detail="ScoringConfig not found")
-        session.delete(config)
+    try:
+        with session_scope(factory) as session:
+            delete_scoring_config_data(session, config_id)
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-# ---------------------------------------------------------------------------
-# Scored TSV endpoint
-# ---------------------------------------------------------------------------
-
+# Scored TSV endpoint ----------------------------------------
 
 @router.get("/prediction-sets/{set_id}/score.tsv")
 def download_scored_predictions(
@@ -214,10 +173,7 @@ def download_scored_predictions(
     )
 
 
-# ---------------------------------------------------------------------------
-# CAFA metrics endpoint
-# ---------------------------------------------------------------------------
-
+# CAFA metrics endpoint ----------------------------------------
 
 @router.get("/prediction-sets/{set_id}/metrics")
 def compute_metrics(
@@ -267,10 +223,7 @@ def compute_metrics(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-# ---------------------------------------------------------------------------
-# Training data endpoint (re-ranker)
-# ---------------------------------------------------------------------------
-
+# Training data endpoint (re-ranker) ----------------------------------------
 @router.get(
     "/prediction-sets/{set_id}/training-data.tsv",
     summary="Export labeled training data for the re-ranker",
@@ -321,10 +274,7 @@ def download_training_data(
     )
 
 
-# ---------------------------------------------------------------------------
-# Re-ranker model CRUD + train + apply
-# ---------------------------------------------------------------------------
-
+# Re-ranker model CRUD + train + apply ----------------------------------------
 
 # RerankerResponse + to_reranker_response are exported by the service module.
 
