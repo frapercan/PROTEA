@@ -133,15 +133,6 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/feature_enricher.py::expand_predictions_to_ancestors",
-      "kind": "method",
-      "path": "protea/core/feature_enricher.py",
-      "name": "expand_predictions_to_ancestors",
-      "line": 129,
-      "metric": 113,
-      "threshold": 60
-    },
-    {
       "key": "method::protea/core/metrics.py::compute_cafa_metrics",
       "kind": "method",
       "path": "protea/core/metrics.py",
@@ -542,7 +533,7 @@
       "kind": "params",
       "path": "protea/core/feature_enricher.py",
       "name": "expand_predictions_to_ancestors",
-      "line": 129,
+      "line": 136,
       "metric": 7,
       "threshold": 6
     },
