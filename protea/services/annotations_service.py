@@ -321,6 +321,98 @@ def iter_delta_proteins_fasta(
     return lines
 
 
+def evaluation_result_to_dict(r: EvaluationResult) -> dict[str, Any]:
+    """Serialise an :class:`EvaluationResult` to its API dict shape."""
+    return {
+        "id": str(r.id),
+        "evaluation_set_id": str(r.evaluation_set_id),
+        "prediction_set_id": str(r.prediction_set_id),
+        "scoring_config_id": str(r.scoring_config_id) if r.scoring_config_id else None,
+        "reranker_model_id": str(r.reranker_model_id) if r.reranker_model_id else None,
+        "reranker_config": r.reranker_config,
+        "job_id": str(r.job_id) if r.job_id else None,
+        "created_at": r.created_at.isoformat(),
+        "results": r.results,
+    }
+
+
+def list_evaluation_results_data(
+    session: Session,
+    eval_id: uuid.UUID,
+) -> list[dict[str, Any]]:
+    """List EvaluationResult rows for one EvaluationSet (newest first).
+
+    Raises :class:`EntityNotFoundError` when the EvaluationSet does
+    not resolve.
+    """
+    if session.get(EvaluationSet, eval_id) is None:
+        raise EntityNotFoundError("EvaluationSet", eval_id)
+    rows = (
+        session.query(EvaluationResult)
+        .filter(EvaluationResult.evaluation_set_id == eval_id)
+        .order_by(EvaluationResult.created_at.desc())
+        .all()
+    )
+    return [evaluation_result_to_dict(r) for r in rows]
+
+
+def get_eval_result_with_keys(
+    session: Session,
+    eval_id: uuid.UUID,
+    result_id: uuid.UUID,
+) -> tuple[EvaluationResult, list[str]]:
+    """Fetch an EvaluationResult belonging to ``eval_id``; return (row, artifact_keys).
+
+    Raises :class:`EntityNotFoundError` ("EvaluationResult") when
+    the result does not exist or does not belong to ``eval_id``.
+    """
+    result = session.get(EvaluationResult, result_id)
+    if result is None or result.evaluation_set_id != eval_id:
+        raise EntityNotFoundError("EvaluationResult", result_id)
+    keys: list[str] = (result.results or {}).get("artifacts", {}).get("keys") or []
+    return result, keys
+
+
+def delete_eval_result_collect_keys(
+    session: Session,
+    eval_id: uuid.UUID,
+    result_id: uuid.UUID,
+) -> list[str]:
+    """Delete the EvaluationResult and return the artifact keys to clean up.
+
+    Same split as :func:`delete_evaluation_set_collect_keys`: the
+    DB delete happens here; the artifact-store deletion is the
+    router's responsibility (it owns the ``ArtifactStore`` factory).
+    """
+    result, keys = get_eval_result_with_keys(session, eval_id, result_id)
+    session.delete(result)
+    return keys
+
+
+def render_evaluation_metrics_tsv(
+    result: EvaluationResult,
+    aspect_codes: tuple[str, ...],
+) -> Any:
+    """Yield TSV rows for the per-(setting, namespace) metrics summary.
+
+    The caller passes the aspect-codes tuple (``ASPECT_CAFA_CODES``)
+    so the service stays free of the domain layer. Returns a
+    generator suitable for ``StreamingResponse``.
+    """
+    yield "setting\tnamespace\tfmax\tprecision\trecall\ttau\tcoverage\tn_proteins\n"
+    for setting in ("NK", "LK", "PK"):
+        ns_data = result.results.get(setting, {})
+        for ns in aspect_codes:
+            m = ns_data.get(ns)
+            if m is None:
+                continue
+            yield (
+                f"{setting}\t{ns}\t{m.get('fmax', '')}\t{m.get('precision', '')}\t"
+                f"{m.get('recall', '')}\t{m.get('tau', '')}\t{m.get('coverage', '')}\t"
+                f"{m.get('n_proteins', '')}\n"
+            )
+
+
 def evaluation_set_to_dict(e: EvaluationSet) -> dict[str, Any]:
     """Serialise an :class:`EvaluationSet` to its API dict shape."""
     return {
@@ -395,8 +487,13 @@ __all__ = [
     "get_annotation_set_data",
     "get_evaluation_set_data",
     "get_snapshot_data",
+    "delete_eval_result_collect_keys",
+    "evaluation_result_to_dict",
+    "get_eval_result_with_keys",
     "iter_delta_proteins_fasta",
     "iter_groundtruth_tsv",
+    "list_evaluation_results_data",
+    "render_evaluation_metrics_tsv",
     "list_annotation_sets_data",
     "list_evaluation_sets_data",
     "list_snapshots_data",
