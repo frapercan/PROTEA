@@ -556,33 +556,6 @@
       "threshold": 6
     },
     {
-      "key": "params::protea/core/operations/_run_cafa_artifacts.py::write_predictions",
-      "kind": "params",
-      "path": "protea/core/operations/_run_cafa_artifacts.py",
-      "name": "write_predictions",
-      "line": 86,
-      "metric": 9,
-      "threshold": 6
-    },
-    {
-      "key": "params::protea/core/operations/_run_cafa_artifacts.py::write_predictions_reranked",
-      "kind": "params",
-      "path": "protea/core/operations/_run_cafa_artifacts.py",
-      "name": "write_predictions_reranked",
-      "line": 154,
-      "metric": 8,
-      "threshold": 6
-    },
-    {
-      "key": "params::protea/core/operations/_run_cafa_artifacts.py::write_predictions_per_aspect",
-      "kind": "params",
-      "path": "protea/core/operations/_run_cafa_artifacts.py",
-      "name": "write_predictions_per_aspect",
-      "line": 206,
-      "metric": 7,
-      "threshold": 6
-    },
-    {
       "key": "params::protea/core/operations/compute_embeddings.py::_embed_t5",
       "kind": "params",
       "path": "protea/core/operations/compute_embeddings.py",
