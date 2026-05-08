@@ -447,5 +447,8 @@ expanding this range may further improve performance.
      regenerate every figure and table on this page.
    - :doc:`/architecture/evaluation` — the CAFA temporal-holdout protocol
      that defines the NK/LK/PK categories and the IA-weighted Fmax used here.
-   - :doc:`/architecture/operations` — ``run_cafa_evaluation`` and
-     ``train_reranker`` are the operations that produced these numbers.
+   - :doc:`/architecture/operations` — ``run_cafa_evaluation`` is the
+     operation that produced the evaluation numbers; the re-ranker
+     boosters that feed those numbers are now trained in
+     ``protea-reranker-lab`` and registered through
+     ``POST /reranker-models/import``.
