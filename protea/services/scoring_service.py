@@ -29,7 +29,6 @@ from sqlalchemy.orm import Session
 from protea.core.evaluation import compute_evaluation_data
 from protea.core.metrics import compute_cafa_metrics
 from protea.core.reranker import load_reranker, model_from_string
-from protea.core.reranker import predict as _reranker_predict
 from protea.core.scoring import compute_score
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
@@ -780,95 +779,11 @@ _RERANK_TSV_COLUMNS: tuple[str, ...] = (
 )
 
 
-def score_predictions_with_reranker(
-    session: Session,
-    *,
-    prediction_set_id: uuid.UUID,
-    reranker_id: uuid.UUID,
-) -> Any:
-    """Validate entities, load the booster, score every GOPrediction.
-
-    Returns a sorted ``pandas.DataFrame`` (descending ``reranker_score``
-    within each protein) ready for TSV emission, or an empty
-    DataFrame when the prediction set has no rows.
-
-    Materialises the full record set in memory; this matches the
-    existing endpoint's behaviour (the LightGBM batch predict needs
-    a single matrix).
-
-    Raises
-    ------
-    EntityNotFoundError
-        Either ``PredictionSet`` or ``RerankerModel`` does not exist.
-    BoosterUnavailableError
-        The RerankerModel row exists but no booster bytes are
-        reachable.
-    """
-    import pandas as pd
-
-    if session.get(PredictionSet, prediction_set_id) is None:
-        raise EntityNotFoundError("PredictionSet", prediction_set_id)
-    rm = session.get(RerankerModel, reranker_id)
-    if rm is None:
-        raise EntityNotFoundError("RerankerModel", reranker_id)
-    model = load_booster(rm)
-
-    records: list[dict[str, Any]] = []
-    for pred, go_id, aspect in (
-        session.query(GOPrediction, GOTerm.go_id, GOTerm.aspect)
-        .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
-        .filter(GOPrediction.prediction_set_id == prediction_set_id)
-        .yield_per(5000)
-    ):
-        records.append(
-            {
-                "protein_accession": pred.protein_accession,
-                "go_id": go_id,
-                "aspect": aspect or "",
-                "distance": pred.distance,
-                "ref_protein_accession": pred.ref_protein_accession or "",
-                "qualifier": pred.qualifier or "",
-                "evidence_code": pred.evidence_code or "",
-                "identity_nw": pred.identity_nw,
-                "similarity_nw": pred.similarity_nw,
-                "alignment_score_nw": pred.alignment_score_nw,
-                "gaps_pct_nw": pred.gaps_pct_nw,
-                "alignment_length_nw": pred.alignment_length_nw,
-                "identity_sw": pred.identity_sw,
-                "similarity_sw": pred.similarity_sw,
-                "alignment_score_sw": pred.alignment_score_sw,
-                "gaps_pct_sw": pred.gaps_pct_sw,
-                "alignment_length_sw": pred.alignment_length_sw,
-                "length_query": pred.length_query,
-                "length_ref": pred.length_ref,
-                "query_taxonomy_id": pred.query_taxonomy_id,
-                "ref_taxonomy_id": pred.ref_taxonomy_id,
-                "taxonomic_lca": pred.taxonomic_lca,
-                "taxonomic_distance": pred.taxonomic_distance,
-                "taxonomic_common_ancestors": pred.taxonomic_common_ancestors,
-                "taxonomic_relation": pred.taxonomic_relation or "",
-                "vote_count": pred.vote_count,
-                "k_position": pred.k_position,
-                "go_term_frequency": pred.go_term_frequency,
-                "ref_annotation_density": pred.ref_annotation_density,
-                "neighbor_distance_std": pred.neighbor_distance_std,
-                # NOTE: do not add a ``label`` column here — its
-                # presence makes ``predict`` route through
-                # ``prepare_dataset`` which expects every training
-                # column. At inference time we want the alignment
-                # branch that fills missing v6 features as NaN.
-            }
-        )
-
-    if not records:
-        return pd.DataFrame()
-
-    df = pd.DataFrame(records)
-    df["reranker_score"] = _reranker_predict(model, df)
-    return df.sort_values(
-        ["protein_accession", "reranker_score"],
-        ascending=[True, False],
-    )
+# score_predictions_with_reranker lives in _scoring_pipeline_helpers and
+# is re-exported below so existing router/CLI imports keep working unchanged.
+from protea.services._scoring_pipeline_helpers import (  # noqa: E402,F401
+    score_predictions_with_reranker,
+)
 
 
 def iter_reranked_predictions_tsv(
