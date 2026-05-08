@@ -146,6 +146,44 @@ def get_stack() -> StackResponse:
     return StackResponse(repos=_load_repos(), thesis_pdf_url=_thesis_pdf_url())
 
 
+def _fetch_repo_pulls(
+    client: httpx.Client,
+    repo: RepoEntry,
+) -> tuple[list[PullRequest], int | None, str | None]:
+    """Fetch open PRs for one repo. Returns (pulls, rate_remaining, error)."""
+    owner, name = _owner_repo(repo.github_url)
+    url = f"{_GITHUB_API}/repos/{owner}/{name}/pulls"
+    try:
+        resp = client.get(url, params={"state": "open", "per_page": 100})
+    except httpx.HTTPError as exc:
+        return [], None, str(exc)
+
+    rate_remaining = (
+        int(resp.headers["X-RateLimit-Remaining"])
+        if "X-RateLimit-Remaining" in resp.headers
+        else None
+    )
+    if resp.status_code != 200:
+        return [], rate_remaining, f"HTTP {resp.status_code}: {resp.text[:200]}"
+
+    pulls = [
+        PullRequest(
+            repo=repo.name,
+            number=item["number"],
+            title=item["title"],
+            url=item["html_url"],
+            state=item["state"],
+            draft=bool(item.get("draft", False)),
+            author=(item.get("user") or {}).get("login"),
+            created_at=item["created_at"],
+            updated_at=item["updated_at"],
+            labels=[lbl["name"] for lbl in item.get("labels", [])],
+        )
+        for item in resp.json()
+    ]
+    return pulls, rate_remaining, None
+
+
 @router.get("/stack/pulls", response_model=PullsResponse)
 def list_open_pulls() -> PullsResponse:
     """Aggregate open pull requests across every repo in the stack.
@@ -166,35 +204,12 @@ def list_open_pulls() -> PullsResponse:
 
     with _build_github_client() as client:
         for repo in repos:
-            owner, name = _owner_repo(repo.github_url)
-            url = f"{_GITHUB_API}/repos/{owner}/{name}/pulls"
-            try:
-                resp = client.get(url, params={"state": "open", "per_page": 100})
-                rate_remaining = (
-                    int(resp.headers["X-RateLimit-Remaining"])
-                    if "X-RateLimit-Remaining" in resp.headers
-                    else rate_remaining
-                )
-                if resp.status_code != 200:
-                    errors[repo.name] = f"HTTP {resp.status_code}: {resp.text[:200]}"
-                    continue
-                for item in resp.json():
-                    pulls.append(
-                        PullRequest(
-                            repo=repo.name,
-                            number=item["number"],
-                            title=item["title"],
-                            url=item["html_url"],
-                            state=item["state"],
-                            draft=bool(item.get("draft", False)),
-                            author=(item.get("user") or {}).get("login"),
-                            created_at=item["created_at"],
-                            updated_at=item["updated_at"],
-                            labels=[lbl["name"] for lbl in item.get("labels", [])],
-                        )
-                    )
-            except httpx.HTTPError as exc:
-                errors[repo.name] = str(exc)
+            repo_pulls, repo_rate, repo_err = _fetch_repo_pulls(client, repo)
+            pulls.extend(repo_pulls)
+            if repo_rate is not None:
+                rate_remaining = repo_rate
+            if repo_err is not None:
+                errors[repo.name] = repo_err
 
     pulls.sort(key=lambda p: p.updated_at, reverse=True)
     payload = PullsResponse(

@@ -106,15 +106,6 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/api/routers/stack.py::list_open_pulls",
-      "kind": "method",
-      "path": "protea/api/routers/stack.py",
-      "name": "list_open_pulls",
-      "line": 150,
-      "metric": 61,
-      "threshold": 60
-    },
-    {
       "key": "method::protea/core/evaluation.py::compute_evaluation_data",
       "kind": "method",
       "path": "protea/core/evaluation.py",

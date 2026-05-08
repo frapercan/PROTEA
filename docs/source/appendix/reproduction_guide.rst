@@ -19,10 +19,36 @@ Reproduction guide
    The expected Fmax values cited throughout this guide (baseline
    0.412 / 0.590 / 0.668, the +1.5–4 % ``alignment_weighted`` gain, the v2/v3
    re-ranker targets) are the pre-2026-04-10 numbers and will be refreshed
-   for the Zenodo deposit. The *procedure* itself — every curl command,
-   payload, operation name, and the order in which they are issued — is
-   stable and will not change. See :doc:`/results` for the full provisional
+   for the Zenodo deposit. See :doc:`/results` for the full provisional
    notice and the reason behind the recompute.
+
+.. admonition:: API drift in Stage 4 (re-ranker training)
+   :class: caution
+
+   The curl recipes in **Stage 4 — Re-ranker training** below (Experiments
+   4–6) target the in-process ``POST /scoring/rerankers/train`` endpoint,
+   which was retired in F0 / T0.6: ``train_reranker`` and
+   ``train_reranker_auto`` are no longer registered in
+   ``operation_catalog.build_operation_registry()``. LightGBM training has
+   moved to the sibling repo
+   `protea-reranker-lab <https://github.com/frapercan/protea-reranker-lab>`_,
+   which consumes a frozen parquet dataset published by PROTEA via
+   ``export_research_dataset`` and registers the resulting booster through
+   ``POST /reranker-models/import``. The four-step flow is documented in
+   :ref:`Register a reranker from protea-reranker-lab
+   <howto-register-reranker>`.
+
+   The ``run_cafa_evaluation`` payloads in Stages 3 and 4 also use the old
+   field names ``scoring_config_name`` and ``reranker_name``; the current
+   payload uses ``scoring_config_id`` (UUID) and either the flat
+   ``reranker_id_{nk,lk,pk}`` UUIDs or the nested ``rerankers`` mapping
+   (see :class:`RunCafaEvaluationPayload` in
+   :mod:`protea.core.operations.run_cafa_evaluation`).
+
+   The historical experiments below produced the v1 / v2 / v3 boosters that
+   still back the numbers in :doc:`/results`; the *commands* must be
+   translated to the current API before they can be re-run. A staged
+   rewrite of this guide is on the doc-writer roadmap.
 
 This appendix documents the exact sequence of steps required to reproduce the
 experimental results reported in :doc:`../results`. The target is a fresh
