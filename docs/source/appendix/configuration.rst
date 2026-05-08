@@ -79,6 +79,27 @@ Environment variable overrides
      - Overrides ``storage.minio.secure`` — truthy enables HTTPS.
    * - ``PROTEA_ADMIN_TOKEN``
      - Overrides ``admin.token``.
+   * - ``PROTEA_REF_CACHE_DIR``
+     - Directory for the on-disk KNN reference cache (embedding +
+       annotation matrices keyed by ``(embedding_config_id,
+       annotation_set_id)``). Defaults to ``data/ref_cache``. Read by
+       :mod:`protea.core.disk_cache`.
+   * - ``PROTEA_PCA_ARTIFACTS_DIR``
+     - Directory for per-PLM PCA projection states (``.npz``) used to
+       pre-compute the ``emb_pca`` feature family. Defaults to
+       ``protea/artifacts/pca``. Read by :mod:`protea.core.pca_cache`.
+   * - ``PROTEA_GITHUB_TOKEN``
+     - GitHub token used by ``GET /stack/pulls`` to lift the
+       unauthenticated 60 req/h rate limit to 5000 req/h. ``GITHUB_TOKEN``
+       and ``GH_TOKEN`` are honoured as fallbacks (in that order). Any
+       value is accepted as long as the GitHub REST API recognises it.
+   * - ``PROTEA_METHOD_NUMPY_QUERY_CHUNK``
+     - Per-chunk query count for the numpy KNN backend (forwarded to
+       ``protea-method``). PROTEA auto-syncs this from
+       ``OperationTuning.numpy_query_chunk`` (set via
+       ``PROTEA_TUNING__OPERATION__NUMPY_QUERY_CHUNK`` or
+       ``system.yaml``); set the env var directly only as an escape
+       hatch — it short-circuits the tuning sync.
 
 Frontend
 --------
