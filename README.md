@@ -146,12 +146,17 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the branching strategy and developmen
 **Requirements:** Python 3.12, Docker (for integration tests)
 
 ```bash
-poetry install
-poetry run pytest              # unit tests
-poetry run pytest --with-postgres  # integration tests
-poetry run task lint           # ruff
-poetry run mypy protea         # type checking
+poetry install --with lint,test       # add ,docs if you build Sphinx
+poetry run pytest                     # unit tests
+poetry run pytest --with-postgres     # integration tests
+poetry run task lint                  # ruff
+poetry run mypy protea                # type checking
 ```
+
+> Default `poetry install` ships **CPU torch** (`pytorch-cpu` source) so CI
+> runners and the slim production Docker image stay lean. GPU embedding
+> workers run `bash scripts/install_gpu_torch.sh` after install to swap in
+> the CUDA wheel.
 
 ---
 

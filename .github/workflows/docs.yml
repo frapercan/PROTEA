@@ -39,10 +39,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .venv
-          key: venv-${{ runner.os }}-py${{ matrix.python-version }}-poetry${{ matrix.poetry-version }}-dev-${{ hashFiles('**/poetry.lock') }}
+          key: venv-${{ runner.os }}-py${{ matrix.python-version }}-poetry${{ matrix.poetry-version }}-docs-${{ hashFiles('**/poetry.lock') }}
 
-      - name: Install main + dev dependencies
-        run: poetry install --with dev
+      - name: Install main + docs dependencies
+        run: poetry install --with docs
 
       - name: Build Sphinx docs
-        run: poetry run task html_docs
+        run: poetry run make html -C docs

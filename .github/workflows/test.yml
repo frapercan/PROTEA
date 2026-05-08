@@ -39,10 +39,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .venv
-          key: venv-${{ runner.os }}-py${{ matrix.python-version }}-poetry${{ matrix.poetry-version }}-dev-${{ hashFiles('**/poetry.lock') }}
+          key: venv-${{ runner.os }}-py${{ matrix.python-version }}-poetry${{ matrix.poetry-version }}-test-${{ hashFiles('**/poetry.lock') }}
 
-      - name: Install dependencies
-        run: poetry install --with dev
+      - name: Install main + test dependencies
+        run: poetry install --with test
 
       - name: Run unit tests with coverage
         run: poetry run pytest --cov=protea --cov-report=xml --cov-fail-under=65 -q
