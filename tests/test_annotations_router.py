@@ -976,7 +976,7 @@ class TestRunCafaEvaluation:
 
         session.add.side_effect = add_side
 
-        with patch("protea.services.jobs_service.publish_job"):
+        with patch("protea.api.routers.annotations.publish_job"):
             resp = c.post(
                 f"/annotations/evaluation-sets/{eval_id}/run",
                 json={"prediction_set_id": pred_set_id},
@@ -997,7 +997,7 @@ class TestRunCafaEvaluation:
         pred_set_id = str(uuid4())
         session.get.return_value = None
 
-        with patch("protea.services.jobs_service.publish_job"):
+        with patch("protea.api.routers.annotations.publish_job"):
             resp = c.post(
                 f"/annotations/evaluation-sets/{eval_id}/run",
                 json={"prediction_set_id": pred_set_id},
