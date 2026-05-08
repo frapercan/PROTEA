@@ -59,7 +59,10 @@ class Offender:
 
     @property
     def key(self) -> str:
-        return f"{self.kind}::{self.path}::{self.name}::{self.line}"
+        # Line is intentionally excluded so an Extract Method that
+        # shifts the offender up or down the file does not look like
+        # a brand-new offender to the ratchet.
+        return f"{self.kind}::{self.path}::{self.name}"
 
 
 def is_excluded(path: Path, excludes: tuple[str, ...]) -> bool:
@@ -75,6 +78,56 @@ def _span(node: ast.AST) -> int:
     return end - start + 1
 
 
+class _OffenderVisitor(ast.NodeVisitor):
+    """Walks the AST tracking the enclosing class so methods get a
+    qualified ``Class.name`` identifier instead of bare ``name``.
+
+    Without the qualifier, two ``execute`` methods in different
+    classes of the same file collapse to one ratchet key and either
+    can shadow the other.
+    """
+
+    def __init__(self, rel: str) -> None:
+        self.rel = rel
+        self.out: list[Offender] = []
+        self._class_stack: list[str] = []
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:  # noqa: N802
+        length = _span(node)
+        if length > THRESHOLDS["class_loc"]:
+            self.out.append(
+                Offender("class", self.rel, node.name, node.lineno, length, THRESHOLDS["class_loc"])
+            )
+        self._class_stack.append(node.name)
+        self.generic_visit(node)
+        self._class_stack.pop()
+
+    def _visit_func(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        qualified = ".".join((*self._class_stack, node.name))
+        length = _span(node)
+        if length > THRESHOLDS["method_loc"]:
+            self.out.append(
+                Offender(
+                    "method", self.rel, qualified, node.lineno, length, THRESHOLDS["method_loc"]
+                )
+            )
+        args = node.args
+        count = len(args.args) + len(args.kwonlyargs) + len(args.posonlyargs)
+        if count > THRESHOLDS["param_count"]:
+            self.out.append(
+                Offender(
+                    "params", self.rel, qualified, node.lineno, count, THRESHOLDS["param_count"]
+                )
+            )
+        self.generic_visit(node)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
+        self._visit_func(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # noqa: N802
+        self._visit_func(node)
+
+
 def scan_file(path: Path, root: Path) -> list[Offender]:
     text = path.read_text(encoding="utf-8", errors="replace")
     rel = str(path.relative_to(root)) if path.is_relative_to(root) else str(path)
@@ -86,25 +139,9 @@ def scan_file(path: Path, root: Path) -> list[Offender]:
         tree = ast.parse(text)
     except SyntaxError:
         return out
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ClassDef):
-            length = _span(node)
-            if length > THRESHOLDS["class_loc"]:
-                out.append(
-                    Offender("class", rel, node.name, node.lineno, length, THRESHOLDS["class_loc"])
-                )
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            length = _span(node)
-            if length > THRESHOLDS["method_loc"]:
-                out.append(
-                    Offender("method", rel, node.name, node.lineno, length, THRESHOLDS["method_loc"])
-                )
-            args = node.args
-            count = len(args.args) + len(args.kwonlyargs) + len(args.posonlyargs)
-            if count > THRESHOLDS["param_count"]:
-                out.append(
-                    Offender("params", rel, node.name, node.lineno, count, THRESHOLDS["param_count"])
-                )
+    visitor = _OffenderVisitor(rel)
+    visitor.visit(tree)
+    out.extend(visitor.out)
     return out
 
 
