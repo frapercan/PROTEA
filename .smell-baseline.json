@@ -61,15 +61,6 @@
       "threshold": 800
     },
     {
-      "key": "method::protea/api/app.py::create_app",
-      "kind": "method",
-      "path": "protea/api/app.py",
-      "name": "create_app",
-      "line": 33,
-      "metric": 174,
-      "threshold": 60
-    },
-    {
       "key": "method::protea/api/routers/annotate.py::annotate",
       "kind": "method",
       "path": "protea/api/routers/annotate.py",
@@ -128,7 +119,7 @@
       "kind": "method",
       "path": "protea/api/routers/stack.py",
       "name": "list_open_pulls",
-      "line": 123,
+      "line": 150,
       "metric": 61,
       "threshold": 60
     },
