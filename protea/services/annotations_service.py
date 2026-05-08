@@ -256,6 +256,71 @@ def iter_groundtruth_tsv(
     ]
 
 
+def iter_delta_proteins_fasta(
+    session: Session,
+    eval_id: uuid.UUID,
+    category: str,
+) -> list[str]:
+    """Return FASTA lines for delta proteins (``nk`` / ``lk`` / ``pk`` / ``all``).
+
+    ``category`` selects which delta categories to include; ``"all"``
+    is the union of NK ∪ LK ∪ PK. Only proteins whose sequence is in
+    the DB are emitted. Header is
+    ``>ACCESSION entry_name OS=organism OX=taxon (NK|LK|PK)``; the
+    sequence is wrapped at 60 chars per line.
+
+    Empty result returns an empty list. Raises
+    :class:`EntityNotFoundError` if the EvaluationSet does not
+    resolve.
+    """
+    from protea.infrastructure.orm.models.protein.protein import Protein
+    from protea.infrastructure.orm.models.sequence.sequence import Sequence
+
+    e = session.get(EvaluationSet, eval_id)
+    if e is None:
+        raise EntityNotFoundError("EvaluationSet", eval_id)
+    data, _ = load_evaluation_data_for_set(session, e)
+
+    accession_label: dict[str, str] = {}
+    if category in ("nk", "all"):
+        for acc in data.nk:
+            accession_label[acc] = "NK"
+    if category in ("lk", "all"):
+        for acc in data.lk:
+            accession_label[acc] = "LK"
+    if category in ("pk", "all"):
+        for acc in data.pk:
+            accession_label.setdefault(acc, "PK")
+
+    if not accession_label:
+        return []
+
+    rows = (
+        session.query(Protein, Sequence)
+        .join(Sequence, Protein.sequence_id == Sequence.id)
+        .filter(Protein.accession.in_(accession_label.keys()))
+        .order_by(Protein.accession)
+        .all()
+    )
+
+    lines: list[str] = []
+    for protein, seq in rows:
+        label = accession_label.get(protein.accession, "")
+        parts = [protein.accession]
+        if protein.entry_name:
+            parts.append(protein.entry_name)
+        if protein.organism:
+            parts.append(f"OS={protein.organism}")
+        if protein.taxonomy_id:
+            parts.append(f"OX={protein.taxonomy_id}")
+        parts.append(f"({label})")
+        lines.append(f">{' '.join(parts)}\n")
+        s = seq.sequence
+        for i in range(0, len(s), 60):
+            lines.append(s[i : i + 60] + "\n")
+    return lines
+
+
 def evaluation_set_to_dict(e: EvaluationSet) -> dict[str, Any]:
     """Serialise an :class:`EvaluationSet` to its API dict shape."""
     return {
@@ -330,6 +395,7 @@ __all__ = [
     "get_annotation_set_data",
     "get_evaluation_set_data",
     "get_snapshot_data",
+    "iter_delta_proteins_fasta",
     "iter_groundtruth_tsv",
     "list_annotation_sets_data",
     "list_evaluation_sets_data",

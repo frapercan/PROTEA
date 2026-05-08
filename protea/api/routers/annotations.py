@@ -16,7 +16,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from protea.api.cache import cached
 from protea.api.deps import get_amqp_url, get_benchmark_config, get_session_factory
 from protea.core.domain.aspect import ASPECT_CAFA_CODES
-from protea.core.evaluation import load_evaluation_data_for_set
 from protea.core.operations.generate_evaluation_set import GenerateEvaluationSetPayload
 from protea.core.operations.load_goa_annotations import LoadGOAAnnotationsPayload
 from protea.core.operations.load_ontology_snapshot import LoadOntologySnapshotPayload
@@ -29,8 +28,6 @@ from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.go_term_relationship import GOTermRelationship
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
-from protea.infrastructure.orm.models.protein.protein import Protein
-from protea.infrastructure.orm.models.sequence.sequence import Sequence
 from protea.infrastructure.queue.publisher import publish_job
 from protea.infrastructure.session import session_scope
 from protea.services.annotations_service import (
@@ -41,6 +38,7 @@ from protea.services.annotations_service import (
     get_annotation_set_data,
     get_evaluation_set_data,
     get_snapshot_data,
+    iter_delta_proteins_fasta,
     iter_groundtruth_tsv,
     list_annotation_sets_data,
     list_evaluation_sets_data,
@@ -436,56 +434,11 @@ def download_delta_fasta(
     Only proteins whose sequence is already stored in the database are included.
     Header format: ``>ACCESSION entry_name OS=organism OX=taxonomy_id (NK|LK)``
     """
-    with session_scope(factory) as session:
-        e = _eval_set_or_404(session, eval_id)
-        data, _ = load_evaluation_data_for_set(session, e)
-
-        # Collect requested accessions with their NK/LK/PK label
-        accession_label: dict[str, str] = {}
-        if category in ("nk", "all"):
-            for acc in data.nk:
-                accession_label[acc] = "NK"
-        if category in ("lk", "all"):
-            for acc in data.lk:
-                accession_label[acc] = "LK"
-        if category in ("pk", "all"):
-            for acc in data.pk:
-                accession_label.setdefault(acc, "PK")  # may also be LK in another ns
-
-        if not accession_label:
-            return StreamingResponse(
-                iter([]),
-                media_type="text/plain",
-                headers={
-                    "Content-Disposition": f'attachment; filename="delta_proteins_{category}.fasta"'
-                },
-            )
-
-        rows = (
-            session.query(Protein, Sequence)
-            .join(Sequence, Protein.sequence_id == Sequence.id)
-            .filter(Protein.accession.in_(accession_label.keys()))
-            .order_by(Protein.accession)
-            .all()
-        )
-
-        lines: list[str] = []
-        for protein, seq in rows:
-            label = accession_label.get(protein.accession, "")
-            parts = [protein.accession]
-            if protein.entry_name:
-                parts.append(protein.entry_name)
-            if protein.organism:
-                parts.append(f"OS={protein.organism}")
-            if protein.taxonomy_id:
-                parts.append(f"OX={protein.taxonomy_id}")
-            parts.append(f"({label})")
-            lines.append(f">{' '.join(parts)}\n")
-            # Wrap sequence at 60 chars per line (standard FASTA)
-            s = seq.sequence
-            for i in range(0, len(s), 60):
-                lines.append(s[i : i + 60] + "\n")
-
+    try:
+        with session_scope(factory) as session:
+            lines = iter_delta_proteins_fasta(session, eval_id, category)
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return StreamingResponse(
         iter(lines),
         media_type="text/plain",
