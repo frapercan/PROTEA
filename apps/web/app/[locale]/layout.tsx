@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import { Geist, Geist_Mono } from "next/font/google";
 import "../globals.css";
 import { ResetDbButton } from "@/components/ResetDbButton";
@@ -15,8 +16,8 @@ const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "PROTEA",
-  description: "Protein data platform — job queue and pipeline management",
+  title: "PROTEA — Functional Annotation",
+  description: "Protein Functional Embedding-based Annotation — job queue and pipeline management",
 };
 
 export default async function LocaleLayout({
@@ -46,9 +47,16 @@ export default async function LocaleLayout({
                 >
                   <span
                     aria-hidden
-                    className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 via-indigo-600 to-violet-600 text-white shadow-sm ring-1 ring-inset ring-white/30 transition-transform group-hover:scale-105"
+                    className="relative flex h-10 w-10 items-center justify-center transition-transform group-hover:scale-105"
                   >
-                    <span className="text-[15px] font-bold tracking-tight">P</span>
+                    <Image
+                      src="/protea-mark.png"
+                      alt=""
+                      width={40}
+                      height={40}
+                      priority
+                      className="h-10 w-10"
+                    />
                     <span className="absolute -right-0.5 -bottom-0.5 h-2 w-2 rounded-full bg-emerald-400 ring-2 ring-white" />
                   </span>
                   <span className="flex flex-col leading-tight">

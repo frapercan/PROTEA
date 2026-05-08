@@ -149,7 +149,9 @@ export default function HomePage() {
       </section>
 
       {/* ── Annotate form ─────────────────────────────────────────── */}
-      <section className="mx-auto max-w-4xl">
+      {/* `id` powers the "Annotate proteins" CTA below; scroll-mt clears
+           the sticky h-16 header so the form lands fully visible. */}
+      <section id="annotate-form" className="mx-auto max-w-4xl scroll-mt-24">
         <AnnotateForm />
       </section>
 
