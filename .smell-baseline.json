@@ -155,8 +155,8 @@
       "kind": "method",
       "path": "protea/core/operations/_run_cafa_artifacts.py",
       "name": "write_predictions",
-      "line": 86,
-      "metric": 66,
+      "line": 106,
+      "metric": 61,
       "threshold": 60
     },
     {
@@ -164,8 +164,8 @@
       "kind": "method",
       "path": "protea/core/operations/_run_cafa_artifacts.py",
       "name": "write_predictions_per_aspect",
-      "line": 206,
-      "metric": 74,
+      "line": 219,
+      "metric": 72,
       "threshold": 60
     },
     {
@@ -408,7 +408,7 @@
       "path": "protea/core/operations/run_cafa_evaluation.py",
       "name": "RunCafaEvaluationOperation.execute",
       "line": 174,
-      "metric": 263,
+      "metric": 265,
       "threshold": 60
     },
     {
