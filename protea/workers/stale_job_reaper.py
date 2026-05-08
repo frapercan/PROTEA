@@ -32,7 +32,7 @@ from __future__ import annotations
 import logging
 import signal
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
@@ -94,49 +94,10 @@ class StaleJobReaper:
                 )
                 .all()
             )
-            reaped = 0
-            for job in candidates:
-                last_event_ts = (
-                    session.query(func.max(JobEvent.ts)).filter(JobEvent.job_id == job.id).scalar()
-                )
-                if last_event_ts is not None and last_event_ts > stall_cutoff:
-                    logger.debug(
-                        "Reaper skipped live job. job_id=%s operation=%s last_event=%s",
-                        job.id,
-                        job.operation,
-                        last_event_ts,
-                    )
-                    continue
-
-                job.status = JobStatus.FAILED
-                job.finished_at = now
-                job.error_code = "JobTimeout"
-                job.error_message = (
-                    f"Job stalled: no activity in {self._stall.total_seconds():.0f}s "
-                    f"(started >{self._timeout.total_seconds():.0f}s ago)"
-                )
-                session.add(
-                    JobEvent(
-                        job_id=job.id,
-                        event="job.timeout",
-                        message=job.error_message,
-                        fields={
-                            "timeout_seconds": self._timeout.total_seconds(),
-                            "stall_seconds": self._stall.total_seconds(),
-                            "last_event_ts": (last_event_ts.isoformat() if last_event_ts else None),
-                        },
-                        level="error",
-                    )
-                )
-                logger.warning(
-                    "Marking stalled job FAILED. job_id=%s operation=%s "
-                    "started_at=%s last_event=%s",
-                    job.id,
-                    job.operation,
-                    job.started_at,
-                    last_event_ts,
-                )
-                reaped += 1
+            reaped = sum(
+                self._reap_one_candidate(session, job, now, stall_cutoff)
+                for job in candidates
+            )
             session.commit()
             return reaped
         except Exception:
@@ -147,3 +108,52 @@ class StaleJobReaper:
             raise
         finally:
             session.close()
+
+    def _reap_one_candidate(
+        self,
+        session: Session,
+        job: Job,
+        now: datetime,
+        stall_cutoff: datetime,
+    ) -> int:
+        """Mark one stalled candidate FAILED. Returns 1 if reaped, 0 if alive."""
+        last_event_ts = (
+            session.query(func.max(JobEvent.ts)).filter(JobEvent.job_id == job.id).scalar()
+        )
+        if last_event_ts is not None and last_event_ts > stall_cutoff:
+            logger.debug(
+                "Reaper skipped live job. job_id=%s operation=%s last_event=%s",
+                job.id,
+                job.operation,
+                last_event_ts,
+            )
+            return 0
+
+        job.status = JobStatus.FAILED
+        job.finished_at = now
+        job.error_code = "JobTimeout"
+        job.error_message = (
+            f"Job stalled: no activity in {self._stall.total_seconds():.0f}s "
+            f"(started >{self._timeout.total_seconds():.0f}s ago)"
+        )
+        session.add(
+            JobEvent(
+                job_id=job.id,
+                event="job.timeout",
+                message=job.error_message,
+                fields={
+                    "timeout_seconds": self._timeout.total_seconds(),
+                    "stall_seconds": self._stall.total_seconds(),
+                    "last_event_ts": (last_event_ts.isoformat() if last_event_ts else None),
+                },
+                level="error",
+            )
+        )
+        logger.warning(
+            "Marking stalled job FAILED. job_id=%s operation=%s started_at=%s last_event=%s",
+            job.id,
+            job.operation,
+            job.started_at,
+            last_event_ts,
+        )
+        return 1
