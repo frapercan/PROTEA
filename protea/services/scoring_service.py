@@ -344,6 +344,73 @@ def to_response(c: ScoringConfig) -> ScoringConfigResponse:
     )
 
 
+def list_scoring_configs_data(session: Session) -> list[ScoringConfigResponse]:
+    """All stored :class:`ScoringConfig` rows as response models, oldest first."""
+    rows = session.query(ScoringConfig).order_by(ScoringConfig.created_at).all()
+    return [to_response(c) for c in rows]
+
+
+def create_scoring_config_data(
+    session: Session,
+    body: ScoringConfigCreate,
+) -> ScoringConfigResponse:
+    """Persist a new :class:`ScoringConfig` from a validated request body.
+
+    Pydantic field validators on :class:`ScoringConfigCreate` already
+    enforce ``formula`` membership and reject unknown signal keys, so
+    this helper just maps the model to the ORM row.
+    """
+    config = ScoringConfig(
+        name=body.name,
+        formula=body.formula,
+        weights=body.weights,
+        evidence_weights=body.evidence_weights,
+        description=body.description,
+    )
+    session.add(config)
+    session.flush()
+    return to_response(config)
+
+
+def get_scoring_config_data(
+    session: Session,
+    config_id: uuid.UUID,
+) -> ScoringConfigResponse:
+    """Fetch a :class:`ScoringConfig` by UUID; raise :class:`EntityNotFoundError`."""
+    config = session.get(ScoringConfig, config_id)
+    if config is None:
+        raise EntityNotFoundError("ScoringConfig", config_id)
+    return to_response(config)
+
+
+def delete_scoring_config_data(
+    session: Session,
+    config_id: uuid.UUID,
+) -> None:
+    """Delete a :class:`ScoringConfig` by UUID; raise :class:`EntityNotFoundError`."""
+    config = session.get(ScoringConfig, config_id)
+    if config is None:
+        raise EntityNotFoundError("ScoringConfig", config_id)
+    session.delete(config)
+
+
+def create_preset_configs_data(session: Session) -> list[str]:
+    """Insert built-in :data:`PRESET_CONFIGS` that are not already present.
+
+    Idempotent — presets matched by ``name`` are skipped silently.
+    Returns the list of preset names actually created (for the HTTP
+    response body).
+    """
+    existing_names = {row[0] for row in session.query(ScoringConfig.name).all()}
+    created: list[str] = []
+    for preset in PRESET_CONFIGS:
+        if preset["name"] in existing_names:
+            continue
+        session.add(ScoringConfig(**preset))
+        created.append(preset["name"])
+    return created
+
+
 def snapshot_config(c: ScoringConfig) -> ScoringConfig:
     """Detached :class:`ScoringConfig` copy safe to use after a session closes.
 
