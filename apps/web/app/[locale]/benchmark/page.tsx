@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Skeleton } from "@/components/Skeleton";
+import { useUrlNumber, useUrlParam } from "@/lib/useUrlParam";
 import {
   getBenchmarkEmbeddings,
   getBenchmarkMatrix,
@@ -143,9 +144,12 @@ export default function BenchmarkPage() {
   const [embeddings, setEmbeddings] = useState<BenchmarkEmbedding[] | null>(null);
   const [matrix, setMatrix] = useState<BenchmarkMatrixResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [stage, setStage] = useState<string | null>(null);
-  const [evalSetId, setEvalSetId] = useState<string | "all">("all");
-  const [selectedK, setSelectedK] = useState<number | null>(null);
+  // URL-synced filters: copy the page link and the chips persist.
+  const [stage, setStage] = useUrlParam("stage", null);
+  const [evalSetIdRaw, setEvalSetIdRaw] = useUrlParam("eval_set", "all");
+  const evalSetId = (evalSetIdRaw ?? "all") as string | "all";
+  const setEvalSetId = (v: string | "all") => setEvalSetIdRaw(v === "all" ? null : v);
+  const [selectedK, setSelectedK] = useUrlNumber("k", null);
 
   // Unfiltered catalog fetch — populates the full set of known stages and
   // eval sets, so selector chips don't disappear when a filtered query
@@ -168,8 +172,9 @@ export default function BenchmarkPage() {
           aspects: m.aspects,
           ks: m.ks ?? [],
         });
-        setStage((prev) => prev ?? pickDefaultStage(m.stages));
-        setSelectedK((prev) => prev ?? (m.ks?.[0] ?? null));
+        // Only seed a default if the URL didn't already pin one.
+        if (stage == null) setStage(pickDefaultStage(m.stages));
+        if (selectedK == null) setSelectedK(m.ks?.[0] ?? null);
       })
       .catch((e) => setError(e.message));
   }, []);
@@ -568,9 +573,9 @@ export default function BenchmarkPage() {
           </p>
         </section>
       ) : (
-        <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
+        <div className="overflow-x-auto protea-scroll-shadow rounded-lg border bg-white shadow-sm">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50">
+            <thead className="protea-thead-sticky bg-slate-50">
               <tr>
                 <th
                   rowSpan={2}

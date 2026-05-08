@@ -96,6 +96,34 @@ h1, h2, h3, h4 {
   color: transparent;
 }
 
+/* Sticky table header — sits below the sticky h-16 chrome header.
+   Apply on the <thead> of any long data table. */
+.protea-thead-sticky {
+  position: sticky;
+  top: 4rem;          /* 64px = h-16 */
+  z-index: 10;
+  background: white;
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.08);
+}
+
+/* Scroll-shadow on horizontally scrollable wrappers. The trick is
+   four stacked layers in `background`:
+     1+2: solid white "covers" anchored to the start/end (background-attachment: local)
+          so they hide as the user scrolls into the content.
+     3+4: faint shadows anchored to the scroll container (background-attachment: scroll)
+          revealed once the white covers move out of the way.
+   Apply on a `<div className="overflow-x-auto protea-scroll-shadow">`. */
+.protea-scroll-shadow {
+  background-image:
+    linear-gradient(to right, white 30%, rgba(255, 255, 255, 0)),
+    linear-gradient(to right, rgba(255, 255, 255, 0), white 70%) 100% 0,
+    radial-gradient(farthest-side at 0 50%, rgba(15, 23, 42, 0.12), rgba(0, 0, 0, 0)),
+    radial-gradient(farthest-side at 100% 50%, rgba(15, 23, 42, 0.12), rgba(0, 0, 0, 0)) 100% 0;
+  background-repeat: no-repeat;
+  background-size: 40px 100%, 40px 100%, 14px 100%, 14px 100%;
+  background-attachment: local, local, scroll, scroll;
+}
+
 .protea-grid-bg {
   background-image:
     radial-gradient(circle at 1px 1px, rgba(15, 23, 42, 0.06) 1px, transparent 0);
