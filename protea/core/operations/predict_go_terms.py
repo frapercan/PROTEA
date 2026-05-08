@@ -143,6 +143,26 @@ class BatchPredictContext:
     query_tax_ids: dict[str, int | None] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class AspectSeparatedKnnContext:
+    """Inputs for ``PredictGOTermsBatchOperation._run_aspect_separated_knn``.
+
+    Same family as :class:`BatchPredictContext` but for the
+    aspect-separated KNN path: one independent index + neighbor set per
+    GO aspect (P/F/C). ``ref_data_by_aspect`` is keyed by aspect char
+    rather than the unified ``ref_data`` dict that ``_predict_batch``
+    consumes; ``annotation_set_id`` is required because aspect-scoped
+    GO annotation lookups happen inside the helper.
+    """
+
+    valid_accessions: list[str]
+    query_embeddings: np.ndarray
+    ref_data_by_aspect: dict[str, dict[str, Any]]
+    annotation_set_id: uuid.UUID
+    prediction_set_id: uuid.UUID
+    payload: PredictGOTermsBatchPayload
+
+
 def _clean_float(value: Any) -> Any:
     """Return ``None`` for NaN / non-finite floats, pass-through otherwise.
 
@@ -550,12 +570,14 @@ class PredictGOTermsBatchOperation:
                 pair_features,
             ) = self._run_aspect_separated_knn(
                 session,
-                valid_accessions,
-                query_embeddings,
-                _REF_CACHE[cache_key],
-                annotation_set_id,
-                prediction_set_id,
-                p,
+                AspectSeparatedKnnContext(
+                    valid_accessions=valid_accessions,
+                    query_embeddings=query_embeddings,
+                    ref_data_by_aspect=_REF_CACHE[cache_key],
+                    annotation_set_id=annotation_set_id,
+                    prediction_set_id=prediction_set_id,
+                    payload=p,
+                ),
             )
             if p.compute_v6_features:
                 v6_ctx = {
@@ -1218,12 +1240,7 @@ class PredictGOTermsBatchOperation:
     def _run_aspect_separated_knn(
         self,
         session: Session,
-        valid_accessions: list[str],
-        query_embeddings: np.ndarray,
-        ref_data_by_aspect: dict[str, dict[str, Any]],
-        annotation_set_id: uuid.UUID,
-        prediction_set_id: uuid.UUID,
-        p: PredictGOTermsBatchPayload,
+        ctx: AspectSeparatedKnnContext,
     ) -> tuple[
         list[dict[str, Any]],
         dict[str, list[list[tuple[str, float]]]],
@@ -1232,9 +1249,11 @@ class PredictGOTermsBatchOperation:
     ]:
         """Run three independent KNN searches (one per GO aspect) and merge results.
 
-        For each aspect ``a`` in (P, F, C):
+        All inputs live on :class:`AspectSeparatedKnnContext`. For each
+        aspect ``a`` in (P, F, C):
+
         1. Build a KNN index from the aspect-filtered reference embeddings.
-        2. Find the ``limit_per_entry`` nearest neighbors for every query.
+        2. Find the ``ctx.payload.limit_per_entry`` nearest neighbors for every query.
         3. Load only aspect-``a`` GO annotations for those neighbors.
         4. Transfer those annotations as predictions.
 
@@ -1246,6 +1265,13 @@ class PredictGOTermsBatchOperation:
         Feature engineering (alignments / taxonomy) is computed for the union of
         neighbors across all aspects to avoid redundant work on shared neighbors.
         """
+        valid_accessions = ctx.valid_accessions
+        query_embeddings = ctx.query_embeddings
+        ref_data_by_aspect = ctx.ref_data_by_aspect
+        annotation_set_id = ctx.annotation_set_id
+        prediction_set_id = ctx.prediction_set_id
+        p = ctx.payload
+
         # ── 1. KNN per aspect ─────────────────────────────────────────
         neighbors_by_aspect, all_unique_neighbors = self._run_knn_per_aspect(
             valid_accessions, query_embeddings, ref_data_by_aspect, p
