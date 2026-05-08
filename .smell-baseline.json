@@ -128,8 +128,8 @@
       "kind": "method",
       "path": "protea/core/metrics.py",
       "name": "compute_cafa_metrics",
-      "line": 70,
-      "metric": 88,
+      "line": 103,
+      "metric": 64,
       "threshold": 60
     },
     {
