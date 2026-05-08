@@ -124,12 +124,18 @@ This starts all processes in the background and writes PIDs to ``logs/pids/``:
    * - Worker — ``protea.embeddings.write``
      - —
      - ``logs/worker-embeddings-write.log``
+   * - Worker — ``protea.predictions`` (serialised coordinator)
+     - —
+     - ``logs/worker-predictions-coord.log``
    * - Worker — ``protea.predictions.batch`` (×N)
      - —
      - ``logs/worker-predictions-batch-*.log``
    * - Worker — ``protea.predictions.write``
      - —
      - ``logs/worker-predictions-write.log``
+   * - Worker — ``protea.evaluations``
+     - —
+     - ``logs/worker-evaluations.log``
    * - Stale job reaper (``reaper``)
      - —
      - ``logs/worker-reaper.log``
