@@ -30,7 +30,7 @@
       "path": "protea/core/operations/compute_embeddings.py",
       "name": "",
       "line": 0,
-      "metric": 1143,
+      "metric": 1120,
       "threshold": 800
     },
     {
@@ -169,20 +169,11 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/compute_embeddings.py::ComputeEmbeddingsOperation.execute",
-      "kind": "method",
-      "path": "protea/core/operations/compute_embeddings.py",
-      "name": "ComputeEmbeddingsOperation.execute",
-      "line": 196,
-      "metric": 79,
-      "threshold": 60
-    },
-    {
       "key": "method::protea/core/operations/compute_embeddings.py::ComputeEmbeddingsBatchOperation.execute",
       "kind": "method",
       "path": "protea/core/operations/compute_embeddings.py",
       "name": "ComputeEmbeddingsBatchOperation.execute",
-      "line": 367,
+      "line": 344,
       "metric": 90,
       "threshold": 60
     },
@@ -191,7 +182,7 @@
       "kind": "method",
       "path": "protea/core/operations/compute_embeddings.py",
       "name": "StoreEmbeddingsOperation.execute",
-      "line": 511,
+      "line": 488,
       "metric": 77,
       "threshold": 60
     },
@@ -200,7 +191,7 @@
       "kind": "method",
       "path": "protea/core/operations/compute_embeddings.py",
       "name": "_embed_esm",
-      "line": 712,
+      "line": 689,
       "metric": 61,
       "threshold": 60
     },
@@ -209,7 +200,7 @@
       "kind": "method",
       "path": "protea/core/operations/compute_embeddings.py",
       "name": "_embed_t5",
-      "line": 780,
+      "line": 757,
       "metric": 128,
       "threshold": 60
     },
@@ -218,7 +209,7 @@
       "kind": "method",
       "path": "protea/core/operations/compute_embeddings.py",
       "name": "_embed_esm3c",
-      "line": 951,
+      "line": 928,
       "metric": 66,
       "threshold": 60
     },
@@ -497,7 +488,7 @@
       "kind": "params",
       "path": "protea/core/operations/compute_embeddings.py",
       "name": "_embed_t5",
-      "line": 780,
+      "line": 757,
       "metric": 7,
       "threshold": 6
     },

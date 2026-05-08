@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload, RetryLaterError
 from protea.core.contracts.parent_progress import update_parent_progress
+from protea.core.operations._compute_embeddings_helpers import build_batch_dispatch_messages
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 from protea.infrastructure.orm.models.job import Job, JobStatus
@@ -227,12 +228,8 @@ class ComputeEmbeddingsOperation:
             emit("compute_embeddings.no_sequences", None, {}, "warning")
             return OperationResult(result={"batches": 0, "sequences": 0})
 
-        # Partition into batches and create one child Job per batch.
-        batches = [
-            sequence_ids[i : i + p.sequences_per_job]
-            for i in range(0, len(sequence_ids), p.sequences_per_job)
-        ]
-        n_batches = len(batches)
+        operations = build_batch_dispatch_messages(p, parent_job_id, sequence_ids)
+        n_batches = len(operations)
 
         emit(
             "compute_embeddings.dispatching",
@@ -244,26 +241,6 @@ class ComputeEmbeddingsOperation:
             },
             "info",
         )
-
-        operations: list[tuple[str, dict]] = []
-        for batch_seq_ids in batches:
-            operations.append(
-                (
-                    _BATCH_QUEUE,
-                    {
-                        "operation": "compute_embeddings_batch",
-                        "job_id": str(parent_job_id),
-                        "payload": {
-                            "embedding_config_id": p.embedding_config_id,
-                            "sequence_ids": batch_seq_ids,
-                            "parent_job_id": str(parent_job_id),
-                            "device": p.device,
-                            "skip_existing": p.skip_existing,
-                            "batch_size": p.batch_size,
-                        },
-                    },
-                )
-            )
 
         return OperationResult(
             result={"batches": n_batches, "sequences": len(sequence_ids)},
