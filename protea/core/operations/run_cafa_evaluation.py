@@ -328,11 +328,13 @@ class RunCafaEvaluationOperation:
                 pred_path = os.path.join(pred_dir, "predictions.tsv")
                 _artifacts.write_predictions(
                     session,
-                    pred_set_id,
-                    delta_proteins,
-                    p.max_distance,
-                    pred_path,
-                    scoring_config_snapshot,
+                    _artifacts.WritePredictionsContext(
+                        pred_set_id=pred_set_id,
+                        delta_proteins=delta_proteins,
+                        max_distance=p.max_distance,
+                        path=pred_path,
+                    ),
+                    scoring_config=scoring_config_snapshot,
                 )
 
             # No-op commit: releases the DB connection back to the pool before

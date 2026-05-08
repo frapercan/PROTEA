@@ -23,7 +23,10 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any, cast
+from typing import TYPE_CHECKING, Annotated, Any, cast
+
+if TYPE_CHECKING:
+    from protea.core.parquet_export import ParquetExportContext
 
 import numpy as np
 import pandas as pd
@@ -1187,54 +1190,23 @@ class TrainRerankerAutoOperation:
         return " · ".join(bits)
 
     @staticmethod
-    def _dump_frozen_dataset(
-        *,
-        dump_dir: Path,
-        split_files: dict[str, list[Path]],
-        valid_split_versions: list[tuple[int, int]],
-        test_files: dict[str, Path | None],
-        test_old_v: int,
-        test_new_v: int,
-        name: str,
-        k: int,
-        embedding_config_id: str,
-        ontology_snapshot_id: str,
-        annotation_source: str,
-    ) -> dict[str, Any]:
+    def _dump_frozen_dataset(ctx: ParquetExportContext) -> dict[str, Any]:
         """Thin wrapper that delegates to ``parquet_export`` — kept so
         ``dump_helper`` can still dump a frozen dataset to a local
         path via ``dump_to=...``. New code should prefer the
         ``export_research_dataset`` operation which publishes via the
         configured ``ArtifactStore``.
-        """
-        from protea import __version__ as _protea_version
-        from protea.core.parquet_export import (
-            ParquetExportContext,
-            export_reranker_parquets,
-            resolve_protea_git_sha,
-        )
 
-        result = export_reranker_parquets(
-            ParquetExportContext(
-                stage_dir=dump_dir,
-                split_files=split_files,
-                valid_split_versions=valid_split_versions,
-                test_files=test_files,
-                test_old_v=test_old_v,
-                test_new_v=test_new_v,
-                name=name,
-                k=k,
-                embedding_config_id=embedding_config_id,
-                ontology_snapshot_id=ontology_snapshot_id,
-                annotation_source=annotation_source,
-                store=None,
-                producer_version=_protea_version,
-                producer_git_sha=resolve_protea_git_sha(),
-            )
-        )
+        The caller is responsible for filling ``producer_version`` and
+        ``producer_git_sha`` on the context. Pass ``store=None`` to
+        skip artifact-store upload.
+        """
+        from protea.core.parquet_export import export_reranker_parquets
+
+        result = export_reranker_parquets(ctx)
         # Preserve the historical return contract — callers rely on
         # ``dump_dir`` instead of ``stage_dir``.
-        result["dump_dir"] = result.pop("stage_dir", str(dump_dir))
+        result["dump_dir"] = result.pop("stage_dir", str(ctx.stage_dir))
         return result
 
     def execute(
@@ -1874,18 +1846,29 @@ class TrainRerankerAutoOperation:
                     "training has been moved to protea-reranker-lab. Use "
                     "ExportResearchDatasetOperation / POST /datasets."
                 )
+            from protea import __version__ as _protea_version
+            from protea.core.parquet_export import (
+                ParquetExportContext,
+                resolve_protea_git_sha,
+            )
+
             dump_stats = self._dump_frozen_dataset(
-                dump_dir=Path(p.dump_to),
-                split_files=split_files,
-                valid_split_versions=valid_split_versions,
-                test_files=test_files,
-                test_old_v=test_old_v,
-                test_new_v=test_new_v,
-                name=p.name,
-                k=int(p.limit_per_entry),
-                embedding_config_id=str(emb_config_id),
-                ontology_snapshot_id=str(ontology_snapshot_id),
-                annotation_source=p.annotation_source,
+                ParquetExportContext(
+                    stage_dir=Path(p.dump_to),
+                    split_files=split_files,
+                    valid_split_versions=valid_split_versions,
+                    test_files=test_files,
+                    test_old_v=test_old_v,
+                    test_new_v=test_new_v,
+                    name=p.name,
+                    k=int(p.limit_per_entry),
+                    embedding_config_id=str(emb_config_id),
+                    ontology_snapshot_id=str(ontology_snapshot_id),
+                    annotation_source=p.annotation_source,
+                    store=None,
+                    producer_version=_protea_version,
+                    producer_git_sha=resolve_protea_git_sha(),
+                )
             )
             emit("dump_helper.dump_done", None, dump_stats, "info")
             elapsed = round(time.perf_counter() - t0, 1)
