@@ -10,8 +10,15 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
+from sqlalchemy.orm import Session
+
+from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
+
 if TYPE_CHECKING:
-    from protea.core.operations.compute_embeddings import ComputeEmbeddingsPayload
+    from protea.core.operations.compute_embeddings import (
+        ComputeEmbeddingsPayload,
+        StoreEmbeddingsPayload,
+    )
 
 _BATCH_QUEUE = "protea.embeddings.batch"
 
@@ -53,3 +60,50 @@ def build_batch_dispatch_messages(
         )
         for batch_seq_ids in batches
     ]
+
+
+def build_embedding_rows(
+    session: Session,
+    p: StoreEmbeddingsPayload,
+    config_id: uuid.UUID,
+) -> tuple[list[dict], int, int]:
+    """Materialise SequenceEmbedding insert rows for a store-embeddings batch.
+
+    Iterates ``p.sequences`` and skips entries whose ``(sequence_id,
+    config_id)`` pair already exists when ``p.skip_existing`` is true;
+    otherwise deletes the existing rows so the bulk insert can replace
+    them. Returns ``(rows, embeddings_stored, sequences_skipped)``;
+    callers run the bulk insert + per-job-progress update.
+    """
+    rows: list[dict] = []
+    embeddings_stored = 0
+    sequences_skipped = 0
+    for seq_data in p.sequences:
+        sequence_id = seq_data["sequence_id"]
+        chunks = seq_data["chunks"]
+        if p.skip_existing:
+            existing = (
+                session.query(SequenceEmbedding)
+                .filter_by(sequence_id=sequence_id, embedding_config_id=config_id)
+                .first()
+            )
+            if existing is not None:
+                sequences_skipped += 1
+                continue
+        else:
+            session.query(SequenceEmbedding).filter_by(
+                sequence_id=sequence_id, embedding_config_id=config_id
+            ).delete()
+        for chunk in chunks:
+            rows.append(
+                {
+                    "sequence_id": sequence_id,
+                    "embedding_config_id": config_id,
+                    "chunk_index_s": chunk["chunk_index_s"],
+                    "chunk_index_e": chunk.get("chunk_index_e"),
+                    "embedding": chunk["vector"],
+                    "embedding_dim": chunk["embedding_dim"],
+                }
+            )
+            embeddings_stored += 1
+    return rows, embeddings_stored, sequences_skipped

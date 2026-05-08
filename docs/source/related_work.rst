@@ -92,9 +92,11 @@ pgvector on 500 000+ vectors (documented in ADR-001). Second, the reference
 set is *frozen at t0* by construction — the ingestion pipeline records the
 ``OntologySnapshot`` OBO version and the ``AnnotationSet`` source version of
 every reference annotation, so that a prediction produced today is exactly
-reproducible against the same references tomorrow. Third, learned
-re-ranking (``train_reranker``) operates on hand-engineered features on top
-of KNN results (Needleman–Wunsch and Smith–Waterman alignment metrics via
+reproducible against the same references tomorrow. Third, the LightGBM
+re-ranker — trained offline in ``protea-reranker-lab`` and registered into
+PROTEA via ``POST /reranker-models/import`` — operates on hand-engineered
+features on top of KNN results (Needleman–Wunsch and Smith–Waterman
+alignment metrics via
 ``parasail`` :cite:`parasail2016`, taxonomic distance via ``ete3``
 :cite:`ete32016`, and neighbour-aggregate signals) rather than on raw
 embeddings, keeping the training signal interpretable.
