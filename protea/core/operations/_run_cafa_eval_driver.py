@@ -78,15 +78,18 @@ def _write_setting_predictions(
     # "known", so training/serving parity requires leaving the
     # features at their predict-time NaN / 0.
     setting_known = ctx.data.known if setting in ("LK", "PK") else None
+    write_ctx = _artifacts.WritePredictionsContext(
+        pred_set_id=ctx.pred_set_id,
+        delta_proteins=ctx.delta_proteins,
+        max_distance=ctx.max_distance,
+        path=pred_path,
+    )
     if "" in rr_aspect_map:
         bundle = rr_aspect_map[""]
         _artifacts.write_predictions(
             session,
-            ctx.pred_set_id,
-            ctx.delta_proteins,
-            ctx.max_distance,
-            pred_path,
-            ctx.scoring_config_snapshot,
+            write_ctx,
+            scoring_config=ctx.scoring_config_snapshot,
             reranker_model_str=bundle["model"],
             reranker_cat_codes=bundle.get("cat_codes"),
             known_gos=setting_known,
@@ -94,11 +97,8 @@ def _write_setting_predictions(
     else:
         _artifacts.write_predictions_per_aspect(
             session,
-            ctx.pred_set_id,
-            ctx.delta_proteins,
-            ctx.max_distance,
-            pred_path,
-            rr_aspect_map,
+            write_ctx,
+            aspect_models=rr_aspect_map,
             known_gos=setting_known,
         )
     return pred_dir

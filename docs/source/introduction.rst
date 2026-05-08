@@ -135,7 +135,7 @@ a typed operation protocol, a two-session job lifecycle, a RabbitMQ job queue
 with nine routed queues, and a PostgreSQL + pgvector data model that
 versions every input (OBO release, annotation set source, embedding config)
 by UUID. The platform is released as open source and runs end-to-end on a
-single workstation with one GPU. PROTEA currently consolidates sixteen
+single workstation with one GPU. PROTEA currently consolidates fifteen
 registered operations covering ingestion, embedding, prediction, evaluation,
 and re-ranking, as well as a one-click ``/annotate`` endpoint that takes a
 FASTA upload and returns ranked GO predictions.
@@ -199,7 +199,7 @@ database migrations managed by Alembic.
 Current capabilities
 ---------------------
 
-PROTEA currently provides sixteen registered operations spanning the full
+PROTEA currently provides fifteen registered operations spanning the full
 protein functional annotation pipeline:
 
 - **Data ingestion** — ``insert_proteins``, ``fetch_uniprot_metadata``,

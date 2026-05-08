@@ -12,6 +12,7 @@ from __future__ import annotations
 import gzip
 import shutil
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 import requests
@@ -26,6 +27,25 @@ from protea.core.scoring import compute_score
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
 from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
+
+
+@dataclass(frozen=True)
+class WritePredictionsContext:
+    """Shared inputs for the per-setting prediction TSV writers.
+
+    Bundles the four query-shaped fields (``pred_set_id``,
+    ``delta_proteins``, ``max_distance``) plus the destination
+    ``path`` consumed by all three artifact writers
+    (``write_predictions``, ``write_predictions_reranked``,
+    ``write_predictions_per_aspect``). The session, scoring
+    snapshot, and reranker bundle stay outside ctx because they
+    encode IO / scoring strategy, not query parameters.
+    """
+
+    pred_set_id: uuid.UUID
+    delta_proteins: set[str]
+    max_distance: float | None
+    path: str
 
 
 def download_obo(url: str, dest: str) -> None:
@@ -85,10 +105,8 @@ def write_gt(annotations: dict[str, set[str]], path: str) -> None:
 
 def write_predictions(
     session: Session,
-    pred_set_id: uuid.UUID,
-    delta_proteins: set[str],
-    max_distance: float | None,
-    path: str,
+    ctx: WritePredictionsContext,
+    *,
     scoring_config: ScoringConfig | None = None,
     reranker_model_str: str | None = None,
     reranker_cat_codes: dict[str, list[str]] | None = None,
@@ -109,11 +127,8 @@ def write_predictions(
     if reranker_model_str is not None:
         write_predictions_reranked(
             session,
-            pred_set_id,
-            delta_proteins,
-            max_distance,
-            path,
-            reranker_model_str,
+            ctx,
+            reranker_model_str=reranker_model_str,
             reranker_cat_codes=reranker_cat_codes,
             known_gos=known_gos,
         )
@@ -122,15 +137,15 @@ def write_predictions(
     q = (
         session.query(GOPrediction, GOTerm)
         .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
-        .filter(GOPrediction.prediction_set_id == pred_set_id)
-        .filter(GOPrediction.protein_accession.in_(delta_proteins))
+        .filter(GOPrediction.prediction_set_id == ctx.pred_set_id)
+        .filter(GOPrediction.protein_accession.in_(ctx.delta_proteins))
     )
-    if max_distance is not None:
-        q = q.filter(GOPrediction.distance <= max_distance)
+    if ctx.max_distance is not None:
+        q = q.filter(GOPrediction.distance <= ctx.max_distance)
     q = q.order_by(GOPrediction.protein_accession, GOTerm.go_id, GOPrediction.distance)
 
     seen: set[tuple[str, str]] = set()
-    with open(path, "w") as f:
+    with open(ctx.path, "w") as f:
         for pred, gt in q.yield_per(1000):
             key = (pred.protein_accession, gt.go_id)
             if key in seen:
@@ -153,10 +168,8 @@ def write_predictions(
 
 def write_predictions_reranked(
     session: Session,
-    pred_set_id: uuid.UUID,
-    delta_proteins: set[str],
-    max_distance: float | None,
-    path: str,
+    ctx: WritePredictionsContext,
+    *,
     reranker_model_str: str,
     reranker_cat_codes: dict[str, list[str]] | None = None,
     known_gos: dict[str, set[str]] | None = None,
@@ -170,11 +183,11 @@ def write_predictions_reranked(
     q = (
         session.query(GOPrediction, GOTerm.go_id, GOTerm.aspect)
         .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
-        .filter(GOPrediction.prediction_set_id == pred_set_id)
-        .filter(GOPrediction.protein_accession.in_(delta_proteins))
+        .filter(GOPrediction.prediction_set_id == ctx.pred_set_id)
+        .filter(GOPrediction.protein_accession.in_(ctx.delta_proteins))
     )
-    if max_distance is not None:
-        q = q.filter(GOPrediction.distance <= max_distance)
+    if ctx.max_distance is not None:
+        q = q.filter(GOPrediction.distance <= ctx.max_distance)
 
     records: list[dict[str, Any]] = [
         _record_from_pred(pred, go_id, aspect=aspect)
@@ -182,7 +195,7 @@ def write_predictions_reranked(
     ]
 
     if not records:
-        with open(path, "w") as f:
+        with open(ctx.path, "w") as f:
             pass
         return
 
@@ -198,17 +211,15 @@ def write_predictions_reranked(
         keep="first",
     )
 
-    with open(path, "w") as f:
+    with open(ctx.path, "w") as f:
         for _, row in df.iterrows():
             f.write(f"{row['protein_accession']}\t{row['go_id']}\t{row['score']:.4f}\n")
 
 
 def write_predictions_per_aspect(
     session: Session,
-    pred_set_id: uuid.UUID,
-    delta_proteins: set[str],
-    max_distance: float | None,
-    path: str,
+    ctx: WritePredictionsContext,
+    *,
     aspect_models: dict[str, dict[str, Any]],
     known_gos: dict[str, set[str]] | None = None,
 ) -> None:
@@ -231,18 +242,18 @@ def write_predictions_per_aspect(
     q = (
         session.query(GOPrediction, GOTerm.go_id, GOTerm.aspect)
         .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
-        .filter(GOPrediction.prediction_set_id == pred_set_id)
-        .filter(GOPrediction.protein_accession.in_(delta_proteins))
+        .filter(GOPrediction.prediction_set_id == ctx.pred_set_id)
+        .filter(GOPrediction.protein_accession.in_(ctx.delta_proteins))
     )
-    if max_distance is not None:
-        q = q.filter(GOPrediction.distance <= max_distance)
+    if ctx.max_distance is not None:
+        q = q.filter(GOPrediction.distance <= ctx.max_distance)
 
     records: list[dict[str, Any]] = [
         _record_from_pred(pred, go_id, aspect) for pred, go_id, aspect in q.yield_per(5000)
     ]
 
     if not records:
-        with open(path, "w") as f:
+        with open(ctx.path, "w") as f:
             pass
         return
 
@@ -274,7 +285,7 @@ def write_predictions_per_aspect(
         keep="first",
     )
 
-    with open(path, "w") as f:
+    with open(ctx.path, "w") as f:
         for _, row in df.iterrows():
             f.write(f"{row['protein_accession']}\t{row['go_id']}\t{row['score']:.4f}\n")
 
