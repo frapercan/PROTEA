@@ -15,6 +15,48 @@ const STYLES: Record<string, string> = {
 const KNOWN_STATUSES = ["queued", "running", "succeeded", "failed", "cancelled"] as const;
 type KnownStatus = typeof KNOWN_STATUSES[number];
 
+/**
+ * Leading glyph per status. Communicates the state via shape, redundant
+ * with color so colorblind users (and tiny-screen readers) still parse
+ * the badge at a glance.
+ */
+function StatusGlyph({ status }: { status: string }) {
+  switch (status) {
+    case "queued":
+      return (
+        <svg className="h-3 w-3" aria-hidden fill="none" viewBox="0 0 12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="6" cy="6" r="4.5" />
+          <path d="M6 3.5v2.7l1.7 1.1" />
+        </svg>
+      );
+    case "running":
+      return (
+        <span aria-hidden className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500" />
+      );
+    case "succeeded":
+      return (
+        <svg className="h-3 w-3" aria-hidden fill="none" viewBox="0 0 12 12" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M2.5 6.5l2.5 2.5L9.5 3.5" />
+        </svg>
+      );
+    case "failed":
+      return (
+        <svg className="h-3 w-3" aria-hidden fill="none" viewBox="0 0 12 12" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 3l6 6M9 3l-6 6" />
+        </svg>
+      );
+    case "cancelled":
+      return (
+        <svg className="h-3 w-3" aria-hidden fill="none" viewBox="0 0 12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="6" cy="6" r="4.5" />
+          <path d="M3 9L9 3" />
+        </svg>
+      );
+    default:
+      return null;
+  }
+}
+
 export function StatusBadge({ status }: { status: Status }) {
   const t = useTranslations("components.statusBadge");
   const key = status.toLowerCase();
@@ -22,10 +64,12 @@ export function StatusBadge({ status }: { status: Status }) {
   const isKnown = KNOWN_STATUSES.includes(key as KnownStatus);
   const label = isKnown ? t(key as KnownStatus) : status.toUpperCase();
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${cls}`}>
-      {key === "running" && (
-        <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500" />
-      )}
+    <span
+      role="status"
+      aria-label={`Status: ${label}`}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${cls}`}
+    >
+      <StatusGlyph status={key} />
       {label}
     </span>
   );

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { BenchmarkHeatmap } from "@/components/BenchmarkHeatmap";
 import { Skeleton } from "@/components/Skeleton";
 import { useUrlNumber, useUrlParam } from "@/lib/useUrlParam";
 import {
@@ -150,6 +151,9 @@ export default function BenchmarkPage() {
   const evalSetId = (evalSetIdRaw ?? "all") as string | "all";
   const setEvalSetId = (v: string | "all") => setEvalSetIdRaw(v === "all" ? null : v);
   const [selectedK, setSelectedK] = useUrlNumber("k", null);
+  // Default view: heatmap small-multiples (#81). The full numeric matrix is
+  // still one click away under the toggle for export workflows.
+  const [viewMode, setViewMode] = useState<"heatmap" | "table">("heatmap");
 
   // Unfiltered catalog fetch — populates the full set of known stages and
   // eval sets, so selector chips don't disappear when a filtered query
@@ -348,11 +352,12 @@ export default function BenchmarkPage() {
           <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">
             Pipeline stage
           </label>
-          <div className="flex flex-wrap gap-1 rounded-lg bg-slate-100 p-0.5">
+          <div role="group" aria-label="Pipeline stage" className="flex flex-wrap gap-1 rounded-lg bg-slate-100 p-0.5">
             {stageList.map((s) => (
               <button
                 key={s.name}
                 onClick={() => setStage(s.name)}
+                aria-pressed={stage === s.name}
                 title={`${s.kind}${s.is_baseline ? " · baseline" : ""}`}
                 className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
                   stage === s.name
@@ -374,11 +379,12 @@ export default function BenchmarkPage() {
             <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">
               Neighbours (K)
             </label>
-            <div className="flex gap-1 rounded-lg bg-slate-100 p-0.5">
+            <div role="group" aria-label="Neighbours (K)" className="flex gap-1 rounded-lg bg-slate-100 p-0.5">
               {catalog.ks.map((n) => (
                 <button
                   key={n}
                   onClick={() => setSelectedK(n)}
+                  aria-pressed={selectedK === n}
                   className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
                     selectedK === n
                       ? "bg-white text-slate-900 shadow-sm"
