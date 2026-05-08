@@ -1,7 +1,7 @@
 [project]
 name = "protea"
 version = "0.8.0"
-description = ""
+description = "PROtein funcTional Embedding-based Annotation: distributed platform for GO term prediction via PLM embeddings, KNN transfer, and learned re-ranking."
 authors = [
     {name = "frapercan",email = "frapercan1@alum.us.es"}
 ]
