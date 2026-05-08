@@ -59,8 +59,6 @@ protea-reranker-lab = {git = "https://github.com/frapercan/protea-reranker-lab.g
 pytest = ">=9.0.2,<10.0.0"
 uvicorn = ">=0.41.0,<0.42.0"
 coverage = {extras = ["toml"], version = ">=7.2.1"}
-flake8 = ">=6.0.0"
-flake8-bugbear = ">=23.2.13"
 taskipy = ">=1.10.3"
 sphinx = ">=7.2.6"
 furo = ">=2024.8.6"
@@ -76,7 +74,7 @@ types-pyyaml = "^6.0.12.20250915"
 sphinxcontrib-bibtex = "^2.7.0"
 
 [tool.taskipy.tasks]
-lint     = "ruff check protea scripts && flake8 protea"
+lint     = "ruff check protea scripts"
 format   = "ruff format protea scripts"
 typecheck = "mypy protea"
 coverage = "coverage run -m pytest tests && coverage report -m"
