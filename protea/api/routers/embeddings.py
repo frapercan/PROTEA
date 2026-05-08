@@ -13,8 +13,6 @@ from protea.api.deps import get_amqp_url, get_session_factory
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
-from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
-from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 from protea.infrastructure.queue.publisher import publish_job
 from protea.infrastructure.session import session_scope
@@ -24,12 +22,15 @@ from protea.services.embeddings_service import (
     assert_prediction_set_exists,
     config_to_dict,
     delete_embedding_config_cascade,
+    delete_prediction_set_cascade,
     get_go_term_distribution_data,
     get_prediction_set_data,
     get_predictions_for_protein,
+    iter_predictions_cafa_tsv,
     iter_predictions_tsv,
     list_prediction_sets_data,
     list_proteins_in_prediction_set,
+    prepare_cafa_export,
     validate_embedding_config_body,
 )
 from protea.services.jobs_service import enqueue_job
@@ -357,64 +358,23 @@ def download_predictions_cafa(
     Pass ``eval_id`` to restrict output to delta proteins only (NK + LK targets),
     which is required for a valid CAFA evaluation.
     """
-    from protea.core.evaluation import compute_evaluation_data
-    from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
-    from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
-    from protea.infrastructure.orm.models.annotation.go_term import GOTerm
-
-    with session_scope(factory) as _check:
-        if _check.get(PredictionSet, set_id) is None:
-            raise HTTPException(status_code=404, detail="PredictionSet not found")
-
-        delta_proteins: set[str] | None = None
-        if eval_id is not None:
-            e = _check.get(EvaluationSet, eval_id)
-            if e is None:
-                raise HTTPException(status_code=404, detail="EvaluationSet not found")
-            ann_old = _check.get(AnnotationSet, e.old_annotation_set_id)
-            data = compute_evaluation_data(
-                _check,
-                e.old_annotation_set_id,
-                e.new_annotation_set_id,
-                ann_old.ontology_snapshot_id,
+    try:
+        with session_scope(factory) as _check:
+            delta_proteins = prepare_cafa_export(
+                _check, prediction_set_id=set_id, eval_id=eval_id
             )
-            delta_proteins = set(data.nk) | set(data.lk)
-
-    def _generate():
-        with session_scope(factory) as session:
-            # Deduplicate at the DB level: keep the lowest distance per
-            # (protein_accession, go_id) pair so we never need an unbounded
-            # `seen` set in Python — this preserves true streaming.
-            from sqlalchemy import func as sa_func
-
-            min_dist = session.query(
-                GOPrediction.protein_accession,
-                GOPrediction.go_term_id,
-                sa_func.min(GOPrediction.distance).label("min_distance"),
-            ).filter(GOPrediction.prediction_set_id == set_id)
-            if max_distance is not None:
-                min_dist = min_dist.filter(GOPrediction.distance <= max_distance)
-            min_dist = min_dist.group_by(
-                GOPrediction.protein_accession, GOPrediction.go_term_id
-            ).subquery()
-
-            q = session.query(
-                min_dist.c.protein_accession, GOTerm.go_id, min_dist.c.min_distance
-            ).join(GOTerm, min_dist.c.go_term_id == GOTerm.id)
-            if aspect:
-                q = q.filter(GOTerm.aspect == aspect.upper())
-            if delta_proteins is not None:
-                q = q.filter(min_dist.c.protein_accession.in_(delta_proteins))
-
-            q = q.order_by(min_dist.c.protein_accession, GOTerm.go_id)
-
-            for acc, go_id, dist in q.yield_per(1000):
-                score = max(0.0, 1.0 - dist)
-                yield f"{acc}\t{go_id}\t{score:.4f}\n"
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     filename = f"predictions_cafa_{set_id}.tsv"
     return StreamingResponse(
-        _generate(),
+        iter_predictions_cafa_tsv(
+            factory,
+            prediction_set_id=set_id,
+            aspect=aspect,
+            max_distance=max_distance,
+            delta_proteins=delta_proteins,
+        ),
         media_type="text/tab-separated-values",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
@@ -426,16 +386,8 @@ def delete_prediction_set(
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
     """Delete a prediction set and all its GOPrediction rows."""
-    with session_scope(factory) as session:
-        ps = session.get(PredictionSet, set_id)
-        if ps is None:
-            raise HTTPException(status_code=404, detail="PredictionSet not found")
-
-        deleted_predictions = (
-            session.query(GOPrediction)
-            .filter(GOPrediction.prediction_set_id == set_id)
-            .delete(synchronize_session=False)
-        )
-        session.delete(ps)
-
-    return {"deleted": str(set_id), "predictions_deleted": deleted_predictions}
+    try:
+        with session_scope(factory) as session:
+            return delete_prediction_set_cascade(session, set_id)
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

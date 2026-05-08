@@ -20,10 +20,11 @@ from __future__ import annotations
 import csv
 import io
 import uuid
+from collections.abc import Iterator
 from typing import Any
 
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.protein_go_annotation import ProteinGOAnnotation
@@ -435,6 +436,112 @@ def get_prediction_set_data(
     }
 
 
+def prepare_cafa_export(
+    session: Session,
+    *,
+    prediction_set_id: uuid.UUID,
+    eval_id: uuid.UUID | None,
+) -> set[str] | None:
+    """Preflight CAFA export: validate the PredictionSet exists and, if an
+    ``EvaluationSet`` was supplied, compute the union of NK + LK delta
+    proteins to restrict the export.
+
+    Returns the delta-protein accession set when ``eval_id`` is provided
+    (the streaming generator filters on it), otherwise ``None``.
+
+    Raises :class:`EntityNotFoundError` for missing PredictionSet or
+    EvaluationSet so the router can translate to 404.
+    """
+    from protea.core.evaluation import compute_evaluation_data
+    from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
+    from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
+
+    if session.get(PredictionSet, prediction_set_id) is None:
+        raise EntityNotFoundError("PredictionSet", prediction_set_id)
+
+    if eval_id is None:
+        return None
+
+    e = session.get(EvaluationSet, eval_id)
+    if e is None:
+        raise EntityNotFoundError("EvaluationSet", eval_id)
+    ann_old = session.get(AnnotationSet, e.old_annotation_set_id)
+    if ann_old is None:
+        raise EntityNotFoundError("AnnotationSet", e.old_annotation_set_id)
+    data = compute_evaluation_data(
+        session,
+        e.old_annotation_set_id,
+        e.new_annotation_set_id,
+        ann_old.ontology_snapshot_id,
+    )
+    return set(data.nk) | set(data.lk)
+
+
+def iter_predictions_cafa_tsv(
+    factory: sessionmaker[Session],
+    *,
+    prediction_set_id: uuid.UUID,
+    aspect: str | None,
+    max_distance: float | None,
+    delta_proteins: set[str] | None,
+) -> Iterator[str]:
+    """Stream the CAFA-format prediction TSV.
+
+    DB-level deduplication: a ``GROUP BY (protein_accession, go_term_id)``
+    + ``MIN(distance)`` subquery keeps the best row per pair so the
+    Python side never needs an unbounded ``seen`` set — true streaming.
+    Score is ``max(0.0, 1.0 - distance)`` clamped to ``[0, 1]``.
+    """
+    with session_scope(factory) as session:
+        min_dist_q = session.query(
+            GOPrediction.protein_accession,
+            GOPrediction.go_term_id,
+            func.min(GOPrediction.distance).label("min_distance"),
+        ).filter(GOPrediction.prediction_set_id == prediction_set_id)
+        if max_distance is not None:
+            min_dist_q = min_dist_q.filter(GOPrediction.distance <= max_distance)
+        min_dist = min_dist_q.group_by(
+            GOPrediction.protein_accession, GOPrediction.go_term_id
+        ).subquery()
+
+        q = session.query(
+            min_dist.c.protein_accession, GOTerm.go_id, min_dist.c.min_distance
+        ).join(GOTerm, min_dist.c.go_term_id == GOTerm.id)
+        if aspect:
+            q = q.filter(GOTerm.aspect == aspect.upper())
+        if delta_proteins is not None:
+            q = q.filter(min_dist.c.protein_accession.in_(delta_proteins))
+
+        q = q.order_by(min_dist.c.protein_accession, GOTerm.go_id)
+
+        for acc, go_id, dist in q.yield_per(1000):
+            score = max(0.0, 1.0 - dist)
+            yield f"{acc}\t{go_id}\t{score:.4f}\n"
+
+
+def delete_prediction_set_cascade(
+    session: Session,
+    prediction_set_id: uuid.UUID,
+) -> dict[str, Any]:
+    """Delete a :class:`PredictionSet` and all its :class:`GOPrediction` rows.
+
+    Returns ``{"deleted": <id>, "predictions_deleted": <count>}``. Raises
+    :class:`EntityNotFoundError` when the UUID does not resolve so the
+    router can translate to 404.
+    """
+    ps = session.get(PredictionSet, prediction_set_id)
+    if ps is None:
+        raise EntityNotFoundError("PredictionSet", prediction_set_id)
+
+    deleted_predictions = (
+        session.query(GOPrediction)
+        .filter(GOPrediction.prediction_set_id == prediction_set_id)
+        .delete(synchronize_session=False)
+    )
+    session.delete(ps)
+    return {"deleted": str(prediction_set_id), "predictions_deleted": deleted_predictions}
+
+
 def delete_embedding_config_cascade(
     session: Session,
     config_id: uuid.UUID,
@@ -717,11 +824,14 @@ __all__ = [
     "assert_prediction_set_exists",
     "config_to_dict",
     "delete_embedding_config_cascade",
-    "get_prediction_set_data",
-    "list_prediction_sets_data",
+    "delete_prediction_set_cascade",
     "get_go_term_distribution_data",
+    "get_prediction_set_data",
     "get_predictions_for_protein",
+    "iter_predictions_cafa_tsv",
     "iter_predictions_tsv",
+    "list_prediction_sets_data",
     "list_proteins_in_prediction_set",
+    "prepare_cafa_export",
     "validate_embedding_config_body",
 ]
