@@ -10,8 +10,6 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.cache import cached
 from protea.api.deps import get_amqp_url, get_session_factory
-from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
-from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 from protea.infrastructure.queue.publisher import publish_job
@@ -19,6 +17,7 @@ from protea.infrastructure.session import session_scope
 from protea.services.embeddings_service import (
     EntityNotFoundError,
     InvalidEmbeddingConfigError,
+    InvalidUUIDFieldError,
     assert_prediction_set_exists,
     config_to_dict,
     delete_embedding_config_cascade,
@@ -32,6 +31,7 @@ from protea.services.embeddings_service import (
     list_proteins_in_prediction_set,
     prepare_cafa_export,
     validate_embedding_config_body,
+    validate_predict_request,
 )
 from protea.services.jobs_service import enqueue_job
 
@@ -167,31 +167,19 @@ def predict_go_terms(
     unified nearest neighbours carry only one aspect).
     """
 
-    def _parse_uuid(key: str) -> UUID:
-        raw = body.get(key)
-        try:
-            return UUID(str(raw))
-        except (ValueError, AttributeError):
-            raise HTTPException(status_code=422, detail=f"{key} must be a valid UUID") from None
-
-    config_id = _parse_uuid("embedding_config_id")
-    annotation_set_id = _parse_uuid("annotation_set_id")
-    ontology_snapshot_id = _parse_uuid("ontology_snapshot_id")
-
-    with session_scope(factory) as session:
-        if session.get(EmbeddingConfig, config_id) is None:
-            raise HTTPException(status_code=404, detail="EmbeddingConfig not found")
-        if session.get(AnnotationSet, annotation_set_id) is None:
-            raise HTTPException(status_code=404, detail="AnnotationSet not found")
-        if session.get(OntologySnapshot, ontology_snapshot_id) is None:
-            raise HTTPException(status_code=404, detail="OntologySnapshot not found")
-
-        job_id = enqueue_job(
-            session,
-            operation="predict_go_terms",
-            queue_name=_PREDICTIONS_QUEUE,
-            payload=body,
-        )
+    try:
+        with session_scope(factory) as session:
+            validate_predict_request(session, body)
+            job_id = enqueue_job(
+                session,
+                operation="predict_go_terms",
+                queue_name=_PREDICTIONS_QUEUE,
+                payload=body,
+            )
+    except InvalidUUIDFieldError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     publish_job(amqp_url, _PREDICTIONS_QUEUE, job_id)
     return {"id": str(job_id), "status": "queued"}
