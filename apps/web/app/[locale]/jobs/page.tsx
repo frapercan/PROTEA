@@ -7,6 +7,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { SkeletonTableRow } from "@/components/Skeleton";
 import { useToast } from "@/components/Toast";
 import { useTranslations } from "next-intl";
+import { useUrlParam } from "@/lib/useUrlParam";
 
 const STATUS_OPTIONS = ["", "queued", "running", "succeeded", "failed", "cancelled"];
 
@@ -51,7 +52,9 @@ export default function JobsPage() {
   const toast = useToast();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState("");
+  const [statusFilterRaw, setStatusFilterRaw] = useUrlParam("status", "");
+  const statusFilter = statusFilterRaw ?? "";
+  const setStatusFilter = (v: string) => setStatusFilterRaw(v === "" ? null : v);
   const [error, setError] = useState("");
   const [autoRefresh, setAutoRefresh] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useToast } from "@/components/Toast";
 import { SkeletonTableRow } from "@/components/Skeleton";
 import { useTranslations } from "next-intl";
+import { useUrlParam } from "@/lib/useUrlParam";
 import {
   getProteinStats,
   listProteins,
@@ -41,7 +42,13 @@ function StatCard({ label, value, sub }: { label: string; value: number; sub?: s
 export default function ProteinsPage() {
   const t = useTranslations("proteins");
   const toast = useToast();
-  const [activeTab, setActiveTab] = useState<Tab>("browse");
+  // URL-synced active tab — shareable links land on the right one.
+  const [tabRaw, setTabRaw] = useUrlParam("tab", "browse");
+  const validTabs: Tab[] = ["browse", "stats", "insert", "metadata"];
+  const activeTab: Tab = (validTabs.includes((tabRaw ?? "browse") as Tab)
+    ? (tabRaw ?? "browse")
+    : "browse") as Tab;
+  const setActiveTab = (t: Tab) => setTabRaw(t === "browse" ? null : t);
 
   // Browse state
   const [proteins, setProteins] = useState<ProteinItem[]>([]);
@@ -270,8 +277,8 @@ export default function ProteinsPage() {
           </div>
 
           {/* Desktop table */}
-          <div className="hidden lg:block overflow-x-auto rounded-lg border bg-white shadow-sm">
-            <div className="grid grid-cols-[130px_140px_120px_1fr_80px_110px] gap-2 border-b bg-slate-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <div className="hidden lg:block overflow-x-auto protea-scroll-shadow rounded-lg border bg-white shadow-sm">
+            <div className="protea-thead-sticky grid grid-cols-[130px_140px_120px_1fr_80px_110px] gap-2 border-b bg-slate-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
               <div>{t("browseTab.tableHeaders.accession")}</div>
               <div>{t("browseTab.tableHeaders.entryName")}</div>
               <div>{t("browseTab.tableHeaders.gene")}</div>
