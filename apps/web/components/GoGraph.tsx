@@ -263,7 +263,7 @@ export default function GoGraph({ subgraph, knownGoIds, predictedGoIds, height =
 
   if (subgraph.nodes.length === 0) {
     return (
-      <div className="flex items-center justify-center h-24 text-sm text-gray-400">
+      <div className="flex items-center justify-center h-24 text-sm text-slate-400">
         No graph data available.
       </div>
     );
@@ -281,7 +281,7 @@ export default function GoGraph({ subgraph, knownGoIds, predictedGoIds, height =
               className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
                 activeAspect === asp
                   ? (ASPECT_TAB_COLORS[asp] ?? "border-blue-600 text-blue-600")
-                  : "border-transparent text-gray-400 hover:text-gray-600"
+                  : "border-transparent text-slate-400 hover:text-slate-600"
               }`}
             >
               {ASPECT_LABELS[asp] ?? asp}
@@ -300,15 +300,15 @@ export default function GoGraph({ subgraph, knownGoIds, predictedGoIds, height =
             style={{ left: tooltip.x + 12, top: tooltip.y + 12 }}
           >
             <p className="font-mono font-semibold text-blue-600">{tooltip.goId}</p>
-            {tooltip.name && <p className="text-gray-700 mt-0.5">{tooltip.name}</p>}
-            <p className="mt-1 text-gray-400 capitalize">{tooltip.kind.replace(/_/g, " ")}</p>
+            {tooltip.name && <p className="text-slate-700 mt-0.5">{tooltip.name}</p>}
+            <p className="mt-1 text-slate-400 capitalize">{tooltip.kind.replace(/_/g, " ")}</p>
           </div>
         )}
       </div>
 
       {/* Legend */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 border-t bg-gray-50 text-xs text-gray-500">
-        <span className="font-medium text-gray-600">Nodes:</span>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 border-t bg-slate-50 text-xs text-slate-500">
+        <span className="font-medium text-slate-600">Nodes:</span>
         {NODE_LEGEND.map(({ kind, label, bg, border }) => (
           <span key={kind} className="flex items-center gap-1.5">
             <span className="inline-block w-3 h-3 rounded-sm border"
@@ -318,7 +318,7 @@ export default function GoGraph({ subgraph, knownGoIds, predictedGoIds, height =
         ))}
         <span className="ml-auto flex items-center gap-3">
           <span className="flex items-center gap-1">
-            <span className="inline-block w-4 h-0.5 bg-gray-400 rounded" /> is_a
+            <span className="inline-block w-4 h-0.5 bg-slate-400 rounded" /> is_a
           </span>
           <span className="flex items-center gap-1">
             <span className="inline-block w-4 border-t border-dashed border-yellow-400" /> part_of

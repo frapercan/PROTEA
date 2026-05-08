@@ -220,10 +220,10 @@ export function AnnotateForm() {
 
   return (
     <section className="rounded-2xl border-2 border-blue-100 bg-gradient-to-b from-blue-50/60 to-white p-6 sm:p-8">
-      <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-1">
+      <h2 className="text-xl sm:text-2xl font-bold text-slate-900 mb-1">
         {t("annotateTitle" as any)}
       </h2>
-      <p className="text-sm text-gray-500 mb-5">
+      <p className="text-sm text-slate-500 mb-5">
         {t("annotateDescription" as any)}
       </p>
 
@@ -267,7 +267,7 @@ export function AnnotateForm() {
         className={`relative rounded-lg border-2 transition-colors ${
           dragOver
             ? "border-blue-400 bg-blue-50"
-            : "border-gray-200 bg-white"
+            : "border-slate-200 bg-white"
         }`}
         onDragOver={(e) => {
           e.preventDefault();
@@ -282,7 +282,7 @@ export function AnnotateForm() {
           placeholder={t("annotatePlaceholder" as any)}
           rows={6}
           disabled={isRunning || isQueueBlocked}
-          className="w-full rounded-lg p-4 text-xs font-mono text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-300 resize-y disabled:opacity-50 disabled:cursor-not-allowed bg-transparent"
+          className="w-full rounded-lg p-4 text-xs font-mono text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-300 resize-y disabled:opacity-50 disabled:cursor-not-allowed bg-transparent"
         />
         {!fasta && !isRunning && !isQueueBlocked && (
           <div className="absolute bottom-3 right-3 flex gap-2">
@@ -296,7 +296,7 @@ export function AnnotateForm() {
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
-              className="text-xs text-gray-500 hover:text-gray-700 underline"
+              className="text-xs text-slate-500 hover:text-slate-700 underline"
             >
               {t("annotateUploadFile" as any)}
             </button>
@@ -353,7 +353,7 @@ export function AnnotateForm() {
         </button>
 
         {isRunning && progress && (
-          <span className="text-sm text-gray-500 tabular-nums">{progress}</span>
+          <span className="text-sm text-slate-500 tabular-nums">{progress}</span>
         )}
 
         {stage === "done" && (
@@ -384,13 +384,13 @@ export function AnnotateForm() {
                       ? "bg-blue-500"
                       : active
                         ? "bg-blue-300 animate-pulse"
-                        : "bg-gray-200"
+                        : "bg-slate-200"
                   }`}
                 />
               );
             })}
           </div>
-          <div className="flex justify-between mt-1 text-[10px] text-gray-400">
+          <div className="flex justify-between mt-1 text-[10px] text-slate-400">
             <span>{t("annotateStepUpload" as any)}</span>
             <span>{t("annotateStepEmbed" as any)}</span>
             <span>{t("annotateStepPredict" as any)}</span>

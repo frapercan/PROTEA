@@ -27,7 +27,7 @@ export default function SupportPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <div className="p-8 text-sm text-gray-400">Loading…</div>;
+  if (loading) return <div className="p-8 text-sm text-slate-400">Loading…</div>;
   if (!data) return <div className="p-8 text-sm text-red-500">Could not load support data.</div>;
 
   const withComments = data.comments.length;
@@ -49,17 +49,17 @@ export default function SupportPage() {
       {/* Comments */}
       {data.comments.length > 0 && (
         <section className="space-y-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-400">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
             {t("commentsSection.heading")}
           </h2>
           <div className="space-y-3">
             {data.comments.map((c) => (
               <div
                 key={c.id}
-                className="rounded-xl border border-gray-100 bg-white px-5 py-4 shadow-sm"
+                className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-sm"
               >
-                <p className="text-sm text-gray-700 leading-relaxed">{c.comment}</p>
-                <p className="mt-2 text-xs text-gray-400">{timeAgo(c.created_at)}</p>
+                <p className="text-sm text-slate-700 leading-relaxed">{c.comment}</p>
+                <p className="mt-2 text-xs text-slate-400">{timeAgo(c.created_at)}</p>
               </div>
             ))}
           </div>
@@ -67,7 +67,7 @@ export default function SupportPage() {
       )}
 
       {data.comments.length === 0 && (
-        <p className="text-center text-sm text-gray-400">{t("commentsSection.noComments")}</p>
+        <p className="text-center text-sm text-slate-400">{t("commentsSection.noComments")}</p>
       )}
     </div>
   );

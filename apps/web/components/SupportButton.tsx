@@ -72,14 +72,14 @@ export function SupportButton() {
             </span>
           )}
         </button>
-        <span className="pointer-events-none absolute bottom-full right-0 mb-2 z-20 hidden group-hover:block w-64 rounded-md border border-gray-200 bg-white px-3 py-2 text-xs text-gray-500 shadow-lg leading-relaxed">
+        <span className="pointer-events-none absolute bottom-full right-0 mb-2 z-20 hidden group-hover:block w-64 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500 shadow-lg leading-relaxed">
           {t("tooltip")}
         </span>
       </div>
 
       {/* Popover */}
       {open && (
-        <div className="absolute right-0 top-full mt-2 z-30 w-80 max-w-[calc(100vw-2rem)] rounded-xl border border-gray-200 bg-white shadow-xl">
+        <div className="absolute right-0 top-full mt-2 z-30 w-80 max-w-[calc(100vw-2rem)] rounded-xl border border-slate-200 bg-white shadow-xl">
           <div className="p-4 space-y-3">
             {submitted ? (
               <p className="text-center text-sm font-medium text-green-600 py-2">
@@ -87,16 +87,16 @@ export function SupportButton() {
               </p>
             ) : (
               <>
-                <p className="text-sm font-semibold text-gray-800">{t("projectSupport")}</p>
+                <p className="text-sm font-semibold text-slate-800">{t("projectSupport")}</p>
                 <textarea
                   value={comment}
                   onChange={(e) => setComment(e.target.value)}
                   placeholder={t("commentPlaceholder")}
                   maxLength={500}
                   rows={3}
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
-                <p className="text-xs text-gray-400">
+                <p className="text-xs text-slate-400">
                   {t("publicNote")}
                 </p>
                 <button
@@ -112,16 +112,16 @@ export function SupportButton() {
 
           {/* Recent comments */}
           {data && data.comments?.length > 0 && (
-            <div className="border-t border-gray-100 px-4 py-3 space-y-2 max-h-48 overflow-y-auto">
+            <div className="border-t border-slate-100 px-4 py-3 space-y-2 max-h-48 overflow-y-auto">
               <div className="flex items-center justify-between">
-                <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">{t("recentComments")}</p>
+                <p className="text-xs font-medium text-slate-400 uppercase tracking-wide">{t("recentComments")}</p>
                 <Link href="/support" className="text-xs text-blue-500 hover:underline" onClick={() => setOpen(false)}>
                   {t("viewAll")}
                 </Link>
               </div>
               {data.comments.map((c) => (
-                <div key={c.id} className="text-xs text-gray-600 leading-relaxed">
-                  <span className="text-gray-400 mr-1">{new Date(c.created_at).toLocaleDateString()}</span>
+                <div key={c.id} className="text-xs text-slate-600 leading-relaxed">
+                  <span className="text-slate-400 mr-1">{new Date(c.created_at).toLocaleDateString()}</span>
                   {c.comment}
                 </div>
               ))}
