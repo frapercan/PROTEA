@@ -6,7 +6,7 @@ data model, job lifecycle, and extension points. Each page focuses on one
 concern and links to the others where they intersect.
 
 :doc:`system_overview`
-   The four horizontal layers (presentation, API, worker, data), the seven
+   The four horizontal layers (presentation, API, worker, data), the ten
    RabbitMQ queues that connect them, and how a typical request flows through
    the stack from FASTA upload to stored prediction.
 
