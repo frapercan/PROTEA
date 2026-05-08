@@ -222,8 +222,8 @@ and records PROTEA's ``producer_version`` + ``producer_git_sha``.
 The single public function ``export_reranker_parquets(...)`` is shared
 by two callers:
 
-- ``train_reranker._dump_frozen_dataset`` — thin wrapper that uses this
-  helper to emit the dataset alongside a training run.
+- ``training_dump_helpers._dump_frozen_dataset`` — thin wrapper that
+  uses this helper to emit the dataset alongside a training-data dump.
 - ``ExportResearchDatasetOperation`` — stand-alone operation that only
   materialises and publishes the dataset, without running LightGBM.
 

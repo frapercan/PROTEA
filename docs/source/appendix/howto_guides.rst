@@ -332,28 +332,19 @@ NK, LK, and PK settings. Download metrics via
 Train a re-ranker
 ------------------
 
-Train a LightGBM binary classifier to re-score GO predictions using
-temporal holdout labels:
-
-.. code-block:: bash
-
-   curl -s -X POST http://127.0.0.1:8000/jobs \
-     -H "Content-Type: application/json" \
-     -d '{
-       "operation": "train_reranker",
-       "queue_name": "protea.jobs",
-       "payload": {
-         "prediction_set_id": "<prediction-set-uuid>",
-         "evaluation_set_id": "<eval-set-uuid>"
-       }
-     }'
-
-The prediction set must have been generated with
-``compute_alignments=true``, ``compute_taxonomy=true``, and
-``compute_reranker_features=true`` to provide the full feature set.
+In-process re-ranker training was retired in F0 (T0.6): the
+``train_reranker`` and ``train_reranker_auto`` operations are no
+longer registered. LightGBM training has moved to the sibling repo
+`protea-reranker-lab <https://github.com/frapercan/protea-reranker-lab>`_,
+which consumes the frozen parquet dataset that PROTEA publishes via
+``export_research_dataset``. The four-step workflow is described in
+:ref:`Register a reranker from protea-reranker-lab
+<howto-register-reranker>` below.
 
 Apply a trained re-ranker to new predictions via
 ``GET /scoring/prediction-sets/{id}/rerank.tsv?reranker_id=<uuid>``.
+
+.. _howto-register-reranker:
 
 Register a reranker from ``protea-reranker-lab``
 -------------------------------------------------
