@@ -26,7 +26,7 @@ from protea.core.disk_cache import (
 from protea.core.domain.aspect import ASPECT_CODES as _ASPECTS
 from protea.core.feature_engineering import compute_alignment, compute_taxonomy
 from protea.core.feature_enricher import NEW_V6_FEATURE_KEYS as _NEW_V6_FEATURE_KEYS
-from protea.core.feature_enricher import enrich_v6_features
+from protea.core.feature_enricher import KnnEnrichmentContext, enrich_v6_features
 from protea.core.knn_search import search_knn
 from protea.core.pca_cache import (
     _load_or_fit_pca_state,
@@ -627,12 +627,14 @@ class PredictGOTermsBatchOperation:
             enrich_v6_features(
                 prediction_dicts,
                 session=session,
-                valid_accessions=valid_accessions,
-                query_embeddings=query_embeddings,
-                neighbors_by_aspect=v6_ctx["neighbors_by_aspect"],
-                go_map_by_aspect=v6_ctx["go_map_by_aspect"],
-                pair_features=v6_ctx["pair_features"],
-                pca_state=pca_state,
+                ctx=KnnEnrichmentContext(
+                    valid_accessions=valid_accessions,
+                    query_embeddings=query_embeddings,
+                    neighbors_by_aspect=v6_ctx["neighbors_by_aspect"],
+                    go_map_by_aspect=v6_ctx["go_map_by_aspect"],
+                    pair_features=v6_ctx["pair_features"],
+                    pca_state=pca_state,
+                ),
                 compute_taxonomy=p.compute_taxonomy,
             )
             emit(
