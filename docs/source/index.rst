@@ -1,7 +1,7 @@
 PROTEA
 ======
 
-**Protein Research and Operations Technology for Enriched Analysis**
+**PROtein funcTional Embedding-based Annotation**
 
 PROTEA is the target platform for the progressive consolidation of the
 `Protein Information System (PIS) <https://github.com/CBBIO/protein-information-system>`_
@@ -32,7 +32,7 @@ metadata enrichment, and job orchestration.
       :shadow: md
       :text-align: left
 
-      :bdg-info:`Design` System layers, job lifecycle, data model, all 16
+      :bdg-info:`Design` System layers, job lifecycle, data model, all 15
       operations, the CAFA evaluation protocol, and the ADRs that explain *why*.
 
    .. grid-item-card:: API Reference
