@@ -13,6 +13,7 @@ which is pure compute but PROTEA-internal) stay here.
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -21,6 +22,23 @@ from protea_method.feature_enricher import enrich_v6_features as _lib_enrich_v6_
 from sqlalchemy.orm import Session
 
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
+
+
+@dataclass(frozen=True)
+class KnnEnrichmentContext:
+    """Bundle of KNN-side inputs consumed by :func:`enrich_v6_features`.
+
+    Groups the six per-call inputs that came out of the same KNN /
+    aspect-pivot pipeline upstream (``predict_go_terms_batch``) so the
+    enrichment signature stays under flake8-bugbear's parameter ceiling.
+    """
+
+    valid_accessions: list[str]
+    query_embeddings: np.ndarray
+    neighbors_by_aspect: dict[str, list[list[tuple[str, float]]]]
+    go_map_by_aspect: dict[str, dict[str, list[dict[str, Any]]]]
+    pair_features: dict[tuple[str, str], dict[str, Any]]
+    pca_state: tuple[np.ndarray, np.ndarray] | None
 
 
 def _load_go_term_metadata(
@@ -76,12 +94,7 @@ def enrich_v6_features(
     predictions: list[dict[str, Any]],
     *,
     session: Session,
-    valid_accessions: list[str],
-    query_embeddings: np.ndarray,
-    neighbors_by_aspect: dict[str, list[list[tuple[str, float]]]],
-    go_map_by_aspect: dict[str, dict[str, list[dict[str, Any]]]],
-    pair_features: dict[tuple[str, str], dict[str, Any]],
-    pca_state: tuple[np.ndarray, np.ndarray] | None,
+    ctx: KnnEnrichmentContext,
     compute_taxonomy: bool,
 ) -> None:
     """Compute the 25 v6 features and merge them into each ``pred`` dict in place.
@@ -96,19 +109,19 @@ def enrich_v6_features(
     if not predictions:
         return
 
-    gtids_in_play = _collect_gtids_in_play(predictions, go_map_by_aspect)
+    gtids_in_play = _collect_gtids_in_play(predictions, ctx.go_map_by_aspect)
     go_id_map, go_aspect_map = _load_go_term_metadata(session, gtids_in_play)
 
     _lib_enrich_v6_features(
         predictions,
         go_id_map=go_id_map,
         go_aspect_map=go_aspect_map,
-        valid_accessions=valid_accessions,
-        query_embeddings=query_embeddings,
-        neighbors_by_aspect=neighbors_by_aspect,
-        go_map_by_aspect=go_map_by_aspect,
-        pair_features=pair_features,
-        pca_state=pca_state,
+        valid_accessions=ctx.valid_accessions,
+        query_embeddings=ctx.query_embeddings,
+        neighbors_by_aspect=ctx.neighbors_by_aspect,
+        go_map_by_aspect=ctx.go_map_by_aspect,
+        pair_features=ctx.pair_features,
+        pca_state=ctx.pca_state,
         compute_taxonomy=compute_taxonomy,
     )
 
