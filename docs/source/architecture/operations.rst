@@ -1233,8 +1233,8 @@ batch queues. They differ from the operations documented above in three ways:
    from, the full :class:`ProteaPayload` is serialised into the AMQP body.
 
 They still implement the ``Operation`` protocol and are registered alongside
-the other thirteen in ``protea/core/operation_catalog.py``. Bringing the
-total to **17 registered operations** (13 job-backed + 4 ephemeral).
+the other eleven in ``protea/core/operation_catalog.py``. Bringing the
+total to **15 registered operations** (11 job-backed + 4 ephemeral).
 
 compute_embeddings_batch
 ~~~~~~~~~~~~~~~~~~~~~~~~
