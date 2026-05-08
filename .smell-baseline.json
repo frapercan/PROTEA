@@ -169,15 +169,6 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/_run_cafa_reranker_loader.py::load_reranker_models_for_payload",
-      "kind": "method",
-      "path": "protea/core/operations/_run_cafa_reranker_loader.py",
-      "name": "load_reranker_models_for_payload",
-      "line": 70,
-      "metric": 70,
-      "threshold": 60
-    },
-    {
       "key": "method::protea/core/operations/compute_embeddings.py::ComputeEmbeddingsOperation.execute",
       "kind": "method",
       "path": "protea/core/operations/compute_embeddings.py",
