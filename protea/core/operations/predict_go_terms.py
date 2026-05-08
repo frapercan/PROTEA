@@ -15,6 +15,7 @@ from protea.core.annotation_intern import intern_string
 from protea.core.contracts.operation import EmitFn, OperationResult
 from protea.core.contracts.parent_progress import update_parent_progress
 from protea.core.disk_cache import (
+    AnnoCsr,
     _aspect_index_path,
     _build_anno_csr,
     _csr_lookup,
@@ -1179,11 +1180,9 @@ class PredictGOTermsBatchOperation:
 
                 # Save annotation CSR cache — zero DB queries during batch processing
                 asp_accessions = [unified["accessions"][i] for i in indices]
-                gtids, quals, ecodes, offsets = _build_anno_csr(
-                    asp_accessions, aspect_to_go_map[asp]
-                )
+                anno_csr = _build_anno_csr(asp_accessions, aspect_to_go_map[asp])
                 _save_anno_csr_to_disk(
-                    embedding_config_id, annotation_set_id, asp, gtids, quals, ecodes, offsets
+                    embedding_config_id, annotation_set_id, asp, anno_csr
                 )
 
         for aspect in _ASPECTS:
@@ -1331,12 +1330,13 @@ class PredictGOTermsBatchOperation:
             if "anno_gtids" in aspect_ref:
                 go_map = _csr_lookup(
                     unique_neighbors_aspect,
-                    aspect_ref["accessions"],
                     aspect_ref["acc_to_anno_idx"],
-                    aspect_ref["anno_gtids"],
-                    aspect_ref["anno_quals"],
-                    aspect_ref["anno_ecodes"],
-                    aspect_ref["anno_offsets"],
+                    AnnoCsr(
+                        gtids=aspect_ref["anno_gtids"],
+                        quals=aspect_ref["anno_quals"],
+                        ecodes=aspect_ref["anno_ecodes"],
+                        offsets=aspect_ref["anno_offsets"],
+                    ),
                 )
             else:
                 go_map = self._load_annotations_for(
