@@ -2,11 +2,16 @@ name: Security
 
 on:
   push:
+    branches: [develop, main]
   pull_request:
   schedule:
     # Weekly Monday 06:00 UTC: catches new CVEs against pinned deps
     # even if no PR has landed.
     - cron: "0 6 * * 1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   audit:
@@ -31,6 +36,15 @@ jobs:
 
       - name: Add poetry to PATH
         run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Use in-project virtualenv
+        run: poetry config virtualenvs.in-project true
+
+      - name: Restore venv cache
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py${{ matrix.python-version }}-poetry${{ matrix.poetry-version }}-main-${{ hashFiles('**/poetry.lock') }}
 
       - name: Install production deps in the poetry venv
         # poetry 2.x removed `poetry export`; install with the main group
