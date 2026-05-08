@@ -23,6 +23,7 @@ from protea.services.embeddings_service import (
     InvalidEmbeddingConfigError,
     assert_prediction_set_exists,
     config_to_dict,
+    delete_embedding_config_cascade,
     get_go_term_distribution_data,
     get_predictions_for_protein,
     iter_predictions_tsv,
@@ -132,50 +133,11 @@ def delete_embedding_config(
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
     """Delete an EmbeddingConfig and cascade-delete all linked embeddings, prediction sets, and predictions."""
-    with session_scope(factory) as session:
-        c = session.get(EmbeddingConfig, config_id)
-        if c is None:
-            raise HTTPException(status_code=404, detail="EmbeddingConfig not found")
-
-        # 1) Delete GOPredictions for all PredictionSets linked to this config
-        #    (PredictionSet → GOPrediction is CASCADE, but bulk-delete bypasses ORM)
-        pred_set_ids = [
-            row[0]
-            for row in session.query(PredictionSet.id)
-            .filter(PredictionSet.embedding_config_id == config_id)
-            .all()
-        ]
-        deleted_predictions = 0
-        if pred_set_ids:
-            deleted_predictions = (
-                session.query(GOPrediction)
-                .filter(GOPrediction.prediction_set_id.in_(pred_set_ids))
-                .delete(synchronize_session=False)
-            )
-
-        # 2) Delete PredictionSets
-        deleted_prediction_sets = (
-            session.query(PredictionSet)
-            .filter(PredictionSet.embedding_config_id == config_id)
-            .delete(synchronize_session=False)
-        )
-
-        # 3) Delete SequenceEmbeddings
-        deleted_embeddings = (
-            session.query(SequenceEmbedding)
-            .filter(SequenceEmbedding.embedding_config_id == config_id)
-            .delete(synchronize_session=False)
-        )
-
-        # 4) Delete the config itself
-        session.delete(c)
-
-    return {
-        "deleted": str(config_id),
-        "embeddings_deleted": deleted_embeddings,
-        "prediction_sets_deleted": deleted_prediction_sets,
-        "predictions_deleted": deleted_predictions,
-    }
+    try:
+        with session_scope(factory) as session:
+            return delete_embedding_config_cascade(session, config_id)
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 # ── Predict ───────────────────────────────────────────────────────────────────

@@ -30,6 +30,7 @@ from protea.infrastructure.orm.models.annotation.protein_go_annotation import Pr
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
+from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.session import session_scope
 
@@ -337,6 +338,63 @@ def iter_predictions_tsv(
             yield buf.getvalue()
 
 
+def delete_embedding_config_cascade(
+    session: Session,
+    config_id: uuid.UUID,
+) -> dict[str, Any]:
+    """Cascade-delete an :class:`EmbeddingConfig` and all linked rows.
+
+    Bulk-deletes the dependent ``GOPrediction`` (via PredictionSet),
+    ``PredictionSet``, and ``SequenceEmbedding`` rows; then the
+    config itself. Returns a summary dict with the deletion counts.
+
+    The ORM-level ``ondelete`` cascade would handle this on
+    ``session.delete(c)`` alone, but we bulk-delete explicitly here
+    so the response reports per-table counts the UI surfaces.
+
+    Raises :class:`EntityNotFoundError` when ``config_id`` does not
+    resolve.
+    """
+    c = session.get(EmbeddingConfig, config_id)
+    if c is None:
+        raise EntityNotFoundError("EmbeddingConfig", config_id)
+
+    pred_set_ids = [
+        row[0]
+        for row in session.query(PredictionSet.id)
+        .filter(PredictionSet.embedding_config_id == config_id)
+        .all()
+    ]
+    deleted_predictions = 0
+    if pred_set_ids:
+        deleted_predictions = (
+            session.query(GOPrediction)
+            .filter(GOPrediction.prediction_set_id.in_(pred_set_ids))
+            .delete(synchronize_session=False)
+        )
+
+    deleted_prediction_sets = (
+        session.query(PredictionSet)
+        .filter(PredictionSet.embedding_config_id == config_id)
+        .delete(synchronize_session=False)
+    )
+
+    deleted_embeddings = (
+        session.query(SequenceEmbedding)
+        .filter(SequenceEmbedding.embedding_config_id == config_id)
+        .delete(synchronize_session=False)
+    )
+
+    session.delete(c)
+
+    return {
+        "deleted": str(config_id),
+        "embeddings_deleted": deleted_embeddings,
+        "prediction_sets_deleted": deleted_prediction_sets,
+        "predictions_deleted": deleted_predictions,
+    }
+
+
 def list_proteins_in_prediction_set(
     session: Session,
     *,
@@ -561,6 +619,7 @@ __all__ = [
     "InvalidEmbeddingConfigError",
     "assert_prediction_set_exists",
     "config_to_dict",
+    "delete_embedding_config_cascade",
     "get_go_term_distribution_data",
     "get_predictions_for_protein",
     "iter_predictions_tsv",
