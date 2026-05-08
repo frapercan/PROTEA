@@ -13,7 +13,10 @@ from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPaylo
 from protea.core.evaluation import load_evaluation_data_for_set
 from protea.core.operations import _run_cafa_artifacts as _artifacts
 from protea.core.operations import _run_cafa_data_helpers as _data
-from protea.core.operations._run_cafa_eval_driver import evaluate_all_settings
+from protea.core.operations._run_cafa_eval_driver import (
+    CafaEvalRunContext,
+    evaluate_all_settings,
+)
 
 # Re-exports for backwards compatibility with existing imports.
 # Helpers live in ``_run_cafa_helpers`` so this file can stay close
@@ -342,9 +345,7 @@ class RunCafaEvaluationOperation:
 
             # Run evaluator for each setting. Body lives in
             # ``_run_cafa_eval_driver.evaluate_all_settings``.
-            shared_pred_dir = os.path.join(str(artifacts_root), "predictions")
-            results = evaluate_all_settings(
-                session,
+            run_ctx = CafaEvalRunContext(
                 pred_set_id=pred_set_id,
                 delta_proteins=delta_proteins,
                 max_distance=p.max_distance,
@@ -360,9 +361,9 @@ class RunCafaEvaluationOperation:
                 pk_known_path=pk_known_path,
                 ia_path=ia_path,
                 toi_path=toi_path,
-                shared_pred_dir=shared_pred_dir,
-                emit=emit,
+                shared_pred_dir=os.path.join(str(artifacts_root), "predictions"),
             )
+            results = evaluate_all_settings(session, ctx=run_ctx, emit=emit)
 
             # ── 2b. Upload all staged artifacts to the artifact store ────────
             for path in sorted(artifacts_root.rglob("*")):
