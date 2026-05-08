@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.evaluation import load_evaluation_data_for_set
 from protea.core.operations import _run_cafa_artifacts as _artifacts
+from protea.core.operations import _run_cafa_data_helpers as _data
 
 # Re-exports for backwards compatibility with existing imports.
 # Helpers live in ``_run_cafa_helpers`` so this file can stay close
@@ -293,73 +294,20 @@ class RunCafaEvaluationOperation:
                     "warning",
                 )
 
-            # Restrict GT to the actually-predicted protein cohort. Without this,
-            # delta proteins outside the PredictionSet's query coverage hurt
-            # Fmax / coverage despite the booster being unable to score them.
+            # Restrict GT to the actually-predicted protein cohort + write
+            # the cafaeval input files (gt_*, known_terms, terms-of-interest).
+            # Bodies live in ``_run_cafa_data_helpers``.
             if p.restrict_gt_to_predicted:
-                from sqlalchemy import distinct, select
-
-                from protea.infrastructure.orm.models.embedding.go_prediction import (
-                    GOPrediction as _GP,
+                data = _data.restrict_data_to_predicted(
+                    session, prediction_set_id=pred_set_id, data=data, emit=emit
                 )
-
-                predicted_set: set[str] = set(
-                    session.execute(
-                        select(distinct(_GP.protein_accession)).where(
-                            _GP.prediction_set_id == pred_set_id
-                        )
-                    )
-                    .scalars()
-                    .all()
-                )
-                _orig_counts = (len(data.nk), len(data.lk), len(data.pk))
-                data = type(data)(
-                    nk={k: v for k, v in data.nk.items() if k in predicted_set},
-                    lk={k: v for k, v in data.lk.items() if k in predicted_set},
-                    pk={k: v for k, v in data.pk.items() if k in predicted_set},
-                    pk_known={k: v for k, v in data.pk_known.items() if k in predicted_set},
-                    known={k: v for k, v in data.known.items() if k in predicted_set},
-                )
-                emit(
-                    "run_cafa_evaluation.gt_restricted_to_predicted",
-                    None,
-                    {
-                        "predicted_proteins": len(predicted_set),
-                        "nk_before": _orig_counts[0],
-                        "nk_after": len(data.nk),
-                        "lk_before": _orig_counts[1],
-                        "lk_after": len(data.lk),
-                        "pk_before": _orig_counts[2],
-                        "pk_after": len(data.pk),
-                    },
-                    "info",
-                )
-
-            # Write ground truth files into the staging artifacts root.
-            gt_dir = str(artifacts_root)
-            nk_path = os.path.join(gt_dir, "gt_NK.tsv")
-            lk_path = os.path.join(gt_dir, "gt_LK.tsv")
-            pk_path = os.path.join(gt_dir, "gt_PK.tsv")
-            known_path = os.path.join(gt_dir, "known_terms.tsv")
-            pk_known_path = os.path.join(gt_dir, "pk_known_terms.tsv")
-
-            _artifacts.write_gt(data.nk, nk_path)
-            _artifacts.write_gt(data.lk, lk_path)
-            _artifacts.write_gt(data.pk, pk_path)
-            _artifacts.write_gt(data.known, known_path)
-            _artifacts.write_gt(data.pk_known, pk_known_path)
-
-            # Write terms-of-interest file (CAFA6 -toi flag).
-            toi_path = os.path.join(gt_dir, "terms_of_interest.txt")
-            with open(toi_path, "w") as f:
-                for go_id in sorted(toi_go_ids):
-                    f.write(f"{go_id}\n")
-            emit(
-                "run_cafa_evaluation.toi_written",
-                None,
-                {"toi_terms": len(toi_go_ids), "path": toi_path},
-                "info",
-            )
+            gt_paths = _data.write_ground_truth_files(artifacts_root, data)
+            nk_path = gt_paths["nk"]
+            lk_path = gt_paths["lk"]
+            pk_path = gt_paths["pk"]
+            pk_known_path = gt_paths["pk_known"]
+            toi_path = os.path.join(str(artifacts_root), "terms_of_interest.txt")
+            _data.write_terms_of_interest(toi_path, toi_go_ids, emit=emit)
 
             delta_proteins = set(data.nk) | set(data.lk) | set(data.pk)
             emit(
@@ -373,7 +321,7 @@ class RunCafaEvaluationOperation:
             # otherwise write a single shared file.
             has_rerankers = bool(reranker_models)
             if not has_rerankers:
-                pred_dir = os.path.join(gt_dir, "predictions")
+                pred_dir = os.path.join(str(artifacts_root), "predictions")
                 os.makedirs(pred_dir, exist_ok=True)
                 pred_path = os.path.join(pred_dir, "predictions.tsv")
                 _artifacts.write_predictions(
@@ -401,7 +349,7 @@ class RunCafaEvaluationOperation:
             ]:
                 # Write per-setting predictions if this setting has a reranker
                 if has_rerankers:
-                    pred_dir = os.path.join(gt_dir, f"predictions_{setting}")
+                    pred_dir = os.path.join(str(artifacts_root), f"predictions_{setting}")
                     os.makedirs(pred_dir, exist_ok=True)
                     pred_path = os.path.join(pred_dir, "predictions.tsv")
                     rr_aspect_map = reranker_models.get(setting, {})
