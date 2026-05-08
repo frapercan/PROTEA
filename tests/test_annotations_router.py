@@ -691,7 +691,7 @@ class TestDownloadGroundTruthNK:
 
         fake_data = _EvalData(nk={"P12345": {"GO:0003674", "GO:0008150"}})
         with patch(
-            "protea.api.routers.annotations.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services.annotations_service.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/ground-truth-NK.tsv")
         assert resp.status_code == 200
@@ -728,7 +728,7 @@ class TestDownloadGroundTruthLK:
 
         fake_data = _EvalData(lk={"Q99999": {"GO:0005575"}})
         with patch(
-            "protea.api.routers.annotations.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services.annotations_service.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/ground-truth-LK.tsv")
         assert resp.status_code == 200
@@ -757,7 +757,7 @@ class TestDownloadGroundTruthPK:
 
         fake_data = _EvalData(pk={"A00001": {"GO:0003674"}})
         with patch(
-            "protea.api.routers.annotations.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services.annotations_service.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/ground-truth-PK.tsv")
         assert resp.status_code == 200
@@ -784,7 +784,7 @@ class TestDownloadKnownTerms:
 
         fake_data = _EvalData(known={"P12345": {"GO:0003674"}, "Q99999": {"GO:0005575"}})
         with patch(
-            "protea.api.routers.annotations.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services.annotations_service.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/known-terms.tsv")
         assert resp.status_code == 200
@@ -831,7 +831,7 @@ class TestDownloadDeltaFasta:
         self._setup_session(session, ev, ann_old, fake_data, protein_rows=[(protein, seq)])
 
         with patch(
-            "protea.api.routers.annotations.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services.annotations_service.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/delta-proteins.fasta")
         assert resp.status_code == 200
@@ -856,7 +856,7 @@ class TestDownloadDeltaFasta:
         self._setup_session(session, ev, ann_old, fake_data, protein_rows=[(protein, seq)])
 
         with patch(
-            "protea.api.routers.annotations.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services.annotations_service.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/delta-proteins.fasta?category=nk")
         assert resp.status_code == 200
@@ -871,7 +871,7 @@ class TestDownloadDeltaFasta:
         self._setup_session(session, ev, ann_old, fake_data, protein_rows=[])
 
         with patch(
-            "protea.api.routers.annotations.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services.annotations_service.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/delta-proteins.fasta")
         assert resp.status_code == 200
@@ -894,7 +894,7 @@ class TestDownloadDeltaFasta:
         self._setup_session(session, ev, ann_old, fake_data, protein_rows=[(protein, seq)])
 
         with patch(
-            "protea.api.routers.annotations.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services.annotations_service.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/delta-proteins.fasta")
         lines = resp.text.strip().split("\n")
@@ -920,7 +920,7 @@ class TestDownloadDeltaFasta:
         self._setup_session(session, ev, ann_old, fake_data, protein_rows=[(protein, seq)])
 
         with patch(
-            "protea.api.routers.annotations.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services.annotations_service.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/delta-proteins.fasta?category=pk")
         assert resp.status_code == 200
@@ -944,7 +944,7 @@ class TestDownloadDeltaFasta:
         self._setup_session(session, ev, ann_old, fake_data, protein_rows=[(protein, seq)])
 
         with patch(
-            "protea.api.routers.annotations.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services.annotations_service.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/delta-proteins.fasta?category=all")
         assert resp.status_code == 200

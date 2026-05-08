@@ -10,33 +10,44 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
-from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.cache import cached
 from protea.api.deps import get_amqp_url, get_benchmark_config, get_session_factory
 from protea.core.domain.aspect import ASPECT_CAFA_CODES
-from protea.core.evaluation import load_evaluation_data_for_set
 from protea.core.operations.generate_evaluation_set import GenerateEvaluationSetPayload
 from protea.core.operations.load_goa_annotations import LoadGOAAnnotationsPayload
 from protea.core.operations.load_ontology_snapshot import LoadOntologySnapshotPayload
 from protea.core.operations.load_quickgo_annotations import LoadQuickGOAnnotationsPayload
 from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationPayload
 from protea.infrastructure.benchmark_config import BenchmarkConfig
-from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.evaluation_result import EvaluationResult
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.go_term_relationship import GOTermRelationship
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
-from protea.infrastructure.orm.models.annotation.protein_go_annotation import ProteinGOAnnotation
 from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
-from protea.infrastructure.orm.models.job import Job, JobEvent
-from protea.infrastructure.orm.models.protein.protein import Protein
-from protea.infrastructure.orm.models.sequence.sequence import Sequence
 from protea.infrastructure.queue.publisher import publish_job
 from protea.infrastructure.session import session_scope
+from protea.services.annotations_service import (
+    AnnotationSetReferencedError,
+    EntityNotFoundError,
+    delete_annotation_set_data,
+    delete_evaluation_set_collect_keys,
+    get_annotation_set_data,
+    get_evaluation_set_data,
+    get_snapshot_data,
+    iter_delta_proteins_fasta,
+    iter_groundtruth_tsv,
+    list_annotation_sets_data,
+    list_evaluation_sets_data,
+    list_snapshots_data,
+)
+from protea.services.annotations_service import (
+    set_snapshot_ia_url as _set_snapshot_ia_url_service,
+)
+from protea.services.jobs_service import enqueue_job
 
 router = APIRouter(prefix="/annotations", tags=["annotations"])
 
@@ -59,31 +70,7 @@ def list_snapshots(
 
     def _compute() -> list[dict[str, Any]]:
         with session_scope(factory) as session:
-            count_sub = (
-                session.query(
-                    GOTerm.ontology_snapshot_id,
-                    func.count(GOTerm.id).label("cnt"),
-                )
-                .group_by(GOTerm.ontology_snapshot_id)
-                .subquery()
-            )
-            rows = (
-                session.query(OntologySnapshot, count_sub.c.cnt)
-                .outerjoin(count_sub, OntologySnapshot.id == count_sub.c.ontology_snapshot_id)
-                .order_by(OntologySnapshot.loaded_at.desc())
-                .all()
-            )
-            return [
-                {
-                    "id": str(s.id),
-                    "obo_url": s.obo_url,
-                    "obo_version": s.obo_version,
-                    "ia_url": s.ia_url,
-                    "loaded_at": s.loaded_at.isoformat(),
-                    "go_term_count": cnt or 0,
-                }
-                for s, cnt in rows
-            ]
+            return list_snapshots_data(session)
 
     return cached("annotations:snapshots", 300.0, _compute)
 
@@ -94,25 +81,11 @@ def get_snapshot(
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
     """Retrieve a single ontology snapshot with its GO term count."""
-    with session_scope(factory) as session:
-        s = session.get(OntologySnapshot, snapshot_id)
-        if s is None:
-            raise HTTPException(status_code=404, detail="OntologySnapshot not found")
-
-        term_count = (
-            session.query(func.count(GOTerm.id))
-            .filter(GOTerm.ontology_snapshot_id == snapshot_id)
-            .scalar()
-        )
-
-        return {
-            "id": str(s.id),
-            "obo_url": s.obo_url,
-            "obo_version": s.obo_version,
-            "ia_url": s.ia_url,
-            "loaded_at": s.loaded_at.isoformat(),
-            "go_term_count": term_count,
-        }
+    try:
+        with session_scope(factory) as session:
+            return get_snapshot_data(session, snapshot_id)
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.patch("/snapshots/{snapshot_id}/ia-url", summary="Set IA URL on an ontology snapshot")
@@ -135,23 +108,15 @@ def set_snapshot_ia_url(
     This endpoint only touches ``ia_url``; the OBO file and GO term data are
     not affected.
     """
-    ia_url = body.get("ia_url")
     if "ia_url" not in body:
         raise HTTPException(
             status_code=422, detail="Body must contain 'ia_url' key (string or null)"
         )
-
-    with session_scope(factory) as session:
-        s = session.get(OntologySnapshot, snapshot_id)
-        if s is None:
-            raise HTTPException(status_code=404, detail="OntologySnapshot not found")
-        s.ia_url = ia_url or None
-        session.flush()
-        return {
-            "id": str(s.id),
-            "obo_version": s.obo_version,
-            "ia_url": s.ia_url,
-        }
+    try:
+        with session_scope(factory) as session:
+            return _set_snapshot_ia_url_service(session, snapshot_id, body.get("ia_url"))
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/snapshots/load", summary="Trigger ontology snapshot load")
@@ -171,16 +136,11 @@ def load_ontology_snapshot(
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
 
     with session_scope(factory) as session:
-        job = Job(operation="load_ontology_snapshot", queue_name=_JOBS_QUEUE, payload=body)
-        session.add(job)
-        session.flush()
-        job_id = job.id
-        session.add(
-            JobEvent(
-                job_id=job_id,
-                event="job.created",
-                fields={"operation": "load_ontology_snapshot", "queue": _JOBS_QUEUE},
-            )
+        job_id = enqueue_job(
+            session,
+            operation="load_ontology_snapshot",
+            queue_name=_JOBS_QUEUE,
+            payload=body,
         )
 
     publish_job(amqp_url, _JOBS_QUEUE, job_id)
@@ -203,33 +163,7 @@ def list_annotation_sets(
 
     def _compute() -> list[dict[str, Any]]:
         with session_scope(factory) as session:
-            count_sub = (
-                session.query(
-                    ProteinGOAnnotation.annotation_set_id,
-                    func.count(ProteinGOAnnotation.id).label("cnt"),
-                )
-                .group_by(ProteinGOAnnotation.annotation_set_id)
-                .subquery()
-            )
-            q = session.query(AnnotationSet, count_sub.c.cnt).outerjoin(
-                count_sub, AnnotationSet.id == count_sub.c.annotation_set_id
-            )
-            if source is not None:
-                q = q.filter(AnnotationSet.source == source)
-            rows = q.order_by(AnnotationSet.created_at.desc()).all()
-            return [
-                {
-                    "id": str(a.id),
-                    "source": a.source,
-                    "source_version": a.source_version,
-                    "ontology_snapshot_id": str(a.ontology_snapshot_id),
-                    "job_id": str(a.job_id) if a.job_id else None,
-                    "created_at": a.created_at.isoformat(),
-                    "meta": a.meta,
-                    "annotation_count": cnt or 0,
-                }
-                for a, cnt in rows
-            ]
+            return list_annotation_sets_data(session, source)
 
     return cached(f"annotations:sets:{source or '*'}", 300.0, _compute)
 
@@ -240,27 +174,11 @@ def get_annotation_set(
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
     """Retrieve a single annotation set with its total annotation count."""
-    with session_scope(factory) as session:
-        a = session.get(AnnotationSet, set_id)
-        if a is None:
-            raise HTTPException(status_code=404, detail="AnnotationSet not found")
-
-        annotation_count = (
-            session.query(func.count(ProteinGOAnnotation.id))
-            .filter(ProteinGOAnnotation.annotation_set_id == set_id)
-            .scalar()
-        )
-
-        return {
-            "id": str(a.id),
-            "source": a.source,
-            "source_version": a.source_version,
-            "ontology_snapshot_id": str(a.ontology_snapshot_id),
-            "job_id": str(a.job_id) if a.job_id else None,
-            "created_at": a.created_at.isoformat(),
-            "meta": a.meta,
-            "annotation_count": annotation_count,
-        }
+    try:
+        with session_scope(factory) as session:
+            return get_annotation_set_data(session, set_id)
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.delete("/sets/{set_id}", summary="Delete an annotation set")
@@ -269,24 +187,13 @@ def delete_annotation_set(
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
     """Delete an annotation set and all its annotations. Returns 409 if referenced by a prediction set."""
-    with session_scope(factory) as session:
-        a = session.get(AnnotationSet, set_id)
-        if a is None:
-            raise HTTPException(status_code=404, detail="AnnotationSet not found")
-        annotation_count = (
-            session.query(func.count(ProteinGOAnnotation.id))
-            .filter(ProteinGOAnnotation.annotation_set_id == set_id)
-            .scalar()
-        )
-        try:
-            session.delete(a)
-            session.flush()
-        except IntegrityError:
-            raise HTTPException(
-                status_code=409,
-                detail="This annotation set is referenced by one or more prediction sets. Delete those first.",
-            ) from None
-        return {"deleted": str(set_id), "annotations_deleted": annotation_count}
+    try:
+        with session_scope(factory) as session:
+            return delete_annotation_set_data(session, set_id)
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except AnnotationSetReferencedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/sets/load-goa", summary="Trigger GOA annotation load")
@@ -303,16 +210,11 @@ def load_goa_annotations(
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
 
     with session_scope(factory) as session:
-        job = Job(operation="load_goa_annotations", queue_name=_JOBS_QUEUE, payload=body)
-        session.add(job)
-        session.flush()
-        job_id = job.id
-        session.add(
-            JobEvent(
-                job_id=job_id,
-                event="job.created",
-                fields={"operation": "load_goa_annotations", "queue": _JOBS_QUEUE},
-            )
+        job_id = enqueue_job(
+            session,
+            operation="load_goa_annotations",
+            queue_name=_JOBS_QUEUE,
+            payload=body,
         )
 
     publish_job(amqp_url, _JOBS_QUEUE, job_id)
@@ -333,16 +235,11 @@ def load_quickgo_annotations(
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
 
     with session_scope(factory) as session:
-        job = Job(operation="load_quickgo_annotations", queue_name=_JOBS_QUEUE, payload=body)
-        session.add(job)
-        session.flush()
-        job_id = job.id
-        session.add(
-            JobEvent(
-                job_id=job_id,
-                event="job.created",
-                fields={"operation": "load_quickgo_annotations", "queue": _JOBS_QUEUE},
-            )
+        job_id = enqueue_job(
+            session,
+            operation="load_quickgo_annotations",
+            queue_name=_JOBS_QUEUE,
+            payload=body,
         )
 
     publish_job(amqp_url, _JOBS_QUEUE, job_id)
@@ -370,16 +267,11 @@ def generate_evaluation_set(
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
 
     with session_scope(factory) as session:
-        job = Job(operation="generate_evaluation_set", queue_name=_JOBS_QUEUE, payload=body)
-        session.add(job)
-        session.flush()
-        job_id = job.id
-        session.add(
-            JobEvent(
-                job_id=job_id,
-                event="job.created",
-                fields={"operation": "generate_evaluation_set", "queue": _JOBS_QUEUE},
-            )
+        job_id = enqueue_job(
+            session,
+            operation="generate_evaluation_set",
+            queue_name=_JOBS_QUEUE,
+            payload=body,
         )
 
     publish_job(amqp_url, _JOBS_QUEUE, job_id)
@@ -392,18 +284,7 @@ def list_evaluation_sets(
 ) -> list[dict[str, Any]]:
     """List all evaluation sets, newest first."""
     with session_scope(factory) as session:
-        rows = session.query(EvaluationSet).order_by(EvaluationSet.created_at.desc()).all()
-        return [
-            {
-                "id": str(e.id),
-                "old_annotation_set_id": str(e.old_annotation_set_id),
-                "new_annotation_set_id": str(e.new_annotation_set_id),
-                "job_id": str(e.job_id) if e.job_id else None,
-                "created_at": e.created_at.isoformat(),
-                "stats": e.stats,
-            }
-            for e in rows
-        ]
+        return list_evaluation_sets_data(session)
 
 
 @router.delete("/evaluation-sets/{eval_id}", summary="Delete an evaluation set", status_code=204)
@@ -418,18 +299,11 @@ def delete_evaluation_set(
     from protea.infrastructure.settings import load_settings
     from protea.infrastructure.storage import get_artifact_store
 
-    with session_scope(factory) as session:
-        e = session.get(EvaluationSet, eval_id)
-        if e is None:
-            raise HTTPException(status_code=404, detail="EvaluationSet not found")
-        result_keys: list[str] = []
-        for r in (
-            session.query(EvaluationResult)
-            .filter(EvaluationResult.evaluation_set_id == eval_id)
-            .all()
-        ):
-            result_keys.extend((r.results or {}).get("artifacts", {}).get("keys") or [])
-        session.delete(e)
+    try:
+        with session_scope(factory) as session:
+            result_keys = delete_evaluation_set_collect_keys(session, eval_id)
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     project_root = Path(__file__).resolve().parents[3]
     store = get_artifact_store(load_settings(project_root))
@@ -443,18 +317,11 @@ def get_evaluation_set(
     eval_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
-    with session_scope(factory) as session:
-        e = session.get(EvaluationSet, eval_id)
-        if e is None:
-            raise HTTPException(status_code=404, detail="EvaluationSet not found")
-        return {
-            "id": str(e.id),
-            "old_annotation_set_id": str(e.old_annotation_set_id),
-            "new_annotation_set_id": str(e.new_annotation_set_id),
-            "job_id": str(e.job_id) if e.job_id else None,
-            "created_at": e.created_at.isoformat(),
-            "stats": e.stats,
-        }
+    try:
+        with session_scope(factory) as session:
+            return get_evaluation_set_data(session, eval_id)
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 def _eval_set_or_404(session: Session, eval_id: UUID) -> EvaluationSet:
@@ -462,6 +329,29 @@ def _eval_set_or_404(session: Session, eval_id: UUID) -> EvaluationSet:
     if e is None:
         raise HTTPException(status_code=404, detail="EvaluationSet not found")
     return e
+
+
+def _stream_groundtruth(
+    factory: sessionmaker[Session],
+    eval_id: UUID,
+    category: str,
+    filename: str,
+) -> StreamingResponse:
+    """Wrap :func:`iter_groundtruth_tsv` in a TSV streaming response.
+
+    Translates ``EntityNotFoundError`` to HTTP 404 at the boundary;
+    same shape used by the four GT/known-terms download endpoints.
+    """
+    try:
+        with session_scope(factory) as session:
+            lines = iter_groundtruth_tsv(session, eval_id, category)
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return StreamingResponse(
+        iter(lines),
+        media_type="text/tab-separated-values",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get(
@@ -476,19 +366,7 @@ def download_gt_nk(
     """Download No-Knowledge ground truth: delta proteins with zero prior experimental annotations.
     Format: ``protein_accession\\tgo_id`` (no header, 2 columns).
     """
-    with session_scope(factory) as session:
-        e = _eval_set_or_404(session, eval_id)
-        data, _ = load_evaluation_data_for_set(session, e)
-        lines = [
-            f"{protein}\t{go_id}\n"
-            for protein, go_ids in sorted(data.nk.items())
-            for go_id in sorted(go_ids)
-        ]
-    return StreamingResponse(
-        iter(lines),
-        media_type="text/tab-separated-values",
-        headers={"Content-Disposition": 'attachment; filename="ground_truth_NK.tsv"'},
-    )
+    return _stream_groundtruth(factory, eval_id, "nk", "ground_truth_NK.tsv")
 
 
 @router.get(
@@ -503,19 +381,7 @@ def download_gt_lk(
     """Download Limited-Knowledge ground truth: delta proteins with prior experimental annotations.
     Format: ``protein_accession\\tgo_id`` (no header, 2 columns).
     """
-    with session_scope(factory) as session:
-        e = _eval_set_or_404(session, eval_id)
-        data, _ = load_evaluation_data_for_set(session, e)
-        lines = [
-            f"{protein}\t{go_id}\n"
-            for protein, go_ids in sorted(data.lk.items())
-            for go_id in sorted(go_ids)
-        ]
-    return StreamingResponse(
-        iter(lines),
-        media_type="text/tab-separated-values",
-        headers={"Content-Disposition": 'attachment; filename="ground_truth_LK.tsv"'},
-    )
+    return _stream_groundtruth(factory, eval_id, "lk", "ground_truth_LK.tsv")
 
 
 @router.get(
@@ -532,19 +398,7 @@ def download_gt_pk(
     Use together with ``known-terms.tsv`` passed as ``-known`` to the CAFA evaluator.
     Format: ``protein_accession\\tgo_id`` (no header, 2 columns).
     """
-    with session_scope(factory) as session:
-        e = _eval_set_or_404(session, eval_id)
-        data, _ = load_evaluation_data_for_set(session, e)
-        lines = [
-            f"{protein}\t{go_id}\n"
-            for protein, go_ids in sorted(data.pk.items())
-            for go_id in sorted(go_ids)
-        ]
-    return StreamingResponse(
-        iter(lines),
-        media_type="text/tab-separated-values",
-        headers={"Content-Disposition": 'attachment; filename="ground_truth_PK.tsv"'},
-    )
+    return _stream_groundtruth(factory, eval_id, "pk", "ground_truth_PK.tsv")
 
 
 @router.get(
@@ -560,19 +414,7 @@ def download_known_terms(
     Format: ``protein_accession\\tgo_id`` (no header, 2 columns).
     Pass this as ``-known`` to the CAFA evaluator to enable PK scoring.
     """
-    with session_scope(factory) as session:
-        e = _eval_set_or_404(session, eval_id)
-        data, _ = load_evaluation_data_for_set(session, e)
-        lines = [
-            f"{protein}\t{go_id}\n"
-            for protein, go_ids in sorted(data.known.items())
-            for go_id in sorted(go_ids)
-        ]
-    return StreamingResponse(
-        iter(lines),
-        media_type="text/tab-separated-values",
-        headers={"Content-Disposition": 'attachment; filename="known_terms.tsv"'},
-    )
+    return _stream_groundtruth(factory, eval_id, "known", "known_terms.tsv")
 
 
 @router.get(
@@ -592,56 +434,11 @@ def download_delta_fasta(
     Only proteins whose sequence is already stored in the database are included.
     Header format: ``>ACCESSION entry_name OS=organism OX=taxonomy_id (NK|LK)``
     """
-    with session_scope(factory) as session:
-        e = _eval_set_or_404(session, eval_id)
-        data, _ = load_evaluation_data_for_set(session, e)
-
-        # Collect requested accessions with their NK/LK/PK label
-        accession_label: dict[str, str] = {}
-        if category in ("nk", "all"):
-            for acc in data.nk:
-                accession_label[acc] = "NK"
-        if category in ("lk", "all"):
-            for acc in data.lk:
-                accession_label[acc] = "LK"
-        if category in ("pk", "all"):
-            for acc in data.pk:
-                accession_label.setdefault(acc, "PK")  # may also be LK in another ns
-
-        if not accession_label:
-            return StreamingResponse(
-                iter([]),
-                media_type="text/plain",
-                headers={
-                    "Content-Disposition": f'attachment; filename="delta_proteins_{category}.fasta"'
-                },
-            )
-
-        rows = (
-            session.query(Protein, Sequence)
-            .join(Sequence, Protein.sequence_id == Sequence.id)
-            .filter(Protein.accession.in_(accession_label.keys()))
-            .order_by(Protein.accession)
-            .all()
-        )
-
-        lines: list[str] = []
-        for protein, seq in rows:
-            label = accession_label.get(protein.accession, "")
-            parts = [protein.accession]
-            if protein.entry_name:
-                parts.append(protein.entry_name)
-            if protein.organism:
-                parts.append(f"OS={protein.organism}")
-            if protein.taxonomy_id:
-                parts.append(f"OX={protein.taxonomy_id}")
-            parts.append(f"({label})")
-            lines.append(f">{' '.join(parts)}\n")
-            # Wrap sequence at 60 chars per line (standard FASTA)
-            s = seq.sequence
-            for i in range(0, len(s), 60):
-                lines.append(s[i : i + 60] + "\n")
-
+    try:
+        with session_scope(factory) as session:
+            lines = iter_delta_proteins_fasta(session, eval_id, category)
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return StreamingResponse(
         iter(lines),
         media_type="text/plain",
@@ -687,16 +484,11 @@ def run_cafa_evaluation(
             ).scalar_one_or_none()
             if baseline is not None:
                 body = {**body, "scoring_config_id": str(baseline.id)}
-        job = Job(operation="run_cafa_evaluation", queue_name=_EVALUATIONS_QUEUE, payload=body)
-        session.add(job)
-        session.flush()
-        job_id = job.id
-        session.add(
-            JobEvent(
-                job_id=job_id,
-                event="job.created",
-                fields={"operation": "run_cafa_evaluation", "queue": _EVALUATIONS_QUEUE},
-            )
+        job_id = enqueue_job(
+            session,
+            operation="run_cafa_evaluation",
+            queue_name=_EVALUATIONS_QUEUE,
+            payload=body,
         )
 
     publish_job(amqp_url, _EVALUATIONS_QUEUE, job_id)

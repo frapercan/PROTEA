@@ -1,6 +1,6 @@
 # PROTEA
 
-**Protein annotation platform** for large-scale GO term prediction, sequence embedding, and functional analysis.
+**PROtein funcTional Embedding-based Annotation**. A distributed platform for large-scale GO term prediction, sequence embedding, and functional analysis.
 
 PROTEA provides a unified backend for ingesting protein data from UniProt, computing protein language model embeddings (ESMC, ProstT5, ESM2), and predicting Gene Ontology terms via KNN transfer plus a learned LightGBM re-ranker — with a full job queue, REST API, and web interface.
 
