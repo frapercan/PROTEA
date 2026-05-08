@@ -1181,25 +1181,28 @@ class TrainRerankerAutoOperation:
         """
         from protea import __version__ as _protea_version
         from protea.core.parquet_export import (
+            ParquetExportContext,
             export_reranker_parquets,
             resolve_protea_git_sha,
         )
 
         result = export_reranker_parquets(
-            stage_dir=dump_dir,
-            split_files=split_files,
-            valid_split_versions=valid_split_versions,
-            test_files=test_files,
-            test_old_v=test_old_v,
-            test_new_v=test_new_v,
-            name=name,
-            k=k,
-            embedding_config_id=embedding_config_id,
-            ontology_snapshot_id=ontology_snapshot_id,
-            annotation_source=annotation_source,
-            store=None,
-            producer_version=_protea_version,
-            producer_git_sha=resolve_protea_git_sha(),
+            ParquetExportContext(
+                stage_dir=dump_dir,
+                split_files=split_files,
+                valid_split_versions=valid_split_versions,
+                test_files=test_files,
+                test_old_v=test_old_v,
+                test_new_v=test_new_v,
+                name=name,
+                k=k,
+                embedding_config_id=embedding_config_id,
+                ontology_snapshot_id=ontology_snapshot_id,
+                annotation_source=annotation_source,
+                store=None,
+                producer_version=_protea_version,
+                producer_git_sha=resolve_protea_git_sha(),
+            )
         )
         # Preserve the historical return contract — callers rely on
         # ``dump_dir`` instead of ``stage_dir``.
