@@ -1,0 +1,27 @@
+name: auto-merge
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize]
+    branches: [develop]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  enable-auto-merge:
+    # Skip Draft PRs — convert to Ready when you want it to merge.
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enable auto-merge (squash) for non-draft PRs targeting develop
+        # GitHub holds the merge until every required status check
+        # passes (lint, test, security) and the branch is up-to-date
+        # with develop, per the branch-protection rules already in
+        # place. To opt out: open as Draft, or run
+        #   gh pr merge <N> --disable-auto -R <repo>
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge "$PR_URL" --auto --squash
