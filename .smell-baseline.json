@@ -493,24 +493,6 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/services/annotations_service.py::iter_delta_proteins_fasta",
-      "kind": "method",
-      "path": "protea/services/annotations_service.py",
-      "name": "iter_delta_proteins_fasta",
-      "line": 263,
-      "metric": 63,
-      "threshold": 60
-    },
-    {
-      "key": "method::protea/services/annotations_service.py::get_go_subgraph_data",
-      "kind": "method",
-      "path": "protea/services/annotations_service.py",
-      "name": "get_go_subgraph_data",
-      "line": 328,
-      "metric": 86,
-      "threshold": 60
-    },
-    {
       "key": "method::protea/services/embeddings_service.py::iter_predictions_tsv",
       "kind": "method",
       "path": "protea/services/embeddings_service.py",
