@@ -58,10 +58,10 @@ def format_training_row(
 
     Column order matches :data:`TRAINING_TSV_COLUMNS`. ``label`` is
     binary (0 / 1). Uses lazy import of ``_format_optional`` from
-    ``scoring_service`` to avoid a circular dep with the re-exporting
-    module.
+    ``_scoring_streaming_helpers`` (where it canonically lives) to
+    avoid a circular dep with the re-exporting module.
     """
-    from protea.services.scoring_service import _format_optional
+    from protea.services._scoring_streaming_helpers import _format_optional
 
     return "\t".join(
         [
