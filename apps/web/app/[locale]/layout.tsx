@@ -8,6 +8,8 @@ import { SupportButton } from "@/components/SupportButton";
 import { ToastProvider } from "@/components/Toast";
 import { UsagePolicyModal } from "@/components/UsagePolicyModal";
 import { FloatingJobsWidget } from "@/components/FloatingJobsWidget";
+import { CommandPalette } from "@/components/CommandPalette";
+import { CommandPaletteTrigger } from "@/components/CommandPaletteTrigger";
 import { NextIntlClientProvider } from "next-intl";
 import { getMessages } from "next-intl/server";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
@@ -81,6 +83,7 @@ export default async function LocaleLayout({
                 />
 
                 <div className="ml-auto flex items-center gap-2 sm:gap-3">
+                  <CommandPaletteTrigger />
                   <div className="hidden lg:flex items-center gap-2">
                     <LanguageSwitcher />
                   </div>
@@ -97,6 +100,7 @@ export default async function LocaleLayout({
             </main>
 
             <FloatingJobsWidget />
+            <CommandPalette />
           </ToastProvider>
         </NextIntlClientProvider>
       </body>
