@@ -47,9 +47,6 @@ jobs:
       - name: ruff check
         run: poetry run ruff check protea scripts
 
-      - name: flake8
-        run: poetry run flake8 protea
-
       - name: mypy
         run: poetry run mypy protea
 

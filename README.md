@@ -149,7 +149,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the branching strategy and developmen
 poetry install
 poetry run pytest              # unit tests
 poetry run pytest --with-postgres  # integration tests
-poetry run task lint           # ruff + flake8 + mypy
+poetry run task lint           # ruff
+poetry run mypy protea         # type checking
 ```
 
 ---
