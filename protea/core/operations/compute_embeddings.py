@@ -15,7 +15,10 @@ from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload, RetryLaterError
 from protea.core.contracts.parent_progress import update_parent_progress
-from protea.core.operations._compute_embeddings_helpers import build_batch_dispatch_messages
+from protea.core.operations._compute_embeddings_helpers import (
+    build_batch_dispatch_messages,
+    build_embedding_rows,
+)
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 from protea.infrastructure.orm.models.job import Job, JobStatus
@@ -502,42 +505,9 @@ class StoreEmbeddingsOperation:
             )
             return OperationResult(result={"skipped": True})
 
-        embeddings_stored = 0
-        sequences_skipped = 0
-
-        rows_to_insert: list[dict] = []
-
-        for seq_data in p.sequences:
-            sequence_id = seq_data["sequence_id"]
-            chunks = seq_data["chunks"]
-
-            if p.skip_existing:
-                existing = (
-                    session.query(SequenceEmbedding)
-                    .filter_by(sequence_id=sequence_id, embedding_config_id=config_id)
-                    .first()
-                )
-                if existing is not None:
-                    sequences_skipped += 1
-                    continue
-            else:
-                session.query(SequenceEmbedding).filter_by(
-                    sequence_id=sequence_id, embedding_config_id=config_id
-                ).delete()
-
-            for chunk in chunks:
-                rows_to_insert.append(
-                    {
-                        "sequence_id": sequence_id,
-                        "embedding_config_id": config_id,
-                        "chunk_index_s": chunk["chunk_index_s"],
-                        "chunk_index_e": chunk.get("chunk_index_e"),
-                        "embedding": chunk["vector"],
-                        "embedding_dim": chunk["embedding_dim"],
-                    }
-                )
-                embeddings_stored += 1
-
+        rows_to_insert, embeddings_stored, sequences_skipped = build_embedding_rows(
+            session, p, config_id
+        )
         if rows_to_insert:
             session.execute(
                 pg_insert(SequenceEmbedding).on_conflict_do_nothing(),
