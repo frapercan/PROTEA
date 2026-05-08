@@ -29,105 +29,94 @@ from protea.infrastructure.benchmark_config import load_benchmark_config
 from protea.infrastructure.session import build_session_factory
 from protea.infrastructure.settings import load_settings
 
+_API_DESCRIPTION = (
+    "**PROTEA** — Protein Representation and Ontology-Term Enrichment Analysis.\n\n"
+    "Manages the full pipeline from UniProt sequence ingestion through GPU embedding "
+    "computation (ESM-2, ESM3c, T5) to KNN-based GO term prediction.\n\n"
+    "All long-running operations are queued via RabbitMQ and tracked as `Job` rows "
+    "with a full event audit trail. Use `GET /jobs/{id}/events` to stream real-time progress."
+)
 
-def create_app(project_root: Path | None = None) -> FastAPI:
-    if project_root is None:
-        project_root = Path(__file__).resolve().parents[2]
+_OPENAPI_TAGS: list[dict[str, str]] = [
+    {
+        "name": "jobs",
+        "description": "Job queue lifecycle — create, monitor, and cancel operations.",
+    },
+    {"name": "proteins", "description": "UniProt protein lookup and aggregate statistics."},
+    {
+        "name": "annotations",
+        "description": "GO ontology snapshots, annotation sets, and GO subgraph queries.",
+    },
+    {
+        "name": "embeddings",
+        "description": "Embedding configs, GPU compute jobs, and prediction sets management.",
+    },
+    {
+        "name": "query-sets",
+        "description": "User-uploaded FASTA datasets for custom prediction queries.",
+    },
+    {
+        "name": "maintenance",
+        "description": "Housekeeping — identify and remove orphaned sequences or embeddings.",
+    },
+    {"name": "admin", "description": "Destructive admin operations (DB reset). Use with caution."},
+    {
+        "name": "scoring",
+        "description": "Scoring configs, scored prediction export, and CAFA metrics.",
+    },
+    {
+        "name": "benchmark",
+        "description": "Per-embedding / per-stage Fmax matrix across every evaluation result. Powers the /benchmark page in the UI.",
+    },
+    {"name": "support", "description": "Community thumbs-up and comments."},
+    {
+        "name": "annotate",
+        "description": "One-click protein annotation — upload FASTA, auto-run the full pipeline.",
+    },
+    {
+        "name": "datasets",
+        "description": "Frozen re-ranker datasets — enqueue export jobs, list/fetch registered dumps, resolve URIs for the lab.",
+    },
+    {
+        "name": "reranker-models",
+        "description": "Register lab-trained LightGBM boosters — multipart upload or by-reference import of artefacts already in MinIO.",
+    },
+    {
+        "name": "stack",
+        "description": "Cross-repository navigation: registry of the eight repositories that make up the PROTEA stack and a live aggregate of their open pull requests.",
+    },
+]
 
-    settings = load_settings(project_root)
-    factory = build_session_factory(settings.db_url)
+_ROUTER_MODULES = (
+    annotate_router,
+    jobs_router,
+    proteins_router,
+    annotations_router,
+    embeddings_router,
+    query_sets_router,
+    maintenance_router,
+    admin_router,
+    scoring_router,
+    showcase_router,
+    benchmark_router,
+    support_router,
+    datasets_router,
+    reranker_models_router,
+    registry_router,
+    stack_router,
+)
 
-    app = FastAPI(
-        title="PROTEA API",
-        version="0.1.0",
-        description=(
-            "**PROTEA** — Protein Representation and Ontology-Term Enrichment Analysis.\n\n"
-            "Manages the full pipeline from UniProt sequence ingestion through GPU embedding "
-            "computation (ESM-2, ESM3c, T5) to KNN-based GO term prediction.\n\n"
-            "All long-running operations are queued via RabbitMQ and tracked as `Job` rows "
-            "with a full event audit trail. Use `GET /jobs/{id}/events` to stream real-time progress."
-        ),
-        contact={"name": "PROTEA Team", "email": "contact@protea.example.org"},
-        openapi_tags=[
-            {
-                "name": "jobs",
-                "description": "Job queue lifecycle — create, monitor, and cancel operations.",
-            },
-            {"name": "proteins", "description": "UniProt protein lookup and aggregate statistics."},
-            {
-                "name": "annotations",
-                "description": "GO ontology snapshots, annotation sets, and GO subgraph queries.",
-            },
-            {
-                "name": "embeddings",
-                "description": "Embedding configs, GPU compute jobs, and prediction sets management.",
-            },
-            {
-                "name": "query-sets",
-                "description": "User-uploaded FASTA datasets for custom prediction queries.",
-            },
-            {
-                "name": "maintenance",
-                "description": "Housekeeping — identify and remove orphaned sequences or embeddings.",
-            },
-            {
-                "name": "admin",
-                "description": "Destructive admin operations (DB reset). Use with caution.",
-            },
-            {
-                "name": "scoring",
-                "description": "Scoring configs, scored prediction export, and CAFA metrics.",
-            },
-            {
-                "name": "benchmark",
-                "description": (
-                    "Per-embedding / per-stage Fmax matrix across every "
-                    "evaluation result. Powers the /benchmark page in the UI."
-                ),
-            },
-            {"name": "support", "description": "Community thumbs-up and comments."},
-            {
-                "name": "annotate",
-                "description": "One-click protein annotation — upload FASTA, auto-run the full pipeline.",
-            },
-            {
-                "name": "datasets",
-                "description": (
-                    "Frozen re-ranker datasets — enqueue export jobs, "
-                    "list/fetch registered dumps, resolve URIs for the lab."
-                ),
-            },
-            {
-                "name": "reranker-models",
-                "description": (
-                    "Register lab-trained LightGBM boosters — multipart "
-                    "upload or by-reference import of artefacts already in MinIO."
-                ),
-            },
-            {
-                "name": "stack",
-                "description": (
-                    "Cross-repository navigation: registry of the eight "
-                    "repositories that make up the PROTEA stack and a "
-                    "live aggregate of their open pull requests."
-                ),
-            },
-        ],
-    )
-    app.state.session_factory = factory
-    app.state.amqp_url = settings.amqp_url
-    app.state.artifacts_dir = settings.artifacts_dir
-    app.state.operation_registry = build_operation_registry()
-    app.state.benchmark_config = load_benchmark_config(project_root)
+_CORS_ORIGINS = (
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://protea.ngrok.app",
+)
 
-    allowed_origins = [
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "https://protea.ngrok.app",
-    ]
+
+def _register_middlewares(app: FastAPI) -> None:
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=allowed_origins,
+        allow_origins=list(_CORS_ORIGINS),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -137,6 +126,8 @@ def create_app(project_root: Path | None = None) -> FastAPI:
     # "unique visitors" dashboard.
     app.add_middleware(VisitorCounterMiddleware)
 
+
+def _register_health_endpoints(app: FastAPI, factory, settings) -> None:
     @app.get("/health", tags=["health"])
     def health_check() -> dict[str, str]:
         """Liveness probe — returns 200 if the API process is up."""
@@ -178,42 +169,62 @@ def create_app(project_root: Path | None = None) -> FastAPI:
 
         return {"status": "ready"}
 
-    app.include_router(annotate_router.router)
-    app.include_router(jobs_router.router)
-    app.include_router(proteins_router.router)
-    app.include_router(annotations_router.router)
-    app.include_router(embeddings_router.router)
-    app.include_router(query_sets_router.router)
-    app.include_router(maintenance_router.router)
-    app.include_router(admin_router.router)
-    app.include_router(scoring_router.router)
-    app.include_router(showcase_router.router)
-    app.include_router(benchmark_router.router)
-    app.include_router(support_router.router)
-    app.include_router(datasets_router.router)
-    app.include_router(reranker_models_router.router)
-    app.include_router(registry_router.router)
-    app.include_router(stack_router.router)
 
+def _register_routers(app: FastAPI) -> None:
+    for module in _ROUTER_MODULES:
+        app.include_router(module.router)
+
+
+def _mount_sibling_docs(app: FastAPI, docs_build_root: Path) -> None:
+    for repo_dir in sorted(p for p in docs_build_root.iterdir() if p.is_dir()):
+        if repo_dir.name == "html":
+            continue
+        html_dir = repo_dir / "html"
+        if (html_dir / "index.html").exists():
+            app.mount(
+                f"/docs/{repo_dir.name}",
+                StaticFiles(directory=html_dir, html=True),
+                name=f"docs-{repo_dir.name}",
+            )
+
+
+def _mount_static_assets(app: FastAPI, project_root: Path) -> None:
     sphinx_build = project_root / "docs" / "build" / "html"
     if sphinx_build.exists():
         app.mount("/sphinx", StaticFiles(directory=sphinx_build, html=True), name="sphinx")
 
     docs_build_root = project_root / "docs" / "build"
     if docs_build_root.exists():
-        for repo_dir in sorted(p for p in docs_build_root.iterdir() if p.is_dir()):
-            if repo_dir.name == "html":
-                continue
-            html_dir = repo_dir / "html"
-            if (html_dir / "index.html").exists():
-                app.mount(
-                    f"/docs/{repo_dir.name}",
-                    StaticFiles(directory=html_dir, html=True),
-                    name=f"docs-{repo_dir.name}",
-                )
+        _mount_sibling_docs(app, docs_build_root)
 
     static_dir = project_root / "static"
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+
+def create_app(project_root: Path | None = None) -> FastAPI:
+    if project_root is None:
+        project_root = Path(__file__).resolve().parents[2]
+
+    settings = load_settings(project_root)
+    factory = build_session_factory(settings.db_url)
+
+    app = FastAPI(
+        title="PROTEA API",
+        version="0.1.0",
+        description=_API_DESCRIPTION,
+        contact={"name": "PROTEA Team", "email": "contact@protea.example.org"},
+        openapi_tags=_OPENAPI_TAGS,
+    )
+    app.state.session_factory = factory
+    app.state.amqp_url = settings.amqp_url
+    app.state.artifacts_dir = settings.artifacts_dir
+    app.state.operation_registry = build_operation_registry()
+    app.state.benchmark_config = load_benchmark_config(project_root)
+
+    _register_middlewares(app)
+    _register_health_endpoints(app, factory, settings)
+    _register_routers(app)
+    _mount_static_assets(app, project_root)
 
     return app
