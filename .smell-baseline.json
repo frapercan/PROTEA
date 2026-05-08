@@ -20,8 +20,8 @@
       "kind": "class",
       "path": "protea/core/operations/run_cafa_evaluation.py",
       "name": "RunCafaEvaluationOperation",
-      "line": 92,
-      "metric": 867,
+      "line": 90,
+      "metric": 581,
       "threshold": 500
     },
     {
@@ -49,15 +49,6 @@
       "name": "",
       "line": 0,
       "metric": 1919,
-      "threshold": 800
-    },
-    {
-      "key": "file::protea/core/operations/run_cafa_evaluation.py::",
-      "kind": "file",
-      "path": "protea/core/operations/run_cafa_evaluation.py",
-      "name": "",
-      "line": 0,
-      "metric": 958,
       "threshold": 800
     },
     {
@@ -175,6 +166,24 @@
       "name": "compute_cafa_metrics",
       "line": 70,
       "metric": 88,
+      "threshold": 60
+    },
+    {
+      "key": "method::protea/core/operations/_run_cafa_artifacts.py::write_predictions",
+      "kind": "method",
+      "path": "protea/core/operations/_run_cafa_artifacts.py",
+      "name": "write_predictions",
+      "line": 86,
+      "metric": 66,
+      "threshold": 60
+    },
+    {
+      "key": "method::protea/core/operations/_run_cafa_artifacts.py::write_predictions_per_aspect",
+      "kind": "method",
+      "path": "protea/core/operations/_run_cafa_artifacts.py",
+      "name": "write_predictions_per_aspect",
+      "line": 206,
+      "metric": 74,
       "threshold": 60
     },
     {
@@ -398,26 +407,8 @@
       "kind": "method",
       "path": "protea/core/operations/run_cafa_evaluation.py",
       "name": "RunCafaEvaluationOperation.execute",
-      "line": 175,
+      "line": 173,
       "metric": 472,
-      "threshold": 60
-    },
-    {
-      "key": "method::protea/core/operations/run_cafa_evaluation.py::RunCafaEvaluationOperation._write_predictions",
-      "kind": "method",
-      "path": "protea/core/operations/run_cafa_evaluation.py",
-      "name": "RunCafaEvaluationOperation._write_predictions",
-      "line": 708,
-      "metric": 67,
-      "threshold": 60
-    },
-    {
-      "key": "method::protea/core/operations/run_cafa_evaluation.py::RunCafaEvaluationOperation._write_predictions_per_aspect",
-      "kind": "method",
-      "path": "protea/core/operations/run_cafa_evaluation.py",
-      "name": "RunCafaEvaluationOperation._write_predictions_per_aspect",
-      "line": 829,
-      "metric": 78,
       "threshold": 60
     },
     {
@@ -493,21 +484,12 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/services/embeddings_service.py::iter_predictions_tsv",
+      "key": "method::protea/services/_embeddings_predictions_helpers.py::iter_predictions_tsv",
       "kind": "method",
-      "path": "protea/services/embeddings_service.py",
+      "path": "protea/services/_embeddings_predictions_helpers.py",
       "name": "iter_predictions_tsv",
-      "line": 224,
+      "line": 72,
       "metric": 77,
-      "threshold": 60
-    },
-    {
-      "key": "method::protea/services/embeddings_service.py::get_predictions_for_protein",
-      "kind": "method",
-      "path": "protea/services/embeddings_service.py",
-      "name": "get_predictions_for_protein",
-      "line": 570,
-      "metric": 61,
       "threshold": 60
     },
     {
@@ -592,6 +574,33 @@
       "threshold": 6
     },
     {
+      "key": "params::protea/core/operations/_run_cafa_artifacts.py::write_predictions",
+      "kind": "params",
+      "path": "protea/core/operations/_run_cafa_artifacts.py",
+      "name": "write_predictions",
+      "line": 86,
+      "metric": 9,
+      "threshold": 6
+    },
+    {
+      "key": "params::protea/core/operations/_run_cafa_artifacts.py::write_predictions_reranked",
+      "kind": "params",
+      "path": "protea/core/operations/_run_cafa_artifacts.py",
+      "name": "write_predictions_reranked",
+      "line": 154,
+      "metric": 8,
+      "threshold": 6
+    },
+    {
+      "key": "params::protea/core/operations/_run_cafa_artifacts.py::write_predictions_per_aspect",
+      "kind": "params",
+      "path": "protea/core/operations/_run_cafa_artifacts.py",
+      "name": "write_predictions_per_aspect",
+      "line": 206,
+      "metric": 7,
+      "threshold": 6
+    },
+    {
       "key": "params::protea/core/operations/compute_embeddings.py::_embed_t5",
       "kind": "params",
       "path": "protea/core/operations/compute_embeddings.py",
@@ -625,33 +634,6 @@
       "name": "PredictGOTermsBatchOperation._predict_batch",
       "line": 1598,
       "metric": 11,
-      "threshold": 6
-    },
-    {
-      "key": "params::protea/core/operations/run_cafa_evaluation.py::RunCafaEvaluationOperation._write_predictions",
-      "kind": "params",
-      "path": "protea/core/operations/run_cafa_evaluation.py",
-      "name": "RunCafaEvaluationOperation._write_predictions",
-      "line": 708,
-      "metric": 10,
-      "threshold": 6
-    },
-    {
-      "key": "params::protea/core/operations/run_cafa_evaluation.py::RunCafaEvaluationOperation._write_predictions_reranked",
-      "kind": "params",
-      "path": "protea/core/operations/run_cafa_evaluation.py",
-      "name": "RunCafaEvaluationOperation._write_predictions_reranked",
-      "line": 776,
-      "metric": 9,
-      "threshold": 6
-    },
-    {
-      "key": "params::protea/core/operations/run_cafa_evaluation.py::RunCafaEvaluationOperation._write_predictions_per_aspect",
-      "kind": "params",
-      "path": "protea/core/operations/run_cafa_evaluation.py",
-      "name": "RunCafaEvaluationOperation._write_predictions_per_aspect",
-      "line": 829,
-      "metric": 8,
       "threshold": 6
     },
     {
