@@ -14,6 +14,7 @@ from protea.core.disk_cache import (
 )
 from protea.core.knn_search import _compute_distance_matrix, search_knn
 from protea.core.operations.predict_go_terms import (
+    BatchPredictContext,
     PredictGOTermsBatchOperation,
     PredictGOTermsBatchPayload,
     PredictGOTermsOperation,
@@ -326,7 +327,15 @@ class TestPredictBatch:
         pred_set_id = uuid.uuid4()
 
         query_embs = np.array([[0.99, 0.01, 0.0]], dtype=np.float32)
-        preds, _, _ = op._predict_batch(["RQUERY"], query_embs, ref, pred_set_id, p)
+        preds, _, _ = op._predict_batch(
+            BatchPredictContext(
+                query_accessions=["RQUERY"],
+                query_embeddings=query_embs,
+                ref_data=ref,
+                prediction_set_id=pred_set_id,
+                payload=p,
+            )
+        )
 
         assert len(preds) >= 1
         go_ids = {pr["go_term_id"] for pr in preds}
@@ -340,7 +349,15 @@ class TestPredictBatch:
         ref = self._ref_data()
         pred_set_id = uuid.uuid4()
         query_embs = np.array([[1.0, 0.0, 0.0]], dtype=np.float32)
-        preds, _, _ = op._predict_batch(["P12345"], query_embs, ref, pred_set_id, p)
+        preds, _, _ = op._predict_batch(
+            BatchPredictContext(
+                query_accessions=["P12345"],
+                query_embeddings=query_embs,
+                ref_data=ref,
+                prediction_set_id=pred_set_id,
+                payload=p,
+            )
+        )
 
         ref_accs = [pr["ref_protein_accession"] for pr in preds]
         assert "P12345" in ref_accs, "Self should be included as a reference neighbor"
@@ -354,7 +371,15 @@ class TestPredictBatch:
         pred_set_id = uuid.uuid4()
 
         query_embs = np.array([[0.0, 0.0, 1.0]], dtype=np.float32)
-        preds, _, _ = op._predict_batch(["RQUERY"], query_embs, ref, pred_set_id, p)
+        preds, _, _ = op._predict_batch(
+            BatchPredictContext(
+                query_accessions=["RQUERY"],
+                query_embeddings=query_embs,
+                ref_data=ref,
+                prediction_set_id=pred_set_id,
+                payload=p,
+            )
+        )
         assert preds == []
 
     def test_limit_per_entry_caps_neighbors(self) -> None:
@@ -364,7 +389,15 @@ class TestPredictBatch:
         pred_set_id = uuid.uuid4()
 
         query_embs = np.array([[0.7, 0.7, 0.0]], dtype=np.float32)
-        preds, _, _ = op._predict_batch(["RQUERY"], query_embs, ref, pred_set_id, p)
+        preds, _, _ = op._predict_batch(
+            BatchPredictContext(
+                query_accessions=["RQUERY"],
+                query_embeddings=query_embs,
+                ref_data=ref,
+                prediction_set_id=pred_set_id,
+                payload=p,
+            )
+        )
 
         ref_accs = {pr["ref_protein_accession"] for pr in preds}
         assert len(ref_accs) == 1
@@ -844,7 +877,15 @@ class TestPredictBatchRerankerFeatures:
             },
         }
         query_embs = np.array([[0.9, 0.1]], dtype=np.float32)
-        preds, _, _ = op._predict_batch(["Q1"], query_embs, ref_data, pred_set_id, p)
+        preds, _, _ = op._predict_batch(
+            BatchPredictContext(
+                query_accessions=["Q1"],
+                query_embeddings=query_embs,
+                ref_data=ref_data,
+                prediction_set_id=pred_set_id,
+                payload=p,
+            )
+        )
 
         assert len(preds) >= 1
         for pred in preds:
@@ -867,7 +908,15 @@ class TestPredictBatchRerankerFeatures:
             },
         }
         query_embs = np.array([[0.9, 0.1]], dtype=np.float32)
-        preds, _, _ = op._predict_batch(["Q1"], query_embs, ref_data, pred_set_id, p)
+        preds, _, _ = op._predict_batch(
+            BatchPredictContext(
+                query_accessions=["Q1"],
+                query_embeddings=query_embs,
+                ref_data=ref_data,
+                prediction_set_id=pred_set_id,
+                payload=p,
+            )
+        )
 
         for pred in preds:
             assert "vote_count" not in pred

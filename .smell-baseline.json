@@ -11,8 +11,8 @@
       "kind": "class",
       "path": "protea/core/operations/predict_go_terms.py",
       "name": "PredictGOTermsBatchOperation",
-      "line": 430,
-      "metric": 1423,
+      "line": 462,
+      "metric": 1422,
       "threshold": 500
     },
     {
@@ -39,7 +39,7 @@
       "path": "protea/core/operations/predict_go_terms.py",
       "name": "",
       "line": 0,
-      "metric": 1921,
+      "metric": 1952,
       "threshold": 800
     },
     {
@@ -335,7 +335,7 @@
       "kind": "method",
       "path": "protea/core/operations/predict_go_terms.py",
       "name": "PredictGOTermsOperation.execute",
-      "line": 237,
+      "line": 269,
       "metric": 144,
       "threshold": 60
     },
@@ -344,8 +344,8 @@
       "kind": "method",
       "path": "protea/core/operations/predict_go_terms.py",
       "name": "PredictGOTermsBatchOperation.execute",
-      "line": 451,
-      "metric": 336,
+      "line": 483,
+      "metric": 338,
       "threshold": 60
     },
     {
@@ -353,7 +353,7 @@
       "kind": "method",
       "path": "protea/core/operations/predict_go_terms.py",
       "name": "PredictGOTermsBatchOperation._apply_reranker_if_aligned",
-      "line": 790,
+      "line": 824,
       "metric": 103,
       "threshold": 60
     },
@@ -362,7 +362,7 @@
       "kind": "method",
       "path": "protea/core/operations/predict_go_terms.py",
       "name": "PredictGOTermsBatchOperation._load_reference_data",
-      "line": 916,
+      "line": 950,
       "metric": 91,
       "threshold": 60
     },
@@ -371,7 +371,7 @@
       "kind": "method",
       "path": "protea/core/operations/predict_go_terms.py",
       "name": "PredictGOTermsBatchOperation._load_reference_data_per_aspect",
-      "line": 1008,
+      "line": 1042,
       "metric": 175,
       "threshold": 60
     },
@@ -380,7 +380,7 @@
       "kind": "method",
       "path": "protea/core/operations/predict_go_terms.py",
       "name": "PredictGOTermsBatchOperation._run_aspect_separated_knn",
-      "line": 1184,
+      "line": 1218,
       "metric": 216,
       "threshold": 60
     },
@@ -389,7 +389,7 @@
       "kind": "method",
       "path": "protea/core/operations/predict_go_terms.py",
       "name": "PredictGOTermsBatchOperation._load_annotations_for",
-      "line": 1486,
+      "line": 1520,
       "metric": 64,
       "threshold": 60
     },
@@ -398,8 +398,8 @@
       "kind": "method",
       "path": "protea/core/operations/predict_go_terms.py",
       "name": "PredictGOTermsBatchOperation._predict_batch",
-      "line": 1600,
-      "metric": 170,
+      "line": 1634,
+      "metric": 167,
       "threshold": 60
     },
     {
@@ -623,17 +623,8 @@
       "kind": "params",
       "path": "protea/core/operations/predict_go_terms.py",
       "name": "PredictGOTermsBatchOperation._run_aspect_separated_knn",
-      "line": 1184,
+      "line": 1218,
       "metric": 8,
-      "threshold": 6
-    },
-    {
-      "key": "params::protea/core/operations/predict_go_terms.py::PredictGOTermsBatchOperation._predict_batch",
-      "kind": "params",
-      "path": "protea/core/operations/predict_go_terms.py",
-      "name": "PredictGOTermsBatchOperation._predict_batch",
-      "line": 1600,
-      "metric": 11,
       "threshold": 6
     },
     {
