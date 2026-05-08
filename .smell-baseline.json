@@ -65,8 +65,8 @@
       "kind": "method",
       "path": "protea/api/routers/benchmark.py",
       "name": "get_benchmark_matrix",
-      "line": 143,
-      "metric": 219,
+      "line": 185,
+      "metric": 209,
       "threshold": 60
     },
     {
@@ -92,8 +92,8 @@
       "kind": "method",
       "path": "protea/api/routers/reranker_models.py",
       "name": "_register_model",
-      "line": 99,
-      "metric": 90,
+      "line": 120,
+      "metric": 81,
       "threshold": 60
     },
     {
@@ -511,20 +511,11 @@
       "threshold": 6
     },
     {
-      "key": "params::protea/api/routers/reranker_models.py::_register_model",
-      "kind": "params",
-      "path": "protea/api/routers/reranker_models.py",
-      "name": "_register_model",
-      "line": 99,
-      "metric": 10,
-      "threshold": 6
-    },
-    {
       "key": "params::protea/api/routers/reranker_models.py::import_reranker_model_multipart",
       "kind": "params",
       "path": "protea/api/routers/reranker_models.py",
       "name": "import_reranker_model_multipart",
-      "line": 192,
+      "line": 204,
       "metric": 10,
       "threshold": 6
     },
