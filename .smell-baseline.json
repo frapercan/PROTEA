@@ -20,8 +20,8 @@
       "kind": "class",
       "path": "protea/core/training_dump_helpers.py",
       "name": "TrainRerankerAutoOperation",
-      "line": 1133,
-      "metric": 770,
+      "line": 1136,
+      "metric": 750,
       "threshold": 500
     },
     {
@@ -48,7 +48,7 @@
       "path": "protea/core/training_dump_helpers.py",
       "name": "",
       "line": 0,
-      "metric": 1902,
+      "metric": 1885,
       "threshold": 800
     },
     {
@@ -434,7 +434,7 @@
       "kind": "method",
       "path": "protea/core/training_dump_helpers.py",
       "name": "_preload_all_embeddings",
-      "line": 179,
+      "line": 182,
       "metric": 73,
       "threshold": 60
     },
@@ -443,7 +443,7 @@
       "kind": "method",
       "path": "protea/core/training_dump_helpers.py",
       "name": "_build_reference_from_cache",
-      "line": 254,
+      "line": 257,
       "metric": 67,
       "threshold": 60
     },
@@ -452,7 +452,7 @@
       "kind": "method",
       "path": "protea/core/training_dump_helpers.py",
       "name": "_knn_transfer_and_label",
-      "line": 372,
+      "line": 375,
       "metric": 624,
       "threshold": 60
     },
@@ -461,8 +461,8 @@
       "kind": "method",
       "path": "protea/core/training_dump_helpers.py",
       "name": "TrainRerankerAutoOperation.execute",
-      "line": 1240,
-      "metric": 663,
+      "line": 1212,
+      "metric": 674,
       "threshold": 60
     },
     {
@@ -643,15 +643,6 @@
       "name": "with_retry",
       "line": 67,
       "metric": 7,
-      "threshold": 6
-    },
-    {
-      "key": "params::protea/core/training_dump_helpers.py::TrainRerankerAutoOperation._dump_frozen_dataset",
-      "kind": "params",
-      "path": "protea/core/training_dump_helpers.py",
-      "name": "TrainRerankerAutoOperation._dump_frozen_dataset",
-      "line": 1190,
-      "metric": 11,
       "threshold": 6
     },
     {

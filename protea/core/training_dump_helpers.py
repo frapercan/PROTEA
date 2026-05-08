@@ -1190,7 +1190,7 @@ class TrainRerankerAutoOperation:
         return " · ".join(bits)
 
     @staticmethod
-    def _dump_frozen_dataset(ctx: "ParquetExportContext") -> dict[str, Any]:
+    def _dump_frozen_dataset(ctx: ParquetExportContext) -> dict[str, Any]:
         """Thin wrapper that delegates to ``parquet_export`` — kept so
         ``dump_helper`` can still dump a frozen dataset to a local
         path via ``dump_to=...``. New code should prefer the
