@@ -420,7 +420,7 @@ class TestDownloadObo:
     def setup_method(self):
         self.op = RunCafaEvaluationOperation()
 
-    @patch("protea.core.operations.run_cafa_evaluation.requests.get")
+    @patch("protea.core.operations._run_cafa_artifacts.requests.get")
     def test_download_plain(self, mock_get):
         mock_resp = MagicMock()
         mock_resp.text = "format-version: 1.2\n"
@@ -436,7 +436,7 @@ class TestDownloadObo:
         finally:
             os.unlink(path)
 
-    @patch("protea.core.operations.run_cafa_evaluation.requests.get")
+    @patch("protea.core.operations._run_cafa_artifacts.requests.get")
     def test_download_gzip(self, mock_get):
         original = b"format-version: 1.2\n"
         compressed = gzip.compress(original)
@@ -507,7 +507,7 @@ class TestDownloadTsv:
             os.unlink(src_path)
             os.unlink(dst_path)
 
-    @patch("protea.core.operations.run_cafa_evaluation.requests.get")
+    @patch("protea.core.operations._run_cafa_artifacts.requests.get")
     def test_http_download(self, mock_get):
         mock_resp = MagicMock()
         mock_resp.text = "GO:0004\t0.9\n"
@@ -523,7 +523,7 @@ class TestDownloadTsv:
         finally:
             os.unlink(dst_path)
 
-    @patch("protea.core.operations.run_cafa_evaluation.requests.get")
+    @patch("protea.core.operations._run_cafa_artifacts.requests.get")
     def test_http_gzip_download(self, mock_get):
         original = b"GO:0005\t0.6\n"
         mock_resp = MagicMock()
@@ -612,7 +612,7 @@ class TestWritePredictions:
         finally:
             os.unlink(path)
 
-    @patch("protea.core.operations.run_cafa_evaluation.compute_score")
+    @patch("protea.core.operations._run_cafa_artifacts.compute_score")
     def test_write_predictions_with_scoring_config(self, mock_compute_score):
         mock_compute_score.return_value = 0.75
 
@@ -858,7 +858,7 @@ class TestExecuteHappyPath:
 
         dfs_best = _dfs_best_fixture()
 
-        with patch.object(self.op, "_download_obo"):
+        with patch("protea.core.operations._run_cafa_artifacts.download_obo"):
             with patch(
                 "cafaeval.evaluation.cafa_eval",
                 return_value=(MagicMock(), dfs_best),
@@ -896,7 +896,7 @@ class TestExecuteHappyPath:
 
         dfs_best = _dfs_best_fixture()
 
-        with patch.object(self.op, "_download_obo"):
+        with patch("protea.core.operations._run_cafa_artifacts.download_obo"):
             with patch(
                 "cafaeval.evaluation.cafa_eval",
                 return_value=(MagicMock(), dfs_best),
@@ -937,7 +937,7 @@ class TestExecuteHappyPath:
         query.order_by.return_value = query
         query.yield_per.return_value = []
 
-        with patch.object(self.op, "_download_obo"):
+        with patch("protea.core.operations._run_cafa_artifacts.download_obo"):
             with patch(
                 "cafaeval.evaluation.cafa_eval",
                 side_effect=RuntimeError("cafa_eval exploded"),
@@ -976,7 +976,7 @@ class TestExecuteHappyPath:
         query.order_by.return_value = query
         query.yield_per.return_value = []
 
-        with patch.object(self.op, "_download_obo"):
+        with patch("protea.core.operations._run_cafa_artifacts.download_obo"):
             with patch(
                 "cafaeval.evaluation.cafa_eval",
                 return_value=(MagicMock(), _dfs_best_fixture()),
@@ -1009,8 +1009,8 @@ class TestExecuteHappyPath:
         query.yield_per.return_value = []
 
         with (
-            patch.object(self.op, "_download_obo"),
-            patch.object(self.op, "_download_tsv") as mock_dl_tsv,
+            patch("protea.core.operations._run_cafa_artifacts.download_obo"),
+            patch("protea.core.operations._run_cafa_artifacts.download_tsv") as mock_dl_tsv,
             patch(
                 "cafaeval.evaluation.cafa_eval",
                 return_value=(MagicMock(), _dfs_best_fixture()),
@@ -1048,8 +1048,8 @@ class TestExecuteHappyPath:
         query.yield_per.return_value = []
 
         with (
-            patch.object(self.op, "_download_obo"),
-            patch.object(self.op, "_download_tsv") as mock_dl_tsv,
+            patch("protea.core.operations._run_cafa_artifacts.download_obo"),
+            patch("protea.core.operations._run_cafa_artifacts.download_tsv") as mock_dl_tsv,
             patch(
                 "cafaeval.evaluation.cafa_eval",
                 return_value=(MagicMock(), _dfs_best_fixture()),
@@ -1093,7 +1093,7 @@ class TestExecuteHappyPath:
         call_order = []
         session.commit.side_effect = lambda: call_order.append("commit")
 
-        with patch.object(self.op, "_download_obo"):
+        with patch("protea.core.operations._run_cafa_artifacts.download_obo"):
             with patch(
                 "cafaeval.evaluation.cafa_eval",
                 side_effect=lambda *a, **kw: (
@@ -1135,7 +1135,7 @@ class TestExecuteHappyPath:
         dfs_best = _dfs_best_fixture()
 
         with (
-            patch.object(self.op, "_download_obo"),
+            patch("protea.core.operations._run_cafa_artifacts.download_obo"),
             patch(
                 "cafaeval.evaluation.cafa_eval",
                 return_value=(df_mock, dfs_best),
@@ -1180,7 +1180,7 @@ class TestExecuteHappyPath:
         query.yield_per.return_value = []
 
         with (
-            patch.object(self.op, "_download_obo"),
+            patch("protea.core.operations._run_cafa_artifacts.download_obo"),
             patch(
                 "cafaeval.evaluation.cafa_eval",
                 return_value=(MagicMock(), _dfs_best_fixture()),

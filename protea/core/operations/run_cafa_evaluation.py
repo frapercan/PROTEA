@@ -7,12 +7,12 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-import requests
 from pydantic import Field, field_validator
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.evaluation import load_evaluation_data_for_set
+from protea.core.operations import _run_cafa_artifacts as _artifacts
 
 # Re-exports for backwards compatibility with existing imports.
 # Helpers live in ``_run_cafa_helpers`` so this file can stay close
@@ -26,12 +26,10 @@ from protea.core.operations._run_cafa_helpers import (  # noqa: F401
     eval_artifact_key,
 )
 from protea.core.reranker import load_reranker
-from protea.core.scoring import compute_score
 from protea.infrastructure.orm.models.annotation.evaluation_result import EvaluationResult
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
-from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
 from protea.infrastructure.orm.models.embedding.reranker_model import (
     RerankerModel as RerankerModelORM,
@@ -349,7 +347,7 @@ class RunCafaEvaluationOperation:
             # Download OBO into temp dir (large file, not persisted)
             emit("run_cafa_evaluation.downloading_obo", None, {"url": snapshot.obo_url}, "info")
             obo_path = os.path.join(tmpdir, "go.obo")
-            self._download_obo(snapshot.obo_url, obo_path)
+            _artifacts.download_obo(snapshot.obo_url, obo_path)
 
             # Resolve IA file: explicit payload path > snapshot ia_url > None (uniform IC).
             # Priority: an explicit ia_file in the payload overrides the snapshot URL so
@@ -360,7 +358,7 @@ class RunCafaEvaluationOperation:
             if ia_path is None and snapshot.ia_url:
                 ia_path = os.path.join(tmpdir, "ia.tsv")
                 emit("run_cafa_evaluation.downloading_ia", None, {"url": snapshot.ia_url}, "info")
-                self._download_tsv(snapshot.ia_url, ia_path)
+                _artifacts.download_tsv(snapshot.ia_url, ia_path)
             if ia_path:
                 emit("run_cafa_evaluation.ia_resolved", None, {"ia_path": ia_path}, "info")
             else:
@@ -425,11 +423,11 @@ class RunCafaEvaluationOperation:
             known_path = os.path.join(gt_dir, "known_terms.tsv")
             pk_known_path = os.path.join(gt_dir, "pk_known_terms.tsv")
 
-            self._write_gt(data.nk, nk_path)
-            self._write_gt(data.lk, lk_path)
-            self._write_gt(data.pk, pk_path)
-            self._write_gt(data.known, known_path)
-            self._write_gt(data.pk_known, pk_known_path)
+            _artifacts.write_gt(data.nk, nk_path)
+            _artifacts.write_gt(data.lk, lk_path)
+            _artifacts.write_gt(data.pk, pk_path)
+            _artifacts.write_gt(data.known, known_path)
+            _artifacts.write_gt(data.pk_known, pk_known_path)
 
             # Write terms-of-interest file (CAFA6 -toi flag).
             toi_path = os.path.join(gt_dir, "terms_of_interest.txt")
@@ -458,7 +456,7 @@ class RunCafaEvaluationOperation:
                 pred_dir = os.path.join(gt_dir, "predictions")
                 os.makedirs(pred_dir, exist_ok=True)
                 pred_path = os.path.join(pred_dir, "predictions.tsv")
-                self._write_predictions(
+                _artifacts.write_predictions(
                     session,
                     pred_set_id,
                     delta_proteins,
@@ -495,7 +493,7 @@ class RunCafaEvaluationOperation:
                     if "" in rr_aspect_map:
                         # Single model for all aspects (legacy flat field)
                         bundle = rr_aspect_map[""]
-                        self._write_predictions(
+                        _artifacts.write_predictions(
                             session,
                             pred_set_id,
                             delta_proteins,
@@ -508,7 +506,7 @@ class RunCafaEvaluationOperation:
                         )
                     else:
                         # Per-aspect models
-                        self._write_predictions_per_aspect(
+                        _artifacts.write_predictions_per_aspect(
                             session,
                             pred_set_id,
                             delta_proteins,
@@ -544,7 +542,7 @@ class RunCafaEvaluationOperation:
                         signal.signal(signal.SIGTERM, _old_sigterm)
                         signal.signal(signal.SIGINT, _old_sigint)
 
-                    results[setting] = self._parse_results(dfs_best)
+                    results[setting] = _artifacts.parse_results(dfs_best)
 
                     # Persist full cafaeval output (PR curves + best metrics per metric type)
                     if df is not None:
@@ -645,314 +643,29 @@ class RunCafaEvaluationOperation:
             }
         )
 
-    # ── Helpers ───────────────────────────────────────────────────────────────
+    # Backwards-compat shims: tests patch and call these names. The bodies
+    # live in ``_run_cafa_artifacts``; these instance methods delegate so
+    # ``mock.patch.object(op, "_download_obo")`` and direct
+    # ``self.op._download_obo(...)`` invocations continue to work.
 
     def _download_obo(self, url: str, dest: str) -> None:
-        """Download OBO file to dest, decompressing gzip if needed."""
-        import gzip
-
-        resp = requests.get(url, stream=True, timeout=300)
-        resp.raise_for_status()
-        if url.endswith(".gz"):
-            with open(dest, "wb") as f:
-                f.write(gzip.decompress(resp.content))
-        else:
-            with open(dest, "w", encoding="utf-8") as f:
-                f.write(resp.text)
+        _artifacts.download_obo(url, dest)
 
     def _download_tsv(self, url: str, dest: str) -> None:
-        """Copy or download a plain-text TSV file (gzip-transparent) to dest.
-
-        Accepts both HTTP(S) URLs and local filesystem paths (absolute or
-        ``file://`` scheme).  Local paths are resolved without any network
-        request, which is useful during development when the IA file lives
-        inside the repository (``data/benchmarks/IA_cafa6.tsv``) and
-        ``ia_url`` is set to its absolute path.  Once the file is pushed to
-        GitHub the URL can be switched to the raw.githubusercontent.com
-        address and the same code path handles it transparently.
-        """
-        import gzip as _gzip
-        import shutil
-
-        # Resolve local paths (absolute or file:// scheme) without HTTP.
-        local_path: str | None = None
-        if url.startswith("file://"):
-            local_path = url[len("file://") :]
-        elif url.startswith("/"):
-            local_path = url
-
-        if local_path is not None:
-            if url.endswith(".gz"):
-                with _gzip.open(local_path, "rb") as src, open(dest, "wb") as f:
-                    shutil.copyfileobj(src, f)
-            else:
-                shutil.copy2(local_path, dest)
-            return
-
-        resp = requests.get(url, stream=True, timeout=300)
-        resp.raise_for_status()
-        if url.endswith(".gz"):
-            with open(dest, "wb") as f:
-                f.write(_gzip.decompress(resp.content))
-        else:
-            with open(dest, "w", encoding="utf-8") as f:
-                f.write(resp.text)
+        _artifacts.download_tsv(url, dest)
 
     def _write_gt(self, annotations: dict[str, set[str]], path: str) -> None:
-        """Write {protein: {go_id}} to a 2-column TSV (no header)."""
-        with open(path, "w") as f:
-            for protein in sorted(annotations):
-                for go_id in sorted(annotations[protein]):
-                    f.write(f"{protein}\t{go_id}\n")
+        _artifacts.write_gt(annotations, path)
 
-    def _write_predictions(
-        self,
-        session: Session,
-        pred_set_id: uuid.UUID,
-        delta_proteins: set[str],
-        max_distance: float | None,
-        path: str,
-        scoring_config: ScoringConfig | None = None,
-        reranker_model_str: str | None = None,
-        reranker_cat_codes: dict[str, list[str]] | None = None,
-        known_gos: dict[str, set[str]] | None = None,
-    ) -> None:
-        """Write CAFA-format predictions (protein\\tgo_id\\tscore) for delta proteins.
+    def _write_predictions(self, *args: Any, **kwargs: Any) -> None:
+        _artifacts.write_predictions(*args, **kwargs)
 
-        Scoring priority:
-          1. If ``reranker_model_str`` is provided, apply the LightGBM model to
-             all predictions and use re-ranker probabilities as scores.
-          2. If a ``ScoringConfig`` is provided, compute scores via ``compute_score()``.
-          3. Otherwise fall back to ``1 - cosine_distance / 2``.
+    def _write_predictions_reranked(self, *args: Any, **kwargs: Any) -> None:
+        _artifacts.write_predictions_reranked(*args, **kwargs)
 
-        ``known_gos`` carries the query's pre-cutoff annotations (LK / PK
-        settings) and is used to override ``anc2vec_query_known_*`` before the
-        reranker sees the DataFrame. For NK it must stay ``None``.
-        """
-        if reranker_model_str is not None:
-            self._write_predictions_reranked(
-                session,
-                pred_set_id,
-                delta_proteins,
-                max_distance,
-                path,
-                reranker_model_str,
-                reranker_cat_codes=reranker_cat_codes,
-                known_gos=known_gos,
-            )
-            return
-
-        q = (
-            session.query(GOPrediction, GOTerm)
-            .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
-            .filter(GOPrediction.prediction_set_id == pred_set_id)
-            .filter(GOPrediction.protein_accession.in_(delta_proteins))
-        )
-        if max_distance is not None:
-            q = q.filter(GOPrediction.distance <= max_distance)
-        q = q.order_by(GOPrediction.protein_accession, GOTerm.go_id, GOPrediction.distance)
-
-        seen: set[tuple[str, str]] = set()
-        with open(path, "w") as f:
-            for pred, gt in q.yield_per(1000):
-                key = (pred.protein_accession, gt.go_id)
-                if key in seen:
-                    continue
-                seen.add(key)
-                if scoring_config is not None:
-                    pred_dict = {
-                        "distance": pred.distance,
-                        "identity_nw": pred.identity_nw,
-                        "identity_sw": pred.identity_sw,
-                        "evidence_code": pred.evidence_code,
-                        "taxonomic_distance": pred.taxonomic_distance,
-                        "neighbor_vote_fraction": pred.neighbor_vote_fraction,
-                    }
-                    score = compute_score(pred_dict, scoring_config)
-                else:
-                    score = max(0.0, 1.0 - (pred.distance or 0.0) / 2.0)
-                f.write(f"{pred.protein_accession}\t{gt.go_id}\t{score:.4f}\n")
-
-    def _write_predictions_reranked(
-        self,
-        session: Session,
-        pred_set_id: uuid.UUID,
-        delta_proteins: set[str],
-        max_distance: float | None,
-        path: str,
-        reranker_model_str: str,
-        reranker_cat_codes: dict[str, list[str]] | None = None,
-        known_gos: dict[str, set[str]] | None = None,
-    ) -> None:
-        """Write CAFA-format predictions using LightGBM re-ranker scores."""
-        import pandas as pd
-
-        from protea.core.reranker import model_from_string
-        from protea.core.reranker import predict as reranker_predict
-
-        q = (
-            session.query(GOPrediction, GOTerm.go_id, GOTerm.aspect)
-            .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
-            .filter(GOPrediction.prediction_set_id == pred_set_id)
-            .filter(GOPrediction.protein_accession.in_(delta_proteins))
-        )
-        if max_distance is not None:
-            q = q.filter(GOPrediction.distance <= max_distance)
-
-        records: list[dict[str, Any]] = [
-            _record_from_pred(pred, go_id, aspect=aspect)
-            for pred, go_id, aspect in q.yield_per(5000)
-        ]
-
-        if not records:
-            with open(path, "w") as f:
-                pass
-            return
-
-        df = pd.DataFrame(records)
-        if known_gos:
-            _patch_query_known_features(df, known_gos)
-        model = model_from_string(reranker_model_str)
-        scores = reranker_predict(model, df, categorical_codes=reranker_cat_codes)
-
-        # Deduplicate: keep highest score per (protein, go_id)
-        df["score"] = scores
-        df = df.sort_values("score", ascending=False).drop_duplicates(
-            subset=["protein_accession", "go_id"],
-            keep="first",
-        )
-
-        with open(path, "w") as f:
-            for _, row in df.iterrows():
-                f.write(f"{row['protein_accession']}\t{row['go_id']}\t{row['score']:.4f}\n")
-
-    def _write_predictions_per_aspect(
-        self,
-        session: Session,
-        pred_set_id: uuid.UUID,
-        delta_proteins: set[str],
-        max_distance: float | None,
-        path: str,
-        aspect_models: dict[str, dict[str, Any]],
-        known_gos: dict[str, set[str]] | None = None,
-    ) -> None:
-        """Write CAFA-format predictions applying per-aspect LightGBM models.
-
-        ``aspect_models`` maps GO aspect char (P/F/C) to ``{"model": str,
-        "cat_codes": dict|None}`` bundles. Predictions whose aspect has no
-        model fall back to ``1 - distance/2``.
-
-        ``known_gos`` carries the query's pre-cutoff annotations (LK / PK
-        settings) so the per-aspect model sees the same
-        ``anc2vec_query_known_*`` features it was trained with. Must be
-        ``None`` for NK.
-        """
-        import pandas as pd
-
-        from protea.core.reranker import model_from_string
-        from protea.core.reranker import predict as reranker_predict
-
-        q = (
-            session.query(GOPrediction, GOTerm.go_id, GOTerm.aspect)
-            .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
-            .filter(GOPrediction.prediction_set_id == pred_set_id)
-            .filter(GOPrediction.protein_accession.in_(delta_proteins))
-        )
-        if max_distance is not None:
-            q = q.filter(GOPrediction.distance <= max_distance)
-
-        records: list[dict[str, Any]] = [
-            _record_from_pred(pred, go_id, aspect) for pred, go_id, aspect in q.yield_per(5000)
-        ]
-
-        if not records:
-            with open(path, "w") as f:
-                pass
-            return
-
-        df = pd.DataFrame(records)
-        if known_gos:
-            _patch_query_known_features(df, known_gos)
-
-        # Score each aspect group with its corresponding model
-        df["score"] = 0.0
-        for aspect_char, bundle in aspect_models.items():
-            mask = df["aspect"] == aspect_char
-            if not mask.any():
-                continue
-            model = model_from_string(bundle["model"])
-            df.loc[mask, "score"] = reranker_predict(
-                model,
-                df.loc[mask],
-                categorical_codes=bundle.get("cat_codes"),
-            )
-
-        # Fallback for aspects without a model
-        modeled_aspects = set(aspect_models.keys())
-        fallback_mask = ~df["aspect"].isin(modeled_aspects)
-        if fallback_mask.any():
-            df.loc[fallback_mask, "score"] = df.loc[fallback_mask, "distance"].apply(
-                lambda d: max(0.0, 1.0 - (d or 0.0) / 2.0)
-            )
-
-        # Deduplicate: keep highest score per (protein, go_id)
-        df = df.sort_values("score", ascending=False).drop_duplicates(
-            subset=["protein_accession", "go_id"],
-            keep="first",
-        )
-
-        with open(path, "w") as f:
-            for _, row in df.iterrows():
-                f.write(f"{row['protein_accession']}\t{row['go_id']}\t{row['score']:.4f}\n")
+    def _write_predictions_per_aspect(self, *args: Any, **kwargs: Any) -> None:
+        _artifacts.write_predictions_per_aspect(*args, **kwargs)
 
     def _parse_results(self, dfs_best: dict) -> dict[str, Any]:
-        """Extract per-namespace Fmax metrics from cafaeval dfs_best.
+        return _artifacts.parse_results(dfs_best)
 
-        The unweighted metrics are read from ``dfs_best["f"]`` (one row
-        per namespace at the threshold optimising the protein-mean
-        Fmax). When an IA file was supplied to cafaeval, the IA-weighted
-        equivalents land in ``dfs_best["f_w"]`` (best by IA-weighted
-        Fmax) and the micro-averaged Fmax in ``dfs_best["f_micro"]`` /
-        ``dfs_best["f_micro_w"]``; these are surfaced here as the
-        ``_w`` / ``_micro`` / ``_micro_w`` keys so chapter-6 tables can
-        pull them without re-reading the per-tier TSV artifacts.
-        """
-        ns_results: dict[str, Any] = {}
-
-        df_f = dfs_best.get("f")
-        if df_f is None or df_f.empty:
-            return ns_results
-
-        df_f = df_f.reset_index()
-        for _, row in df_f.iterrows():
-            ns_long = str(row.get("ns", ""))
-            ns = _NS_LABELS.get(ns_long)
-            if ns is None:
-                continue
-            ns_results[ns] = {
-                "fmax": round(float(row.get("f", 0)), 4),
-                "precision": round(float(row.get("pr", 0)), 4),
-                "recall": round(float(row.get("rc", 0)), 4),
-                "tau": round(float(row.get("tau", 0)), 4),
-                "coverage": round(float(row.get("cov_max", row.get("cov", 0))), 4),
-                "n_proteins": int(row.get("n", 0)) if "n" in row else None,
-            }
-
-        for key, fmt in (
-            ("f_w", "fmax_w"),
-            ("f_micro", "f_micro"),
-            ("f_micro_w", "f_micro_w"),
-        ):
-            df_extra = dfs_best.get(key)
-            if df_extra is None or df_extra.empty:
-                continue
-            df_extra = df_extra.reset_index()
-            col = key  # the metric column matches the dfs_best key name
-            for _, row in df_extra.iterrows():
-                ns_long = str(row.get("ns", ""))
-                ns = _NS_LABELS.get(ns_long)
-                if ns is None or ns not in ns_results:
-                    continue
-                ns_results[ns][fmt] = round(float(row.get(col, 0)), 4)
-
-        return ns_results
