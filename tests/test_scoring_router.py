@@ -750,7 +750,7 @@ class TestTrainingDataEndpoint:
         )
         assert resp.status_code == 422
 
-    @patch("protea.services.scoring_service.compute_evaluation_data")
+    @patch("protea.services._scoring_validation_helpers.compute_evaluation_data")
     def test_streams_labeled_data_positive(self, mock_eval, session):
         """Prediction matching ground truth gets label=1."""
         ps = _make_pred_set()
@@ -796,7 +796,7 @@ class TestTrainingDataEndpoint:
         label_idx = header.index("label")
         assert row[label_idx] == "1"
 
-    @patch("protea.services.scoring_service.compute_evaluation_data")
+    @patch("protea.services._scoring_validation_helpers.compute_evaluation_data")
     def test_streams_labeled_data_negative(self, mock_eval, session):
         """Prediction NOT in ground truth gets label=0."""
         ps = _make_pred_set()
@@ -837,7 +837,7 @@ class TestTrainingDataEndpoint:
         label_idx = header.index("label")
         assert row[label_idx] == "0"
 
-    @patch("protea.services.scoring_service.compute_evaluation_data")
+    @patch("protea.services._scoring_validation_helpers.compute_evaluation_data")
     def test_all_columns_present(self, mock_eval, session):
         """Verify all 32 columns are in the TSV header."""
         ps = _make_pred_set()
@@ -877,7 +877,7 @@ class TestTrainingDataEndpoint:
         assert header[3] == "label"
         assert header[-1] == "neighbor_distance_std"
 
-    @patch("protea.services.scoring_service.compute_evaluation_data")
+    @patch("protea.services._scoring_validation_helpers.compute_evaluation_data")
     def test_pk_category(self, mock_eval, session):
         """PK category uses eval_data.pk for ground truth."""
         ps = _make_pred_set()
@@ -920,7 +920,7 @@ class TestTrainingDataEndpoint:
         label_idx = header.index("label")
         assert row[label_idx] == "1"
 
-    @patch("protea.services.scoring_service.compute_evaluation_data")
+    @patch("protea.services._scoring_validation_helpers.compute_evaluation_data")
     def test_none_features_render_as_empty(self, mock_eval, session):
         """None values are rendered as empty strings in the TSV."""
         ps = _make_pred_set()
@@ -1176,7 +1176,7 @@ class TestRerankerMetrics:
         assert "curve" in data
         assert len(data["curve"]) == 1
 
-    @patch("protea.services.scoring_service.compute_evaluation_data")
+    @patch("protea.services._scoring_validation_helpers.compute_evaluation_data")
     def test_empty_predictions_returns_zero_metrics(self, mock_eval, client, session):
         ps = _make_pred_set()
         rm = _make_reranker_model()
