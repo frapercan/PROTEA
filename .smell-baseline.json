@@ -173,8 +173,8 @@
       "kind": "method",
       "path": "protea/core/operations/_run_cafa_eval_driver.py",
       "name": "_run_cafaeval_for_setting",
-      "line": 113,
-      "metric": 73,
+      "line": 107,
+      "metric": 70,
       "threshold": 60
     },
     {
@@ -580,24 +580,6 @@
       "name": "write_predictions_per_aspect",
       "line": 206,
       "metric": 7,
-      "threshold": 6
-    },
-    {
-      "key": "params::protea/core/operations/_run_cafa_eval_driver.py::_write_setting_predictions",
-      "kind": "params",
-      "path": "protea/core/operations/_run_cafa_eval_driver.py",
-      "name": "_write_setting_predictions",
-      "line": 60,
-      "metric": 9,
-      "threshold": 6
-    },
-    {
-      "key": "params::protea/core/operations/_run_cafa_eval_driver.py::_run_cafaeval_for_setting",
-      "kind": "params",
-      "path": "protea/core/operations/_run_cafa_eval_driver.py",
-      "name": "_run_cafaeval_for_setting",
-      "line": 113,
-      "metric": 9,
       "threshold": 6
     },
     {

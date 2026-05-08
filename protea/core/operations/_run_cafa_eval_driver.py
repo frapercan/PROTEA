@@ -61,13 +61,7 @@ def _write_setting_predictions(
     session: Session,
     *,
     setting: str,
-    pred_set_id: uuid.UUID,
-    delta_proteins: set[str],
-    max_distance: float | None,
-    artifacts_root: Path,
-    reranker_models: dict[str, dict[str, dict[str, Any]]],
-    scoring_config_snapshot: ScoringConfig | None,
-    data: EvaluationData,
+    ctx: CafaEvalRunContext,
 ) -> str:
     """Write the per-setting predictions TSV when a reranker applies.
 
@@ -75,24 +69,24 @@ def _write_setting_predictions(
     For settings without a reranker the caller falls back to the
     pre-written shared `predictions/` dir.
     """
-    pred_dir = os.path.join(str(artifacts_root), f"predictions_{setting}")
+    pred_dir = os.path.join(str(ctx.artifacts_root), f"predictions_{setting}")
     os.makedirs(pred_dir, exist_ok=True)
     pred_path = os.path.join(pred_dir, "predictions.tsv")
-    rr_aspect_map = reranker_models.get(setting, {})
+    rr_aspect_map = ctx.reranker_models.get(setting, {})
     # anc2vec_query_known_* is only meaningful when the query has
     # pre-cutoff annotations (LK / PK). NK proteins have nothing
     # "known", so training/serving parity requires leaving the
     # features at their predict-time NaN / 0.
-    setting_known = data.known if setting in ("LK", "PK") else None
+    setting_known = ctx.data.known if setting in ("LK", "PK") else None
     if "" in rr_aspect_map:
         bundle = rr_aspect_map[""]
         _artifacts.write_predictions(
             session,
-            pred_set_id,
-            delta_proteins,
-            max_distance,
+            ctx.pred_set_id,
+            ctx.delta_proteins,
+            ctx.max_distance,
             pred_path,
-            scoring_config_snapshot,
+            ctx.scoring_config_snapshot,
             reranker_model_str=bundle["model"],
             reranker_cat_codes=bundle.get("cat_codes"),
             known_gos=setting_known,
@@ -100,9 +94,9 @@ def _write_setting_predictions(
     else:
         _artifacts.write_predictions_per_aspect(
             session,
-            pred_set_id,
-            delta_proteins,
-            max_distance,
+            ctx.pred_set_id,
+            ctx.delta_proteins,
+            ctx.max_distance,
             pred_path,
             rr_aspect_map,
             known_gos=setting_known,
@@ -113,21 +107,18 @@ def _write_setting_predictions(
 def _run_cafaeval_for_setting(
     *,
     setting: str,
-    obo_path: str,
     pred_dir: str,
     gt_file: str,
-    ia_path: str | None,
     known_file: str | None,
-    toi_path: str,
-    artifacts_root: Path,
+    ctx: CafaEvalRunContext,
     emit: EmitFn,
 ) -> dict[str, Any]:
     """Run cafaeval for one setting under signal-safe handlers.
 
     Returns the parsed per-namespace metrics dict (empty on failure).
     Persists the full PR-curve + dfs_best artifacts to
-    ``artifacts_root/<setting>/`` so the upload loop in the orchestrator
-    picks them up.
+    ``ctx.artifacts_root/<setting>/`` so the upload loop in the
+    orchestrator picks them up.
     """
     from cafaeval.evaluation import cafa_eval
 
@@ -141,15 +132,15 @@ def _run_cafaeval_for_setting(
         old_sigint = signal.signal(signal.SIGINT, signal.SIG_DFL)
         try:
             df, dfs_best = cafa_eval(
-                obo_path,
+                ctx.obo_path,
                 pred_dir,
                 gt_file,
-                ia=ia_path,
+                ia=ctx.ia_path,
                 exclude=known_file,
                 prop="fill",
                 norm="cafa",
                 no_orphans=True,
-                toi_file=toi_path,
+                toi_file=ctx.toi_path,
                 max_terms=500,
                 th_step=0.001,
                 n_cpu=1,
@@ -164,7 +155,7 @@ def _run_cafaeval_for_setting(
         if df is not None:
             from cafaeval.evaluation import write_results as _write_results
 
-            setting_dir = artifacts_root / setting
+            setting_dir = ctx.artifacts_root / setting
             setting_dir.mkdir(exist_ok=True)
             _write_results(df, dfs_best, str(setting_dir))
 
@@ -208,25 +199,16 @@ def evaluate_all_settings(
             pred_dir = _write_setting_predictions(
                 session,
                 setting=setting,
-                pred_set_id=ctx.pred_set_id,
-                delta_proteins=ctx.delta_proteins,
-                max_distance=ctx.max_distance,
-                artifacts_root=ctx.artifacts_root,
-                reranker_models=ctx.reranker_models,
-                scoring_config_snapshot=ctx.scoring_config_snapshot,
-                data=ctx.data,
+                ctx=ctx,
             )
         else:
             pred_dir = ctx.shared_pred_dir
         results[setting] = _run_cafaeval_for_setting(
             setting=setting,
-            obo_path=ctx.obo_path,
             pred_dir=pred_dir,
             gt_file=gt_file,
-            ia_path=ctx.ia_path,
             known_file=known_file,
-            toi_path=ctx.toi_path,
-            artifacts_root=ctx.artifacts_root,
+            ctx=ctx,
             emit=emit,
         )
     return results
