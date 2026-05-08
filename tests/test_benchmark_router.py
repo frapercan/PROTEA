@@ -305,6 +305,53 @@ class TestBenchmarkMatrix:
         assert resp.status_code == 200
         assert resp.json()["total"] == 0
 
+    def test_best_per_cell_global_ignores_stage_and_k_filters(self, client):
+        """best_per_cell_global must surface the absolute champion per cell
+        even when the user's stage/K filters would hide it from the main table.
+        """
+        c, session = client
+        emb_a = uuid4()
+        emb_b = uuid4()
+        eval_set_id = uuid4()
+
+        # alignment_weighted at K=5 is the dataset champion (fmax=0.85)
+        er_aw = _make_eval({"NK": {"BPO": {"fmax": 0.85}}}, scoring_config_id=uuid4())
+        # reranker at K=10 is weaker (fmax=0.55) but matches the active filters
+        er_reranker = _make_eval(
+            {"NK": {"BPO": {"fmax": 0.55}}},
+            reranker_model_id=uuid4(),
+        )
+        er_aw.evaluation_set_id = eval_set_id
+        er_reranker.evaluation_set_id = eval_set_id
+
+        self._dual_execute(
+            session,
+            matrix_rows=[
+                self._row(er_aw, emb_a, k=5),
+                self._row(er_reranker, emb_b, k=10),
+            ],
+            eval_set_rows=[self._eval_set_row(eval_set_id)],
+        )
+
+        resp = c.get("/benchmark/matrix?stage=reranker&k=10")
+        data = resp.json()
+
+        # Filtered table reflects the user's selection: only the reranker row
+        assert data["total"] == 1
+        assert data["best_per_cell"][0]["fmax"] == 0.55
+        assert data["best_per_cell"][0]["stage"] == "reranker"
+        assert data["best_per_cell"][0]["k"] == 10
+
+        # Global champion is the alignment_weighted K=5 winner — independent
+        # of the stage=reranker, k=10 filter the user picked.
+        assert "best_per_cell_global" in data
+        assert len(data["best_per_cell_global"]) == 1
+        global_winner = data["best_per_cell_global"][0]
+        assert global_winner["fmax"] == 0.85
+        assert global_winner["stage"] == "alignment_weighted"
+        assert global_winner["k"] == 5
+        assert global_winner["embedding_config_id"] == str(emb_a)
+
     def test_missing_fmax_cells_are_skipped(self, client):
         c, session = client
         eval_set_id = uuid4()

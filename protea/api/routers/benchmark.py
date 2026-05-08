@@ -29,6 +29,11 @@ Two endpoints are provided:
     - ``stages``:            every stage observed in the data (with label/kind)
     - ``evaluation_sets``:   per-eval-set metadata (stats, source, obo version)
     - ``best_per_cell``:     cross-model winner per (category, aspect) cell
+                             within the active stage/K filter selection
+    - ``best_per_cell_global``: same shape as ``best_per_cell`` but ignores the
+                                user's stage/K filters. Stable across filter
+                                changes; the per-cell champion across the entire
+                                dataset for the current evaluation set.
     - ``categories`` / ``aspects``: from YAML config
 """
 
@@ -86,6 +91,43 @@ def _embedding_display(cfg: EmbeddingConfig) -> dict[str, Any]:
         "family": cfg.family or cfg.model_backend,
         "param_count": cfg.param_count,
     }
+
+
+def _make_leaderboard(
+    rows: list[dict[str, Any]],
+    categories: tuple[str, ...] | list[str],
+    aspects: tuple[str, ...] | list[str],
+) -> list[dict[str, Any]]:
+    """Cross-model leaderboard: best Fmax per ``(category, aspect)`` cell.
+
+    Iterates a flat list of row dicts (each containing at least ``category``,
+    ``aspect`` and ``fmax``) and returns one entry per cell with the winning
+    embedding / stage / K, in canonical (categories × aspects) order.
+    """
+    leaderboard: dict[tuple[str, str], dict[str, Any]] = {}
+    for r in rows:
+        lkey = (r["category"], r["aspect"])
+        cur = leaderboard.get(lkey)
+        if cur is None or r["fmax"] > cur["fmax"]:
+            leaderboard[lkey] = r
+    return [
+        {
+            "category": cat,
+            "aspect": asp,
+            "fmax": entry["fmax"],
+            "precision": entry["precision"],
+            "recall": entry["recall"],
+            "coverage": entry["coverage"],
+            "embedding_config_id": entry["embedding_config_id"],
+            "k": entry["k"],
+            "stage": entry["stage"],
+            "evaluation_result_id": entry["evaluation_result_id"],
+            "evaluation_set_id": entry["evaluation_set_id"],
+        }
+        for cat in categories
+        for asp in aspects
+        if (entry := leaderboard.get((cat, asp))) is not None
+    ]
 
 
 def _eval_set_label(
@@ -148,8 +190,7 @@ def get_benchmark_matrix(
     stage: str | None = Query(
         default=None,
         description=(
-            "If set, restrict rows to this pipeline stage "
-            "(any scoring_config.name, or 'reranker')."
+            "If set, restrict rows to this pipeline stage (any scoring_config.name, or 'reranker')."
         ),
     ),
     k: int | None = Query(
@@ -179,20 +220,23 @@ def get_benchmark_matrix(
                 ScoringConfig.name.label("scoring_name"),
             )
             .join(PredictionSet, PredictionSet.id == EvaluationResult.prediction_set_id)
-            .outerjoin(
-                ScoringConfig, ScoringConfig.id == EvaluationResult.scoring_config_id
-            )
+            .outerjoin(ScoringConfig, ScoringConfig.id == EvaluationResult.scoring_config_id)
         )
         if evaluation_set_id is not None:
             stmt = stmt.where(EvaluationResult.evaluation_set_id == evaluation_set_id)
-        if k is not None:
-            stmt = stmt.where(PredictionSet.limit_per_entry == k)
+        # Stage and K filters are applied in Python so the unfiltered "global
+        # champions" leaderboard can see every row that passed hidden_stages.
 
-        # Dedupe on the Python side: row count is always small (O(hundreds)),
-        # and "best-Fmax per cell" is clearest as an in-memory fold.
-        # Key now includes K so the same (embedding, stage, cell) tuple yields
+        # Two best-per-key dicts share the same shape — see _make_leaderboard:
+        #   * ``best`` honours the user's stage/K filters (drives the main
+        #     table and the per-selection leaderboard).
+        #   * ``best_global`` ignores stage and K (drives the global champions
+        #     view; still respects evaluation_set_id and hidden_stages).
+        # Key includes K so the same (embedding, stage, cell) tuple yields
         # one row per K (3, 5, 10) instead of collapsing them.
-        best: dict[tuple[str, str, str, int, str, str], dict[str, Any]] = {}
+        BestKey = tuple[str, str, str, int, str, str]
+        best: dict[BestKey, dict[str, Any]] = {}
+        best_global: dict[BestKey, dict[str, Any]] = {}
         eval_set_ids: set[str] = set()
         embedding_ids: set[str] = set()
         stages_seen: set[str] = set()
@@ -203,14 +247,13 @@ def get_benchmark_matrix(
             if st is None or st in cfg.hidden_stages:
                 continue
             stages_seen.add(st)
-            if stage is not None and st != stage:
-                continue
+            ks_seen.add(int(row_k))
+            passes_filter = (stage is None or st == stage) and (k is None or int(row_k) == k)
 
             eid = str(embedding_config_id)
             esid = str(er.evaluation_set_id)
             embedding_ids.add(eid)
             eval_set_ids.add(esid)
-            ks_seen.add(int(row_k))
             results = er.results or {}
 
             for cat in cfg.categories:
@@ -223,23 +266,28 @@ def get_benchmark_matrix(
                     if fmax is None:
                         continue
 
-                    key = (eid, esid, st, int(row_k), cat, asp)
-                    cur = best.get(key)
-                    if cur is None or fmax > cur["fmax"]:
-                        best[key] = {
-                            "embedding_config_id": eid,
-                            "evaluation_set_id": esid,
-                            "stage": st,
-                            "k": int(row_k),
-                            "category": cat,
-                            "aspect": asp,
-                            "fmax": round(float(fmax), 4),
-                            "precision": _round(cell.get("precision")),
-                            "recall": _round(cell.get("recall")),
-                            "coverage": _round(cell.get("coverage")),
-                            "n_proteins": cell.get("n_proteins"),
-                            "evaluation_result_id": str(er.id),
-                        }
+                    key: BestKey = (eid, esid, st, int(row_k), cat, asp)
+                    payload = {
+                        "embedding_config_id": eid,
+                        "evaluation_set_id": esid,
+                        "stage": st,
+                        "k": int(row_k),
+                        "category": cat,
+                        "aspect": asp,
+                        "fmax": round(float(fmax), 4),
+                        "precision": _round(cell.get("precision")),
+                        "recall": _round(cell.get("recall")),
+                        "coverage": _round(cell.get("coverage")),
+                        "n_proteins": cell.get("n_proteins"),
+                        "evaluation_result_id": str(er.id),
+                    }
+                    cur_g = best_global.get(key)
+                    if cur_g is None or payload["fmax"] > cur_g["fmax"]:
+                        best_global[key] = payload
+                    if passes_filter:
+                        cur = best.get(key)
+                        if cur is None or payload["fmax"] > cur["fmax"]:
+                            best[key] = payload
 
         # Stable stage ordering based on YAML preferred_default_stages.
         stages_payload = [
@@ -266,34 +314,13 @@ def get_benchmark_matrix(
             ),
         )
 
-        # Cross-model leaderboard: for each (cat, asp) cell, pick the single
-        # best row across every embedding and stage currently selected. When
-        # a stage filter is active, the leaderboard is naturally restricted
-        # to that stage — same semantics as the main table.
-        leaderboard: dict[tuple[str, str], dict[str, Any]] = {}
-        for r in rows:
-            lkey = (r["category"], r["aspect"])
-            cur = leaderboard.get(lkey)
-            if cur is None or r["fmax"] > cur["fmax"]:
-                leaderboard[lkey] = r
-        best_per_cell = [
-            {
-                "category": cat,
-                "aspect": asp,
-                "fmax": entry["fmax"],
-                "precision": entry["precision"],
-                "recall": entry["recall"],
-                "coverage": entry["coverage"],
-                "embedding_config_id": entry["embedding_config_id"],
-                "k": entry["k"],
-                "stage": entry["stage"],
-                "evaluation_result_id": entry["evaluation_result_id"],
-                "evaluation_set_id": entry["evaluation_set_id"],
-            }
-            for cat in cfg.categories
-            for asp in cfg.aspects
-            if (entry := leaderboard.get((cat, asp))) is not None
-        ]
+        # Two leaderboards: one for the user's current selection (matches the
+        # main table), one global across every stage/K (constant across
+        # filter changes — anchors the "is this the absolute champion?" read).
+        best_per_cell = _make_leaderboard(rows, cfg.categories, cfg.aspects)
+        best_per_cell_global = _make_leaderboard(
+            list(best_global.values()), cfg.categories, cfg.aspects
+        )
 
         # Enrich eval set metadata. Only fetch the ones actually present in
         # the filtered result — the UI selector draws from the full catalog,
@@ -329,7 +356,11 @@ def get_benchmark_matrix(
                     {
                         "id": esid,
                         "label": _eval_set_label(
-                            es, old_s, new_s, old_sv, new_sv,
+                            es,
+                            old_s,
+                            new_s,
+                            old_sv,
+                            new_sv,
                             cfg.eval_set_labels.get(esid),
                         ),
                         "old_source": old_s,
@@ -353,6 +384,7 @@ def get_benchmark_matrix(
             "aspects": list(cfg.aspects),
             "ks": sorted(ks_seen),
             "best_per_cell": best_per_cell,
+            "best_per_cell_global": best_per_cell_global,
             "filters": {
                 "evaluation_set_id": str(evaluation_set_id) if evaluation_set_id else None,
                 "stage": stage,
