@@ -31,6 +31,9 @@ function DropdownGroup({ group, pathname }: { group: NavGroup; pathname: string 
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-current={groupActive ? "page" : undefined}
         className={`relative flex items-center gap-1.5 px-3 h-10 rounded-lg text-[14px] font-medium transition-all ${
           groupActive
             ? "text-blue-700 bg-blue-50/70"
@@ -56,7 +59,11 @@ function DropdownGroup({ group, pathname }: { group: NavGroup; pathname: string 
         )}
       </button>
       {open && (
-        <div className="absolute top-full left-0 mt-2 py-2 bg-white rounded-xl border border-slate-200 shadow-xl z-50 min-w-[220px] animate-[fadeIn_120ms_ease-out]">
+        <div
+          role="menu"
+          aria-label={group.title}
+          className="absolute top-full left-0 mt-2 py-2 bg-white rounded-xl border border-slate-200 shadow-xl z-50 min-w-[220px] animate-[fadeIn_120ms_ease-out]"
+        >
           <div className="px-3 pb-1.5 mb-1 border-b border-slate-100">
             <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
               {group.title}
@@ -68,6 +75,8 @@ function DropdownGroup({ group, pathname }: { group: NavGroup; pathname: string 
               <Link
                 key={href}
                 href={href}
+                role="menuitem"
+                aria-current={active ? "page" : undefined}
                 onClick={() => setOpen(false)}
                 className={`flex items-center gap-2 mx-1.5 px-3 py-2 rounded-lg text-[13px] transition-colors ${
                   active
@@ -76,6 +85,7 @@ function DropdownGroup({ group, pathname }: { group: NavGroup; pathname: string 
                 }`}
               >
                 <span
+                  aria-hidden
                   className={`h-1.5 w-1.5 rounded-full transition-colors ${
                     active ? "bg-blue-600" : "bg-slate-300"
                   }`}
@@ -132,6 +142,18 @@ export function NavLinks({ mobileExtras }: { mobileExtras?: React.ReactNode }) {
 
   // Close menu on route change
   useEffect(() => { setOpen(false); }, [pathname]);
+
+  // Body scroll lock while the mobile menu is open. Restore the user's
+  // previous overflow on close so we don't fight other modals.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    if (!open) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [open]);
 
   return (
     <>

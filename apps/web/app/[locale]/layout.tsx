@@ -40,6 +40,14 @@ export default async function LocaleLayout({
         <NextIntlClientProvider messages={messages}>
           <UsagePolicyModal />
           <ToastProvider>
+            {/* Skip-to-content for screen-reader / keyboard users.
+                Hidden until focused; lands focus on <main>. */}
+            <a
+              href="#main"
+              className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[110] focus:rounded-lg focus:bg-blue-600 focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-white focus:shadow-lg"
+            >
+              Skip to main content
+            </a>
             <header className="sticky top-0 z-40 border-b border-slate-200/70 bg-white/85 backdrop-blur-md supports-[backdrop-filter]:bg-white/70">
               <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4 sm:px-6 lg:px-8">
                 <a
@@ -95,7 +103,11 @@ export default async function LocaleLayout({
               </div>
             </header>
 
-            <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6 sm:py-8 lg:py-10">
+            <main
+              id="main"
+              tabIndex={-1}
+              className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6 sm:py-8 lg:py-10 focus:outline-none"
+            >
               {children}
             </main>
 
