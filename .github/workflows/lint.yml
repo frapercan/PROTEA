@@ -38,3 +38,6 @@ jobs:
 
       - name: mypy
         run: poetry run mypy protea
+
+      - name: smell budget (master plan v3.2 §3)
+        run: poetry run python scripts/check_smells.py
