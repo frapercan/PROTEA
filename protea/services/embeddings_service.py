@@ -29,12 +29,10 @@ from sqlalchemy.orm import Session, sessionmaker
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
-from protea.infrastructure.orm.models.annotation.protein_go_annotation import ProteinGOAnnotation
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
-from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.session import session_scope
 
 # Allowed values for the embedding config fields. Mirror the (de
@@ -649,103 +647,11 @@ def delete_embedding_config_cascade(
     }
 
 
-def list_proteins_in_prediction_set(
-    session: Session,
-    *,
-    prediction_set_id: uuid.UUID,
-    search: str | None = None,
-    limit: int = 50,
-    offset: int = 0,
-) -> dict[str, Any]:
-    """Paginated list of proteins in a prediction set with derived stats.
-
-    For each row returns ``go_count`` (number of predicted terms),
-    ``min_distance`` (closest neighbour), ``annotation_count``
-    (known annotations against the same AnnotationSet) and
-    ``match_count`` (predictions whose ``(protein, go_id)`` is in
-    the known set — a precision proxy).
-
-    Raises :class:`EntityNotFoundError` when ``prediction_set_id``
-    does not resolve.
-    """
-    ps = session.get(PredictionSet, prediction_set_id)
-    if ps is None:
-        raise EntityNotFoundError("PredictionSet", prediction_set_id)
-
-    q = (
-        session.query(
-            GOPrediction.protein_accession,
-            func.count(GOPrediction.id).label("go_count"),
-            func.min(GOPrediction.distance).label("min_distance"),
-        )
-        .filter(GOPrediction.prediction_set_id == prediction_set_id)
-        .group_by(GOPrediction.protein_accession)
-    )
-    if search:
-        q = q.filter(GOPrediction.protein_accession.ilike(f"%{search}%"))
-
-    total = q.count()
-    rows = q.order_by(GOPrediction.protein_accession).offset(offset).limit(limit).all()
-
-    accessions = [r[0] for r in rows]
-    protein_map = {
-        p.accession: p
-        for p in session.query(Protein).filter(Protein.accession.in_(accessions)).all()
-    }
-
-    ann_counts: dict[str, int] = {}
-    match_counts: dict[str, int] = {}
-    if accessions:
-        ann_counts = {
-            acc: cnt
-            for acc, cnt in session.query(
-                ProteinGOAnnotation.protein_accession,
-                func.count(ProteinGOAnnotation.id),
-            )
-            .filter(
-                ProteinGOAnnotation.protein_accession.in_(accessions),
-                ProteinGOAnnotation.annotation_set_id == ps.annotation_set_id,
-            )
-            .group_by(ProteinGOAnnotation.protein_accession)
-            .all()
-        }
-
-        match_counts = {
-            acc: cnt
-            for acc, cnt in session.query(
-                GOPrediction.protein_accession,
-                func.count(func.distinct(GOPrediction.go_term_id)),
-            )
-            .join(
-                ProteinGOAnnotation,
-                (ProteinGOAnnotation.go_term_id == GOPrediction.go_term_id)
-                & (ProteinGOAnnotation.protein_accession == GOPrediction.protein_accession)
-                & (ProteinGOAnnotation.annotation_set_id == ps.annotation_set_id),
-            )
-            .filter(
-                GOPrediction.prediction_set_id == prediction_set_id,
-                GOPrediction.protein_accession.in_(accessions),
-            )
-            .group_by(GOPrediction.protein_accession)
-            .all()
-        }
-
-    return {
-        "total": total,
-        "offset": offset,
-        "limit": limit,
-        "items": [
-            {
-                "accession": acc,
-                "go_count": go_count,
-                "min_distance": round(min_dist, 4) if min_dist is not None else None,
-                "annotation_count": ann_counts.get(acc, 0),
-                "match_count": match_counts.get(acc, 0),
-                "in_db": acc in protein_map,
-            }
-            for acc, go_count, min_dist in rows
-        ],
-    }
+# list_proteins_in_prediction_set lives in _embeddings_proteins_helpers and
+# is re-exported below so existing router/CLI imports keep working unchanged.
+from protea.services._embeddings_proteins_helpers import (  # noqa: E402,F401
+    list_proteins_in_prediction_set,
+)
 
 
 def get_predictions_for_protein(
