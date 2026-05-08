@@ -25,8 +25,10 @@ from protea.services.embeddings_service import (
     config_to_dict,
     delete_embedding_config_cascade,
     get_go_term_distribution_data,
+    get_prediction_set_data,
     get_predictions_for_protein,
     iter_predictions_tsv,
+    list_prediction_sets_data,
     list_proteins_in_prediction_set,
     validate_embedding_config_body,
 )
@@ -201,63 +203,11 @@ def predict_go_terms(
 def list_prediction_sets(
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> list[dict[str, Any]]:
-    """List the 100 most recent prediction sets.
-
-    The per-set GO-prediction count comes from a single ``GROUP BY`` query
-    rather than a correlated subquery — for tables in the 10⁷+ row range
-    PostgreSQL's planner reliably falls into a per-row index probe with
-    the correlated form (~30 s per outer row). The grouped variant runs
-    one index-only scan over ``prediction_set_id`` and returns all 25
-    counts at once, cached for 5 minutes alongside the rest of the
-    response.
-    """
+    """List the 100 most recent prediction sets, cached 5 min."""
 
     def _compute() -> list[dict[str, Any]]:
         with session_scope(factory) as session:
-            rows = (
-                session.query(
-                    PredictionSet,
-                    EmbeddingConfig,
-                    AnnotationSet,
-                    OntologySnapshot,
-                )
-                .join(EmbeddingConfig, PredictionSet.embedding_config_id == EmbeddingConfig.id)
-                .join(AnnotationSet, PredictionSet.annotation_set_id == AnnotationSet.id)
-                .join(OntologySnapshot, PredictionSet.ontology_snapshot_id == OntologySnapshot.id)
-                .order_by(PredictionSet.created_at.desc())
-                .limit(100)
-                .all()
-            )
-            counts = {
-                set_id: cnt
-                for set_id, cnt in session.query(
-                    GOPrediction.prediction_set_id,
-                    func.count(GOPrediction.id),
-                )
-                .group_by(GOPrediction.prediction_set_id)
-                .all()
-            }
-            return [
-                {
-                    "id": str(ps.id),
-                    "embedding_config_id": str(ps.embedding_config_id),
-                    "embedding_config_name": ec.model_name,
-                    "annotation_set_id": str(ps.annotation_set_id),
-                    "annotation_set_label": (
-                        f"{ann.source} {ann.source_version}"
-                        if ann.source_version
-                        else ann.source
-                    ),
-                    "ontology_snapshot_id": str(ps.ontology_snapshot_id),
-                    "ontology_snapshot_version": snap.obo_version,
-                    "query_set_id": str(ps.query_set_id) if ps.query_set_id else None,
-                    "limit_per_entry": ps.limit_per_entry,
-                    "distance_threshold": ps.distance_threshold,
-                    "created_at": ps.created_at.isoformat(),
-                    "prediction_count": int(counts.get(ps.id, 0)),
-                }
-                for ps, ec, ann, snap in rows
-            ]
+            return list_prediction_sets_data(session)
 
     return cached("embeddings:prediction-sets", 300.0, _compute)
 
@@ -268,36 +218,11 @@ def get_prediction_set(
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
     """Retrieve a prediction set with total prediction count and per-protein GO term counts."""
-    with session_scope(factory) as session:
-        ps = session.get(PredictionSet, set_id)
-        if ps is None:
-            raise HTTPException(status_code=404, detail="PredictionSet not found")
-
-        prediction_count = (
-            session.query(func.count(GOPrediction.id))
-            .filter(GOPrediction.prediction_set_id == set_id)
-            .scalar()
-        )
-
-        per_protein = (
-            session.query(GOPrediction.protein_accession, func.count(GOPrediction.id))
-            .filter(GOPrediction.prediction_set_id == set_id)
-            .group_by(GOPrediction.protein_accession)
-            .all()
-        )
-
-        return {
-            "id": str(ps.id),
-            "embedding_config_id": str(ps.embedding_config_id),
-            "annotation_set_id": str(ps.annotation_set_id),
-            "ontology_snapshot_id": str(ps.ontology_snapshot_id),
-            "query_set_id": str(ps.query_set_id) if ps.query_set_id else None,
-            "limit_per_entry": ps.limit_per_entry,
-            "distance_threshold": ps.distance_threshold,
-            "created_at": ps.created_at.isoformat(),
-            "prediction_count": prediction_count,
-            "per_protein_counts": {acc: cnt for acc, cnt in per_protein},
-        }
+    try:
+        with session_scope(factory) as session:
+            return get_prediction_set_data(session, set_id)
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/prediction-sets/{set_id}/proteins", summary="List proteins in a prediction set")

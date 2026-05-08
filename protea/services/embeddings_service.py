@@ -338,6 +338,103 @@ def iter_predictions_tsv(
             yield buf.getvalue()
 
 
+def list_prediction_sets_data(session: Session) -> list[dict[str, Any]]:
+    """Top 100 most-recent ``PredictionSet`` rows joined with their context.
+
+    Returns a list of dicts each carrying the embedding-config name,
+    annotation-set label, ontology version, plus the per-set
+    ``prediction_count``. The per-set count comes from a single
+    ``GROUP BY`` over GOPrediction (one index-only scan) rather than a
+    correlated subquery — for ~10⁷-row tables Postgres' planner falls
+    into a per-row index probe with the correlated form (~30s per
+    outer row). The grouped form returns all 100 counts at once.
+    """
+    from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
+    from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
+
+    rows = (
+        session.query(
+            PredictionSet,
+            EmbeddingConfig,
+            AnnotationSet,
+            OntologySnapshot,
+        )
+        .join(EmbeddingConfig, PredictionSet.embedding_config_id == EmbeddingConfig.id)
+        .join(AnnotationSet, PredictionSet.annotation_set_id == AnnotationSet.id)
+        .join(OntologySnapshot, PredictionSet.ontology_snapshot_id == OntologySnapshot.id)
+        .order_by(PredictionSet.created_at.desc())
+        .limit(100)
+        .all()
+    )
+    counts = {
+        set_id: cnt
+        for set_id, cnt in session.query(
+            GOPrediction.prediction_set_id,
+            func.count(GOPrediction.id),
+        )
+        .group_by(GOPrediction.prediction_set_id)
+        .all()
+    }
+    return [
+        {
+            "id": str(ps.id),
+            "embedding_config_id": str(ps.embedding_config_id),
+            "embedding_config_name": ec.model_name,
+            "annotation_set_id": str(ps.annotation_set_id),
+            "annotation_set_label": (
+                f"{ann.source} {ann.source_version}" if ann.source_version else ann.source
+            ),
+            "ontology_snapshot_id": str(ps.ontology_snapshot_id),
+            "ontology_snapshot_version": snap.obo_version,
+            "query_set_id": str(ps.query_set_id) if ps.query_set_id else None,
+            "limit_per_entry": ps.limit_per_entry,
+            "distance_threshold": ps.distance_threshold,
+            "created_at": ps.created_at.isoformat(),
+            "prediction_count": int(counts.get(ps.id, 0)),
+        }
+        for ps, ec, ann, snap in rows
+    ]
+
+
+def get_prediction_set_data(
+    session: Session,
+    prediction_set_id: uuid.UUID,
+) -> dict[str, Any]:
+    """Retrieve a prediction set with total + per-protein GO term counts.
+
+    Raises :class:`EntityNotFoundError` when the UUID does not resolve.
+    """
+    ps = session.get(PredictionSet, prediction_set_id)
+    if ps is None:
+        raise EntityNotFoundError("PredictionSet", prediction_set_id)
+
+    prediction_count = (
+        session.query(func.count(GOPrediction.id))
+        .filter(GOPrediction.prediction_set_id == prediction_set_id)
+        .scalar()
+    )
+
+    per_protein = (
+        session.query(GOPrediction.protein_accession, func.count(GOPrediction.id))
+        .filter(GOPrediction.prediction_set_id == prediction_set_id)
+        .group_by(GOPrediction.protein_accession)
+        .all()
+    )
+
+    return {
+        "id": str(ps.id),
+        "embedding_config_id": str(ps.embedding_config_id),
+        "annotation_set_id": str(ps.annotation_set_id),
+        "ontology_snapshot_id": str(ps.ontology_snapshot_id),
+        "query_set_id": str(ps.query_set_id) if ps.query_set_id else None,
+        "limit_per_entry": ps.limit_per_entry,
+        "distance_threshold": ps.distance_threshold,
+        "created_at": ps.created_at.isoformat(),
+        "prediction_count": prediction_count or 0,
+        "per_protein_counts": {acc: cnt for acc, cnt in per_protein},
+    }
+
+
 def delete_embedding_config_cascade(
     session: Session,
     config_id: uuid.UUID,
@@ -620,6 +717,8 @@ __all__ = [
     "assert_prediction_set_exists",
     "config_to_dict",
     "delete_embedding_config_cascade",
+    "get_prediction_set_data",
+    "list_prediction_sets_data",
     "get_go_term_distribution_data",
     "get_predictions_for_protein",
     "iter_predictions_tsv",
