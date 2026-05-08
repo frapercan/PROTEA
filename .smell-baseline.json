@@ -30,7 +30,7 @@
       "path": "protea/core/operations/compute_embeddings.py",
       "name": "",
       "line": 0,
-      "metric": 1090,
+      "metric": 1100,
       "threshold": 800
     },
     {
@@ -184,15 +184,6 @@
       "name": "_embed_t5",
       "line": 727,
       "metric": 128,
-      "threshold": 60
-    },
-    {
-      "key": "method::protea/core/operations/compute_embeddings.py::_embed_esm3c",
-      "kind": "method",
-      "path": "protea/core/operations/compute_embeddings.py",
-      "name": "_embed_esm3c",
-      "line": 898,
-      "metric": 66,
       "threshold": 60
     },
     {
