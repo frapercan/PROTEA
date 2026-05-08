@@ -70,15 +70,6 @@
       "threshold": 800
     },
     {
-      "key": "file::protea/services/embeddings_service.py::",
-      "kind": "file",
-      "path": "protea/services/embeddings_service.py",
-      "name": "",
-      "line": 0,
-      "metric": 889,
-      "threshold": 800
-    },
-    {
       "key": "file::protea/services/scoring_service.py::",
       "kind": "file",
       "path": "protea/services/scoring_service.py",
@@ -529,30 +520,12 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/services/embeddings_service.py::validate_embedding_config_body",
-      "kind": "method",
-      "path": "protea/services/embeddings_service.py",
-      "name": "validate_embedding_config_body",
-      "line": 132,
-      "metric": 93,
-      "threshold": 60
-    },
-    {
       "key": "method::protea/services/embeddings_service.py::iter_predictions_tsv",
       "kind": "method",
       "path": "protea/services/embeddings_service.py",
       "name": "iter_predictions_tsv",
-      "line": 313,
+      "line": 224,
       "metric": 77,
-      "threshold": 60
-    },
-    {
-      "key": "method::protea/services/embeddings_service.py::list_proteins_in_prediction_set",
-      "kind": "method",
-      "path": "protea/services/embeddings_service.py",
-      "name": "list_proteins_in_prediction_set",
-      "line": 652,
-      "metric": 97,
       "threshold": 60
     },
     {
@@ -560,7 +533,7 @@
       "kind": "method",
       "path": "protea/services/embeddings_service.py",
       "name": "get_predictions_for_protein",
-      "line": 751,
+      "line": 570,
       "metric": 61,
       "threshold": 60
     },
