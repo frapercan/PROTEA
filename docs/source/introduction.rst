@@ -132,7 +132,7 @@ The thesis makes three contributions, one per research question:
 
 **C1 — A reproducible platform for protein functional annotation** built on
 a typed operation protocol, a two-session job lifecycle, a RabbitMQ job queue
-with seven routed queues, and a PostgreSQL + pgvector data model that
+with nine routed queues, and a PostgreSQL + pgvector data model that
 versions every input (OBO release, annotation set source, embedding config)
 by UUID. The platform is released as open source and runs end-to-end on a
 single workstation with one GPU. PROTEA currently consolidates fifteen
