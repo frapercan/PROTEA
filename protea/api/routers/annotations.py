@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import io
-import zipfile
-from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -10,7 +7,6 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
-from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.cache import cached
@@ -23,12 +19,13 @@ from protea.core.operations.load_quickgo_annotations import LoadQuickGOAnnotatio
 from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationPayload
 from protea.infrastructure.benchmark_config import BenchmarkConfig
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
-from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
 from protea.infrastructure.queue.publisher import publish_job
 from protea.infrastructure.session import session_scope
 from protea.services.annotations_service import (
     AnnotationSetReferencedError,
     EntityNotFoundError,
+    apply_baseline_scoring_default,
+    assert_evaluation_set_exists,
     delete_annotation_set_data,
     delete_eval_result_collect_keys,
     delete_evaluation_set_collect_keys,
@@ -38,6 +35,7 @@ from protea.services.annotations_service import (
     get_go_subgraph_data,
     get_snapshot_data,
     iter_delta_proteins_fasta,
+    iter_evaluation_artifacts_zip,
     iter_groundtruth_tsv,
     list_annotation_sets_data,
     list_evaluation_results_data,
@@ -472,25 +470,18 @@ def run_cafa_evaluation(
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
 
-    with session_scope(factory) as session:
-        if session.get(EvaluationSet, eval_id) is None:
-            raise HTTPException(status_code=404, detail="EvaluationSet not found")
-        # Auto-apply baseline scoring_config so every eval_result lands in the
-        # benchmark matrix. Without this, unclassified rows (scoring_config_id
-        # and reranker_model_id both NULL) are filtered out by _stage_of().
-        if not body.get("scoring_config_id") and not body.get("reranker_model_id") \
-                and not body.get("rerankers") and cfg.baseline_scoring_name:
-            baseline = session.execute(
-                select(ScoringConfig).where(ScoringConfig.name == cfg.baseline_scoring_name)
-            ).scalar_one_or_none()
-            if baseline is not None:
-                body = {**body, "scoring_config_id": str(baseline.id)}
-        job_id = enqueue_job(
-            session,
-            operation="run_cafa_evaluation",
-            queue_name=_EVALUATIONS_QUEUE,
-            payload=body,
-        )
+    try:
+        with session_scope(factory) as session:
+            assert_evaluation_set_exists(session, eval_id)
+            body = apply_baseline_scoring_default(session, body, cfg.baseline_scoring_name)
+            job_id = enqueue_job(
+                session,
+                operation="run_cafa_evaluation",
+                queue_name=_EVALUATIONS_QUEUE,
+                payload=body,
+            )
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     publish_job(amqp_url, _EVALUATIONS_QUEUE, job_id)
     return {"id": str(job_id), "status": "queued"}
@@ -537,23 +528,8 @@ def download_evaluation_artifacts(
     if not keys:
         raise HTTPException(status_code=404, detail="No artifacts found for this result")
 
-    from protea.infrastructure.settings import load_settings
-    from protea.infrastructure.storage import get_artifact_store
-
-    project_root = Path(__file__).resolve().parents[3]
-    store = get_artifact_store(load_settings(project_root))
-    prefix = f"eval_artifacts/{result_id}/"
-
-    def _zip_stream() -> Iterator[bytes]:
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
-            for key in sorted(keys):
-                rel = key[len(prefix):] if key.startswith(prefix) else key
-                zf.writestr(rel, store.get(key))
-        yield buf.getvalue()
-
     return StreamingResponse(
-        _zip_stream(),
+        iter_evaluation_artifacts_zip(keys, result_id),
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="artifacts_{result_id}.zip"'},
     )

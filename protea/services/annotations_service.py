@@ -14,10 +14,13 @@ responses:
 
 from __future__ import annotations
 
+import io
 import uuid
+import zipfile
+from collections.abc import Iterator
 from typing import Any
 
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -28,6 +31,7 @@ from protea.infrastructure.orm.models.annotation.evaluation_set import Evaluatio
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.orm.models.annotation.protein_go_annotation import ProteinGOAnnotation
+from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
 
 
 class AnnotationsServiceError(Exception):
@@ -459,6 +463,69 @@ def get_eval_result_with_keys(
         raise EntityNotFoundError("EvaluationResult", result_id)
     keys: list[str] = (result.results or {}).get("artifacts", {}).get("keys") or []
     return result, keys
+
+
+def apply_baseline_scoring_default(
+    session: Session,
+    body: dict[str, Any],
+    baseline_scoring_name: str | None,
+) -> dict[str, Any]:
+    """Auto-attach the baseline ``scoring_config_id`` to a CAFA evaluation
+    payload when no scoring + reranker selection is provided.
+
+    Without this, eval_result rows with both ``scoring_config_id`` and
+    ``reranker_model_id`` NULL are filtered out of the benchmark matrix
+    (``_stage_of()`` excludes them). When the caller supplies any of
+    ``scoring_config_id`` / ``reranker_model_id`` / ``rerankers``, or
+    when no baseline name is configured, the body is returned unchanged.
+    """
+    if (
+        body.get("scoring_config_id")
+        or body.get("reranker_model_id")
+        or body.get("rerankers")
+        or not baseline_scoring_name
+    ):
+        return body
+    baseline = session.execute(
+        select(ScoringConfig).where(ScoringConfig.name == baseline_scoring_name)
+    ).scalar_one_or_none()
+    if baseline is None:
+        return body
+    return {**body, "scoring_config_id": str(baseline.id)}
+
+
+def assert_evaluation_set_exists(session: Session, eval_id: uuid.UUID) -> None:
+    """Raise :class:`EntityNotFoundError` when the ``EvaluationSet`` UUID
+    does not resolve. Cheap preflight for endpoints that dispatch
+    background work but still need a 404 path."""
+    if session.get(EvaluationSet, eval_id) is None:
+        raise EntityNotFoundError("EvaluationSet", eval_id)
+
+
+def iter_evaluation_artifacts_zip(
+    keys: list[str],
+    result_id: uuid.UUID,
+) -> Iterator[bytes]:
+    """Stream a deflate-compressed zip of the evaluation-result artifacts.
+
+    The artifact store is resolved internally from settings — the
+    caller does not need to thread the store through. Keys are
+    rewritten to drop the ``eval_artifacts/<result_id>/`` prefix so
+    the zip entries are the relative file names cafaeval emitted.
+    """
+    from protea.infrastructure.settings import load_settings
+    from protea.infrastructure.storage import get_artifact_store
+
+    project_root = __import__("pathlib").Path(__file__).resolve().parents[2]
+    store = get_artifact_store(load_settings(project_root))
+    prefix = f"eval_artifacts/{result_id}/"
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for key in sorted(keys):
+            rel = key[len(prefix):] if key.startswith(prefix) else key
+            zf.writestr(rel, store.get(key))
+    yield buf.getvalue()
 
 
 def delete_eval_result_collect_keys(
