@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import signal
 import tempfile
 import uuid
 from pathlib import Path
@@ -14,6 +13,7 @@ from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPaylo
 from protea.core.evaluation import load_evaluation_data_for_set
 from protea.core.operations import _run_cafa_artifacts as _artifacts
 from protea.core.operations import _run_cafa_data_helpers as _data
+from protea.core.operations._run_cafa_eval_driver import evaluate_all_settings
 
 # Re-exports for backwards compatibility with existing imports.
 # Helpers live in ``_run_cafa_helpers`` so this file can stay close
@@ -171,7 +171,6 @@ class RunCafaEvaluationOperation:
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        from cafaeval.evaluation import cafa_eval
 
         p = RunCafaEvaluationPayload.model_validate(payload)
 
@@ -341,105 +340,29 @@ class RunCafaEvaluationOperation:
             # session so BaseWorker can still update job.status after execute().
             session.commit()
 
-            # Run evaluator for each setting
-            for setting, gt_file, known_file in [
-                ("NK", nk_path, None),
-                ("LK", lk_path, None),
-                ("PK", pk_path, pk_known_path),
-            ]:
-                # Write per-setting predictions if this setting has a reranker
-                if has_rerankers:
-                    pred_dir = os.path.join(str(artifacts_root), f"predictions_{setting}")
-                    os.makedirs(pred_dir, exist_ok=True)
-                    pred_path = os.path.join(pred_dir, "predictions.tsv")
-                    rr_aspect_map = reranker_models.get(setting, {})
-                    # anc2vec_query_known_* is only meaningful when the query
-                    # has pre-cutoff annotations (LK / PK).  NK proteins have
-                    # nothing "known", so training/serving parity requires
-                    # leaving the features at their predict-time NaN / 0.
-                    setting_known = data.known if setting in ("LK", "PK") else None
-                    if "" in rr_aspect_map:
-                        # Single model for all aspects (legacy flat field)
-                        bundle = rr_aspect_map[""]
-                        _artifacts.write_predictions(
-                            session,
-                            pred_set_id,
-                            delta_proteins,
-                            p.max_distance,
-                            pred_path,
-                            scoring_config_snapshot,
-                            reranker_model_str=bundle["model"],
-                            reranker_cat_codes=bundle.get("cat_codes"),
-                            known_gos=setting_known,
-                        )
-                    else:
-                        # Per-aspect models
-                        _artifacts.write_predictions_per_aspect(
-                            session,
-                            pred_set_id,
-                            delta_proteins,
-                            p.max_distance,
-                            pred_path,
-                            rr_aspect_map,  # bundle dicts now
-                            known_gos=setting_known,
-                        )
-                emit("run_cafa_evaluation.evaluating", None, {"setting": setting}, "info")
-                try:
-                    # Reset SIGTERM/SIGINT to defaults before cafaeval forks pool
-                    # workers.  Our _handle_stop handler only sets a flag without
-                    # calling sys.exit(), so forked children would ignore SIGTERM
-                    # from pool.terminate() and pool.join() would block forever.
-                    _old_sigterm = signal.signal(signal.SIGTERM, signal.SIG_DFL)
-                    _old_sigint = signal.signal(signal.SIGINT, signal.SIG_DFL)
-                    try:
-                        df, dfs_best = cafa_eval(
-                            obo_path,
-                            pred_dir,
-                            gt_file,
-                            ia=ia_path,
-                            exclude=known_file,
-                            prop="fill",
-                            norm="cafa",
-                            no_orphans=True,
-                            toi_file=toi_path,
-                            max_terms=500,
-                            th_step=0.001,
-                            n_cpu=1,
-                        )
-                    finally:
-                        signal.signal(signal.SIGTERM, _old_sigterm)
-                        signal.signal(signal.SIGINT, _old_sigint)
-
-                    results[setting] = _artifacts.parse_results(dfs_best)
-
-                    # Persist full cafaeval output (PR curves + best metrics per metric type)
-                    if df is not None:
-                        from cafaeval.evaluation import write_results as _write_results
-
-                        setting_dir = artifacts_root / setting
-                        setting_dir.mkdir(exist_ok=True)
-                        _write_results(df, dfs_best, str(setting_dir))
-
-                    emit(
-                        "run_cafa_evaluation.setting_done",
-                        None,
-                        {
-                            "setting": setting,
-                            "namespaces": list(results[setting].keys()),
-                        },
-                        "info",
-                    )
-                except Exception as exc:
-                    emit(
-                        "run_cafa_evaluation.setting_failed",
-                        None,
-                        {
-                            "setting": setting,
-                            "error": str(exc),
-                        },
-                        "warning",
-                    )
-                    results[setting] = {}
+            # Run evaluator for each setting. Body lives in
+            # ``_run_cafa_eval_driver.evaluate_all_settings``.
+            shared_pred_dir = os.path.join(str(artifacts_root), "predictions")
+            results = evaluate_all_settings(
+                session,
+                pred_set_id=pred_set_id,
+                delta_proteins=delta_proteins,
+                max_distance=p.max_distance,
+                artifacts_root=artifacts_root,
+                has_rerankers=has_rerankers,
+                reranker_models=reranker_models,
+                scoring_config_snapshot=scoring_config_snapshot,
+                data=data,
+                obo_path=obo_path,
+                nk_path=nk_path,
+                lk_path=lk_path,
+                pk_path=pk_path,
+                pk_known_path=pk_known_path,
+                ia_path=ia_path,
+                toi_path=toi_path,
+                shared_pred_dir=shared_pred_dir,
+                emit=emit,
+            )
 
             # ── 2b. Upload all staged artifacts to the artifact store ────────
             for path in sorted(artifacts_root.rglob("*")):
