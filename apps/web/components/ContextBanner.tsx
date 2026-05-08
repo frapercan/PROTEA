@@ -34,7 +34,7 @@ export function ContextBanner({ title, description, prerequisites, nextStep }: C
 
       {!collapsed && (
         <div className="px-4 pb-3 space-y-2">
-          <p className="text-sm text-gray-600">{description}</p>
+          <p className="text-sm text-slate-600">{description}</p>
 
           {prerequisites && prerequisites.length > 0 && (
             <div className="flex flex-wrap gap-x-4 gap-y-1">
@@ -48,7 +48,7 @@ export function ContextBanner({ title, description, prerequisites, nextStep }: C
                       {p.label}
                     </Link>
                   ) : (
-                    <span className={p.met ? "text-gray-600" : "text-amber-700"}>{p.label}</span>
+                    <span className={p.met ? "text-slate-600" : "text-amber-700"}>{p.label}</span>
                   )}
                 </span>
               ))}
@@ -56,7 +56,7 @@ export function ContextBanner({ title, description, prerequisites, nextStep }: C
           )}
 
           {nextStep && (
-            <div className="text-xs text-gray-500">
+            <div className="text-xs text-slate-500">
               Next:{" "}
               <Link href={nextStep.href} className="text-blue-600 underline hover:text-blue-800">
                 {nextStep.label} &rarr;

@@ -55,9 +55,9 @@ function evalLabel(es: EvaluationSet, annotationSets: AnnotationSet[]) {
   return `${oldVer} → ${newVer} · ${delta} delta proteins (${shortId(es.id)}…)`;
 }
 
-const labelClass = "block text-sm font-medium text-gray-700 mb-1";
+const labelClass = "block text-sm font-medium text-slate-700 mb-1";
 const selectClass =
-  "w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+  "w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
 const btnPrimary =
   "rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors";
 const btnDanger =
@@ -83,21 +83,21 @@ function FeatureImportanceChart({ importance }: { importance: Record<string, num
   const entries = Object.entries(importance)
     .sort(([, a], [, b]) => b - a)
     .filter(([, v]) => v > 0);
-  if (entries.length === 0) return <p className="text-xs text-gray-400">No feature importance data</p>;
+  if (entries.length === 0) return <p className="text-xs text-slate-400">No feature importance data</p>;
   const maxVal = entries[0][1];
 
   return (
     <div className="space-y-1">
       {entries.map(([name, val]) => (
         <div key={name} className="flex items-center gap-2 text-xs">
-          <span className="w-40 shrink-0 text-right text-gray-600 truncate" title={name}>{name}</span>
-          <div className="flex-1 h-4 bg-gray-100 rounded overflow-hidden">
+          <span className="w-40 shrink-0 text-right text-slate-600 truncate" title={name}>{name}</span>
+          <div className="flex-1 h-4 bg-slate-100 rounded overflow-hidden">
             <div
               className="h-4 bg-blue-400 rounded"
               style={{ width: `${Math.round((val / maxVal) * 100)}%` }}
             />
           </div>
-          <span className="w-20 shrink-0 font-mono text-gray-500 text-right">
+          <span className="w-20 shrink-0 font-mono text-slate-500 text-right">
             {val >= 1000 ? `${(val / 1000).toFixed(1)}k` : val.toFixed(0)}
           </span>
         </div>
@@ -115,8 +115,8 @@ function MetricsBadge({ label, value, suffix }: { label: string; value: number |
   const formatted = typeof value === "number" ? value.toFixed(4) : value;
   return (
     <div className="rounded-lg border bg-white p-3 shadow-sm text-center">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">{label}</p>
-      <p className="text-lg font-bold text-gray-900 mt-0.5">{formatted}{suffix}</p>
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="text-lg font-bold text-slate-900 mt-0.5">{formatted}{suffix}</p>
     </div>
   );
 }
@@ -180,12 +180,12 @@ function RerankerCard({
   return (
     <div className="rounded-lg border bg-white shadow-sm overflow-hidden">
       <div
-        className="px-4 py-3 cursor-pointer hover:bg-gray-50 transition-colors"
+        className="px-4 py-3 cursor-pointer hover:bg-slate-50 transition-colors"
         onClick={() => setExpanded(!expanded)}
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <span className="font-semibold text-gray-900">{model.name}</span>
+            <span className="font-semibold text-slate-900">{model.name}</span>
             <span className="rounded-full border px-2 py-0.5 text-xs font-medium bg-indigo-50 text-indigo-700 border-indigo-100 uppercase">
               {model.category}
             </span>
@@ -196,26 +196,26 @@ function RerankerCard({
             )}
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-xs text-gray-400">{new Date(model.created_at).toLocaleDateString()}</span>
-            <span className="text-gray-300 text-xs">{expanded ? "▲" : "▼"}</span>
+            <span className="text-xs text-slate-400">{new Date(model.created_at).toLocaleDateString()}</span>
+            <span className="text-slate-300 text-xs">{expanded ? "▲" : "▼"}</span>
           </div>
         </div>
-        <div className="flex flex-wrap gap-4 mt-2 text-xs text-gray-500">
+        <div className="flex flex-wrap gap-4 mt-2 text-[13px] text-slate-500">
           {m.test_fmax != null ? (
             <>
-              <span>Test Fmax: <strong className="text-gray-700">{m.test_fmax.toFixed(4)}</strong></span>
-              <span>Best iter: <strong className="text-gray-700">{m.best_iteration ?? "—"}</strong></span>
+              <span>Test Fmax: <strong className="text-slate-700">{m.test_fmax.toFixed(4)}</strong></span>
+              <span>Best iter: <strong className="text-slate-700">{m.best_iteration ?? "—"}</strong></span>
               {m.positive_rate_train != null && (
-                <span>Train pos. rate: <strong className="text-gray-700">{(m.positive_rate_train * 100).toFixed(2)}%</strong></span>
+                <span>Train pos. rate: <strong className="text-slate-700">{(m.positive_rate_train * 100).toFixed(2)}%</strong></span>
               )}
             </>
           ) : (
             <>
-              <span>AUC: <strong className="text-gray-700">{m.val_auc?.toFixed(4) ?? "—"}</strong></span>
-              <span>F1: <strong className="text-gray-700">{m.val_f1?.toFixed(4) ?? "—"}</strong></span>
-              <span>Precision: <strong className="text-gray-700">{m.val_precision?.toFixed(4) ?? "—"}</strong></span>
-              <span>Recall: <strong className="text-gray-700">{m.val_recall?.toFixed(4) ?? "—"}</strong></span>
-              <span>Positive rate: <strong className="text-gray-700">{m.positive_rate != null ? `${(m.positive_rate * 100).toFixed(2)}%` : "—"}</strong></span>
+              <span>AUC: <strong className="text-slate-700">{m.val_auc?.toFixed(4) ?? "—"}</strong></span>
+              <span>F1: <strong className="text-slate-700">{m.val_f1?.toFixed(4) ?? "—"}</strong></span>
+              <span>Precision: <strong className="text-slate-700">{m.val_precision?.toFixed(4) ?? "—"}</strong></span>
+              <span>Recall: <strong className="text-slate-700">{m.val_recall?.toFixed(4) ?? "—"}</strong></span>
+              <span>Positive rate: <strong className="text-slate-700">{m.positive_rate != null ? `${(m.positive_rate * 100).toFixed(2)}%` : "—"}</strong></span>
             </>
           )}
         </div>
@@ -225,7 +225,7 @@ function RerankerCard({
         <div className="border-t px-4 py-4 space-y-5">
           {/* Training-time metrics */}
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Training-time metrics</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Training-time metrics</p>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <MetricsBadge label="Test Fmax" value={m.test_fmax} />
               <MetricsBadge label="Best iteration" value={m.best_iteration} />
@@ -233,7 +233,7 @@ function RerankerCard({
               <MetricsBadge label="Log-loss" value={m.val_logloss} />
               <MetricsBadge label="F1" value={m.val_f1} />
             </div>
-            <div className="flex flex-wrap gap-4 mt-2 text-xs text-gray-500">
+            <div className="flex flex-wrap gap-4 mt-2 text-[13px] text-slate-500">
               {m.train_samples != null && <span>Train samples: {m.train_samples.toLocaleString()}</span>}
               {m.val_samples != null && <span>Val samples: {m.val_samples.toLocaleString()}</span>}
               {m.positive_rate_train != null && (
@@ -244,18 +244,18 @@ function RerankerCard({
 
           {/* Feature importance */}
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Feature importance (gain)</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Feature importance (gain)</p>
             <FeatureImportanceChart importance={model.feature_importance} />
           </div>
 
           {/* Download reranked TSV */}
           {model.prediction_set_id && (
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Download re-ranked predictions</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Download re-ranked predictions</p>
               <a
                 href={getRerankedTsvUrl(model.prediction_set_id, model.id)}
                 download={`reranked_${shortId(model.id)}.tsv`}
-                className="inline-flex items-center gap-1.5 rounded-md border bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+                className="inline-flex items-center gap-1.5 rounded-md border bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
               >
                 ↓ Download reranked TSV
               </a>
@@ -264,10 +264,10 @@ function RerankerCard({
 
           {/* Compute CAFA metrics */}
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Compute CAFA metrics</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Compute CAFA metrics</p>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-2">
               <div>
-                <label className="text-xs text-gray-500 mb-0.5 block">Prediction set</label>
+                <label className="text-[13px] text-slate-500 mb-0.5 block">Prediction set</label>
                 <select value={metricsPsId} onChange={(e) => setMetricsPsId(e.target.value)} className={selectClass}>
                   <option value="">Select...</option>
                   {predictionSets.map((ps) => (
@@ -276,7 +276,7 @@ function RerankerCard({
                 </select>
               </div>
               <div>
-                <label className="text-xs text-gray-500 mb-0.5 block">Evaluation set</label>
+                <label className="text-[13px] text-slate-500 mb-0.5 block">Evaluation set</label>
                 <select value={metricsEsId} onChange={(e) => setMetricsEsId(e.target.value)} className={selectClass}>
                   <option value="">Select...</option>
                   {evaluationSets.map((es) => (
@@ -285,13 +285,13 @@ function RerankerCard({
                 </select>
               </div>
               <div>
-                <label className="text-xs text-gray-500 mb-0.5 block">Category</label>
+                <label className="text-[13px] text-slate-500 mb-0.5 block">Category</label>
                 <select value={metricsCategory} onChange={(e) => setMetricsCategory(e.target.value)} className={selectClass}>
                   <option value="nk">NK (No Knowledge)</option>
                   <option value="lk">LK (Limited Knowledge)</option>
                   <option value="pk">PK (Partial Knowledge)</option>
                 </select>
-                <p className="text-[10px] text-gray-400 mt-1 leading-snug">{CATEGORY_HINTS[metricsCategory]}</p>
+                <p className="text-[10px] text-slate-400 mt-1 leading-snug">{CATEGORY_HINTS[metricsCategory]}</p>
               </div>
             </div>
             <button
@@ -303,7 +303,7 @@ function RerankerCard({
             </button>
             {metricsError && <p className="text-xs text-red-500 mt-2">{metricsError}</p>}
             {metrics && (
-              <div className="mt-3 rounded-md border bg-gray-50 p-3">
+              <div className="mt-3 rounded-md border bg-slate-50 p-3">
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
                   <MetricsBadge label="Fmax" value={metrics.fmax} />
                   <MetricsBadge label="AUC-PR" value={metrics.auc_pr} />
@@ -313,14 +313,14 @@ function RerankerCard({
                   <MetricsBadge label="Predictions" value={metrics.n_predictions} />
                 </div>
                 {metrics.curve && metrics.curve.length > 0 && (
-                  <p className="text-[10px] text-gray-400 mt-2">{metrics.curve.length} PR curve points computed</p>
+                  <p className="text-[10px] text-slate-400 mt-2">{metrics.curve.length} PR curve points computed</p>
                 )}
               </div>
             )}
           </div>
 
           {/* Source info */}
-          <div className="flex flex-wrap gap-4 text-xs text-gray-400 border-t pt-3">
+          <div className="flex flex-wrap gap-4 text-xs text-slate-400 border-t pt-3">
             <span>Prediction set: <span className="font-mono">{model.prediction_set_id ? shortId(model.prediction_set_id) : "—"}</span></span>
             <span>Evaluation set: <span className="font-mono">{model.evaluation_set_id ? shortId(model.evaluation_set_id) : "—"}</span></span>
             <span>ID: <span className="font-mono">{shortId(model.id)}</span></span>
@@ -423,7 +423,7 @@ export default function RerankerPage() {
         ]}
         nextStep={{ label: "Evaluation", href: "/evaluation" }}
       />
-      <p className="text-sm text-gray-500 mb-6">
+      <p className="text-sm text-slate-500 mb-6">
         LightGBM binary classifiers trained on temporal holdout data (CAFA protocol).
         A re-ranker uses alignment, taxonomy, and aggregate features to re-score GO predictions
         with calibrated probabilities, replacing the raw embedding distance ranking.
@@ -431,7 +431,7 @@ export default function RerankerPage() {
 
       {/* Train new reranker */}
       <div className="rounded-lg border bg-white p-5 shadow-sm mb-6">
-        <h2 className="text-sm font-semibold text-gray-700 mb-4">Train new re-ranker</h2>
+        <h2 className="text-sm font-semibold text-slate-700 mb-4">Train new re-ranker</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 mb-3">
           <div>
             <label className={labelClass}>Name</label>
@@ -440,7 +440,7 @@ export default function RerankerPage() {
               value={trainName}
               onChange={(e) => setTrainName(e.target.value)}
               placeholder="e.g. reranker-nk-bpo-v1"
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
           <div>
@@ -468,7 +468,7 @@ export default function RerankerPage() {
               <option value="lk">LK (Limited Knowledge)</option>
               <option value="pk">PK (Partial Knowledge)</option>
             </select>
-            <p className="text-[10px] text-gray-400 mt-1 leading-snug">{CATEGORY_HINTS[trainCategory]}</p>
+            <p className="text-[10px] text-slate-400 mt-1 leading-snug">{CATEGORY_HINTS[trainCategory]}</p>
           </div>
           <div>
             <label className={labelClass}>Aspect</label>
@@ -485,7 +485,7 @@ export default function RerankerPage() {
               type="number" min="1" step="1" placeholder="all (no limit)"
               value={trainNegPosRatio}
               onChange={(e) => setTrainNegPosRatio(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
         </div>
@@ -493,11 +493,11 @@ export default function RerankerPage() {
         {/* Extra training pairs */}
         <div className="mb-3">
           <div className="flex items-center gap-2 mb-2">
-            <label className="text-xs font-medium text-gray-600">Additional training pairs (multi-temporal)</label>
+            <label className="text-xs font-medium text-slate-600">Additional training pairs (multi-temporal)</label>
             <button
               type="button"
               onClick={() => setExtraPairs((prev) => [...prev, { psId: "", esId: "" }])}
-              className="rounded border border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-50"
+              className="rounded border border-slate-300 bg-white px-2 py-0.5 text-[13px] text-slate-600 hover:bg-slate-50"
             >
               + Add pair
             </button>
@@ -534,7 +534,7 @@ export default function RerankerPage() {
             </div>
           ))}
           {extraPairs.length > 0 && (
-            <p className="text-[10px] text-gray-400 mt-1">
+            <p className="text-[10px] text-slate-400 mt-1">
               Data from all pairs will be concatenated before training a single model.
               {extraPairs.filter((p) => p.psId && p.esId).length > 0 &&
                 ` (${1 + extraPairs.filter((p) => p.psId && p.esId).length} pairs total)`}
@@ -564,11 +564,11 @@ export default function RerankerPage() {
       </div>
 
       {/* List of rerankers */}
-      {loading && <p className="text-sm text-gray-400">Loading...</p>}
+      {loading && <p className="text-sm text-slate-400">Loading...</p>}
       {error && <p className="text-sm text-red-500">{error}</p>}
 
       {!loading && rerankers.length === 0 && (
-        <div className="rounded-lg border bg-white px-4 py-12 text-center text-sm text-gray-400 shadow-sm">
+        <div className="rounded-lg border bg-white px-4 py-12 text-center text-sm text-slate-400 shadow-sm">
           No re-ranker models trained yet. Use the form above to train one.
         </div>
       )}

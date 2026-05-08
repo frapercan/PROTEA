@@ -7,6 +7,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { SkeletonTableRow } from "@/components/Skeleton";
 import { useToast } from "@/components/Toast";
 import { useTranslations } from "next-intl";
+import { useUrlParam } from "@/lib/useUrlParam";
 
 const STATUS_OPTIONS = ["", "queued", "running", "succeeded", "failed", "cancelled"];
 
@@ -25,23 +26,23 @@ function InlineProgress({
   if (!total) {
     return (
       <div className="mt-1 flex items-center gap-2">
-        <div className="h-1.5 w-24 overflow-hidden rounded-full bg-gray-100">
+        <div className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-100">
           <div className="h-1.5 w-8 rounded-full bg-blue-400 animate-pulse" />
         </div>
-        <span className="text-xs text-gray-400">{(current ?? 0).toLocaleString()}</span>
+        <span className="text-xs text-slate-400">{(current ?? 0).toLocaleString()}</span>
       </div>
     );
   }
   const pct = Math.min(100, Math.round(((current ?? 0) / total) * 100));
   return (
     <div className="mt-1 flex items-center gap-2">
-      <div className="h-1.5 w-24 overflow-hidden rounded-full bg-gray-100">
+      <div className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-100">
         <div
           className="h-1.5 rounded-full bg-blue-400 transition-all duration-500"
           style={{ width: `${pct}%` }}
         />
       </div>
-      <span className="text-xs text-gray-400">{pct}%</span>
+      <span className="text-xs text-slate-400">{pct}%</span>
     </div>
   );
 }
@@ -51,7 +52,9 @@ export default function JobsPage() {
   const toast = useToast();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState("");
+  const [statusFilterRaw, setStatusFilterRaw] = useUrlParam("status", "");
+  const statusFilter = statusFilterRaw ?? "";
+  const setStatusFilter = (v: string) => setStatusFilterRaw(v === "" ? null : v);
   const [error, setError] = useState("");
   const [autoRefresh, setAutoRefresh] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -123,7 +126,7 @@ export default function JobsPage() {
             ))}
           </select>
 
-          <label className="flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer select-none">
+          <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer select-none">
             <input
               type="checkbox"
               checked={autoRefresh}
@@ -136,7 +139,7 @@ export default function JobsPage() {
 
           <button
             onClick={() => refresh(statusFilter)}
-            className="rounded-md border bg-white px-3 py-1.5 text-sm hover:bg-gray-50"
+            className="rounded-md border bg-white px-3 py-1.5 text-sm hover:bg-slate-50"
           >
             {t("refresh")}
           </button>
@@ -153,35 +156,35 @@ export default function JobsPage() {
       <div className="mt-4 lg:hidden space-y-2">
         {loading && Array.from({ length: 5 }).map((_, i) => (
           <div key={i} className="rounded-lg border bg-white p-3 shadow-sm animate-pulse space-y-2">
-            <div className="h-4 bg-gray-200 rounded w-24" />
-            <div className="h-3 bg-gray-100 rounded w-40" />
+            <div className="h-4 bg-slate-200 rounded w-24" />
+            <div className="h-3 bg-slate-100 rounded w-40" />
           </div>
         ))}
         {!loading && jobs.length === 0 && (
-          <div className="rounded-lg border bg-white px-4 py-8 text-center text-sm text-gray-400 shadow-sm">{t("noJobsFound")}</div>
+          <div className="rounded-lg border bg-white px-4 py-8 text-center text-sm text-slate-400 shadow-sm">{t("noJobsFound")}</div>
         )}
         {!loading && jobs.map((j) => (
           <Link key={j.id} href={`/jobs/${j.id}`} className="block rounded-lg border bg-white p-3 shadow-sm hover:border-blue-200 hover:bg-blue-50 transition-colors">
             <div className="flex items-start justify-between gap-2">
               <StatusBadge status={j.status} />
-              <span className="text-xs text-gray-400">{formatDate(j.created_at)}</span>
+              <span className="text-xs text-slate-400">{formatDate(j.created_at)}</span>
             </div>
-            <p className="mt-1.5 text-sm font-medium text-gray-800">{j.operation}</p>
+            <p className="mt-1.5 text-sm font-medium text-slate-800">{j.operation}</p>
             {j.operation_description && (
-              <p className="text-xs text-gray-500 leading-snug">{j.operation_description}</p>
+              <p className="text-xs text-slate-500 leading-snug">{j.operation_description}</p>
             )}
             {j.operation_summary && (
-              <p className="mt-1 text-xs font-mono text-gray-700 break-words">{j.operation_summary}</p>
+              <p className="mt-1 text-xs font-mono text-slate-700 break-words">{j.operation_summary}</p>
             )}
             <InlineProgress current={j.progress_current} total={j.progress_total} />
-            <p className="mt-1 font-mono text-xs text-gray-400 truncate">{j.id}</p>
+            <p className="mt-1 font-mono text-xs text-slate-400 truncate">{j.id}</p>
           </Link>
         ))}
       </div>
 
       {/* Desktop table */}
       <div className="mt-4 hidden lg:block overflow-hidden rounded-lg border bg-white shadow-sm">
-        <div className="grid grid-cols-[140px_220px_1fr_180px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
+        <div className="grid grid-cols-[140px_220px_1fr_180px] gap-2 border-b bg-slate-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
           <div>{t("status")}</div>
           <div>{t("operation")}</div>
           <div>{t("operationContext")}</div>
@@ -200,32 +203,32 @@ export default function JobsPage() {
           >
             <div><StatusBadge status={j.status} /></div>
             <div>
-              <span className="text-gray-700 font-medium block truncate">{j.operation}</span>
+              <span className="text-slate-700 font-medium block truncate">{j.operation}</span>
               {j.operation_description && (
-                <span className="text-xs text-gray-500 leading-snug line-clamp-2 block">{j.operation_description}</span>
+                <span className="text-xs text-slate-500 leading-snug line-clamp-2 block">{j.operation_description}</span>
               )}
               <InlineProgress current={j.progress_current} total={j.progress_total} />
             </div>
             <div className="space-y-0.5">
               {j.operation_summary ? (
-                <span className="text-xs font-mono text-gray-700 break-words block">{j.operation_summary}</span>
+                <span className="text-xs font-mono text-slate-700 break-words block">{j.operation_summary}</span>
               ) : (
-                <span className="text-xs text-gray-300">—</span>
+                <span className="text-xs text-slate-300">—</span>
               )}
-              <span className="font-mono text-[10px] text-gray-400 truncate block">{j.id}</span>
+              <span className="font-mono text-[10px] text-slate-400 truncate block">{j.id}</span>
             </div>
-            <div className="text-gray-500 text-xs">{formatDate(j.created_at)}</div>
+            <div className="text-slate-500 text-xs">{formatDate(j.created_at)}</div>
           </Link>
         ))}
 
         {!loading && jobs.length === 0 && (
-          <div className="px-4 py-8 text-center text-sm text-gray-400">
+          <div className="px-4 py-8 text-center text-sm text-slate-400">
             {t("noJobsFound")}
           </div>
         )}
       </div>
 
-      <p className="mt-2 text-xs text-gray-400">{jobs.length} job{jobs.length !== 1 ? "s" : ""} shown</p>
+      <p className="mt-2 text-xs text-slate-400">{jobs.length} job{jobs.length !== 1 ? "s" : ""} shown</p>
     </>
   );
 }

@@ -156,14 +156,14 @@ function WeightPanel({
             <span
               key={key}
               title={`${label}: ${w}`}
-              className={`rounded px-1.5 py-0.5 font-mono ${w > 0 ? "bg-gray-100 text-gray-700" : "text-gray-300"}`}
+              className={`rounded px-1.5 py-0.5 font-mono ${w > 0 ? "bg-slate-100 text-slate-700" : "text-slate-300"}`}
             >
               {label} {w}
             </span>
           );
         })}
         {config.description && (
-          <span className="text-gray-400 italic ml-1">{config.description}</span>
+          <span className="text-slate-400 italic ml-1">{config.description}</span>
         )}
       </div>
     );
@@ -173,7 +173,7 @@ function WeightPanel({
     return (
       <div className="rounded-lg border bg-white p-3 shadow-sm w-72">
         <div className="flex items-center justify-between mb-3">
-          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Custom weights</span>
+          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Custom weights</span>
           <select
             value={customFormula}
             onChange={(e) => onFormulaChange(e.target.value)}
@@ -188,14 +188,14 @@ function WeightPanel({
             const val = customWeights[key] ?? 0;
             return (
               <div key={key} className="flex items-center gap-2" title={hint}>
-                <span className="text-xs text-gray-600 w-32 shrink-0">{label}</span>
+                <span className="text-xs text-slate-600 w-32 shrink-0">{label}</span>
                 <input
                   type="range" min="0" max="1" step="0.05"
                   value={val}
                   onChange={(e) => onWeightChange(key, parseFloat(e.target.value))}
                   className="flex-1 accent-blue-500"
                 />
-                <span className="font-mono text-xs text-gray-700 w-8 text-right">{val.toFixed(2)}</span>
+                <span className="font-mono text-xs text-slate-700 w-8 text-right">{val.toFixed(2)}</span>
               </div>
             );
           })}
@@ -226,7 +226,7 @@ function WeightPanel({
               </button>
               <button
                 onClick={() => { setShowSaveForm(false); setSaveName(""); }}
-                className="text-xs text-gray-400 hover:text-gray-600 px-1"
+                className="text-xs text-slate-400 hover:text-slate-600 px-1"
               >
                 ✕
               </button>
@@ -257,9 +257,9 @@ const ASPECT_COLORS: Record<string, string> = {
 };
 
 function AspectBadge({ aspect }: { aspect?: string | null }) {
-  if (!aspect) return <span className="text-gray-300 text-xs">—</span>;
+  if (!aspect) return <span className="text-slate-300 text-xs">—</span>;
   return (
-    <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${ASPECT_COLORS[aspect] ?? "bg-gray-50 text-gray-600"}`}>
+    <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${ASPECT_COLORS[aspect] ?? "bg-slate-50 text-slate-600"}`}>
       {aspect}
     </span>
   );
@@ -280,7 +280,7 @@ const RELATION_COLORS: Record<string, string> = {
   close:        "bg-green-50 text-green-700",
   intermediate: "bg-yellow-50 text-yellow-700",
   distant:      "bg-orange-50 text-orange-700",
-  "root-only":  "bg-gray-50 text-gray-500",
+  "root-only":  "bg-slate-50 text-slate-500",
   unrelated:    "bg-red-50 text-red-600",
 };
 
@@ -302,7 +302,7 @@ function evidenceBadgeClass(code: string): string {
   if (w >= 1.0) return "bg-green-100 text-green-700 border-green-200";
   if (w >= 0.7) return "bg-blue-100 text-blue-700 border-blue-200";
   if (w >= 0.5) return "bg-yellow-100 text-yellow-700 border-yellow-200";
-  return "bg-gray-100 text-gray-500 border-gray-200";
+  return "bg-slate-100 text-slate-500 border-slate-200";
 }
 
 type GroupedAnnotation = { go_id: string; name: string | null; aspect: string | null; evidence_codes: string[] };
@@ -346,7 +346,7 @@ function PredictionTable({ preds, knownByGoId, scoringConfig }: {
   return (
     <div className="rounded-md border bg-white text-xs">
       {/* Desktop header */}
-      <div className={`hidden lg:grid ${gridClass} gap-x-3 border-b bg-gray-50 px-3 py-1.5 font-semibold uppercase tracking-wide text-gray-400`}>
+      <div className={`hidden lg:grid ${gridClass} gap-x-3 border-b bg-slate-50 px-3 py-1.5 font-semibold uppercase tracking-wide text-slate-400`}>
         {hasScore && <div>Score</div>}
         <div>GO ID</div>
         <div>Name</div>
@@ -357,7 +357,7 @@ function PredictionTable({ preds, knownByGoId, scoringConfig }: {
       </div>
 
       {sorted.length === 0 ? (
-        <p className="px-3 py-3 text-gray-300">—</p>
+        <p className="px-3 py-3 text-slate-300">—</p>
       ) : sorted.map((pred) => {
         const isExpanded = expanded === pred.go_id;
         const knownAnn = knownByGoId.get(pred.go_id);
@@ -377,13 +377,13 @@ function PredictionTable({ preds, knownByGoId, scoringConfig }: {
                       {computeScore(pred, scoringConfig!).toFixed(3)}
                     </span>
                   )}
-                  <span className="font-mono text-gray-500 text-[10px]">{pred.distance.toFixed(4)}</span>
-                  {hasDetail && <span className="text-gray-300 text-[10px]">{isExpanded ? "▲" : "▼"}</span>}
+                  <span className="font-mono text-slate-500 text-[10px]">{pred.distance.toFixed(4)}</span>
+                  {hasDetail && <span className="text-slate-300 text-[10px]">{isExpanded ? "▲" : "▼"}</span>}
                 </div>
               </div>
-              <p className="text-gray-700 leading-snug text-xs mb-1">{pred.name ?? "—"}</p>
+              <p className="text-slate-700 leading-snug text-xs mb-1">{pred.name ?? "—"}</p>
               <div className="flex flex-wrap items-center gap-2 text-[10px]">
-                <span className="text-gray-400">via</span>
+                <span className="text-slate-400">via</span>
                 <Link
                   href={`/proteins/${pred.ref_protein_accession}`}
                   className="font-mono text-blue-500 hover:underline"
@@ -415,90 +415,90 @@ function PredictionTable({ preds, knownByGoId, scoringConfig }: {
                 </span>
               )}
               <span className="font-mono text-blue-600">{pred.go_id}</span>
-              <span className="text-gray-700 leading-snug">{pred.name ?? "—"}</span>
+              <span className="text-slate-700 leading-snug">{pred.name ?? "—"}</span>
               <div className="flex items-start gap-1">
                 <Link
                   href={`/proteins/${pred.ref_protein_accession}`}
                   className="font-mono text-blue-500 hover:underline"
                   onClick={(e) => e.stopPropagation()}
                 >{pred.ref_protein_accession}</Link>
-                {hasDetail && <span className="text-gray-300 text-[10px] mt-0.5">{isExpanded ? "▲" : "▼"}</span>}
+                {hasDetail && <span className="text-slate-300 text-[10px] mt-0.5">{isExpanded ? "▲" : "▼"}</span>}
               </div>
               <div>
                 {pred.evidence_code ? (
                   <span className={`rounded border px-1 py-0.5 text-[10px] font-mono font-medium ${evidenceBadgeClass(pred.evidence_code)}`}>
                     {pred.evidence_code}
                   </span>
-                ) : <span className="text-gray-300">—</span>}
+                ) : <span className="text-slate-300">—</span>}
               </div>
               <div className="flex flex-wrap gap-0.5">
                 {knownAnn ? knownAnn.evidence_codes.map((ec) => (
                   <span key={ec} className={`rounded border px-1 py-0.5 text-[10px] font-mono font-medium ${evidenceBadgeClass(ec)}`}>
                     {ec}
                   </span>
-                )) : <span className="text-gray-300">—</span>}
+                )) : <span className="text-slate-300">—</span>}
               </div>
-              <span className="font-mono text-gray-500">{pred.distance.toFixed(4)}</span>
+              <span className="font-mono text-slate-500">{pred.distance.toFixed(4)}</span>
             </div>
 
             {/* Expanded: alignment + taxonomy + reranker detail */}
             {isExpanded && hasDetail && (
-              <div className="border-b bg-gray-50 px-4 py-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+              <div className="border-b bg-slate-50 px-4 py-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
                 {hasAlignment && (
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-2">
                       Alignment — query vs {pred.ref_protein_accession}
                     </p>
                     <table className="w-full text-xs">
                       <thead>
-                        <tr className="text-gray-400">
+                        <tr className="text-slate-400">
                           <th className="text-left font-medium pr-4 pb-1">Metric</th>
                           <th className="text-right font-medium pr-4 pb-1">NW (global)</th>
                           <th className="text-right font-medium pb-1">SW (local)</th>
                         </tr>
                       </thead>
                       <tbody className="font-mono">
-                        <tr><td className="pr-4 text-gray-500 font-sans py-0.5">Identity</td><td className="text-right pr-4">{pct(pred.identity_nw)}</td><td className="text-right">{pct(pred.identity_sw)}</td></tr>
-                        <tr><td className="pr-4 text-gray-500 font-sans py-0.5">Similarity</td><td className="text-right pr-4">{pct(pred.similarity_nw)}</td><td className="text-right">{pct(pred.similarity_sw)}</td></tr>
-                        <tr><td className="pr-4 text-gray-500 font-sans py-0.5">Score</td><td className="text-right pr-4">{pred.alignment_score_nw?.toFixed(0) ?? "—"}</td><td className="text-right">{pred.alignment_score_sw?.toFixed(0) ?? "—"}</td></tr>
-                        <tr><td className="pr-4 text-gray-500 font-sans py-0.5">Gaps</td><td className="text-right pr-4">{pct(pred.gaps_pct_nw)}</td><td className="text-right">{pct(pred.gaps_pct_sw)}</td></tr>
-                        <tr><td className="pr-4 text-gray-500 font-sans py-0.5">Aln length</td><td className="text-right pr-4">{pred.alignment_length_nw ?? "—"}</td><td className="text-right">{pred.alignment_length_sw ?? "—"}</td></tr>
-                        <tr><td className="pr-4 text-gray-500 font-sans py-0.5">Seq length</td><td className="text-right pr-4">{pred.length_query ?? "—"} (q)</td><td className="text-right">{pred.length_ref ?? "—"} (r)</td></tr>
+                        <tr><td className="pr-4 text-slate-500 font-sans py-0.5">Identity</td><td className="text-right pr-4">{pct(pred.identity_nw)}</td><td className="text-right">{pct(pred.identity_sw)}</td></tr>
+                        <tr><td className="pr-4 text-slate-500 font-sans py-0.5">Similarity</td><td className="text-right pr-4">{pct(pred.similarity_nw)}</td><td className="text-right">{pct(pred.similarity_sw)}</td></tr>
+                        <tr><td className="pr-4 text-slate-500 font-sans py-0.5">Score</td><td className="text-right pr-4">{pred.alignment_score_nw?.toFixed(0) ?? "—"}</td><td className="text-right">{pred.alignment_score_sw?.toFixed(0) ?? "—"}</td></tr>
+                        <tr><td className="pr-4 text-slate-500 font-sans py-0.5">Gaps</td><td className="text-right pr-4">{pct(pred.gaps_pct_nw)}</td><td className="text-right">{pct(pred.gaps_pct_sw)}</td></tr>
+                        <tr><td className="pr-4 text-slate-500 font-sans py-0.5">Aln length</td><td className="text-right pr-4">{pred.alignment_length_nw ?? "—"}</td><td className="text-right">{pred.alignment_length_sw ?? "—"}</td></tr>
+                        <tr><td className="pr-4 text-slate-500 font-sans py-0.5">Seq length</td><td className="text-right pr-4">{pred.length_query ?? "—"} (q)</td><td className="text-right">{pred.length_ref ?? "—"} (r)</td></tr>
                       </tbody>
                     </table>
                   </div>
                 )}
                 {hasTaxonomy && (
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-2">
                       Taxonomy — query vs {pred.ref_protein_accession}
                     </p>
                     <div className="space-y-1.5 text-xs">
                       <div className="flex justify-between">
-                        <span className="text-gray-500">Relation</span>
-                        <span className={`rounded px-1.5 py-0.5 font-medium ${RELATION_COLORS[pred.taxonomic_relation ?? ""] ?? "bg-gray-50 text-gray-500"}`}>
+                        <span className="text-slate-500">Relation</span>
+                        <span className={`rounded px-1.5 py-0.5 font-medium ${RELATION_COLORS[pred.taxonomic_relation ?? ""] ?? "bg-slate-50 text-slate-500"}`}>
                           {pred.taxonomic_relation ?? "—"}
                         </span>
                       </div>
-                      <div className="flex justify-between"><span className="text-gray-500">Distance</span><span className="font-mono">{pred.taxonomic_distance ?? "—"}</span></div>
-                      <div className="flex justify-between"><span className="text-gray-500">Common ancestors</span><span className="font-mono">{pred.taxonomic_common_ancestors ?? "—"}</span></div>
-                      <div className="flex justify-between"><span className="text-gray-500">LCA taxid</span><span className="font-mono">{pred.taxonomic_lca ?? "—"}</span></div>
-                      <div className="flex justify-between"><span className="text-gray-500">Query taxid</span><span className="font-mono">{pred.query_taxonomy_id ?? "—"}</span></div>
-                      <div className="flex justify-between"><span className="text-gray-500">Ref taxid</span><span className="font-mono">{pred.ref_taxonomy_id ?? "—"}</span></div>
+                      <div className="flex justify-between"><span className="text-slate-500">Distance</span><span className="font-mono">{pred.taxonomic_distance ?? "—"}</span></div>
+                      <div className="flex justify-between"><span className="text-slate-500">Common ancestors</span><span className="font-mono">{pred.taxonomic_common_ancestors ?? "—"}</span></div>
+                      <div className="flex justify-between"><span className="text-slate-500">LCA taxid</span><span className="font-mono">{pred.taxonomic_lca ?? "—"}</span></div>
+                      <div className="flex justify-between"><span className="text-slate-500">Query taxid</span><span className="font-mono">{pred.query_taxonomy_id ?? "—"}</span></div>
+                      <div className="flex justify-between"><span className="text-slate-500">Ref taxid</span><span className="font-mono">{pred.ref_taxonomy_id ?? "—"}</span></div>
                     </div>
                   </div>
                 )}
                 {hasReranker && (
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-2">
                       Re-ranker features
                     </p>
                     <div className="space-y-1.5 text-xs">
-                      <div className="flex justify-between"><span className="text-gray-500">Vote count</span><span className="font-mono">{pred.vote_count ?? "—"}</span></div>
-                      <div className="flex justify-between"><span className="text-gray-500">K position</span><span className="font-mono">{pred.k_position ?? "—"}</span></div>
-                      <div className="flex justify-between"><span className="text-gray-500">GO term frequency</span><span className="font-mono">{pred.go_term_frequency != null ? pred.go_term_frequency.toFixed(4) : "—"}</span></div>
-                      <div className="flex justify-between"><span className="text-gray-500">Ref annotation density</span><span className="font-mono">{pred.ref_annotation_density != null ? pred.ref_annotation_density.toFixed(4) : "—"}</span></div>
-                      <div className="flex justify-between"><span className="text-gray-500">Neighbor dist std</span><span className="font-mono">{pred.neighbor_distance_std != null ? pred.neighbor_distance_std.toFixed(4) : "—"}</span></div>
+                      <div className="flex justify-between"><span className="text-slate-500">Vote count</span><span className="font-mono">{pred.vote_count ?? "—"}</span></div>
+                      <div className="flex justify-between"><span className="text-slate-500">K position</span><span className="font-mono">{pred.k_position ?? "—"}</span></div>
+                      <div className="flex justify-between"><span className="text-slate-500">GO term frequency</span><span className="font-mono">{pred.go_term_frequency != null ? pred.go_term_frequency.toFixed(4) : "—"}</span></div>
+                      <div className="flex justify-between"><span className="text-slate-500">Ref annotation density</span><span className="font-mono">{pred.ref_annotation_density != null ? pred.ref_annotation_density.toFixed(4) : "—"}</span></div>
+                      <div className="flex justify-between"><span className="text-slate-500">Neighbor dist std</span><span className="font-mono">{pred.neighbor_distance_std != null ? pred.neighbor_distance_std.toFixed(4) : "—"}</span></div>
                     </div>
                   </div>
                 )}
@@ -569,9 +569,9 @@ function ProteinDetail({
   const uncoveredKnown = Array.from(knownByGoId.values()).filter((a) => !predictedGoIds.has(a.go_id));
 
   return (
-    <div className="mt-4 rounded-lg border bg-gray-50 p-4">
+    <div className="mt-4 rounded-lg border bg-slate-50 p-4">
       <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-4">
-        <span className="font-mono font-semibold text-gray-900">{accession}</span>
+        <span className="font-mono font-semibold text-slate-900">{accession}</span>
         {inDb && (
           <Link href={`/proteins/${accession}`} className="text-xs text-blue-500 hover:underline">
             View protein →
@@ -583,14 +583,14 @@ function ProteinDetail({
           </span>
         )}
         {ontologySnapshotId && predictions.length > 0 && (
-          <button onClick={toggleGraph} className="rounded border bg-white px-2 py-1 text-xs hover:bg-gray-50">
+          <button onClick={toggleGraph} className="rounded border bg-white px-2 py-1 text-xs hover:bg-slate-50">
             {loadingGraph ? "Loading…" : showGraph ? "Hide graph" : "GO graph"}
           </button>
         )}
-        <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg leading-none ml-auto sm:ml-2">×</button>
+        <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-lg leading-none ml-auto sm:ml-2">×</button>
       </div>
 
-      {loading && <p className="text-sm text-gray-400">Loading…</p>}
+      {loading && <p className="text-sm text-slate-400">Loading…</p>}
 
       {showGraph && subgraph && (
         <div className="mb-4">
@@ -604,7 +604,7 @@ function ProteinDetail({
       )}
 
       {!loading && predictions.length === 0 && annotations.length === 0 && (
-        <p className="text-sm text-gray-400">No data found.</p>
+        <p className="text-sm text-slate-400">No data found.</p>
       )}
 
       {!loading && aspects.map((asp) => {
@@ -615,8 +615,8 @@ function ProteinDetail({
           <div key={asp} className="mb-5 last:mb-0">
             <div className="flex items-center gap-2 mb-2">
               <AspectBadge aspect={asp} />
-              <span className="text-xs font-semibold text-gray-600">{ASPECT_LABELS[asp]}</span>
-              <span className="text-xs text-gray-400 ml-1">{uniquePredCount} predicted · {knownInAspect.length} known</span>
+              <span className="text-xs font-semibold text-slate-600">{ASPECT_LABELS[asp]}</span>
+              <span className="text-xs text-slate-400 ml-1">{uniquePredCount} predicted · {knownInAspect.length} known</span>
             </div>
             <PredictionTable preds={preds} knownByGoId={knownByGoId} scoringConfig={scoringConfig} />
           </div>
@@ -626,17 +626,17 @@ function ProteinDetail({
       {/* Known terms with no matching prediction */}
       {!loading && uncoveredKnown.length > 0 && (
         <div className="mt-4">
-          <p className="text-xs font-semibold text-gray-500 mb-2">
+          <p className="text-xs font-semibold text-slate-500 mb-2">
             Known annotations not covered by any prediction ({uncoveredKnown.length})
           </p>
           <div className="overflow-x-auto rounded-md border bg-white text-xs">
-            <div className="grid grid-cols-[90px_1fr_80px] gap-2 border-b bg-gray-50 px-3 py-1.5 font-semibold uppercase tracking-wide text-gray-400">
+            <div className="grid grid-cols-[90px_1fr_80px] gap-2 border-b bg-slate-50 px-3 py-1.5 font-semibold uppercase tracking-wide text-slate-400">
               <div>GO ID</div><div>Name</div><div>Evidence</div>
             </div>
             {uncoveredKnown.map((ann) => (
               <div key={ann.go_id} className="grid grid-cols-[90px_1fr_80px] gap-2 border-b px-3 py-2 last:border-0 items-start">
                 <span className="font-mono text-blue-600 pt-0.5">{ann.go_id}</span>
-                <span className="text-gray-700 leading-snug">{ann.name ?? "—"}</span>
+                <span className="text-slate-700 leading-snug">{ann.name ?? "—"}</span>
                 <div className="flex flex-wrap gap-0.5 justify-end">
                   {ann.evidence_codes.map((ec) => (
                     <span key={ec} className={`rounded border px-1 py-0.5 text-[10px] font-mono font-medium ${evidenceBadgeClass(ec)}`}>
@@ -680,18 +680,18 @@ function DownloadButton({ setId, scoringConfigId, customBlocked }: { setId: stri
       <button
         onClick={() => setOpen((v) => !v)}
         title={customBlocked ? "Guarda el config custom para descargar scored TSV" : undefined}
-        className="flex items-center gap-1.5 rounded-md border bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+        className="flex items-center gap-1.5 rounded-md border bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
       >
         ↓ Download TSV
       </button>
 
       {open && (
         <div className="absolute right-0 top-10 z-20 w-64 rounded-lg border bg-white p-4 shadow-lg">
-          <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">Download options</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">Download options</p>
 
           {!isScored && (
             <>
-              <label className="block text-xs text-gray-600 mb-1">GO Aspect</label>
+              <label className="block text-xs text-slate-600 mb-1">GO Aspect</label>
               <select
                 value={aspect}
                 onChange={(e) => setAspect(e.target.value)}
@@ -703,7 +703,7 @@ function DownloadButton({ setId, scoringConfigId, customBlocked }: { setId: stri
                 <option value="C">C — Cellular Component</option>
               </select>
 
-              <label className="block text-xs text-gray-600 mb-1">Max distance</label>
+              <label className="block text-xs text-slate-600 mb-1">Max distance</label>
               <input
                 type="number"
                 min="0"
@@ -728,7 +728,7 @@ function DownloadButton({ setId, scoringConfigId, customBlocked }: { setId: stri
               <p className="text-xs text-blue-700 bg-blue-50 rounded px-2 py-1.5 mb-3">
                 Scored TSV — includes computed score column
               </p>
-              <label className="block text-xs text-gray-600 mb-1">Min score</label>
+              <label className="block text-xs text-slate-600 mb-1">Min score</label>
               <input
                 type="number"
                 min="0"
@@ -890,19 +890,19 @@ export default function PredictionSetDetailPage({ params }: { params: Promise<{ 
         <Breadcrumbs />
         <div>
           <h1 className="text-xl font-semibold mt-2">
-            Prediction Set <span className="font-mono text-base text-gray-500">{shortId(setId)}…</span>
+            Prediction Set <span className="font-mono text-base text-slate-500">{shortId(setId)}…</span>
           </h1>
           {limitPerEntry != null && (
-            <p className="text-xs text-gray-400 mt-0.5">k = {limitPerEntry}</p>
+            <p className="text-xs text-slate-400 mt-0.5">k = {limitPerEntry}</p>
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-1.5">
-            <label className="text-xs text-gray-500 whitespace-nowrap">Scoring</label>
+            <label className="text-xs text-slate-500 whitespace-nowrap">Scoring</label>
             <select
               value={selectedConfigId}
               onChange={(e) => setSelectedConfigId(e.target.value)}
-              className="rounded-md border bg-white px-2 py-1.5 text-sm text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="rounded-md border bg-white px-2 py-1.5 text-sm text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">Raw distance</option>
               {scoringConfigs.map((c) => (
@@ -952,7 +952,7 @@ export default function PredictionSetDetailPage({ params }: { params: Promise<{ 
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               activeTab === t.key
                 ? "border-blue-600 text-blue-600"
-                : "border-transparent text-gray-500 hover:text-gray-700"
+                : "border-transparent text-slate-500 hover:text-slate-700"
             }`}
           >
             {t.label}
@@ -964,15 +964,15 @@ export default function PredictionSetDetailPage({ params }: { params: Promise<{ 
       {activeTab === "proteins" && distribution && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
           <div className="rounded-lg border bg-white p-3 text-center">
-            <div className="text-xl font-bold text-gray-900 tabular-nums">{proteinTotal.toLocaleString()}</div>
-            <div className="text-xs text-gray-500">Proteins</div>
+            <div className="text-xl font-bold text-slate-900 tabular-nums">{proteinTotal.toLocaleString()}</div>
+            <div className="text-xs text-slate-500">Proteins</div>
           </div>
           {(["P", "F", "C"] as const).map((aspect) => (
             <div key={aspect} className="rounded-lg border bg-white p-3 text-center">
-              <div className="text-xl font-bold text-gray-900 tabular-nums">
+              <div className="text-xl font-bold text-slate-900 tabular-nums">
                 {(distribution.aspect_totals[aspect] ?? 0).toLocaleString()}
               </div>
-              <div className="text-xs text-gray-500">{ASPECT_LABELS[aspect]}</div>
+              <div className="text-xs text-slate-500">{ASPECT_LABELS[aspect]}</div>
             </div>
           ))}
         </div>
@@ -990,42 +990,42 @@ export default function PredictionSetDetailPage({ params }: { params: Promise<{ 
                 placeholder="Filter by accession…"
                 className="rounded-md border px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-full sm:w-56"
               />
-              <button type="submit" className="rounded-md border bg-white px-3 py-1.5 text-sm hover:bg-gray-50">
+              <button type="submit" className="rounded-md border bg-white px-3 py-1.5 text-sm hover:bg-slate-50">
                 Filter
               </button>
               {proteinSearch && (
                 <button type="button" onClick={() => { setProteinSearchInput(""); setProteinSearch(""); loadProteins(0, ""); }}
-                  className="rounded-md border bg-white px-3 py-1.5 text-sm text-gray-500 hover:bg-gray-50">
+                  className="rounded-md border bg-white px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-50">
                   Clear
                 </button>
               )}
             </form>
-            <span className="text-sm text-gray-400">{proteinTotal.toLocaleString()} proteins</span>
+            <span className="text-sm text-slate-400">{proteinTotal.toLocaleString()} proteins</span>
           </div>
 
           {/* Mobile card list */}
           <div className="lg:hidden space-y-2">
             {loadingProteins && Array.from({ length: 4 }).map((_, i) => (
               <div key={i} className="rounded-lg border bg-white p-4 shadow-sm animate-pulse">
-                <div className="h-4 bg-gray-200 rounded w-1/3 mb-2" />
-                <div className="h-3 bg-gray-100 rounded w-2/3" />
+                <div className="h-4 bg-slate-200 rounded w-1/3 mb-2" />
+                <div className="h-3 bg-slate-100 rounded w-2/3" />
               </div>
             ))}
             {!loadingProteins && proteins.length === 0 && (
-              <div className="rounded-lg border bg-white px-4 py-12 text-center text-sm text-gray-400 shadow-sm">No proteins found.</div>
+              <div className="rounded-lg border bg-white px-4 py-12 text-center text-sm text-slate-400 shadow-sm">No proteins found.</div>
             )}
             {!loadingProteins && proteins.map((p) => (
               <div key={p.accession} className="rounded-lg border bg-white shadow-sm overflow-hidden">
                 <div
                   className={`p-4 cursor-pointer transition-colors ${
-                    selectedAccession === p.accession ? "bg-blue-50" : "hover:bg-gray-50"
+                    selectedAccession === p.accession ? "bg-blue-50" : "hover:bg-slate-50"
                   }`}
                   onClick={() => selectProtein(p.accession, p.in_db)}
                 >
                   <div className="flex items-center justify-between mb-1">
                     <div className="flex items-center gap-1.5">
                       <span className={`inline-block w-2 h-2 rounded-full ${
-                        p.min_distance == null ? "bg-gray-300"
+                        p.min_distance == null ? "bg-slate-300"
                         : p.min_distance < 0.3 ? "bg-green-500"
                         : p.min_distance < 0.6 ? "bg-amber-400"
                         : "bg-red-500"
@@ -1035,12 +1035,12 @@ export default function PredictionSetDetailPage({ params }: { params: Promise<{ 
                           {p.accession}
                         </Link>
                       ) : (
-                        <span className="font-mono text-sm text-gray-700">{p.accession}</span>
+                        <span className="font-mono text-sm text-slate-700">{p.accession}</span>
                       )}
                     </div>
-                    <span className="text-xs text-gray-500">{p.go_count} predicted</span>
+                    <span className="text-xs text-slate-500">{p.go_count} predicted</span>
                   </div>
-                  <div className="flex gap-4 text-xs text-gray-500">
+                  <div className="flex gap-4 text-xs text-slate-500">
                     <span>dist: {p.min_distance?.toFixed(4) ?? "—"}</span>
                     <span>known/pred: {p.annotation_count}/{p.go_count}</span>
                   </div>
@@ -1065,7 +1065,7 @@ export default function PredictionSetDetailPage({ params }: { params: Promise<{ 
 
           {/* Desktop table */}
           <div className="hidden lg:block overflow-x-auto rounded-lg border bg-white shadow-sm">
-            <div className="grid grid-cols-[160px_90px_120px_120px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
+            <div className="grid grid-cols-[160px_90px_120px_120px] gap-2 border-b bg-slate-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
               <div>Accession</div>
               <div>Predicted</div>
               <div>Min Distance</div>
@@ -1075,20 +1075,20 @@ export default function PredictionSetDetailPage({ params }: { params: Promise<{ 
             {loadingProteins && Array.from({ length: 8 }).map((_, i) => <SkeletonTableRow key={i} cols={5} />)}
 
             {!loadingProteins && proteins.length === 0 && (
-              <div className="px-4 py-12 text-center text-sm text-gray-400">No proteins found.</div>
+              <div className="px-4 py-12 text-center text-sm text-slate-400">No proteins found.</div>
             )}
 
             {!loadingProteins && proteins.map((p) => (
               <div key={p.accession}>
                 <div
                   className={`grid grid-cols-[160px_90px_120px_120px] gap-2 border-b px-4 py-3 text-sm items-center cursor-pointer transition-colors ${
-                    selectedAccession === p.accession ? "bg-blue-50" : "hover:bg-gray-50"
+                    selectedAccession === p.accession ? "bg-blue-50" : "hover:bg-slate-50"
                   }`}
                   onClick={() => selectProtein(p.accession, p.in_db)}
                 >
                   <div className="flex items-center gap-2">
                     <span className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${
-                      p.min_distance == null ? "bg-gray-300"
+                      p.min_distance == null ? "bg-slate-300"
                       : p.min_distance < 0.3 ? "bg-green-500"
                       : p.min_distance < 0.6 ? "bg-amber-400"
                       : "bg-red-500"
@@ -1102,17 +1102,17 @@ export default function PredictionSetDetailPage({ params }: { params: Promise<{ 
                         {p.accession}
                       </Link>
                     ) : (
-                      <span className="font-mono text-xs text-gray-700">{p.accession}</span>
+                      <span className="font-mono text-xs text-slate-700">{p.accession}</span>
                     )}
                   </div>
-                  <div className="text-gray-700 font-medium">{p.go_count}</div>
-                  <div className="text-gray-600 font-mono text-xs">{p.min_distance?.toFixed(4) ?? "—"}</div>
+                  <div className="text-slate-700 font-medium">{p.go_count}</div>
+                  <div className="text-slate-600 font-mono text-xs">{p.min_distance?.toFixed(4) ?? "—"}</div>
                   <div className="text-sm font-mono">
                     {p.annotation_count > 0
-                      ? <span className="text-gray-700">{p.annotation_count}</span>
-                      : <span className="text-gray-300">0</span>}
-                    <span className="text-gray-300 mx-1">/</span>
-                    <span className="text-gray-700">{p.go_count}</span>
+                      ? <span className="text-slate-700">{p.annotation_count}</span>
+                      : <span className="text-slate-300">0</span>}
+                    <span className="text-slate-300 mx-1">/</span>
+                    <span className="text-slate-700">{p.go_count}</span>
                   </div>
                 </div>
 
@@ -1135,13 +1135,13 @@ export default function PredictionSetDetailPage({ params }: { params: Promise<{ 
           </div>
 
           {totalPages > 1 && (
-            <div className="mt-4 flex items-center justify-between text-sm text-gray-500">
+            <div className="mt-4 flex items-center justify-between text-sm text-slate-500">
               <span>Page {currentPage} of {totalPages}</span>
               <div className="flex gap-2">
                 <button onClick={() => loadProteins(proteinOffset - PAGE_SIZE)} disabled={proteinOffset === 0}
-                  className="rounded-md border bg-white px-3 py-1.5 hover:bg-gray-50 disabled:opacity-40">Previous</button>
+                  className="rounded-md border bg-white px-3 py-1.5 hover:bg-slate-50 disabled:opacity-40">Previous</button>
                 <button onClick={() => loadProteins(proteinOffset + PAGE_SIZE)} disabled={proteinOffset + PAGE_SIZE >= proteinTotal}
-                  className="rounded-md border bg-white px-3 py-1.5 hover:bg-gray-50 disabled:opacity-40">Next</button>
+                  className="rounded-md border bg-white px-3 py-1.5 hover:bg-slate-50 disabled:opacity-40">Next</button>
               </div>
             </div>
           )}
@@ -1151,18 +1151,18 @@ export default function PredictionSetDetailPage({ params }: { params: Promise<{ 
       {/* ── GO Distribution ── */}
       {activeTab === "distribution" && (
         <div>
-          {loadingDist && <p className="text-sm text-gray-400">Loading…</p>}
+          {loadingDist && <p className="text-sm text-slate-400">Loading…</p>}
 
           {distribution && (
             <div className="space-y-6">
               <div className="grid grid-cols-3 gap-3">
                 {(["F", "P", "C"] as const).map((asp) => (
                   <div key={asp} className="rounded-lg border bg-white p-4 shadow-sm">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{ASPECT_LABELS[asp]}</p>
-                    <p className="mt-1 text-2xl font-bold text-gray-900">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{ASPECT_LABELS[asp]}</p>
+                    <p className="mt-1 text-2xl font-bold text-slate-900">
                       {(distribution.aspect_totals[asp] ?? 0).toLocaleString()}
                     </p>
-                    <p className="text-xs text-gray-400 mt-0.5">predictions</p>
+                    <p className="text-xs text-slate-400 mt-0.5">predictions</p>
                   </div>
                 ))}
               </div>
@@ -1173,23 +1173,23 @@ export default function PredictionSetDetailPage({ params }: { params: Promise<{ 
                 const maxCount = terms[0]?.count ?? 1;
                 return (
                   <div key={asp}>
-                    <p className="text-sm font-semibold text-gray-700 mb-3">
+                    <p className="text-sm font-semibold text-slate-700 mb-3">
                       {ASPECT_LABELS[asp]}
-                      <span className="ml-2 text-xs font-normal text-gray-400">top {terms.length} terms</span>
+                      <span className="ml-2 text-xs font-normal text-slate-400">top {terms.length} terms</span>
                     </p>
                     <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
                       {terms.map((t) => (
                         <div key={t.go_id} className="flex items-center gap-3 border-b px-4 py-2.5 last:border-0">
                           <span className="font-mono text-xs text-blue-600 w-24 shrink-0">{t.go_id}</span>
-                          <span className="text-xs text-gray-700 flex-1 truncate">{t.name ?? "—"}</span>
+                          <span className="text-xs text-slate-700 flex-1 truncate">{t.name ?? "—"}</span>
                           <div className="flex items-center gap-2 shrink-0">
-                            <div className="w-24 h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                            <div className="w-24 h-1.5 rounded-full bg-slate-100 overflow-hidden">
                               <div
                                 className="h-1.5 rounded-full bg-blue-400"
                                 style={{ width: `${Math.round((t.count / maxCount) * 100)}%` }}
                               />
                             </div>
-                            <span className="text-xs text-gray-500 w-12 text-right">{t.count.toLocaleString()}</span>
+                            <span className="text-xs text-slate-500 w-12 text-right">{t.count.toLocaleString()}</span>
                           </div>
                         </div>
                       ))}

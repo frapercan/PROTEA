@@ -27,12 +27,12 @@ export function UsagePolicyModal() {
       <div className="relative mx-4 w-full max-w-lg rounded-xl bg-white shadow-2xl">
         {/* Header */}
         <div className="border-b px-6 py-4">
-          <h2 className="text-lg font-semibold text-gray-900">{t("title")}</h2>
-          <p className="mt-0.5 text-sm text-gray-500">{t("subtitle")}</p>
+          <h2 className="text-lg font-semibold text-slate-900">{t("title")}</h2>
+          <p className="mt-0.5 text-sm text-slate-500">{t("subtitle")}</p>
         </div>
 
         {/* Body */}
-        <div className="px-6 py-5 text-sm text-gray-700 space-y-3">
+        <div className="px-6 py-5 text-sm text-slate-700 space-y-3">
           <p>{t("intro")}</p>
           <ul className="space-y-2 list-none">
             {(["rule1", "rule2", "rule3", "rule4", "rule5", "rule6"] as const).map((key) => (
@@ -48,7 +48,7 @@ export function UsagePolicyModal() {
               </li>
             ))}
           </ul>
-          <p className="text-xs text-gray-400 pt-1">{t("dataPublicNote")}</p>
+          <p className="text-xs text-slate-400 pt-1">{t("dataPublicNote")}</p>
         </div>
 
         {/* Footer */}

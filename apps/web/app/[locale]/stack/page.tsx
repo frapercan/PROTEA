@@ -13,7 +13,7 @@ import {
 const STATUS_STYLE: Record<string, string> = {
   active: "bg-green-100 text-green-800 ring-green-200",
   beta: "bg-blue-100 text-blue-800 ring-blue-200",
-  skeleton: "bg-gray-100 text-gray-700 ring-gray-200",
+  skeleton: "bg-slate-100 text-slate-700 ring-slate-200",
   archived: "bg-rose-100 text-rose-800 ring-rose-200",
 };
 
@@ -74,8 +74,8 @@ export default function StackPage() {
   return (
     <main className="mx-auto max-w-6xl px-4 py-8 space-y-10">
       <header>
-        <h1 className="text-2xl font-bold tracking-tight text-gray-900">{t("title")}</h1>
-        <p className="mt-2 max-w-3xl text-sm text-gray-600">{t("subtitle")}</p>
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900">{t("title")}</h1>
+        <p className="mt-2 max-w-3xl text-sm text-slate-600">{t("subtitle")}</p>
       </header>
 
       {thesisPdfUrl && (
@@ -98,13 +98,13 @@ export default function StackPage() {
       )}
 
       <section>
-        <h2 className="text-lg font-semibold text-gray-900">{t("reposHeading")}</h2>
+        <h2 className="text-lg font-semibold text-slate-900">{t("reposHeading")}</h2>
         {reposError && (
           <p className="mt-3 text-sm text-rose-600">{reposError}</p>
         )}
         <div className="mt-4 overflow-hidden rounded-lg border bg-white">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-left text-xs uppercase tracking-wider text-gray-500">
+            <thead className="bg-slate-50 text-left text-xs uppercase tracking-wider text-slate-500">
               <tr>
                 <th className="px-4 py-2.5">{t("colRepo")}</th>
                 <th className="px-4 py-2.5">{t("colRole")}</th>
@@ -113,9 +113,9 @@ export default function StackPage() {
                 <th className="px-4 py-2.5">{t("colLinks")}</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-slate-100">
               {repos.map((r) => (
-                <tr key={r.slug} className="hover:bg-gray-50">
+                <tr key={r.slug} className="hover:bg-slate-50">
                   <td className="px-4 py-3 align-top font-mono text-blue-700">
                     <a
                       href={r.github_url}
@@ -126,11 +126,11 @@ export default function StackPage() {
                       {r.name}
                     </a>
                   </td>
-                  <td className="px-4 py-3 align-top text-gray-600">{r.role_label}</td>
+                  <td className="px-4 py-3 align-top text-slate-600">{r.role_label}</td>
                   <td className="px-4 py-3 align-top">
                     <StatusPill status={r.status} />
                   </td>
-                  <td className="px-4 py-3 align-top text-gray-700">{r.summary}</td>
+                  <td className="px-4 py-3 align-top text-slate-700">{r.summary}</td>
                   <td className="px-4 py-3 align-top text-xs space-x-3 whitespace-nowrap">
                     <a href={r.github_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
                       GitHub
@@ -155,7 +155,7 @@ export default function StackPage() {
               ))}
               {repos.length === 0 && !reposError && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-6 text-center text-gray-400">
+                  <td colSpan={5} className="px-4 py-6 text-center text-slate-400">
                     {t("loading")}
                   </td>
                 </tr>
@@ -168,9 +168,9 @@ export default function StackPage() {
       <section>
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">{t("pullsHeading")}</h2>
+            <h2 className="text-lg font-semibold text-slate-900">{t("pullsHeading")}</h2>
             {pullsFetchedAt && (
-              <p className="mt-1 text-xs text-gray-500">
+              <p className="mt-1 text-xs text-slate-500">
                 {t("fetchedAt", { time: new Date(pullsFetchedAt * 1000).toLocaleString() })}
               </p>
             )}
@@ -178,7 +178,7 @@ export default function StackPage() {
           <button
             onClick={loadPulls}
             disabled={pullsLoading}
-            className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+            className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
           >
             {pullsLoading ? t("refreshing") : t("refresh")}
           </button>
@@ -199,7 +199,7 @@ export default function StackPage() {
 
         <div className="mt-4 overflow-hidden rounded-lg border bg-white">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-left text-xs uppercase tracking-wider text-gray-500">
+            <thead className="bg-slate-50 text-left text-xs uppercase tracking-wider text-slate-500">
               <tr>
                 <th className="px-4 py-2.5">{t("prRepo")}</th>
                 <th className="px-4 py-2.5">{t("prTitle")}</th>
@@ -207,10 +207,10 @@ export default function StackPage() {
                 <th className="px-4 py-2.5">{t("prUpdated")}</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-slate-100">
               {pulls.map((p) => (
-                <tr key={`${p.repo}#${p.number}`} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 align-top text-xs font-mono text-gray-600">{p.repo}</td>
+                <tr key={`${p.repo}#${p.number}`} className="hover:bg-slate-50">
+                  <td className="px-4 py-3 align-top text-xs font-mono text-slate-600">{p.repo}</td>
                   <td className="px-4 py-3 align-top">
                     <a
                       href={p.url}
@@ -221,7 +221,7 @@ export default function StackPage() {
                       #{p.number} {p.title}
                     </a>
                     {p.draft && (
-                      <span className="ml-2 inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 ring-1 ring-gray-200">
+                      <span className="ml-2 inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 ring-1 ring-slate-200">
                         draft
                       </span>
                     )}
@@ -234,22 +234,22 @@ export default function StackPage() {
                       </span>
                     ))}
                   </td>
-                  <td className="px-4 py-3 align-top text-xs text-gray-600">{p.author ?? "—"}</td>
-                  <td className="px-4 py-3 align-top text-xs text-gray-500" title={p.updated_at}>
+                  <td className="px-4 py-3 align-top text-xs text-slate-600">{p.author ?? "—"}</td>
+                  <td className="px-4 py-3 align-top text-xs text-slate-500" title={p.updated_at}>
                     {relativeTime(p.updated_at)}
                   </td>
                 </tr>
               ))}
               {pulls.length === 0 && !pullsLoading && (
                 <tr>
-                  <td colSpan={4} className="px-4 py-8 text-center text-gray-400">
+                  <td colSpan={4} className="px-4 py-8 text-center text-slate-400">
                     {t("noOpenPulls")}
                   </td>
                 </tr>
               )}
               {pullsLoading && pulls.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-4 py-8 text-center text-gray-400">
+                  <td colSpan={4} className="px-4 py-8 text-center text-slate-400">
                     {t("loadingPulls")}
                   </td>
                 </tr>

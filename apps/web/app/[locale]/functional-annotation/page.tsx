@@ -33,7 +33,7 @@ function shortId(id: string) {
 }
 
 const inputClass = "w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
-const labelClass = "block text-sm font-medium text-gray-700 mb-1";
+const labelClass = "block text-sm font-medium text-slate-700 mb-1";
 
 export default function FunctionalAnnotationPage() {
   const t = useTranslations("functionalAnnotation");
@@ -183,7 +183,7 @@ export default function FunctionalAnnotationPage() {
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               activeTab === tab.key
                 ? "border-blue-600 text-blue-600"
-                : "border-transparent text-gray-500 hover:text-gray-700"
+                : "border-transparent text-slate-500 hover:text-slate-700"
             }`}
           >
             {tab.label}
@@ -197,7 +197,7 @@ export default function FunctionalAnnotationPage() {
           <div className="rounded-lg border bg-white p-6 shadow-sm">
             <h2 className="text-base font-semibold mb-4">{t("predictTab.title")}</h2>
             {loading ? (
-              <p className="text-sm text-gray-400">{t("predictTab.loading")}</p>
+              <p className="text-sm text-slate-400">{t("predictTab.loading")}</p>
             ) : (
               <form onSubmit={handlePredictSubmit} className="space-y-4">
                 <div>
@@ -214,7 +214,7 @@ export default function FunctionalAnnotationPage() {
 
                 <div>
                   <label className={labelClass}>
-                    {t("predictTab.querySetLabel")} <span className="font-normal text-gray-400">{t("predictTab.querySetHelper")}</span>
+                    {t("predictTab.querySetLabel")} <span className="font-normal text-slate-400">{t("predictTab.querySetHelper")}</span>
                   </label>
                   <select value={predQuerySetId} onChange={(e) => setPredQuerySetId(e.target.value)} className={inputClass}>
                     <option value="">{t("predictTab.allSequences")}</option>
@@ -272,7 +272,7 @@ export default function FunctionalAnnotationPage() {
                     />
                   </div>
                   <div>
-                    <label className={labelClass}>{t("predictTab.distanceThresholdLabel")} <span className="font-normal text-gray-400">{t("predictTab.distanceThresholdHelper")}</span></label>
+                    <label className={labelClass}>{t("predictTab.distanceThresholdLabel")} <span className="font-normal text-slate-400">{t("predictTab.distanceThresholdHelper")}</span></label>
                     <input
                       type="number"
                       step="any"
@@ -285,8 +285,8 @@ export default function FunctionalAnnotationPage() {
                 </div>
 
                 {/* KNN Strategy + Feature Engineering */}
-                <div className="rounded-md border border-gray-200 bg-gray-50 p-4 space-y-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{t("predictTab.knnStrategy")}</p>
+                <div className="rounded-md border border-slate-200 bg-slate-50 p-4 space-y-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{t("predictTab.knnStrategy")}</p>
                   <div className="flex flex-col gap-2 mb-4">
                     <label className="flex items-start gap-2 cursor-pointer">
                       <input
@@ -295,15 +295,15 @@ export default function FunctionalAnnotationPage() {
                         onChange={(e) => setPredAspectSeparatedKnn(e.target.checked)}
                         className="mt-0.5 rounded"
                       />
-                      <span className="text-sm text-gray-700">
+                      <span className="text-sm text-slate-700">
                         {t("predictTab.aspectSeparatedKnn")}
-                        <span className="ml-1.5 text-xs text-gray-400">{t("predictTab.aspectSeparatedKnnHelper")}</span>
+                        <span className="ml-1.5 text-xs text-slate-400">{t("predictTab.aspectSeparatedKnnHelper")}</span>
                       </span>
                     </label>
                   </div>
 
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    {t("predictTab.featureEngineering")} <span className="font-normal normal-case text-gray-400">{t("predictTab.featureEngineeringHelper")}</span>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    {t("predictTab.featureEngineering")} <span className="font-normal normal-case text-slate-400">{t("predictTab.featureEngineeringHelper")}</span>
                   </p>
                   <div className="flex flex-col gap-2">
                     <label className="flex items-start gap-2 cursor-pointer">
@@ -313,9 +313,9 @@ export default function FunctionalAnnotationPage() {
                         onChange={(e) => setPredComputeAlignments(e.target.checked)}
                         className="mt-0.5 rounded"
                       />
-                      <span className="text-sm text-gray-700">
+                      <span className="text-sm text-slate-700">
                         {t("predictTab.sequenceAlignments")}
-                        <span className="ml-1.5 text-xs text-gray-400">{t("predictTab.sequenceAlignmentsHelper")}</span>
+                        <span className="ml-1.5 text-xs text-slate-400">{t("predictTab.sequenceAlignmentsHelper")}</span>
                       </span>
                     </label>
                     <label className="flex items-start gap-2 cursor-pointer">
@@ -325,17 +325,17 @@ export default function FunctionalAnnotationPage() {
                         onChange={(e) => setPredComputeTaxonomy(e.target.checked)}
                         className="mt-0.5 rounded"
                       />
-                      <span className="text-sm text-gray-700">
+                      <span className="text-sm text-slate-700">
                         {t("predictTab.taxonomicDistance")}
-                        <span className="ml-1.5 text-xs text-gray-400">{t("predictTab.taxonomicDistanceHelper")}</span>
+                        <span className="ml-1.5 text-xs text-slate-400">{t("predictTab.taxonomicDistanceHelper")}</span>
                       </span>
                     </label>
                   </div>
                 </div>
 
                 {/* Search Backend */}
-                <div className="rounded-md border border-gray-200 bg-gray-50 p-4 space-y-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{t("predictTab.searchBackend")}</p>
+                <div className="rounded-md border border-slate-200 bg-slate-50 p-4 space-y-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{t("predictTab.searchBackend")}</p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className={labelClass}>{t("predictTab.searchBackendLabel")}</label>
@@ -425,16 +425,16 @@ export default function FunctionalAnnotationPage() {
       {activeTab === "results" && (
         <div>
           <div className="flex items-center justify-between mb-3">
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-slate-500">
               {predictionSets.length} annotation result{predictionSets.length !== 1 ? "s" : ""}
             </p>
-            <button onClick={loadResults} className="rounded-md border bg-white px-3 py-1.5 text-sm hover:bg-gray-50">
+            <button onClick={loadResults} className="rounded-md border bg-white px-3 py-1.5 text-sm hover:bg-slate-50">
               {t("resultsTab.refresh")}
             </button>
           </div>
 
           <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
-            <div className="grid grid-cols-[80px_100px_100px_100px_90px_80px_50px_160px_60px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
+            <div className="grid grid-cols-[80px_100px_100px_100px_90px_80px_50px_160px_60px] gap-2 border-b bg-slate-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
               <div>{t("resultsTab.tableHeaders.id")}</div>
               <div>{t("resultsTab.tableHeaders.config")}</div>
               <div>{t("resultsTab.tableHeaders.annotationSet")}</div>
@@ -456,15 +456,15 @@ export default function FunctionalAnnotationPage() {
                     {shortId(ps.id)}…
                   </Link>
                 </div>
-                <div className="text-xs text-gray-700" title={ps.embedding_config_id}>{ps.embedding_config_name ?? shortId(ps.embedding_config_id)}</div>
-                <div className="text-xs text-gray-700" title={ps.annotation_set_id}>{ps.annotation_set_label ?? shortId(ps.annotation_set_id)}</div>
-                <div className="text-xs text-gray-700" title={ps.ontology_snapshot_id}>{ps.ontology_snapshot_version ?? shortId(ps.ontology_snapshot_id)}</div>
-                <div className="text-gray-700">{ps.prediction_count ?? 0}</div>
-                <div className="text-gray-600">
-                  {ps.distance_threshold != null ? ps.distance_threshold : <span className="text-gray-400">—</span>}
+                <div className="text-xs text-slate-700" title={ps.embedding_config_id}>{ps.embedding_config_name ?? shortId(ps.embedding_config_id)}</div>
+                <div className="text-xs text-slate-700" title={ps.annotation_set_id}>{ps.annotation_set_label ?? shortId(ps.annotation_set_id)}</div>
+                <div className="text-xs text-slate-700" title={ps.ontology_snapshot_id}>{ps.ontology_snapshot_version ?? shortId(ps.ontology_snapshot_id)}</div>
+                <div className="text-slate-700">{ps.prediction_count ?? 0}</div>
+                <div className="text-slate-600">
+                  {ps.distance_threshold != null ? ps.distance_threshold : <span className="text-slate-400">—</span>}
                 </div>
-                <div className="text-gray-600">{ps.limit_per_entry}</div>
-                <div className="text-xs text-gray-400">{formatDate(ps.created_at)}</div>
+                <div className="text-slate-600">{ps.limit_per_entry}</div>
+                <div className="text-xs text-slate-400">{formatDate(ps.created_at)}</div>
                 <div className="flex justify-end">
                   <button
                     onClick={() => handleDeleteResult(ps.id)}
@@ -477,7 +477,7 @@ export default function FunctionalAnnotationPage() {
             ))}
 
             {predictionSets.length === 0 && (
-              <div className="px-4 py-8 text-center text-sm text-gray-400">
+              <div className="px-4 py-8 text-center text-sm text-slate-400">
                 {t("resultsTab.noResults")}
               </div>
             )}

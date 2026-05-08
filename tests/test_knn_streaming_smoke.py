@@ -17,7 +17,11 @@ import numpy as np
 import pyarrow.parquet as pq
 import pytest
 
-from protea.core.training_dump_helpers import StreamOutput, _knn_transfer_and_label
+from protea.core.training_dump_helpers import (
+    KnnTransferContext,
+    StreamOutput,
+    _knn_transfer_and_label,
+)
 
 
 class _StubAnc2Vec:
@@ -123,18 +127,24 @@ def _run(mode: str, tmp_path: Path | None = None, *, expand: bool, pivot=None):
     session = MagicMock()
     p = _mk_payload(expand=expand)
 
-    kwargs: dict = {
-        "query_known_gos": None,
-        "parent_map_str": parent_map_str if expand else None,
-        "ia_weights": None,
-        "pca_state": None,
-    }
-    kwargs["pivot_go_ids"] = pivot
-    if mode == "stream":
-        kwargs["stream_output"] = StreamOutput(
-            output_parquet=tmp_path / "out.parquet",
-            chunk_rows=3,  # tiny to force multiple flushes
-        )
+    ctx = KnnTransferContext(
+        valid_queries=valid_queries,
+        query_emb=query_emb,
+        ref_by_aspect=ref_by_aspect,
+        go_id_map=go_id_map,
+        aspect_map=aspect_map,
+        gt_pairs=gt_pairs,
+        query_known_gos=None,
+        parent_map_str=parent_map_str if expand else None,
+        ia_weights=None,
+        pca_state=None,
+        pivot_go_ids=pivot,
+    )
+    stream_output = (
+        StreamOutput(output_parquet=tmp_path / "out.parquet", chunk_rows=3)
+        if mode == "stream"
+        else None
+    )
 
     with patch(
         "protea.core.training_dump_helpers.get_anc2vec_index",
@@ -142,14 +152,9 @@ def _run(mode: str, tmp_path: Path | None = None, *, expand: bool, pivot=None):
     ):
         return _knn_transfer_and_label(
             session,
-            valid_queries,
-            query_emb,
-            ref_by_aspect,
-            go_id_map,
-            aspect_map,
-            gt_pairs,
             p,
-            **kwargs,
+            ctx,
+            stream_output=stream_output,
         )
 
 

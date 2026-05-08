@@ -14,9 +14,9 @@ import { useTranslations } from "next-intl";
 
 function StatRow({ label, value, highlight }: { label: string; value: number | null; highlight?: boolean }) {
   return (
-    <div className="flex justify-between items-center py-1.5 border-b border-gray-100 last:border-0">
-      <span className="text-sm text-gray-600">{label}</span>
-      <span className={`text-sm font-mono font-semibold ${highlight && value ? "text-amber-600" : "text-gray-800"}`}>
+    <div className="flex justify-between items-center py-1.5 border-b border-slate-100 last:border-0">
+      <span className="text-sm text-slate-600">{label}</span>
+      <span className={`text-sm font-mono font-semibold ${highlight && value ? "text-amber-600" : "text-slate-800"}`}>
         {value === null ? "—" : value.toLocaleString()}
       </span>
     </div>
@@ -60,11 +60,11 @@ function VacuumCard({
   const pct = totalValue ? Math.round(((orphanValue ?? 0) / totalValue) * 100) : 0;
 
   return (
-    <div className="border border-gray-200 rounded-lg p-5 bg-white shadow-sm">
+    <div className="border border-slate-200 rounded-lg p-5 bg-white shadow-sm">
       <div className="flex items-start justify-between gap-4 mb-3">
         <div>
-          <h2 className="font-semibold text-gray-900">{title}</h2>
-          <p className="text-xs text-gray-500 mt-0.5">{description}</p>
+          <h2 className="font-semibold text-slate-900">{title}</h2>
+          <p className="text-xs text-slate-500 mt-0.5">{description}</p>
         </div>
         {orphanValue !== null && (
           <span
@@ -79,11 +79,11 @@ function VacuumCard({
 
       {orphanValue !== null && totalValue !== null && totalValue > 0 && (
         <div className="mb-3">
-          <div className="flex justify-between text-xs text-gray-400 mb-1">
+          <div className="flex justify-between text-xs text-slate-400 mb-1">
             <span>{orphanLabel}</span>
             <span>{pct}%</span>
           </div>
-          <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+          <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
             <div
               className={`h-full rounded-full transition-all ${hasOrphans ? "bg-amber-400" : "bg-green-400"}`}
               style={{ width: `${pct}%` }}
@@ -98,7 +98,7 @@ function VacuumCard({
         <button
           onClick={onPreview}
           disabled={loading}
-          className="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 transition-colors"
+          className="px-3 py-1.5 text-sm border border-slate-300 rounded hover:bg-slate-50 disabled:opacity-50 transition-colors"
         >
           {loading ? "Loading…" : labelRefresh}
         </button>
@@ -200,8 +200,8 @@ export default function MaintenancePage() {
   return (
     <main className="max-w-2xl mx-auto px-4 py-8 space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">{t("title")}</h1>
-        <p className="text-sm text-gray-500 mt-1">{t("description")}</p>
+        <h1 className="text-2xl font-bold text-slate-900">{t("title")}</h1>
+        <p className="text-sm text-slate-500 mt-1">{t("description")}</p>
       </div>
 
       <VacuumCard
