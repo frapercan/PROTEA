@@ -222,8 +222,8 @@ and records PROTEA's ``producer_version`` + ``producer_git_sha``.
 The single public function ``export_reranker_parquets(...)`` is shared
 by two callers:
 
-- ``train_reranker._dump_frozen_dataset`` — thin wrapper that uses this
-  helper to emit the dataset alongside a training run.
+- ``training_dump_helpers._dump_frozen_dataset`` — thin wrapper that
+  uses this helper to emit the dataset alongside a training-data dump.
 - ``ExportResearchDatasetOperation`` — stand-alone operation that only
   materialises and publishes the dataset, without running LightGBM.
 
@@ -317,13 +317,19 @@ different namespaces simultaneously (e.g., LK in CCO and PK in BPO).
 Operations
 ----------
 
-PROTEA ships seventeen registered operation instances at worker startup
-via ``protea.core.operation_catalog.build_operation_registry``. Each
-operation is a class that implements the ``Operation`` protocol: a
-``name`` string and an ``execute`` method.
+PROTEA ships fifteen registered operation instances at worker startup
+via ``protea.core.operation_catalog.build_operation_registry``: eleven
+job-backed (reachable through ``POST /jobs``) plus four ephemeral
+consumers (dispatched internally by the ``compute_embeddings`` and
+``predict_go_terms`` coordinators — see :doc:`/architecture/operations`
+for that taxonomy). Each operation is a class that implements the
+``Operation`` protocol: a ``name`` string and an ``execute`` method.
 Operations are stateless with respect to infrastructure — they receive a
 session and emit structured events, but do not open connections or manage
-transactions.
+transactions. The eleven job-backed entries are documented below; the
+four ephemeral siblings (``compute_embeddings_batch``,
+``store_embeddings``, ``predict_go_terms_batch``,
+``store_predictions``) live in :doc:`/architecture/operations`.
 
 **ping**
    Smoke-test operation. Returns immediately with a success result.
