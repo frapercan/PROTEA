@@ -31,36 +31,63 @@ export default async function LocaleLayout({
   return (
     <html lang={locale} suppressHydrationWarning>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen bg-gray-50`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen bg-[var(--background)] text-[var(--foreground)]`}
         suppressHydrationWarning
       >
         <NextIntlClientProvider messages={messages}>
           <UsagePolicyModal />
           <ToastProvider>
-            <header className="relative border-b bg-white px-4 sm:px-6 py-3 flex items-center gap-2 sm:gap-3">
-              <a href="/" className="text-lg font-bold tracking-tight text-blue-700 hover:text-blue-800 transition-colors">PROTEA</a>
-              <span className="hidden lg:inline text-gray-300">|</span>
-              <NavLinks
-                mobileExtras={
-                  <>
+            <header className="sticky top-0 z-40 border-b border-slate-200/70 bg-white/85 backdrop-blur-md supports-[backdrop-filter]:bg-white/70">
+              <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4 sm:px-6 lg:px-8">
+                <a
+                  href="/"
+                  className="group flex items-center gap-2.5 shrink-0"
+                  aria-label="PROTEA home"
+                >
+                  <span
+                    aria-hidden
+                    className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 via-indigo-600 to-violet-600 text-white shadow-sm ring-1 ring-inset ring-white/30 transition-transform group-hover:scale-105"
+                  >
+                    <span className="text-[15px] font-bold tracking-tight">P</span>
+                    <span className="absolute -right-0.5 -bottom-0.5 h-2 w-2 rounded-full bg-emerald-400 ring-2 ring-white" />
+                  </span>
+                  <span className="flex flex-col leading-tight">
+                    <span className="text-[17px] font-bold tracking-tight text-slate-900 group-hover:text-blue-700 transition-colors">
+                      PROTEA
+                    </span>
+                    <span className="hidden sm:block text-[10px] uppercase tracking-[0.14em] text-slate-400 font-medium">
+                      Functional Annotation
+                    </span>
+                  </span>
+                </a>
+
+                <div className="hidden lg:block h-7 w-px bg-slate-200 mx-1" />
+
+                <NavLinks
+                  mobileExtras={
+                    <>
+                      <LanguageSwitcher />
+                      <ResetDbButton />
+                    </>
+                  }
+                />
+
+                <div className="ml-auto flex items-center gap-2 sm:gap-3">
+                  <div className="hidden lg:flex items-center gap-2">
                     <LanguageSwitcher />
+                  </div>
+                  <SupportButton />
+                  <div className="hidden lg:block">
                     <ResetDbButton />
-                  </>
-                }
-              />
-              <div className="ml-auto flex items-center gap-2 sm:gap-3">
-                <div className="hidden lg:flex items-center gap-2">
-                  <LanguageSwitcher />
-                </div>
-                <SupportButton />
-                <div className="hidden lg:block">
-                  <ResetDbButton />
+                  </div>
                 </div>
               </div>
             </header>
-            <main className="mx-auto max-w-5xl px-4 sm:px-6 py-4 sm:py-6">
+
+            <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6 sm:py-8 lg:py-10">
               {children}
             </main>
+
             <FloatingJobsWidget />
           </ToastProvider>
         </NextIntlClientProvider>
