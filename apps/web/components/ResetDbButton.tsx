@@ -30,8 +30,11 @@ export function ResetDbButton() {
     <>
       <button
         onClick={() => { setResult(null); setShowConfirm(true); }}
-        className="rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100 transition-colors"
+        className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 text-[12px] font-semibold text-red-600 hover:bg-red-100 hover:border-red-300 transition-colors"
       >
+        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 14 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 4h8M5.5 4v-1a1 1 0 011-1h1a1 1 0 011 1v1M4 4l.5 8a1 1 0 001 1h3a1 1 0 001-1L10 4" />
+        </svg>
         {t("button")}
       </button>
 

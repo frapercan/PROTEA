@@ -138,7 +138,15 @@ fi
 # the deployed source. --no-build skips the frontend build (npm) but
 # still produces docs because the API mounts them dynamically and a
 # stale doc set is visible to end users via the stack page.
-echo "${C_BOLD}building docs (PROTEA + sibling repos)...${C_RESET}"
+#
+# build_docs.py reads SIBLINGS_DIR. We default it to a frozen worktree
+# directory so the docs are built against origin/develop of every
+# sibling, not whatever feature branch happens to be checked out in
+# ~/Thesis/repositories/<slug>/ (where other agents may have WIP).
+# The loop's protea_refresh_siblings.sh keeps that directory on tip.
+default_siblings="$HOME/Thesis/worktrees/_siblings"
+export SIBLINGS_DIR="${PROTEA_SIBLINGS_DIR:-${SIBLINGS_DIR:-$default_siblings}}"
+echo "${C_BOLD}building docs${C_RESET} (siblings_dir=$SIBLINGS_DIR)"
 poetry run task docs 2>&1 | tail -10 || echo "${C_YELLOW}docs build failed (non-fatal)${C_RESET}"
 
 if [[ "$DO_BUILD" == "1" ]]; then
