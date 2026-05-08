@@ -16,7 +16,6 @@ from protea.infrastructure.orm.models.embedding.embedding_config import Embeddin
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
-from protea.infrastructure.orm.models.job import Job, JobEvent
 from protea.infrastructure.queue.publisher import publish_job
 from protea.infrastructure.session import session_scope
 from protea.services.embeddings_service import (
@@ -30,6 +29,7 @@ from protea.services.embeddings_service import (
     list_proteins_in_prediction_set,
     validate_embedding_config_body,
 )
+from protea.services.jobs_service import enqueue_job
 
 router = APIRouter(prefix="/embeddings", tags=["embeddings"])
 
@@ -221,16 +221,11 @@ def predict_go_terms(
         if session.get(OntologySnapshot, ontology_snapshot_id) is None:
             raise HTTPException(status_code=404, detail="OntologySnapshot not found")
 
-        job = Job(operation="predict_go_terms", queue_name=_PREDICTIONS_QUEUE, payload=body)
-        session.add(job)
-        session.flush()
-        job_id = job.id
-        session.add(
-            JobEvent(
-                job_id=job_id,
-                event="job.created",
-                fields={"operation": "predict_go_terms", "queue": _PREDICTIONS_QUEUE},
-            )
+        job_id = enqueue_job(
+            session,
+            operation="predict_go_terms",
+            queue_name=_PREDICTIONS_QUEUE,
+            payload=body,
         )
 
     publish_job(amqp_url, _PREDICTIONS_QUEUE, job_id)
