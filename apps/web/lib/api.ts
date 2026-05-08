@@ -775,6 +775,10 @@ export type BenchmarkMatrixResponse = {
   aspects: string[];
   ks: number[];
   best_per_cell: BenchmarkBestCell[];
+  /** Same shape as best_per_cell but ignores stage and K filters. Stable
+   *  across filter changes; the absolute champion per cell within the
+   *  active evaluation_set scope. */
+  best_per_cell_global: BenchmarkBestCell[];
   filters: {
     evaluation_set_id: string | null;
     stage: string | null;
