@@ -25,7 +25,9 @@ from typing import Any
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
+from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.orm.models.annotation.protein_go_annotation import ProteinGOAnnotation
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
@@ -76,6 +78,54 @@ class InvalidEmbeddingConfigError(EmbeddingsServiceError):
     def __init__(self, errors: list[str]) -> None:
         self.errors = errors
         super().__init__("; ".join(errors) if errors else "invalid embedding config")
+
+
+class InvalidUUIDFieldError(EmbeddingsServiceError):
+    """Predict request body had a field that does not parse as UUID.
+
+    Carries the offending field name in ``field``; the router
+    translates this to ``422`` with detail
+    ``"<field> must be a valid UUID"``.
+    """
+
+    def __init__(self, field: str) -> None:  # noqa: B042
+        super().__init__(f"{field} must be a valid UUID")
+        self.field = field
+
+    def __reduce__(self) -> tuple[type, tuple[str]]:
+        return (self.__class__, (self.field,))
+
+
+_PREDICT_ENTITY_MAP: tuple[tuple[str, str, type], ...] = (
+    ("embedding_config_id", "EmbeddingConfig", EmbeddingConfig),
+    ("annotation_set_id", "AnnotationSet", AnnotationSet),
+    ("ontology_snapshot_id", "OntologySnapshot", OntologySnapshot),
+)
+
+
+def validate_predict_request(
+    session: Session, body: dict[str, Any]
+) -> dict[str, uuid.UUID]:
+    """Parse + validate the three required UUID fields of a predict request.
+
+    Returns a dict mapping field name to its parsed :class:`uuid.UUID`.
+    Raises :class:`InvalidUUIDFieldError` for parse failures (router →
+    422) or :class:`EntityNotFoundError` if a referenced entity does
+    not exist (router → 404). Field order is preserved so the first
+    failure wins, matching the previous in-router behaviour.
+    """
+    parsed: dict[str, uuid.UUID] = {}
+    for field, _, _ in _PREDICT_ENTITY_MAP:
+        try:
+            parsed[field] = uuid.UUID(str(body.get(field)))
+        except (ValueError, AttributeError):
+            raise InvalidUUIDFieldError(field) from None
+
+    for field, label, model_cls in _PREDICT_ENTITY_MAP:
+        if session.get(model_cls, parsed[field]) is None:
+            raise EntityNotFoundError(label, parsed[field])
+
+    return parsed
 
 
 def validate_embedding_config_body(body: dict[str, Any]) -> dict[str, Any]:
@@ -617,6 +667,7 @@ __all__ = [
     "EmbeddingsServiceError",
     "EntityNotFoundError",
     "InvalidEmbeddingConfigError",
+    "InvalidUUIDFieldError",
     "assert_prediction_set_exists",
     "config_to_dict",
     "delete_embedding_config_cascade",
@@ -625,4 +676,5 @@ __all__ = [
     "iter_predictions_tsv",
     "list_proteins_in_prediction_set",
     "validate_embedding_config_body",
+    "validate_predict_request",
 ]
