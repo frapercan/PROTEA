@@ -224,7 +224,7 @@ export default function EmbeddingsPage() {
 
   const inputClass =
     "w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
-  const labelClass = "block text-sm font-medium text-gray-700 mb-1";
+  const labelClass = "block text-sm font-medium text-slate-700 mb-1";
 
   return (
     <>
@@ -257,7 +257,7 @@ export default function EmbeddingsPage() {
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               activeTab === tab.key
                 ? "border-blue-600 text-blue-600"
-                : "border-transparent text-gray-500 hover:text-gray-700"
+                : "border-transparent text-slate-500 hover:text-slate-700"
             }`}
           >
             {tab.label}
@@ -269,7 +269,7 @@ export default function EmbeddingsPage() {
       {activeTab === "configs" && (
         <div>
           <div className="flex items-center justify-between mb-3">
-            <p className="text-sm text-gray-500">{t("configsTab.configs", { count: configs.length })}</p>
+            <p className="text-sm text-slate-500">{t("configsTab.configs", { count: configs.length })}</p>
             <button
               onClick={() => setShowConfigForm((v) => !v)}
               className="rounded-md bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700"
@@ -342,7 +342,7 @@ export default function EmbeddingsPage() {
                       />
                     )}
                     {cfgModelPreset !== "__custom__" && (
-                      <p className="mt-1 font-mono text-xs text-gray-400 truncate" title={cfgModelPreset}>
+                      <p className="mt-1 font-mono text-xs text-slate-400 truncate" title={cfgModelPreset}>
                         {cfgModelPreset}
                       </p>
                     )}
@@ -350,7 +350,7 @@ export default function EmbeddingsPage() {
                   <div>
                     <label className={labelClass}>
                       {t("configsTab.newConfigForm.layerIndicesLabel")}{" "}
-                      <span className="font-normal text-gray-400">{t("configsTab.newConfigForm.layerIndicesHelper")}</span>
+                      <span className="font-normal text-slate-400">{t("configsTab.newConfigForm.layerIndicesHelper")}</span>
                     </label>
                     <input
                       type="text"
@@ -407,7 +407,7 @@ export default function EmbeddingsPage() {
                       onChange={(e) => setCfgNormalizeResidues(e.target.checked)}
                       className="rounded"
                     />
-                    <label htmlFor="cfg-norm-residues" className="text-sm text-gray-700 cursor-pointer">
+                    <label htmlFor="cfg-norm-residues" className="text-sm text-slate-700 cursor-pointer">
                       {t("configsTab.newConfigForm.normalizeResidues")}
                     </label>
                   </div>
@@ -419,7 +419,7 @@ export default function EmbeddingsPage() {
                       onChange={(e) => setCfgNormalize(e.target.checked)}
                       className="rounded"
                     />
-                    <label htmlFor="cfg-normalize" className="text-sm text-gray-700 cursor-pointer">
+                    <label htmlFor="cfg-normalize" className="text-sm text-slate-700 cursor-pointer">
                       {t("configsTab.newConfigForm.normalizeFinal")}
                     </label>
                   </div>
@@ -433,7 +433,7 @@ export default function EmbeddingsPage() {
                       onChange={(e) => setCfgUseChunking(e.target.checked)}
                       className="rounded"
                     />
-                    <label htmlFor="cfg-chunking" className="text-sm text-gray-700 cursor-pointer">
+                    <label htmlFor="cfg-chunking" className="text-sm text-slate-700 cursor-pointer">
                       {t("configsTab.newConfigForm.enableChunking")}
                     </label>
                   </div>
@@ -473,7 +473,7 @@ export default function EmbeddingsPage() {
                   <button
                     type="button"
                     onClick={() => setShowConfigForm(false)}
-                    className="rounded-md border px-4 py-2 text-sm hover:bg-gray-50"
+                    className="rounded-md border px-4 py-2 text-sm hover:bg-slate-50"
                   >
                     {t("configsTab.cancel")}
                   </button>
@@ -500,29 +500,29 @@ export default function EmbeddingsPage() {
                 {configs.map((c) => (
                   <div key={c.id} className="rounded-lg border bg-white p-4 shadow-sm">
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-sm font-medium text-gray-800 truncate">
-                        {c.description || <span className="text-gray-400 italic">—</span>}
+                      <span className="text-sm font-medium text-slate-800 truncate">
+                        {c.description || <span className="text-slate-400 italic">—</span>}
                       </span>
                       <button
                         onClick={() => handleDeleteConfig(c.id)}
-                        className="text-gray-400 hover:text-red-600 transition-colors ml-2"
+                        className="text-slate-400 hover:text-red-600 transition-colors ml-2"
                         title="Delete config"
                       >
                         ✕
                       </button>
                     </div>
-                    <p className="font-mono text-xs text-gray-500 truncate" title={c.model_name}>{c.model_name}</p>
-                    <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-600">
+                    <p className="font-mono text-xs text-slate-500 truncate" title={c.model_name}>{c.model_name}</p>
+                    <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-600">
                       <span>{c.model_backend}</span>
                       <span>layers [{c.layer_indices.join(", ")}]</span>
                       <span>{c.layer_agg}/{c.pooling}</span>
                       <span>{c.normalize ? "norm" : "no norm"}</span>
                     </div>
-                    <p className="mt-1 text-xs text-gray-400">{formatDate(c.created_at)}</p>
+                    <p className="mt-1 text-xs text-slate-400">{formatDate(c.created_at)}</p>
                   </div>
                 ))}
                 {configs.length === 0 && (
-                  <div className="rounded-lg border bg-white px-4 py-8 text-center text-sm text-gray-400 shadow-sm">
+                  <div className="rounded-lg border bg-white px-4 py-8 text-center text-sm text-slate-400 shadow-sm">
                     {t("configsTab.noConfigs")}{" "}
                     <button onClick={() => setShowConfigForm(true)} className="text-blue-600 underline">
                       ↑
@@ -533,7 +533,7 @@ export default function EmbeddingsPage() {
 
               {/* Desktop table */}
               <div className="hidden lg:block overflow-x-auto rounded-lg border bg-white shadow-sm">
-                <div className="grid grid-cols-[1fr_140px_80px_100px_80px_80px_60px_160px_60px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                <div className="grid grid-cols-[1fr_140px_80px_100px_80px_80px_60px_160px_60px] gap-2 border-b bg-slate-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
                   <div>{t("configsTab.tableHeaders.description")}</div>
                   <div>{t("configsTab.tableHeaders.model")}</div>
                   <div>{t("configsTab.tableHeaders.backend")}</div>
@@ -549,20 +549,20 @@ export default function EmbeddingsPage() {
                     key={c.id}
                     className="grid grid-cols-[1fr_140px_80px_100px_80px_80px_60px_160px_60px] gap-2 border-b px-4 py-3 text-sm last:border-0 items-center"
                   >
-                    <div className="text-gray-700 truncate" title={c.description ?? c.model_name}>
-                      {c.description || <span className="text-gray-400 italic">—</span>}
+                    <div className="text-slate-700 truncate" title={c.description ?? c.model_name}>
+                      {c.description || <span className="text-slate-400 italic">—</span>}
                     </div>
-                    <div className="font-mono text-xs text-gray-500 truncate" title={c.model_name}>{c.model_name}</div>
-                    <div className="text-gray-600">{c.model_backend}</div>
-                    <div className="font-mono text-xs text-gray-500">[{c.layer_indices.join(", ")}]</div>
-                    <div className="text-gray-600">{c.layer_agg}</div>
-                    <div className="text-gray-600">{c.pooling}</div>
-                    <div className="text-gray-600">{c.normalize ? "yes" : "no"}</div>
-                    <div className="text-xs text-gray-400">{formatDate(c.created_at)}</div>
+                    <div className="font-mono text-xs text-slate-500 truncate" title={c.model_name}>{c.model_name}</div>
+                    <div className="text-slate-600">{c.model_backend}</div>
+                    <div className="font-mono text-xs text-slate-500">[{c.layer_indices.join(", ")}]</div>
+                    <div className="text-slate-600">{c.layer_agg}</div>
+                    <div className="text-slate-600">{c.pooling}</div>
+                    <div className="text-slate-600">{c.normalize ? "yes" : "no"}</div>
+                    <div className="text-xs text-slate-400">{formatDate(c.created_at)}</div>
                     <div>
                       <button
                         onClick={() => handleDeleteConfig(c.id)}
-                        className="text-gray-400 hover:text-red-600 transition-colors"
+                        className="text-slate-400 hover:text-red-600 transition-colors"
                         title="Delete config"
                       >
                         ✕
@@ -571,7 +571,7 @@ export default function EmbeddingsPage() {
                   </div>
                 ))}
                 {configs.length === 0 && (
-                  <div className="px-4 py-8 text-center text-sm text-gray-400">
+                  <div className="px-4 py-8 text-center text-sm text-slate-400">
                     {t("configsTab.noConfigs")}{" "}
                     <button onClick={() => setShowConfigForm(true)} className="text-blue-600 underline">
                       ↑
@@ -590,7 +590,7 @@ export default function EmbeddingsPage() {
           <div className="rounded-lg border bg-white p-6 shadow-sm">
             <h2 className="text-base font-semibold mb-4">{t("computeTab.title")}</h2>
             {loading ? (
-              <p className="text-sm text-gray-400">{t("computeTab.loading")}</p>
+              <p className="text-sm text-slate-400">{t("computeTab.loading")}</p>
             ) : (
               <form onSubmit={handleComputeSubmit} className="space-y-4">
                 <div>
@@ -614,7 +614,7 @@ export default function EmbeddingsPage() {
 
                 <div>
                   <label className={labelClass}>
-                    {t("computeTab.querySetLabel")} <span className="font-normal text-gray-400">{t("computeTab.querySetHelper")}</span>
+                    {t("computeTab.querySetLabel")} <span className="font-normal text-slate-400">{t("computeTab.querySetHelper")}</span>
                   </label>
                   <select
                     value={cmpQuerySetId}
@@ -634,7 +634,7 @@ export default function EmbeddingsPage() {
                   <div>
                     <label className={labelClass}>
                       {t("computeTab.queueBatchSizeLabel")}{" "}
-                      <span className="font-normal text-gray-400">{t("computeTab.queueBatchSizeHelper")}</span>
+                      <span className="font-normal text-slate-400">{t("computeTab.queueBatchSizeHelper")}</span>
                     </label>
                     <input
                       type="number"
@@ -647,7 +647,7 @@ export default function EmbeddingsPage() {
                   <div>
                     <label className={labelClass}>
                       {t("computeTab.modelBatchSizeLabel")}{" "}
-                      <span className="font-normal text-gray-400">{t("computeTab.modelBatchSizeHelper")}</span>
+                      <span className="font-normal text-slate-400">{t("computeTab.modelBatchSizeHelper")}</span>
                     </label>
                     <input
                       type="number"
@@ -693,7 +693,7 @@ export default function EmbeddingsPage() {
                     onChange={(e) => setCmpSkipExisting(e.target.checked)}
                     className="rounded"
                   />
-                  <label htmlFor="cmp-skip-existing" className="text-sm text-gray-700 cursor-pointer">
+                  <label htmlFor="cmp-skip-existing" className="text-sm text-slate-700 cursor-pointer">
                     {t("computeTab.skipExisting")}
                   </label>
                 </div>

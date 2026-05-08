@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { Skeleton } from "@/components/Skeleton";
 import {
   getBenchmarkEmbeddings,
   getBenchmarkMatrix,
@@ -227,8 +228,8 @@ export default function BenchmarkPage() {
   if (!embeddings || !matrix || stage === null) {
     return (
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12 space-y-8">
-        <div className="h-8 w-64 bg-gray-100 rounded animate-pulse" />
-        <div className="h-96 bg-gray-100 rounded-lg animate-pulse" />
+        <Skeleton className="h-8 w-64" />
+        <Skeleton className="h-96 rounded-lg" />
       </div>
     );
   }
@@ -254,8 +255,8 @@ export default function BenchmarkPage() {
       {/* Header */}
       <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Benchmark matrix</h1>
-          <p className="text-sm text-gray-500 mt-1">
+          <h1 className="text-2xl font-bold text-slate-900">Benchmark matrix</h1>
+          <p className="text-sm text-slate-500 mt-1">
             Per-embedding Fmax across categories and aspects for every evaluation
             run in the database.{" "}
             <Link href="/" className="text-blue-600 hover:underline">
@@ -272,7 +273,7 @@ export default function BenchmarkPage() {
                 rowsToCsv(embeddings, matrix.rows, stage),
               )
             }
-            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Download CSV
           </button>
@@ -339,10 +340,10 @@ export default function BenchmarkPage() {
       {/* Filters */}
       <div className="flex flex-wrap gap-3 items-end">
         <div>
-          <label className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
+          <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">
             Pipeline stage
           </label>
-          <div className="flex flex-wrap gap-1 rounded-lg bg-gray-100 p-0.5">
+          <div className="flex flex-wrap gap-1 rounded-lg bg-slate-100 p-0.5">
             {stageList.map((s) => (
               <button
                 key={s.name}
@@ -350,13 +351,13 @@ export default function BenchmarkPage() {
                 title={`${s.kind}${s.is_baseline ? " · baseline" : ""}`}
                 className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
                   stage === s.name
-                    ? "bg-white text-gray-900 shadow-sm"
-                    : "text-gray-500 hover:text-gray-700"
+                    ? "bg-white text-slate-900 shadow-sm"
+                    : "text-slate-500 hover:text-slate-700"
                 }`}
               >
                 {s.label}
                 {s.is_baseline && (
-                  <span className="ml-1 text-[9px] text-gray-400 uppercase">base</span>
+                  <span className="ml-1 text-[9px] text-slate-400 uppercase">base</span>
                 )}
               </button>
             ))}
@@ -365,18 +366,18 @@ export default function BenchmarkPage() {
 
         {catalog.ks.length > 0 && (
           <div>
-            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
+            <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">
               Neighbours (K)
             </label>
-            <div className="flex gap-1 rounded-lg bg-gray-100 p-0.5">
+            <div className="flex gap-1 rounded-lg bg-slate-100 p-0.5">
               {catalog.ks.map((n) => (
                 <button
                   key={n}
                   onClick={() => setSelectedK(n)}
                   className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
                     selectedK === n
-                      ? "bg-white text-gray-900 shadow-sm"
-                      : "text-gray-500 hover:text-gray-700"
+                      ? "bg-white text-slate-900 shadow-sm"
+                      : "text-slate-500 hover:text-slate-700"
                   }`}
                 >
                   K={n}
@@ -388,13 +389,13 @@ export default function BenchmarkPage() {
 
         {evalSetList.length > 1 && (
           <div>
-            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
+            <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">
               Evaluation set
             </label>
             <select
               value={evalSetId}
               onChange={(e) => setEvalSetId(e.target.value)}
-              className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700"
+              className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700"
             >
               <option value="all">All splits</option>
               {evalSetList.map((es) => (
@@ -406,7 +407,7 @@ export default function BenchmarkPage() {
           </div>
         )}
 
-        <div className="text-xs text-gray-400 ml-auto self-end">
+        <div className="text-xs text-slate-400 ml-auto self-end">
           {matrix.total} cells · {matrix.embedding_config_ids.length} embeddings ·{" "}
           {matrix.evaluation_sets.length} eval set
           {matrix.evaluation_sets.length === 1 ? "" : "s"}
@@ -487,9 +488,9 @@ export default function BenchmarkPage() {
       {matrix.best_per_cell.length > 0 && (
         <section className="rounded-xl border bg-white shadow-sm p-4">
           <div className="flex items-baseline justify-between mb-3">
-            <h2 className="text-sm font-semibold text-gray-800">
+            <h2 className="text-sm font-semibold text-slate-800">
               Best Fmax per cell
-              <span className="ml-2 text-xs font-normal text-gray-400">
+              <span className="ml-2 text-xs font-normal text-slate-400">
                 in current selection
                 {stage ? ` · stage=${stageLabel(stageList, stage)}` : ""}
                 {selectedK ? ` · K=${selectedK}` : ""}
@@ -500,11 +501,11 @@ export default function BenchmarkPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr>
-                  <th className="px-2 py-1 text-left font-medium text-gray-500"></th>
+                  <th className="px-2 py-1 text-left font-medium text-slate-500"></th>
                   {aspects.map((asp) => (
                     <th
                       key={asp}
-                      className="px-2 py-1 text-center text-[10px] font-medium text-gray-500 uppercase tracking-wide"
+                      className="px-2 py-1 text-center text-[10px] font-medium text-slate-500 uppercase tracking-wide"
                     >
                       {asp}
                     </th>
@@ -514,14 +515,14 @@ export default function BenchmarkPage() {
               <tbody>
                 {categories.map((cat) => (
                   <tr key={cat} className="border-t">
-                    <td className="px-2 py-2 font-semibold text-gray-700">{cat}</td>
+                    <td className="px-2 py-2 font-semibold text-slate-700">{cat}</td>
                     {aspects.map((asp) => {
                       const best = bestPerCell.get(`${cat}|${asp}`);
                       if (!best) {
                         return (
                           <td
                             key={asp}
-                            className="px-2 py-2 text-center text-gray-300"
+                            className="px-2 py-2 text-center text-slate-300"
                           >
                             —
                           </td>
@@ -534,13 +535,13 @@ export default function BenchmarkPage() {
                           className="px-2 py-2 text-center border-l"
                           title={`${emb?.display_name ?? best.embedding_config_id} · ${stageLabel(stageList, best.stage)}`}
                         >
-                          <div className="font-semibold text-gray-900 tabular-nums">
+                          <div className="font-semibold text-slate-900 tabular-nums">
                             {best.fmax.toFixed(3)}
                           </div>
-                          <div className="text-[10px] text-gray-500 truncate max-w-[120px] mx-auto">
+                          <div className="text-[10px] text-slate-500 truncate max-w-[120px] mx-auto">
                             {emb?.display_name ?? "—"}
                           </div>
-                          <div className="text-[9px] text-gray-400 truncate max-w-[120px] mx-auto">
+                          <div className="text-[9px] text-slate-400 truncate max-w-[120px] mx-auto">
                             {stageLabel(stageList, best.stage)}
                           </div>
                         </td>
@@ -556,12 +557,12 @@ export default function BenchmarkPage() {
 
       {/* Matrix table */}
       {!hasData ? (
-        <section className="rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 p-12 text-center">
-          <p className="text-gray-500 text-sm">
+        <section className="rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 p-12 text-center">
+          <p className="text-slate-500 text-sm">
             No evaluation results for{" "}
             <span className="font-semibold">{currentStageLabel}</span> yet.
           </p>
-          <p className="text-gray-400 text-xs mt-2">
+          <p className="text-slate-400 text-xs mt-2">
             Run <code>run_cafa_evaluation</code> for an embedding to populate
             this cell of the matrix.
           </p>
@@ -569,11 +570,11 @@ export default function BenchmarkPage() {
       ) : (
         <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50">
+            <thead className="bg-slate-50">
               <tr>
                 <th
                   rowSpan={2}
-                  className="px-4 py-2 text-left font-medium text-gray-600 border-b sticky left-0 bg-gray-50"
+                  className="px-4 py-2 text-left font-medium text-slate-600 border-b sticky left-0 bg-slate-50"
                 >
                   Embedding
                 </th>
@@ -581,7 +582,7 @@ export default function BenchmarkPage() {
                   <th
                     key={cat}
                     colSpan={aspects.length}
-                    className="px-2 py-1.5 text-center font-semibold text-gray-700 border-b border-l"
+                    className="px-2 py-1.5 text-center font-semibold text-slate-700 border-b border-l"
                   >
                     {cat}
                   </th>
@@ -592,7 +593,7 @@ export default function BenchmarkPage() {
                   aspects.map((asp) => (
                     <th
                       key={`${cat}-${asp}`}
-                      className="px-2 py-1 text-center text-[10px] font-medium text-gray-500 uppercase tracking-wide border-b border-l"
+                      className="px-2 py-1 text-center text-[10px] font-medium text-slate-500 uppercase tracking-wide border-b border-l"
                     >
                       {asp}
                     </th>
@@ -609,10 +610,10 @@ export default function BenchmarkPage() {
                     className={`border-t ${hasRow ? "" : "opacity-50"}`}
                   >
                     <td className="px-4 py-2 sticky left-0 bg-white border-r">
-                      <div className="font-medium text-gray-900">
+                      <div className="font-medium text-slate-900">
                         {emb.display_name}
                       </div>
-                      <div className="text-[10px] text-gray-400 font-mono">
+                      <div className="text-[10px] text-slate-400 font-mono">
                         {emb.family}
                         {emb.param_count != null
                           ? ` · ${formatParams(emb.param_count)}`
@@ -640,13 +641,13 @@ export default function BenchmarkPage() {
                             {row ? (
                               <span
                                 className={`font-semibold ${
-                                  isWinner ? "text-green-700" : "text-gray-900"
+                                  isWinner ? "text-green-700" : "text-slate-900"
                                 }`}
                               >
                                 {row.fmax.toFixed(3)}
                               </span>
                             ) : (
-                              <span className="text-gray-300">—</span>
+                              <span className="text-slate-300">—</span>
                             )}
                           </td>
                         );
@@ -660,7 +661,7 @@ export default function BenchmarkPage() {
         </div>
       )}
 
-      <p className="text-xs text-gray-400">
+      <p className="text-xs text-slate-400">
         Display names and stage labels come from{" "}
         <code>embedding_config</code> (DB) and{" "}
         <code>protea/config/benchmark.yaml</code>. Edit the YAML to change

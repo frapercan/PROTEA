@@ -8,7 +8,7 @@ export function DocLinks() {
         href={`${base}/docs`}
         target="_blank"
         rel="noopener noreferrer"
-        className="hover:text-gray-900"
+        className="hover:text-slate-900"
       >
         Swagger
       </a>
@@ -16,7 +16,7 @@ export function DocLinks() {
         href="/sphinx/"
         target="_blank"
         rel="noopener noreferrer"
-        className="hover:text-gray-900"
+        className="hover:text-slate-900"
       >
         Docs
       </a>
@@ -24,7 +24,7 @@ export function DocLinks() {
         href={`${base}/static/thesis.pdf`}
         target="_blank"
         rel="noopener noreferrer"
-        className="hover:text-gray-900"
+        className="hover:text-slate-900"
       >
         Thesis
       </a>

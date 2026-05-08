@@ -48,13 +48,13 @@ export function ResetDbButton() {
       {showConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-sm rounded-xl border bg-white shadow-xl p-6">
-            <h2 className="text-base font-semibold text-gray-900">{t("confirmTitle")}</h2>
-            <p className="mt-2 text-sm text-gray-500">{t("confirmMessage")}</p>
+            <h2 className="text-base font-semibold text-slate-900">{t("confirmTitle")}</h2>
+            <p className="mt-2 text-sm text-slate-500">{t("confirmMessage")}</p>
             <div className="mt-5 flex justify-end gap-2">
               <button
                 onClick={() => setShowConfirm(false)}
                 disabled={loading}
-                className="rounded-md border px-4 py-2 text-sm hover:bg-gray-50 disabled:opacity-50"
+                className="rounded-md border px-4 py-2 text-sm hover:bg-slate-50 disabled:opacity-50"
               >
                 {t("cancel")}
               </button>

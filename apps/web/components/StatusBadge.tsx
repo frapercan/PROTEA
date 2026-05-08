@@ -9,7 +9,7 @@ const STYLES: Record<string, string> = {
   running: "bg-blue-100 text-blue-800 border-blue-200",
   succeeded: "bg-green-100 text-green-800 border-green-200",
   failed: "bg-red-100 text-red-800 border-red-200",
-  cancelled: "bg-gray-100 text-gray-600 border-gray-200",
+  cancelled: "bg-slate-100 text-slate-600 border-slate-200",
 };
 
 const KNOWN_STATUSES = ["queued", "running", "succeeded", "failed", "cancelled"] as const;
@@ -18,7 +18,7 @@ type KnownStatus = typeof KNOWN_STATUSES[number];
 export function StatusBadge({ status }: { status: Status }) {
   const t = useTranslations("components.statusBadge");
   const key = status.toLowerCase();
-  const cls = STYLES[key] ?? "bg-gray-100 text-gray-600 border-gray-200";
+  const cls = STYLES[key] ?? "bg-slate-100 text-slate-600 border-slate-200";
   const isKnown = KNOWN_STATUSES.includes(key as KnownStatus);
   const label = isKnown ? t(key as KnownStatus) : status.toUpperCase();
   return (

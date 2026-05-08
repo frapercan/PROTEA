@@ -9,24 +9,24 @@ import {
 } from "@/lib/api";
 import type { AnnotationSet, PredictionSet, ScoringConfig, RerankerModel } from "@/lib/api";
 
-const labelClass = "block text-sm font-medium text-gray-700 mb-1";
+const labelClass = "block text-sm font-medium text-slate-700 mb-1";
 const selectClass =
-  "w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+  "w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
 const btnPrimary =
   "rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors";
 const btnSecondary =
-  "rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors";
+  "rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 transition-colors";
 
 function InfoTooltip({ text }: { text: string }) {
   return (
     <span className="relative inline-block group ml-1 align-middle">
       <span
         aria-label={text}
-        className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-gray-200 text-gray-500 text-[10px] font-bold cursor-help select-none"
+        className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-slate-200 text-slate-500 text-[10px] font-bold cursor-help select-none"
       >
         ?
       </span>
-      <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 z-10 hidden group-hover:block w-64 rounded-md border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600 shadow-lg leading-relaxed">
+      <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 z-10 hidden group-hover:block w-64 rounded-md border border-slate-200 bg-white px-3 py-2 text-[13px] text-slate-600 shadow-lg leading-relaxed">
         {text}
       </span>
     </span>
@@ -39,7 +39,7 @@ function RichTooltip({ children }: { children: React.ReactNode }) {
       <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-blue-100 text-blue-500 text-[10px] font-bold cursor-help select-none">
         ℹ
       </span>
-      <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 z-10 hidden group-hover:block w-72 rounded-md border border-gray-200 bg-white px-3 py-2.5 text-xs text-gray-600 shadow-xl leading-relaxed">
+      <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 z-10 hidden group-hover:block w-72 rounded-md border border-slate-200 bg-white px-3 py-2.5 text-[13px] text-slate-600 shadow-xl leading-relaxed">
         {children}
       </span>
     </span>
@@ -128,7 +128,7 @@ function DownloadLink({ href, label, filename }: { href: string; label: string; 
     <a
       href={href}
       download={filename}
-      className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm hover:bg-gray-50 transition-colors"
+      className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50 transition-colors"
     >
       ↓ {label}
     </a>
@@ -137,11 +137,11 @@ function DownloadLink({ href, label, filename }: { href: string; label: string; 
 
 function StatBadge({ label, value, tooltip }: { label: string; value: number | undefined; tooltip?: string }) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-center">
-      <div className="text-lg font-semibold text-gray-900">
+    <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-center">
+      <div className="text-lg font-semibold text-slate-900">
         {value != null ? value.toLocaleString() : "—"}
       </div>
-      <div className="text-xs text-gray-500 mt-0.5">
+      <div className="text-[13px] text-slate-500 mt-0.5">
         {label}
         {tooltip && <InfoTooltip text={tooltip} />}
       </div>
@@ -158,7 +158,7 @@ const SETTING_COLORS: Record<string, string> = {
 function ResultsTable({ results }: { results: Record<string, SettingResults> }) {
   const t = useTranslations("evaluation");
   const settings = ["NK", "LK", "PK"].filter((s) => results[s] && Object.keys(results[s]).length > 0);
-  if (settings.length === 0) return <p className="text-sm text-gray-400">{t("evaluationSetCard.noEvaluations")}</p>;
+  if (settings.length === 0) return <p className="text-sm text-slate-400">{t("evaluationSetCard.noEvaluations")}</p>;
 
   const NS_LABELS: Record<string, string> = {
     BPO: t("resultMetrics.biologicalProcess"),
@@ -176,7 +176,7 @@ function ResultsTable({ results }: { results: Record<string, SettingResults> }) 
     <div className="space-y-4">
       {settings.map((setting) => (
         <div key={setting} className={`rounded-lg border p-4 ${SETTING_COLORS[setting] ?? ""}`}>
-          <div className="text-sm font-semibold text-gray-700 mb-3">
+          <div className="text-sm font-semibold text-slate-700 mb-3">
             {setting}
             {SETTING_TOOLTIPS[setting] && <InfoTooltip text={SETTING_TOOLTIPS[setting]} />}
           </div>
@@ -185,31 +185,31 @@ function ResultsTable({ results }: { results: Record<string, SettingResults> }) 
               const m = results[setting]?.[ns];
               if (!m) return null;
               return (
-                <div key={ns} className="rounded-md bg-white border border-gray-200 p-3">
-                  <div className="text-xs font-medium text-gray-500 mb-2">{NS_LABELS[ns]}</div>
+                <div key={ns} className="rounded-md bg-white border border-slate-200 p-3">
+                  <div className="text-xs font-medium text-slate-500 mb-2">{NS_LABELS[ns]}</div>
                   <div className="space-y-1 text-sm">
                     <div className="flex justify-between">
-                      <span className="text-gray-500">{t("resultMetrics.fmax")}</span>
-                      <span className="font-semibold text-gray-900">{m.fmax.toFixed(3)}</span>
+                      <span className="text-slate-500">{t("resultMetrics.fmax")}</span>
+                      <span className="font-semibold text-slate-900">{m.fmax.toFixed(3)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-500">{t("resultMetrics.precision")}</span>
-                      <span className="text-gray-700">{m.precision.toFixed(3)}</span>
+                      <span className="text-slate-500">{t("resultMetrics.precision")}</span>
+                      <span className="text-slate-700">{m.precision.toFixed(3)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-500">{t("resultMetrics.recall")}</span>
-                      <span className="text-gray-700">{m.recall.toFixed(3)}</span>
+                      <span className="text-slate-500">{t("resultMetrics.recall")}</span>
+                      <span className="text-slate-700">{m.recall.toFixed(3)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-500 flex items-center gap-1">
+                      <span className="text-slate-500 flex items-center gap-1">
                         {t("resultMetrics.coverage")}
                         <InfoTooltip text="Fraction of benchmark proteins for which at least one prediction was submitted at the Fmax threshold. Values above 100% can occur in the PK setting: cafaeval shrinks the PK denominator by removing proteins whose new terms are excluded via the -known file, while PROTEA already subtracts those terms when building the ground truth — this double-accounting inflates the ratio. NK and LK coverage is always ≤ 100%." />
                       </span>
-                      <span className="text-gray-700">{(m.coverage * 100).toFixed(1)}%</span>
+                      <span className="text-slate-700">{(m.coverage * 100).toFixed(1)}%</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-500">{t("resultMetrics.tau")}</span>
-                      <span className="text-gray-700">{m.tau.toFixed(2)}</span>
+                      <span className="text-slate-500">{t("resultMetrics.tau")}</span>
+                      <span className="text-slate-700">{m.tau.toFixed(2)}</span>
                     </div>
                   </div>
                 </div>
@@ -351,16 +351,16 @@ function EvaluationSetCard({
   return (
     <div
       className={`rounded-lg border transition-colors ${
-        isSelected ? "border-blue-400" : "border-gray-200"
+        isSelected ? "border-blue-400" : "border-slate-200"
       }`}
     >
       {/* Header */}
       <div
-        className="cursor-pointer p-4 hover:bg-gray-50 rounded-t-lg"
+        className="cursor-pointer p-4 hover:bg-slate-50 rounded-t-lg"
         onClick={onSelect}
       >
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-          <div className="text-sm font-medium text-gray-800">{evalLabel(e, annotationSets)}</div>
+          <div className="text-sm font-medium text-slate-800">{evalLabel(e, annotationSets)}</div>
           <button
             onClick={async (ev) => {
               ev.stopPropagation();
@@ -398,11 +398,11 @@ function EvaluationSetCard({
       </div>
 
       {isSelected && (
-        <div className="border-t border-gray-200 p-4 space-y-5 bg-gray-50 rounded-b-lg">
+        <div className="border-t border-slate-200 p-4 space-y-5 bg-slate-50 rounded-b-lg">
 
           {/* Downloads */}
           <div>
-            <p className="text-xs font-medium text-gray-500 mb-2">
+            <p className="text-xs font-medium text-slate-500 mb-2">
               {t("evaluationSetCard.groundTruthFiles")}
               <InfoTooltip text="2-column TSV files (protein accession → GO term) used as input to the cafaeval evaluator. Each file contains only the novel experimental annotations for that category." />
             </p>
@@ -428,7 +428,7 @@ function EvaluationSetCard({
                 filename="known_terms.tsv"
               />
             </div>
-            <p className="text-xs text-gray-400 mt-1">
+            <p className="text-xs text-slate-400 mt-1">
               {t("evaluationSetCard.downloadKnownTerms")}
               <InfoTooltip text="All experimental annotations from the old snapshot for PK proteins in the relevant namespace. Passed to cafaeval with -known to exclude them from scoring — this penalises methods that simply repeat prior annotations." />
               : passed to cafaeval as <code className="font-mono">-known</code> for the PK pass only.
@@ -437,7 +437,7 @@ function EvaluationSetCard({
 
           {/* FASTA downloads */}
           <div>
-            <p className="text-xs font-medium text-gray-500 mb-2">
+            <p className="text-xs font-medium text-slate-500 mb-2">
               {t("evaluationSetCard.deltaProteinSequences")}
               <InfoTooltip text="Sequences of proteins that gained new experimental GO annotations (delta proteins). Download the full set or per-category subsets to compute embeddings and run predictions before evaluation." />
             </p>
@@ -467,7 +467,7 @@ function EvaluationSetCard({
 
           {/* Run evaluation */}
           <div className="space-y-3">
-            <p className="text-xs font-medium text-gray-500">{t("evaluationSetCard.runCafaEvaluator")}</p>
+            <p className="text-xs font-medium text-slate-500">{t("evaluationSetCard.runCafaEvaluator")}</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className={labelClass}>{t("evaluationSetCard.predictionSetLabel")}</label>
@@ -488,7 +488,7 @@ function EvaluationSetCard({
                   type="number" min="0" max="2" step="0.05" placeholder="no limit"
                   value={maxDistance}
                   onChange={(ev) => setMaxDistance(ev.target.value)}
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
             </div>
@@ -504,16 +504,16 @@ function EvaluationSetCard({
                   <table className="w-full text-xs border-collapse">
                     <thead>
                       <tr>
-                        <th className="px-2 py-1 text-left text-gray-500 font-medium"></th>
-                        <th className="px-2 py-1 text-center text-gray-600 font-semibold">BPO</th>
-                        <th className="px-2 py-1 text-center text-gray-600 font-semibold">MFO</th>
-                        <th className="px-2 py-1 text-center text-gray-600 font-semibold">CCO</th>
+                        <th className="px-2 py-1 text-left text-slate-500 font-medium"></th>
+                        <th className="px-2 py-1 text-center text-slate-600 font-semibold">BPO</th>
+                        <th className="px-2 py-1 text-center text-slate-600 font-semibold">MFO</th>
+                        <th className="px-2 py-1 text-center text-slate-600 font-semibold">CCO</th>
                       </tr>
                     </thead>
                     <tbody>
                       {(["nk", "lk", "pk"] as const).map((cat) => (
                         <tr key={cat}>
-                          <td className="px-2 py-1.5 font-semibold text-gray-700 uppercase">{cat}</td>
+                          <td className="px-2 py-1.5 font-semibold text-slate-700 uppercase">{cat}</td>
                           {(["bpo", "mfo", "cco"] as const).map((asp) => {
                             // Show models matching this category+aspect, or category+null (all-aspect models)
                             const candidates = initialRerankers.filter(
@@ -524,7 +524,7 @@ function EvaluationSetCard({
                                 <select
                                   value={rrGrid[cat]?.[asp] ?? ""}
                                   onChange={(ev) => { setRrCell(cat, asp, ev.target.value); if (ev.target.value) setScoringConfigId(""); }}
-                                  className="w-full rounded border border-gray-300 px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                  className="w-full rounded border border-slate-300 px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
                                 >
                                   <option value="">—</option>
                                   {candidates.map((r) => (
@@ -546,7 +546,7 @@ function EvaluationSetCard({
                 const hasAnyRr = Object.values(rrGrid).some((catMap) => Object.values(catMap).some(Boolean));
                 return scoringConfigs.length > 0 && !hasAnyRr ? (
                   <div className="mt-2">
-                    <label className="text-xs text-gray-500 mb-0.5 block">Scoring config (alternative to re-ranker)</label>
+                    <label className="text-[13px] text-slate-500 mb-0.5 block">Scoring config (alternative to re-ranker)</label>
                     <select
                       value={scoringConfigId}
                       onChange={(ev) => setScoringConfigId(ev.target.value)}
@@ -596,7 +596,7 @@ function EvaluationSetCard({
           {/* Results */}
           <div>
             <div className="flex items-center justify-between mb-3">
-              <p className="text-xs font-medium text-gray-500">
+              <p className="text-xs font-medium text-slate-500">
                 {t("evaluationSetCard.resultsHeading")}
                 {pollingResults && (
                   <span className="ml-2 text-blue-500 animate-pulse">{t("evaluationSetCard.pollingResults")}</span>
@@ -605,15 +605,15 @@ function EvaluationSetCard({
               <button
                 onClick={refreshResults}
                 disabled={loadingResults}
-                className="text-xs text-gray-400 hover:text-gray-700 border rounded px-2 py-0.5 disabled:opacity-40"
+                className="text-xs text-slate-400 hover:text-slate-700 border rounded px-2 py-0.5 disabled:opacity-40"
               >
                 {loadingResults ? t("evaluationSetCard.refreshing") : t("evaluationSetCard.refreshResults")}
               </button>
             </div>
             {loadingResults ? (
-              <p className="text-sm text-gray-400">Loading…</p>
+              <p className="text-sm text-slate-400">Loading…</p>
             ) : results.length === 0 ? (
-              <p className="text-sm text-gray-400">{t("evaluationSetCard.noEvaluations")}</p>
+              <p className="text-sm text-slate-400">{t("evaluationSetCard.noEvaluations")}</p>
             ) : (
               <div className="space-y-6">
                 {results.map((r) => {
@@ -622,12 +622,12 @@ function EvaluationSetCard({
                   const hasReranker = !!r.reranker_model_id;
                   const rr = initialRerankers.find((m) => m.id === r.reranker_model_id);
                   return (
-                    <div key={r.id} className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
+                    <div key={r.id} className="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
                       {/* Meta header */}
                       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
-                        <div className="space-y-0.5 text-xs text-gray-500 min-w-0">
+                        <div className="space-y-0.5 text-[13px] text-slate-500 min-w-0">
                           <div className="flex items-center gap-0.5">
-                            <span className="font-medium text-gray-700">{t("evaluationSetCard.predictionSet")} </span>
+                            <span className="font-medium text-slate-700">{t("evaluationSetCard.predictionSet")} </span>
                             {pred
                               ? <span title={r.prediction_set_id}>{r.prediction_set_id.slice(0, 8)}… · {new Date(pred.created_at).toLocaleDateString()}{pred.prediction_count != null ? ` · ${pred.prediction_count.toLocaleString()} preds.` : ""}</span>
                               : <span className="font-mono">{r.prediction_set_id.slice(0, 8)}…</span>
@@ -635,25 +635,25 @@ function EvaluationSetCard({
                             {pred && (
                               <RichTooltip>
                                 <div className="space-y-1.5">
-                                  <div className="font-semibold text-gray-700 border-b border-gray-100 pb-1 mb-1">Prediction Set</div>
+                                  <div className="font-semibold text-slate-700 border-b border-slate-100 pb-1 mb-1">Prediction Set</div>
                                   <div className="flex justify-between gap-3">
-                                    <span className="text-gray-400">Config</span>
+                                    <span className="text-slate-400">Config</span>
                                     <span className="text-right">{pred.embedding_config_name ?? pred.embedding_config_id.slice(0, 8) + "…"}</span>
                                   </div>
                                   <div className="flex justify-between gap-3">
-                                    <span className="text-gray-400">Annotations</span>
+                                    <span className="text-slate-400">Annotations</span>
                                     <span className="text-right">{pred.annotation_set_label ?? pred.annotation_set_id.slice(0, 8) + "…"}</span>
                                   </div>
                                   <div className="flex justify-between gap-3">
-                                    <span className="text-gray-400">Ontology</span>
+                                    <span className="text-slate-400">Ontology</span>
                                     <span className="text-right">{pred.ontology_snapshot_version ?? pred.ontology_snapshot_id.slice(0, 8) + "…"}</span>
                                   </div>
                                   <div className="flex justify-between gap-3">
-                                    <span className="text-gray-400">Max dist.</span>
+                                    <span className="text-slate-400">Max dist.</span>
                                     <span>{pred.distance_threshold ?? "—"}</span>
                                   </div>
                                   <div className="flex justify-between gap-3">
-                                    <span className="text-gray-400">Limit/entry</span>
+                                    <span className="text-slate-400">Limit/entry</span>
                                     <span>{pred.limit_per_entry}</span>
                                   </div>
                                 </div>
@@ -661,12 +661,12 @@ function EvaluationSetCard({
                             )}
                           </div>
                           <div className="flex items-center gap-0.5 flex-wrap">
-                            <span className="font-medium text-gray-700">{t("evaluationSetCard.scoring")} </span>
+                            <span className="font-medium text-slate-700">{t("evaluationSetCard.scoring")} </span>
                             {r.reranker_config ? (
                               <span className="inline-flex items-center gap-1 flex-wrap">
                                 <span className="rounded-full bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">Re-ranker</span>
                                 {Object.entries(r.reranker_config).map(([cat, aspMap]) => (
-                                  <span key={cat} className="text-[10px] text-gray-500">
+                                  <span key={cat} className="text-[10px] text-slate-500">
                                     {cat.toUpperCase()}({Object.keys(aspMap).map(a => a.toUpperCase()).join(",")})
                                   </span>
                                 ))}
@@ -676,22 +676,22 @@ function EvaluationSetCard({
                                 <span className="rounded-full bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">Re-ranker</span>
                                 {rr ? rr.name : "model"}
                               </span>
-                            ) : sc ? sc.name : <span className="italic text-gray-400">{t("evaluationSetCard.fallbackFormula")}</span>}
+                            ) : sc ? sc.name : <span className="italic text-slate-400">{t("evaluationSetCard.fallbackFormula")}</span>}
                             {sc && !hasReranker && (
                               <RichTooltip>
                                 <div className="space-y-1.5">
-                                  <div className="font-semibold text-gray-700 border-b border-gray-100 pb-1 mb-1">{sc.name}</div>
-                                  {sc.description && <div className="italic text-gray-500 mb-1">{sc.description}</div>}
+                                  <div className="font-semibold text-slate-700 border-b border-slate-100 pb-1 mb-1">{sc.name}</div>
+                                  {sc.description && <div className="italic text-slate-500 mb-1">{sc.description}</div>}
                                   <div className="flex justify-between gap-3">
-                                    <span className="text-gray-400">Formula</span>
+                                    <span className="text-slate-400">Formula</span>
                                     <code className="text-blue-600 text-[10px]">{sc.formula}</code>
                                   </div>
                                   {Object.keys(sc.weights).length > 0 && (
                                     <div>
-                                      <div className="text-gray-400 mb-0.5">Weights</div>
+                                      <div className="text-slate-400 mb-0.5">Weights</div>
                                       {Object.entries(sc.weights).map(([k, v]) => (
                                         <div key={k} className="flex justify-between gap-3 pl-2">
-                                          <span className="text-gray-500">{k}</span>
+                                          <span className="text-slate-500">{k}</span>
                                           <span className="font-mono">{v}</span>
                                         </div>
                                       ))}
@@ -701,13 +701,13 @@ function EvaluationSetCard({
                               </RichTooltip>
                             )}
                           </div>
-                          <div className="text-gray-400">{new Date(r.created_at).toLocaleString()}</div>
+                          <div className="text-slate-400">{new Date(r.created_at).toLocaleString()}</div>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                           <a
                             href={`${baseUrl()}/annotations/evaluation-sets/${e.id}/results/${r.id}/artifacts.zip`}
                             download={`cafaeval_${r.id.slice(0, 8)}.zip`}
-                            className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-1 text-xs hover:bg-gray-50 transition-colors"
+                            className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-3 py-1 text-xs hover:bg-slate-50 transition-colors"
                           >
                             {t("evaluationSetCard.artifactsDownload")}
                           </a>
@@ -788,11 +788,11 @@ export default function EvaluationPage() {
     }
   }
 
-  if (loading) return <div className="p-8 text-sm text-gray-500">Loading…</div>;
+  if (loading) return <div className="p-8 text-sm text-slate-500">Loading…</div>;
 
   return (
     <div className="px-4 sm:px-8 py-6 sm:py-8 max-w-3xl space-y-8 sm:space-y-10">
-      <h1 className="text-xl font-semibold text-gray-900">{t("title")}</h1>
+      <h1 className="text-xl font-semibold text-slate-900">{t("title")}</h1>
 
       <ContextBanner
         title="Benchmark prediction quality with CAFA metrics"
@@ -805,10 +805,10 @@ export default function EvaluationPage() {
       />
 
       {/* ── Generate Evaluation Set ───────────────────────────────── */}
-      <section className="rounded-lg border border-gray-200 p-6 space-y-5">
+      <section className="rounded-lg border border-slate-200 p-6 space-y-5">
         <div>
-          <h2 className="text-base font-semibold text-gray-800">{t("generateSection.heading")}</h2>
-          <p className="mt-1 text-sm text-gray-500">
+          <h2 className="text-base font-semibold text-slate-800">{t("generateSection.heading")}</h2>
+          <p className="mt-1 text-sm text-slate-500">
             {t("generateSection.description")}
           </p>
         </div>
@@ -846,7 +846,7 @@ export default function EvaluationPage() {
       {/* ── Evaluation Sets ───────────────────────────────────────── */}
       {evaluationSets.length > 0 && (
         <section className="space-y-4">
-          <h2 className="text-base font-semibold text-gray-800">{t("evaluationSetsSection.heading")}</h2>
+          <h2 className="text-base font-semibold text-slate-800">{t("evaluationSetsSection.heading")}</h2>
           {evaluationSets.map((e) => (
             <EvaluationSetCard
               key={e.id}
@@ -864,9 +864,9 @@ export default function EvaluationPage() {
       )}
 
       {/* ── Evaluator command reference ───────────────────────────── */}
-      <section className="rounded-lg border border-gray-100 bg-gray-50 p-5">
-        <h2 className="text-sm font-semibold text-gray-700 mb-2">{t("manualEvaluatorSection.heading")}</h2>
-        <pre className="text-xs text-gray-600 overflow-x-auto whitespace-pre-wrap leading-relaxed">
+      <section className="rounded-lg border border-slate-100 bg-slate-50 p-5">
+        <h2 className="text-sm font-semibold text-slate-700 mb-2">{t("manualEvaluatorSection.heading")}</h2>
+        <pre className="text-[13px] text-slate-600 overflow-x-auto whitespace-pre-wrap leading-relaxed">
 {`python -m cafaeval go-basic.obo predictions/ ground_truth_NK.tsv -out_dir results/NK
 python -m cafaeval go-basic.obo predictions/ ground_truth_LK.tsv -out_dir results/LK
 python -m cafaeval go-basic.obo predictions/ ground_truth_PK.tsv -known known_terms.tsv -out_dir results/PK`}
