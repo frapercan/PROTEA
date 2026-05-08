@@ -169,6 +169,15 @@
       "threshold": 60
     },
     {
+      "key": "method::protea/core/operations/_run_cafa_eval_driver.py::_run_cafaeval_for_setting",
+      "kind": "method",
+      "path": "protea/core/operations/_run_cafa_eval_driver.py",
+      "name": "_run_cafaeval_for_setting",
+      "line": 85,
+      "metric": 73,
+      "threshold": 60
+    },
+    {
       "key": "method::protea/core/operations/_run_cafa_reranker_loader.py::load_reranker_models_for_payload",
       "kind": "method",
       "path": "protea/core/operations/_run_cafa_reranker_loader.py",
@@ -399,7 +408,7 @@
       "path": "protea/core/operations/run_cafa_evaluation.py",
       "name": "RunCafaEvaluationOperation.execute",
       "line": 171,
-      "metric": 342,
+      "metric": 265,
       "threshold": 60
     },
     {
@@ -589,6 +598,33 @@
       "name": "write_predictions_per_aspect",
       "line": 206,
       "metric": 7,
+      "threshold": 6
+    },
+    {
+      "key": "params::protea/core/operations/_run_cafa_eval_driver.py::_write_setting_predictions",
+      "kind": "params",
+      "path": "protea/core/operations/_run_cafa_eval_driver.py",
+      "name": "_write_setting_predictions",
+      "line": 32,
+      "metric": 9,
+      "threshold": 6
+    },
+    {
+      "key": "params::protea/core/operations/_run_cafa_eval_driver.py::_run_cafaeval_for_setting",
+      "kind": "params",
+      "path": "protea/core/operations/_run_cafa_eval_driver.py",
+      "name": "_run_cafaeval_for_setting",
+      "line": 85,
+      "metric": 9,
+      "threshold": 6
+    },
+    {
+      "key": "params::protea/core/operations/_run_cafa_eval_driver.py::evaluate_all_settings",
+      "kind": "params",
+      "path": "protea/core/operations/_run_cafa_eval_driver.py",
+      "name": "evaluate_all_settings",
+      "line": 160,
+      "metric": 18,
       "threshold": 6
     },
     {
