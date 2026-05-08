@@ -29,7 +29,6 @@ from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.go_term_relationship import GOTermRelationship
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
-from protea.infrastructure.orm.models.job import Job, JobEvent
 from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
 from protea.infrastructure.queue.publisher import publish_job
@@ -49,6 +48,7 @@ from protea.services.annotations_service import (
 from protea.services.annotations_service import (
     set_snapshot_ia_url as _set_snapshot_ia_url_service,
 )
+from protea.services.jobs_service import enqueue_job
 
 router = APIRouter(prefix="/annotations", tags=["annotations"])
 
@@ -137,16 +137,11 @@ def load_ontology_snapshot(
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
 
     with session_scope(factory) as session:
-        job = Job(operation="load_ontology_snapshot", queue_name=_JOBS_QUEUE, payload=body)
-        session.add(job)
-        session.flush()
-        job_id = job.id
-        session.add(
-            JobEvent(
-                job_id=job_id,
-                event="job.created",
-                fields={"operation": "load_ontology_snapshot", "queue": _JOBS_QUEUE},
-            )
+        job_id = enqueue_job(
+            session,
+            operation="load_ontology_snapshot",
+            queue_name=_JOBS_QUEUE,
+            payload=body,
         )
 
     publish_job(amqp_url, _JOBS_QUEUE, job_id)
@@ -216,16 +211,11 @@ def load_goa_annotations(
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
 
     with session_scope(factory) as session:
-        job = Job(operation="load_goa_annotations", queue_name=_JOBS_QUEUE, payload=body)
-        session.add(job)
-        session.flush()
-        job_id = job.id
-        session.add(
-            JobEvent(
-                job_id=job_id,
-                event="job.created",
-                fields={"operation": "load_goa_annotations", "queue": _JOBS_QUEUE},
-            )
+        job_id = enqueue_job(
+            session,
+            operation="load_goa_annotations",
+            queue_name=_JOBS_QUEUE,
+            payload=body,
         )
 
     publish_job(amqp_url, _JOBS_QUEUE, job_id)
@@ -246,16 +236,11 @@ def load_quickgo_annotations(
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
 
     with session_scope(factory) as session:
-        job = Job(operation="load_quickgo_annotations", queue_name=_JOBS_QUEUE, payload=body)
-        session.add(job)
-        session.flush()
-        job_id = job.id
-        session.add(
-            JobEvent(
-                job_id=job_id,
-                event="job.created",
-                fields={"operation": "load_quickgo_annotations", "queue": _JOBS_QUEUE},
-            )
+        job_id = enqueue_job(
+            session,
+            operation="load_quickgo_annotations",
+            queue_name=_JOBS_QUEUE,
+            payload=body,
         )
 
     publish_job(amqp_url, _JOBS_QUEUE, job_id)
@@ -283,16 +268,11 @@ def generate_evaluation_set(
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
 
     with session_scope(factory) as session:
-        job = Job(operation="generate_evaluation_set", queue_name=_JOBS_QUEUE, payload=body)
-        session.add(job)
-        session.flush()
-        job_id = job.id
-        session.add(
-            JobEvent(
-                job_id=job_id,
-                event="job.created",
-                fields={"operation": "generate_evaluation_set", "queue": _JOBS_QUEUE},
-            )
+        job_id = enqueue_job(
+            session,
+            operation="generate_evaluation_set",
+            queue_name=_JOBS_QUEUE,
+            payload=body,
         )
 
     publish_job(amqp_url, _JOBS_QUEUE, job_id)
@@ -575,16 +555,11 @@ def run_cafa_evaluation(
             ).scalar_one_or_none()
             if baseline is not None:
                 body = {**body, "scoring_config_id": str(baseline.id)}
-        job = Job(operation="run_cafa_evaluation", queue_name=_EVALUATIONS_QUEUE, payload=body)
-        session.add(job)
-        session.flush()
-        job_id = job.id
-        session.add(
-            JobEvent(
-                job_id=job_id,
-                event="job.created",
-                fields={"operation": "run_cafa_evaluation", "queue": _EVALUATIONS_QUEUE},
-            )
+        job_id = enqueue_job(
+            session,
+            operation="run_cafa_evaluation",
+            queue_name=_EVALUATIONS_QUEUE,
+            payload=body,
         )
 
     publish_job(amqp_url, _EVALUATIONS_QUEUE, job_id)
