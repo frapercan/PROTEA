@@ -67,6 +67,39 @@ class CAFAMetrics:
         }
 
 
+def _evaluate_at_threshold(
+    threshold: float,
+    ground_truth: dict[str, set[str]],
+    preds_by_protein: dict[str, list[tuple[float, str]]],
+    total_gt_terms: int,
+) -> PRPoint:
+    """Single-threshold pass over the per-protein prediction lists.
+
+    Returns the ``PRPoint`` (precision / recall / F1) at ``threshold``;
+    callers fold it into the PR curve and track the running Fmax.
+    """
+    tp_sum = 0
+    pred_sum = 0
+    rc_num = 0
+    for acc, true_terms in ground_truth.items():
+        predicted = {go for score, go in preds_by_protein.get(acc, []) if score >= threshold}
+        tp = len(predicted & true_terms)
+        rc_num += tp
+        if predicted:
+            tp_sum += tp
+            pred_sum += len(predicted)
+
+    pr = (tp_sum / pred_sum) if pred_sum > 0 else 0.0
+    rc = (rc_num / total_gt_terms) if total_gt_terms > 0 else 0.0
+    f1 = (2 * pr * rc / (pr + rc)) if (pr + rc) > 0 else 0.0
+    return PRPoint(
+        threshold=round(threshold, 4),
+        precision=round(pr, 6),
+        recall=round(rc, 6),
+        f1=round(f1, 6),
+    )
+
+
 def compute_cafa_metrics(
     scored_predictions: list[dict[str, Any]],
     evaluation_data: EvaluationData,
@@ -103,42 +136,18 @@ def compute_cafa_metrics(
             preds_by_protein[acc].append((float(p["score"]), str(p["go_id"])))
 
     n_gt = len(ground_truth)
+    total_gt_terms = sum(len(v) for v in ground_truth.values())
     n_predicted = len(preds_by_protein)
 
-    thresholds = np.linspace(0.0, 1.0, _N_THRESHOLDS)
     curve: list[PRPoint] = []
     best_f = 0.0
     best_t = 0.0
-
-    for t in thresholds:
-        t = float(t)
-        tp_sum = 0
-        pred_sum = 0
-        rc_num = 0
-        n_with_preds = 0
-
-        for acc, true_terms in ground_truth.items():
-            predicted = {go for score, go in preds_by_protein.get(acc, []) if score >= t}
-            tp = len(predicted & true_terms)
-            rc_num += tp
-            if predicted:
-                n_with_preds += 1
-                tp_sum += tp
-                pred_sum += len(predicted)
-
-        pr = (tp_sum / pred_sum) if pred_sum > 0 else 0.0
-        rc = (rc_num / sum(len(v) for v in ground_truth.values())) if n_gt > 0 else 0.0
-        f1 = (2 * pr * rc / (pr + rc)) if (pr + rc) > 0 else 0.0
-
-        curve.append(
-            PRPoint(
-                threshold=round(t, 4), precision=round(pr, 6), recall=round(rc, 6), f1=round(f1, 6)
-            )
-        )
-
-        if f1 > best_f:
-            best_f = f1
-            best_t = t
+    for t in np.linspace(0.0, 1.0, _N_THRESHOLDS):
+        point = _evaluate_at_threshold(float(t), ground_truth, preds_by_protein, total_gt_terms)
+        curve.append(point)
+        if point.f1 > best_f:
+            best_f = point.f1
+            best_t = point.threshold
 
     # AUC-PR: trapezoidal integration (recall on x-axis, precision on y-axis)
     recalls = [p.recall for p in curve]
