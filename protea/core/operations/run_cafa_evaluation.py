@@ -668,4 +668,3 @@ class RunCafaEvaluationOperation:
 
     def _parse_results(self, dfs_best: dict) -> dict[str, Any]:
         return _artifacts.parse_results(dfs_best)
-
