@@ -31,17 +31,37 @@ function DropdownGroup({ group, pathname }: { group: NavGroup; pathname: string 
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className={`flex items-center gap-1 px-2 py-1 rounded transition-colors text-sm ${
-          groupActive ? "font-semibold text-blue-600" : "text-gray-500 hover:text-gray-900"
+        className={`relative flex items-center gap-1.5 px-3 h-10 rounded-lg text-[14px] font-medium transition-all ${
+          groupActive
+            ? "text-blue-700 bg-blue-50/70"
+            : open
+              ? "text-slate-900 bg-slate-100/80"
+              : "text-slate-600 hover:text-slate-900 hover:bg-slate-100/70"
         }`}
       >
         {group.title}
-        <svg className={`w-3 h-3 transition-transform ${open ? "rotate-180" : ""}`} fill="none" viewBox="0 0 12 12" stroke="currentColor" strokeWidth="2">
+        <svg
+          className={`w-3.5 h-3.5 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+          fill="none"
+          viewBox="0 0 12 12"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
           <path d="M3 4.5l3 3 3-3" />
         </svg>
+        {groupActive && (
+          <span className="absolute left-3 right-3 -bottom-[1px] h-[2px] rounded-full bg-blue-600" />
+        )}
       </button>
       {open && (
-        <div className="absolute top-full left-0 mt-1 py-1 bg-white rounded-lg border shadow-lg z-50 min-w-[180px]">
+        <div className="absolute top-full left-0 mt-2 py-2 bg-white rounded-xl border border-slate-200 shadow-xl z-50 min-w-[220px] animate-[fadeIn_120ms_ease-out]">
+          <div className="px-3 pb-1.5 mb-1 border-b border-slate-100">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+              {group.title}
+            </p>
+          </div>
           {group.items.map(({ href, label }) => {
             const active = stripped === href || stripped.startsWith(href + "/");
             return (
@@ -49,12 +69,17 @@ function DropdownGroup({ group, pathname }: { group: NavGroup; pathname: string 
                 key={href}
                 href={href}
                 onClick={() => setOpen(false)}
-                className={`block px-4 py-2 text-sm transition-colors ${
+                className={`flex items-center gap-2 mx-1.5 px-3 py-2 rounded-lg text-[13px] transition-colors ${
                   active
-                    ? "font-semibold text-blue-600 bg-blue-50"
-                    : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                    ? "font-semibold text-blue-700 bg-blue-50"
+                    : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
                 }`}
               >
+                <span
+                  className={`h-1.5 w-1.5 rounded-full transition-colors ${
+                    active ? "bg-blue-600" : "bg-slate-300"
+                  }`}
+                />
                 {label}
               </Link>
             );
@@ -105,30 +130,28 @@ export function NavLinks({ mobileExtras }: { mobileExtras?: React.ReactNode }) {
     },
   ];
 
-  const ALL_LINKS = NAV_GROUPS.flatMap((g) => g.items);
-
   // Close menu on route change
   useEffect(() => { setOpen(false); }, [pathname]);
 
   return (
     <>
       {/* Desktop nav */}
-      <nav className="hidden lg:flex items-center gap-1 text-sm">
+      <nav className="hidden lg:flex items-center gap-1">
         {NAV_GROUPS.map((group, gi) => (
-          <span key={gi} className="flex items-center">
-            {gi > 0 && <span className="mx-1.5 text-gray-200">|</span>}
-            <DropdownGroup group={group} pathname={pathname} />
-          </span>
+          <DropdownGroup key={gi} group={group} pathname={pathname} />
         ))}
-        <span className="mx-1.5 text-gray-200">|</span>
-        <DocLinks />
+        <span className="mx-2 h-5 w-px bg-slate-200" />
+        <div className="flex items-center gap-1 text-[13px] text-slate-500">
+          <DocLinks />
+        </div>
       </nav>
 
       {/* Mobile hamburger */}
       <button
-        className="lg:hidden flex flex-col justify-center items-center w-10 h-10 gap-1.5 rounded text-gray-600 hover:bg-gray-100 transition-colors"
+        className="lg:hidden ml-auto flex flex-col justify-center items-center w-11 h-11 gap-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
         onClick={() => setOpen((v) => !v)}
         aria-label="Toggle menu"
+        aria-expanded={open}
       >
         <span className={`block h-0.5 w-5 bg-current transition-all duration-200 ${open ? "rotate-45 translate-y-2" : ""}`} />
         <span className={`block h-0.5 w-5 bg-current transition-all duration-200 ${open ? "opacity-0" : ""}`} />
@@ -137,12 +160,11 @@ export function NavLinks({ mobileExtras }: { mobileExtras?: React.ReactNode }) {
 
       {/* Mobile dropdown */}
       {open && (
-        <div className="lg:hidden absolute left-0 right-0 top-full z-50 border-b bg-white shadow-lg">
-          <nav className="px-4 py-3 flex flex-col gap-0.5">
+        <div className="lg:hidden absolute left-0 right-0 top-full z-50 border-b border-slate-200 bg-white shadow-xl max-h-[calc(100vh-4rem)] overflow-y-auto">
+          <nav className="px-4 py-4 flex flex-col gap-1">
             {NAV_GROUPS.map((group, gi) => (
-              <div key={gi}>
-                {gi > 0 && <div className="border-t my-1" />}
-                <div className="px-3 py-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wider">
+              <div key={gi} className={gi > 0 ? "mt-3 pt-3 border-t border-slate-100" : ""}>
+                <div className="px-3 py-1.5 text-[10px] font-semibold text-slate-400 uppercase tracking-[0.14em]">
                   {group.title}
                 </div>
                 {group.items.map(({ href, label }) => {
@@ -152,23 +174,28 @@ export function NavLinks({ mobileExtras }: { mobileExtras?: React.ReactNode }) {
                     <Link
                       key={href}
                       href={href}
-                      className={`block px-3 py-2 rounded-md text-sm transition-colors ${
+                      className={`flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-[14px] transition-colors ${
                         active
-                          ? "font-semibold text-blue-600 bg-blue-50"
-                          : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                          ? "font-semibold text-blue-700 bg-blue-50"
+                          : "text-slate-700 hover:bg-slate-50"
                       }`}
                     >
+                      <span
+                        className={`h-1.5 w-1.5 rounded-full ${
+                          active ? "bg-blue-600" : "bg-slate-300"
+                        }`}
+                      />
                       {label}
                     </Link>
                   );
                 })}
               </div>
             ))}
-            <div className="mt-1 pt-2 border-t flex gap-4 px-3 text-sm text-gray-500">
+            <div className="mt-3 pt-3 border-t border-slate-100 flex gap-5 px-3 text-[13px] text-slate-500">
               <DocLinks />
             </div>
             {mobileExtras && (
-              <div className="mt-1 pt-2 border-t px-3 pb-1 flex items-center justify-between gap-3">
+              <div className="mt-3 pt-3 border-t border-slate-100 px-3 pb-1 flex items-center justify-between gap-3">
                 {mobileExtras}
               </div>
             )}

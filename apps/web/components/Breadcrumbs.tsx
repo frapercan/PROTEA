@@ -14,6 +14,9 @@ const ROUTE_LABELS: Record<string, string> = {
   reranker: "Re-ranker",
   "query-sets": "Query Sets",
   maintenance: "Maintenance",
+  benchmark: "Benchmark",
+  stack: "Stack",
+  support: "Support",
 };
 
 export function Breadcrumbs() {
@@ -41,19 +44,37 @@ export function Breadcrumbs() {
   }
 
   return (
-    <nav className="flex items-center gap-1 text-xs text-gray-400 mb-3" aria-label="Breadcrumb">
-      {crumbs.map((crumb, i) => (
-        <span key={crumb.href} className="flex items-center gap-1">
-          {i > 0 && <span>/</span>}
-          {i < crumbs.length - 1 ? (
-            <Link href={crumb.href} className="hover:text-gray-600 transition-colors">
-              {crumb.label}
-            </Link>
-          ) : (
-            <span className="text-gray-600 font-medium">{crumb.label}</span>
-          )}
-        </span>
-      ))}
+    <nav className="flex items-center flex-wrap gap-1.5 text-sm text-slate-500 mb-5" aria-label="Breadcrumb">
+      {crumbs.map((crumb, i) => {
+        const isLast = i === crumbs.length - 1;
+        return (
+          <span key={crumb.href} className="flex items-center gap-1.5">
+            {i > 0 && (
+              <svg
+                className="w-3.5 h-3.5 text-slate-300"
+                fill="none"
+                viewBox="0 0 14 14"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M5 3l4 4-4 4" />
+              </svg>
+            )}
+            {isLast ? (
+              <span className="text-slate-900 font-semibold">{crumb.label}</span>
+            ) : (
+              <Link
+                href={crumb.href}
+                className="rounded-md px-1.5 py-0.5 hover:bg-slate-100 hover:text-slate-700 transition-colors"
+              >
+                {crumb.label}
+              </Link>
+            )}
+          </span>
+        );
+      })}
     </nav>
   );
 }

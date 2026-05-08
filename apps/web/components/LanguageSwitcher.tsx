@@ -42,17 +42,20 @@ export function LanguageSwitcher() {
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen(!open)}
-        className="px-2 py-1.5 text-xs rounded transition-colors min-h-[36px] min-w-[36px] flex items-center justify-center bg-blue-100 text-blue-700 font-semibold"
+        className="flex h-9 min-w-[44px] items-center justify-center gap-1 rounded-lg bg-slate-100 px-2.5 text-[12px] font-semibold text-slate-700 hover:bg-slate-200 hover:text-slate-900 transition-colors"
+        aria-label="Switch language"
+        aria-expanded={open}
       >
-        {LOCALE_LABELS[locale]}
+        <span className="text-[13px]">🌐</span>
+        <span>{LOCALE_LABELS[locale]}</span>
       </button>
       {open && (
-        <div className="absolute right-0 mt-1 flex flex-col gap-0.5 bg-white border border-gray-200 rounded shadow-lg p-1 z-50">
+        <div className="absolute right-0 mt-2 flex flex-col gap-0.5 bg-white border border-slate-200 rounded-xl shadow-xl p-1.5 z-50 min-w-[80px]">
           {otherLocales.map((l) => (
             <button
               key={l}
               onClick={() => switchLocale(l)}
-              className="px-3 py-1.5 text-xs rounded transition-colors min-h-[36px] min-w-[36px] flex items-center justify-center text-gray-500 hover:text-gray-700 hover:bg-gray-100 whitespace-nowrap"
+              className="px-3 py-1.5 text-[12px] font-medium rounded-lg transition-colors text-slate-600 hover:bg-slate-100 hover:text-slate-900 whitespace-nowrap text-left"
             >
               {LOCALE_LABELS[l]}
             </button>
