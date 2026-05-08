@@ -767,19 +767,19 @@ class TestCsrLookup:
             "P1": [{"go_term_id": 10, "qualifier": "enables", "evidence_code": "IDA"}],
             "P2": [{"go_term_id": 20, "qualifier": None, "evidence_code": "IEA"}],
         }
-        gtids, quals, ecodes, offsets = _build_anno_csr(accessions, go_map)
+        csr = _build_anno_csr(accessions, go_map)
         acc_to_anno_idx = {acc: i for i, acc in enumerate(accessions)}
 
-        result = _csr_lookup({"P1"}, accessions, acc_to_anno_idx, gtids, quals, ecodes, offsets)
+        result = _csr_lookup({"P1"}, acc_to_anno_idx, csr)
         assert "P1" in result
         assert len(result["P1"]) == 1
         assert result["P1"][0]["go_term_id"] == 10
 
     def test_missing_accession_ignored(self) -> None:
-        gtids, quals, ecodes, offsets = _build_anno_csr(["P1"], {"P1": [{"go_term_id": 10}]})
+        csr = _build_anno_csr(["P1"], {"P1": [{"go_term_id": 10}]})
         acc_to_anno_idx = {"P1": 0}
 
-        result = _csr_lookup({"UNKNOWN"}, ["P1"], acc_to_anno_idx, gtids, quals, ecodes, offsets)
+        result = _csr_lookup({"UNKNOWN"}, acc_to_anno_idx, csr)
         assert result == {}
 
 

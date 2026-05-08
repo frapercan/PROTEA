@@ -11,8 +11,8 @@
       "kind": "class",
       "path": "protea/core/operations/predict_go_terms.py",
       "name": "PredictGOTermsBatchOperation",
-      "line": 482,
-      "metric": 1428,
+      "line": 463,
+      "metric": 1421,
       "threshold": 500
     },
     {
@@ -20,8 +20,8 @@
       "kind": "class",
       "path": "protea/core/training_dump_helpers.py",
       "name": "TrainRerankerAutoOperation",
-      "line": 1136,
-      "metric": 750,
+      "line": 1133,
+      "metric": 770,
       "threshold": 500
     },
     {
@@ -39,7 +39,7 @@
       "path": "protea/core/operations/predict_go_terms.py",
       "name": "",
       "line": 0,
-      "metric": 1978,
+      "metric": 1952,
       "threshold": 800
     },
     {
@@ -48,7 +48,7 @@
       "path": "protea/core/training_dump_helpers.py",
       "name": "",
       "line": 0,
-      "metric": 1885,
+      "metric": 1902,
       "threshold": 800
     },
     {
@@ -155,8 +155,8 @@
       "kind": "method",
       "path": "protea/core/operations/_run_cafa_artifacts.py",
       "name": "write_predictions",
-      "line": 106,
-      "metric": 61,
+      "line": 86,
+      "metric": 66,
       "threshold": 60
     },
     {
@@ -164,8 +164,8 @@
       "kind": "method",
       "path": "protea/core/operations/_run_cafa_artifacts.py",
       "name": "write_predictions_per_aspect",
-      "line": 219,
-      "metric": 72,
+      "line": 206,
+      "metric": 74,
       "threshold": 60
     },
     {
@@ -313,6 +313,15 @@
       "threshold": 60
     },
     {
+      "key": "method::protea/core/operations/load_ontology_snapshot.py::LoadOntologySnapshotOperation.execute",
+      "kind": "method",
+      "path": "protea/core/operations/load_ontology_snapshot.py",
+      "name": "LoadOntologySnapshotOperation.execute",
+      "line": 59,
+      "metric": 154,
+      "threshold": 60
+    },
+    {
       "key": "method::protea/core/operations/load_quickgo_annotations.py::LoadQuickGOAnnotationsOperation.execute",
       "kind": "method",
       "path": "protea/core/operations/load_quickgo_annotations.py",
@@ -326,7 +335,7 @@
       "kind": "method",
       "path": "protea/core/operations/predict_go_terms.py",
       "name": "PredictGOTermsOperation.execute",
-      "line": 289,
+      "line": 270,
       "metric": 144,
       "threshold": 60
     },
@@ -335,8 +344,8 @@
       "kind": "method",
       "path": "protea/core/operations/predict_go_terms.py",
       "name": "PredictGOTermsBatchOperation.execute",
-      "line": 503,
-      "metric": 340,
+      "line": 484,
+      "metric": 338,
       "threshold": 60
     },
     {
@@ -344,7 +353,7 @@
       "kind": "method",
       "path": "protea/core/operations/predict_go_terms.py",
       "name": "PredictGOTermsBatchOperation._apply_reranker_if_aligned",
-      "line": 846,
+      "line": 825,
       "metric": 103,
       "threshold": 60
     },
@@ -353,7 +362,7 @@
       "kind": "method",
       "path": "protea/core/operations/predict_go_terms.py",
       "name": "PredictGOTermsBatchOperation._load_reference_data",
-      "line": 972,
+      "line": 951,
       "metric": 91,
       "threshold": 60
     },
@@ -362,8 +371,8 @@
       "kind": "method",
       "path": "protea/core/operations/predict_go_terms.py",
       "name": "PredictGOTermsBatchOperation._load_reference_data_per_aspect",
-      "line": 1064,
-      "metric": 175,
+      "line": 1043,
+      "metric": 173,
       "threshold": 60
     },
     {
@@ -371,8 +380,8 @@
       "kind": "method",
       "path": "protea/core/operations/predict_go_terms.py",
       "name": "PredictGOTermsBatchOperation._run_aspect_separated_knn",
-      "line": 1240,
-      "metric": 220,
+      "line": 1217,
+      "metric": 217,
       "threshold": 60
     },
     {
@@ -380,7 +389,7 @@
       "kind": "method",
       "path": "protea/core/operations/predict_go_terms.py",
       "name": "PredictGOTermsBatchOperation._load_annotations_for",
-      "line": 1546,
+      "line": 1520,
       "metric": 64,
       "threshold": 60
     },
@@ -389,7 +398,7 @@
       "kind": "method",
       "path": "protea/core/operations/predict_go_terms.py",
       "name": "PredictGOTermsBatchOperation._predict_batch",
-      "line": 1660,
+      "line": 1634,
       "metric": 167,
       "threshold": 60
     },
@@ -399,7 +408,7 @@
       "path": "protea/core/operations/run_cafa_evaluation.py",
       "name": "RunCafaEvaluationOperation.execute",
       "line": 174,
-      "metric": 265,
+      "metric": 263,
       "threshold": 60
     },
     {
@@ -425,7 +434,7 @@
       "kind": "method",
       "path": "protea/core/training_dump_helpers.py",
       "name": "_preload_all_embeddings",
-      "line": 182,
+      "line": 179,
       "metric": 73,
       "threshold": 60
     },
@@ -434,7 +443,7 @@
       "kind": "method",
       "path": "protea/core/training_dump_helpers.py",
       "name": "_build_reference_from_cache",
-      "line": 257,
+      "line": 254,
       "metric": 67,
       "threshold": 60
     },
@@ -443,7 +452,7 @@
       "kind": "method",
       "path": "protea/core/training_dump_helpers.py",
       "name": "_knn_transfer_and_label",
-      "line": 375,
+      "line": 372,
       "metric": 624,
       "threshold": 60
     },
@@ -452,8 +461,8 @@
       "kind": "method",
       "path": "protea/core/training_dump_helpers.py",
       "name": "TrainRerankerAutoOperation.execute",
-      "line": 1212,
-      "metric": 674,
+      "line": 1240,
+      "metric": 663,
       "threshold": 60
     },
     {
@@ -520,29 +529,38 @@
       "threshold": 6
     },
     {
-      "key": "params::protea/core/disk_cache.py::_save_anno_csr_to_disk",
-      "kind": "params",
-      "path": "protea/core/disk_cache.py",
-      "name": "_save_anno_csr_to_disk",
-      "line": 123,
-      "metric": 7,
-      "threshold": 6
-    },
-    {
-      "key": "params::protea/core/disk_cache.py::_csr_lookup",
-      "kind": "params",
-      "path": "protea/core/disk_cache.py",
-      "name": "_csr_lookup",
-      "line": 142,
-      "metric": 7,
-      "threshold": 6
-    },
-    {
       "key": "params::protea/core/feature_enricher.py::expand_predictions_to_ancestors",
       "kind": "params",
       "path": "protea/core/feature_enricher.py",
       "name": "expand_predictions_to_ancestors",
       "line": 129,
+      "metric": 7,
+      "threshold": 6
+    },
+    {
+      "key": "params::protea/core/operations/_run_cafa_artifacts.py::write_predictions",
+      "kind": "params",
+      "path": "protea/core/operations/_run_cafa_artifacts.py",
+      "name": "write_predictions",
+      "line": 86,
+      "metric": 9,
+      "threshold": 6
+    },
+    {
+      "key": "params::protea/core/operations/_run_cafa_artifacts.py::write_predictions_reranked",
+      "kind": "params",
+      "path": "protea/core/operations/_run_cafa_artifacts.py",
+      "name": "write_predictions_reranked",
+      "line": 154,
+      "metric": 8,
+      "threshold": 6
+    },
+    {
+      "key": "params::protea/core/operations/_run_cafa_artifacts.py::write_predictions_per_aspect",
+      "kind": "params",
+      "path": "protea/core/operations/_run_cafa_artifacts.py",
+      "name": "write_predictions_per_aspect",
+      "line": 206,
       "metric": 7,
       "threshold": 6
     },
@@ -565,12 +583,30 @@
       "threshold": 6
     },
     {
+      "key": "params::protea/core/operations/predict_go_terms.py::PredictGOTermsBatchOperation._run_aspect_separated_knn",
+      "kind": "params",
+      "path": "protea/core/operations/predict_go_terms.py",
+      "name": "PredictGOTermsBatchOperation._run_aspect_separated_knn",
+      "line": 1217,
+      "metric": 8,
+      "threshold": 6
+    },
+    {
       "key": "params::protea/core/retry.py::with_retry",
       "kind": "params",
       "path": "protea/core/retry.py",
       "name": "with_retry",
       "line": 67,
       "metric": 7,
+      "threshold": 6
+    },
+    {
+      "key": "params::protea/core/training_dump_helpers.py::TrainRerankerAutoOperation._dump_frozen_dataset",
+      "kind": "params",
+      "path": "protea/core/training_dump_helpers.py",
+      "name": "TrainRerankerAutoOperation._dump_frozen_dataset",
+      "line": 1190,
+      "metric": 11,
       "threshold": 6
     },
     {
