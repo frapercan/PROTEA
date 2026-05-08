@@ -404,8 +404,6 @@ def get_go_term_distribution(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-
-
 @router.get(
     "/prediction-sets/{set_id}/predictions.tsv",
     summary="Download predictions as TSV",
