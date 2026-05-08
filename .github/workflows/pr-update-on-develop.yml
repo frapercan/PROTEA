@@ -1,0 +1,33 @@
+name: pr-update-on-develop
+
+on:
+  push:
+    branches: [develop]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-prs:
+    # When develop receives a new commit, every open PR targeting
+    # develop becomes "out-of-date" under the strict branch-protection
+    # mode. This job rebuilds the merge base for each open PR so CI
+    # re-runs against the new develop and (combined with auto-merge)
+    # the PR can land without manual "Update branch" clicks.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update every open PR targeting develop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr list \
+            --repo "${{ github.repository }}" \
+            --base develop \
+            --state open \
+            --json number \
+            --jq '.[].number' \
+          | while read pr; do
+              echo "Updating PR #$pr"
+              gh pr update-branch "$pr" --repo "${{ github.repository }}" || true
+            done
