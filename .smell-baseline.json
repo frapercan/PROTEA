@@ -21,7 +21,7 @@
       "path": "protea/core/training_dump_helpers.py",
       "name": "TrainRerankerAutoOperation",
       "line": 1105,
-      "metric": 763,
+      "metric": 766,
       "threshold": 500
     },
     {
@@ -48,7 +48,7 @@
       "path": "protea/core/training_dump_helpers.py",
       "name": "",
       "line": 0,
-      "metric": 1867,
+      "metric": 1870,
       "threshold": 800
     },
     {
@@ -416,8 +416,8 @@
       "kind": "method",
       "path": "protea/core/parquet_export.py",
       "name": "export_reranker_parquets",
-      "line": 82,
-      "metric": 180,
+      "line": 116,
+      "metric": 162,
       "threshold": 60
     },
     {
@@ -461,7 +461,7 @@
       "kind": "method",
       "path": "protea/core/training_dump_helpers.py",
       "name": "TrainRerankerAutoOperation.execute",
-      "line": 1209,
+      "line": 1212,
       "metric": 659,
       "threshold": 60
     },
@@ -634,15 +634,6 @@
       "name": "PredictGOTermsBatchOperation._predict_batch",
       "line": 1600,
       "metric": 11,
-      "threshold": 6
-    },
-    {
-      "key": "params::protea/core/parquet_export.py::export_reranker_parquets",
-      "kind": "params",
-      "path": "protea/core/parquet_export.py",
-      "name": "export_reranker_parquets",
-      "line": 82,
-      "metric": 16,
       "threshold": 6
     },
     {

@@ -22,6 +22,7 @@ import hashlib
 import json
 import logging
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,39 @@ logger = logging.getLogger(__name__)
 
 _ASPECT_NAMES = {"P": "bpo", "F": "mfo", "C": "cco"}
 _CATEGORIES = ("nk", "lk", "pk")
+
+
+@dataclass(frozen=True)
+class ParquetExportContext:
+    """Bundle of inputs ``export_reranker_parquets`` consumes.
+
+    Groups the 15 per-call inputs (identity, source shards, publishing
+    options) so the entry-point signature stays under flake8-bugbear's
+    parameter ceiling. Keep this dataclass authoritative when adding
+    new options.
+    """
+
+    # Source shards
+    stage_dir: Path
+    split_files: dict[str, list[Path]]
+    valid_split_versions: list[tuple[int, int]]
+    test_files: dict[str, Path | None]
+    test_old_v: int
+    test_new_v: int
+
+    # Dataset identity
+    name: str
+    k: int
+    embedding_config_id: str
+    ontology_snapshot_id: str
+    annotation_source: str
+
+    # Publishing
+    store: ArtifactStore | None = None
+    key_prefix: str = ""
+    producer_version: str | None = None
+    producer_git_sha: str | None = None
+    validate_with_contracts: bool = True
 
 
 def resolve_protea_git_sha() -> str | None:
@@ -79,57 +113,39 @@ def _validate_manifest_with_contracts(manifest: dict[str, Any]) -> None:
     ManifestV1.model_validate(manifest)
 
 
-def export_reranker_parquets(
-    *,
-    stage_dir: Path,
-    split_files: dict[str, list[Path]],
-    valid_split_versions: list[tuple[int, int]],
-    test_files: dict[str, Path | None],
-    test_old_v: int,
-    test_new_v: int,
-    name: str,
-    k: int,
-    embedding_config_id: str,
-    ontology_snapshot_id: str,
-    annotation_source: str,
-    store: ArtifactStore | None = None,
-    key_prefix: str = "",
-    producer_version: str | None = None,
-    producer_git_sha: str | None = None,
-    validate_with_contracts: bool = True,
-) -> dict[str, Any]:
+def export_reranker_parquets(ctx: ParquetExportContext) -> dict[str, Any]:
     """Consolidate per-cat per-split parquet shards into the frozen
     dataset layout and optionally publish via an ``ArtifactStore``.
 
-    Parameters
-    ----------
-    stage_dir
-        Directory used as the local staging area. The three output files
-        are written here regardless of ``store``; when ``store`` is given
-        they are additionally uploaded under ``key_prefix``.
-    split_files
-        Per-category list of training shard paths, parallel to
-        ``valid_split_versions``.
-    valid_split_versions
-        ``(v_old, v_new)`` pairs for each training shard position.
-    test_files
-        Per-category test shard path (may be ``None`` when the category
-        has no test rows).
-    store
-        When provided, the three consolidated files are uploaded under
-        ``f"{key_prefix}train.parquet"`` etc. The returned dict includes
-        the resulting URIs.
-    key_prefix
-        Prefix for store keys (should typically end with ``/``).
-    producer_version
-        PROTEA version string recorded in the manifest (optional).
-    producer_git_sha
-        PROTEA git HEAD at export time, recorded in the manifest
-        (optional).
-    validate_with_contracts
-        If True, best-effort validate the manifest dict against the lab's
-        ``ManifestV1`` before writing. Silent if the lab isn't installed.
+    All inputs live on :class:`ParquetExportContext`. Notable fields:
+
+    - ``stage_dir``: local staging area (always written here; uploaded
+      under ``key_prefix`` if ``store`` is set).
+    - ``split_files``: per-category training shard paths, parallel to
+      ``valid_split_versions``.
+    - ``test_files``: per-category test shard path (may be ``None``).
+    - ``store`` / ``key_prefix``: optional artifact-store upload.
+    - ``producer_version`` / ``producer_git_sha``: manifest provenance.
+    - ``validate_with_contracts``: best-effort validate against the
+      lab's ``ManifestV1`` before writing.
     """
+    stage_dir = ctx.stage_dir
+    split_files = ctx.split_files
+    valid_split_versions = ctx.valid_split_versions
+    test_files = ctx.test_files
+    test_old_v = ctx.test_old_v
+    test_new_v = ctx.test_new_v
+    name = ctx.name
+    k = ctx.k
+    embedding_config_id = ctx.embedding_config_id
+    ontology_snapshot_id = ctx.ontology_snapshot_id
+    annotation_source = ctx.annotation_source
+    store = ctx.store
+    key_prefix = ctx.key_prefix
+    producer_version = ctx.producer_version
+    producer_git_sha = ctx.producer_git_sha
+    validate_with_contracts = ctx.validate_with_contracts
+
     stage_dir.mkdir(parents=True, exist_ok=True)
     aspect_norm = dict(_ASPECT_NAMES)
 
