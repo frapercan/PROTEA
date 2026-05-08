@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -109,6 +110,37 @@ _STORE_FLOAT_KEYS: tuple[str, ...] = (
     "neighbor_mean_distance",
     *_NEW_V6_FEATURE_KEYS,
 )
+
+
+@dataclass(frozen=True)
+class BatchPredictContext:
+    """Inputs for ``PredictGOTermsBatchOperation._predict_batch``.
+
+    Bundles the per-batch query/reference data and optional enrichment
+    maps so the entry-point signature stays under flake8-bugbear's
+    parameter ceiling (master plan v3.2 §3 — ``param_count`` >6).
+    The payload ``p`` and ``prediction_set_id`` are configuration-shaped
+    and could live alongside; keeping them on the context too lets
+    callers pass a single value.
+
+    ``ref_data`` must have keys ``accessions``, ``embeddings``, and ``go_map``.
+    ``neighbors`` may be pre-computed (KNN already done by ``execute()``);
+    when ``None``, ``_predict_batch`` runs KNN itself.
+    """
+
+    query_accessions: list[str]
+    query_embeddings: np.ndarray
+    ref_data: dict[str, Any]
+    prediction_set_id: uuid.UUID
+    # ``PredictGOTermsBatchPayload`` is imported below; the
+    # ``from __future__ import annotations`` directive keeps this
+    # annotation as a string until evaluated lazily.
+    payload: PredictGOTermsBatchPayload
+    neighbors: list[list[tuple[str, float]]] | None = None
+    ref_sequences: dict[str, str] = field(default_factory=dict)
+    query_sequences: dict[str, str] = field(default_factory=dict)
+    ref_tax_ids: dict[str, int | None] = field(default_factory=dict)
+    query_tax_ids: dict[str, int | None] = field(default_factory=dict)
 
 
 def _clean_float(value: Any) -> Any:
@@ -585,16 +617,18 @@ class PredictGOTermsBatchOperation:
                 "go_map": go_map,
             }
             prediction_dicts, neighbors, pair_features = self._predict_batch(
-                valid_accessions,
-                query_embeddings,
-                ref_data_with_annotations,
-                prediction_set_id,
-                p,
-                neighbors=neighbors,
-                ref_sequences=ref_sequences,
-                query_sequences=query_sequences,
-                ref_tax_ids=ref_tax_ids,
-                query_tax_ids=query_tax_ids,
+                BatchPredictContext(
+                    query_accessions=valid_accessions,
+                    query_embeddings=query_embeddings,
+                    ref_data=ref_data_with_annotations,
+                    prediction_set_id=prediction_set_id,
+                    payload=p,
+                    neighbors=neighbors,
+                    ref_sequences=ref_sequences,
+                    query_sequences=query_sequences,
+                    ref_tax_ids=ref_tax_ids,
+                    query_tax_ids=query_tax_ids,
+                )
             )
             if p.compute_v6_features:
                 # Unified mode: collapse to a single synthetic aspect key so the
@@ -1599,17 +1633,7 @@ class PredictGOTermsBatchOperation:
 
     def _predict_batch(
         self,
-        query_accessions: list[str],
-        query_embeddings: np.ndarray,
-        ref_data: dict[str, Any],
-        prediction_set_id: uuid.UUID,
-        p: PredictGOTermsBatchPayload,
-        *,
-        neighbors: list[list[tuple[str, float]]] | None = None,
-        ref_sequences: dict[str, str] | None = None,
-        query_sequences: dict[str, str] | None = None,
-        ref_tax_ids: dict[str, int | None] | None = None,
-        query_tax_ids: dict[str, int | None] | None = None,
+        ctx: BatchPredictContext,
     ) -> tuple[
         list[dict[str, Any]],
         list[list[tuple[str, float]]],
@@ -1617,16 +1641,23 @@ class PredictGOTermsBatchOperation:
     ]:
         """Build serializable prediction dicts from KNN results.
 
-        ``ref_data`` must have keys ``accessions``, ``embeddings``, and ``go_map``.
-        If ``neighbors`` is provided (pre-computed by execute()), KNN is skipped.
-        Returns ``(predictions, neighbors, pair_features)`` — the last two are
-        used by ``_enrich_with_v6_features`` when ``compute_v6_features`` is on.
-        ``pair_features`` is keyed by ``(query_accession, ref_accession)``.
+        All inputs live on :class:`BatchPredictContext`. If
+        ``ctx.neighbors`` is provided (pre-computed by ``execute()``),
+        KNN is skipped. Returns ``(predictions, neighbors, pair_features)``;
+        the last two are used by ``_enrich_with_v6_features`` when
+        ``compute_v6_features`` is on. ``pair_features`` is keyed by
+        ``(query_accession, ref_accession)``.
         """
-        ref_sequences = ref_sequences or {}
-        query_sequences = query_sequences or {}
-        ref_tax_ids = ref_tax_ids or {}
-        query_tax_ids = query_tax_ids or {}
+        query_accessions = ctx.query_accessions
+        query_embeddings = ctx.query_embeddings
+        ref_data = ctx.ref_data
+        prediction_set_id = ctx.prediction_set_id
+        p = ctx.payload
+        ref_sequences = ctx.ref_sequences
+        query_sequences = ctx.query_sequences
+        ref_tax_ids = ctx.ref_tax_ids
+        query_tax_ids = ctx.query_tax_ids
+        neighbors = ctx.neighbors
 
         if neighbors is None:
             ref_emb = ref_data["embeddings"]
