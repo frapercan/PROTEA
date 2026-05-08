@@ -30,7 +30,6 @@ from protea.infrastructure.orm.models.annotation.ontology_snapshot import Ontolo
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
-from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 from protea.infrastructure.session import session_scope
 
 # VALID_* sets canonically defined in _embeddings_validation_helpers; re-exported
@@ -160,6 +159,13 @@ def config_to_dict(c: EmbeddingConfig, embedding_count: int | None = None) -> di
         out["embedding_count"] = embedding_count
     return out
 
+
+# cascade_delete_embedding_config + compute_go_term_distribution own the
+# heavy DB work; service-layer wrappers above keep the existence check.
+from protea.services._embeddings_admin_helpers import (  # noqa: E402
+    cascade_delete_embedding_config,
+    compute_go_term_distribution,
+)
 
 # PREDICTIONS_TSV_COLUMNS / _format_float / _format_optional canonically
 # defined in _embeddings_predictions_helpers; re-exported here so existing
@@ -388,55 +394,14 @@ def delete_embedding_config_cascade(
 ) -> dict[str, Any]:
     """Cascade-delete an :class:`EmbeddingConfig` and all linked rows.
 
-    Bulk-deletes the dependent ``GOPrediction`` (via PredictionSet),
-    ``PredictionSet``, and ``SequenceEmbedding`` rows; then the
-    config itself. Returns a summary dict with the deletion counts.
-
-    The ORM-level ``ondelete`` cascade would handle this on
-    ``session.delete(c)`` alone, but we bulk-delete explicitly here
-    so the response reports per-table counts the UI surfaces.
-
     Raises :class:`EntityNotFoundError` when ``config_id`` does not
-    resolve.
+    resolve. Body lives in
+    :func:`_embeddings_admin_helpers.cascade_delete_embedding_config`.
     """
     c = session.get(EmbeddingConfig, config_id)
     if c is None:
         raise EntityNotFoundError("EmbeddingConfig", config_id)
-
-    pred_set_ids = [
-        row[0]
-        for row in session.query(PredictionSet.id)
-        .filter(PredictionSet.embedding_config_id == config_id)
-        .all()
-    ]
-    deleted_predictions = 0
-    if pred_set_ids:
-        deleted_predictions = (
-            session.query(GOPrediction)
-            .filter(GOPrediction.prediction_set_id.in_(pred_set_ids))
-            .delete(synchronize_session=False)
-        )
-
-    deleted_prediction_sets = (
-        session.query(PredictionSet)
-        .filter(PredictionSet.embedding_config_id == config_id)
-        .delete(synchronize_session=False)
-    )
-
-    deleted_embeddings = (
-        session.query(SequenceEmbedding)
-        .filter(SequenceEmbedding.embedding_config_id == config_id)
-        .delete(synchronize_session=False)
-    )
-
-    session.delete(c)
-
-    return {
-        "deleted": str(config_id),
-        "embeddings_deleted": deleted_embeddings,
-        "prediction_sets_deleted": deleted_prediction_sets,
-        "predictions_deleted": deleted_predictions,
-    }
+    return cascade_delete_embedding_config(session, c)
 
 
 # list_proteins_in_prediction_set lives in _embeddings_proteins_helpers and
@@ -476,47 +441,16 @@ def get_go_term_distribution_data(
     """Return the most-frequent GO terms predicted in this set + per-aspect totals.
 
     Raises :class:`EntityNotFoundError` when the PredictionSet does
-    not resolve.
+    not resolve. Body lives in
+    :func:`_embeddings_admin_helpers.compute_go_term_distribution`.
     """
     if session.get(PredictionSet, prediction_set_id) is None:
         raise EntityNotFoundError("PredictionSet", prediction_set_id)
-
-    rows = (
-        session.query(
-            GOTerm.go_id,
-            GOTerm.name,
-            GOTerm.aspect,
-            func.count(GOPrediction.id).label("count"),
-        )
-        .join(GOPrediction, GOPrediction.go_term_id == GOTerm.id)
-        .filter(GOPrediction.prediction_set_id == prediction_set_id)
-        .group_by(GOTerm.go_id, GOTerm.name, GOTerm.aspect)
-        .order_by(func.count(GOPrediction.id).desc())
-        .limit(limit)
-        .all()
+    return compute_go_term_distribution(
+        session,
+        prediction_set_id=prediction_set_id,
+        limit=limit,
     )
-
-    by_aspect: dict[str, list[dict[str, Any]]] = {"F": [], "P": [], "C": [], "other": []}
-    for go_id, name, aspect, count in rows:
-        entry = {"go_id": go_id, "name": name, "count": count}
-        by_aspect.get(aspect or "other", by_aspect["other"]).append(entry)
-
-    aspect_counts = (
-        session.query(GOTerm.aspect, func.count(GOPrediction.id))
-        .join(GOPrediction, GOPrediction.go_term_id == GOTerm.id)
-        .filter(GOPrediction.prediction_set_id == prediction_set_id)
-        .group_by(GOTerm.aspect)
-        .all()
-    )
-
-    return {
-        "by_aspect": by_aspect,
-        "aspect_totals": {asp or "other": cnt for asp, cnt in aspect_counts},
-        "top_terms": [
-            {"go_id": go_id, "name": name, "aspect": aspect, "count": count}
-            for go_id, name, aspect, count in rows
-        ],
-    }
 
 
 __all__ = [
