@@ -313,15 +313,6 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/load_ontology_snapshot.py::LoadOntologySnapshotOperation.execute",
-      "kind": "method",
-      "path": "protea/core/operations/load_ontology_snapshot.py",
-      "name": "LoadOntologySnapshotOperation.execute",
-      "line": 59,
-      "metric": 154,
-      "threshold": 60
-    },
-    {
       "key": "method::protea/core/operations/load_quickgo_annotations.py::LoadQuickGOAnnotationsOperation.execute",
       "kind": "method",
       "path": "protea/core/operations/load_quickgo_annotations.py",
