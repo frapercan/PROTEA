@@ -84,7 +84,7 @@
       "path": "protea/services/scoring_service.py",
       "name": "",
       "line": 0,
-      "metric": 1166,
+      "metric": 1029,
       "threshold": 800
     },
     {
@@ -583,20 +583,11 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/services/scoring_service.py::compute_reranker_metrics_data",
-      "kind": "method",
-      "path": "protea/services/scoring_service.py",
-      "name": "compute_reranker_metrics_data",
-      "line": 912,
-      "metric": 144,
-      "threshold": 60
-    },
-    {
       "key": "method::protea/services/scoring_service.py::compute_prediction_metrics",
       "kind": "method",
       "path": "protea/services/scoring_service.py",
       "name": "compute_prediction_metrics",
-      "line": 1058,
+      "line": 921,
       "metric": 84,
       "threshold": 60
     },
@@ -794,7 +785,7 @@
       "kind": "params",
       "path": "protea/services/scoring_service.py",
       "name": "compute_prediction_metrics",
-      "line": 1058,
+      "line": 921,
       "metric": 7,
       "threshold": 6
     }
