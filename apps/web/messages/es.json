@@ -19,7 +19,8 @@
     "data": "Datos",
     "pipelineGroup": "Pipeline",
     "results": "Resultados",
-    "system": "Sistema"
+    "system": "Sistema",
+    "stack": "Stack"
   },
   "home": {
     "title": "Pipeline de Prediccion de Funcion Proteica",
@@ -719,5 +720,27 @@
     "languageSwitcher": {
       "label": "Idioma"
     }
+  },
+  "stack": {
+    "title": "Stack PROTEA",
+    "subtitle": "PROTEA se compone de ocho repositorios. Usa esta página para saltar entre ellos cuando revises pull requests o compares implementaciones.",
+    "reposHeading": "Repositorios",
+    "colRepo": "Repo",
+    "colRole": "Rol",
+    "colStatus": "Estado",
+    "colSummary": "Resumen",
+    "colLinks": "Enlaces",
+    "loading": "Cargando repositorios...",
+    "pullsHeading": "Pull requests abiertas en el stack",
+    "refresh": "Actualizar",
+    "refreshing": "Actualizando...",
+    "fetchedAt": "Consultado a las {time}. Cache de 5 minutos.",
+    "errorsHeading": "Algunos repositorios no pudieron consultarse:",
+    "prRepo": "Repo",
+    "prTitle": "Título",
+    "prAuthor": "Autor",
+    "prUpdated": "Actualizado",
+    "noOpenPulls": "No hay pull requests abiertas en ningún repositorio.",
+    "loadingPulls": "Cargando pull requests..."
   }
 }

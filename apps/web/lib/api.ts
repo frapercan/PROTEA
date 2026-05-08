@@ -798,3 +798,47 @@ export function getBenchmarkMatrix(params?: {
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   return http<BenchmarkMatrixResponse>(`/benchmark/matrix${suffix}`);
 }
+
+export type StackRepo = {
+  name: string;
+  slug: string;
+  role: string;
+  role_label: string;
+  status: "active" | "beta" | "skeleton" | "archived";
+  summary: string;
+  github_url: string;
+  docs_url: string | null;
+  package_url: string | null;
+};
+
+export type StackResponse = { repos: StackRepo[] };
+
+export type StackPullRequest = {
+  repo: string;
+  number: number;
+  title: string;
+  url: string;
+  state: string;
+  draft: boolean;
+  author: string | null;
+  created_at: string;
+  updated_at: string;
+  labels: string[];
+};
+
+export type StackPullsResponse = {
+  fetched_at: number;
+  cached: boolean;
+  repos_queried: number;
+  pulls: StackPullRequest[];
+  rate_limit_remaining: number | null;
+  errors: Record<string, string>;
+};
+
+export function getStack() {
+  return http<StackResponse>("/stack");
+}
+
+export function getStackPulls() {
+  return http<StackPullsResponse>("/stack/pulls");
+}
