@@ -56,6 +56,7 @@ PROTEA runs as a set of cooperative processes managed by ``scripts/manage.sh``:
    │                         │  protea.predictions     │ coordinator     │
    │                         │  protea.predictions.batch│ ephemeral      │
    │                         │  protea.predictions.write│ ephemeral      │
+   │                         │  protea.evaluations     │                 │
    │                         └───────────┬─────────────┘                 │
    │                                     │                               │
    │                             Worker processes                        │
@@ -94,7 +95,7 @@ Services and data stores
         - QueueConsumer
         - ``insert_proteins``, ``fetch_uniprot_metadata``, ``load_ontology_snapshot``,
           ``load_goa_annotations``, ``load_quickgo_annotations``,
-          ``generate_evaluation_set``, ``run_cafa_evaluation``
+          ``generate_evaluation_set``
       * - ``protea.training``
         - QueueConsumer
         - ``export_research_dataset`` — serialised, GPU/RAM-intensive KNN + feature
@@ -118,6 +119,11 @@ Services and data stores
       * - ``protea.predictions.write``
         - OperationConsumer
         - ``store_predictions`` — bulk GOPrediction insert (ephemeral, no DB Job row)
+      * - ``protea.evaluations``
+        - QueueConsumer
+        - ``run_cafa_evaluation`` — runs ``cafaeval`` for NK/LK/PK against a
+          prediction set; serialised because cafaeval is single-process and
+          each run can take minutes
 
 **QueueConsumer vs OperationConsumer**
 

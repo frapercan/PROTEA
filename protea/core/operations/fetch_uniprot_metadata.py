@@ -288,40 +288,8 @@ class FetchUniProtMetadataOperation:
 
             if p.update_protein_core:
                 pr = protein_map.get(record.accession)
-                if pr is not None:
-                    core_changed = False
-
-                    reviewed = row.get("Reviewed", "").strip().lower()
-                    if pr.reviewed is None and reviewed:
-                        if reviewed == "reviewed":
-                            pr.reviewed = True
-                            core_changed = True
-                        elif reviewed == "unreviewed":
-                            pr.reviewed = False
-                            core_changed = True
-
-                    entry_name = row.get("Entry Name", "").strip()
-                    if pr.entry_name is None and entry_name:
-                        pr.entry_name = entry_name
-                        core_changed = True
-
-                    organism = row.get("Organism", "").strip()
-                    if pr.organism is None and organism:
-                        pr.organism = organism
-                        core_changed = True
-
-                    gene_names = row.get("Gene Names", "").strip()
-                    if pr.gene_name is None and gene_names:
-                        pr.gene_name = gene_names.split()[0]
-                        core_changed = True
-
-                    length = row.get("Length", "").strip()
-                    if pr.length is None and length.isdigit():
-                        pr.length = int(length)
-                        core_changed = True
-
-                    if core_changed:
-                        touched += 1
+                if pr is not None and _backfill_protein_core(pr, row):
+                    touched += 1
 
         return touched, upserted
 
@@ -341,3 +309,45 @@ class FetchUniProtMetadataOperation:
             for m in rows:
                 existing[m.canonical_accession] = m
         return existing
+
+
+def _backfill_protein_core(pr: Protein, row: dict[str, str]) -> bool:
+    """Fill missing ``Protein`` core columns from a UniProt TSV row.
+
+    Only NULL columns are touched; the goal is to backfill rows that
+    came in via the streaming embeddings pipeline (which only knows
+    accession + sequence) with the human-readable fields UniProt
+    publishes alongside. Returns ``True`` if any column was changed.
+    """
+    changed = False
+
+    reviewed = row.get("Reviewed", "").strip().lower()
+    if pr.reviewed is None and reviewed:
+        if reviewed == "reviewed":
+            pr.reviewed = True
+            changed = True
+        elif reviewed == "unreviewed":
+            pr.reviewed = False
+            changed = True
+
+    entry_name = row.get("Entry Name", "").strip()
+    if pr.entry_name is None and entry_name:
+        pr.entry_name = entry_name
+        changed = True
+
+    organism = row.get("Organism", "").strip()
+    if pr.organism is None and organism:
+        pr.organism = organism
+        changed = True
+
+    gene_names = row.get("Gene Names", "").strip()
+    if pr.gene_name is None and gene_names:
+        pr.gene_name = gene_names.split()[0]
+        changed = True
+
+    length = row.get("Length", "").strip()
+    if pr.length is None and length.isdigit():
+        pr.length = int(length)
+        changed = True
+
+    return changed

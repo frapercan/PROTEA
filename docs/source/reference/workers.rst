@@ -82,11 +82,12 @@ selected by the queue configuration in ``scripts/worker.py``:
 
    - ``protea.ping`` — smoke test
    - ``protea.jobs`` — ingestion, ontology / annotation loaders, and
-     evaluation operations
+     ``generate_evaluation_set``
    - ``protea.embeddings`` — serialised embedding coordinator
    - ``protea.predictions`` — serialised prediction coordinator
    - ``protea.training`` — serialised dataset-export coordinator
      (``export_research_dataset``)
+   - ``protea.evaluations`` — ``run_cafa_evaluation`` runner
 
 **OperationConsumer**
    Reads a raw serialised operation payload from the queue and executes it

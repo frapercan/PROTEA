@@ -147,7 +147,7 @@ RabbitMQ management
 -------------------
 
 The RabbitMQ management UI is available at http://localhost:15672 (default
-credentials ``guest`` / ``guest``). The nine PROTEA queues are:
+credentials ``guest`` / ``guest``). The ten PROTEA queues are:
 
 .. list-table::
    :header-rows: 1
@@ -162,7 +162,7 @@ credentials ``guest`` / ``guest``). The nine PROTEA queues are:
      - QueueConsumer
      - ``insert_proteins``, ``fetch_uniprot_metadata``, ``load_ontology_snapshot``,
        ``load_goa_annotations``, ``load_quickgo_annotations``,
-       ``generate_evaluation_set``, ``run_cafa_evaluation``
+       ``generate_evaluation_set``
    * - ``protea.training``
      - QueueConsumer
      - ``export_research_dataset`` (serialised; GPU/RAM-intensive)
@@ -184,6 +184,9 @@ credentials ``guest`` / ``guest``). The nine PROTEA queues are:
    * - ``protea.predictions.write``
      - OperationConsumer
      - ``store_predictions`` — bulk GOPrediction insert (ephemeral)
+   * - ``protea.evaluations``
+     - QueueConsumer
+     - ``run_cafa_evaluation``
 
 Queues are declared at worker startup and survive broker restarts.
 
