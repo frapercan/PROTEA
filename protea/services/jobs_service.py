@@ -1,4 +1,4 @@
-"""Jobs service — shared helper for the queue-dispatch pattern.
+"""Jobs service — shared helpers for the queue-dispatch pattern.
 
 Multiple routers (annotations, embeddings, predictions) follow the
 same shape when an HTTP endpoint queues background work:
@@ -9,14 +9,9 @@ same shape when an HTTP endpoint queues background work:
 4. Publish to RabbitMQ via :func:`protea.infrastructure.queue.publisher.publish_job`.
 5. Return ``{"id": ..., "status": "queued"}``.
 
-This module centralises step 2-3 so the router can collapse to::
-
-    job_id = enqueue_job(session, operation="...", queue_name="...", payload=body)
-    publish_job(amqp_url, queue_name, job_id)
-    return {"id": str(job_id), "status": "queued"}
-
-The ORM ``Job`` model owns the row schema; this service just
-threads the payload through with a consistent ``JobEvent`` shape.
+This module exposes :func:`enqueue_job` (steps 2–3) and the higher-
+level :func:`dispatch_validated_job` (steps 1–5) so routers collapse
+to a single try/except.
 """
 
 from __future__ import annotations
@@ -24,9 +19,24 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy.orm import Session
+from pydantic import BaseModel, ValidationError
+from sqlalchemy.orm import Session, sessionmaker
 
 from protea.infrastructure.orm.models.job import Job, JobEvent
+from protea.infrastructure.queue.publisher import publish_job
+from protea.infrastructure.session import session_scope
+
+
+class InvalidJobPayloadError(Exception):
+    """Pydantic validation failed for a queue-dispatch request body.
+
+    Carries the structured ``errors`` list produced by Pydantic so
+    the router can pass it through verbatim as the HTTP 422 detail.
+    """
+
+    def __init__(self, errors: Any) -> None:
+        self.errors = errors
+        super().__init__("invalid job payload")
 
 
 def enqueue_job(
@@ -61,4 +71,40 @@ def enqueue_job(
     return job_id
 
 
-__all__ = ["enqueue_job"]
+def dispatch_validated_job(
+    factory: sessionmaker[Session],
+    amqp_url: str,
+    body: dict[str, Any],
+    payload_model: type[BaseModel],
+    *,
+    operation: str,
+    queue_name: str,
+) -> dict[str, Any]:
+    """End-to-end queue dispatch: validate, persist, publish, respond.
+
+    Pydantic-validates ``body`` against ``payload_model`` (raising
+    :class:`InvalidJobPayloadError` on failure for the router to map
+    to a 422), inserts a ``Job`` + ``JobEvent`` pair inside a
+    fresh session, then publishes to RabbitMQ. Returns the canonical
+    ``{"id": <uuid>, "status": "queued"}`` response shape used by
+    every dispatch endpoint.
+    """
+    try:
+        payload_model.model_validate(body)
+    except ValidationError as exc:
+        raise InvalidJobPayloadError(exc.errors()) from exc
+
+    with session_scope(factory) as session:
+        job_id = enqueue_job(
+            session, operation=operation, queue_name=queue_name, payload=body
+        )
+
+    publish_job(amqp_url, queue_name, job_id)
+    return {"id": str(job_id), "status": "queued"}
+
+
+__all__ = [
+    "InvalidJobPayloadError",
+    "dispatch_validated_job",
+    "enqueue_job",
+]

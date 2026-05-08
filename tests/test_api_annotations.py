@@ -185,7 +185,7 @@ class TestLoadOntologySnapshot:
                 "protea.api.routers.annotations.session_scope",
                 side_effect=lambda _: _mock_scope(session),
             ),
-            patch("protea.api.routers.annotations.publish_job"),
+            patch("protea.services.jobs_service.publish_job"),
             patch("protea.services.jobs_service.Job", return_value=job),
         ):
             resp = TestClient(app).post(
@@ -223,7 +223,7 @@ class TestLoadOntologySnapshot:
                 "protea.api.routers.annotations.session_scope",
                 side_effect=lambda _: _mock_scope(session),
             ),
-            patch("protea.api.routers.annotations.publish_job") as mock_publish,
+            patch("protea.services.jobs_service.publish_job") as mock_publish,
             patch("protea.services.jobs_service.Job", return_value=job),
         ):
             TestClient(app).post(
@@ -339,7 +339,7 @@ class TestLoadGOAAnnotations:
                 "protea.api.routers.annotations.session_scope",
                 side_effect=lambda _: _mock_scope(session),
             ),
-            patch("protea.api.routers.annotations.publish_job"),
+            patch("protea.services.jobs_service.publish_job"),
             patch("protea.services.jobs_service.Job", return_value=job),
         ):
             resp = TestClient(app).post("/annotations/sets/load-goa", json=self._VALID_PAYLOAD)
@@ -386,7 +386,7 @@ class TestLoadQuickGOAnnotations:
                 "protea.api.routers.annotations.session_scope",
                 side_effect=lambda _: _mock_scope(session),
             ),
-            patch("protea.api.routers.annotations.publish_job"),
+            patch("protea.services.jobs_service.publish_job"),
             patch("protea.services.jobs_service.Job", return_value=job),
         ):
             resp = TestClient(app).post("/annotations/sets/load-quickgo", json=self._VALID_PAYLOAD)
@@ -419,7 +419,7 @@ class TestLoadQuickGOAnnotations:
                 "protea.api.routers.annotations.session_scope",
                 side_effect=lambda _: _mock_scope(session),
             ),
-            patch("protea.api.routers.annotations.publish_job") as mock_publish,
+            patch("protea.services.jobs_service.publish_job") as mock_publish,
             patch("protea.services.jobs_service.Job", return_value=job),
         ):
             TestClient(app).post("/annotations/sets/load-quickgo", json=self._VALID_PAYLOAD)

@@ -46,7 +46,11 @@ from protea.services.annotations_service import (
 from protea.services.annotations_service import (
     set_snapshot_ia_url as _set_snapshot_ia_url_service,
 )
-from protea.services.jobs_service import enqueue_job
+from protea.services.jobs_service import (
+    InvalidJobPayloadError,
+    dispatch_validated_job,
+    enqueue_job,
+)
 
 router = APIRouter(prefix="/annotations", tags=["annotations"])
 
@@ -130,20 +134,12 @@ def load_ontology_snapshot(
     it will be skipped; if relationships are missing they will be backfilled.
     """
     try:
-        LoadOntologySnapshotPayload.model_validate(body)
-    except ValidationError as exc:
-        raise HTTPException(status_code=422, detail=exc.errors()) from exc
-
-    with session_scope(factory) as session:
-        job_id = enqueue_job(
-            session,
-            operation="load_ontology_snapshot",
-            queue_name=_JOBS_QUEUE,
-            payload=body,
+        return dispatch_validated_job(
+            factory, amqp_url, body, LoadOntologySnapshotPayload,
+            operation="load_ontology_snapshot", queue_name=_JOBS_QUEUE,
         )
-
-    publish_job(amqp_url, _JOBS_QUEUE, job_id)
-    return {"id": str(job_id), "status": "queued"}
+    except InvalidJobPayloadError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors) from exc
 
 
 # ── Annotation Sets ───────────────────────────────────────────────────────────
@@ -204,20 +200,12 @@ def load_goa_annotations(
     """Queue a `load_goa_annotations` job that streams a GAF file (gzip or plain) and upserts
     GO annotations into an AnnotationSet. Only proteins already in the DB are annotated."""
     try:
-        LoadGOAAnnotationsPayload.model_validate(body)
-    except ValidationError as exc:
-        raise HTTPException(status_code=422, detail=exc.errors()) from exc
-
-    with session_scope(factory) as session:
-        job_id = enqueue_job(
-            session,
-            operation="load_goa_annotations",
-            queue_name=_JOBS_QUEUE,
-            payload=body,
+        return dispatch_validated_job(
+            factory, amqp_url, body, LoadGOAAnnotationsPayload,
+            operation="load_goa_annotations", queue_name=_JOBS_QUEUE,
         )
-
-    publish_job(amqp_url, _JOBS_QUEUE, job_id)
-    return {"id": str(job_id), "status": "queued"}
+    except InvalidJobPayloadError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors) from exc
 
 
 @router.post("/sets/load-quickgo", summary="Trigger QuickGO annotation load")
@@ -229,20 +217,12 @@ def load_quickgo_annotations(
     """Queue a `load_quickgo_annotations` job that streams GO annotations from the QuickGO
     bulk download API with optional taxon, aspect, and evidence code filtering."""
     try:
-        LoadQuickGOAnnotationsPayload.model_validate(body)
-    except ValidationError as exc:
-        raise HTTPException(status_code=422, detail=exc.errors()) from exc
-
-    with session_scope(factory) as session:
-        job_id = enqueue_job(
-            session,
-            operation="load_quickgo_annotations",
-            queue_name=_JOBS_QUEUE,
-            payload=body,
+        return dispatch_validated_job(
+            factory, amqp_url, body, LoadQuickGOAnnotationsPayload,
+            operation="load_quickgo_annotations", queue_name=_JOBS_QUEUE,
         )
-
-    publish_job(amqp_url, _JOBS_QUEUE, job_id)
-    return {"id": str(job_id), "status": "queued"}
+    except InvalidJobPayloadError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors) from exc
 
 
 # ── CAFA Evaluation Sets ──────────────────────────────────────────────────────
@@ -261,20 +241,12 @@ def generate_evaluation_set(
     a new EvaluationSet row; ground-truth TSVs are streamed on demand.
     """
     try:
-        GenerateEvaluationSetPayload.model_validate(body)
-    except ValidationError as exc:
-        raise HTTPException(status_code=422, detail=exc.errors()) from exc
-
-    with session_scope(factory) as session:
-        job_id = enqueue_job(
-            session,
-            operation="generate_evaluation_set",
-            queue_name=_JOBS_QUEUE,
-            payload=body,
+        return dispatch_validated_job(
+            factory, amqp_url, body, GenerateEvaluationSetPayload,
+            operation="generate_evaluation_set", queue_name=_JOBS_QUEUE,
         )
-
-    publish_job(amqp_url, _JOBS_QUEUE, job_id)
-    return {"id": str(job_id), "status": "queued"}
+    except InvalidJobPayloadError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors) from exc
 
 
 @router.get("/evaluation-sets", summary="List evaluation sets")
