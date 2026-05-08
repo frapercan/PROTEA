@@ -114,7 +114,7 @@ Batch failures
 ~~~~~~~~~~~~~~
 
 Batches (``compute_embeddings_batch``, ``predict_go_terms_batch``) do not
-have their own row in ``jobs``.  To diagnose:
+have their own row in ``job``.  To diagnose:
 
 1. **Parent job events** — failures are recorded as ``child.failed``:
 
@@ -185,9 +185,9 @@ Database
 
    # Clean up jobs and events older than 30 days
    psql postgresql://protea:protea@localhost:5432/protea \
-     -c "DELETE FROM job_events WHERE ts < now() - interval '30 days';"
+     -c "DELETE FROM job_event WHERE ts < now() - interval '30 days';"
    psql postgresql://protea:protea@localhost:5432/protea \
-     -c "DELETE FROM jobs WHERE finished_at < now() - interval '30 days'
+     -c "DELETE FROM job WHERE finished_at < now() - interval '30 days'
          AND status IN ('succeeded', 'failed', 'cancelled');"
 
    # Full reset (destructive — deletes EVERYTHING)
