@@ -20,8 +20,8 @@
       "kind": "class",
       "path": "protea/core/training_dump_helpers.py",
       "name": "TrainRerankerAutoOperation",
-      "line": 1105,
-      "metric": 766,
+      "line": 1133,
+      "metric": 770,
       "threshold": 500
     },
     {
@@ -48,7 +48,7 @@
       "path": "protea/core/training_dump_helpers.py",
       "name": "",
       "line": 0,
-      "metric": 1870,
+      "metric": 1902,
       "threshold": 800
     },
     {
@@ -434,7 +434,7 @@
       "kind": "method",
       "path": "protea/core/training_dump_helpers.py",
       "name": "_preload_all_embeddings",
-      "line": 153,
+      "line": 179,
       "metric": 73,
       "threshold": 60
     },
@@ -443,7 +443,7 @@
       "kind": "method",
       "path": "protea/core/training_dump_helpers.py",
       "name": "_build_reference_from_cache",
-      "line": 228,
+      "line": 254,
       "metric": 67,
       "threshold": 60
     },
@@ -452,8 +452,8 @@
       "kind": "method",
       "path": "protea/core/training_dump_helpers.py",
       "name": "_knn_transfer_and_label",
-      "line": 346,
-      "metric": 622,
+      "line": 372,
+      "metric": 624,
       "threshold": 60
     },
     {
@@ -461,8 +461,8 @@
       "kind": "method",
       "path": "protea/core/training_dump_helpers.py",
       "name": "TrainRerankerAutoOperation.execute",
-      "line": 1212,
-      "metric": 659,
+      "line": 1240,
+      "metric": 663,
       "threshold": 60
     },
     {
@@ -646,20 +646,11 @@
       "threshold": 6
     },
     {
-      "key": "params::protea/core/training_dump_helpers.py::_knn_transfer_and_label",
-      "kind": "params",
-      "path": "protea/core/training_dump_helpers.py",
-      "name": "_knn_transfer_and_label",
-      "line": 346,
-      "metric": 16,
-      "threshold": 6
-    },
-    {
       "key": "params::protea/core/training_dump_helpers.py::TrainRerankerAutoOperation._dump_frozen_dataset",
       "kind": "params",
       "path": "protea/core/training_dump_helpers.py",
       "name": "TrainRerankerAutoOperation._dump_frozen_dataset",
-      "line": 1162,
+      "line": 1190,
       "metric": 11,
       "threshold": 6
     },
