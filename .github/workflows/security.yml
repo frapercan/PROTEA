@@ -3,6 +3,7 @@ name: Security
 on:
   push:
   pull_request:
+  merge_group:
   schedule:
     # Weekly Monday 06:00 UTC: catches new CVEs against pinned deps
     # even if no PR has landed.
