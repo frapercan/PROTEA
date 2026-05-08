@@ -67,6 +67,70 @@ def resolve_reranker_model_bundle(rm: RerankerModelORM) -> dict[str, Any]:
     return {"model": model_str, "cat_codes": cat_codes}
 
 
+def _load_nested_rerankers(
+    session: Session,
+    rerankers_nested: dict[str, dict[str, str]],
+    emit: EmitFn,
+) -> tuple[dict[str, dict[str, dict[str, Any]]], dict[str, dict[str, str]]]:
+    """Resolve nested-form reranker references (per-category x per-aspect)."""
+    reranker_models: dict[str, dict[str, dict[str, Any]]] = {}
+    snapshot: dict[str, dict[str, str]] = {}
+    for cat_key, aspect_map in rerankers_nested.items():
+        setting = cat_key.upper()
+        reranker_models[setting] = {}
+        snapshot[cat_key] = {}
+        for aspect_key, rid_str in aspect_map.items():
+            rid = uuid.UUID(rid_str)
+            rm = session.get(RerankerModelORM, rid)
+            if rm is None:
+                raise ValueError(f"RerankerModel {rid_str} not found")
+            aspect_char = _ASPECT_KEY_TO_CHAR.get(aspect_key, aspect_key)
+            reranker_models[setting][aspect_char] = resolve_reranker_model_bundle(rm)
+            snapshot[cat_key][aspect_key] = rid_str
+            emit(
+                "run_cafa_evaluation.reranker_loaded",
+                None,
+                {
+                    "setting": setting,
+                    "aspect": aspect_key,
+                    "reranker_id": str(rid),
+                    "name": rm.name,
+                },
+                "info",
+            )
+    return reranker_models, snapshot
+
+
+def _load_flat_rerankers(
+    session: Session,
+    *,
+    reranker_id_nk: str | None,
+    reranker_id_lk: str | None,
+    reranker_id_pk: str | None,
+    emit: EmitFn,
+) -> dict[str, dict[str, dict[str, Any]]]:
+    """Resolve legacy flat-form reranker references (one model per category)."""
+    reranker_models: dict[str, dict[str, dict[str, Any]]] = {}
+    for setting, field in [
+        ("NK", reranker_id_nk),
+        ("LK", reranker_id_lk),
+        ("PK", reranker_id_pk),
+    ]:
+        if field:
+            rid = uuid.UUID(field)
+            rm = session.get(RerankerModelORM, rid)
+            if rm is None:
+                raise ValueError(f"RerankerModel {field} not found")
+            reranker_models[setting] = {"": resolve_reranker_model_bundle(rm)}
+            emit(
+                "run_cafa_evaluation.reranker_loaded",
+                None,
+                {"setting": setting, "reranker_id": str(rid), "name": rm.name},
+                "info",
+            )
+    return reranker_models
+
+
 def load_reranker_models_for_payload(
     session: Session,
     *,
@@ -89,51 +153,13 @@ def load_reranker_models_for_payload(
     in ``EvaluationResult.reranker_config`` (``None`` for the legacy
     flat path).
     """
-    reranker_models: dict[str, dict[str, dict[str, Any]]] = {}
-    reranker_config_snapshot: dict[str, dict[str, str]] | None = None
-
     if rerankers_nested:
-        reranker_config_snapshot = {}
-        for cat_key, aspect_map in rerankers_nested.items():
-            setting = cat_key.upper()
-            reranker_models[setting] = {}
-            reranker_config_snapshot[cat_key] = {}
-            for aspect_key, rid_str in aspect_map.items():
-                rid = uuid.UUID(rid_str)
-                rm = session.get(RerankerModelORM, rid)
-                if rm is None:
-                    raise ValueError(f"RerankerModel {rid_str} not found")
-                aspect_char = _ASPECT_KEY_TO_CHAR.get(aspect_key, aspect_key)
-                reranker_models[setting][aspect_char] = resolve_reranker_model_bundle(rm)
-                reranker_config_snapshot[cat_key][aspect_key] = rid_str
-                emit(
-                    "run_cafa_evaluation.reranker_loaded",
-                    None,
-                    {
-                        "setting": setting,
-                        "aspect": aspect_key,
-                        "reranker_id": str(rid),
-                        "name": rm.name,
-                    },
-                    "info",
-                )
-    else:
-        for setting, field in [
-            ("NK", reranker_id_nk),
-            ("LK", reranker_id_lk),
-            ("PK", reranker_id_pk),
-        ]:
-            if field:
-                rid = uuid.UUID(field)
-                rm = session.get(RerankerModelORM, rid)
-                if rm is None:
-                    raise ValueError(f"RerankerModel {field} not found")
-                reranker_models[setting] = {"": resolve_reranker_model_bundle(rm)}
-                emit(
-                    "run_cafa_evaluation.reranker_loaded",
-                    None,
-                    {"setting": setting, "reranker_id": str(rid), "name": rm.name},
-                    "info",
-                )
-
-    return reranker_models, reranker_config_snapshot
+        return _load_nested_rerankers(session, rerankers_nested, emit)
+    flat = _load_flat_rerankers(
+        session,
+        reranker_id_nk=reranker_id_nk,
+        reranker_id_lk=reranker_id_lk,
+        reranker_id_pk=reranker_id_pk,
+        emit=emit,
+    )
+    return flat, None

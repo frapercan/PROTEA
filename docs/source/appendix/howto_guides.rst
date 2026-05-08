@@ -278,7 +278,7 @@ the DB before submitting.
      -H "Content-Type: application/json" \
      -d '{
        "operation": "predict_go_terms",
-       "queue_name": "protea.jobs",
+       "queue_name": "protea.predictions",
        "payload": {
          "embedding_config_id": "<config-uuid>",
          "annotation_set_id": "<annotation-set-uuid>",
@@ -366,7 +366,7 @@ them through the configured ``ArtifactStore`` under
      -H "Content-Type: application/json" \
      -d '{
        "operation": "export_research_dataset",
-       "queue_name": "protea.jobs",
+       "queue_name": "protea.training",
        "payload": {
          "embedding_config_id": "<config-uuid>",
          "ontology_snapshot_id": "<snapshot-uuid>",
