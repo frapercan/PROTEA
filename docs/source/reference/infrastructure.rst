@@ -240,6 +240,32 @@ to any prediction set to produce a composite score per prediction row.
    :undoc-members:
    :show-inheritance:
 
+**Datasets**
+
+``Dataset`` is the durable handle for a frozen re-ranker training dataset
+published to the artifact store. One row per ``export_research_dataset``
+run that completes successfully; ``protea-reranker-lab``'s
+``pull_dataset.py`` resolves either a UUID or a human ``name`` against
+this table to fetch the exact ``train.parquet`` / ``eval.parquet`` /
+``manifest.json`` triple that produced a given booster.
+
+Storage is backend-agnostic: ``train_uri`` / ``eval_uri`` /
+``manifest_uri`` are opaque URIs (``file://…`` for the local backend,
+``s3://bucket/key`` for MinIO) resolved through the
+:class:`ArtifactStore` interface — callers never need to know which
+backend is active. Two content fingerprints provide drift detection:
+``schema_sha`` (16-char) records the feature-set version (must match
+the booster's ``feature_schema_sha`` at inference time) and
+``manifest_sha`` (64-char) is the sha256 of the serialized manifest
+bytes. Provenance lives in ``producer_version`` / ``producer_git_sha``
+so any registered booster can be traced back to the PROTEA HEAD that
+emitted its dataset.
+
+.. automodule:: protea.infrastructure.orm.models.embedding.dataset
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 **Support Entries**
 
 ``SupportEntry`` stores community feedback: a thumbs-up with an optional
@@ -259,6 +285,23 @@ already exists in the database, the existing ``Sequence`` row is reused,
 avoiding redundant embedding computation.
 
 .. automodule:: protea.infrastructure.orm.models.query.query_set
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+**Visitor Events**
+
+``VisitorEvent`` is the append-only log used by the Grafana
+"unique visitors" dashboard. One row is written per HTTP GET to a
+non-asset path. The schema deliberately omits IP addresses: each row
+stores only ``visitor_hash`` — the first 16 hex chars of
+``sha256(daily_salt || client_ip)`` where ``daily_salt`` is a 32-byte
+random value held in process memory and rotated every calendar day.
+Once the day rolls over the salt is gone, so cross-day correlation of a
+visitor becomes cryptographically infeasible. This is the same
+no-PII model used by Plausible and Fathom.
+
+.. automodule:: protea.infrastructure.orm.models.visitor_event
    :members:
    :undoc-members:
    :show-inheritance:
