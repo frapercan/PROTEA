@@ -560,7 +560,39 @@ export default function BenchmarkPage() {
         </section>
       )}
 
-      {/* Matrix table */}
+      {/* View toggle: Heatmap (default) | Table */}
+      {hasData && (
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div role="tablist" aria-label="View mode" className="inline-flex rounded-xl border border-slate-200 bg-white p-0.5 shadow-sm">
+            {(["heatmap", "table"] as const).map((mode) => {
+              const active = viewMode === mode;
+              return (
+                <button
+                  key={mode}
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setViewMode(mode)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-colors ${
+                    active
+                      ? "bg-blue-600 text-white shadow-sm"
+                      : "text-slate-600 hover:bg-slate-100"
+                  }`}
+                >
+                  <span aria-hidden>{mode === "heatmap" ? "📊" : "🔢"}</span>
+                  {mode === "heatmap" ? "Heatmap" : "Table"}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-xs text-slate-500">
+            {viewMode === "heatmap"
+              ? "Visual ranking per cell. Bars sorted by Fmax."
+              : "Full matrix with raw numbers. Useful for export."}
+          </p>
+        </div>
+      )}
+
+      {/* Matrix view */}
       {!hasData ? (
         <section className="rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 p-12 text-center">
           <p className="text-slate-500 text-sm">
@@ -572,6 +604,13 @@ export default function BenchmarkPage() {
             this cell of the matrix.
           </p>
         </section>
+      ) : viewMode === "heatmap" ? (
+        <BenchmarkHeatmap
+          rows={matrix.rows}
+          embeddings={embeddings}
+          categories={categories}
+          aspects={aspects}
+        />
       ) : (
         <div className="overflow-x-auto protea-scroll-shadow rounded-lg border bg-white shadow-sm">
           <table className="w-full text-sm">
