@@ -81,6 +81,7 @@ format   = "ruff format protea scripts"
 typecheck = "mypy protea"
 coverage = "coverage run -m pytest tests && coverage report -m"
 html_docs = "make html -C docs"
+docs     = "python scripts/build_docs.py"
 
 [tool.ruff]
 target-version = "py312"

@@ -170,3 +170,35 @@ class TestStackYamlFile:
         assert stack_router._STACK_YAML.exists()
         repos = stack_router._load_repos()
         assert len(repos) >= 1
+
+
+class TestLocalArtefacts:
+    def test_local_docs_path_is_set_when_index_exists(
+        self, client: TestClient, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        slug = "protea-contracts"
+        html_dir = tmp_path / "docs" / "build" / slug / "html"
+        html_dir.mkdir(parents=True)
+        (html_dir / "index.html").write_text("<html></html>", encoding="utf-8")
+
+        monkeypatch.setattr(stack_router, "_DOCS_BUILD_ROOT", tmp_path / "docs" / "build")
+
+        body = client.get("/stack").json()
+        target = next(r for r in body["repos"] if r["slug"] == slug)
+        assert target["local_docs_path"] == f"/docs/{slug}/"
+
+        other = next(r for r in body["repos"] if r["slug"] != slug)
+        assert other["local_docs_path"] is None
+
+    def test_thesis_pdf_url_reflects_filesystem(
+        self, client: TestClient, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pdf = tmp_path / "thesis.pdf"
+        monkeypatch.setattr(stack_router, "_THESIS_PDF", pdf)
+
+        body = client.get("/stack").json()
+        assert body["thesis_pdf_url"] is None
+
+        pdf.write_bytes(b"%PDF-1.7 fake")
+        body = client.get("/stack").json()
+        assert body["thesis_pdf_url"] == "/static/thesis.pdf"

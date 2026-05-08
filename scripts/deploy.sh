@@ -133,6 +133,14 @@ if [[ "$DO_DEPS" == "1" ]]; then
   poetry install --quiet --no-root || poetry install --no-root
 fi
 
+# Always rebuild Sphinx HTML for PROTEA + sibling repos; the cost is
+# only a few seconds per repo and keeps /docs/<slug>/ in lockstep with
+# the deployed source. --no-build skips the frontend build (npm) but
+# still produces docs because the API mounts them dynamically and a
+# stale doc set is visible to end users via the stack page.
+echo "${C_BOLD}building docs (PROTEA + sibling repos)...${C_RESET}"
+poetry run task docs 2>&1 | tail -10 || echo "${C_YELLOW}docs build failed (non-fatal)${C_RESET}"
+
 if [[ "$DO_BUILD" == "1" ]]; then
   # apps/web/.env.local is gitignored. Seed a default if missing so the
   # build picks up NEXT_PUBLIC_API_URL. Default to a same-origin proxy

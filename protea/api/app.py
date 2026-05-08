@@ -199,6 +199,19 @@ def create_app(project_root: Path | None = None) -> FastAPI:
     if sphinx_build.exists():
         app.mount("/sphinx", StaticFiles(directory=sphinx_build, html=True), name="sphinx")
 
+    docs_build_root = project_root / "docs" / "build"
+    if docs_build_root.exists():
+        for repo_dir in sorted(p for p in docs_build_root.iterdir() if p.is_dir()):
+            if repo_dir.name == "html":
+                continue
+            html_dir = repo_dir / "html"
+            if (html_dir / "index.html").exists():
+                app.mount(
+                    f"/docs/{repo_dir.name}",
+                    StaticFiles(directory=html_dir, html=True),
+                    name=f"docs-{repo_dir.name}",
+                )
+
     static_dir = project_root / "static"
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=static_dir), name="static")

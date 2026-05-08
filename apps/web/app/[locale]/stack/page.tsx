@@ -39,6 +39,7 @@ function relativeTime(iso: string): string {
 export default function StackPage() {
   const t = useTranslations("stack");
   const [repos, setRepos] = useState<StackRepo[]>([]);
+  const [thesisPdfUrl, setThesisPdfUrl] = useState<string | null>(null);
   const [pulls, setPulls] = useState<StackPullRequest[]>([]);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [pullsLoading, setPullsLoading] = useState(true);
@@ -47,7 +48,10 @@ export default function StackPage() {
 
   useEffect(() => {
     getStack()
-      .then((d) => setRepos(d.repos))
+      .then((d) => {
+        setRepos(d.repos);
+        setThesisPdfUrl(d.thesis_pdf_url);
+      })
       .catch((e) => setReposError(e?.message ?? String(e)));
   }, []);
 
@@ -73,6 +77,25 @@ export default function StackPage() {
         <h1 className="text-2xl font-bold tracking-tight text-gray-900">{t("title")}</h1>
         <p className="mt-2 max-w-3xl text-sm text-gray-600">{t("subtitle")}</p>
       </header>
+
+      {thesisPdfUrl && (
+        <section className="rounded-lg border border-indigo-200 bg-indigo-50 p-4">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h2 className="text-lg font-semibold text-indigo-900">{t("thesisHeading")}</h2>
+              <p className="mt-1 text-sm text-indigo-800">{t("thesisDescription")}</p>
+            </div>
+            <a
+              href={thesisPdfUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700"
+            >
+              {t("thesisOpen")}
+            </a>
+          </div>
+        </section>
+      )}
 
       <section>
         <h2 className="text-lg font-semibold text-gray-900">{t("reposHeading")}</h2>
@@ -118,11 +141,15 @@ export default function StackPage() {
                     <a href={`${r.github_url}/issues`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
                       Issues
                     </a>
-                    {r.docs_url && (
-                      <a href={r.docs_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
-                        Docs
+                    {r.local_docs_path ? (
+                      <a href={r.local_docs_path} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                        {t("linkDocsLocal")}
                       </a>
-                    )}
+                    ) : r.docs_url ? (
+                      <a href={r.docs_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                        {t("linkDocs")}
+                      </a>
+                    ) : null}
                   </td>
                 </tr>
               ))}
