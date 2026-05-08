@@ -6,7 +6,7 @@ Data Model
    :depth: 2
 
 All models use SQLAlchemy 2.x declarative style with ``Mapped[]`` type annotations.
-The schema is managed by Alembic (22 migrations to date).
+The schema is managed by Alembic (32 migrations to date).
 
 Protein and sequence deduplication
 ------------------------------------
@@ -275,6 +275,51 @@ Predictions
    Defines a named scoring recipe: a set of feature weights and parameters
    that can be applied to any prediction set. Immutable once created.
 
+Re-ranker datasets
+------------------
+
+.. code-block:: text
+
+   ┌──────────────────────────────────┐
+   │             Dataset              │
+   │──────────────────────────────────│
+   │ id (UUID, PK)                    │
+   │ name (str, unique)               │
+   │ operation (export_research_…)    │
+   │ job_id (FK, nullable)            │
+   │ ── storage layout ──             │
+   │ storage_backend (local|minio)    │
+   │ key_prefix                       │
+   │ train_uri / eval_uri             │
+   │ manifest_uri                     │
+   │ ── content fingerprints ──       │
+   │ schema_sha (16-char)             │
+   │ manifest_sha (sha256)            │
+   │ n_train_rows / n_eval_rows       │
+   │ ── dump parameters ──            │
+   │ k                                │
+   │ annotation_source                │
+   │ embedding_config_id (FK, null)   │
+   │ ontology_snapshot_id (FK, null)  │
+   │ train_snapshot_pairs (JSONB)     │
+   │ eval_snapshot_pair               │
+   │ ── reproducibility ──            │
+   │ producer_version                 │
+   │ producer_git_sha                 │
+   │ meta (JSONB)                     │
+   │ created_at                       │
+   └──────────────────────────────────┘
+
+**Dataset**
+   The durable handle for a frozen re-ranker dataset published to the
+   artifact store by ``export_research_dataset``. One row per successful
+   export run; ``protea-reranker-lab``'s ``pull_dataset.py`` resolves
+   either ``id`` or ``name`` against this table to download the exact
+   ``train.parquet`` / ``eval.parquet`` / ``manifest.json`` triple that
+   trained a given booster. ``schema_sha`` must equal the booster's
+   ``feature_schema_sha`` at inference (load-bearing); ``manifest_sha``
+   detects content drift across re-emissions.
+
 Evaluation
 ----------
 
@@ -321,6 +366,34 @@ Support
 
 **SupportEntry**
    Community feedback: a thumbs-up with an optional comment (max 500 chars).
+
+Visitor events
+--------------
+
+.. code-block:: text
+
+   ┌──────────────────────────────┐
+   │        VisitorEvent          │
+   │──────────────────────────────│
+   │ id (BigInt, PK)              │
+   │ day (Date, indexed)          │
+   │ visitor_hash (16-char)       │
+   │ path                         │
+   │ method                       │
+   │ status (int)                 │
+   │ created_at                   │
+   └──────────────────────────────┘
+
+**VisitorEvent**
+   Append-only log that powers the Grafana "unique visitors" dashboard.
+   The schema deliberately omits IP addresses: ``visitor_hash`` is the
+   first 16 hex chars of ``sha256(daily_salt || client_ip)``, where
+   ``daily_salt`` is a 32-byte random value held in process memory and
+   regenerated every calendar day. Once the day rolls over the salt is
+   gone, so cross-day correlation becomes cryptographically infeasible
+   — the same no-PII model used by Plausible and Fathom. The ``(day,
+   visitor_hash)`` index drives unique-visitor counts per day; the
+   ``path`` index drives top-page reports.
 
 Job queue
 ---------
