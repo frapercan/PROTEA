@@ -27,7 +27,6 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from protea.core.evaluation import compute_evaluation_data
-from protea.core.metrics import compute_cafa_metrics
 from protea.core.reranker import load_reranker, model_from_string
 from protea.core.scoring import compute_score
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
@@ -832,92 +831,11 @@ from protea.services._scoring_metrics_helpers import (  # noqa: E402,F401
     compute_reranker_metrics_data,
 )
 
-
-def compute_prediction_metrics(
-    session: Session,
-    *,
-    prediction_set_id: uuid.UUID,
-    scoring_config_id: uuid.UUID,
-    old_annotation_set_id: uuid.UUID,
-    new_annotation_set_id: uuid.UUID,
-    ontology_snapshot_id: uuid.UUID,
-    category: str,
-) -> dict[str, Any]:
-    """Compute CAFA Fmax and AUC-PR for a PredictionSet under a ScoringConfig.
-
-    Loads ``PredictionSet`` and ``ScoringConfig``, validates signal
-    coverage, materialises the temporal NK/LK ground-truth delta from
-    the two AnnotationSets via :func:`compute_evaluation_data`,
-    applies the config's formula to every ``GOPrediction`` row via
-    :func:`compute_score`, and feeds the scored predictions through
-    :func:`compute_cafa_metrics`. Returns a JSON-ready dict with the
-    summary metrics + the full precision-recall curve.
-
-    The session is read-only here; no flush/commit. The function
-    returns plain Python types and does not depend on FastAPI.
-
-    Raises
-    ------
-    EntityNotFoundError
-        Either ``PredictionSet`` or ``ScoringConfig`` does not exist.
-    SignalCoverageError
-        The config requires signals absent from the PredictionSet.
-    """
-    if session.get(PredictionSet, prediction_set_id) is None:
-        raise EntityNotFoundError("PredictionSet", prediction_set_id)
-    config = session.get(ScoringConfig, scoring_config_id)
-    if config is None:
-        raise EntityNotFoundError("ScoringConfig", scoring_config_id)
-    config_snap = snapshot_config(config)
-    check_signal_coverage(session, prediction_set_id, config_snap)
-
-    eval_data = compute_evaluation_data(
-        session,
-        old_annotation_set_id=old_annotation_set_id,
-        new_annotation_set_id=new_annotation_set_id,
-        ontology_snapshot_id=ontology_snapshot_id,
-    )
-
-    rows = (
-        session.query(GOPrediction, GOTerm.go_id)
-        .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
-        .filter(GOPrediction.prediction_set_id == prediction_set_id)
-        .all()
-    )
-
-    scored: list[dict[str, Any]] = []
-    for pred, go_id in rows:
-        pred_dict: dict[str, Any] = {
-            "protein_accession": pred.protein_accession,
-            "go_id": go_id,
-            "distance": pred.distance,
-            "identity_nw": pred.identity_nw,
-            "identity_sw": pred.identity_sw,
-            "evidence_code": pred.evidence_code,
-            "taxonomic_distance": pred.taxonomic_distance,
-            "neighbor_vote_fraction": pred.neighbor_vote_fraction,
-        }
-        pred_dict["score"] = compute_score(pred_dict, config_snap)
-        scored.append(pred_dict)
-
-    metrics = compute_cafa_metrics(scored, eval_data, category=category)
-
-    return {
-        "prediction_set_id": str(prediction_set_id),
-        "scoring_config_id": str(scoring_config_id),
-        "scoring_config_name": config_snap.name,
-        **metrics.summary(),
-        "curve": [
-            {
-                "threshold": p.threshold,
-                "precision": p.precision,
-                "recall": p.recall,
-                "f1": p.f1,
-            }
-            for p in metrics.curve
-        ],
-    }
-
+# compute_prediction_metrics lives in _scoring_prediction_metrics_helpers and
+# is re-exported below so existing router/CLI imports keep working unchanged.
+from protea.services._scoring_prediction_metrics_helpers import (  # noqa: E402,F401
+    compute_prediction_metrics,
+)
 
 __all__ = [
     "PRESET_CONFIGS",
