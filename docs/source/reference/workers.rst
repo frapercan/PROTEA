@@ -81,8 +81,12 @@ selected by the queue configuration in ``scripts/worker.py``:
    observability and traceability matter:
 
    - ``protea.ping`` — smoke test
-   - ``protea.jobs`` — all coordinator operations
+   - ``protea.jobs`` — ingestion, ontology / annotation loaders, and
+     evaluation operations
    - ``protea.embeddings`` — serialised embedding coordinator
+   - ``protea.predictions`` — serialised prediction coordinator
+   - ``protea.training`` — serialised dataset-export coordinator
+     (``export_research_dataset``)
 
 **OperationConsumer**
    Reads a raw serialised operation payload from the queue and executes it
