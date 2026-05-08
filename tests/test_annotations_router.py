@@ -132,6 +132,8 @@ def client(session, factory):
     app = _make_app(factory)
     with patch(
         "protea.api.routers.annotations.session_scope", side_effect=lambda _: _mock_scope(session)
+    ), patch(
+        "protea.services.jobs_service.session_scope", side_effect=lambda _: _mock_scope(session)
     ):
         with TestClient(app) as c:
             yield c, session
@@ -142,6 +144,8 @@ def client_with_artifacts(session, factory, tmp_path):
     app = _make_app(factory, artifacts_dir=tmp_path)
     with patch(
         "protea.api.routers.annotations.session_scope", side_effect=lambda _: _mock_scope(session)
+    ), patch(
+        "protea.services.jobs_service.session_scope", side_effect=lambda _: _mock_scope(session)
     ):
         with TestClient(app) as c:
             yield c, session, tmp_path
@@ -234,7 +238,7 @@ class TestLoadOntologySnapshot:
 
         session.add.side_effect = add_side
 
-        with patch("protea.api.routers.annotations.publish_job"):
+        with patch("protea.services.jobs_service.publish_job"):
             resp = c.post(
                 "/annotations/snapshots/load",
                 json={"obo_url": "http://example.com/go.obo"},
@@ -342,7 +346,7 @@ class TestLoadGOAAnnotations:
 
         session.add.side_effect = add_side
 
-        with patch("protea.api.routers.annotations.publish_job"):
+        with patch("protea.services.jobs_service.publish_job"):
             resp = c.post(
                 "/annotations/sets/load-goa",
                 json={
@@ -377,7 +381,7 @@ class TestLoadQuickGOAnnotations:
 
         session.add.side_effect = add_side
 
-        with patch("protea.api.routers.annotations.publish_job"):
+        with patch("protea.services.jobs_service.publish_job"):
             resp = c.post(
                 "/annotations/sets/load-quickgo",
                 json={
@@ -531,7 +535,7 @@ class TestGenerateEvaluationSet:
 
         session.add.side_effect = add_side
 
-        with patch("protea.api.routers.annotations.publish_job"):
+        with patch("protea.services.jobs_service.publish_job"):
             resp = c.post(
                 "/annotations/evaluation-sets/generate",
                 json={"old_annotation_set_id": old_id, "new_annotation_set_id": new_id},
