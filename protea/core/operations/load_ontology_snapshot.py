@@ -61,7 +61,7 @@ class LoadOntologySnapshotOperation:
     The ``data-version:`` header of the OBO file is used as the canonical
     version identifier (e.g. ``releases/2024-01-17``). If a snapshot with that
     version already exists, the operation is a no-op and returns the existing
-    snapshot id — making it safe to re-run.
+    snapshot id, making it safe to re-run.
 
     GO term aspect is mapped from the OBO ``namespace`` field:
     ``biological_process`` → P, ``molecular_function`` → F,

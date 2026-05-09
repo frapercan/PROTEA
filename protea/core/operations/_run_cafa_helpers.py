@@ -185,8 +185,8 @@ def _patch_query_known_features(
     prediction set. This helper repairs them for LK / PK evaluation so the
     reranker sees the same query-profile features it was trained on.
 
-    Splits across two private helpers — ``_build_anc2vec_lookup`` (the
-    embedding matrix) and ``_fill_anc2vec_columns`` (the per-row scoring) —
+    Splits across two private helpers (``_build_anc2vec_lookup`` for the
+    embedding matrix and ``_fill_anc2vec_columns`` for the per-row scoring)
     so neither breaches the 60-LOC method ceiling.
     """
     import pandas as pd
