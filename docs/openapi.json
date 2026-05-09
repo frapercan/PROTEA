@@ -239,6 +239,7 @@
         "type": "object"
       },
       "CreateExperimentRunRequest": {
+        "description": "Body for ``POST /experiment-runs``.\n\nCarries the narrative trio (``description`` / ``hypothesis`` /\n``findings``) plus structured ``config`` + ``provenance`` overlays\nthat the F-EXP campaign tooling reads back. New rows always start in\n``planned`` status; transitions happen via ``PATCH``.",
         "properties": {
           "config": {
             "additionalProperties": true,
@@ -293,6 +294,7 @@
         "type": "object"
       },
       "CreateJobCommentRequest": {
+        "description": "Body for ``POST /jobs/{job_id}/comments``.\n\nCurator/operator note attached to a Job (D11 narrative thread).\nDistinct from machine-emitted ``JobEvent`` rows: comments carry an\nopinionated message and an optional ``author`` tag. Markdown is\npermitted in ``body``; the UI renders the thread chronologically.",
         "properties": {
           "author": {
             "anyOf": [
@@ -320,6 +322,7 @@
         "type": "object"
       },
       "CreateJobRequest": {
+        "description": "Body for ``POST /jobs``.\n\nTells PROTEA which registered operation to run (``operation``) and\nwhich RabbitMQ queue to publish the work onto (``queue_name``). The\n``payload`` blob is op-specific; the operation registry validates it\non dequeue. ``description`` / ``tags`` are the D11 narrative fields\nsurfaced in the UI run detail.",
         "properties": {
           "description": {
             "anyOf": [
@@ -590,6 +593,7 @@
         "type": "object"
       },
       "PullRequest": {
+        "description": "One open PR in the stack as reported by GitHub's REST API.\n\nUsed by the stack landing page's PR widget; the payload is the\nintersection of fields the UI actually renders, not a full echo of\nGitHub's response.",
         "properties": {
           "author": {
             "anyOf": [
@@ -658,6 +662,7 @@
         "type": "object"
       },
       "PullsResponse": {
+        "description": "Aggregated open-PR snapshot across all stack repos.\n\nThe handler caches the GitHub query for a few minutes; ``cached``\nflips to ``True`` when a response is served from the in-process\ncache, ``fetched_at`` records the original wall-clock time, and\n``errors`` carries per-repo failures (e.g. rate-limited, 404).",
         "properties": {
           "cached": {
             "title": "Cached",
@@ -708,6 +713,7 @@
         "type": "object"
       },
       "RepoEntry": {
+        "description": "One repository row in the multi-repo stack landing page.\n\nEach entry represents a sibling git repo (PROTEA itself or one of\nthe plugin/lab packages). ``role`` is the architectural slot\n(``core``, ``contracts``, ``plugin``, ``lab``); ``status`` is a\ncoarse health signal sourced from the repo's CI / release state.",
         "properties": {
           "docs_url": {
             "anyOf": [
@@ -978,6 +984,7 @@
         "type": "object"
       },
       "StackResponse": {
+        "description": "Top-level payload for ``GET /stack``.\n\nLists every repository in the PROTEA family plus the link to the\ncanonical thesis PDF. Consumed by the frontend's stack overview\npage and the docs portal sidebar.",
         "properties": {
           "repos": {
             "items": {
@@ -1005,6 +1012,7 @@
         "type": "object"
       },
       "SupportCreate": {
+        "description": "Body for ``POST /support``.\n\nA thumbs-up may carry an optional free-form ``comment``. The text is\ncapped at ``api.max_comment_length`` from the tuning config; longer\nsubmissions are rejected with 422 rather than silently truncated.",
         "properties": {
           "comment": {
             "anyOf": [

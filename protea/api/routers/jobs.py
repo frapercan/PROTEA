@@ -140,6 +140,15 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
 class CreateJobRequest(BaseModel):
+    """Body for ``POST /jobs``.
+
+    Tells PROTEA which registered operation to run (``operation``) and
+    which RabbitMQ queue to publish the work onto (``queue_name``). The
+    ``payload`` blob is op-specific; the operation registry validates it
+    on dequeue. ``description`` / ``tags`` are the D11 narrative fields
+    surfaced in the UI run detail.
+    """
+
     operation: str = Field(
         ..., min_length=1, description="Registered operation name, e.g. `insert_proteins`."
     )
@@ -365,6 +374,14 @@ def get_job_events(
 
 
 class CreateJobCommentRequest(BaseModel):
+    """Body for ``POST /jobs/{job_id}/comments``.
+
+    Curator/operator note attached to a Job (D11 narrative thread).
+    Distinct from machine-emitted ``JobEvent`` rows: comments carry an
+    opinionated message and an optional ``author`` tag. Markdown is
+    permitted in ``body``; the UI renders the thread chronologically.
+    """
+
     body: str = Field(..., min_length=1, description="Comment payload (markdown allowed).")
     author: str | None = Field(
         default=None,
