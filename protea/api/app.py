@@ -119,6 +119,14 @@ _ROUTER_MODULES = (
     stack_router,
 )
 
+# T4.1 (D4 accepted 2026-05-06): version prefix for the public API.
+# Mount every router under ``/v1/`` so OpenAPI exposes the canonical
+# paths; keep an unprefixed alias hidden from the schema for the
+# deprecation window so existing frontend / CLI traffic doesn't break.
+# When the legacy aliases get retired, drop the second include_router
+# call in ``_register_routers``.
+_API_VERSION_PREFIX = "/v1"
+
 _CORS_ORIGINS = (
     "http://localhost:3000",
     "http://127.0.0.1:3000",
@@ -184,8 +192,20 @@ def _register_health_endpoints(app: FastAPI, factory, settings) -> None:
 
 
 def _register_routers(app: FastAPI) -> None:
+    """Mount each router under ``/v1/`` (canonical) and at the root path
+    (deprecated alias hidden from OpenAPI).
+
+    The dual-include strategy lets existing clients keep hitting the
+    unprefixed routes during the deprecation window while the OpenAPI
+    schema only advertises the versioned paths. Health endpoints stay
+    at the root by convention (handled by ``_register_health_endpoints``).
+    """
     for module in _ROUTER_MODULES:
-        app.include_router(module.router)
+        app.include_router(module.router, prefix=_API_VERSION_PREFIX)
+        # Legacy alias — same routes mounted at ``/`` so frontends and
+        # CLIs that haven't been updated keep working. ``include_in_schema``
+        # off so OpenAPI / Swagger only surface the canonical ``/v1`` paths.
+        app.include_router(module.router, include_in_schema=False)
 
 
 def _mount_sibling_docs(app: FastAPI, docs_build_root: Path) -> None:
