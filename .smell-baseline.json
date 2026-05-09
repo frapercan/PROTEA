@@ -30,7 +30,7 @@
       "path": "protea/core/operations/compute_embeddings.py",
       "name": "",
       "line": 0,
-      "metric": 1100,
+      "metric": 1074,
       "threshold": 800
     },
     {
@@ -115,20 +115,11 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/compute_embeddings.py::ComputeEmbeddingsBatchOperation.execute",
-      "kind": "method",
-      "path": "protea/core/operations/compute_embeddings.py",
-      "name": "ComputeEmbeddingsBatchOperation.execute",
-      "line": 347,
-      "metric": 90,
-      "threshold": 60
-    },
-    {
       "key": "method::protea/core/operations/compute_embeddings.py::_embed_esm",
       "kind": "method",
       "path": "protea/core/operations/compute_embeddings.py",
       "name": "_embed_esm",
-      "line": 659,
+      "line": 633,
       "metric": 61,
       "threshold": 60
     },
@@ -137,7 +128,7 @@
       "kind": "method",
       "path": "protea/core/operations/compute_embeddings.py",
       "name": "_embed_t5",
-      "line": 727,
+      "line": 701,
       "metric": 128,
       "threshold": 60
     },
@@ -362,7 +353,7 @@
       "kind": "params",
       "path": "protea/core/operations/compute_embeddings.py",
       "name": "_embed_t5",
-      "line": 727,
+      "line": 701,
       "metric": 7,
       "threshold": 6
     },
