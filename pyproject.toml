@@ -27,6 +27,7 @@ dependencies = [
     "cafaeval-protea @ git+https://github.com/frapercan/cafaeval-protea.git@main",
     "lightgbm (>=4.6.0,<5.0.0)",
     "pyarrow (>=23.0.1,<24.0.0)",
+    "httpx (>=0.28.1,<0.29.0)",
 ]
 
 [project.optional-dependencies]
@@ -91,7 +92,6 @@ optional = true
 pytest = ">=9.0.2,<10.0.0"
 pytest-cov = ">=7.0.0,<8.0.0"
 coverage = {extras = ["toml"], version = ">=7.2.1"}
-httpx = ">=0.28.1,<0.29.0"
 uvicorn = ">=0.41.0,<0.42.0"
 protea-reranker-lab = {git = "https://github.com/frapercan/protea-reranker-lab.git", branch = "main"}
 

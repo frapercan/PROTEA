@@ -40,10 +40,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .venv
-          key: venv-${{ runner.os }}-py${{ matrix.python-version }}-poetry${{ matrix.poetry-version }}-main-${{ hashFiles('**/poetry.lock') }}
+          key: venv-${{ runner.os }}-py${{ matrix.python-version }}-poetry${{ matrix.poetry-version }}-main-plugins-${{ hashFiles('**/poetry.lock') }}
 
-      - name: Install main deps
-        run: poetry install --only main
+      - name: Install main + plugins deps
+        # The drift gate calls ``app.openapi()`` which loads every router.
+        # That means we need the runtime dep tree, including the
+        # ``protea-contracts`` git source pinned in the ``plugins`` poetry
+        # group (``protea.core.contracts.operation`` re-exports symbols
+        # from it at module load).
+        run: poetry install --only main,plugins
 
       - name: Regenerate docs/openapi.json
         run: poetry run python scripts/generate_openapi.py
