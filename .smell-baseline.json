@@ -142,15 +142,6 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/infrastructure/queue/consumer.py::OperationConsumer._on_message",
-      "kind": "method",
-      "path": "protea/infrastructure/queue/consumer.py",
-      "name": "OperationConsumer._on_message",
-      "line": 241,
-      "metric": 185,
-      "threshold": 60
-    },
-    {
       "key": "params::protea/api/routers/jobs.py::list_jobs",
       "kind": "params",
       "path": "protea/api/routers/jobs.py",
@@ -209,7 +200,7 @@
       "kind": "params",
       "path": "protea/infrastructure/queue/consumer.py",
       "name": "OperationConsumer.__init__",
-      "line": 181,
+      "line": 191,
       "metric": 7,
       "threshold": 6
     },

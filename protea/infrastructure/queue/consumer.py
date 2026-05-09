@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import signal
-from typing import Any
+from typing import Any, NamedTuple
 from uuid import UUID
 
 import pika
@@ -12,7 +12,7 @@ from pika.spec import Basic, BasicProperties
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.config.tuning import get_tuning
-from protea.core.contracts.operation import RetryLaterError, make_safe_emit
+from protea.core.contracts.operation import EmitFn, RetryLaterError, make_safe_emit
 from protea.core.contracts.registry import OperationRegistry
 from protea.infrastructure.orm.models.job import JobEvent
 from protea.infrastructure.queue.publisher import publish_operation
@@ -28,6 +28,16 @@ _DLQ_NAME = "protea.dead-letter"
 # oom_max_delay). Defaults: 5 retries, 5s base, 300s cap, backoff
 # 5/10/20/40/80s. ~155s wait budget before dead-letter.
 _OOM_RETRY_HEADER = "x-oom-retry"
+
+
+class _DecodedMessage(NamedTuple):
+    """Validated header + payload bundle parsed from one AMQP delivery."""
+
+    operation_name: str
+    payload: dict[str, Any]
+    parent_job_id: UUID | None
+    headers: dict[str, Any]
+    oom_retry_count: int
 
 
 def _setup_dead_letter(channel: BlockingChannel) -> None:
@@ -249,19 +259,57 @@ class OperationConsumer:
             channel.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
             return
 
+        decoded = self._decode_message(body, properties)
+        if decoded is None:
+            channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+            return
+        logger.info(
+            "Dispatching operation. operation=%s queue=%s",
+            decoded.operation_name,
+            self._queue_name,
+        )
+
+        op = self._registry.get(decoded.operation_name)
+        session = self._factory()
+        try:
+            emit = make_safe_emit(self._make_raw_emit(decoded.parent_job_id))
+            result = op.execute(session, decoded.payload, emit=emit)
+            session.commit()
+            # Forward any downstream operation messages (e.g. GPU→write worker).
+            for queue_name, op_payload in result.publish_operations or []:
+                publish_operation(self._amqp_url, queue_name, op_payload)
+            channel.basic_ack(delivery_tag=method.delivery_tag)
+            logger.info("Operation acked. operation=%s", decoded.operation_name)
+        except Exception as exc:
+            try:
+                session.rollback()
+            except Exception:
+                pass
+            if "CUDA out of memory" in str(exc):
+                self._handle_cuda_oom(channel, method, body, decoded, exc)
+            else:
+                self._handle_general_failure(channel, method, decoded, exc)
+        finally:
+            session.close()
+
+    @staticmethod
+    def _decode_message(
+        body: bytes, properties: BasicProperties
+    ) -> _DecodedMessage | None:
+        """Parse the AMQP delivery into a validated bundle.
+
+        Returns ``None`` when the body is not valid JSON or is missing
+        ``operation`` / ``payload``; the caller dead-letters in that case.
+        """
         try:
             data = json.loads(body.decode("utf-8"))
             operation_name: str = data["operation"]
             payload: dict[str, Any] = data["payload"]
         except Exception as exc:
-            logger.error("Unparseable operation message, discarding. body=%r error=%s", body, exc)
-            channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
-            return
-
-        logger.info(
-            "Dispatching operation. operation=%s queue=%s", operation_name, self._queue_name
-        )
-
+            logger.error(
+                "Unparseable operation message, discarding. body=%r error=%s", body, exc
+            )
+            return None
         parent_job_id: UUID | None = None
         raw_job_id = data.get("job_id")
         if raw_job_id:
@@ -269,160 +317,193 @@ class OperationConsumer:
                 parent_job_id = UUID(raw_job_id)
             except (ValueError, TypeError):
                 pass
+        headers = dict(properties.headers or {})
+        return _DecodedMessage(
+            operation_name=operation_name,
+            payload=payload,
+            parent_job_id=parent_job_id,
+            headers=headers,
+            oom_retry_count=int(headers.get(_OOM_RETRY_HEADER, 0)),
+        )
 
-        # Current OOM retry count from message headers (0 for fresh messages).
-        incoming_headers = dict(properties.headers or {})
-        oom_retry_count = int(incoming_headers.get(_OOM_RETRY_HEADER, 0))
+    def _make_raw_emit(self, parent_job_id: UUID | None) -> EmitFn:
+        """Build the raw emit closure that streams operation events to the
+        parent job's ``JobEvent`` log via fresh per-event sessions."""
 
-        op = self._registry.get(operation_name)
-        session = self._factory()
-        try:
-
-            def raw_emit(
-                event: str,
-                message: str | None = None,
-                fields: dict[str, Any] | None = None,
-                level: str = "info",
-            ) -> None:
-                logger.info("operation.%s fields=%s", event, fields or {})
-                if parent_job_id is None:
-                    return
-                event_session = self._factory()
-                try:
-                    event_session.add(
-                        JobEvent(
-                            job_id=parent_job_id,
-                            event=f"child.{event}",
-                            message=message,
-                            fields=fields or {},
-                            level=level,
-                        )
-                    )
-                    event_session.commit()
-                finally:
-                    event_session.close()
-
-            result = op.execute(session, payload, emit=make_safe_emit(raw_emit))
-            session.commit()
-            # Forward any downstream operation messages (e.g. GPU→write worker).
-            for queue_name, op_payload in result.publish_operations or []:
-                publish_operation(self._amqp_url, queue_name, op_payload)
-            channel.basic_ack(delivery_tag=method.delivery_tag)
-            logger.info("Operation acked. operation=%s", operation_name)
-        except Exception as exc:
-            try:
-                session.rollback()
-            except Exception:
-                pass
-
-            # CUDA OOM: free the GPU cache, apply exponential backoff, and
-            # republish with an incremented retry counter in message headers.
-            # After _OOM_MAX_RETRIES the message is dead-lettered so the hot
-            # loop cannot burn the GPU for hours on an impossible batch size.
-            if "CUDA out of memory" in str(exc):
-                try:
-                    import torch
-
-                    torch.cuda.empty_cache()
-                except Exception:
-                    pass
-
-                qsettings = get_tuning().queue
-                if oom_retry_count < qsettings.oom_max_retries:
-                    next_count = oom_retry_count + 1
-                    delay = min(
-                        qsettings.oom_base_delay * (2**oom_retry_count),
-                        qsettings.oom_max_delay,
-                    )
-                    logger.warning(
-                        "CUDA OOM: backing off %ds (retry %d/%d). operation=%s",
-                        delay,
-                        next_count,
-                        qsettings.oom_max_retries,
-                        operation_name,
-                    )
-                    self._emit_parent_event(
-                        parent_job_id,
-                        "child.cuda_oom_retry",
-                        f"CUDA OOM on {operation_name}; retry {next_count}/{qsettings.oom_max_retries} "
-                        f"after {delay}s backoff",
-                        {
-                            "operation": operation_name,
-                            "retry_count": next_count,
-                            "max_retries": qsettings.oom_max_retries,
-                            "delay_seconds": delay,
-                        },
-                        level="warning",
-                    )
-                    # Block the consumer while honouring AMQP heartbeats.
-                    try:
-                        channel.connection.sleep(delay)
-                    except Exception:
-                        pass
-
-                    new_headers = {**incoming_headers, _OOM_RETRY_HEADER: next_count}
-                    try:
-                        channel.basic_publish(
-                            exchange="",
-                            routing_key=self._queue_name,
-                            body=body,
-                            properties=pika.BasicProperties(
-                                delivery_mode=pika.DeliveryMode.Persistent,
-                                headers=new_headers,
-                            ),
-                        )
-                        channel.basic_ack(delivery_tag=method.delivery_tag)
-                        return
-                    except Exception as republish_exc:
-                        logger.error(
-                            "Failed to republish OOM message; dead-lettering. "
-                            "operation=%s error=%s",
-                            operation_name,
-                            republish_exc,
-                        )
-                        # fall through to dead-letter path
-
-                # Retries exhausted — dead-letter the message.
-                logger.error(
-                    "CUDA OOM retries exhausted — dead-lettering. operation=%s retries=%d",
-                    operation_name,
-                    oom_retry_count,
-                )
-                self._emit_parent_event(
-                    parent_job_id,
-                    "child.cuda_oom_dead_letter",
-                    f"CUDA OOM on {operation_name} after {oom_retry_count} retries; "
-                    f"message dead-lettered",
-                    {
-                        "operation": operation_name,
-                        "retries": oom_retry_count,
-                        "error": str(exc)[:500],
-                    },
-                    level="error",
-                )
-                channel.basic_nack(
-                    delivery_tag=method.delivery_tag,
-                    requeue=False,
-                )
+        def raw_emit(
+            event: str,
+            message: str | None = None,
+            fields: dict[str, Any] | None = None,
+            level: str = "info",
+        ) -> None:
+            logger.info("operation.%s fields=%s", event, fields or {})
+            if parent_job_id is None:
                 return
+            event_session = self._factory()
+            try:
+                event_session.add(
+                    JobEvent(
+                        job_id=parent_job_id,
+                        event=f"child.{event}",
+                        message=message,
+                        fields=fields or {},
+                        level=level,
+                    )
+                )
+                event_session.commit()
+            finally:
+                event_session.close()
 
-            logger.error("Operation failed. operation=%s error=%s", operation_name, exc)
-            self._emit_parent_event(
-                parent_job_id,
-                "child.failed",
-                str(exc)[:2000],
-                {
-                    "operation": operation_name,
-                    "error_code": exc.__class__.__name__,
-                },
-                level="error",
+        return raw_emit  # type: ignore[return-value]
+
+    def _handle_cuda_oom(
+        self,
+        channel: BlockingChannel,
+        method: Basic.Deliver,
+        body: bytes,
+        decoded: _DecodedMessage,
+        exc: BaseException,
+    ) -> None:
+        """Free the GPU cache and either republish with backoff or dead-letter.
+
+        While ``decoded.oom_retry_count`` is below ``oom_max_retries`` the
+        message is republished with an incremented header after an
+        exponential backoff (heartbeat-safe sleep). Past the cap the
+        message is dead-lettered so an impossible batch size cannot burn
+        the GPU forever.
+        """
+        try:
+            import torch
+
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
+
+        qsettings = get_tuning().queue
+        operation_name = decoded.operation_name
+        if decoded.oom_retry_count < qsettings.oom_max_retries:
+            if self._republish_oom(channel, method, body, decoded, qsettings):
+                return
+            # republish failed → fall through to dead-letter path
+
+        logger.error(
+            "CUDA OOM retries exhausted — dead-lettering. operation=%s retries=%d",
+            operation_name,
+            decoded.oom_retry_count,
+        )
+        self._emit_parent_event(
+            decoded.parent_job_id,
+            "child.cuda_oom_dead_letter",
+            f"CUDA OOM on {operation_name} after {decoded.oom_retry_count} retries; "
+            f"message dead-lettered",
+            {
+                "operation": operation_name,
+                "retries": decoded.oom_retry_count,
+                "error": str(exc)[:500],
+            },
+            level="error",
+        )
+        channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+
+    def _republish_oom(
+        self,
+        channel: BlockingChannel,
+        method: Basic.Deliver,
+        body: bytes,
+        decoded: _DecodedMessage,
+        qsettings: Any,
+    ) -> bool:
+        """Emit retry event, sleep with heartbeats, republish with bumped header.
+
+        Returns ``True`` on republish+ack, ``False`` on republish failure
+        (caller falls through to dead-letter).
+        """
+        next_count = decoded.oom_retry_count + 1
+        delay = min(
+            qsettings.oom_base_delay * (2**decoded.oom_retry_count),
+            qsettings.oom_max_delay,
+        )
+        operation_name = decoded.operation_name
+        logger.warning(
+            "CUDA OOM: backing off %ds (retry %d/%d). operation=%s",
+            delay,
+            next_count,
+            qsettings.oom_max_retries,
+            operation_name,
+        )
+        self._emit_parent_event(
+            decoded.parent_job_id,
+            "child.cuda_oom_retry",
+            f"CUDA OOM on {operation_name}; retry {next_count}/{qsettings.oom_max_retries} "
+            f"after {delay}s backoff",
+            {
+                "operation": operation_name,
+                "retry_count": next_count,
+                "max_retries": qsettings.oom_max_retries,
+                "delay_seconds": delay,
+            },
+            level="warning",
+        )
+        try:
+            channel.connection.sleep(delay)
+        except Exception:
+            pass
+        new_headers = {**decoded.headers, _OOM_RETRY_HEADER: next_count}
+        try:
+            self._publish_persistent(channel, body, new_headers, method.delivery_tag)
+            return True
+        except Exception as republish_exc:
+            logger.error(
+                "Failed to republish OOM message; dead-lettering. operation=%s error=%s",
+                operation_name, republish_exc,
             )
-            channel.basic_nack(
-                delivery_tag=method.delivery_tag,
-                requeue=self._requeue_on_failure,
-            )
-        finally:
-            session.close()
+            return False
+
+    def _publish_persistent(
+        self,
+        channel: BlockingChannel,
+        body: bytes,
+        headers: dict[str, Any],
+        delivery_tag: int,
+    ) -> None:
+        """Republish ``body`` with persistent delivery + ``headers`` and ack
+        the original delivery."""
+        channel.basic_publish(
+            exchange="",
+            routing_key=self._queue_name,
+            body=body,
+            properties=pika.BasicProperties(
+                delivery_mode=pika.DeliveryMode.Persistent,
+                headers=headers,
+            ),
+        )
+        channel.basic_ack(delivery_tag=delivery_tag)
+
+    def _handle_general_failure(
+        self,
+        channel: BlockingChannel,
+        method: Basic.Deliver,
+        decoded: _DecodedMessage,
+        exc: BaseException,
+    ) -> None:
+        """Non-OOM failure: emit ``child.failed`` and nack with the configured
+        requeue flag."""
+        operation_name = decoded.operation_name
+        logger.error("Operation failed. operation=%s error=%s", operation_name, exc)
+        self._emit_parent_event(
+            decoded.parent_job_id,
+            "child.failed",
+            str(exc)[:2000],
+            {
+                "operation": operation_name,
+                "error_code": exc.__class__.__name__,
+            },
+            level="error",
+        )
+        channel.basic_nack(
+            delivery_tag=method.delivery_tag,
+            requeue=self._requeue_on_failure,
+        )
 
     def _emit_parent_event(
         self,
