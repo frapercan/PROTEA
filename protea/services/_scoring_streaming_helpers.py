@@ -57,6 +57,40 @@ def _format_optional(value: Any) -> str:
     return "" if value is None else str(value)
 
 
+def _pred_score_inputs(pred: GOPrediction) -> dict[str, Any]:
+    """Lift the score-formula input fields off a ``GOPrediction`` row."""
+    return {
+        "distance": pred.distance,
+        "identity_nw": pred.identity_nw,
+        "identity_sw": pred.identity_sw,
+        "evidence_code": pred.evidence_code,
+        "taxonomic_distance": pred.taxonomic_distance,
+        "neighbor_vote_fraction": pred.neighbor_vote_fraction,
+    }
+
+
+def _scored_tsv_row(pred: GOPrediction, go_id: str, score: float) -> bytes:
+    """Render one scored TSV row (matches ``_SCORED_TSV_COLUMNS`` exactly)."""
+    return (
+        "\t".join(
+            [
+                pred.protein_accession,
+                go_id,
+                str(score),
+                _format_optional(pred.distance),
+                pred.ref_protein_accession or "",
+                pred.evidence_code or "",
+                pred.qualifier or "",
+                _format_optional(pred.identity_nw),
+                _format_optional(pred.identity_sw),
+                _format_optional(pred.taxonomic_distance),
+                _format_optional(pred.neighbor_vote_fraction),
+            ]
+        )
+        + "\n"
+    ).encode()
+
+
 def iter_scored_predictions(
     factory: Any,
     *,
@@ -68,7 +102,7 @@ def iter_scored_predictions(
     """Yield TSV rows (as bytes) of scored predictions.
 
     Opens its own session inside the generator so the route's initial
-    validation phase can close its session before streaming starts —
+    validation phase can close its session before streaming starts;
     avoids holding a DB connection open for the duration of the
     response. The first yielded chunk is the header line; one row
     per GOPrediction follows.
@@ -86,37 +120,10 @@ def iter_scored_predictions(
             q = q.filter(GOPrediction.protein_accession == accession)
 
         for pred, go_id in q.yield_per(1000):
-            pred_dict = {
-                "distance": pred.distance,
-                "identity_nw": pred.identity_nw,
-                "identity_sw": pred.identity_sw,
-                "evidence_code": pred.evidence_code,
-                "taxonomic_distance": pred.taxonomic_distance,
-                "neighbor_vote_fraction": pred.neighbor_vote_fraction,
-            }
-            score = compute_score(pred_dict, config_snap)
+            score = compute_score(_pred_score_inputs(pred), config_snap)
             if min_score is not None and score < min_score:
                 continue
-
-            row = (
-                "\t".join(
-                    [
-                        pred.protein_accession,
-                        go_id,
-                        str(score),
-                        _format_optional(pred.distance),
-                        pred.ref_protein_accession or "",
-                        pred.evidence_code or "",
-                        pred.qualifier or "",
-                        _format_optional(pred.identity_nw),
-                        _format_optional(pred.identity_sw),
-                        _format_optional(pred.taxonomic_distance),
-                        _format_optional(pred.neighbor_vote_fraction),
-                    ]
-                )
-                + "\n"
-            )
-            yield row.encode()
+            yield _scored_tsv_row(pred, go_id, score)
 
 
 def iter_training_data(
