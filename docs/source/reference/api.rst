@@ -8,7 +8,7 @@ HTTP API
 The PROTEA HTTP API is a FastAPI application that exposes seventeen routers.
 All state mutations flow through this layer: it writes ``Job`` rows to
 PostgreSQL and publishes messages to RabbitMQ. The API is stateless between
-requests — the session factory and AMQP URL are injected via ``app.state``
+requests; the session factory and AMQP URL are injected via ``app.state``
 at startup, keeping every router free of global state and infrastructure
 imports.
 
@@ -19,7 +19,7 @@ e.g. ``/problems/not-found``), ``title`` (short stable summary),
 ``status`` (mirror of the HTTP code), and an optional ``detail`` +
 ``instance`` (request URI). Validation errors carry an extra
 ``errors`` array with the offending field paths. Existing route code
-keeps raising ``HTTPException`` exactly as before — only the wire
+keeps raising ``HTTPException`` exactly as before; only the wire
 format changed. Timestamps are ISO 8601 UTC strings. UUID identifiers
 are lowercase hyphenated strings.
 
@@ -28,10 +28,10 @@ Versioning and the ``/v1/`` prefix
 
 Every router is mounted twice (T4.1, decision D4):
 
-- **Canonical** under ``/v1/`` — the prefix surfaced in OpenAPI /
+- **Canonical** under ``/v1/``: the prefix surfaced in OpenAPI /
   Swagger and the only path schema exporters and codegen tools see.
   All new clients should target this form.
-- **Legacy alias** at the root path — the same handler reachable
+- **Legacy alias** at the root path: the same handler reachable
   without a prefix, ``include_in_schema=False`` so OpenAPI does *not*
   advertise it. This exists for the deprecation window so existing
   frontend, CLI, and CI traffic keeps working without a coordinated
@@ -64,8 +64,8 @@ Jobs router
 The ``/jobs`` router is the primary interface for job lifecycle management.
 Jobs are created by ``POST /jobs`` with an ``operation`` name, a
 ``queue_name``, and an optional JSON ``payload``. The API creates a ``Job``
-row in ``QUEUED`` status, commits, then publishes the UUID to RabbitMQ —
-in that order, so workers always find the row before they try to claim it.
+row in ``QUEUED`` status, commits, then publishes the UUID to RabbitMQ
+(in that order, so workers always find the row before they try to claim it).
 
 Job status and the structured event timeline can be polled via
 ``GET /jobs/{id}`` and ``GET /jobs/{id}/events`` respectively. The frontend
@@ -81,7 +81,7 @@ Proteins router
 ---------------
 
 The ``/proteins`` router provides read access to the protein and sequence
-catalogue. Proteins are not created directly through this router — they are
+catalogue. Proteins are not created directly through this router; they are
 inserted asynchronously by the ``insert_proteins`` operation. The router
 exposes list and detail endpoints with filtering by organism and review
 status.
@@ -141,16 +141,16 @@ trained offline in ``protea-reranker-lab`` and registered through the
 
 Key endpoints:
 
-- ``GET /scoring/prediction-sets/{id}/training-data.tsv`` — generates a
+- ``GET /scoring/prediction-sets/{id}/training-data.tsv``: generates a
   31-column TSV with binary labels from temporal ground truth, consumed
   by ``protea-reranker-lab`` to fit a booster.
 - ``GET /scoring/rerankers`` / ``GET /scoring/rerankers/{id}`` /
-  ``DELETE /scoring/rerankers/{id}`` — read/delete operations for
+  ``DELETE /scoring/rerankers/{id}``: read/delete operations for
   registered re-ranker models. Creation lives at
   ``POST /reranker-models/import``.
-- ``GET /scoring/prediction-sets/{id}/rerank.tsv`` — applies a trained
+- ``GET /scoring/prediction-sets/{id}/rerank.tsv``: applies a trained
   re-ranker to a prediction set, streaming re-scored predictions.
-- ``GET /scoring/prediction-sets/{id}/reranker-metrics`` — computes CAFA-style
+- ``GET /scoring/prediction-sets/{id}/reranker-metrics``: computes CAFA-style
   Fmax and AUC-PR using re-ranker probability scores.
 
 .. automodule:: protea.api.routers.scoring
@@ -221,7 +221,7 @@ Showcase router
 The ``/showcase`` router aggregates platform statistics and best evaluation
 results for the landing page. Returns protein counts, embedding counts,
 prediction counts, best Fmax per aspect per evaluation category (NK/LK/PK),
-and a method comparison table — all in a single JSON response.
+and a method comparison table, all in a single JSON response.
 
 .. automodule:: protea.api.routers.showcase
    :members:
@@ -249,7 +249,7 @@ the maximum, this router preserves *which* embedding produced each number
 and *which* scoring config was used, exposing one stage per distinct
 ``ScoringConfig.name`` plus an implicit ``"reranker"`` stage for evaluations
 that used a re-ranker. Stage labels, GO categories, and the baseline tag are
-read from ``protea/config/benchmark.yaml`` — no hardcoded constants.
+read from ``protea/config/benchmark.yaml``; no hardcoded constants.
 
 .. automodule:: protea.api.routers.benchmark
    :members:
@@ -279,7 +279,7 @@ Registry router
 The ``/backends``, ``/sources``, and ``/runners`` endpoints list the plugins
 discovered at runtime via ``importlib.metadata.entry_points`` for the three
 plugin groups: embedding backends, annotation sources, and experiment
-runners. The router is intentionally stateless — it re-scans entry points
+runners. The router is intentionally stateless: it re-scans entry points
 on every call rather than caching, so a worker that has just been restarted
 with a newly-installed extra surfaces in the next request without an API
 restart.
@@ -337,7 +337,7 @@ under a unique human ``name`` and carries the narrative trio
 ``PATCH /experiment-runs/{run_id}`` accepts partial updates; status
 transitions stamp ``started_at`` (on ``planned → running``) and
 ``finished_at`` (on ``running → done`` or ``→ abandoned``)
-idempotently — re-entering a state never resets its timestamp.
+idempotently: re-entering a state never resets its timestamp.
 
 .. automodule:: protea.api.routers.experiment_runs
    :members:
@@ -360,10 +360,10 @@ Endpoints summary
      -
    * - ``GET``
      - ``/health``
-     - Liveness probe — returns 200 if the API process is up.
+     - Liveness probe: returns 200 if the API process is up.
    * - ``GET``
      - ``/health/ready``
-     - Readiness probe — verifies database and RabbitMQ connections.
+     - Readiness probe: verifies database and RabbitMQ connections.
 
    * -
      - **Jobs**
@@ -771,9 +771,9 @@ Common payload examples by operation:
 
 .. seealso::
 
-   - :doc:`/architecture/operations` — every operation referenced in a
+   - :doc:`/architecture/operations`: every operation referenced in a
      payload, with field-level documentation.
-   - :doc:`/appendix/howto_guides` — concrete ``curl`` recipes that submit
+   - :doc:`/appendix/howto_guides`: concrete ``curl`` recipes that submit
      each endpoint end-to-end.
-   - :doc:`/architecture/job_lifecycle` — how the API turns a request into a
+   - :doc:`/architecture/job_lifecycle`: how the API turns a request into a
      persistent ``Job`` row and a queue message.
