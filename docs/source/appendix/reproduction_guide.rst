@@ -8,12 +8,12 @@ Reproduction guide
    end-to-end against the GOA 220 → 229 temporal holdout.
 
    **Read** :doc:`howto_guides` **instead if:** you have one specific task to
-   accomplish — load an ontology, upload a FASTA, predict GO terms for your
-   own proteins, scale a worker. The how-to is recipe-style and stops at the
+   accomplish (load an ontology, upload a FASTA, predict GO terms for your
+   own proteins, scale a worker). The how-to is recipe-style and stops at the
    step you need; this guide is a single ordered procedure that runs every
    experiment in sequence.
 
-.. admonition:: Provisional expected values — pending final recompute
+.. admonition:: Provisional expected values, pending final recompute
    :class: warning
 
    The expected Fmax values cited throughout this guide (baseline
@@ -121,10 +121,10 @@ The key reference UUIDs from the original campaign are recorded in
 on a new deployment regenerates these UUIDs; the shell variables below are
 placeholders that the user fills in after each preparation step.
 
-Stage 1 — Prepare infrastructure
+Stage 1: Prepare infrastructure
 --------------------------------
 
-Step 1.1 — Load the GO ontology
+Step 1.1: Load the GO ontology
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Queue a ``load_ontology_snapshot`` job. The OBO file is versioned by
@@ -147,7 +147,7 @@ snapshot ID:
    SNAPSHOT_ID=$(curl -s $API/annotations/snapshots \
      | jq -r '.[0].id')
 
-Step 1.2 — Load GOA annotation sets
+Step 1.2: Load GOA annotation sets
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 For the temporal re-ranker training pipeline the campaign loads 15 releases
@@ -181,7 +181,7 @@ to a specific release with ``jq``:
    NEW_SET=$(curl -s "$API/annotations/sets?source=goa" \
      | jq -r '.[] | select(.source_version=="goa_229") | .id')
 
-Step 1.3 — Generate the NK/LK/PK evaluation set
+Step 1.3: Generate the NK/LK/PK evaluation set
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: bash
@@ -204,7 +204,7 @@ experimental evidence filtering, and per-namespace classification. The
 summary counts stored on the ``EvaluationSet`` row should match the numbers
 reported in Infrastructure above.
 
-Step 1.4 — Compute ESM-C reference embeddings
+Step 1.4: Compute ESM-C reference embeddings
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Create the embedding config first (ESM-C 300M, mean-pooled, float16 storage):
@@ -241,17 +241,17 @@ The full reference set contains 527 K sequences; total wall-clock time is
 approximately 6–8 hours on a single GPU. Monitor ``manage.sh status`` and the
 ``protea.embeddings.batch`` worker logs for progress.
 
-Stage 2 — Baseline KNN experiments
+Stage 2: Baseline KNN experiments
 ----------------------------------
 
 Stage 2 reproduces experiments 1 and 2 from ``EXPERIMENTS.md``:
 the ``k`` sweep and the ``aspect_separated_knn`` ablation.
 
-Experiment 1 — ``k`` sweep
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+Experiment 1: ``k`` sweep
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Run one ``predict_go_terms`` job for each target ``k``. Feature-engineering
-flags are left disabled at this stage — the scoring and re-ranker experiments
+flags are left disabled at this stage; the scoring and re-ranker experiments
 reuse a single enriched prediction set generated in Stage 3.
 
 .. code-block:: bash
@@ -287,8 +287,8 @@ The expected ``k = 5`` baseline Fmax (IA-weighted) is ``0.412 / 0.590 / 0.668``
 for NK BPO/MFO/CCO and degrades monotonically for larger ``k``. Use ``k = 5``
 for all downstream experiments.
 
-Experiment 2 — ``aspect_separated_knn``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Experiment 2: ``aspect_separated_knn``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Re-run prediction with ``aspect_separated_knn: false`` and compare against the
 ``k = 5`` result from Experiment 1:
@@ -313,10 +313,10 @@ Differences between the two variants are within ±0.011 Fmax across all nine
 cells. The campaign retains ``aspect_separated_knn = true`` for uniform aspect
 coverage.
 
-Stage 3 — Feature engineering and scoring
+Stage 3: Feature engineering and scoring
 -----------------------------------------
 
-Experiment 3 — Heuristic scoring configurations
+Experiment 3: Heuristic scoring configurations
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 All scoring configurations operate on a single enriched prediction set that
@@ -369,10 +369,10 @@ improving the ``embedding_only`` baseline by +1.5 % to +4 % Fmax. Every scoring
 configuration that mixes evidence-code weights degrades the baseline under
 IA-weighted CAFA evaluation.
 
-Stage 4 — Re-ranker training
+Stage 4: Re-ranker training
 ----------------------------
 
-Experiment 4 — Re-ranker v1 (per-aspect LightGBM)
+Experiment 4: Re-ranker v1 (per-aspect LightGBM)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Version ``v1`` trains nine LightGBM binary classifiers (one per NK/LK/PK ×
@@ -414,7 +414,7 @@ In the unbalanced run six of the nine models early-stop at iteration 1 due to
 extreme class imbalance (≈0.17 % positives in BPO). The balanced run recovers
 BPO (+0.124 AUC for LK-BPO) but does not outperform ``alignment_weighted``.
 
-Experiment 5 — Re-ranker v2 (per-category + IA weighting)
+Experiment 5: Re-ranker v2 (per-category + IA weighting)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Version ``v2`` collapses the nine per-aspect models into three per-category
@@ -446,7 +446,7 @@ training loss. Hyperparameters move to ``learning_rate = 0.01`` and
 The expected ``v2 full`` Fmax matches or exceeds ``v1`` in every cell but does
 not yet overtake ``alignment_weighted`` globally.
 
-Experiment 6 — Re-ranker v3 (full alignment and taxonomy features)
+Experiment 6: Re-ranker v3 (full alignment and taxonomy features)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Version ``v3`` is identical to ``v2`` except that the training-data generator
@@ -500,7 +500,7 @@ Expected result: ``v3`` outperforms the ``alignment_weighted`` heuristic in 7
 of the 9 evaluation cells and is the best global configuration reported in
 :doc:`../results`.
 
-Stage 5 — External tool benchmarks
+Stage 5: External tool benchmarks
 ----------------------------------
 
 All external tools are evaluated on the same 20 281-protein delta as PROTEA
@@ -508,8 +508,8 @@ using ``scripts/evaluate_external_tool.py``. The script normalises each tool's
 output into a CAFA-style ``predictions.tsv`` and runs ``cafaeval`` with IA
 weights against the same evaluation set.
 
-Experiment 7 — eggNOG-mapper
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Experiment 7: eggNOG-mapper
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: bash
 
@@ -527,7 +527,7 @@ Experiment 7 — eggNOG-mapper
 PROTEA reranker v3 is expected to outperform eggNOG-mapper in 9 of 9 cells
 (differences up to +0.306 Fmax in NK-CCO).
 
-Experiment 8 — Pannzer2 and the data-leakage analysis
+Experiment 8: Pannzer2 and the data-leakage analysis
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Pannzer2 is invoked via the Helsinki web server; results are downloaded as
@@ -541,7 +541,7 @@ HTML, parsed into a CAFA-style TSV, and scored the same way.
      --evaluation-set $EVAL_SET
 
 Pannzer2 posts the highest apparent Fmax in the benchmark (e.g. NK-MFO 0.717),
-but its reference database was pulled in March 2026 — after the GOA 229 cutoff
+but its reference database was pulled in March 2026, after the GOA 229 cutoff
 that defines the ground truth. The leakage measurement compares the
 (protein, GO term) pairs in the ground truth against those in each tool's
 predictions and reports the exact-match overlap per NK/LK/PK category. For
@@ -550,8 +550,8 @@ explaining its apparent advantage over temporally strict methods. PROTEA is
 the only tool in the benchmark that freezes its reference at ``t0``, so its
 numbers are the only fair upper bound.
 
-Experiment 9 — InterProScan 6
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Experiment 9: InterProScan 6
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: bash
 
@@ -573,16 +573,16 @@ Checklist
 The nine experiments above fully reproduce the figures and tables in
 :doc:`../results`:
 
-1. Experiment 1 — ``k`` sweep (``k ∈ {5, 10, 20, 50}``)
-2. Experiment 2 — ``aspect_separated_knn`` ablation
-3. Experiment 3 — Heuristic scoring (five presets)
-4. Experiment 4 — Re-ranker ``v1`` (per-aspect, unbalanced and balanced)
-5. Experiment 5 — Re-ranker ``v2`` (per-category, IA-weighted)
-6. Experiment 6 — Re-ranker ``v3`` (per-category, full alignment and
-   taxonomy features) — best global configuration
-7. Experiment 7 — eggNOG-mapper benchmark
-8. Experiment 8 — Pannzer2 benchmark plus data-leakage analysis
-9. Experiment 9 — InterProScan 6 benchmark
+1. Experiment 1: ``k`` sweep (``k ∈ {5, 10, 20, 50}``)
+2. Experiment 2: ``aspect_separated_knn`` ablation
+3. Experiment 3: Heuristic scoring (five presets)
+4. Experiment 4: Re-ranker ``v1`` (per-aspect, unbalanced and balanced)
+5. Experiment 5: Re-ranker ``v2`` (per-category, IA-weighted)
+6. Experiment 6: Re-ranker ``v3`` (per-category, full alignment and
+   taxonomy features), best global configuration
+7. Experiment 7: eggNOG-mapper benchmark
+8. Experiment 8: Pannzer2 benchmark plus data-leakage analysis
+9. Experiment 9: InterProScan 6 benchmark
 
 Every prediction set, evaluation result, and re-ranker model is persisted in
 the database with a UUID that can be recorded alongside the thesis tables,
