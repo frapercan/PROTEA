@@ -24,15 +24,45 @@ from protea.infrastructure.orm.models.embedding.scoring_config import (
 class RerankerResponse(BaseModel):
     """Serialised representation of a stored :class:`RerankerModel`."""
 
-    id: uuid.UUID
-    name: str
-    prediction_set_id: uuid.UUID | None
-    evaluation_set_id: uuid.UUID | None
-    category: str
-    aspect: str | None
-    metrics: dict[str, Any]
-    feature_importance: dict[str, Any]
-    created_at: Any
+    id: uuid.UUID = Field(..., description="UUID primary key of the ``RerankerModel`` row.")
+    name: str = Field(..., description="Unique human-readable name (also used as artifact key suffix).")
+    prediction_set_id: uuid.UUID | None = Field(
+        ...,
+        description=(
+            "UUID of the ``PredictionSet`` this booster was trained "
+            "against; ``None`` when the booster is not bound to one."
+        ),
+    )
+    evaluation_set_id: uuid.UUID | None = Field(
+        ...,
+        description=(
+            "UUID of the ``EvaluationSet`` this booster was tuned "
+            "against; ``None`` when not bound."
+        ),
+    )
+    category: str = Field(
+        ...,
+        description="CAFA category (``NK`` / ``LK`` / ``PK``) the booster targets.",
+    )
+    aspect: str | None = Field(
+        ...,
+        description=(
+            "GO aspect (``BPO`` / ``MFO`` / ``CCO``) when the booster "
+            "is aspect-specific; ``None`` for cross-aspect models."
+        ),
+    )
+    metrics: dict[str, Any] = Field(
+        ...,
+        description="Cached training/eval metrics (Fmax, AUPRC, etc.) keyed by metric name.",
+    )
+    feature_importance: dict[str, Any] = Field(
+        ...,
+        description="LightGBM feature-importance map keyed by feature name.",
+    )
+    created_at: Any = Field(
+        ...,
+        description="ISO 8601 timestamp of when the row was inserted.",
+    )
 
 
 def to_reranker_response(m: RerankerModel) -> RerankerResponse:
@@ -58,9 +88,30 @@ class ScoringConfigCreate(BaseModel):
     FastAPI in.
     """
 
-    name: str = Field(..., min_length=1, max_length=255)
-    formula: str = Field("linear")
-    weights: dict[str, float] = Field(default_factory=lambda: dict(DEFAULT_WEIGHTS))
+    name: str = Field(
+        ...,
+        min_length=1,
+        max_length=255,
+        description="Unique human-readable name; doubles as the row's lookup key.",
+    )
+    formula: str = Field(
+        "linear",
+        description=(
+            "Aggregation formula across signals: ``linear`` (weighted "
+            "sum) or ``evidence_weighted`` (final multiply by evidence "
+            "weight). Unknown values are rejected with 422."
+        ),
+    )
+    weights: dict[str, float] = Field(
+        default_factory=lambda: dict(DEFAULT_WEIGHTS),
+        description=(
+            "Per-signal weight map (``embedding_similarity``, "
+            "``identity_nw``, ``identity_sw``, ``evidence_weight``, "
+            "``taxonomic_proximity``, ``neighbor_vote_fraction``). "
+            "Defaults to ``DEFAULT_WEIGHTS``; unknown keys are rejected "
+            "with 422."
+        ),
+    )
     evidence_weights: dict[str, float] | None = Field(
         default=None,
         description=(
@@ -68,7 +119,10 @@ class ScoringConfigCreate(BaseModel):
             "NULL means use system defaults. Partial dicts are valid."
         ),
     )
-    description: str | None = None
+    description: str | None = Field(
+        default=None,
+        description="Optional human-readable explanation shown in the scoring config picker.",
+    )
 
     model_config = {"extra": "forbid"}
 
@@ -113,13 +167,31 @@ class ScoringConfigCreate(BaseModel):
 class ScoringConfigResponse(BaseModel):
     """Serialised representation of a stored :class:`ScoringConfig`."""
 
-    id: uuid.UUID
-    name: str
-    formula: str
-    weights: dict[str, Any]
-    evidence_weights: dict[str, Any] | None
-    description: str | None
-    created_at: Any
+    id: uuid.UUID = Field(..., description="UUID primary key of the ``ScoringConfig`` row.")
+    name: str = Field(..., description="Unique human-readable name.")
+    formula: str = Field(
+        ...,
+        description="Aggregation formula (``linear`` or ``evidence_weighted``).",
+    )
+    weights: dict[str, Any] = Field(
+        ...,
+        description="Resolved per-signal weight map as stored on the row.",
+    )
+    evidence_weights: dict[str, Any] | None = Field(
+        ...,
+        description=(
+            "Per-evidence-code quality overrides; ``None`` means the "
+            "row uses the system defaults."
+        ),
+    )
+    description: str | None = Field(
+        ...,
+        description="Optional human-readable explanation; ``None`` if not set.",
+    )
+    created_at: Any = Field(
+        ...,
+        description="ISO 8601 timestamp of when the row was inserted.",
+    )
 
 
 def to_response(c: ScoringConfig) -> ScoringConfigResponse:

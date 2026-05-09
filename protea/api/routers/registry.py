@@ -24,7 +24,7 @@ from importlib.metadata import entry_points
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 router = APIRouter(tags=["registry"])
 
@@ -39,31 +39,49 @@ _KNOWN_GROUPS = {
 class PluginInfo(BaseModel):
     """Metadata for one discovered plugin."""
 
-    name: str
-    """Entry-point name (e.g. ``"esm"``, ``"goa"``, ``"lightgbm"``).
-    Matches the plugin's ``name`` class attribute by convention."""
-
-    cls: str
-    """Plugin class name (e.g. ``"EsmBackend"``, ``"GoaSource"``)."""
-
-    module: str
-    """Fully-qualified entry-point value
-    (e.g. ``"protea_backends.esm:plugin"``)."""
-
-    extra: dict[str, Any] = {}
-    """Plugin-specific metadata read from the loaded instance. Today
-    carries ``version`` for sources; empty for backends and runners."""
+    name: str = Field(
+        ...,
+        description=(
+            "Entry-point name (e.g. ``esm``, ``goa``, ``lightgbm``); "
+            "matches the plugin's ``name`` class attribute by "
+            "convention."
+        ),
+    )
+    cls: str = Field(
+        ...,
+        description="Plugin class name (e.g. ``EsmBackend``, ``GoaSource``).",
+    )
+    module: str = Field(
+        ...,
+        description=(
+            "Fully-qualified entry-point value "
+            "(e.g. ``protea_backends.esm:plugin``)."
+        ),
+    )
+    extra: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Plugin-specific metadata read from the loaded instance. "
+            "Today carries ``version`` for sources; empty for backends "
+            "and runners."
+        ),
+    )
 
 
 class PluginListResponse(BaseModel):
     """Response shape for the three registry endpoints."""
 
-    group: str
-    """The ``entry_points`` group queried
-    (e.g. ``"protea.backends"``)."""
-
-    plugins: list[PluginInfo]
-    """Sorted (by ``name``) list of discovered plugins."""
+    group: str = Field(
+        ...,
+        description=(
+            "The ``entry_points`` group queried "
+            "(e.g. ``protea.backends``)."
+        ),
+    )
+    plugins: list[PluginInfo] = Field(
+        ...,
+        description="Discovered plugins, sorted alphabetically by ``name``.",
+    )
 
 
 def _discover(group: str) -> list[PluginInfo]:

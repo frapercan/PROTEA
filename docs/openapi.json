@@ -516,20 +516,23 @@
         "description": "Metadata for one discovered plugin.",
         "properties": {
           "cls": {
+            "description": "Plugin class name (e.g. ``EsmBackend``, ``GoaSource``).",
             "title": "Cls",
             "type": "string"
           },
           "extra": {
             "additionalProperties": true,
-            "default": {},
+            "description": "Plugin-specific metadata read from the loaded instance. Today carries ``version`` for sources; empty for backends and runners.",
             "title": "Extra",
             "type": "object"
           },
           "module": {
+            "description": "Fully-qualified entry-point value (e.g. ``protea_backends.esm:plugin``).",
             "title": "Module",
             "type": "string"
           },
           "name": {
+            "description": "Entry-point name (e.g. ``esm``, ``goa``, ``lightgbm``); matches the plugin's ``name`` class attribute by convention.",
             "title": "Name",
             "type": "string"
           }
@@ -546,10 +549,12 @@
         "description": "Response shape for the three registry endpoints.",
         "properties": {
           "group": {
+            "description": "The ``entry_points`` group queried (e.g. ``protea.backends``).",
             "title": "Group",
             "type": "string"
           },
           "plugins": {
+            "description": "Discovered plugins, sorted alphabetically by ``name``.",
             "items": {
               "$ref": "#/components/schemas/PluginInfo"
             },
@@ -631,17 +636,21 @@
                 "type": "null"
               }
             ],
+            "description": "GitHub login of the PR author; ``None`` for ghost users.",
             "title": "Author"
           },
           "created_at": {
+            "description": "ISO 8601 timestamp of PR creation.",
             "title": "Created At",
             "type": "string"
           },
           "draft": {
+            "description": "True when the PR is in draft state (not ready for review).",
             "title": "Draft",
             "type": "boolean"
           },
           "labels": {
+            "description": "Names of labels attached to the PR.",
             "items": {
               "type": "string"
             },
@@ -649,26 +658,32 @@
             "type": "array"
           },
           "number": {
+            "description": "GitHub's PR number (per-repo, integer).",
             "title": "Number",
             "type": "integer"
           },
           "repo": {
+            "description": "Slug of the repository the PR belongs to.",
             "title": "Repo",
             "type": "string"
           },
           "state": {
+            "description": "GitHub state (``open``, ``closed``).",
             "title": "State",
             "type": "string"
           },
           "title": {
+            "description": "PR title as set on GitHub.",
             "title": "Title",
             "type": "string"
           },
           "updated_at": {
+            "description": "ISO 8601 timestamp of the last PR update.",
             "title": "Updated At",
             "type": "string"
           },
           "url": {
+            "description": "Public ``https://github.com/.../pull/N`` URL.",
             "title": "Url",
             "type": "string"
           }
@@ -692,6 +707,7 @@
         "description": "Aggregated open-PR snapshot across all stack repos.\n\nThe handler caches the GitHub query for a few minutes; ``cached``\nflips to ``True`` when a response is served from the in-process\ncache, ``fetched_at`` records the original wall-clock time, and\n``errors`` carries per-repo failures (e.g. rate-limited, 404).",
         "properties": {
           "cached": {
+            "description": "True when the response is served from the in-process cache (GitHub was not contacted for this request).",
             "title": "Cached",
             "type": "boolean"
           },
@@ -699,15 +715,17 @@
             "additionalProperties": {
               "type": "string"
             },
-            "default": {},
+            "description": "Per-repo error map (slug \u2192 message) for repos GitHub failed on.",
             "title": "Errors",
             "type": "object"
           },
           "fetched_at": {
+            "description": "Unix timestamp when the snapshot was originally built.",
             "title": "Fetched At",
             "type": "number"
           },
           "pulls": {
+            "description": "Aggregated open PRs across all queried repos.",
             "items": {
               "$ref": "#/components/schemas/PullRequest"
             },
@@ -723,9 +741,11 @@
                 "type": "null"
               }
             ],
+            "description": "Value of GitHub's ``X-RateLimit-Remaining`` header from the underlying call; ``None`` if served from cache.",
             "title": "Rate Limit Remaining"
           },
           "repos_queried": {
+            "description": "Number of repos GitHub was queried for in the snapshot.",
             "title": "Repos Queried",
             "type": "integer"
           }
@@ -751,9 +771,11 @@
                 "type": "null"
               }
             ],
+            "description": "Sphinx docs URL when published; ``None`` for sibling repos without docs.",
             "title": "Docs Url"
           },
           "github_url": {
+            "description": "Canonical ``https://github.com/...`` URL.",
             "title": "Github Url",
             "type": "string"
           },
@@ -766,9 +788,11 @@
                 "type": "null"
               }
             ],
+            "description": "Path under the local docs portal where this repo's Sphinx build is served (when present in the worktree).",
             "title": "Local Docs Path"
           },
           "name": {
+            "description": "Display name (human-readable, e.g. ``PROTEA``).",
             "title": "Name",
             "type": "string"
           },
@@ -781,25 +805,31 @@
                 "type": "null"
               }
             ],
+            "description": "PyPI / package registry URL; ``None`` if not published.",
             "title": "Package Url"
           },
           "role": {
+            "description": "Architectural slot key: ``core``, ``contracts``, ``plugin``, ``lab``.",
             "title": "Role",
             "type": "string"
           },
           "role_label": {
+            "description": "Human-readable label for ``role`` shown in the UI.",
             "title": "Role Label",
             "type": "string"
           },
           "slug": {
+            "description": "URL-safe slug (lowercase, hyphenated; e.g. ``protea-method``).",
             "title": "Slug",
             "type": "string"
           },
           "status": {
+            "description": "Coarse health signal sourced from the repo's CI / release state (``green``, ``warn``, ``red``).",
             "title": "Status",
             "type": "string"
           },
           "summary": {
+            "description": "One-line description shown on the stack landing page.",
             "title": "Summary",
             "type": "string"
           }
@@ -828,13 +858,16 @@
                 "type": "null"
               }
             ],
+            "description": "GO aspect (``BPO`` / ``MFO`` / ``CCO``) when the booster is aspect-specific; ``None`` for cross-aspect models.",
             "title": "Aspect"
           },
           "category": {
+            "description": "CAFA category (``NK`` / ``LK`` / ``PK``) the booster targets.",
             "title": "Category",
             "type": "string"
           },
           "created_at": {
+            "description": "ISO 8601 timestamp of when the row was inserted.",
             "title": "Created At"
           },
           "evaluation_set_id": {
@@ -847,24 +880,29 @@
                 "type": "null"
               }
             ],
+            "description": "UUID of the ``EvaluationSet`` this booster was tuned against; ``None`` when not bound.",
             "title": "Evaluation Set Id"
           },
           "feature_importance": {
             "additionalProperties": true,
+            "description": "LightGBM feature-importance map keyed by feature name.",
             "title": "Feature Importance",
             "type": "object"
           },
           "id": {
+            "description": "UUID primary key of the ``RerankerModel`` row.",
             "format": "uuid",
             "title": "Id",
             "type": "string"
           },
           "metrics": {
             "additionalProperties": true,
+            "description": "Cached training/eval metrics (Fmax, AUPRC, etc.) keyed by metric name.",
             "title": "Metrics",
             "type": "object"
           },
           "name": {
+            "description": "Unique human-readable name (also used as artifact key suffix).",
             "title": "Name",
             "type": "string"
           },
@@ -878,6 +916,7 @@
                 "type": "null"
               }
             ],
+            "description": "UUID of the ``PredictionSet`` this booster was trained against; ``None`` when the booster is not bound to one.",
             "title": "Prediction Set Id"
           }
         },
@@ -908,6 +947,7 @@
                 "type": "null"
               }
             ],
+            "description": "Optional human-readable explanation shown in the scoring config picker.",
             "title": "Description"
           },
           "evidence_weights": {
@@ -927,10 +967,12 @@
           },
           "formula": {
             "default": "linear",
+            "description": "Aggregation formula across signals: ``linear`` (weighted sum) or ``evidence_weighted`` (final multiply by evidence weight). Unknown values are rejected with 422.",
             "title": "Formula",
             "type": "string"
           },
           "name": {
+            "description": "Unique human-readable name; doubles as the row's lookup key.",
             "maxLength": 255,
             "minLength": 1,
             "title": "Name",
@@ -940,6 +982,7 @@
             "additionalProperties": {
               "type": "number"
             },
+            "description": "Per-signal weight map (``embedding_similarity``, ``identity_nw``, ``identity_sw``, ``evidence_weight``, ``taxonomic_proximity``, ``neighbor_vote_fraction``). Defaults to ``DEFAULT_WEIGHTS``; unknown keys are rejected with 422.",
             "title": "Weights",
             "type": "object"
           }
@@ -954,6 +997,7 @@
         "description": "Serialised representation of a stored :class:`ScoringConfig`.",
         "properties": {
           "created_at": {
+            "description": "ISO 8601 timestamp of when the row was inserted.",
             "title": "Created At"
           },
           "description": {
@@ -965,6 +1009,7 @@
                 "type": "null"
               }
             ],
+            "description": "Optional human-readable explanation; ``None`` if not set.",
             "title": "Description"
           },
           "evidence_weights": {
@@ -977,23 +1022,28 @@
                 "type": "null"
               }
             ],
+            "description": "Per-evidence-code quality overrides; ``None`` means the row uses the system defaults.",
             "title": "Evidence Weights"
           },
           "formula": {
+            "description": "Aggregation formula (``linear`` or ``evidence_weighted``).",
             "title": "Formula",
             "type": "string"
           },
           "id": {
+            "description": "UUID primary key of the ``ScoringConfig`` row.",
             "format": "uuid",
             "title": "Id",
             "type": "string"
           },
           "name": {
+            "description": "Unique human-readable name.",
             "title": "Name",
             "type": "string"
           },
           "weights": {
             "additionalProperties": true,
+            "description": "Resolved per-signal weight map as stored on the row.",
             "title": "Weights",
             "type": "object"
           }
@@ -1014,6 +1064,7 @@
         "description": "Top-level payload for ``GET /stack``.\n\nLists every repository in the PROTEA family plus the link to the\ncanonical thesis PDF. Consumed by the frontend's stack overview\npage and the docs portal sidebar.",
         "properties": {
           "repos": {
+            "description": "One ``RepoEntry`` per repository in the PROTEA family.",
             "items": {
               "$ref": "#/components/schemas/RepoEntry"
             },
@@ -1029,6 +1080,7 @@
                 "type": "null"
               }
             ],
+            "description": "Public URL of the canonical thesis PDF; ``None`` if not yet hosted.",
             "title": "Thesis Pdf Url"
           }
         },
@@ -1050,6 +1102,7 @@
                 "type": "null"
               }
             ],
+            "description": "Optional free-form note shown on the support feed. Capped at ``api.max_comment_length`` from the tuning config.",
             "title": "Comment"
           }
         },

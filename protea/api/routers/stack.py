@@ -25,7 +25,7 @@ from typing import Any
 import httpx
 import yaml
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 router = APIRouter(tags=["stack"])
 
@@ -46,16 +46,46 @@ class RepoEntry(BaseModel):
     coarse health signal sourced from the repo's CI / release state.
     """
 
-    name: str
-    slug: str
-    role: str
-    role_label: str
-    status: str
-    summary: str
-    github_url: str
-    docs_url: str | None = None
-    package_url: str | None = None
-    local_docs_path: str | None = None
+    name: str = Field(..., description="Display name (human-readable, e.g. ``PROTEA``).")
+    slug: str = Field(
+        ...,
+        description="URL-safe slug (lowercase, hyphenated; e.g. ``protea-method``).",
+    )
+    role: str = Field(
+        ...,
+        description=(
+            "Architectural slot key: ``core``, ``contracts``, "
+            "``plugin``, ``lab``."
+        ),
+    )
+    role_label: str = Field(
+        ...,
+        description="Human-readable label for ``role`` shown in the UI.",
+    )
+    status: str = Field(
+        ...,
+        description=(
+            "Coarse health signal sourced from the repo's CI / release "
+            "state (``green``, ``warn``, ``red``)."
+        ),
+    )
+    summary: str = Field(..., description="One-line description shown on the stack landing page.")
+    github_url: str = Field(..., description="Canonical ``https://github.com/...`` URL.")
+    docs_url: str | None = Field(
+        default=None,
+        description="Sphinx docs URL when published; ``None`` for sibling repos without docs.",
+    )
+    package_url: str | None = Field(
+        default=None,
+        description="PyPI / package registry URL; ``None`` if not published.",
+    )
+    local_docs_path: str | None = Field(
+        default=None,
+        description=(
+            "Path under the local docs portal where this repo's "
+            "Sphinx build is served (when present in the worktree)."
+        ),
+    )
 
 
 class StackResponse(BaseModel):
@@ -66,8 +96,14 @@ class StackResponse(BaseModel):
     page and the docs portal sidebar.
     """
 
-    repos: list[RepoEntry]
-    thesis_pdf_url: str | None = None
+    repos: list[RepoEntry] = Field(
+        ...,
+        description="One ``RepoEntry`` per repository in the PROTEA family.",
+    )
+    thesis_pdf_url: str | None = Field(
+        default=None,
+        description="Public URL of the canonical thesis PDF; ``None`` if not yet hosted.",
+    )
 
 
 class PullRequest(BaseModel):
@@ -78,16 +114,22 @@ class PullRequest(BaseModel):
     GitHub's response.
     """
 
-    repo: str
-    number: int
-    title: str
-    url: str
-    state: str
-    draft: bool
-    author: str | None
-    created_at: str
-    updated_at: str
-    labels: list[str]
+    repo: str = Field(..., description="Slug of the repository the PR belongs to.")
+    number: int = Field(..., description="GitHub's PR number (per-repo, integer).")
+    title: str = Field(..., description="PR title as set on GitHub.")
+    url: str = Field(..., description="Public ``https://github.com/.../pull/N`` URL.")
+    state: str = Field(..., description="GitHub state (``open``, ``closed``).")
+    draft: bool = Field(
+        ...,
+        description="True when the PR is in draft state (not ready for review).",
+    )
+    author: str | None = Field(
+        ...,
+        description="GitHub login of the PR author; ``None`` for ghost users.",
+    )
+    created_at: str = Field(..., description="ISO 8601 timestamp of PR creation.")
+    updated_at: str = Field(..., description="ISO 8601 timestamp of the last PR update.")
+    labels: list[str] = Field(..., description="Names of labels attached to the PR.")
 
 
 class PullsResponse(BaseModel):
@@ -99,12 +141,36 @@ class PullsResponse(BaseModel):
     ``errors`` carries per-repo failures (e.g. rate-limited, 404).
     """
 
-    fetched_at: float
-    cached: bool
-    repos_queried: int
-    pulls: list[PullRequest]
-    rate_limit_remaining: int | None = None
-    errors: dict[str, str] = {}
+    fetched_at: float = Field(
+        ...,
+        description="Unix timestamp when the snapshot was originally built.",
+    )
+    cached: bool = Field(
+        ...,
+        description=(
+            "True when the response is served from the in-process cache "
+            "(GitHub was not contacted for this request)."
+        ),
+    )
+    repos_queried: int = Field(
+        ...,
+        description="Number of repos GitHub was queried for in the snapshot.",
+    )
+    pulls: list[PullRequest] = Field(
+        ...,
+        description="Aggregated open PRs across all queried repos.",
+    )
+    rate_limit_remaining: int | None = Field(
+        default=None,
+        description=(
+            "Value of GitHub's ``X-RateLimit-Remaining`` header from "
+            "the underlying call; ``None`` if served from cache."
+        ),
+    )
+    errors: dict[str, str] = Field(
+        default_factory=dict,
+        description="Per-repo error map (slug → message) for repos GitHub failed on.",
+    )
 
 
 _pulls_cache: dict[str, Any] = {"fetched_at": 0.0, "payload": None}
