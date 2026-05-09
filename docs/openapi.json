@@ -157,45 +157,53 @@
         "type": "object"
       },
       "CreateDatasetRequest": {
-        "description": "Body for ``POST /datasets``.\n\nMirrors the ``export_research_dataset`` operation payload. The caller\ndoes not pick a queue \u2014 the dataset export always runs on the\n``protea.training`` worker (serialized, GPU/RAM-intensive).",
+        "description": "Body for ``POST /datasets``.\n\nMirrors the ``export_research_dataset`` operation payload. The caller\ndoes not pick a queue: the dataset export always runs on the\n``protea.training`` worker (serialized, GPU/RAM-intensive).",
         "properties": {
           "annotation_source": {
             "default": "goa",
+            "description": "``goa`` (default, UniProt-GOA) or ``quickgo``. Controls which annotation table the dump pulls from.",
             "title": "Annotation Source",
             "type": "string"
           },
           "compute_alignments": {
             "default": false,
+            "description": "When true, materialise pairwise alignment features (parasail). Slow but feeds the reranker.",
             "title": "Compute Alignments",
             "type": "boolean"
           },
           "compute_taxonomy": {
             "default": false,
+            "description": "When true, attach taxonomy-distance features per neighbour pair.",
             "title": "Compute Taxonomy",
             "type": "boolean"
           },
           "embedding_config_id": {
+            "description": "UUID of the ``EmbeddingConfig`` that drives source embeddings (vector dim, backend, model name).",
             "minLength": 1,
             "title": "Embedding Config Id",
             "type": "string"
           },
           "expand_votes_to_ancestors": {
             "default": false,
+            "description": "Legacy knob; ancestor-expanded ground-truth is now reconciled inside the eval-set itself.",
             "title": "Expand Votes To Ancestors",
             "type": "boolean"
           },
           "k": {
             "default": 5,
+            "description": "KNN neighbour count per query protein.",
             "exclusiveMinimum": 0.0,
             "title": "K",
             "type": "integer"
           },
           "ontology_snapshot_id": {
+            "description": "UUID of the ``OntologySnapshot`` anchoring the GO term graph (defines aspect / ancestor lookups).",
             "minLength": 1,
             "title": "Ontology Snapshot Id",
             "type": "string"
           },
           "output_name": {
+            "description": "Unique slug for the dataset; becomes the artifact-store prefix and the row's ``name`` column. Must be non-empty.",
             "maxLength": 255,
             "minLength": 1,
             "title": "Output Name",
@@ -203,10 +211,12 @@
           },
           "search_backend": {
             "default": "faiss",
+            "description": "``faiss`` (CPU-IVF, default) or ``numpy`` (exact brute force). Both return identical neighbours within numerical noise.",
             "title": "Search Backend",
             "type": "string"
           },
           "test_versions": {
+            "description": "GOA snapshot versions used for evaluation; typically a single recent release.",
             "items": {
               "type": "integer"
             },
@@ -215,6 +225,7 @@
             "type": "array"
           },
           "train_versions": {
+            "description": "GOA snapshot versions used for training. At least two are required so the dump can build a temporal split.",
             "items": {
               "type": "integer"
             },
@@ -224,6 +235,7 @@
           },
           "use_embedding_pca": {
             "default": false,
+            "description": "When true, project embeddings through the cached PCA before KNN (smaller index, slight Fmax loss).",
             "title": "Use Embedding Pca",
             "type": "boolean"
           }
