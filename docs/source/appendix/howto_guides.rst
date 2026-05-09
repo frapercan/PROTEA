@@ -476,12 +476,16 @@ Create a scoring config and apply it to a prediction set:
 
 .. code-block:: bash
 
-   # Create scoring config
+   # Create scoring config. ``weights`` keys must come from
+   # ``DEFAULT_WEIGHTS``: ``embedding_similarity``, ``identity_nw``,
+   # ``identity_sw``, ``evidence_weight``, ``taxonomic_proximity``,
+   # ``neighbor_vote_fraction`` (any other key triggers a 422 since the
+   # request body is ``extra=forbid``). Omitted keys default to 0.
    curl -s -X POST http://127.0.0.1:8000/scoring/configs \
      -H "Content-Type: application/json" \
      -d '{
-       "name": "distance-only",
-       "weights": {"distance": -1.0}
+       "name": "alignment-weighted",
+       "weights": {"embedding_similarity": 0.5, "identity_nw": 0.3, "identity_sw": 0.2}
      }' | python -m json.tool
 
    # Download scored predictions
