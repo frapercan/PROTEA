@@ -1,7 +1,7 @@
 # protea/api/routers/jobs.py
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, NamedTuple
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -14,6 +14,38 @@ from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
 from protea.infrastructure.queue.publisher import publish_job
 from protea.infrastructure.session import session_scope
+
+
+class JobListFilters(NamedTuple):
+    """Bundle of query-string filters consumed by ``GET /jobs``.
+
+    Carries the 5 user-visible knobs so the route handler signature stays
+    under the §3 6-param ceiling. The FastAPI dep ``_job_list_filters_dep``
+    exposes each field as a discrete query parameter on the wire.
+    """
+
+    status: str | None
+    operation: str | None
+    include_children: bool
+    parent_job_id: UUID | None
+    limit: int
+
+
+def _job_list_filters_dep(
+    status: str | None = Query(default=None),
+    operation: str | None = Query(default=None),
+    include_children: bool = Query(default=False),
+    parent_job_id: UUID | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=500),
+) -> JobListFilters:
+    """FastAPI dependency that gathers the 5 ``GET /jobs`` query filters."""
+    return JobListFilters(
+        status=status,
+        operation=operation,
+        include_children=include_children,
+        parent_job_id=parent_job_id,
+        limit=limit,
+    )
 
 
 def _operation_metadata(
@@ -117,38 +149,39 @@ def create_job(
 
 @router.get("", summary="List jobs")
 def list_jobs(
-    status: str | None = Query(default=None),
-    operation: str | None = Query(default=None),
-    include_children: bool = Query(default=False),
-    parent_job_id: UUID | None = Query(default=None),
-    limit: int = Query(default=50, ge=1, le=500),
+    filters: JobListFilters = Depends(_job_list_filters_dep),
     factory: sessionmaker[Session] = Depends(get_session_factory),
     registry: OperationRegistry = Depends(get_operation_registry),
 ) -> list[dict[str, Any]]:
     """List jobs with optional filtering.
 
-    By default only top-level jobs (no parent) are returned. Set `include_children=true`
-    or filter by `parent_job_id` to see batch sub-jobs from distributed pipelines.
+    By default only top-level jobs (no parent) are returned. Set
+    ``include_children=true`` or filter by ``parent_job_id`` to see batch
+    sub-jobs from distributed pipelines. Filters travel as discrete query
+    parameters on the wire; the dependency bundles them into
+    :class:`JobListFilters` for the handler.
     """
     with session_scope(factory) as session:
         q = session.query(Job)
 
-        if parent_job_id is not None:
-            q = q.filter(Job.parent_job_id == parent_job_id)
-        elif not include_children:
+        if filters.parent_job_id is not None:
+            q = q.filter(Job.parent_job_id == filters.parent_job_id)
+        elif not filters.include_children:
             q = q.filter(Job.parent_job_id.is_(None))
 
-        if status is not None:
+        if filters.status is not None:
             try:
-                st = JobStatus(status)
+                st = JobStatus(filters.status)
             except Exception as exc:
-                raise HTTPException(status_code=400, detail=f"Unknown status: {status}") from exc
+                raise HTTPException(
+                    status_code=400, detail=f"Unknown status: {filters.status}"
+                ) from exc
             q = q.filter(Job.status == st)
 
-        if operation is not None:
-            q = q.filter(Job.operation == operation)
+        if filters.operation is not None:
+            q = q.filter(Job.operation == filters.operation)
 
-        rows = q.order_by(Job.created_at.desc()).limit(limit).all()
+        rows = q.order_by(Job.created_at.desc()).limit(filters.limit).all()
         out: list[dict[str, Any]] = []
         for j in rows:
             description, summary = _operation_metadata(
