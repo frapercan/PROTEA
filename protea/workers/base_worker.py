@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from protea.core.contracts.operation import OperationResult, RetryLaterError, make_safe_emit
 from protea.core.contracts.registry import OperationRegistry
-from protea.core.retry import is_retryable, with_retry
+from protea.core.retry import RetryPolicy, is_retryable, with_retry
 from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
 from protea.infrastructure.queue.publisher import publish_job, publish_operation
@@ -66,10 +66,12 @@ class BaseWorker:
             with_retry(
                 self._execute_with_session,
                 job_id,
-                max_attempts=3,
-                base_delay=1.0,
-                max_delay=10.0,
-                jitter_ratio=0.3,
+                policy=RetryPolicy(
+                    max_attempts=3,
+                    base_delay=1.0,
+                    max_delay=10.0,
+                    jitter_ratio=0.3,
+                ),
             )
         except RetryLaterError:
             # Consumer re-publishes; job is already QUEUED.
