@@ -17,7 +17,7 @@ Contracts
 The contracts module defines the interfaces that every operation must satisfy
 and the shared types used across the entire codebase.
 
-``Operation`` is a structural Protocol — any class that exposes a ``name``
+``Operation`` is a structural Protocol: any class that exposes a ``name``
 string and an ``execute(session, payload, *, emit)`` method conforms to it,
 without needing to inherit from a base class. ``ProteaPayload`` is the
 immutable, strictly-typed Pydantic base class for all operation payloads:
@@ -26,7 +26,7 @@ accidental mutation after validation. ``OperationResult`` is the return value
 of every ``execute`` call; its ``deferred`` flag tells ``BaseWorker`` that
 completion will be signalled by child workers rather than immediately.
 ``RetryLaterError`` is raised when a shared resource (e.g. the GPU) is
-occupied — ``BaseWorker`` catches it, resets the job to ``QUEUED``, and
+occupied; ``BaseWorker`` catches it, resets the job to ``QUEUED``, and
 re-publishes the message after a configurable delay.
 
 .. automodule:: protea.core.contracts.operation
@@ -221,19 +221,19 @@ documented in :ref:`train_reranker <train-reranker-operation>`.
 
 The module provides:
 
-- ``prepare_dataset(df)`` — extracts and coerces feature columns. Numeric
+- ``prepare_dataset(df)``: extracts and coerces feature columns. Numeric
   columns are coerced with ``errors="coerce"`` (invalid strings become
   ``NaN``); categorical columns are converted to pandas ``category`` dtype,
   which LightGBM consumes directly without manual label encoding.
-- ``train(df)`` — stratified positive/negative split with early-stopping on a
+- ``train(df)``: stratified positive/negative split with early-stopping on a
   held-out validation set (default 20 %). Returns a ``TrainResult`` with the
   Booster, validation metrics (AUC, logloss, precision, recall, F1 at the
   0.5 threshold), the best boosting iteration, and gain-based feature
   importance.
-- ``predict(model, df)`` — returns probability scores in ``[0, 1]``.
-- ``model_to_string()`` / ``model_from_string()`` — serialization for DB
+- ``predict(model, df)``: returns probability scores in ``[0, 1]``.
+- ``model_to_string()`` / ``model_from_string()``: serialization for DB
   storage in the ``RerankerModel`` table.
-- ``load_training_tsv()`` — parses a training data TSV as produced by the
+- ``load_training_tsv()``: parses a training data TSV as produced by the
   ``/scoring/prediction-sets/{id}/training-data.tsv`` endpoint.
 
 .. note::
@@ -262,9 +262,9 @@ and records PROTEA's ``producer_version`` + ``producer_git_sha``.
 The single public function ``export_reranker_parquets(...)`` is shared
 by two callers:
 
-- ``training_dump_helpers._dump_frozen_dataset`` — thin wrapper that
+- ``training_dump_helpers._dump_frozen_dataset``: thin wrapper that
   uses this helper to emit the dataset alongside a training-data dump.
-- ``ExportResearchDatasetOperation`` — stand-alone operation that only
+- ``ExportResearchDatasetOperation``: stand-alone operation that only
   materialises and publishes the dataset, without running LightGBM.
 
 When ``store`` is provided, the three consolidated files are
@@ -330,16 +330,16 @@ Each dictionary maps a protein accession to a set of GO term IDs.
 
 ``EvaluationData`` fields:
 
-- ``nk`` — delta annotations for No-Knowledge proteins (no prior annotations
+- ``nk``: delta annotations for No-Knowledge proteins (no prior annotations
   in any namespace at t0).
-- ``lk`` — delta annotations for Limited-Knowledge proteins (had annotations
+- ``lk``: delta annotations for Limited-Knowledge proteins (had annotations
   in some namespaces but gained new terms in a previously empty namespace).
-- ``pk`` — novel annotations for Partial-Knowledge proteins (gained new terms
+- ``pk``: novel annotations for Partial-Knowledge proteins (gained new terms
   in a namespace where they already had annotations).
-- ``pk_known`` — old experimental annotations for PK proteins in the
+- ``pk_known``: old experimental annotations for PK proteins in the
   relevant namespaces; passed as ``-known`` to ``cafaeval`` to exclude them
   from scoring.
-- ``known`` — all old experimental annotations flattened across namespaces;
+- ``known``: all old experimental annotations flattened across namespaces;
   available for download via the reference endpoint.
 
 The public entry point is ``compute_evaluation_data(session,
@@ -383,10 +383,10 @@ PROTEA ships fifteen registered operation instances at worker startup
 via ``protea.core.operation_catalog.build_operation_registry``: eleven
 job-backed (reachable through ``POST /jobs``) plus four ephemeral
 consumers (dispatched internally by the ``compute_embeddings`` and
-``predict_go_terms`` coordinators — see :doc:`/architecture/operations`
+``predict_go_terms`` coordinators; see :doc:`/architecture/operations`
 for that taxonomy). Each operation is a class that implements the
 ``Operation`` protocol: a ``name`` string and an ``execute`` method.
-Operations are stateless with respect to infrastructure — they receive a
+Operations are stateless with respect to infrastructure: they receive a
 session and emit structured events, but do not open connections or manage
 transactions. The eleven job-backed entries are documented below; the
 four ephemeral siblings (``compute_embeddings_batch``,
@@ -421,7 +421,7 @@ four ephemeral siblings (``compute_embeddings_batch``,
    ``ProteinUniProtMetadata`` rows keyed by canonical accession. Fields
    include functional description, EC numbers, pathway membership, and
    kinetics. Isoforms inherit metadata through the ``canonical_accession``
-   join — no duplicate rows are created.
+   join; no duplicate rows are created.
 
 .. automodule:: protea.core.operations.fetch_uniprot_metadata
    :members:
@@ -467,7 +467,7 @@ four ephemeral siblings (``compute_embeddings_batch``,
    ``protea.embeddings.batch``. The coordinator serialises on the
    ``protea.embeddings`` queue (one at a time) to prevent concurrent model
    loads from exhausting GPU memory. Batch and write workers scale
-   independently. Returns ``deferred=True`` — the parent job is closed by
+   independently. Returns ``deferred=True``; the parent job is closed by
    the last write worker.
 
 .. automodule:: protea.core.operations.compute_embeddings
@@ -480,7 +480,7 @@ four ephemeral siblings (``compute_embeddings_batch``,
    float16 cache, partitions the query set into batches, and dispatches one
    ``predict_go_terms_batch`` message per batch to
    ``protea.predictions.batch``. Feature engineering (alignments, taxonomy)
-   is opt-in via payload flags. Returns ``deferred=True`` — the parent job
+   is opt-in via payload flags. Returns ``deferred=True``; the parent job
    is closed by the last write worker.
 
 .. automodule:: protea.core.operations.predict_go_terms
@@ -534,7 +534,7 @@ Training-dump helpers
 ``protea.core.training_dump_helpers`` is the home of the KNN /
 feature-generation helpers that were extracted in F0 (T0.6) when
 ``protea.core.operations.train_reranker`` was deleted. The module is
-deliberately not an operation — it is reused in-process by
+deliberately not an operation: it is reused in-process by
 :class:`ExportResearchDatasetOperation` to materialise ``train`` and
 ``eval`` shards before the ``parquet_export`` consolidation pass.
 LightGBM training itself lives in
@@ -554,17 +554,17 @@ These modules are imported by the operations and the feature
 engineering layer; they are documented here for completeness but are
 not part of the public API.
 
-- ``protea.core.anc2vec_embeddings`` — anc2vec ancestry embeddings for
+- ``protea.core.anc2vec_embeddings``: anc2vec ancestry embeddings for
   GO terms, used as features by the re-ranker (see ADR D19 for the
   GeOKG replacement candidate).
-- ``protea.core.annotation_intern`` — string interning helper for
+- ``protea.core.annotation_intern``: string interning helper for
   reducing memory pressure when loading large annotation sets.
-- ``protea.core.disk_cache`` — generic on-disk cache with TTL used by
+- ``protea.core.disk_cache``: generic on-disk cache with TTL used by
   the KNN reference loader and the PCA cache.
-- ``protea.core.feature_enricher`` — orchestrator that combines
+- ``protea.core.feature_enricher``: orchestrator that combines
   alignment, taxonomy and anc2vec features into a single
   per-candidate row.
-- ``protea.core.pca_cache`` — per-PLM PCA projection cache, used to
+- ``protea.core.pca_cache``: per-PLM PCA projection cache, used to
   pre-compute the ``emb_pca`` feature family.
 
 .. automodule:: protea.core.anc2vec_embeddings
@@ -594,9 +594,9 @@ not part of the public API.
 
 .. seealso::
 
-   - :doc:`/architecture/operations` — narrative documentation for every
+   - :doc:`/architecture/operations`: narrative documentation for every
      operation listed above, with payload examples and execution flow.
-   - :doc:`infrastructure` — the ORM models that ``protea.core`` reads and
+   - :doc:`infrastructure`: the ORM models that ``protea.core`` reads and
      writes.
-   - :doc:`/appendix/howto_guides` — task-oriented recipes that exercise
+   - :doc:`/appendix/howto_guides`: task-oriented recipes that exercise
      these modules end-to-end.
