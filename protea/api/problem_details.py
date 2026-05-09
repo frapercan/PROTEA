@@ -146,8 +146,62 @@ def register_problem_handlers(app: FastAPI) -> None:
         )
 
 
+def install_problem_openapi_schema(app: FastAPI) -> None:
+    """Document RFC 7807 as the default 4xx/5xx schema in the OpenAPI spec.
+
+    FastAPI's stock OpenAPI generator points 4xx/5xx responses at
+    ``application/json`` with ``HTTPValidationError`` (or nothing). This
+    hook patches every operation so every 4xx/5xx response advertises
+    ``application/problem+json`` referencing :class:`ProblemDetail`,
+    matching what the runtime handlers (installed by
+    :func:`register_problem_handlers`) actually emit.
+
+    The hook lives behind ``app.openapi`` (FastAPI's documented override
+    point) so re-runs return the cached schema. Idempotent: an existing
+    ``application/problem+json`` content entry on a given operation is
+    left in place so endpoints can still document a more specific error
+    shape later.
+    """
+    schema_ref = "#/components/schemas/ProblemDetail"
+    problem_content = {"schema": {"$ref": schema_ref}}
+
+    original_openapi = app.openapi
+
+    def _patched_openapi() -> dict[str, Any]:
+        if app.openapi_schema:
+            return app.openapi_schema
+
+        spec = original_openapi()
+        components = spec.setdefault("components", {})
+        schemas = components.setdefault("schemas", {})
+        if "ProblemDetail" not in schemas:
+            schemas["ProblemDetail"] = ProblemDetail.model_json_schema()
+
+        for path_item in spec.get("paths", {}).values():
+            if not isinstance(path_item, dict):
+                continue
+            for method, operation in path_item.items():
+                if method == "parameters" or not isinstance(operation, dict):
+                    continue
+                responses = operation.get("responses", {})
+                for status_code, response in list(responses.items()):
+                    if not status_code.startswith(("4", "5")):
+                        continue
+                    if not isinstance(response, dict):
+                        continue
+                    content = response.setdefault("content", {})
+                    content.setdefault(
+                        "application/problem+json", dict(problem_content)
+                    )
+        app.openapi_schema = spec
+        return spec
+
+    app.openapi = _patched_openapi  # type: ignore[method-assign]
+
+
 __all__ = [
     "PROBLEM_JSON_MEDIA_TYPE",
     "ProblemDetail",
+    "install_problem_openapi_schema",
     "register_problem_handlers",
 ]
