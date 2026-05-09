@@ -1634,320 +1634,14 @@ class PredictGOTermsBatchOperation:
     ]:
         """Run three independent KNN searches (one per GO aspect) and merge results.
 
-        For each aspect (P/F/C): build a KNN index from the aspect-filtered
-        references, take the top ``limit_per_entry`` neighbours of every
-        query, load aspect-scoped GO annotations, and transfer them as
-        predictions. Guarantees BPO + MFO + CCO candidates even when the
-        globally nearest neighbours all happen to carry one or two aspects.
-
-        Feature engineering (alignments / taxonomy) runs on the union of
-        neighbours across aspects to avoid redundant work.
+        Thin wrapper that delegates the per-aspect KNN orchestration to the
+        :class:`_AspectSeparatedKnnRunner` Method Object. The runner owns the
+        per-batch accumulator and the helper methods (KNN per aspect, go_map
+        loading, reranker aggregates, prediction-dict assembly). Public API
+        unchanged: returns the same tuple shape consumers already expect.
         """
-        p = ctx.payload
-        neighbors_by_aspect, all_unique_neighbors = self._run_knn_per_aspect(
-            ctx.valid_accessions, ctx.query_embeddings, ctx.ref_data_by_aspect, p
-        )
-        feature_inputs = _FeatureInputs(
-            *self._load_feature_engineering_data(
-                session, p, ctx.valid_accessions, all_unique_neighbors
-            )
-        )
-        acc = self._init_aspect_accumulator(ctx.valid_accessions, neighbors_by_aspect, p)
-
-        for aspect in _ASPECTS:
-            unique_neighbors_aspect: set[str] = set()
-            for top_refs in neighbors_by_aspect[aspect]:
-                for ref_acc, _ in top_refs:
-                    unique_neighbors_aspect.add(ref_acc)
-            go_map = self._load_aspect_go_map(
-                session,
-                ctx.ref_data_by_aspect[aspect],
-                ctx.annotation_set_id,
-                unique_neighbors_aspect,
-                aspect,
-            )
-            acc.go_map_by_aspect[aspect] = go_map
-            if p.compute_reranker_features:
-                self._update_reranker_aggregates(
-                    acc, ctx.valid_accessions, neighbors_by_aspect, go_map, aspect
-                )
-            self._build_aspect_predictions(
-                ctx, acc, neighbors_by_aspect[aspect], go_map, feature_inputs
-            )
-
-        return (
-            acc.predictions,
-            neighbors_by_aspect,
-            acc.go_map_by_aspect,
-            acc.pair_features,
-        )
-
-    @staticmethod
-    def _init_aspect_accumulator(
-        valid_accessions: list[str],
-        neighbors_by_aspect: dict[str, list[list[tuple[str, float]]]],
-        p: PredictGOTermsBatchPayload,
-    ) -> _AspectKnnAccumulator:
-        """Build the per-batch accumulator and pre-compute the per-query
-        ``neighbor_distance_std`` aggregate (uses the union of distances
-        across all three aspects)."""
-        acc = _AspectKnnAccumulator(
-            predictions=[],
-            seen_per_query={a: set() for a in valid_accessions},
-            pair_features={},
-            go_map_by_aspect={},
-            rr_distance_std_per_query={},
-            rr_vote_count_per_query={},
-            rr_k_position_per_query={},
-            rr_vote_min_d_per_query={},
-            rr_vote_sum_d_per_query={},
-            all_go_term_freq={},
-            all_ref_ann_density={},
-        )
-        if not p.compute_reranker_features:
-            return acc
-        for q_idx, q_acc in enumerate(valid_accessions):
-            acc.rr_vote_count_per_query[q_acc] = {}
-            acc.rr_k_position_per_query[q_acc] = {}
-            acc.rr_vote_min_d_per_query[q_acc] = {}
-            acc.rr_vote_sum_d_per_query[q_acc] = {}
-            all_distances: list[float] = []
-            for aspect in _ASPECTS:
-                aspect_neighbors = neighbors_by_aspect[aspect]
-                if q_idx < len(aspect_neighbors):
-                    all_distances.extend(d for _, d in aspect_neighbors[q_idx])
-            acc.rr_distance_std_per_query[q_acc] = (
-                float(np.std(all_distances)) if len(all_distances) > 1 else 0.0
-            )
-        return acc
-
-    def _load_aspect_go_map(
-        self,
-        session: Session,
-        aspect_ref: dict[str, Any],
-        annotation_set_id: uuid.UUID,
-        unique_neighbors_aspect: set[str],
-        aspect: str,
-    ) -> dict[str, list[dict[str, Any]]]:
-        """Resolve the per-aspect ``ref_acc → annotations`` map: in-memory CSR
-        cache when available, fall back to a DB query keyed on the aspect."""
-        if "anno_gtids" in aspect_ref:
-            return _csr_lookup(
-                unique_neighbors_aspect,
-                aspect_ref["acc_to_anno_idx"],
-                AnnoCsr(
-                    gtids=aspect_ref["anno_gtids"],
-                    quals=aspect_ref["anno_quals"],
-                    ecodes=aspect_ref["anno_ecodes"],
-                    offsets=aspect_ref["anno_offsets"],
-                ),
-            )
-        return self._load_annotations_for(
-            session, annotation_set_id, unique_neighbors_aspect, aspect=aspect
-        )
-
-    @staticmethod
-    def _update_reranker_aggregates(
-        acc: _AspectKnnAccumulator,
-        valid_accessions: list[str],
-        neighbors_by_aspect: dict[str, list[list[tuple[str, float]]]],
-        go_map: dict[str, list[dict[str, Any]]],
-        aspect: str,
-    ) -> None:
-        """Fold this aspect's go_map into the running reranker counters:
-        ``go_term_frequency``, ``ref_annotation_density``, ``vote_count``,
-        ``k_position``, ``vote_min_distance``, ``vote_sum_distance``."""
-        for ref_acc, anns in go_map.items():
-            acc.all_ref_ann_density[ref_acc] = (
-                acc.all_ref_ann_density.get(ref_acc, 0) + len(anns)
-            )
-            for ann in anns:
-                gtid = ann["go_term_id"]
-                acc.all_go_term_freq[gtid] = acc.all_go_term_freq.get(gtid, 0) + 1
-        aspect_neighbors = neighbors_by_aspect[aspect]
-        for q_idx, q_acc in enumerate(valid_accessions):
-            if q_idx >= len(aspect_neighbors):
-                continue
-            vc = acc.rr_vote_count_per_query[q_acc]
-            kp = acc.rr_k_position_per_query[q_acc]
-            min_d = acc.rr_vote_min_d_per_query[q_acc]
-            sum_d = acc.rr_vote_sum_d_per_query[q_acc]
-            for k_pos, (ref_acc, dist) in enumerate(aspect_neighbors[q_idx], 1):
-                for ann in go_map.get(ref_acc, []):
-                    gtid = ann["go_term_id"]
-                    vc[gtid] = vc.get(gtid, 0) + 1
-                    if gtid not in kp:
-                        kp[gtid] = k_pos
-                    prev_min = min_d.get(gtid)
-                    if prev_min is None or dist < prev_min:
-                        min_d[gtid] = dist
-                    sum_d[gtid] = sum_d.get(gtid, 0.0) + dist
-
-    def _build_aspect_predictions(
-        self,
-        ctx: AspectSeparatedKnnContext,
-        acc: _AspectKnnAccumulator,
-        aspect_top_refs: list[list[tuple[str, float]]],
-        go_map: dict[str, list[dict[str, Any]]],
-        feature_inputs: _FeatureInputs,
-    ) -> None:
-        """Walk this aspect's per-query neighbours and emit one prediction
-        dict per (query, ref, go_term) tuple — deduped against
-        ``acc.seen_per_query`` so a term carried by multiple aspects only
-        yields one row in the final list."""
-        p = ctx.payload
-        for q_acc, top_refs in zip(ctx.valid_accessions, aspect_top_refs, strict=False):
-            seen_terms = acc.seen_per_query[q_acc]
-            for ref_acc, distance in top_refs:
-                feats = self._resolve_pair_features(
-                    acc.pair_features, p, q_acc, ref_acc, feature_inputs
-                )
-                for ann in go_map.get(ref_acc, []):
-                    go_term_id = ann["go_term_id"]
-                    if go_term_id in seen_terms:
-                        continue
-                    seen_terms.add(go_term_id)
-                    cell = _PredCellInputs(
-                        q_acc=q_acc,
-                        ref_acc=ref_acc,
-                        distance=distance,
-                        ann=ann,
-                        feats=feats,
-                    )
-                    acc.predictions.append(self._build_prediction_dict(ctx, acc, cell))
-
-    @staticmethod
-    def _resolve_pair_features(
-        pair_features: dict[tuple[str, str], dict[str, Any]],
-        p: PredictGOTermsBatchPayload,
-        q_acc: str,
-        ref_acc: str,
-        feature_inputs: _FeatureInputs,
-    ) -> dict[str, Any]:
-        """Return (and cache) per-(query, ref) pair features. Computes
-        alignments + taxonomy once per pair across the aspect loop."""
-        pair_key = (q_acc, ref_acc)
-        if pair_key in pair_features:
-            return pair_features[pair_key]
-        feats: dict[str, Any] = {}
-        if p.compute_alignments:
-            q_seq = feature_inputs.query_sequences.get(q_acc, "")
-            r_seq = feature_inputs.ref_sequences.get(ref_acc, "")
-            if q_seq and r_seq:
-                feats.update(compute_alignment(q_seq, r_seq))
-        if p.compute_taxonomy:
-            q_tid = feature_inputs.query_tax_ids.get(q_acc)
-            r_tid = feature_inputs.ref_tax_ids.get(ref_acc)
-            feats.update(compute_taxonomy(q_tid, r_tid))
-            feats["query_taxonomy_id"] = q_tid
-            feats["ref_taxonomy_id"] = r_tid
-        pair_features[pair_key] = feats
-        return feats
-
-    @staticmethod
-    def _build_prediction_dict(
-        ctx: AspectSeparatedKnnContext,
-        acc: _AspectKnnAccumulator,
-        cell: _PredCellInputs,
-    ) -> dict[str, Any]:
-        """Construct one prediction dict — base fields + reranker stats +
-        non-null pair features. Output schema matches the unified-pool path."""
-        ann = cell.ann
-        go_term_id = ann["go_term_id"]
-        pred: dict[str, Any] = {
-            "prediction_set_id": str(ctx.prediction_set_id),
-            "protein_accession": cell.q_acc,
-            "go_term_id": go_term_id,
-            "ref_protein_accession": cell.ref_acc,
-            "distance": cell.distance,
-        }
-        if ann.get("qualifier"):
-            pred["qualifier"] = ann["qualifier"]
-        if ann.get("evidence_code"):
-            pred["evidence_code"] = ann["evidence_code"]
-        if ctx.payload.compute_reranker_features:
-            PredictGOTermsBatchOperation._stamp_reranker_features(pred, ctx, acc, cell)
-        for key in _PAIR_FEATURE_KEYS:
-            val = cell.feats.get(key)
-            if val is not None:
-                pred[key] = val
-        return pred
-
-    @staticmethod
-    def _stamp_reranker_features(
-        pred: dict[str, Any],
-        ctx: AspectSeparatedKnnContext,
-        acc: _AspectKnnAccumulator,
-        cell: _PredCellInputs,
-    ) -> None:
-        """Fill the per-prediction reranker stats — vote / position / frequency
-        / density / distance aggregates — from the running ``acc`` counters."""
-        p = ctx.payload
-        go_term_id = cell.ann["go_term_id"]
-        q_acc = cell.q_acc
-        vc_val = acc.rr_vote_count_per_query.get(q_acc, {}).get(go_term_id, 1)
-        pred["vote_count"] = vc_val
-        pred["k_position"] = acc.rr_k_position_per_query.get(q_acc, {}).get(go_term_id, 1)
-        pred["go_term_frequency"] = acc.all_go_term_freq.get(go_term_id, 0)
-        pred["ref_annotation_density"] = acc.all_ref_ann_density.get(cell.ref_acc, 0)
-        pred["neighbor_distance_std"] = acc.rr_distance_std_per_query.get(q_acc, 0.0)
-        pred["neighbor_vote_fraction"] = (
-            vc_val / p.limit_per_entry if p.limit_per_entry else None
-        )
-        min_d_map = acc.rr_vote_min_d_per_query.get(q_acc, {})
-        sum_d_map = acc.rr_vote_sum_d_per_query.get(q_acc, {})
-        pred["neighbor_min_distance"] = min_d_map.get(go_term_id)
-        if vc_val > 0 and go_term_id in sum_d_map:
-            pred["neighbor_mean_distance"] = sum_d_map[go_term_id] / vc_val
-
-    def _run_knn_per_aspect(
-        self,
-        valid_accessions: list[str],
-        query_embeddings: np.ndarray,
-        ref_data_by_aspect: dict[str, dict[str, Any]],
-        p: PredictGOTermsBatchPayload,
-    ) -> tuple[dict[str, list[list[tuple[str, float]]]], set[str]]:
-        """Run one independent KNN search per GO aspect and accumulate
-        the union of all neighbors across aspects.
-
-        Returns ``(neighbors_by_aspect, all_unique_neighbors)`` — feature
-        engineering downstream is computed once per pair regardless of how
-        many aspects reference it, so the union is the right call surface.
-        """
-        neighbors_by_aspect: dict[str, list[list[tuple[str, float]]]] = {}
-        all_unique_neighbors: set[str] = set()
-
-        use_cos = p.metric == "cosine"
-        for aspect in _ASPECTS:
-            aspect_refs = ref_data_by_aspect[aspect]
-            if not aspect_refs["accessions"]:
-                neighbors_by_aspect[aspect] = [[] for _ in valid_accessions]
-                continue
-
-            ref_f32 = (
-                aspect_refs["embeddings_f32_cos"] if use_cos else aspect_refs["embeddings_f32"]
-            )
-            aspect_neighbors = search_knn(
-                query_embeddings,
-                ref_f32,
-                aspect_refs["accessions"],
-                k=p.limit_per_entry,
-                distance_threshold=p.distance_threshold,
-                backend=p.search_backend,
-                metric=p.metric,
-                pre_normalized=use_cos,
-                faiss_index_type=p.faiss_index_type,
-                faiss_nlist=p.faiss_nlist,
-                faiss_nprobe=p.faiss_nprobe,
-                faiss_hnsw_m=p.faiss_hnsw_m,
-                faiss_hnsw_ef_search=p.faiss_hnsw_ef_search,
-            )
-            neighbors_by_aspect[aspect] = aspect_neighbors
-            for top_refs in aspect_neighbors:
-                for ref_acc, _ in top_refs:
-                    all_unique_neighbors.add(ref_acc)
-
-        return neighbors_by_aspect, all_unique_neighbors
+        runner = _AspectSeparatedKnnRunner(session=session, ctx=ctx, parent=self)
+        return runner.run()
 
     def _load_feature_engineering_data(
         self,
@@ -2185,6 +1879,360 @@ class PredictGOTermsBatchOperation:
             for acc, tid in rows:
                 result[acc] = int(tid) if tid else None
         return result
+
+
+# ---------------------------------------------------------------------------
+# Aspect-separated KNN runner (Method Object, T2B.5)
+# ---------------------------------------------------------------------------
+
+
+class _AspectSeparatedKnnRunner:
+    """Method Object for the aspect-separated KNN path of one batch.
+
+    Bundles the per-batch state (``ctx``, accumulator, session) and the
+    step methods (KNN per aspect, go_map loading, reranker aggregates,
+    prediction-dict assembly) that previously lived as nine private methods
+    on :class:`PredictGOTermsBatchOperation`.
+
+    The parent operation reference is kept only so the runner can reuse
+    the DB helpers ``_load_annotations_for`` and
+    ``_load_feature_engineering_data``, which legitimately belong to the
+    operation alongside its other ORM loaders.
+    """
+
+    def __init__(
+        self,
+        *,
+        session: Session,
+        ctx: AspectSeparatedKnnContext,
+        parent: PredictGOTermsBatchOperation,
+    ) -> None:
+        self._session = session
+        self._ctx = ctx
+        self._parent = parent
+
+    def run(
+        self,
+    ) -> tuple[
+        list[dict[str, Any]],
+        dict[str, list[list[tuple[str, float]]]],
+        dict[str, dict[str, list[dict[str, Any]]]],
+        dict[tuple[str, str], dict[str, Any]],
+    ]:
+        """Execute three KNN searches (one per GO aspect) and merge results.
+
+        For each aspect (P/F/C): build a KNN index from the aspect-filtered
+        references, take the top ``limit_per_entry`` neighbours of every
+        query, load aspect-scoped GO annotations, and transfer them as
+        predictions. Guarantees BPO + MFO + CCO candidates even when the
+        globally nearest neighbours all happen to carry one or two aspects.
+
+        Feature engineering (alignments / taxonomy) runs on the union of
+        neighbours across aspects to avoid redundant work.
+        """
+        ctx = self._ctx
+        p = ctx.payload
+        neighbors_by_aspect, all_unique_neighbors = self._run_knn_per_aspect(
+            ctx.valid_accessions, ctx.query_embeddings, ctx.ref_data_by_aspect, p
+        )
+        feature_inputs = _FeatureInputs(
+            *self._parent._load_feature_engineering_data(
+                self._session, p, ctx.valid_accessions, all_unique_neighbors
+            )
+        )
+        acc = self._init_aspect_accumulator(ctx.valid_accessions, neighbors_by_aspect, p)
+
+        for aspect in _ASPECTS:
+            unique_neighbors_aspect: set[str] = set()
+            for top_refs in neighbors_by_aspect[aspect]:
+                for ref_acc, _ in top_refs:
+                    unique_neighbors_aspect.add(ref_acc)
+            go_map = self._load_aspect_go_map(
+                ctx.ref_data_by_aspect[aspect],
+                ctx.annotation_set_id,
+                unique_neighbors_aspect,
+                aspect,
+            )
+            acc.go_map_by_aspect[aspect] = go_map
+            if p.compute_reranker_features:
+                self._update_reranker_aggregates(
+                    acc, ctx.valid_accessions, neighbors_by_aspect, go_map, aspect
+                )
+            self._build_aspect_predictions(
+                acc, neighbors_by_aspect[aspect], go_map, feature_inputs
+            )
+
+        return (
+            acc.predictions,
+            neighbors_by_aspect,
+            acc.go_map_by_aspect,
+            acc.pair_features,
+        )
+
+    @staticmethod
+    def _init_aspect_accumulator(
+        valid_accessions: list[str],
+        neighbors_by_aspect: dict[str, list[list[tuple[str, float]]]],
+        p: PredictGOTermsBatchPayload,
+    ) -> _AspectKnnAccumulator:
+        """Build the per-batch accumulator and pre-compute the per-query
+        ``neighbor_distance_std`` aggregate (uses the union of distances
+        across all three aspects)."""
+        acc = _AspectKnnAccumulator(
+            predictions=[],
+            seen_per_query={a: set() for a in valid_accessions},
+            pair_features={},
+            go_map_by_aspect={},
+            rr_distance_std_per_query={},
+            rr_vote_count_per_query={},
+            rr_k_position_per_query={},
+            rr_vote_min_d_per_query={},
+            rr_vote_sum_d_per_query={},
+            all_go_term_freq={},
+            all_ref_ann_density={},
+        )
+        if not p.compute_reranker_features:
+            return acc
+        for q_idx, q_acc in enumerate(valid_accessions):
+            acc.rr_vote_count_per_query[q_acc] = {}
+            acc.rr_k_position_per_query[q_acc] = {}
+            acc.rr_vote_min_d_per_query[q_acc] = {}
+            acc.rr_vote_sum_d_per_query[q_acc] = {}
+            all_distances: list[float] = []
+            for aspect in _ASPECTS:
+                aspect_neighbors = neighbors_by_aspect[aspect]
+                if q_idx < len(aspect_neighbors):
+                    all_distances.extend(d for _, d in aspect_neighbors[q_idx])
+            acc.rr_distance_std_per_query[q_acc] = (
+                float(np.std(all_distances)) if len(all_distances) > 1 else 0.0
+            )
+        return acc
+
+    def _load_aspect_go_map(
+        self,
+        aspect_ref: dict[str, Any],
+        annotation_set_id: uuid.UUID,
+        unique_neighbors_aspect: set[str],
+        aspect: str,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Resolve the per-aspect ``ref_acc → annotations`` map: in-memory CSR
+        cache when available, fall back to a DB query keyed on the aspect."""
+        if "anno_gtids" in aspect_ref:
+            return _csr_lookup(
+                unique_neighbors_aspect,
+                aspect_ref["acc_to_anno_idx"],
+                AnnoCsr(
+                    gtids=aspect_ref["anno_gtids"],
+                    quals=aspect_ref["anno_quals"],
+                    ecodes=aspect_ref["anno_ecodes"],
+                    offsets=aspect_ref["anno_offsets"],
+                ),
+            )
+        return self._parent._load_annotations_for(
+            self._session, annotation_set_id, unique_neighbors_aspect, aspect=aspect
+        )
+
+    @staticmethod
+    def _update_reranker_aggregates(
+        acc: _AspectKnnAccumulator,
+        valid_accessions: list[str],
+        neighbors_by_aspect: dict[str, list[list[tuple[str, float]]]],
+        go_map: dict[str, list[dict[str, Any]]],
+        aspect: str,
+    ) -> None:
+        """Fold this aspect's go_map into the running reranker counters:
+        ``go_term_frequency``, ``ref_annotation_density``, ``vote_count``,
+        ``k_position``, ``vote_min_distance``, ``vote_sum_distance``."""
+        for ref_acc, anns in go_map.items():
+            acc.all_ref_ann_density[ref_acc] = (
+                acc.all_ref_ann_density.get(ref_acc, 0) + len(anns)
+            )
+            for ann in anns:
+                gtid = ann["go_term_id"]
+                acc.all_go_term_freq[gtid] = acc.all_go_term_freq.get(gtid, 0) + 1
+        aspect_neighbors = neighbors_by_aspect[aspect]
+        for q_idx, q_acc in enumerate(valid_accessions):
+            if q_idx >= len(aspect_neighbors):
+                continue
+            vc = acc.rr_vote_count_per_query[q_acc]
+            kp = acc.rr_k_position_per_query[q_acc]
+            min_d = acc.rr_vote_min_d_per_query[q_acc]
+            sum_d = acc.rr_vote_sum_d_per_query[q_acc]
+            for k_pos, (ref_acc, dist) in enumerate(aspect_neighbors[q_idx], 1):
+                for ann in go_map.get(ref_acc, []):
+                    gtid = ann["go_term_id"]
+                    vc[gtid] = vc.get(gtid, 0) + 1
+                    if gtid not in kp:
+                        kp[gtid] = k_pos
+                    prev_min = min_d.get(gtid)
+                    if prev_min is None or dist < prev_min:
+                        min_d[gtid] = dist
+                    sum_d[gtid] = sum_d.get(gtid, 0.0) + dist
+
+    def _build_aspect_predictions(
+        self,
+        acc: _AspectKnnAccumulator,
+        aspect_top_refs: list[list[tuple[str, float]]],
+        go_map: dict[str, list[dict[str, Any]]],
+        feature_inputs: _FeatureInputs,
+    ) -> None:
+        """Walk this aspect's per-query neighbours and emit one prediction
+        dict per (query, ref, go_term) tuple, deduped against
+        ``acc.seen_per_query`` so a term carried by multiple aspects only
+        yields one row in the final list."""
+        ctx = self._ctx
+        p = ctx.payload
+        for q_acc, top_refs in zip(ctx.valid_accessions, aspect_top_refs, strict=False):
+            seen_terms = acc.seen_per_query[q_acc]
+            for ref_acc, distance in top_refs:
+                feats = self._resolve_pair_features(
+                    acc.pair_features, p, q_acc, ref_acc, feature_inputs
+                )
+                for ann in go_map.get(ref_acc, []):
+                    go_term_id = ann["go_term_id"]
+                    if go_term_id in seen_terms:
+                        continue
+                    seen_terms.add(go_term_id)
+                    cell = _PredCellInputs(
+                        q_acc=q_acc,
+                        ref_acc=ref_acc,
+                        distance=distance,
+                        ann=ann,
+                        feats=feats,
+                    )
+                    acc.predictions.append(self._build_prediction_dict(acc, cell))
+
+    @staticmethod
+    def _resolve_pair_features(
+        pair_features: dict[tuple[str, str], dict[str, Any]],
+        p: PredictGOTermsBatchPayload,
+        q_acc: str,
+        ref_acc: str,
+        feature_inputs: _FeatureInputs,
+    ) -> dict[str, Any]:
+        """Return (and cache) per-(query, ref) pair features. Computes
+        alignments + taxonomy once per pair across the aspect loop."""
+        pair_key = (q_acc, ref_acc)
+        if pair_key in pair_features:
+            return pair_features[pair_key]
+        feats: dict[str, Any] = {}
+        if p.compute_alignments:
+            q_seq = feature_inputs.query_sequences.get(q_acc, "")
+            r_seq = feature_inputs.ref_sequences.get(ref_acc, "")
+            if q_seq and r_seq:
+                feats.update(compute_alignment(q_seq, r_seq))
+        if p.compute_taxonomy:
+            q_tid = feature_inputs.query_tax_ids.get(q_acc)
+            r_tid = feature_inputs.ref_tax_ids.get(ref_acc)
+            feats.update(compute_taxonomy(q_tid, r_tid))
+            feats["query_taxonomy_id"] = q_tid
+            feats["ref_taxonomy_id"] = r_tid
+        pair_features[pair_key] = feats
+        return feats
+
+    def _build_prediction_dict(
+        self,
+        acc: _AspectKnnAccumulator,
+        cell: _PredCellInputs,
+    ) -> dict[str, Any]:
+        """Construct one prediction dict: base fields, reranker stats,
+        non-null pair features. Output schema matches the unified-pool path."""
+        ctx = self._ctx
+        ann = cell.ann
+        go_term_id = ann["go_term_id"]
+        pred: dict[str, Any] = {
+            "prediction_set_id": str(ctx.prediction_set_id),
+            "protein_accession": cell.q_acc,
+            "go_term_id": go_term_id,
+            "ref_protein_accession": cell.ref_acc,
+            "distance": cell.distance,
+        }
+        if ann.get("qualifier"):
+            pred["qualifier"] = ann["qualifier"]
+        if ann.get("evidence_code"):
+            pred["evidence_code"] = ann["evidence_code"]
+        if ctx.payload.compute_reranker_features:
+            self._stamp_reranker_features(pred, acc, cell)
+        for key in _PAIR_FEATURE_KEYS:
+            val = cell.feats.get(key)
+            if val is not None:
+                pred[key] = val
+        return pred
+
+    def _stamp_reranker_features(
+        self,
+        pred: dict[str, Any],
+        acc: _AspectKnnAccumulator,
+        cell: _PredCellInputs,
+    ) -> None:
+        """Fill the per-prediction reranker stats (vote / position / frequency
+        / density / distance aggregates) from the running ``acc`` counters."""
+        p = self._ctx.payload
+        go_term_id = cell.ann["go_term_id"]
+        q_acc = cell.q_acc
+        vc_val = acc.rr_vote_count_per_query.get(q_acc, {}).get(go_term_id, 1)
+        pred["vote_count"] = vc_val
+        pred["k_position"] = acc.rr_k_position_per_query.get(q_acc, {}).get(go_term_id, 1)
+        pred["go_term_frequency"] = acc.all_go_term_freq.get(go_term_id, 0)
+        pred["ref_annotation_density"] = acc.all_ref_ann_density.get(cell.ref_acc, 0)
+        pred["neighbor_distance_std"] = acc.rr_distance_std_per_query.get(q_acc, 0.0)
+        pred["neighbor_vote_fraction"] = (
+            vc_val / p.limit_per_entry if p.limit_per_entry else None
+        )
+        min_d_map = acc.rr_vote_min_d_per_query.get(q_acc, {})
+        sum_d_map = acc.rr_vote_sum_d_per_query.get(q_acc, {})
+        pred["neighbor_min_distance"] = min_d_map.get(go_term_id)
+        if vc_val > 0 and go_term_id in sum_d_map:
+            pred["neighbor_mean_distance"] = sum_d_map[go_term_id] / vc_val
+
+    @staticmethod
+    def _run_knn_per_aspect(
+        valid_accessions: list[str],
+        query_embeddings: np.ndarray,
+        ref_data_by_aspect: dict[str, dict[str, Any]],
+        p: PredictGOTermsBatchPayload,
+    ) -> tuple[dict[str, list[list[tuple[str, float]]]], set[str]]:
+        """Run one independent KNN search per GO aspect and accumulate
+        the union of all neighbors across aspects.
+
+        Returns ``(neighbors_by_aspect, all_unique_neighbors)``. Feature
+        engineering downstream is computed once per pair regardless of how
+        many aspects reference it, so the union is the right call surface.
+        """
+        neighbors_by_aspect: dict[str, list[list[tuple[str, float]]]] = {}
+        all_unique_neighbors: set[str] = set()
+
+        use_cos = p.metric == "cosine"
+        for aspect in _ASPECTS:
+            aspect_refs = ref_data_by_aspect[aspect]
+            if not aspect_refs["accessions"]:
+                neighbors_by_aspect[aspect] = [[] for _ in valid_accessions]
+                continue
+
+            ref_f32 = (
+                aspect_refs["embeddings_f32_cos"] if use_cos else aspect_refs["embeddings_f32"]
+            )
+            aspect_neighbors = search_knn(
+                query_embeddings,
+                ref_f32,
+                aspect_refs["accessions"],
+                k=p.limit_per_entry,
+                distance_threshold=p.distance_threshold,
+                backend=p.search_backend,
+                metric=p.metric,
+                pre_normalized=use_cos,
+                faiss_index_type=p.faiss_index_type,
+                faiss_nlist=p.faiss_nlist,
+                faiss_nprobe=p.faiss_nprobe,
+                faiss_hnsw_m=p.faiss_hnsw_m,
+                faiss_hnsw_ef_search=p.faiss_hnsw_ef_search,
+            )
+            neighbors_by_aspect[aspect] = aspect_neighbors
+            for top_refs in aspect_neighbors:
+                for ref_acc, _ in top_refs:
+                    all_unique_neighbors.add(ref_acc)
+
+        return neighbors_by_aspect, all_unique_neighbors
 
 
 # ---------------------------------------------------------------------------
