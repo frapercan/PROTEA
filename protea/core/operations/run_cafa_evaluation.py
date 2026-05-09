@@ -4,13 +4,13 @@ import os
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from pydantic import Field, field_validator
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
-from protea.core.evaluation import load_evaluation_data_for_set
+from protea.core.evaluation import EvaluationData, load_evaluation_data_for_set
 from protea.core.operations import _run_cafa_artifacts as _artifacts
 from protea.core.operations import _run_cafa_data_helpers as _data
 from protea.core.operations._run_cafa_eval_driver import (
@@ -39,7 +39,30 @@ from protea.infrastructure.orm.models.annotation.ontology_snapshot import Ontolo
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
 from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
 from protea.infrastructure.settings import load_settings
-from protea.infrastructure.storage import get_artifact_store
+from protea.infrastructure.storage import ArtifactStore, get_artifact_store
+
+
+class _EvalInputs(NamedTuple):
+    """Validated entities + supporting data shared across the run pipeline."""
+
+    eval_set_id: uuid.UUID
+    pred_set_id: uuid.UUID
+    eval_set: EvaluationSet
+    pred_set: PredictionSet
+    data: EvaluationData
+    snapshot: OntologySnapshot
+    pivot_snapshot_id: uuid.UUID
+    toi_go_ids: list[str]
+
+
+class _PipelineCtx(NamedTuple):
+    """Bundle of run-pipeline inputs threaded through the tempdir block."""
+
+    inputs: _EvalInputs
+    scoring_snapshot: ScoringConfig | None
+    reranker_models: dict[str, Any]
+    result_id: uuid.UUID
+    artifact_store: ArtifactStore
 
 
 class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
@@ -174,37 +197,84 @@ class RunCafaEvaluationOperation:
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-
         p = RunCafaEvaluationPayload.model_validate(payload)
+        inputs = self._load_evaluation_inputs(session, p, emit)
+        scoring_snapshot = self._resolve_scoring_snapshot(session, p.scoring_config_id)
+        reranker_models, reranker_config_snapshot = load_reranker_models_for_payload(
+            session,
+            rerankers_nested=p.rerankers,
+            reranker_id_nk=p.reranker_id_nk,
+            reranker_id_lk=p.reranker_id_lk,
+            reranker_id_pk=p.reranker_id_pk,
+            emit=emit,
+        )
+        # Pre-generate result_id so the artifact-store prefix matches the DB row.
+        result_id = uuid.uuid4()
+        artifact_store = get_artifact_store(load_settings(Path(__file__).resolve().parents[3]))
+        ctx = _PipelineCtx(
+            inputs=inputs,
+            scoring_snapshot=scoring_snapshot,
+            reranker_models=reranker_models,
+            result_id=result_id,
+            artifact_store=artifact_store,
+        )
+        results = self._run_evaluation_pipeline(session, p, ctx, emit)
+        first_reranker_id, reranker_config_snapshot = self._finalize_reranker_config(
+            reranker_config_snapshot, reranker_models, p
+        )
+        eval_result = EvaluationResult(
+            id=result_id,
+            evaluation_set_id=inputs.eval_set_id,
+            prediction_set_id=inputs.pred_set_id,
+            scoring_config_id=uuid.UUID(p.scoring_config_id) if p.scoring_config_id else None,
+            reranker_model_id=first_reranker_id,
+            reranker_config=reranker_config_snapshot,
+            results=results,
+        )
+        session.add(eval_result)
+        session.flush()
+        emit(
+            "run_cafa_evaluation.done",
+            None,
+            {
+                "evaluation_result_id": str(result_id),
+                "settings_evaluated": [k for k in results.keys() if k != "artifacts"],
+                "artifacts_prefix": f"eval_artifacts/{result_id}/",
+                "artifacts_count": len((results.get("artifacts") or {}).get("keys") or []),
+            },
+            "info",
+        )
+        return OperationResult(
+            result={"evaluation_result_id": str(result_id), "results": results}
+        )
 
+    @staticmethod
+    def _load_evaluation_inputs(
+        session: Session, p: RunCafaEvaluationPayload, emit: EmitFn
+    ) -> _EvalInputs:
+        """Validate eval/pred set FKs, compute the delta data, resolve the
+        pivot snapshot + terms-of-interest, and emit the start / delta_done
+        events that downstream listeners use to gate progress UI."""
         eval_set_id = uuid.UUID(p.evaluation_set_id)
         pred_set_id = uuid.UUID(p.prediction_set_id)
-
         eval_set = session.get(EvaluationSet, eval_set_id)
         if eval_set is None:
             raise ValueError(f"EvaluationSet {eval_set_id} not found")
-
         pred_set = session.get(PredictionSet, pred_set_id)
         if pred_set is None:
             raise ValueError(f"PredictionSet {pred_set_id} not found")
 
-        # ── 1. Compute evaluation data (dispatches same-snapshot vs reconciled) ─
         emit("run_cafa_evaluation.computing_delta", None, {}, "info")
         data, pivot_snapshot_id = load_evaluation_data_for_set(session, eval_set)
         snapshot = session.get(OntologySnapshot, pivot_snapshot_id)
         if snapshot is None:
             raise ValueError(f"Pivot OntologySnapshot {pivot_snapshot_id} not found")
-
-        # Terms-of-interest (CAFA6 -toi): all GO terms in the pivot graph.
-        # cafaeval restricts evaluation to this set so that terms not in the
-        # frozen graph (e.g. new since t-1) are excluded from scoring.
         toi_go_ids: list[str] = [
             gid
             for (gid,) in session.query(GOTerm.go_id)
             .filter(GOTerm.ontology_snapshot_id == pivot_snapshot_id)
             .all()
         ]
-
         emit(
             "run_cafa_evaluation.start",
             None,
@@ -227,165 +297,201 @@ class RunCafaEvaluationOperation:
             },
             "info",
         )
-
         if data.delta_proteins == 0:
             raise ValueError("No delta proteins found — cannot evaluate")
-
-        # Load and snapshot ScoringConfig before the no-op commit below
-        scoring_config_snapshot: ScoringConfig | None = None
-        if p.scoring_config_id:
-            sc = session.get(ScoringConfig, uuid.UUID(p.scoring_config_id))
-            if sc is None:
-                raise ValueError(f"ScoringConfig {p.scoring_config_id} not found")
-            scoring_config_snapshot = ScoringConfig(
-                formula=sc.formula,
-                weights=dict(sc.weights),
-            )
-
-        # Load per-category (and optionally per-aspect) reranker models before
-        # session commit. Body lives in
-        # ``_run_cafa_reranker_loader.load_reranker_models_for_payload``.
-        reranker_models, reranker_config_snapshot = load_reranker_models_for_payload(
-            session,
-            rerankers_nested=p.rerankers,
-            reranker_id_nk=p.reranker_id_nk,
-            reranker_id_lk=p.reranker_id_lk,
-            reranker_id_pk=p.reranker_id_pk,
-            emit=emit,
+        return _EvalInputs(
+            eval_set_id=eval_set_id,
+            pred_set_id=pred_set_id,
+            eval_set=eval_set,
+            pred_set=pred_set,
+            data=data,
+            snapshot=snapshot,
+            pivot_snapshot_id=pivot_snapshot_id,
+            toi_go_ids=toi_go_ids,
         )
 
-        # Pre-generate result_id so the artifact-store prefix matches the DB row.
-        result_id = uuid.uuid4()
+    @staticmethod
+    def _resolve_scoring_snapshot(
+        session: Session, scoring_config_id: str | None
+    ) -> ScoringConfig | None:
+        """Materialise an in-memory snapshot of the ScoringConfig before the
+        no-op commit so cafaeval workers don't need a session."""
+        if not scoring_config_id:
+            return None
+        sc = session.get(ScoringConfig, uuid.UUID(scoring_config_id))
+        if sc is None:
+            raise ValueError(f"ScoringConfig {scoring_config_id} not found")
+        return ScoringConfig(formula=sc.formula, weights=dict(sc.weights))
 
-        project_root = Path(__file__).resolve().parents[3]
-        artifact_store = get_artifact_store(load_settings(project_root))
-        uploaded_keys: list[str] = []
-
-        results: dict[str, Any] = {}
+    def _run_evaluation_pipeline(
+        self,
+        session: Session,
+        p: RunCafaEvaluationPayload,
+        ctx: _PipelineCtx,
+        emit: EmitFn,
+    ) -> dict[str, Any]:
+        """Stage cafaeval inputs in a tempdir, run the per-setting evaluator,
+        upload artifacts, return the merged results dict (with ``artifacts``)."""
         with tempfile.TemporaryDirectory(prefix="protea_cafa_") as tmpdir:
-            # Persistent staging dir for cafaeval outputs (uploaded to MinIO at the
-            # end of each setting). Lives inside tmpdir so it vanishes on exit.
             artifacts_root = Path(tmpdir) / "artifacts"
             artifacts_root.mkdir(parents=True, exist_ok=True)
-            # Download OBO into temp dir (large file, not persisted)
-            emit("run_cafa_evaluation.downloading_obo", None, {"url": snapshot.obo_url}, "info")
-            obo_path = os.path.join(tmpdir, "go.obo")
-            _artifacts.download_obo(snapshot.obo_url, obo_path)
-
-            # Resolve IA file: explicit payload path > snapshot ia_url > None (uniform IC).
-            # Priority: an explicit ia_file in the payload overrides the snapshot URL so
-            # that one-off experiments can use a custom IA without touching the snapshot.
-            # When ia_file is absent but the snapshot carries an ia_url, the file is
-            # downloaded once into tmpdir and used for all three settings (NK/LK/PK).
-            ia_path: str | None = p.ia_file
-            if ia_path is None and snapshot.ia_url:
-                ia_path = os.path.join(tmpdir, "ia.tsv")
-                emit("run_cafa_evaluation.downloading_ia", None, {"url": snapshot.ia_url}, "info")
-                _artifacts.download_tsv(snapshot.ia_url, ia_path)
-            if ia_path:
-                emit("run_cafa_evaluation.ia_resolved", None, {"ia_path": ia_path}, "info")
-            else:
-                emit(
-                    "run_cafa_evaluation.ia_missing",
-                    None,
-                    {
-                        "warning": "No IA file available; cafaeval will use uniform IC=1 for all "
-                        "GO terms. Set ia_url on the OntologySnapshot or pass ia_file "
-                        "in the payload for information-content-weighted metrics.",
-                    },
-                    "warning",
-                )
-
-            # Restrict GT to the actually-predicted protein cohort + write
-            # the cafaeval input files (gt_*, known_terms, terms-of-interest).
-            # Bodies live in ``_run_cafa_data_helpers``.
-            if p.restrict_gt_to_predicted:
-                data = _data.restrict_data_to_predicted(
-                    session, prediction_set_id=pred_set_id, data=data, emit=emit
-                )
-            gt_paths = _data.write_ground_truth_files(artifacts_root, data)
-            nk_path = gt_paths["nk"]
-            lk_path = gt_paths["lk"]
-            pk_path = gt_paths["pk"]
-            pk_known_path = gt_paths["pk_known"]
-            toi_path = os.path.join(str(artifacts_root), "terms_of_interest.txt")
-            _data.write_terms_of_interest(toi_path, toi_go_ids, emit=emit)
-
-            delta_proteins = set(data.nk) | set(data.lk) | set(data.pk)
-            emit(
-                "run_cafa_evaluation.writing_predictions",
-                None,
-                {"delta_proteins": len(delta_proteins)},
-                "info",
+            run_data = self._stage_evaluator_inputs(
+                session, p, ctx, artifacts_root, emit
             )
-
-            # If any reranker is set, write per-setting prediction files;
-            # otherwise write a single shared file.
-            has_rerankers = bool(reranker_models)
-            if not has_rerankers:
-                pred_dir = os.path.join(str(artifacts_root), "predictions")
-                os.makedirs(pred_dir, exist_ok=True)
-                pred_path = os.path.join(pred_dir, "predictions.tsv")
-                _artifacts.write_predictions(
-                    session,
-                    _artifacts.WritePredictionsContext(
-                        pred_set_id=pred_set_id,
-                        delta_proteins=delta_proteins,
-                        max_distance=p.max_distance,
-                        path=pred_path,
-                    ),
-                    scoring_config=scoring_config_snapshot,
-                )
-
             # No-op commit: releases the DB connection back to the pool before
-            # cafaeval forks worker processes via multiprocessing.Pool.  Forked
-            # children would otherwise inherit SQLAlchemy connection-pool locks
-            # held by other threads, causing an indefinite deadlock on first use.
-            # Unlike session.close(), commit() keeps all ORM objects in the
-            # session so BaseWorker can still update job.status after execute().
+            # cafaeval forks worker processes via multiprocessing.Pool. Forked
+            # children would otherwise inherit SQLAlchemy connection-pool
+            # locks, causing an indefinite deadlock on first use. commit()
+            # (vs session.close()) keeps ORM objects so BaseWorker can still
+            # update job.status after execute().
             session.commit()
+            results = evaluate_all_settings(session, ctx=run_data, emit=emit)
+            uploaded_keys = self._upload_artifacts(
+                ctx.artifact_store, ctx.result_id, artifacts_root, emit
+            )
+            results["artifacts"] = {"keys": uploaded_keys}
+            return results
 
-            # Run evaluator for each setting. Body lives in
-            # ``_run_cafa_eval_driver.evaluate_all_settings``.
-            run_ctx = CafaEvalRunContext(
-                pred_set_id=pred_set_id,
+    def _stage_evaluator_inputs(
+        self,
+        session: Session,
+        p: RunCafaEvaluationPayload,
+        ctx: _PipelineCtx,
+        artifacts_root: Path,
+        emit: EmitFn,
+    ) -> CafaEvalRunContext:
+        """Download OBO + IA, restrict GT, write GT/TOI/predictions files, and
+        bundle every cafaeval input into a ``CafaEvalRunContext``."""
+        inputs = ctx.inputs
+        tmpdir = str(artifacts_root.parent)
+        emit("run_cafa_evaluation.downloading_obo", None, {"url": inputs.snapshot.obo_url}, "info")
+        obo_path = os.path.join(tmpdir, "go.obo")
+        _artifacts.download_obo(inputs.snapshot.obo_url, obo_path)
+        ia_path = self._resolve_ia_file(tmpdir, inputs.snapshot, p.ia_file, emit)
+
+        data = inputs.data
+        if p.restrict_gt_to_predicted:
+            data = _data.restrict_data_to_predicted(
+                session, prediction_set_id=inputs.pred_set_id, data=data, emit=emit
+            )
+        gt_paths = _data.write_ground_truth_files(artifacts_root, data)
+        toi_path = os.path.join(str(artifacts_root), "terms_of_interest.txt")
+        _data.write_terms_of_interest(toi_path, inputs.toi_go_ids, emit=emit)
+
+        delta_proteins = set(data.nk) | set(data.lk) | set(data.pk)
+        emit(
+            "run_cafa_evaluation.writing_predictions",
+            None, {"delta_proteins": len(delta_proteins)}, "info",
+        )
+        has_rerankers = bool(ctx.reranker_models)
+        if not has_rerankers:
+            self._write_shared_prediction_file(
+                session, p, ctx, artifacts_root, delta_proteins
+            )
+        return CafaEvalRunContext(
+            pred_set_id=inputs.pred_set_id,
+            delta_proteins=delta_proteins,
+            max_distance=p.max_distance,
+            artifacts_root=artifacts_root,
+            has_rerankers=has_rerankers,
+            reranker_models=ctx.reranker_models,
+            scoring_config_snapshot=ctx.scoring_snapshot,
+            data=data,
+            obo_path=obo_path,
+            nk_path=gt_paths["nk"],
+            lk_path=gt_paths["lk"],
+            pk_path=gt_paths["pk"],
+            pk_known_path=gt_paths["pk_known"],
+            ia_path=ia_path,
+            toi_path=toi_path,
+            shared_pred_dir=os.path.join(str(artifacts_root), "predictions"),
+        )
+
+    @staticmethod
+    def _write_shared_prediction_file(
+        session: Session,
+        p: RunCafaEvaluationPayload,
+        ctx: _PipelineCtx,
+        artifacts_root: Path,
+        delta_proteins: set[str],
+    ) -> None:
+        """Write the single shared predictions.tsv (no-rerankers path)."""
+        pred_dir = os.path.join(str(artifacts_root), "predictions")
+        os.makedirs(pred_dir, exist_ok=True)
+        _artifacts.write_predictions(
+            session,
+            _artifacts.WritePredictionsContext(
+                pred_set_id=ctx.inputs.pred_set_id,
                 delta_proteins=delta_proteins,
                 max_distance=p.max_distance,
-                artifacts_root=artifacts_root,
-                has_rerankers=has_rerankers,
-                reranker_models=reranker_models,
-                scoring_config_snapshot=scoring_config_snapshot,
-                data=data,
-                obo_path=obo_path,
-                nk_path=nk_path,
-                lk_path=lk_path,
-                pk_path=pk_path,
-                pk_known_path=pk_known_path,
-                ia_path=ia_path,
-                toi_path=toi_path,
-                shared_pred_dir=os.path.join(str(artifacts_root), "predictions"),
-            )
-            results = evaluate_all_settings(session, ctx=run_ctx, emit=emit)
+                path=os.path.join(pred_dir, "predictions.tsv"),
+            ),
+            scoring_config=ctx.scoring_snapshot,
+        )
 
-            # ── 2b. Upload all staged artifacts to the artifact store ────────
-            for path in sorted(artifacts_root.rglob("*")):
-                if not path.is_file():
-                    continue
-                relpath = path.relative_to(artifacts_root).as_posix()
-                key = eval_artifact_key(result_id, relpath)
-                artifact_store.put(key, path)
-                uploaded_keys.append(key)
-            emit(
-                "run_cafa_evaluation.artifacts_uploaded",
-                None,
-                {"count": len(uploaded_keys), "prefix": f"eval_artifacts/{result_id}/"},
-                "info",
-            )
+    @staticmethod
+    def _resolve_ia_file(
+        tmpdir: str, snapshot: OntologySnapshot, payload_ia_file: str | None, emit: EmitFn
+    ) -> str | None:
+        """Resolve the Information Accretion file for cafaeval.
 
-        results["artifacts"] = {"keys": uploaded_keys}
+        Priority: explicit ``payload.ia_file`` > snapshot ``ia_url`` (downloaded
+        once) > ``None`` (cafaeval falls back to uniform IC=1, with a warning).
+        """
+        ia_path: str | None = payload_ia_file
+        if ia_path is None and snapshot.ia_url:
+            ia_path = os.path.join(tmpdir, "ia.tsv")
+            emit("run_cafa_evaluation.downloading_ia", None, {"url": snapshot.ia_url}, "info")
+            _artifacts.download_tsv(snapshot.ia_url, ia_path)
+        if ia_path:
+            emit("run_cafa_evaluation.ia_resolved", None, {"ia_path": ia_path}, "info")
+            return ia_path
+        emit(
+            "run_cafa_evaluation.ia_missing",
+            None,
+            {
+                "warning": "No IA file available; cafaeval will use uniform IC=1 for all "
+                "GO terms. Set ia_url on the OntologySnapshot or pass ia_file "
+                "in the payload for information-content-weighted metrics.",
+            },
+            "warning",
+        )
+        return None
 
-        # ── 3. Persist EvaluationResult ───────────────────────────────────────
-        # For backwards compat, pick a single representative reranker_model_id
+    @staticmethod
+    def _upload_artifacts(
+        artifact_store: ArtifactStore,
+        result_id: uuid.UUID,
+        artifacts_root: Path,
+        emit: EmitFn,
+    ) -> list[str]:
+        """Walk ``artifacts_root``, upload every file under the
+        ``eval_artifacts/{result_id}/`` prefix, return the list of keys."""
+        uploaded_keys: list[str] = []
+        for path in sorted(artifacts_root.rglob("*")):
+            if not path.is_file():
+                continue
+            relpath = path.relative_to(artifacts_root).as_posix()
+            key = eval_artifact_key(result_id, relpath)
+            artifact_store.put(key, path)
+            uploaded_keys.append(key)
+        emit(
+            "run_cafa_evaluation.artifacts_uploaded",
+            None,
+            {"count": len(uploaded_keys), "prefix": f"eval_artifacts/{result_id}/"},
+            "info",
+        )
+        return uploaded_keys
+
+    @staticmethod
+    def _finalize_reranker_config(
+        reranker_config_snapshot: dict[str, Any] | None,
+        reranker_models: dict[str, Any],
+        p: RunCafaEvaluationPayload,
+    ) -> tuple[uuid.UUID | None, dict[str, Any] | None]:
+        """Pick the representative ``reranker_model_id`` for backwards-compat
+        and synthesise the ``reranker_config`` snapshot from the flat
+        per-category fields when the nested mapping is empty."""
         first_reranker_id: uuid.UUID | None = None
         if reranker_config_snapshot:
             for _cat_map in reranker_config_snapshot.values():
@@ -394,8 +500,8 @@ class RunCafaEvaluationOperation:
                     break
                 if first_reranker_id:
                     break
-        elif reranker_models:
-            # Flat per-category fields: build config snapshot and pick first ID
+            return first_reranker_id, reranker_config_snapshot
+        if reranker_models:
             reranker_config_snapshot = {}
             for setting, field in [
                 ("nk", p.reranker_id_nk),
@@ -406,36 +512,7 @@ class RunCafaEvaluationOperation:
                     reranker_config_snapshot[setting] = {"all": field}
                     if first_reranker_id is None:
                         first_reranker_id = uuid.UUID(field)
-
-        eval_result = EvaluationResult(
-            id=result_id,
-            evaluation_set_id=eval_set_id,
-            prediction_set_id=pred_set_id,
-            scoring_config_id=uuid.UUID(p.scoring_config_id) if p.scoring_config_id else None,
-            reranker_model_id=first_reranker_id,
-            reranker_config=reranker_config_snapshot,
-            results=results,
-        )
-        session.add(eval_result)
-        session.flush()
-
-        emit(
-            "run_cafa_evaluation.done",
-            None,
-            {
-                "evaluation_result_id": str(result_id),
-                "settings_evaluated": [k for k in results.keys() if k != "artifacts"],
-                "artifacts_prefix": f"eval_artifacts/{result_id}/",
-                "artifacts_count": len(uploaded_keys),
-            },
-            "info",
-        )
-        return OperationResult(
-            result={
-                "evaluation_result_id": str(result_id),
-                "results": results,
-            }
-        )
+        return first_reranker_id, reranker_config_snapshot
 
     # Backwards-compat shims: tests patch and call these names. The bodies
     # live in ``_run_cafa_artifacts``; these instance methods delegate so

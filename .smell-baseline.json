@@ -79,15 +79,6 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/run_cafa_evaluation.py::RunCafaEvaluationOperation.execute",
-      "kind": "method",
-      "path": "protea/core/operations/run_cafa_evaluation.py",
-      "name": "RunCafaEvaluationOperation.execute",
-      "line": 174,
-      "metric": 265,
-      "threshold": 60
-    },
-    {
       "key": "method::protea/core/parquet_export.py::export_reranker_parquets",
       "kind": "method",
       "path": "protea/core/parquet_export.py",
