@@ -6,17 +6,17 @@ Operations
    :depth: 2
 
 An **Operation** is the fundamental unit of domain logic in PROTEA. Every task
-that a worker can execute — from a health-check ping to a full UniProt ingest —
+that a worker can execute (from a health-check ping to a full UniProt ingest)
 is encapsulated in a class that satisfies the ``Operation`` protocol.
 
 .. seealso::
 
-   - :doc:`/appendix/howto_guides` — task-oriented recipes that submit each
+   - :doc:`/appendix/howto_guides`: task-oriented recipes that submit each
      of these operations through the HTTP API with concrete payloads.
-   - :doc:`/architecture/data_model` — the ORM tables that operations read
+   - :doc:`/architecture/data_model`: the ORM tables that operations read
      from and write to (``Sequence``, ``Protein``, ``GOTerm``, ``AnnotationSet``,
      ``EmbeddingConfig``, ``GOPrediction``, ``EvaluationSet``…).
-   - :doc:`/architecture/job_lifecycle` — how the worker layer dispatches
+   - :doc:`/architecture/job_lifecycle`: how the worker layer dispatches
      these operations and tracks their progress.
 
 The Operation protocol
@@ -70,7 +70,7 @@ Every operation defines a **payload** class that extends ``ProteaPayload``:
 ``ProteaPayload`` is an immutable, strictly-typed Pydantic v2 base. Strict
 mode prevents silent coercions (``"yes"`` is not a valid ``bool``). Each
 operation calls ``MyPayload.model_validate(payload)`` at the top of
-``execute()`` — validation errors surface as ``FAILED`` jobs with a clear
+``execute()``; validation errors surface as ``FAILED`` jobs with a clear
 error message, before any DB writes occur.
 
 Shared HTTP / retry behaviour
@@ -79,14 +79,14 @@ Shared HTTP / retry behaviour
 Both ``insert_proteins`` and ``fetch_uniprot_metadata`` implement an identical
 resilience strategy against the UniProt REST API:
 
-- **Cursor-based pagination** — the ``link`` response header carries the next
+- **Cursor-based pagination.** The ``link`` response header carries the next
   cursor token. Iteration stops when no ``rel="next"`` link is present.
-- **Exponential backoff with jitter** — on retriable errors (``429``, ``5xx``,
+- **Exponential backoff with jitter.** On retriable errors (``429``, ``5xx``,
   network exceptions), the wait time is
   ``min(base × 2^(attempt-1), max) + uniform(0, jitter)``.
-- **Retry-After header** — if UniProt returns a ``429`` with a ``Retry-After``
+- **Retry-After header.** If UniProt returns a ``429`` with a ``Retry-After``
   header, that duration (capped at ``backoff_max_seconds``) is used directly.
-- **max_retries** — after this many attempts the exception is re-raised,
+- **max_retries.** After this many attempts the exception is re-raised,
   transitioning the job to ``FAILED``.
 
 Every retry is logged via ``emit("http.retry", ...)`` so the frontend timeline
@@ -95,7 +95,7 @@ always shows when and why a delay occurred.
 insert_proteins
 ---------------
 
-**Operation name:** ``insert_proteins`` — queue: ``protea.jobs``
+**Operation name:** ``insert_proteins``; queue: ``protea.jobs``
 
 | **How to invoke this:** see *Submit a job via the API* in :doc:`/appendix/howto_guides`.
 | **Tables touched:** ``Protein`` and ``Sequence`` (see :doc:`/architecture/data_model`).
@@ -160,7 +160,7 @@ Execution flow
       d. INSERT missing Sequence rows → obtain IDs
       e. bulk-load existing Protein rows by accession (chunks of 5 000)
       f. INSERT new Protein rows / conservative UPDATE existing rows
-      g. session.flush() — no commit per page (commit on job success)
+      g. session.flush(): no commit per page (commit on job success)
       h. emit("insert_proteins.page_done", ...)
    3. if total_limit reached → emit warning + break
    4. emit("insert_proteins.done", ...)
@@ -170,7 +170,7 @@ Sequence deduplication
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 ``Sequence`` rows are keyed by ``sequence_hash`` (MD5 of the amino-acid
-string). Many ``Protein`` rows can point to the same ``Sequence`` row —
+string). Many ``Protein`` rows can point to the same ``Sequence`` row;
 ``sequence_id`` is deliberately non-unique. This eliminates redundant storage
 for identical sequences across species or isoforms.
 
@@ -193,7 +193,7 @@ accession are stored. ``is_canonical = False`` for isoforms;
 fetch_uniprot_metadata
 -----------------------
 
-**Operation name:** ``fetch_uniprot_metadata`` — queue: ``protea.jobs``
+**Operation name:** ``fetch_uniprot_metadata``; queue: ``protea.jobs``
 
 | **How to invoke this:** see *Fetch UniProt metadata for existing proteins* in :doc:`/appendix/howto_guides`.
 | **Tables touched:** ``ProteinUniProtMetadata`` (see :doc:`/architecture/data_model`).
@@ -308,7 +308,7 @@ TSV response.
 load_ontology_snapshot
 ----------------------
 
-**Operation name:** ``load_ontology_snapshot`` — queue: ``protea.jobs``
+**Operation name:** ``load_ontology_snapshot``; queue: ``protea.jobs``
 
 | **How to invoke this:** see *Load a GO ontology snapshot* in :doc:`/appendix/howto_guides`.
 | **Tables touched:** ``OntologySnapshot``, ``GOTerm``, ``GOTermRelationship`` (see *GO ontology* in :doc:`/architecture/data_model`).
@@ -360,7 +360,7 @@ Execution flow
 load_goa_annotations
 ---------------------
 
-**Operation name:** ``load_goa_annotations`` — queue: ``protea.jobs``
+**Operation name:** ``load_goa_annotations``; queue: ``protea.jobs``
 
 | **How to invoke this:** see *Load GOA annotations* in :doc:`/appendix/howto_guides`.
 | **Tables touched:** ``AnnotationSet``, ``ProteinGOAnnotation`` (see *Annotation sets* in :doc:`/architecture/data_model`).
@@ -412,7 +412,7 @@ Execution flow
    3. stream GAF lines:
       a. skip comment lines (starting with "!")
       b. parse 15-column tab-separated record
-      c. filter against canonical accessions — skip unknown
+      c. filter against canonical accessions; skip unknown
       d. resolve go_term_id from go_id; skip if term unknown in snapshot
       e. buffer ProteinGOAnnotation rows
       f. flush + commit every page_size rows
@@ -422,13 +422,13 @@ Execution flow
 load_quickgo_annotations
 -------------------------
 
-**Operation name:** ``load_quickgo_annotations`` — queue: ``protea.jobs``
+**Operation name:** ``load_quickgo_annotations``; queue: ``protea.jobs``
 
 | **How to invoke this:** see *Load QuickGO annotations* in :doc:`/appendix/howto_guides`.
 | **Tables touched:** ``AnnotationSet``, ``ProteinGOAnnotation`` (see *Annotation sets* in :doc:`/architecture/data_model`).
 
 Streams GO annotations from the QuickGO bulk download TSV API. Proteins
-are determined by the canonical accessions already in the DB — no external
+are determined by the canonical accessions already in the DB; no external
 accession list is needed. Supports optional ECO ID → evidence code mapping,
 taxon filtering, and aspect filtering.
 
@@ -479,12 +479,12 @@ Payload fields
 compute_embeddings
 ------------------
 
-**Operation name:** ``compute_embeddings`` — queue: ``protea.embeddings``
+**Operation name:** ``compute_embeddings``; queue: ``protea.embeddings``
 (coordinator, serialised; one at a time via ``RetryLaterError`` if GPU busy)
 
 | **How to invoke this:** see *Compute sequence embeddings* in :doc:`/appendix/howto_guides`.
 | **Tables touched:** ``EmbeddingConfig``, ``SequenceEmbedding`` (see *Embeddings* in :doc:`/architecture/data_model`).
-| **Lifecycle pattern:** parent-child coordinator with deferred completion — see :doc:`/architecture/job_lifecycle`.
+| **Lifecycle pattern:** parent-child coordinator with deferred completion (see :doc:`/architecture/job_lifecycle`).
 
 Coordinator operation: determines which sequences need embeddings and fans
 out ``ComputeEmbeddingsBatchOperation`` messages to ``protea.embeddings.batch``.
@@ -554,12 +554,12 @@ closing the parent job when all batches are done.
 predict_go_terms
 ----------------
 
-**Operation name:** ``predict_go_terms`` — queue: ``protea.predictions``
+**Operation name:** ``predict_go_terms``; queue: ``protea.predictions``
 (coordinator; fans out KNN batch workers on ``protea.predictions.batch``)
 
 | **How to invoke this:** see *Predict GO terms* in :doc:`/appendix/howto_guides`.
 | **Tables touched:** ``PredictionSet``, ``GOPrediction`` (see *Predictions* in :doc:`/architecture/data_model`).
-| **Lifecycle pattern:** parent-child coordinator with deferred completion — see :doc:`/architecture/job_lifecycle`.
+| **Lifecycle pattern:** parent-child coordinator with deferred completion (see :doc:`/architecture/job_lifecycle`).
 | **KNN backend rationale:** see :doc:`/adr/001-knn-without-pgvector`.
 
 Coordinator operation: loads reference embeddings into a process-level cache,
@@ -660,13 +660,13 @@ The flow is:
    flags.
 2. If ``live_sha != reranker_feature_schema_sha`` the worker emits
    ``reranker.schema_mismatch`` (level ``error``) and returns stats with
-   ``applied=False``. The batch continues using the KNN ordering — **no
-   crash**, and no partial scoring.
+   ``applied=False``. The batch continues using the KNN ordering with **no
+   crash** and no partial scoring.
 3. On match, the worker attaches the GOTerm aspect to each dict, calls
    :func:`protea.core.reranking.apply_reranker`, and writes the
    ``reranker_score`` field into every prediction dict in memory.
 
-``reranker_score`` is **in-memory only** — ``GOPrediction`` does not yet
+``reranker_score`` is **in-memory only**: ``GOPrediction`` does not yet
 have a column for it, so the score is surfaced through the
 ``predict_go_terms_batch.done`` event (nested ``reranker`` block with
 applied/skipped/mean_score/etc.) but is not persisted.
@@ -696,7 +696,7 @@ runs KNN search and GO transfer per batch. The ``store_predictions``
 ping
 ----
 
-**Operation name:** ``ping`` — queue: ``protea.ping``
+**Operation name:** ``ping``; queue: ``protea.ping``
 
 Smoke-test operation. Accepts no required payload fields, emits a single
 ``ping.pong`` event, and returns immediately. Used to verify end-to-end
@@ -705,7 +705,7 @@ connectivity of the job queue without touching the protein data tables.
 generate_evaluation_set
 -----------------------
 
-**Operation name:** ``generate_evaluation_set`` — queue: ``protea.jobs``
+**Operation name:** ``generate_evaluation_set``; queue: ``protea.jobs``
 
 Computes the CAFA-style evaluation delta between two ``AnnotationSet`` rows
 (old → new) and stores an ``EvaluationSet`` row with summary statistics.
@@ -743,7 +743,7 @@ Execution flow
 .. code-block:: text
 
    1. validate payload; load AnnotationSet rows; assert same ontology snapshot
-   2. call compute_evaluation_data() — see protea.core.evaluation:
+   2. call compute_evaluation_data(); see protea.core.evaluation:
       a. load GO DAG children map (is_a / part_of only)
       b. build NOT-propagation exclusion set (negated terms + GO descendants)
       c. load experimental annotations for old and new sets, filtered by
@@ -773,7 +773,7 @@ stored in the DB) using the same ``compute_evaluation_data`` logic.
 run_cafa_evaluation
 -------------------
 
-**Operation name:** ``run_cafa_evaluation`` — queue: ``protea.evaluations``
+**Operation name:** ``run_cafa_evaluation``; queue: ``protea.evaluations``
 
 | **How to invoke this:** see *Run a CAFA evaluation* in :doc:`/appendix/howto_guides`.
 | **Tables touched:** ``EvaluationSet``, ``EvaluationResult`` (see *Evaluation* in :doc:`/architecture/data_model`).
@@ -849,13 +849,13 @@ Execution flow
 .. code-block:: text
 
    1. load EvaluationSet + PredictionSet + OntologySnapshot from DB
-   2. compute_evaluation_data() — same delta as generate_evaluation_set
+   2. compute_evaluation_data(): same delta as generate_evaluation_set
    3. download OBO file from snapshot.obo_url to a temp directory
    4. write ground-truth TSVs: gt_NK.tsv, gt_LK.tsv, gt_PK.tsv,
       known_terms.tsv, pk_known_terms.tsv
    5. write predictions in CAFA format (protein \\t go_id \\t score),
       score = max(0, 1 - distance), filtered to delta proteins only
-   6. session.commit() — releases DB connection before cafaeval forks workers
+   6. session.commit(): releases DB connection before cafaeval forks workers
    7. for each setting in (NK, LK, PK):
       a. NK pass: cafa_eval(obo, predictions/, gt_NK.tsv)
       b. LK pass: cafa_eval(obo, predictions/, gt_LK.tsv)
@@ -873,7 +873,7 @@ PK known-terms
 For the PK pass, ``pk_known_terms.tsv`` is passed to ``cafa_eval`` as the
 ``-known`` (``exclude``) argument. This file contains all experimental
 annotations from the *old* snapshot for PK proteins in the relevant namespace.
-``cafaeval`` uses this to exclude known annotations from scoring — methods
+``cafaeval`` uses this to exclude known annotations from scoring; methods
 that simply repeat prior annotations receive no credit for PK predictions.
 
 SIGTERM handling
@@ -894,7 +894,7 @@ train_reranker
    LightGBM training has been decoupled from PROTEA and now lives in
    `protea-reranker-lab <https://github.com/frapercan/protea-reranker-lab>`_.
    ``TrainRerankerOperation`` and ``TrainRerankerAutoOperation`` are
-   **no longer registered** in the ``OperationRegistry`` — a ``POST /jobs``
+   **no longer registered** in the ``OperationRegistry``; a ``POST /jobs``
    request with ``operation_name: train_reranker`` or ``train_reranker_auto``
    will be rejected. The classes remain importable as internal helpers
    that :ref:`export-research-dataset-operation` reuses in-process to run
@@ -902,12 +902,12 @@ train_reranker
 
    The narrative below (feature matrix, LightGBM hyperparameters,
    validation metrics) is retained as the canonical specification of
-   the booster that the lab trains — the lab consumes the exact same
+   the booster that the lab trains; the lab consumes the exact same
    feature schema PROTEA produces. For the live end-to-end flow, see
    :ref:`export-research-dataset-operation` below and the
    ``/reranker-models/import`` HTTP surface.
 
-**Operation name:** ``train_reranker`` — *internal helper, not queued*
+**Operation name:** ``train_reranker`` (*internal helper, not queued*)
 
 | **How to invoke this:** no longer invocable via ``/jobs``. See
   :ref:`export-research-dataset-operation` and the ``POST /datasets``
@@ -1047,7 +1047,7 @@ and **3 categorical** columns, grouped by origin:
 All three categorical features are converted to pandas ``category`` dtype in
 :func:`protea.core.reranker.prepare_dataset`; LightGBM consumes them directly,
 so no manual label encoding is required. Missing values in numeric columns
-are left as ``NaN`` — LightGBM handles them natively by learning an optimal
+are left as ``NaN``; LightGBM handles them natively by learning an optimal
 direction at each split.
 
 Training protocol
@@ -1131,17 +1131,17 @@ Validation metrics
 After training, the validation set is scored and the following metrics are
 written to ``RerankerModel.metrics`` as a JSONB dict:
 
-- ``best_iteration`` — boosting round at which early stopping triggered.
-- ``val_auc`` — ROC-AUC on the validation split.
-- ``val_logloss`` — binary logloss at the best iteration.
-- ``val_precision`` / ``val_recall`` / ``val_f1`` — computed at the
+- ``best_iteration``: boosting round at which early stopping triggered.
+- ``val_auc``: ROC-AUC on the validation split.
+- ``val_logloss``: binary logloss at the best iteration.
+- ``val_precision`` / ``val_recall`` / ``val_f1``: computed at the
   ``p ≥ 0.5`` decision threshold. These are reported for quick inspection
   but are **not** the primary objective: the re-ranker is ultimately scored
   through the full CAFA evaluation pipeline (:doc:`evaluation`), which uses
   IA-weighted Fmax per ``(category, namespace)`` cell.
-- ``train_samples`` / ``val_samples`` — row counts after any negative
+- ``train_samples`` / ``val_samples``: row counts after any negative
   subsampling.
-- ``positive_rate`` — fraction of rows with ``label == 1`` *before* any
+- ``positive_rate``: fraction of rows with ``label == 1`` *before* any
   subsampling.
 
 In addition, :func:`~protea.core.reranker.train` returns a
@@ -1161,7 +1161,7 @@ re-ranker.
 train_reranker_auto
 ~~~~~~~~~~~~~~~~~~~
 
-**Operation name:** ``train_reranker_auto`` — *internal helper, not queued*
+**Operation name:** ``train_reranker_auto`` (*internal helper, not queued*)
 
 .. note::
 
@@ -1178,7 +1178,7 @@ train_reranker_auto
 export_research_dataset
 ------------------------
 
-**Operation name:** ``export_research_dataset`` — queue: ``protea.training``
+**Operation name:** ``export_research_dataset``; queue: ``protea.training``
 
 | **How to invoke this:** see *Registering a reranker from protea-reranker-lab* in :doc:`/appendix/howto_guides`.
 | **Tables touched:** read-only over existing ``PredictionSet`` / feature data. Writes blobs via the configured ``ArtifactStore`` (no ORM writes).
@@ -1272,13 +1272,13 @@ The operation relays the underlying ``train_reranker_auto`` events
 under its own namespace (``train_reranker_auto.*`` →
 ``export_research_dataset.*``) and additionally emits:
 
-- ``export_research_dataset.started`` — payload echoed back with
+- ``export_research_dataset.started``: payload echoed back with
   resolved backend.
-- ``export_research_dataset.rows_written`` — n_train_rows / n_eval_rows
+- ``export_research_dataset.rows_written``: n_train_rows / n_eval_rows
   per shard once the parquets are materialised.
-- ``export_research_dataset.published`` — ``{backend, key_prefix, files}``
+- ``export_research_dataset.published``: ``{backend, key_prefix, files}``
   when the three artefacts have been uploaded successfully.
-- ``export_research_dataset.completed`` — final summary including the
+- ``export_research_dataset.completed``: final summary including the
   three resulting URIs (``file://…`` or ``s3://bucket/key``).
 
 Ephemeral consumer operations
@@ -1304,7 +1304,7 @@ total to **15 registered operations** (11 job-backed + 4 ephemeral).
 compute_embeddings_batch
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Queue:** ``protea.embeddings.batch`` — **consumer:** ``OperationConsumer``
+**Queue:** ``protea.embeddings.batch``; **consumer:** ``OperationConsumer``
 
 Runs the protein language model forward pass for one batch of sequences.
 Loads the model on first use, caches it at process level, performs GPU
@@ -1315,12 +1315,12 @@ converts to float32, and publishes a ``StoreEmbeddings`` message to
 
 Backends are selected via ``EmbeddingConfig.model_backend``:
 
-* ``esm``   — HuggingFace ``EsmModel`` (ESM-2 family); single-sequence forward.
-* ``esm3c`` — ESM SDK ``ESMC`` (ESM3c family); FP16 on GPU, no external tokenizer.
-* ``t5``    — HuggingFace ``T5EncoderModel`` (ProstT5, ``prot_t5_xl_uniref50``…);
+* ``esm``:   HuggingFace ``EsmModel`` (ESM-2 family); single-sequence forward.
+* ``esm3c``: ESM SDK ``ESMC`` (ESM3c family); FP16 on GPU, no external tokenizer.
+* ``t5``:    HuggingFace ``T5EncoderModel`` (ProstT5, ``prot_t5_xl_uniref50``…);
   the ``<AA2fold>`` prefix is auto-injected when the model name contains
   ``prostt5``.
-* ``ankh``  — HuggingFace ``T5EncoderModel`` loaded via ``AutoTokenizer``
+* ``ankh``:  HuggingFace ``T5EncoderModel`` loaded via ``AutoTokenizer``
   (``ElnaggarLab/ankh-base``, ``ElnaggarLab/ankh-large``). Shares the batched
   T5 pipeline but with two mandatory deviations from the ProstT5 path,
   both verified end-to-end with real weights on 2026-04-10:
@@ -1335,7 +1335,7 @@ Backends are selected via ``EmbeddingConfig.model_backend``:
      destroys the embedding. ``_embed_ankh`` instead passes
      ``[list(seq) for seq in batch]`` with ``is_split_into_words=True``
      (verified 0 ``<unk>``). The ``<AA2fold>`` prefix is never injected.
-* ``auto``  — falls back to ``esm``.
+* ``auto``:  falls back to ``esm``.
 
 Residue-tensor convention
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -1383,7 +1383,7 @@ saturates the device; the coordinator serialises dispatch with
 store_embeddings
 ~~~~~~~~~~~~~~~~
 
-**Queue:** ``protea.embeddings.write`` — **consumer:** ``OperationConsumer``
+**Queue:** ``protea.embeddings.write``; **consumer:** ``OperationConsumer``
 
 Bulk-inserts ``SequenceEmbedding`` rows (one per chunk) into the pgvector
 ``VECTOR`` column, using PostgreSQL ``INSERT ... ON CONFLICT DO NOTHING`` to
@@ -1398,7 +1398,7 @@ independently.
 predict_go_terms_batch
 ~~~~~~~~~~~~~~~~~~~~~~
 
-**Queue:** ``protea.predictions.batch`` — **consumer:** ``OperationConsumer``
+**Queue:** ``protea.predictions.batch``; **consumer:** ``OperationConsumer``
 
 Runs the KNN + GO transfer pipeline for one batch of query proteins. As
 of F2C.5 the heavy lifting is delegated to
@@ -1427,7 +1427,7 @@ unified path returns.
    (``enrich_v6_features``) when ``compute_v6_features=true``.
 5. Publishes a ``StorePredictions`` message to ``protea.predictions.write``.
 
-GPU is not required — KNN search runs on CPU unless a FAISS GPU index is
+GPU is not required: KNN search runs on CPU unless a FAISS GPU index is
 configured at process startup. The re-ranker (``booster``) is applied
 *after* ancestor expansion via ``_apply_reranker_if_aligned``, not
 inside ``protea_method.pipeline.predict``, so the historical scoring
@@ -1436,7 +1436,7 @@ order remains bit-exact.
 store_predictions
 ~~~~~~~~~~~~~~~~~
 
-**Queue:** ``protea.predictions.write`` — **consumer:** ``OperationConsumer``
+**Queue:** ``protea.predictions.write``; **consumer:** ``OperationConsumer``
 
 Bulk-inserts ``GOPrediction`` rows (one row per predicted ``(protein, go_term)``
 pair) and atomically increments ``Job.progress_current`` on the parent
