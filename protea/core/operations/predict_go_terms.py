@@ -963,42 +963,19 @@ class PredictGOTermsBatchOperation:
             for i, chunk in enumerate(chunks)
         ]
 
-    def _apply_reranker_if_aligned(
+    def _resolve_live_schema_sha(
         self,
-        session: Session,
-        prediction_dicts: list[dict[str, Any]],
         p: PredictGOTermsBatchPayload,
         emit: EmitFn,
-    ) -> dict[str, Any] | None:
-        """Score ``prediction_dicts`` with the configured reranker.
+    ) -> str | None:
+        """Compute the live feature-schema SHA via ``protea_contracts``.
 
-        The booster is skipped (never crashed) whenever any of the load-
-        bearing preconditions fails:
-
-        * ``artifact_uri`` / ``feature_schema_sha`` missing in the payload
-          (coordinator bug — should not happen, but we log and continue).
-        * ``protea_reranker_lab.contracts`` is not importable (production
-          image without the dev dep).
-        * ``live_sha != expected_sha`` (feature set diverged since
-          training — silently fall back to KNN distance ordering).
-
-        On success the ``reranker_score`` float ends up on every prediction
-        dict in memory (not persisted — ``GOPrediction`` has no column for
-        it yet) and the method returns per-batch summary stats for the
-        ``predict_go_terms_batch.done`` event.
+        Returns the SHA on success or ``None`` when the contracts module
+        is unavailable (the booster is skipped silently in that case so
+        production images without the dev dep can still serve KNN
+        distance ordering).
         """
-        if not (p.reranker_artifact_uri and p.reranker_feature_schema_sha):
-            emit(
-                "reranker.skipped",
-                None,
-                {"reason": "missing_artifact_context", "reranker_model_id": p.reranker_model_id},
-                "warning",
-            )
-            return None
-
         try:
-            # T1.8 boundary validation: live sha computed via the canonical
-            # protea_contracts implementation (single source of truth).
             from protea_contracts import compute_feature_schema_sha
         except Exception as exc:
             emit(
@@ -1012,32 +989,20 @@ class PredictGOTermsBatchOperation:
                 "warning",
             )
             return None
-
         live_families = infer_active_feature_families(
             compute_alignments=p.compute_alignments,
             compute_taxonomy=p.compute_taxonomy,
             compute_v6_features=p.compute_v6_features,
         )
-        live_sha = compute_feature_schema_sha(live_families)
-        if live_sha != p.reranker_feature_schema_sha:
-            emit(
-                "reranker.schema_mismatch",
-                None,
-                {
-                    "reranker_model_id": p.reranker_model_id,
-                    "expected_sha": p.reranker_feature_schema_sha,
-                    "live_sha": live_sha,
-                    "live_families": live_families,
-                },
-                "error",
-            )
-            return {
-                "applied": False,
-                "skipped_reason": "schema_mismatch",
-                "expected_sha": p.reranker_feature_schema_sha,
-                "live_sha": live_sha,
-            }
+        return compute_feature_schema_sha(live_families)
 
+    def _score_with_reranker(
+        self,
+        session: Session,
+        prediction_dicts: list[dict[str, Any]],
+        p: PredictGOTermsBatchPayload,
+    ) -> Any:
+        """Load the booster, score predictions in-place, return the score array."""
         import pandas as pd
 
         project_root = Path(__file__).resolve().parents[2]
@@ -1048,14 +1013,57 @@ class PredictGOTermsBatchOperation:
             feature_schema_sha=p.reranker_feature_schema_sha,
             store=store,
         )
-
         self._attach_go_term_aspect(session, prediction_dicts)
         df = pd.DataFrame(prediction_dicts)
         scores = apply_reranker(df, booster)
-
         for rec, score in zip(prediction_dicts, scores.tolist(), strict=True):
             rec["reranker_score"] = float(score)
+        return scores
 
+    def _apply_reranker_if_aligned(
+        self,
+        session: Session,
+        prediction_dicts: list[dict[str, Any]],
+        p: PredictGOTermsBatchPayload,
+        emit: EmitFn,
+    ) -> dict[str, Any] | None:
+        """Score ``prediction_dicts`` with the configured reranker.
+
+        The booster is skipped (never crashed) whenever any precondition
+        fails: missing artifact context, contracts module unavailable,
+        or live schema SHA != expected. On success ``reranker_score``
+        lands on every prediction dict in memory (not persisted) and
+        the method returns per-batch summary stats.
+        """
+        if not (p.reranker_artifact_uri and p.reranker_feature_schema_sha):
+            emit(
+                "reranker.skipped",
+                None,
+                {"reason": "missing_artifact_context", "reranker_model_id": p.reranker_model_id},
+                "warning",
+            )
+            return None
+        live_sha = self._resolve_live_schema_sha(p, emit)
+        if live_sha is None:
+            return None
+        if live_sha != p.reranker_feature_schema_sha:
+            emit(
+                "reranker.schema_mismatch",
+                None,
+                {
+                    "reranker_model_id": p.reranker_model_id,
+                    "expected_sha": p.reranker_feature_schema_sha,
+                    "live_sha": live_sha,
+                },
+                "error",
+            )
+            return {
+                "applied": False,
+                "skipped_reason": "schema_mismatch",
+                "expected_sha": p.reranker_feature_schema_sha,
+                "live_sha": live_sha,
+            }
+        scores = self._score_with_reranker(session, prediction_dicts, p)
         if scores.size == 0:
             return {"applied": True, "rows": 0}
         return {
