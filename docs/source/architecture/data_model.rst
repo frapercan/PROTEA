@@ -6,7 +6,7 @@ Data Model
    :depth: 2
 
 All models use SQLAlchemy 2.x declarative style with ``Mapped[]`` type annotations.
-The schema is managed by Alembic (34 migrations to date).
+The schema is managed by Alembic (35 migrations to date).
 
 Protein and sequence deduplication
 ------------------------------------
@@ -466,6 +466,45 @@ Job queue
    chronologically through ``GET /jobs/{job_id}/comments``; they
    complement ``JobEvent`` (which is machine-emitted) by giving
    curators / operators a place for free-form annotations.
+
+Experiment runs
+---------------
+
+.. code-block:: text
+
+   ┌──────────────────────────────┐
+   │       ExperimentRun          │
+   │──────────────────────────────│
+   │ id (UUID, PK)                │
+   │ name (Text, UNIQUE)          │
+   │ description (Text, null)     │
+   │ hypothesis (Text, null)      │
+   │ findings (Text, null)        │
+   │ status (enum)                │
+   │ config (JSONB)               │
+   │ provenance (JSONB)           │
+   │ tags (ARRAY[Text])           │
+   │ created_at                   │
+   │ started_at (null)            │
+   │ finished_at (null)           │
+   └──────────────────────────────┘
+
+**ExperimentRun**
+   Per-research-run narrative + provenance anchor (T3.8 / Fase 4).
+   The row that F-EXP campaigns and the F8b Experiments page hang
+   their per-run metadata off of: a single ``ExperimentRun``
+   typically aggregates multiple ``Job`` / ``EvaluationResult`` /
+   ``RerankerModel`` rows under one human ``name``. The narrative
+   trio (``description`` / ``hypothesis`` / ``findings``) mirrors
+   ``Job``'s D11 columns; ``config`` and ``provenance`` are JSONB
+   bags suitable for the ``capture_provenance`` snapshot from
+   :mod:`protea.core.provenance`. Status enum is
+   ``planned`` → ``running`` → ``done`` (or ``abandoned``); planned
+   rather than queued because experiments often live as drafts
+   before any compute kicks off, and ``abandoned`` rather than
+   ``failed`` because a research run can be stopped without a hard
+   error. Linkage to sibling rows lives in follow-up tasks
+   T4.7-T4.9.
 
 Status enum
 -----------
