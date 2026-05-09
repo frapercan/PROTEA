@@ -5,7 +5,7 @@ Results
    :local:
    :depth: 2
 
-.. admonition:: Provisional results — pending final recompute
+.. admonition:: Provisional results, pending final recompute
    :class: warning
 
    Every number reported in this chapter was produced **before** the
@@ -28,7 +28,7 @@ Results
    The experimental protocol (GOA 220 → GOA 229 temporal holdout, NK/LK/PK
    categorisation, IA-weighted ``cafaeval``, :math:`k=5` KNN, scoring
    configurations, and the three re-ranker generations) is **stable** and
-   will not change in the final run — only the numerical values will be
+   will not change in the final run; only the numerical values will be
    regenerated.
 
 This chapter presents the experimental evaluation of PROTEA's GO term prediction
@@ -43,9 +43,9 @@ Experimental setup
 GOA release 229 as the ground truth (t1). Proteins that gained new experimental
 GO annotations between t0 and t1 form the test set:
 
-- **NK** (No-Knowledge): 2 831 proteins — no experimental annotations at t0
-- **LK** (Limited-Knowledge): 3 410 proteins — annotations in some namespaces at t0, new in others
-- **PK** (Partial-Knowledge): 15 313 proteins — additional annotations in an already-annotated namespace
+- **NK** (No-Knowledge): 2 831 proteins, no experimental annotations at t0.
+- **LK** (Limited-Knowledge): 3 410 proteins, annotations in some namespaces at t0 and new in others.
+- **PK** (Partial-Knowledge): 15 313 proteins, additional annotations in an already-annotated namespace.
 
 See :doc:`architecture/evaluation` for the full protocol and NK/LK/PK
 classification rules.
@@ -54,7 +54,7 @@ classification rules.
 reference protein set frozen at GOA 220.
 
 **Evaluator.** ``cafaeval`` with IA weighting, ``prop=max``, ``norm=cafa``.
-Metrics are reported as Fmax per (category, namespace) — 9 cells:
+Metrics are reported as Fmax per (category, namespace), 9 cells in total:
 NK/LK/PK × BPO/MFO/CCO.
 
 Ablation studies
@@ -121,7 +121,7 @@ Scoring: baseline (``1 − distance/2``), aspect-separated KNN index.
      - 0.312
 
 Performance degrades monotonically with k. k = 5 is optimal across all
-categories — additional neighbours introduce noise without improving recall.
+categories; additional neighbours introduce noise without improving recall.
 
 Scoring configurations
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -197,7 +197,7 @@ prediction set; only the post-hoc score computation differs.
 The ``alignment_weighted`` configuration (embedding 0.5, NW 0.3, SW 0.2)
 outperforms the embedding-only baseline by 1.5–4 % Fmax across all cells.
 Configurations that incorporate evidence-code weighting consistently
-underperform the baseline — the evidence signal hurts ranking under
+underperform the baseline; the evidence signal hurts ranking under
 IA-weighted ``cafaeval`` scoring.
 
 Re-ranker progression
@@ -207,19 +207,19 @@ PROTEA includes a LightGBM-based re-ranker trained on temporal splits of GOA
 releases (GOA 160 through 220, 13 splits). Each split provides ground truth for
 supervised training. The re-ranker was developed iteratively:
 
-**v1** — 9 models (one per category × namespace). Class imbalance caused 6 of 9
+**v1.** 9 models (one per category × namespace). Class imbalance caused 6 of 9
 models to early-stop at iteration 1. Balancing with ``neg_pos_ratio=10`` fixed
 training but MFO degraded (0.577 vs 0.611 heuristic).
 
-**v2** — 3 models (one per category: NK, LK, PK). IA values used as sample
+**v2.** 3 models (one per category: NK, LK, PK). IA values used as sample
 weights during training. Learning rate reduced to 0.01, rounds increased to
 1 000. MFO stabilised (0.607) but did not surpass the heuristic globally.
 
-**v3** — Same architecture as v2 but with full alignment (NW/SW) and taxonomy
+**v3.** Same architecture as v2 but with full alignment (NW/SW) and taxonomy
 features computed during training data generation (previously hardcoded to NULL).
 22 input features total.
 
-.. list-table:: Re-ranker progression — Fmax
+.. list-table:: Re-ranker progression: Fmax
    :header-rows: 1
    :widths: 22 9 9 9 9 9 9 9 9 9
 
@@ -287,7 +287,7 @@ features computed during training data generation (previously hardcoded to NULL)
 The v3 re-ranker surpasses the ``alignment_weighted`` heuristic in 7 of 9 cells,
 with the largest gains in MFO (+0.009 NK, +0.009 LK) and CCO (+0.009 NK). It
 loses only in LK-BPO (0.478 vs 0.500) and LK-CCO (0.697 vs 0.699). The key
-insight is that alignment features were critical — v2 had access to the same
+insight is that alignment features were critical; v2 had access to the same
 model architecture but trained without them.
 
 Benchmark against external tools
@@ -297,7 +297,7 @@ PROTEA (re-ranker v3) was benchmarked against three widely used GO annotation
 tools using the same temporal holdout (GOA 220 → 229). All evaluations use
 ``cafaeval`` with IA weighting.
 
-.. list-table:: Fmax (IA-weighted) — GOA 220 → 229
+.. list-table:: Fmax (IA-weighted): GOA 220 → 229
    :header-rows: 1
    :widths: 22 9 9 9 9 9 9 9 9 9
 
@@ -352,7 +352,7 @@ tools using the same temporal holdout (GOA 220 → 229). All evaluations use
      - 0.199
      - 0.325
 
-:sup:`†` Subject to temporal data leakage — see below.
+:sup:`†` Subject to temporal data leakage; see below.
 
 **Tool details:**
 
@@ -397,8 +397,8 @@ predictions and the ground truth were measured:
      - **20 373 (50.9 %)**
      - **10 308 (25.8 %)**
 
-Pannzer2 exactly matches 62.4 % of NK annotations — proteins that by definition
-had **no** experimental annotations at t0. This confirms that its reference
+Pannzer2 exactly matches 62.4 % of NK annotations (proteins that by definition
+had **no** experimental annotations at t0). This confirms that its reference
 database already contains the experimental evidence that appeared between GOA 220
 and GOA 229.
 
@@ -426,14 +426,14 @@ the highest Fmax across all 9 evaluation cells.
 from v1 to v3 shows that the model architecture (LightGBM, per-category, IA
 sample weights) was necessary but not sufficient. The decisive improvement came
 from computing Needleman-Wunsch and Smith-Waterman alignment features during
-training — without them, the re-ranker could not consistently outperform the
+training; without them, the re-ranker could not consistently outperform the
 hand-tuned heuristic.
 
 **Temporal integrity matters.** The data leakage analysis reveals that Pannzer2's
 apparent advantage (0.717 NK-MFO vs PROTEA's 0.620) is largely explained by
 access to post-t0 annotations: it exactly matches 62.4 % of NK ground truth
 pairs. This finding underscores the importance of reproducible, versioned
-evaluation pipelines — a core design goal of PROTEA.
+evaluation pipelines, a core design goal of PROTEA.
 
 **Limitations.** The current evaluation uses a single temporal holdout
 (GOA 220 → 229). Multiple holdouts across different time windows would
@@ -443,11 +443,11 @@ expanding this range may further improve performance.
 
 .. seealso::
 
-   - :doc:`/appendix/reproduction_guide` — exact command sequence to
+   - :doc:`/appendix/reproduction_guide`: exact command sequence to
      regenerate every figure and table on this page.
-   - :doc:`/architecture/evaluation` — the CAFA temporal-holdout protocol
+   - :doc:`/architecture/evaluation`: the CAFA temporal-holdout protocol
      that defines the NK/LK/PK categories and the IA-weighted Fmax used here.
-   - :doc:`/architecture/operations` — ``run_cafa_evaluation`` is the
+   - :doc:`/architecture/operations`: ``run_cafa_evaluation`` is the
      operation that produced the evaluation numbers; the re-ranker
      boosters that feed those numbers are now trained in
      ``protea-reranker-lab`` and registered through
