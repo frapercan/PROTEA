@@ -188,6 +188,10 @@ later revision).
      - :doc:`Insights appendix <D30-insights-appendix>`
      - Accepted
      - F7
+   * - D31
+     - :doc:`T2B.5 Method Object reframe (sub-cluster granularity) <D31-t2b5-method-object-reframe>`
+     - Accepted
+     - F2C / §24
 
 .. toctree::
    :maxdepth: 1
@@ -231,3 +235,4 @@ later revision).
    D28-secrets-management
    D29-release-pipeline
    D30-insights-appendix
+   D31-t2b5-method-object-reframe
