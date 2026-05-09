@@ -16,15 +16,6 @@
       "threshold": 500
     },
     {
-      "key": "file::protea/core/operations/compute_embeddings.py::",
-      "kind": "file",
-      "path": "protea/core/operations/compute_embeddings.py",
-      "name": "",
-      "line": 0,
-      "metric": 1106,
-      "threshold": 800
-    },
-    {
       "key": "file::protea/core/operations/predict_go_terms.py::",
       "kind": "file",
       "path": "protea/core/operations/predict_go_terms.py",
@@ -39,26 +30,8 @@
       "path": "protea/core/training_dump_helpers.py",
       "name": "",
       "line": 0,
-      "metric": 1802,
+      "metric": 1214,
       "threshold": 800
-    },
-    {
-      "key": "method::protea/core/training_dump_helpers.py::_knn_transfer_and_label",
-      "kind": "method",
-      "path": "protea/core/training_dump_helpers.py",
-      "name": "_knn_transfer_and_label",
-      "line": 334,
-      "metric": 624,
-      "threshold": 60
-    },
-    {
-      "key": "method::protea/core/training_dump_helpers.py::TrainRerankerAutoOperation.execute",
-      "kind": "method",
-      "path": "protea/core/training_dump_helpers.py",
-      "name": "TrainRerankerAutoOperation.execute",
-      "line": 1612,
-      "metric": 191,
-      "threshold": 60
     }
   ]
 }
