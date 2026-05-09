@@ -24,13 +24,13 @@ Install dependencies
 The dev tooling is split into three optional Poetry groups so each CI
 job installs only the packages it needs:
 
-- ``--with lint`` — ruff, mypy, type stubs, taskipy.
-- ``--with test`` — pytest, pytest-cov, httpx, uvicorn, plus
+- ``--with lint``: ruff, mypy, type stubs, taskipy.
+- ``--with test``: pytest, pytest-cov, httpx, uvicorn, plus
   ``protea-reranker-lab`` for parity tests.
-- ``--with docs`` — Sphinx, furo, sphinx-copybutton, sphinx-design,
+- ``--with docs``: Sphinx, furo, sphinx-copybutton, sphinx-design,
   shibuya theme, sphinxcontrib-bibtex.
 
-A bare ``poetry install`` no longer installs Sphinx or pytest — pick
+A bare ``poetry install`` no longer installs Sphinx or pytest; pick
 the groups you need.
 
 Optional extras:
@@ -119,38 +119,38 @@ This starts all processes in the background and writes PIDs to ``logs/pids/``:
    * - FastAPI (uvicorn)
      - http://127.0.0.1:8000
      - ``logs/api.log``
-   * - Worker — ``protea.ping``
-     - —
+   * - Worker: ``protea.ping``
+     - n/a
      - ``logs/worker-ping.log``
-   * - Worker — ``protea.jobs``
-     - —
+   * - Worker: ``protea.jobs``
+     - n/a
      - ``logs/worker-jobs.log``
-   * - Worker — ``protea.training``
-     - —
+   * - Worker: ``protea.training``
+     - n/a
      - ``logs/worker-training.log``
-   * - Worker — ``protea.embeddings`` (serialised coordinator)
-     - —
+   * - Worker: ``protea.embeddings`` (serialised coordinator)
+     - n/a
      - ``logs/worker-embeddings-coord.log``
-   * - Worker — ``protea.embeddings.batch`` (×N)
-     - —
+   * - Worker: ``protea.embeddings.batch`` (×N)
+     - n/a
      - ``logs/worker-embeddings-batch-*.log``
-   * - Worker — ``protea.embeddings.write``
-     - —
+   * - Worker: ``protea.embeddings.write``
+     - n/a
      - ``logs/worker-embeddings-write.log``
-   * - Worker — ``protea.predictions`` (serialised coordinator)
-     - —
+   * - Worker: ``protea.predictions`` (serialised coordinator)
+     - n/a
      - ``logs/worker-predictions-coord.log``
-   * - Worker — ``protea.predictions.batch`` (×N)
-     - —
+   * - Worker: ``protea.predictions.batch`` (×N)
+     - n/a
      - ``logs/worker-predictions-batch-*.log``
-   * - Worker — ``protea.predictions.write``
-     - —
+   * - Worker: ``protea.predictions.write``
+     - n/a
      - ``logs/worker-predictions-write.log``
-   * - Worker — ``protea.evaluations``
-     - —
+   * - Worker: ``protea.evaluations``
+     - n/a
      - ``logs/worker-evaluations.log``
    * - Stale job reaper (``reaper``)
-     - —
+     - n/a
      - ``logs/worker-reaper.log``
    * - Next.js frontend
      - http://127.0.0.1:3000
