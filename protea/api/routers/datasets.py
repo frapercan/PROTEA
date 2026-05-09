@@ -152,6 +152,13 @@ def list_datasets(
     ),
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> list[dict[str, Any]]:
+    """Return registered frozen datasets newest-first.
+
+    The lab's ``pull_dataset.py`` polls this endpoint to discover dump
+    artefacts produced by ``export_research_dataset``. Filters narrow by
+    name substring or by source ``embedding_config_id``. Pagination is
+    cursor-based (``after``) plus a hard ``limit`` ceiling.
+    """
     with session_scope(factory) as session:
         q = session.query(Dataset)
         if name_like:
@@ -169,6 +176,13 @@ def get_dataset(
     id_or_name: str,
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
+    """Resolve a dataset by UUID or by the ``name`` slug.
+
+    Tries the UUID path first; on ``ValueError`` (non-UUID input), falls
+    back to the ``name`` column. Returns ``404`` if neither resolves.
+    The lab uses the name path so dump callers can refer to ``bench-v1-K5``
+    without juggling UUIDs.
+    """
     with session_scope(factory) as session:
         row: Dataset | None = None
         try:

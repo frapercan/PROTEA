@@ -112,6 +112,29 @@ class TestRefResolution:
 
 
 class TestOperations:
+    def test_every_v1_operation_has_description(self, spec: dict[str, Any]) -> None:
+        """T4.3 partial: every public op carries human-readable prose.
+
+        FastAPI lifts the route handler's docstring into the OpenAPI
+        ``description`` field. Missing prose means the snapshot ships
+        without the rationale a downstream consumer needs to understand
+        the endpoint. Pinned here so future additions cannot regress.
+        """
+        offenders: list[str] = []
+        for path, item in spec["paths"].items():
+            if not isinstance(item, dict):
+                continue
+            if not path.startswith("/v1/"):
+                continue
+            for method, operation in item.items():
+                if method not in _OPERATION_KEYS or not isinstance(operation, dict):
+                    continue
+                if not operation.get("description"):
+                    offenders.append(f"{method.upper()} {path}")
+        assert offenders == [], (
+            "v1 operations missing description: " + ", ".join(offenders)
+        )
+
     def test_every_operation_has_responses(self, spec: dict[str, Any]) -> None:
         offenders: list[str] = []
         for path, item in spec["paths"].items():
