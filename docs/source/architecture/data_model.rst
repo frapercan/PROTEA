@@ -235,10 +235,27 @@ Predictions
 **GOPrediction**
    One row per (query protein, GO term, reference protein) triple. The alignment and
    taxonomy columns are ``NULL`` unless ``compute_alignments=true`` and/or
-   ``compute_taxonomy=true`` were set in the prediction payload. Five additional
-   re-ranker features (``vote_count``, ``k_position``, ``go_term_frequency``,
-   ``ref_annotation_density``, ``neighbor_distance_std``) are populated when
-   ``compute_reranker_features=true``.
+   ``compute_taxonomy=true`` were set in the prediction payload (both default
+   to ``True``).
+
+   When ``compute_reranker_features=true`` (also the default) the legacy
+   re-ranker aggregate columns are populated: ``vote_count``,
+   ``k_position``, ``go_term_frequency``, ``ref_annotation_density``,
+   ``neighbor_distance_std``, ``neighbor_vote_fraction``,
+   ``neighbor_min_distance``, ``neighbor_mean_distance`` — eight fields in
+   total.
+
+   When ``compute_v6_features=true`` (opt-in, default ``False``) the v6
+   feature family is materialised on top: 6 anc2vec columns
+   (``anc2vec_neighbor_cos`` / ``anc2vec_neighbor_maxcos`` /
+   ``anc2vec_has_emb`` / ``anc2vec_query_known_cos`` /
+   ``anc2vec_query_known_maxcos`` / ``anc2vec_query_known_count``), 3
+   tax-voter aggregates (``tax_voters_same_frac``,
+   ``tax_voters_close_frac``, ``tax_voters_mean_common_ancestors``) and
+   16 PCA-projected embedding columns (``emb_pca_query_0`` …
+   ``emb_pca_query_15``) — 25 additional fields. PCA state is fit once
+   per ``EmbeddingConfig`` and cached on disk
+   (``PROTEA_PCA_ARTIFACTS_DIR``).
 
 **RerankerModel**
    Stores a trained LightGBM binary (or LambdaRank) re-ranker. References the
