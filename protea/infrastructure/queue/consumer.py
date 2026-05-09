@@ -30,6 +30,19 @@ _DLQ_NAME = "protea.dead-letter"
 _OOM_RETRY_HEADER = "x-oom-retry"
 
 
+class ConsumerOptions(NamedTuple):
+    """Tunable knobs shared by ``QueueConsumer`` / ``OperationConsumer``.
+
+    Bundles the two AMQP-side tunables (``prefetch_count`` and
+    ``requeue_on_failure``) so consumer constructors stay under the §3
+    6-param ceiling. Call sites can pass ``ConsumerOptions(...)`` or omit
+    it to accept the defaults (prefetch=1, no requeue on failure).
+    """
+
+    prefetch_count: int = 1
+    requeue_on_failure: bool = False
+
+
 class _DecodedMessage(NamedTuple):
     """Validated header + payload bundle parsed from one AMQP delivery."""
 
@@ -68,14 +81,13 @@ class QueueConsumer:
         queue_name: str,
         worker: BaseWorker,
         *,
-        prefetch_count: int = 1,
-        requeue_on_failure: bool = False,
+        options: ConsumerOptions = ConsumerOptions(),
     ) -> None:
         self._amqp_url = amqp_url
         self._queue_name = queue_name
         self._worker = worker
-        self._prefetch_count = prefetch_count
-        self._requeue_on_failure = requeue_on_failure
+        self._prefetch_count = options.prefetch_count
+        self._requeue_on_failure = options.requeue_on_failure
         self._stop = False
 
     def run(self) -> None:
@@ -195,15 +207,14 @@ class OperationConsumer:
         registry: OperationRegistry,
         session_factory: sessionmaker[Session],
         *,
-        prefetch_count: int = 1,
-        requeue_on_failure: bool = False,
+        options: ConsumerOptions = ConsumerOptions(),
     ) -> None:
         self._amqp_url = amqp_url
         self._queue_name = queue_name
         self._registry = registry
         self._factory = session_factory
-        self._prefetch_count = prefetch_count
-        self._requeue_on_failure = requeue_on_failure
+        self._prefetch_count = options.prefetch_count
+        self._requeue_on_failure = options.requeue_on_failure
         self._stop = False
 
     def run(self) -> None:

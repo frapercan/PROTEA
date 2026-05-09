@@ -149,15 +149,6 @@
       "line": 67,
       "metric": 7,
       "threshold": 6
-    },
-    {
-      "key": "params::protea/infrastructure/queue/consumer.py::OperationConsumer.__init__",
-      "kind": "params",
-      "path": "protea/infrastructure/queue/consumer.py",
-      "name": "OperationConsumer.__init__",
-      "line": 191,
-      "metric": 7,
-      "threshold": 6
     }
   ]
 }
