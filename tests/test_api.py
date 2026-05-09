@@ -320,6 +320,29 @@ class TestGetJobEvents:
 
         assert resp.status_code == 404
 
+    def test_after_cursor_filters_by_ts(self, session):
+        """T4.2: ``after`` adds a ``ts < after`` clause for the newest-first stream."""
+        job = _make_job()
+        session.get.return_value = job
+
+        q = MagicMock()
+        q.filter.return_value = q
+        q.order_by.return_value.limit.return_value.all.return_value = []
+        session.query.return_value = q
+
+        factory = MagicMock()
+        app = _make_app(factory)
+
+        with patch(
+            "protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)
+        ):
+            c = TestClient(app)
+            resp = c.get(f"/jobs/{job.id}/events?after=2026-04-01T10:00:00Z")
+
+        assert resp.status_code == 200
+        # Filter called twice: once for job_id == ..., once for ts < after.
+        assert q.filter.call_count == 2
+
 
 # ---------------------------------------------------------------------------
 # POST /jobs/{id}/comments + GET /jobs/{id}/comments  (T3.10)
@@ -389,7 +412,11 @@ class TestJobCommentsList:
         c2 = _make_job_comment(2, job.id, "second", author="anpha")
 
         q = MagicMock()
-        q.filter.return_value.order_by.return_value.all.return_value = [c1, c2]
+        # Updated chain after T4.2 added ``.limit(...)`` between order_by
+        # and all() so the cursor pagination path can cap each page.
+        q.filter.return_value.order_by.return_value.limit.return_value.all.return_value = (
+            [c1, c2]
+        )
         session.query.return_value = q
 
         factory = MagicMock()
@@ -419,6 +446,29 @@ class TestJobCommentsList:
             resp = c.get(f"/jobs/{uuid4()}/comments")
 
         assert resp.status_code == 404
+
+    def test_after_cursor_filters_by_created_at(self, session):
+        """T4.2: ``after`` adds ``created_at > after`` for the oldest-first stream."""
+        job = _make_job()
+        session.get.return_value = job
+
+        q = MagicMock()
+        q.filter.return_value = q
+        q.order_by.return_value.limit.return_value.all.return_value = []
+        session.query.return_value = q
+
+        factory = MagicMock()
+        app = _make_app(factory)
+
+        with patch(
+            "protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)
+        ):
+            c = TestClient(app)
+            resp = c.get(f"/jobs/{job.id}/comments?after=2026-04-01T10:00:00Z")
+
+        assert resp.status_code == 200
+        # Filter called twice: once for job_id, once for created_at > after.
+        assert q.filter.call_count == 2
 
 
 # ---------------------------------------------------------------------------

@@ -284,6 +284,14 @@ def get_job(
 def get_job_events(
     job_id: UUID,
     limit: int = Query(default=200, ge=1, le=2000),
+    after: datetime | None = Query(
+        default=None,
+        description=(
+            "Cursor for pagination (T4.2) — return events with "
+            "``ts < after`` only. Walks the newest-first stream "
+            "backward by feeding the oldest visible event's ``ts``."
+        ),
+    ),
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> list[dict[str, Any]]:
     """Return the structured event log for a job (newest first).
@@ -297,13 +305,10 @@ def get_job_events(
         if j is None:
             raise HTTPException(status_code=404, detail="Job not found")
 
-        events = (
-            session.query(JobEvent)
-            .filter(JobEvent.job_id == job_id)
-            .order_by(JobEvent.ts.desc())
-            .limit(limit)
-            .all()
-        )
+        q = session.query(JobEvent).filter(JobEvent.job_id == job_id)
+        if after is not None:
+            q = q.filter(JobEvent.ts < after)
+        events = q.order_by(JobEvent.ts.desc()).limit(limit).all()
 
         return [
             {
@@ -382,16 +387,33 @@ def create_job_comment(
 @router.get("/{job_id}/comments", summary="List job comments")
 def list_job_comments(
     job_id: UUID,
+    limit: int = Query(default=200, ge=1, le=2000),
+    after: datetime | None = Query(
+        default=None,
+        description=(
+            "Cursor for pagination (T4.2) — return comments with "
+            "``created_at > after`` only. Walks the oldest-first "
+            "stream forward by feeding the newest visible comment's "
+            "``created_at``."
+        ),
+    ),
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> list[dict[str, Any]]:
-    """Return every ``JobComment`` for a Job, oldest first."""
+    """Return ``JobComment`` rows for a Job, oldest first.
+
+    Use ``after`` to page forward (the comment thread grows oldest →
+    newest, so cursor semantics flip vs. the newest-first lists).
+    ``limit`` caps each page at 2000 to keep payloads bounded.
+    """
     with session_scope(factory) as session:
         if session.get(Job, job_id) is None:
             raise HTTPException(status_code=404, detail="Job not found")
+        q = session.query(JobComment).filter(JobComment.job_id == job_id)
+        if after is not None:
+            q = q.filter(JobComment.created_at > after)
         rows = (
-            session.query(JobComment)
-            .filter(JobComment.job_id == job_id)
-            .order_by(JobComment.created_at.asc(), JobComment.id.asc())
+            q.order_by(JobComment.created_at.asc(), JobComment.id.asc())
+            .limit(limit)
             .all()
         )
         return [_serialise_job_comment(c) for c in rows]
