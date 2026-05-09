@@ -20,8 +20,8 @@ tasks, the script to reproduce the thesis results, and the on-call runbook.
    and the per-environment knobs that change behaviour without code edits.
 
 :doc:`howto_guides`
-   Task-oriented recipes — load an ontology, ingest GOA, upload a FASTA query
-   set, compute embeddings, predict GO terms, scale workers — with the exact
+   Task-oriented recipes (load an ontology, ingest GOA, upload a FASTA query
+   set, compute embeddings, predict GO terms, scale workers) with the exact
    ``curl`` and ``manage.sh`` commands. Read this when you have one specific
    thing to accomplish.
 
