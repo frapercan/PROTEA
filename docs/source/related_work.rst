@@ -139,8 +139,17 @@ pre-trained protein language models:
   fraction of the inference cost of ESM-2 650 M while preserving most of the
   downstream task performance. ESM-C is the default backend in PROTEA's
   benchmarks because of this favourable cost/accuracy trade-off.
+- **Ankh** — encoder–decoder T5-style protein model from
+  ElnaggarLab, available as ``ankh-base`` and ``ankh-large`` checkpoints.
+  Loaded via the same ``T5EncoderModel`` path as ProtT5, but the backend
+  forces ``bfloat16`` on CUDA (FP16 overflows to ``NaN``) and tokenises
+  char-by-char with ``is_split_into_words=True`` because Ankh's
+  SentencePiece vocabulary maps literal spaces to ``<unk>``; the
+  ``<AA2fold>`` prefix is never injected. Not yet used in the benchmark
+  tables (see :doc:`/results`); included for parity with the upstream
+  protein-PLM survey.
 
-All three backends are wrapped by a single ``EmbeddingConfig`` row that
+All four backends are wrapped by a single ``EmbeddingConfig`` row that
 records the model checkpoint, layer selection, pooling strategy, and any
 post-processing (L2 normalisation). This discipline is necessary for
 reproducibility: a prediction run annotated with ``embedding_config_id`` can
