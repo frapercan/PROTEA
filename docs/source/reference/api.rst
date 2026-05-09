@@ -382,6 +382,7 @@ Endpoints summary
    * - ``GET``
      - ``/jobs/{id}/events``
      - Retrieve the event timeline for a job (up to 2 000 events).
+       Cursor pagination (T4.2): pass ``after=<ts>`` to walk forward.
    * - ``POST``
      - ``/jobs/{id}/cancel``
      - Transition a ``QUEUED`` or ``RUNNING`` job to ``CANCELLED``.
@@ -395,7 +396,8 @@ Endpoints summary
    * - ``GET``
      - ``/jobs/{id}/comments``
      - List the ``JobComment`` thread chronologically (``created_at``
-       ASC, ``id`` ASC tiebreaker).
+       ASC, ``id`` ASC tiebreaker). Cursor pagination (T4.2): pass
+       ``after=<created_at>`` to walk forward past the limit.
 
    * -
      - **Proteins**
