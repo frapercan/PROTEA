@@ -14,6 +14,13 @@ router = APIRouter(prefix="/support", tags=["support"])
 
 
 class SupportCreate(BaseModel):
+    """Body for ``POST /support``.
+
+    A thumbs-up may carry an optional free-form ``comment``. The text is
+    capped at ``api.max_comment_length`` from the tuning config; longer
+    submissions are rejected with 422 rather than silently truncated.
+    """
+
     comment: str | None = Field(default=None)
 
     @field_validator("comment")

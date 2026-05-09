@@ -42,6 +42,14 @@ router = APIRouter(prefix="/experiment-runs", tags=["experiment-runs"])
 
 
 class CreateExperimentRunRequest(BaseModel):
+    """Body for ``POST /experiment-runs``.
+
+    Carries the narrative trio (``description`` / ``hypothesis`` /
+    ``findings``) plus structured ``config`` + ``provenance`` overlays
+    that the F-EXP campaign tooling reads back. New rows always start in
+    ``planned`` status; transitions happen via ``PATCH``.
+    """
+
     name: str = Field(..., min_length=1, description="Unique slug for the run.")
     description: str | None = Field(default=None)
     hypothesis: str | None = Field(default=None)

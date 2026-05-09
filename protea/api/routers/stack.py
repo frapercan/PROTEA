@@ -38,6 +38,14 @@ _GITHUB_API = "https://api.github.com"
 
 
 class RepoEntry(BaseModel):
+    """One repository row in the multi-repo stack landing page.
+
+    Each entry represents a sibling git repo (PROTEA itself or one of
+    the plugin/lab packages). ``role`` is the architectural slot
+    (``core``, ``contracts``, ``plugin``, ``lab``); ``status`` is a
+    coarse health signal sourced from the repo's CI / release state.
+    """
+
     name: str
     slug: str
     role: str
@@ -51,11 +59,25 @@ class RepoEntry(BaseModel):
 
 
 class StackResponse(BaseModel):
+    """Top-level payload for ``GET /stack``.
+
+    Lists every repository in the PROTEA family plus the link to the
+    canonical thesis PDF. Consumed by the frontend's stack overview
+    page and the docs portal sidebar.
+    """
+
     repos: list[RepoEntry]
     thesis_pdf_url: str | None = None
 
 
 class PullRequest(BaseModel):
+    """One open PR in the stack as reported by GitHub's REST API.
+
+    Used by the stack landing page's PR widget; the payload is the
+    intersection of fields the UI actually renders, not a full echo of
+    GitHub's response.
+    """
+
     repo: str
     number: int
     title: str
@@ -69,6 +91,14 @@ class PullRequest(BaseModel):
 
 
 class PullsResponse(BaseModel):
+    """Aggregated open-PR snapshot across all stack repos.
+
+    The handler caches the GitHub query for a few minutes; ``cached``
+    flips to ``True`` when a response is served from the in-process
+    cache, ``fetched_at`` records the original wall-clock time, and
+    ``errors`` carries per-repo failures (e.g. rate-limited, 404).
+    """
+
     fetched_at: float
     cached: bool
     repos_queried: int

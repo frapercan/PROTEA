@@ -111,6 +111,38 @@ class TestRefResolution:
         assert offenders == [], f"unresolved $refs in snapshot: {offenders!r}"
 
 
+class TestSchemas:
+    """Schema-level invariants over ``components.schemas``."""
+
+    # FastAPI generates these automatically from multipart bodies / Pydantic
+    # validation; their descriptions are owned by the framework, not us.
+    _AUTO_GENERATED = {
+        "HTTPValidationError",
+        "ValidationError",
+    }
+    _AUTO_PREFIX = "Body_"
+
+    def test_every_user_schema_has_description(self, spec: dict[str, Any]) -> None:
+        """T4.3 partial: user-defined Pydantic models must carry a docstring.
+
+        Pydantic lifts the class docstring into ``components.schemas[X].
+        description``, so a missing docstring means the snapshot ships
+        with an opaque schema. Skips FastAPI's auto-generated ``Body_*``
+        + ``ValidationError`` entries, which are framework-owned.
+        """
+        offenders: list[str] = []
+        for name, schema in spec.get("components", {}).get("schemas", {}).items():
+            if name in self._AUTO_GENERATED:
+                continue
+            if name.startswith(self._AUTO_PREFIX):
+                continue
+            if not schema.get("description"):
+                offenders.append(name)
+        assert offenders == [], (
+            "user-defined schemas missing description: " + ", ".join(offenders)
+        )
+
+
 class TestOperations:
     def test_every_v1_operation_has_description(self, spec: dict[str, Any]) -> None:
         """T4.3 partial: every public op carries human-readable prose.
