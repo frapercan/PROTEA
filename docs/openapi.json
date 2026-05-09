@@ -1,0 +1,5553 @@
+{
+  "components": {
+    "schemas": {
+      "Body_annotate_v1_annotate_post": {
+        "properties": {
+          "fasta_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fasta Text"
+          },
+          "file": {
+            "anyOf": [
+              {
+                "contentMediaType": "application/octet-stream",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File"
+          },
+          "name": {
+            "default": "Quick annotation",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "title": "Body_annotate_v1_annotate_post",
+        "type": "object"
+      },
+      "Body_create_query_set_v1_query_sets_post": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file",
+          "name"
+        ],
+        "title": "Body_create_query_set_v1_query_sets_post",
+        "type": "object"
+      },
+      "Body_import_reranker_model_multipart_v1_reranker_models_import_post": {
+        "properties": {
+          "dataset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Override linked Dataset UUID",
+            "title": "Dataset Id"
+          },
+          "evaluation_set_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evaluation Set Id"
+          },
+          "external_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Source"
+          },
+          "force": {
+            "default": false,
+            "title": "Force",
+            "type": "boolean"
+          },
+          "model_file": {
+            "contentMediaType": "application/octet-stream",
+            "description": "LightGBM model.txt",
+            "title": "Model File",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Override RerankerModel.name",
+            "title": "Name"
+          },
+          "prediction_set_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prediction Set Id"
+          },
+          "run_json": {
+            "contentMediaType": "application/octet-stream",
+            "description": "Lab run.json with metrics + provenance",
+            "title": "Run Json",
+            "type": "string"
+          },
+          "spec_yaml": {
+            "contentMediaType": "application/octet-stream",
+            "description": "ExperimentSpec spec.yaml",
+            "title": "Spec Yaml",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_file",
+          "spec_yaml",
+          "run_json"
+        ],
+        "title": "Body_import_reranker_model_multipart_v1_reranker_models_import_post",
+        "type": "object"
+      },
+      "CreateDatasetRequest": {
+        "description": "Body for ``POST /datasets``.\n\nMirrors the ``export_research_dataset`` operation payload. The caller\ndoes not pick a queue \u2014 the dataset export always runs on the\n``protea.training`` worker (serialized, GPU/RAM-intensive).",
+        "properties": {
+          "annotation_source": {
+            "default": "goa",
+            "title": "Annotation Source",
+            "type": "string"
+          },
+          "compute_alignments": {
+            "default": false,
+            "title": "Compute Alignments",
+            "type": "boolean"
+          },
+          "compute_taxonomy": {
+            "default": false,
+            "title": "Compute Taxonomy",
+            "type": "boolean"
+          },
+          "embedding_config_id": {
+            "minLength": 1,
+            "title": "Embedding Config Id",
+            "type": "string"
+          },
+          "expand_votes_to_ancestors": {
+            "default": false,
+            "title": "Expand Votes To Ancestors",
+            "type": "boolean"
+          },
+          "k": {
+            "default": 5,
+            "exclusiveMinimum": 0.0,
+            "title": "K",
+            "type": "integer"
+          },
+          "ontology_snapshot_id": {
+            "minLength": 1,
+            "title": "Ontology Snapshot Id",
+            "type": "string"
+          },
+          "output_name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Output Name",
+            "type": "string"
+          },
+          "search_backend": {
+            "default": "faiss",
+            "title": "Search Backend",
+            "type": "string"
+          },
+          "test_versions": {
+            "items": {
+              "type": "integer"
+            },
+            "minItems": 1,
+            "title": "Test Versions",
+            "type": "array"
+          },
+          "train_versions": {
+            "items": {
+              "type": "integer"
+            },
+            "minItems": 2,
+            "title": "Train Versions",
+            "type": "array"
+          },
+          "use_embedding_pca": {
+            "default": false,
+            "title": "Use Embedding Pca",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "output_name",
+          "embedding_config_id",
+          "ontology_snapshot_id",
+          "train_versions",
+          "test_versions"
+        ],
+        "title": "CreateDatasetRequest",
+        "type": "object"
+      },
+      "CreateExperimentRunRequest": {
+        "properties": {
+          "config": {
+            "additionalProperties": true,
+            "title": "Config",
+            "type": "object"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "hypothesis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hypothesis"
+          },
+          "name": {
+            "description": "Unique slug for the run.",
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "provenance": {
+            "additionalProperties": true,
+            "title": "Provenance",
+            "type": "object"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "CreateExperimentRunRequest",
+        "type": "object"
+      },
+      "CreateJobCommentRequest": {
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Free-form actor tag (e.g. user login, bot id, cron name).",
+            "title": "Author"
+          },
+          "body": {
+            "description": "Comment payload (markdown allowed).",
+            "minLength": 1,
+            "title": "Body",
+            "type": "string"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "title": "CreateJobCommentRequest",
+        "type": "object"
+      },
+      "CreateJobRequest": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Human-readable intent text shown on the run \u2014 D11 narrative field.",
+            "title": "Description"
+          },
+          "meta": {
+            "additionalProperties": true,
+            "description": "Optional free-form metadata stored alongside the job.",
+            "title": "Meta",
+            "type": "object"
+          },
+          "operation": {
+            "description": "Registered operation name, e.g. `insert_proteins`.",
+            "minLength": 1,
+            "title": "Operation",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "description": "Operation-specific configuration object.",
+            "title": "Payload",
+            "type": "object"
+          },
+          "queue_name": {
+            "description": "RabbitMQ queue to publish the job to, e.g. `protea.jobs`.",
+            "minLength": 1,
+            "title": "Queue Name",
+            "type": "string"
+          },
+          "tags": {
+            "description": "Lightweight grouping tokens (e.g. `ablation`, `benchmark-v1`).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "operation",
+          "queue_name"
+        ],
+        "title": "CreateJobRequest",
+        "type": "object"
+      },
+      "ExperimentRunStatus": {
+        "description": "Lifecycle states for an ``ExperimentRun``.\n\nMirrors ``JobStatus`` semantically but with ``planned`` as the\ninitial state (Jobs default to QUEUED; experiments often live as\ndrafts before any compute kicks off) and ``abandoned`` instead of\n``failed`` (a research run can be stopped without a hard error).",
+        "enum": [
+          "planned",
+          "running",
+          "done",
+          "abandoned"
+        ],
+        "title": "ExperimentRunStatus",
+        "type": "string"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "ImportRerankerByReferenceRequest": {
+        "description": "Body for ``POST /reranker-models/import-by-reference``.\n\nUse this when the lab has already uploaded ``model.txt`` to MinIO\nunder its own key and just needs PROTEA to register the URI.",
+        "properties": {
+          "artifact_uri": {
+            "minLength": 1,
+            "title": "Artifact Uri",
+            "type": "string"
+          },
+          "dataset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Id"
+          },
+          "evaluation_set_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evaluation Set Id"
+          },
+          "external_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Source"
+          },
+          "force": {
+            "default": false,
+            "title": "Force",
+            "type": "boolean"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "prediction_set_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prediction Set Id"
+          },
+          "run": {
+            "additionalProperties": true,
+            "description": "Parsed run.json",
+            "title": "Run",
+            "type": "object"
+          },
+          "spec_yaml": {
+            "description": "Full spec.yaml text",
+            "title": "Spec Yaml",
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact_uri",
+          "spec_yaml",
+          "run"
+        ],
+        "title": "ImportRerankerByReferenceRequest",
+        "type": "object"
+      },
+      "PluginInfo": {
+        "description": "Metadata for one discovered plugin.",
+        "properties": {
+          "cls": {
+            "title": "Cls",
+            "type": "string"
+          },
+          "extra": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "Extra",
+            "type": "object"
+          },
+          "module": {
+            "title": "Module",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "cls",
+          "module"
+        ],
+        "title": "PluginInfo",
+        "type": "object"
+      },
+      "PluginListResponse": {
+        "description": "Response shape for the three registry endpoints.",
+        "properties": {
+          "group": {
+            "title": "Group",
+            "type": "string"
+          },
+          "plugins": {
+            "items": {
+              "$ref": "#/components/schemas/PluginInfo"
+            },
+            "title": "Plugins",
+            "type": "array"
+          }
+        },
+        "required": [
+          "group",
+          "plugins"
+        ],
+        "title": "PluginListResponse",
+        "type": "object"
+      },
+      "PullRequest": {
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "draft": {
+            "title": "Draft",
+            "type": "boolean"
+          },
+          "labels": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Labels",
+            "type": "array"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "repo": {
+            "title": "Repo",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repo",
+          "number",
+          "title",
+          "url",
+          "state",
+          "draft",
+          "author",
+          "created_at",
+          "updated_at",
+          "labels"
+        ],
+        "title": "PullRequest",
+        "type": "object"
+      },
+      "PullsResponse": {
+        "properties": {
+          "cached": {
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "errors": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "title": "Errors",
+            "type": "object"
+          },
+          "fetched_at": {
+            "title": "Fetched At",
+            "type": "number"
+          },
+          "pulls": {
+            "items": {
+              "$ref": "#/components/schemas/PullRequest"
+            },
+            "title": "Pulls",
+            "type": "array"
+          },
+          "rate_limit_remaining": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Limit Remaining"
+          },
+          "repos_queried": {
+            "title": "Repos Queried",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "fetched_at",
+          "cached",
+          "repos_queried",
+          "pulls"
+        ],
+        "title": "PullsResponse",
+        "type": "object"
+      },
+      "RepoEntry": {
+        "properties": {
+          "docs_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Docs Url"
+          },
+          "github_url": {
+            "title": "Github Url",
+            "type": "string"
+          },
+          "local_docs_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Docs Path"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "package_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Package Url"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "role_label": {
+            "title": "Role Label",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "slug",
+          "role",
+          "role_label",
+          "status",
+          "summary",
+          "github_url"
+        ],
+        "title": "RepoEntry",
+        "type": "object"
+      },
+      "RerankerResponse": {
+        "description": "Serialised representation of a stored :class:`RerankerModel`.",
+        "properties": {
+          "aspect": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aspect"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At"
+          },
+          "evaluation_set_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evaluation Set Id"
+          },
+          "feature_importance": {
+            "additionalProperties": true,
+            "title": "Feature Importance",
+            "type": "object"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "metrics": {
+            "additionalProperties": true,
+            "title": "Metrics",
+            "type": "object"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "prediction_set_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prediction Set Id"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "prediction_set_id",
+          "evaluation_set_id",
+          "category",
+          "aspect",
+          "metrics",
+          "feature_importance",
+          "created_at"
+        ],
+        "title": "RerankerResponse",
+        "type": "object"
+      },
+      "ScoringConfigCreate": {
+        "additionalProperties": false,
+        "description": "Request body for ``POST /scoring/configs``.\n\nLives in the service module so non-router callers (CLI tools,\nbatch scripts) can reuse the validation rules without pulling\nFastAPI in.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "evidence_weights": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per-GO-evidence-code quality overrides in [0, 1]. NULL means use system defaults. Partial dicts are valid.",
+            "title": "Evidence Weights"
+          },
+          "formula": {
+            "default": "linear",
+            "title": "Formula",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "weights": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Weights",
+            "type": "object"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ScoringConfigCreate",
+        "type": "object"
+      },
+      "ScoringConfigResponse": {
+        "description": "Serialised representation of a stored :class:`ScoringConfig`.",
+        "properties": {
+          "created_at": {
+            "title": "Created At"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "evidence_weights": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Weights"
+          },
+          "formula": {
+            "title": "Formula",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "weights": {
+            "additionalProperties": true,
+            "title": "Weights",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "formula",
+          "weights",
+          "evidence_weights",
+          "description",
+          "created_at"
+        ],
+        "title": "ScoringConfigResponse",
+        "type": "object"
+      },
+      "StackResponse": {
+        "properties": {
+          "repos": {
+            "items": {
+              "$ref": "#/components/schemas/RepoEntry"
+            },
+            "title": "Repos",
+            "type": "array"
+          },
+          "thesis_pdf_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thesis Pdf Url"
+          }
+        },
+        "required": [
+          "repos"
+        ],
+        "title": "StackResponse",
+        "type": "object"
+      },
+      "SupportCreate": {
+        "properties": {
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          }
+        },
+        "title": "SupportCreate",
+        "type": "object"
+      },
+      "UpdateExperimentRunRequest": {
+        "description": "All fields optional; absent ones leave the column untouched.",
+        "properties": {
+          "config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "findings": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Findings"
+          },
+          "hypothesis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hypothesis"
+          },
+          "provenance": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provenance"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExperimentRunStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
+          }
+        },
+        "title": "UpdateExperimentRunRequest",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "contact": {
+      "email": "contact@protea.example.org",
+      "name": "PROTEA Team"
+    },
+    "description": "**PROTEA** \u2014 Protein Representation and Ontology-Term Enrichment Analysis.\n\nManages the full pipeline from UniProt sequence ingestion through GPU embedding computation (ESM-2, ESM3c, T5) to KNN-based GO term prediction.\n\nAll long-running operations are queued via RabbitMQ and tracked as `Job` rows with a full event audit trail. Use `GET /jobs/{id}/events` to stream real-time progress.",
+    "title": "PROTEA API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/health": {
+      "get": {
+        "description": "Liveness probe \u2014 returns 200 if the API process is up.",
+        "operationId": "health_check_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Health Check Health Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health Check",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "description": "Readiness probe \u2014 verifies database, RabbitMQ, and (if configured) MinIO.\n\nThe artifact-store check is load-bearing: ``POST /datasets`` and\n``/reranker-models/import`` silently misbehave if MinIO is\nconfigured but unreachable (``Dataset`` rows would be written\nagainst the local filesystem). Failing readiness here keeps\ndocker / k8s from routing traffic until the store is back.",
+        "operationId": "readiness_check_health_ready_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Readiness Check Health Ready Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Readiness Check",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/v1/admin/reset-db": {
+      "post": {
+        "description": "Drop and recreate the public schema, then re-apply all Alembic migrations.",
+        "operationId": "reset_db_v1_admin_reset_db_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reset Db V1 Admin Reset Db Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reset Db",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/annotate": {
+      "post": {
+        "description": "One-click annotation: upload FASTA, auto-select best method, run pipeline.\n\nAccepts either an uploaded FASTA ``file`` **or** raw ``fasta_text``.\nCreates a QuerySet, picks the best embedding config (or creates the\ndefault ESM-2 650M config), and queues a ``compute_embeddings`` job.\n\nReturns the IDs the frontend needs to monitor progress and chain\n``predict_go_terms`` once embeddings are ready.",
+        "operationId": "annotate_v1_annotate_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_annotate_v1_annotate_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Annotate V1 Annotate Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Annotate proteins from FASTA",
+        "tags": [
+          "annotate"
+        ]
+      }
+    },
+    "/v1/annotations/evaluation-sets": {
+      "get": {
+        "description": "List all evaluation sets, newest first.",
+        "operationId": "list_evaluation_sets_v1_annotations_evaluation_sets_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Evaluation Sets V1 Annotations Evaluation Sets Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List evaluation sets",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
+    "/v1/annotations/evaluation-sets/generate": {
+      "post": {
+        "description": "Queue a job that computes the CAFA delta between two annotation sets.\n\nApplies experimental evidence filtering, NOT-qualifier propagation through\nthe GO DAG, and classifies delta proteins into NK/LK.  Stats are stored in\na new EvaluationSet row; ground-truth TSVs are streamed on demand.",
+        "operationId": "generate_evaluation_set_v1_annotations_evaluation_sets_generate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Generate Evaluation Set V1 Annotations Evaluation Sets Generate Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Queue a generate_evaluation_set job",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
+    "/v1/annotations/evaluation-sets/{eval_id}": {
+      "delete": {
+        "description": "Delete an evaluation set and all its results, cascading to EvaluationResult\nrows and removing their artifact-store objects (ground-truth + per-result\ncafaeval outputs).",
+        "operationId": "delete_evaluation_set_v1_annotations_evaluation_sets__eval_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "eval_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Eval Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete an evaluation set",
+        "tags": [
+          "annotations"
+        ]
+      },
+      "get": {
+        "operationId": "get_evaluation_set_v1_annotations_evaluation_sets__eval_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "eval_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Eval Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Evaluation Set V1 Annotations Evaluation Sets  Eval Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get evaluation set details",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
+    "/v1/annotations/evaluation-sets/{eval_id}/delta-proteins.fasta": {
+      "get": {
+        "description": "Download the amino-acid sequences of delta proteins (NK and/or LK) as FASTA.\n\nHeader format: ``>ACCESSION entry_name OS=organism OX=taxonomy_id (NK|LK)``",
+        "operationId": "download_delta_fasta_v1_annotations_evaluation_sets__eval_id__delta_proteins_fasta_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "eval_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Eval Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Which proteins to include: `nk`, `lk`, or `all` (default).",
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "description": "Which proteins to include: `nk`, `lk`, or `all` (default).",
+              "title": "Category",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download delta proteins as FASTA",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
+    "/v1/annotations/evaluation-sets/{eval_id}/ground-truth-LK.tsv": {
+      "get": {
+        "description": "Download Limited-Knowledge ground truth: delta proteins with prior experimental annotations.",
+        "operationId": "download_gt_lk_v1_annotations_evaluation_sets__eval_id__ground_truth_LK_tsv_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "eval_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Eval Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download LK ground truth (CAFA format)",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
+    "/v1/annotations/evaluation-sets/{eval_id}/ground-truth-NK.tsv": {
+      "get": {
+        "description": "Download No-Knowledge ground truth: delta proteins with zero prior experimental annotations.",
+        "operationId": "download_gt_nk_v1_annotations_evaluation_sets__eval_id__ground_truth_NK_tsv_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "eval_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Eval Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download NK ground truth (CAFA format)",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
+    "/v1/annotations/evaluation-sets/{eval_id}/ground-truth-PK.tsv": {
+      "get": {
+        "description": "Download Partial-Knowledge ground truth: proteins that gained new terms in a\nnamespace where they already had experimental annotations at t0.",
+        "operationId": "download_gt_pk_v1_annotations_evaluation_sets__eval_id__ground_truth_PK_tsv_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "eval_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Eval Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download PK ground truth (CAFA format)",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
+    "/v1/annotations/evaluation-sets/{eval_id}/known-terms.tsv": {
+      "get": {
+        "description": "Download ALL experimental annotations from the OLD set. Pass as ``-known`` to enable PK scoring.",
+        "operationId": "download_known_terms_v1_annotations_evaluation_sets__eval_id__known_terms_tsv_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "eval_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Eval Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download known-terms from OLD annotation set (for CAFA PK evaluation)",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
+    "/v1/annotations/evaluation-sets/{eval_id}/results": {
+      "get": {
+        "operationId": "list_evaluation_results_v1_annotations_evaluation_sets__eval_id__results_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "eval_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Eval Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Evaluation Results V1 Annotations Evaluation Sets  Eval Id  Results Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List evaluation results for an evaluation set",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
+    "/v1/annotations/evaluation-sets/{eval_id}/results/{result_id}": {
+      "delete": {
+        "operationId": "delete_evaluation_result_v1_annotations_evaluation_sets__eval_id__results__result_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "eval_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Eval Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "result_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Result Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete an evaluation result",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
+    "/v1/annotations/evaluation-sets/{eval_id}/results/{result_id}/artifacts.zip": {
+      "get": {
+        "operationId": "download_evaluation_artifacts_v1_annotations_evaluation_sets__eval_id__results__result_id__artifacts_zip_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "eval_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Eval Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "result_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Result Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download all cafaeval artifacts for an evaluation result as a zip",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
+    "/v1/annotations/evaluation-sets/{eval_id}/results/{result_id}/metrics.tsv": {
+      "get": {
+        "operationId": "download_evaluation_metrics_v1_annotations_evaluation_sets__eval_id__results__result_id__metrics_tsv_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "eval_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Eval Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "result_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Result Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download evaluation metrics as TSV",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
+    "/v1/annotations/evaluation-sets/{eval_id}/run": {
+      "post": {
+        "description": "Queue a job that runs the CAFA evaluator (NK / LK / PK) for a prediction set.\n\nBody must contain ``prediction_set_id`` (required) and optionally\n``max_distance`` (float).",
+        "operationId": "run_cafa_evaluation_v1_annotations_evaluation_sets__eval_id__run_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "eval_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Eval Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Run Cafa Evaluation V1 Annotations Evaluation Sets  Eval Id  Run Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Queue a run_cafa_evaluation job",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
+    "/v1/annotations/sets": {
+      "get": {
+        "description": "List annotation sets with their annotation counts, newest first.\n\nCached 5 minutes \u2014 GROUP BY over protein_go_annotation (80M rows) takes\n6+ seconds. Per-source views are cached independently.",
+        "operationId": "list_annotation_sets_v1_annotations_sets_get",
+        "parameters": [
+          {
+            "description": "Filter by source: `goa` or `quickgo`.",
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by source: `goa` or `quickgo`.",
+              "title": "Source"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Annotation Sets V1 Annotations Sets Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List annotation sets",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
+    "/v1/annotations/sets/load-goa": {
+      "post": {
+        "description": "Queue a `load_goa_annotations` job that streams a GAF file (gzip or plain) and upserts\nGO annotations into an AnnotationSet. Only proteins already in the DB are annotated.",
+        "operationId": "load_goa_annotations_v1_annotations_sets_load_goa_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Load Goa Annotations V1 Annotations Sets Load Goa Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Trigger GOA annotation load",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
+    "/v1/annotations/sets/load-quickgo": {
+      "post": {
+        "description": "Queue a `load_quickgo_annotations` job that streams GO annotations from the QuickGO\nbulk download API with optional taxon, aspect, and evidence code filtering.",
+        "operationId": "load_quickgo_annotations_v1_annotations_sets_load_quickgo_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Load Quickgo Annotations V1 Annotations Sets Load Quickgo Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Trigger QuickGO annotation load",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
+    "/v1/annotations/sets/{set_id}": {
+      "delete": {
+        "description": "Delete an annotation set and all its annotations. Returns 409 if referenced by a prediction set.",
+        "operationId": "delete_annotation_set_v1_annotations_sets__set_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "set_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Set Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Delete Annotation Set V1 Annotations Sets  Set Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete an annotation set",
+        "tags": [
+          "annotations"
+        ]
+      },
+      "get": {
+        "description": "Retrieve a single annotation set with its total annotation count.",
+        "operationId": "get_annotation_set_v1_annotations_sets__set_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "set_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Set Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Annotation Set V1 Annotations Sets  Set Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get annotation set details",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
+    "/v1/annotations/snapshots": {
+      "get": {
+        "description": "List all loaded GO ontology snapshots with their GO term counts, newest first.\n\nCached 5 minutes \u2014 the GROUP BY over go_term (N million rows per snapshot)\ntakes multiple seconds, and snapshots are effectively immutable once loaded.",
+        "operationId": "list_snapshots_v1_annotations_snapshots_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Snapshots V1 Annotations Snapshots Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List ontology snapshots",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
+    "/v1/annotations/snapshots/load": {
+      "post": {
+        "description": "Queue a `load_ontology_snapshot` job that downloads and parses a GO OBO file.\n\nIdempotent by ``obo_version``: existing snapshots are skipped or backfilled.",
+        "operationId": "load_ontology_snapshot_v1_annotations_snapshots_load_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Load Ontology Snapshot V1 Annotations Snapshots Load Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Trigger ontology snapshot load",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
+    "/v1/annotations/snapshots/{snapshot_id}": {
+      "get": {
+        "description": "Retrieve a single ontology snapshot with its GO term count.",
+        "operationId": "get_snapshot_v1_annotations_snapshots__snapshot_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "snapshot_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Snapshot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Snapshot V1 Annotations Snapshots  Snapshot Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get ontology snapshot details",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
+    "/v1/annotations/snapshots/{snapshot_id}/ia-url": {
+      "patch": {
+        "description": "Associate an Information Accretion (IA) file URL with an existing ontology snapshot.\n\nThe IA file contains per-term information-content weights (two columns:\n``go_id``, ``ia_value``) and is published alongside each CAFA benchmark\n(e.g. ``IA_cafa6.tsv``).  Once set, ``run_cafa_evaluation`` picks it up\nautomatically for every evaluation that uses this snapshot.\n\nPass ``{\"ia_url\": null}`` to clear the association (evaluations will fall\nback to uniform IC=1).",
+        "operationId": "set_snapshot_ia_url_v1_annotations_snapshots__snapshot_id__ia_url_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "snapshot_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Snapshot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Set Snapshot Ia Url V1 Annotations Snapshots  Snapshot Id  Ia Url Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set IA URL on an ontology snapshot",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
+    "/v1/annotations/snapshots/{snapshot_id}/subgraph": {
+      "get": {
+        "description": "Return a subgraph of the GO DAG containing the requested terms and their ancestors up to ``depth`` levels.",
+        "operationId": "get_go_subgraph_v1_annotations_snapshots__snapshot_id__subgraph_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "snapshot_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Snapshot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Comma-separated GO IDs, e.g. GO:0003674,GO:0008150",
+            "in": "query",
+            "name": "go_ids",
+            "required": true,
+            "schema": {
+              "description": "Comma-separated GO IDs, e.g. GO:0003674,GO:0008150",
+              "title": "Go Ids",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "depth",
+            "required": false,
+            "schema": {
+              "default": 3,
+              "maximum": 6,
+              "minimum": 1,
+              "title": "Depth",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Go Subgraph V1 Annotations Snapshots  Snapshot Id  Subgraph Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Go Subgraph",
+        "tags": [
+          "annotations"
+        ]
+      }
+    },
+    "/v1/backends": {
+      "get": {
+        "description": "List all installed embedding backend plugins.\n\nThe plugin set depends on which ``protea-backends[<extra>]``\nextras are installed (esm, t5, ankh, esm3c). With the default\ninstall all four are discoverable; only the ones whose lazy\nimports succeed at ``stream_*`` time will actually run on GPU.",
+        "operationId": "list_backends_v1_backends_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Backends",
+        "tags": [
+          "registry"
+        ]
+      }
+    },
+    "/v1/benchmark/embeddings": {
+      "get": {
+        "description": "Return every ``EmbeddingConfig`` with its persisted display metadata.\n\nThe metadata lives in ``embedding_config.display_name / family /\nparam_count`` \u2014 filled at creation time by the seed scripts. No\nheuristic inference happens here.",
+        "operationId": "list_benchmark_embeddings_v1_benchmark_embeddings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Benchmark Embeddings V1 Benchmark Embeddings Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List embedding configs with persisted display metadata",
+        "tags": [
+          "benchmark"
+        ]
+      }
+    },
+    "/v1/benchmark/matrix": {
+      "get": {
+        "description": "Return a long-format table with one row per\n``(embedding_config, evaluation_set, stage, category, aspect)`` tuple\ncontaining the best Fmax / precision / recall observed in the DB,\nplus per-eval-set metadata and a cross-model leaderboard.",
+        "operationId": "get_benchmark_matrix_v1_benchmark_matrix_get",
+        "parameters": [
+          {
+            "description": "If set, restrict rows to this evaluation set only.",
+            "in": "query",
+            "name": "evaluation_set_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "If set, restrict rows to this evaluation set only.",
+              "title": "Evaluation Set Id"
+            }
+          },
+          {
+            "description": "If set, restrict rows to this pipeline stage (any scoring_config.name, or 'reranker').",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "If set, restrict rows to this pipeline stage (any scoring_config.name, or 'reranker').",
+              "title": "Stage"
+            }
+          },
+          {
+            "description": "If set, restrict rows to PredictionSets computed with this ``limit_per_entry`` (K). Typical values: 3, 5, 10.",
+            "in": "query",
+            "name": "k",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "If set, restrict rows to PredictionSets computed with this ``limit_per_entry`` (K). Typical values: 3, 5, 10.",
+              "title": "K"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Benchmark Matrix V1 Benchmark Matrix Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Per-embedding / per-stage Fmax matrix across all evaluation results",
+        "tags": [
+          "benchmark"
+        ]
+      }
+    },
+    "/v1/datasets": {
+      "get": {
+        "operationId": "list_datasets_v1_datasets_get",
+        "parameters": [
+          {
+            "description": "Substring filter on name",
+            "in": "query",
+            "name": "name_like",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Substring filter on name",
+              "title": "Name Like"
+            }
+          },
+          {
+            "in": "query",
+            "name": "embedding_config_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Embedding Config Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Datasets V1 Datasets Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List registered datasets",
+        "tags": [
+          "datasets"
+        ]
+      },
+      "post": {
+        "description": "Enqueue an ``export_research_dataset`` job.\n\nReturns ``{job_id}``. Poll ``GET /jobs/{job_id}`` for status; once the\njob is ``SUCCEEDED``, ``GET /datasets/{name}`` returns the registered\nrow with its artifact URIs.",
+        "operationId": "create_dataset_v1_datasets_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDatasetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Dataset V1 Datasets Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Enqueue a dataset export job",
+        "tags": [
+          "datasets"
+        ]
+      }
+    },
+    "/v1/datasets/{id_or_name}": {
+      "get": {
+        "operationId": "get_dataset_v1_datasets__id_or_name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id_or_name",
+            "required": true,
+            "schema": {
+              "title": "Id Or Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Dataset V1 Datasets  Id Or Name  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get a dataset by id or name",
+        "tags": [
+          "datasets"
+        ]
+      }
+    },
+    "/v1/embeddings/configs": {
+      "get": {
+        "description": "List all embedding configurations with their stored embedding counts, newest first.\n\nThe per-config GROUP BY over a 4M-row table is cached 5 minutes \u2014 new\nconfigs still appear immediately (they have 0 embeddings), only the\ncounts are stale.",
+        "operationId": "list_embedding_configs_v1_embeddings_configs_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Embedding Configs V1 Embeddings Configs Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List embedding configs",
+        "tags": [
+          "embeddings"
+        ]
+      },
+      "post": {
+        "description": "Create a new EmbeddingConfig that defines the model, layer selection, pooling strategy, and chunking.\n\nThis config is referenced by `compute_embeddings` jobs and `predict_go_terms` jobs to ensure\nquery and reference embeddings were produced under identical settings.",
+        "operationId": "create_embedding_config_v1_embeddings_configs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Embedding Config V1 Embeddings Configs Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create an embedding config",
+        "tags": [
+          "embeddings"
+        ]
+      }
+    },
+    "/v1/embeddings/configs/{config_id}": {
+      "delete": {
+        "description": "Delete an EmbeddingConfig and cascade-delete all linked embeddings, prediction sets, and predictions.",
+        "operationId": "delete_embedding_config_v1_embeddings_configs__config_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "config_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Config Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Delete Embedding Config V1 Embeddings Configs  Config Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete an embedding config",
+        "tags": [
+          "embeddings"
+        ]
+      },
+      "get": {
+        "description": "Retrieve a single EmbeddingConfig with its total stored embedding count.",
+        "operationId": "get_embedding_config_v1_embeddings_configs__config_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "config_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Config Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Embedding Config V1 Embeddings Configs  Config Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get embedding config details",
+        "tags": [
+          "embeddings"
+        ]
+      }
+    },
+    "/v1/embeddings/predict": {
+      "post": {
+        "description": "Queue a `predict_go_terms` job that runs KNN-based GO term transfer.\n\nThe coordinator partitions query proteins into batches, each dispatched to\n`protea.predictions.batch` workers for KNN search (numpy or FAISS) + GO annotation transfer.\nResults are written to a new `PredictionSet` via `protea.predictions.write` workers.\n\nRequired body fields: `embedding_config_id`, `annotation_set_id`, `ontology_snapshot_id`.\nOptional: `query_set_id` (FASTA upload), `limit_per_entry`, `distance_threshold`,\n`batch_size`, `search_backend`. Feature-engineering flags default to True \u2014\n`compute_alignments`, `compute_taxonomy`, `compute_reranker_features` all run\nunless explicitly set to false. `aspect_separated_knn` defaults to true\n(one KNN index per GO aspect to guarantee BPO/MFO/CCO coverage even when\nunified nearest neighbours carry only one aspect).",
+        "operationId": "predict_go_terms_v1_embeddings_predict_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Predict Go Terms V1 Embeddings Predict Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Trigger GO term prediction",
+        "tags": [
+          "embeddings"
+        ]
+      }
+    },
+    "/v1/embeddings/prediction-sets": {
+      "get": {
+        "description": "List the 100 most recent prediction sets, cached 5 min.",
+        "operationId": "list_prediction_sets_v1_embeddings_prediction_sets_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Prediction Sets V1 Embeddings Prediction Sets Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List prediction sets",
+        "tags": [
+          "embeddings"
+        ]
+      }
+    },
+    "/v1/embeddings/prediction-sets/{set_id}": {
+      "delete": {
+        "description": "Delete a prediction set and all its GOPrediction rows.",
+        "operationId": "delete_prediction_set_v1_embeddings_prediction_sets__set_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "set_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Set Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Delete Prediction Set V1 Embeddings Prediction Sets  Set Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete a prediction set",
+        "tags": [
+          "embeddings"
+        ]
+      },
+      "get": {
+        "description": "Retrieve a prediction set with total prediction count and per-protein GO term counts.",
+        "operationId": "get_prediction_set_v1_embeddings_prediction_sets__set_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "set_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Set Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Prediction Set V1 Embeddings Prediction Sets  Set Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get prediction set details",
+        "tags": [
+          "embeddings"
+        ]
+      }
+    },
+    "/v1/embeddings/prediction-sets/{set_id}/go-terms": {
+      "get": {
+        "description": "Return the most frequently predicted GO terms grouped by aspect (F/P/C)\nand the total prediction counts per aspect.",
+        "operationId": "get_go_term_distribution_v1_embeddings_prediction_sets__set_id__go_terms_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "set_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Set Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Go Term Distribution V1 Embeddings Prediction Sets  Set Id  Go Terms Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "GO term distribution in a prediction set",
+        "tags": [
+          "embeddings"
+        ]
+      }
+    },
+    "/v1/embeddings/prediction-sets/{set_id}/predictions-cafa.tsv": {
+      "get": {
+        "description": "Stream predictions in CAFA format: ``protein_accession\\tgo_id\\tscore``.\n\nScore is computed as ``max(0.0, 1.0 - distance)`` so that closer neighbours\nreceive higher confidence scores in the [0, 1] range expected by the\nCAFA evaluator.  One row per (protein, GO term) pair \u2014 duplicate GO terms\nfor the same protein are deduplicated keeping the highest score (lowest distance).\n\nPass ``eval_id`` to restrict output to delta proteins only (NK + LK targets),\nwhich is required for a valid CAFA evaluation.",
+        "operationId": "download_predictions_cafa_v1_embeddings_prediction_sets__set_id__predictions_cafa_tsv_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "set_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Set Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter to delta proteins from this EvaluationSet.",
+            "in": "query",
+            "name": "eval_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to delta proteins from this EvaluationSet.",
+              "title": "Eval Id"
+            }
+          },
+          {
+            "description": "Filter by GO aspect: F, P, or C",
+            "in": "query",
+            "name": "aspect",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by GO aspect: F, P, or C",
+              "title": "Aspect"
+            }
+          },
+          {
+            "description": "Only include predictions with distance \u2264 this value",
+            "in": "query",
+            "name": "max_distance",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only include predictions with distance \u2264 this value",
+              "title": "Max Distance"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download predictions in CAFA submission format",
+        "tags": [
+          "embeddings"
+        ]
+      }
+    },
+    "/v1/embeddings/prediction-sets/{set_id}/predictions.tsv": {
+      "get": {
+        "description": "Stream all GO predictions for a prediction set as a tab-separated file.\n\nEach row is one (protein, GO term, reference protein) triple. Columns include\nembedding distance, GO term metadata, annotation fields, and optional alignment\nand taxonomy features (columns are present but empty when not computed).\n\nOptional filters: ``accession``, ``aspect`` (F/P/C), ``max_distance``.\n\nThe response streams rows directly from the database \u2014 suitable for large\nprediction sets without loading everything into memory.",
+        "operationId": "download_predictions_tsv_v1_embeddings_prediction_sets__set_id__predictions_tsv_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "set_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Set Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter to a single query protein accession",
+            "in": "query",
+            "name": "accession",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single query protein accession",
+              "title": "Accession"
+            }
+          },
+          {
+            "description": "Filter by GO aspect: F, P, or C",
+            "in": "query",
+            "name": "aspect",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by GO aspect: F, P, or C",
+              "title": "Aspect"
+            }
+          },
+          {
+            "description": "Only include predictions with distance \u2264 this value",
+            "in": "query",
+            "name": "max_distance",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only include predictions with distance \u2264 this value",
+              "title": "Max Distance"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download predictions as TSV",
+        "tags": [
+          "embeddings"
+        ]
+      }
+    },
+    "/v1/embeddings/prediction-sets/{set_id}/proteins": {
+      "get": {
+        "description": "Paginated list of proteins in a prediction set with their predicted GO count, minimum distance,\nknown annotation count, and how many predictions match known annotations (precision proxy).",
+        "operationId": "list_prediction_set_proteins_v1_embeddings_prediction_sets__set_id__proteins_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "set_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Set Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Prediction Set Proteins V1 Embeddings Prediction Sets  Set Id  Proteins Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List proteins in a prediction set",
+        "tags": [
+          "embeddings"
+        ]
+      }
+    },
+    "/v1/embeddings/prediction-sets/{set_id}/proteins/{accession}": {
+      "get": {
+        "description": "Return all predicted GO terms for a protein in a prediction set, sorted by distance (nearest first).\nIncludes GO term details plus optional alignment (NW/SW) and taxonomy fields when computed.",
+        "operationId": "get_protein_predictions_v1_embeddings_prediction_sets__set_id__proteins__accession__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "set_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Set Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "accession",
+            "required": true,
+            "schema": {
+              "title": "Accession",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Get Protein Predictions V1 Embeddings Prediction Sets  Set Id  Proteins  Accession  Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get predictions for one protein",
+        "tags": [
+          "embeddings"
+        ]
+      }
+    },
+    "/v1/experiment-runs": {
+      "get": {
+        "description": "Return runs newest-first, optionally filtered by status.",
+        "operationId": "list_experiment_runs_v1_experiment_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ExperimentRunStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Experiment Runs V1 Experiment Runs Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List experiment runs",
+        "tags": [
+          "experiment-runs"
+        ]
+      },
+      "post": {
+        "description": "Create a new ``ExperimentRun`` row in ``planned`` status.",
+        "operationId": "create_experiment_run_v1_experiment_runs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateExperimentRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Experiment Run V1 Experiment Runs Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create an experiment run",
+        "tags": [
+          "experiment-runs"
+        ]
+      }
+    },
+    "/v1/experiment-runs/{run_id}": {
+      "delete": {
+        "description": "Permanently delete a run. Mostly used for cleaning up draft rows.",
+        "operationId": "delete_experiment_run_v1_experiment_runs__run_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete an experiment run",
+        "tags": [
+          "experiment-runs"
+        ]
+      },
+      "get": {
+        "description": "Fetch a single run by id.",
+        "operationId": "get_experiment_run_v1_experiment_runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Experiment Run V1 Experiment Runs  Run Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get one experiment run",
+        "tags": [
+          "experiment-runs"
+        ]
+      },
+      "patch": {
+        "description": "Patch narrative fields, status, config, provenance, or tags.\n\nOnly fields explicitly present in the request body are updated;\nomitted fields leave the column untouched. Status transitions stamp\n``started_at`` / ``finished_at`` per the rules in\n:func:`_stamp_status_transition`.",
+        "operationId": "update_experiment_run_v1_experiment_runs__run_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateExperimentRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Update Experiment Run V1 Experiment Runs  Run Id  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update an experiment run",
+        "tags": [
+          "experiment-runs"
+        ]
+      }
+    },
+    "/v1/jobs": {
+      "get": {
+        "description": "List jobs with optional filtering.\n\nBy default only top-level jobs (no parent) are returned. Set\n``include_children=true`` or filter by ``parent_job_id`` to see batch\nsub-jobs from distributed pipelines. Filters travel as discrete query\nparameters on the wire; the dependency bundles them into\n:class:`JobListFilters` for the handler.",
+        "operationId": "list_jobs_v1_jobs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "operation",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Operation"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_children",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Children",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "parent_job_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Parent Job Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Jobs V1 Jobs Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List jobs",
+        "tags": [
+          "jobs"
+        ]
+      },
+      "post": {
+        "description": "Create a Job row and publish its ID to the specified RabbitMQ queue.\n\nThe job transitions `QUEUED \u2192 RUNNING \u2192 SUCCEEDED/FAILED` as the worker processes it.\nUse `GET /jobs/{id}/events` to poll structured progress events in real time.",
+        "operationId": "create_job_v1_jobs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateJobRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Job V1 Jobs Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create and enqueue a job",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/v1/jobs/{job_id}": {
+      "delete": {
+        "description": "Permanently delete a job and its event log. Running jobs cannot be deleted (409).",
+        "operationId": "delete_job_v1_jobs__job_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Delete Job V1 Jobs  Job Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete a job",
+        "tags": [
+          "jobs"
+        ]
+      },
+      "get": {
+        "description": "Retrieve full details for a single job including its payload, meta, and progress counters.",
+        "operationId": "get_job_v1_jobs__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Job V1 Jobs  Job Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get job details",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/v1/jobs/{job_id}/cancel": {
+      "post": {
+        "description": "Mark a job (and any non-terminal child jobs) as CANCELLED.\n\nAlready-finished jobs (SUCCEEDED/FAILED) are returned as-is with no state change.\nChildren in QUEUED are cancelled immediately.  Children in RUNNING are also\nmarked CANCELLED \u2014 the worker's parent-check in BaseWorker.handle_job() will\ndetect the cancelled parent on the next iteration and stop gracefully.",
+        "operationId": "cancel_job_v1_jobs__job_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Cancel Job V1 Jobs  Job Id  Cancel Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel a job",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/v1/jobs/{job_id}/comments": {
+      "get": {
+        "description": "Return every ``JobComment`` for a Job, oldest first.",
+        "operationId": "list_job_comments_v1_jobs__job_id__comments_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Job Comments V1 Jobs  Job Id  Comments Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List job comments",
+        "tags": [
+          "jobs"
+        ]
+      },
+      "post": {
+        "description": "Append a free-form comment to a Job.\n\nCurators / operators use this thread to record observations,\nfollow-ups, or post-mortems; the worker fleet keeps writing to\n``JobEvent`` for machine-emitted progress.",
+        "operationId": "create_job_comment_v1_jobs__job_id__comments_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateJobCommentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Job Comment V1 Jobs  Job Id  Comments Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Append a comment to a job",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/v1/jobs/{job_id}/events": {
+      "get": {
+        "description": "Return the structured event log for a job (newest first).\n\nEvents include progress milestones, warnings, HTTP retries, and errors.\nUseful for monitoring long-running operations such as `compute_embeddings` or `predict_go_terms`.",
+        "operationId": "get_job_events_v1_jobs__job_id__events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 2000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Get Job Events V1 Jobs  Job Id  Events Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List job events",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/v1/maintenance/vacuum-embeddings": {
+      "post": {
+        "description": "Delete embeddings for sequences not referenced by any Protein.\n\nSafe to run after predictions have been generated \u2014 query protein\nembeddings are only needed during the prediction job itself.",
+        "operationId": "vacuum_embeddings_v1_maintenance_vacuum_embeddings_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Vacuum Embeddings V1 Maintenance Vacuum Embeddings Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Vacuum Embeddings",
+        "tags": [
+          "maintenance"
+        ]
+      }
+    },
+    "/v1/maintenance/vacuum-embeddings/preview": {
+      "get": {
+        "description": "Count embeddings for sequences not referenced by any Protein.\n\nThese are embeddings computed for query proteins (QuerySet uploads) or\norphan sequences. They are safe to delete once predictions have been run.",
+        "operationId": "preview_unindexed_embeddings_v1_maintenance_vacuum_embeddings_preview_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Preview Unindexed Embeddings V1 Maintenance Vacuum Embeddings Preview Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Preview Unindexed Embeddings",
+        "tags": [
+          "maintenance"
+        ]
+      }
+    },
+    "/v1/maintenance/vacuum-sequences": {
+      "post": {
+        "description": "Delete sequences not referenced by any Protein or QuerySetEntry.\n\nSafe to run at any time \u2014 orphan sequences have no embeddings that\ncan be reached from any active protein or query set.",
+        "operationId": "vacuum_sequences_v1_maintenance_vacuum_sequences_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Vacuum Sequences V1 Maintenance Vacuum Sequences Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Vacuum Sequences",
+        "tags": [
+          "maintenance"
+        ]
+      }
+    },
+    "/v1/maintenance/vacuum-sequences/preview": {
+      "get": {
+        "description": "Count orphan sequences without running the delete.\n\nA sequence is orphaned when it has no Protein rows pointing to it\nAND no QuerySetEntry rows pointing to it.",
+        "operationId": "preview_orphan_sequences_v1_maintenance_vacuum_sequences_preview_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Preview Orphan Sequences V1 Maintenance Vacuum Sequences Preview Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Preview Orphan Sequences",
+        "tags": [
+          "maintenance"
+        ]
+      }
+    },
+    "/v1/proteins": {
+      "get": {
+        "description": "Paginated protein listing with optional full-text search across accession, entry name, gene name, and organism.",
+        "operationId": "list_proteins_v1_proteins_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "in": "query",
+            "name": "reviewed",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Reviewed"
+            }
+          },
+          {
+            "in": "query",
+            "name": "canonical_only",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Canonical Only",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Proteins V1 Proteins Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List proteins",
+        "tags": [
+          "proteins"
+        ]
+      }
+    },
+    "/v1/proteins/stats": {
+      "get": {
+        "description": "Return aggregate counts: total proteins, canonical vs isoforms, reviewed,\nand how many have metadata, embeddings, or GO annotations.\n\nCached for 5 minutes \u2014 the DISTINCT-over-JOIN counts scan 4M\u201380M rows and\ntake 30+ seconds to run from scratch. Counts move slowly enough that a\n5-min staleness is invisible to users.",
+        "operationId": "get_protein_stats_v1_proteins_stats_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Protein Stats V1 Proteins Stats Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Aggregate protein statistics",
+        "tags": [
+          "proteins"
+        ]
+      }
+    },
+    "/v1/proteins/{accession}": {
+      "get": {
+        "description": "Full details for one protein: core fields, UniProt functional metadata, embedding count,\nGO annotation count, and accessions of known isoforms (if canonical).",
+        "operationId": "get_protein_v1_proteins__accession__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "accession",
+            "required": true,
+            "schema": {
+              "title": "Accession",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Protein V1 Proteins  Accession  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get protein details",
+        "tags": [
+          "proteins"
+        ]
+      }
+    },
+    "/v1/proteins/{accession}/annotations": {
+      "get": {
+        "description": "Return all GO term annotations for a protein, joined with term details and annotation set source.\nOptionally filter to a specific annotation set by UUID.",
+        "operationId": "get_protein_annotations_v1_proteins__accession__annotations_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "accession",
+            "required": true,
+            "schema": {
+              "title": "Accession",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "annotation_set_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Annotation Set Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Get Protein Annotations V1 Proteins  Accession  Annotations Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List GO annotations for a protein",
+        "tags": [
+          "proteins"
+        ]
+      }
+    },
+    "/v1/query-sets": {
+      "get": {
+        "description": "List all uploaded FASTA query sets with their entry counts, newest first.",
+        "operationId": "list_query_sets_v1_query_sets_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Query Sets V1 Query Sets Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List query sets",
+        "tags": [
+          "query-sets"
+        ]
+      },
+      "post": {
+        "description": "Upload a FASTA file and create a QuerySet.\n\nEach sequence in the FASTA is stored (or reused if already present) in the\n``sequence`` table. A ``query_set_entry`` row is created per sequence,\npreserving the original FASTA accession. Duplicate accessions within the\nsame upload are rejected with 422.",
+        "operationId": "create_query_set_v1_query_sets_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_create_query_set_v1_query_sets_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Query Set V1 Query Sets Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Query Set",
+        "tags": [
+          "query-sets"
+        ]
+      }
+    },
+    "/v1/query-sets/{query_set_id}": {
+      "delete": {
+        "description": "Delete a query set and all its entries. Sequences are not deleted (they may be shared).",
+        "operationId": "delete_query_set_v1_query_sets__query_set_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "query_set_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Query Set Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Delete Query Set V1 Query Sets  Query Set Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete a query set",
+        "tags": [
+          "query-sets"
+        ]
+      },
+      "get": {
+        "description": "Retrieve a query set with its full entry list (accessions and sequence IDs).",
+        "operationId": "get_query_set_v1_query_sets__query_set_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "query_set_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Query Set Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Query Set V1 Query Sets  Query Set Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get query set details",
+        "tags": [
+          "query-sets"
+        ]
+      }
+    },
+    "/v1/reranker-models/import": {
+      "post": {
+        "description": "Upload a trained booster and register a ``RerankerModel`` row.\n\nThe three files (``model.txt``, ``spec.yaml``, ``run.json``) mirror\nthe artefacts produced by ``protea-reranker-lab`` under\n``runs/<name>/``. Wire format unchanged \u2014 the FastAPI deps expose\nevery File/Form field as a discrete multipart part.",
+        "operationId": "import_reranker_model_multipart_v1_reranker_models_import_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_reranker_model_multipart_v1_reranker_models_import_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Import Reranker Model Multipart V1 Reranker Models Import Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import a lab-trained booster",
+        "tags": [
+          "reranker-models"
+        ]
+      }
+    },
+    "/v1/reranker-models/import-by-reference": {
+      "post": {
+        "description": "Register a ``RerankerModel`` whose booster is already in MinIO.\n\nThe lab uploads the booster directly (faster, no double-hop) and\nPOSTs the URI + run.json + spec.yaml here. Server does not re-read\nthe artifact \u2014 it trusts the URI.",
+        "operationId": "import_reranker_model_by_reference_v1_reranker_models_import_by_reference_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportRerankerByReferenceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Import Reranker Model By Reference V1 Reranker Models Import By Reference Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Register a booster already in the artifact store",
+        "tags": [
+          "reranker-models"
+        ]
+      }
+    },
+    "/v1/runners": {
+      "get": {
+        "description": "List all installed experiment runner plugins.\n\nToday: ``baseline``, ``knn``, ``lightgbm``. The latter two are\ncontract-surface stubs until F2A.7 (lab \u2192 ``protea-runners\n.lightgbm`` migration) and F2C.1 (``protea-method`` extraction)\nmove the real implementations here.",
+        "operationId": "list_runners_v1_runners_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Runners",
+        "tags": [
+          "registry"
+        ]
+      }
+    },
+    "/v1/scoring/configs": {
+      "get": {
+        "description": "Return all stored ScoringConfigs ordered by creation time.",
+        "operationId": "list_scoring_configs_v1_scoring_configs_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ScoringConfigResponse"
+                  },
+                  "title": "Response List Scoring Configs V1 Scoring Configs Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Scoring Configs",
+        "tags": [
+          "scoring"
+        ]
+      },
+      "post": {
+        "description": "Create a new ScoringConfig. Pydantic validators on ``ScoringConfigCreate``\nalready enforce ``formula`` membership + signal-name allowlist (422).",
+        "operationId": "create_scoring_config_v1_scoring_configs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScoringConfigCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScoringConfigResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Scoring Config",
+        "tags": [
+          "scoring"
+        ]
+      }
+    },
+    "/v1/scoring/configs/presets": {
+      "post": {
+        "description": "Seed the database with the four built-in preset ScoringConfigs.\n\nIdempotent \u2014 presets matched by name are skipped silently. Returns\nthe list of preset names that were actually created.",
+        "operationId": "create_preset_configs_v1_scoring_configs_presets_post",
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Create Preset Configs",
+        "tags": [
+          "scoring"
+        ]
+      }
+    },
+    "/v1/scoring/configs/{config_id}": {
+      "delete": {
+        "description": "Delete a ScoringConfig by UUID.",
+        "operationId": "delete_scoring_config_v1_scoring_configs__config_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "config_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Config Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Scoring Config",
+        "tags": [
+          "scoring"
+        ]
+      },
+      "get": {
+        "description": "Retrieve a single ScoringConfig by UUID.",
+        "operationId": "get_scoring_config_v1_scoring_configs__config_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "config_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Config Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScoringConfigResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Scoring Config",
+        "tags": [
+          "scoring"
+        ]
+      }
+    },
+    "/v1/scoring/prediction-sets/{set_id}/metrics": {
+      "get": {
+        "description": "Compute CAFA Fmax and AUC-PR for a PredictionSet under a ScoringConfig.\n\nGround truth is the NK or LK delta between the old and new annotation sets\nin ``eval_context``, following the CAFA4 protocol: only experimental\nevidence codes, NOT-qualifier annotations excluded with full DAG propagation.\n\nThe selected ``ScoringConfig`` \u2014 including any custom ``evidence_weights``\n\u2014 is applied to every ``GOPrediction`` row before computing the\nprecision-recall curve.\n\nParameters\n----------\nscoring_config_id:\n    Which stored ScoringConfig formula (and evidence weights) to apply.\neval_context:\n    Bundled ``(old_annotation_set_id, new_annotation_set_id,\n    ontology_snapshot_id)`` carried through the metrics pipeline. The\n    FastAPI dependency exposes the three fields as discrete query\n    parameters on the wire.\ncategory:\n    ``\"nk\"`` (no-knowledge) or ``\"lk\"`` (limited-knowledge) protein set.",
+        "operationId": "compute_metrics_v1_scoring_prediction_sets__set_id__metrics_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "set_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Set Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scoring_config_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Scoring Config Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "default": "nk",
+              "pattern": "^(nk|lk)$",
+              "title": "Category",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "old_annotation_set_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Old Annotation Set Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "new_annotation_set_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "New Annotation Set Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ontology_snapshot_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Ontology Snapshot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Compute Metrics",
+        "tags": [
+          "scoring"
+        ]
+      }
+    },
+    "/v1/scoring/prediction-sets/{set_id}/rerank.tsv": {
+      "get": {
+        "description": "Stream predictions re-scored by a trained LightGBM model.\n\nEach row includes the original prediction data plus a ``reranker_score``\ncolumn (probability 0\u20131, higher = more likely correct).  Rows are sorted\nby descending score within each protein.",
+        "operationId": "download_reranked_predictions_v1_scoring_prediction_sets__set_id__rerank_tsv_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "set_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Set Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID of the trained RerankerModel to apply",
+            "in": "query",
+            "name": "reranker_id",
+            "required": true,
+            "schema": {
+              "description": "UUID of the trained RerankerModel to apply",
+              "format": "uuid",
+              "title": "Reranker Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Minimum re-ranker score threshold",
+            "in": "query",
+            "name": "min_score",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 1.0,
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Minimum re-ranker score threshold",
+              "title": "Min Score"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Apply a trained re-ranker to predictions",
+        "tags": [
+          "scoring"
+        ]
+      }
+    },
+    "/v1/scoring/prediction-sets/{set_id}/reranker-metrics": {
+      "get": {
+        "description": "Compute CAFA Fmax and AUC-PR using re-ranker scores instead of ScoringConfig.\n\nApplies the trained LightGBM model to all predictions in the PredictionSet,\nthen evaluates against the temporal ground truth of the EvaluationSet.\n\nThis closes the full re-ranker loop: train \u2192 apply \u2192 evaluate.",
+        "operationId": "compute_reranker_metrics_v1_scoring_prediction_sets__set_id__reranker_metrics_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "set_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Set Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID of the trained RerankerModel",
+            "in": "query",
+            "name": "reranker_id",
+            "required": true,
+            "schema": {
+              "description": "UUID of the trained RerankerModel",
+              "format": "uuid",
+              "title": "Reranker Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID of the EvaluationSet",
+            "in": "query",
+            "name": "evaluation_set_id",
+            "required": true,
+            "schema": {
+              "description": "UUID of the EvaluationSet",
+              "format": "uuid",
+              "title": "Evaluation Set Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "default": "nk",
+              "pattern": "^(nk|lk|pk)$",
+              "title": "Category",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Compute Reranker Metrics",
+        "tags": [
+          "scoring"
+        ]
+      }
+    },
+    "/v1/scoring/prediction-sets/{set_id}/score.tsv": {
+      "get": {
+        "description": "Stream a TSV of predictions with computed confidence scores.\n\nThe score is computed on-the-fly for every row using the selected\n``ScoringConfig``, including any custom evidence-weight overrides stored\nin that config.  The session is closed before the generator starts so\nthe response is streamed without holding a DB connection open.\n\nQuery parameters\n----------------\nscoring_config_id:\n    UUID of the ``ScoringConfig`` to apply.\nmin_score:\n    Optional score threshold \u2014 rows below this value are omitted.\naccession:\n    Optional protein accession filter.\n\nTSV columns\n-----------\nprotein_accession, go_id, score, distance, ref_protein_accession,\nevidence_code, qualifier, identity_nw, identity_sw, taxonomic_distance.",
+        "operationId": "download_scored_predictions_v1_scoring_prediction_sets__set_id__score_tsv_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "set_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Set Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scoring_config_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Scoring Config Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_score",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 1.0,
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Score"
+            }
+          },
+          {
+            "in": "query",
+            "name": "accession",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Accession"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Scored Predictions",
+        "tags": [
+          "scoring"
+        ]
+      }
+    },
+    "/v1/scoring/prediction-sets/{set_id}/training-data.tsv": {
+      "get": {
+        "description": "Stream labeled training data for the re-ranker model.\n\nJoins all GOPrediction feature columns with a binary ``label`` derived\nfrom the temporal ground-truth delta of the given EvaluationSet.\n\nA prediction is labeled **1** if the (protein_accession, go_id) pair\nappears in the selected category's ground truth, **0** otherwise.\n\nParameters\n----------\nevaluation_set_id:\n    UUID of the EvaluationSet (old \u2192 new annotation sets).\ncategory:\n    ``\"nk\"`` (no-knowledge), ``\"lk\"`` (limited-knowledge), or\n    ``\"pk\"`` (partial-knowledge).",
+        "operationId": "download_training_data_v1_scoring_prediction_sets__set_id__training_data_tsv_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "set_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Set Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "EvaluationSet to derive ground-truth labels from",
+            "in": "query",
+            "name": "evaluation_set_id",
+            "required": true,
+            "schema": {
+              "description": "EvaluationSet to derive ground-truth labels from",
+              "format": "uuid",
+              "title": "Evaluation Set Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Ground-truth category: nk, lk, or pk",
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "default": "nk",
+              "description": "Ground-truth category: nk, lk, or pk",
+              "pattern": "^(nk|lk|pk)$",
+              "title": "Category",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export labeled training data for the re-ranker",
+        "tags": [
+          "scoring"
+        ]
+      }
+    },
+    "/v1/scoring/rerankers": {
+      "get": {
+        "description": "Return all stored re-ranker models ordered by creation time.",
+        "operationId": "list_rerankers_v1_scoring_rerankers_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RerankerResponse"
+                  },
+                  "title": "Response List Rerankers V1 Scoring Rerankers Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Rerankers",
+        "tags": [
+          "scoring"
+        ]
+      }
+    },
+    "/v1/scoring/rerankers/{reranker_id}": {
+      "delete": {
+        "description": "Delete a re-ranker model by UUID.",
+        "operationId": "delete_reranker_v1_scoring_rerankers__reranker_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "reranker_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Reranker Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Reranker",
+        "tags": [
+          "scoring"
+        ]
+      },
+      "get": {
+        "description": "Retrieve a single re-ranker model by UUID.",
+        "operationId": "get_reranker_v1_scoring_rerankers__reranker_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "reranker_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Reranker Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RerankerResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Reranker",
+        "tags": [
+          "scoring"
+        ]
+      }
+    },
+    "/v1/showcase": {
+      "get": {
+        "description": "Aggregate pipeline stage counts and return the single best evaluation\nresult (by mean Fmax across the 9 cells) along with the embedding that\nproduced it.\n\nEmpty-state contract: ``best`` is ``None`` when no ``EvaluationResult``\nexists; ``pipeline_stages`` always returns the same five entries with\n``count = 0`` for unpopulated stages; ``counts`` always returns the\nsame keys.",
+        "operationId": "get_showcase_v1_showcase_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Showcase V1 Showcase Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Platform showcase data",
+        "tags": [
+          "showcase"
+        ]
+      }
+    },
+    "/v1/sources": {
+      "get": {
+        "description": "List all installed annotation source plugins.\n\nToday: ``goa``, ``quickgo``, ``uniprot`` (all real after\nF2A.6-real). The ``extra.version`` field surfaces the\n:attr:`AnnotationSource.version` declared on each plugin\n(e.g. ``\"uniprot-goa\"``, ``\"quickgo-rest\"``).",
+        "operationId": "list_sources_v1_sources_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Sources",
+        "tags": [
+          "registry"
+        ]
+      }
+    },
+    "/v1/stack": {
+      "get": {
+        "description": "Return the eight-repo PROTEA stack registry.\n\nSingle source of truth: ``docs/source/_data/stack.yaml`` in this\nrepo. Edit that file (and run ``scripts/sync_stack.py``) to refresh\nthe README block and the Sphinx page in the same commit.\n\nPer-repo ``local_docs_path`` and the top-level ``thesis_pdf_url``\nare computed from the filesystem at request time: the field is\npopulated whenever the corresponding artefact has been built into\n``docs/build/<slug>/html/`` or ``static/thesis.pdf`` respectively,\nand is ``None`` otherwise.",
+        "operationId": "get_stack_v1_stack_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StackResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Stack",
+        "tags": [
+          "stack"
+        ]
+      }
+    },
+    "/v1/stack/pulls": {
+      "get": {
+        "description": "Aggregate open pull requests across every repo in the stack.\n\nCached in-process for five minutes. Pass an optional\n``PROTEA_GITHUB_TOKEN`` env var to use authenticated requests\n(rate limit 5000/h instead of 60/h).",
+        "operationId": "list_open_pulls_v1_stack_pulls_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PullsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Open Pulls",
+        "tags": [
+          "stack"
+        ]
+      }
+    },
+    "/v1/support": {
+      "get": {
+        "description": "Return total thumbs-up count and comments.\n\nPass ``all_comments=true`` to get all comments (up to the configured\npage limit) instead of the recent_limit most recent.",
+        "operationId": "get_support_v1_support_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "all_comments",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "All Comments",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Support V1 Support Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Support",
+        "tags": [
+          "support"
+        ]
+      },
+      "post": {
+        "description": "Submit a thumbs-up with an optional comment.",
+        "operationId": "post_support_v1_support_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupportCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Post Support V1 Support Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Support",
+        "tags": [
+          "support"
+        ]
+      }
+    }
+  },
+  "tags": [
+    {
+      "description": "Job queue lifecycle \u2014 create, monitor, and cancel operations.",
+      "name": "jobs"
+    },
+    {
+      "description": "UniProt protein lookup and aggregate statistics.",
+      "name": "proteins"
+    },
+    {
+      "description": "GO ontology snapshots, annotation sets, and GO subgraph queries.",
+      "name": "annotations"
+    },
+    {
+      "description": "Embedding configs, GPU compute jobs, and prediction sets management.",
+      "name": "embeddings"
+    },
+    {
+      "description": "User-uploaded FASTA datasets for custom prediction queries.",
+      "name": "query-sets"
+    },
+    {
+      "description": "Housekeeping \u2014 identify and remove orphaned sequences or embeddings.",
+      "name": "maintenance"
+    },
+    {
+      "description": "Destructive admin operations (DB reset). Use with caution.",
+      "name": "admin"
+    },
+    {
+      "description": "Scoring configs, scored prediction export, and CAFA metrics.",
+      "name": "scoring"
+    },
+    {
+      "description": "Per-embedding / per-stage Fmax matrix across every evaluation result. Powers the /benchmark page in the UI.",
+      "name": "benchmark"
+    },
+    {
+      "description": "Community thumbs-up and comments.",
+      "name": "support"
+    },
+    {
+      "description": "One-click protein annotation \u2014 upload FASTA, auto-run the full pipeline.",
+      "name": "annotate"
+    },
+    {
+      "description": "Frozen re-ranker datasets \u2014 enqueue export jobs, list/fetch registered dumps, resolve URIs for the lab.",
+      "name": "datasets"
+    },
+    {
+      "description": "Register lab-trained LightGBM boosters \u2014 multipart upload or by-reference import of artefacts already in MinIO.",
+      "name": "reranker-models"
+    },
+    {
+      "description": "Cross-repository navigation: registry of the eight repositories that make up the PROTEA stack and a live aggregate of their open pull requests.",
+      "name": "stack"
+    },
+    {
+      "description": "Per-research-run narrative + provenance anchor (decision D11). Powers the F8b Experiments page and the F-EXP campaign tooling.",
+      "name": "experiment-runs"
+    }
+  ]
+}
