@@ -35,8 +35,13 @@ All contributions go through `develop` first. `develop` is merged into `main` fo
 ## Development Setup
 
 ```bash
-# Install dependencies
-poetry install
+# Install runtime + the dev groups you actually need.
+# Groups are opt-in (`optional = true`); `poetry install` alone gets only
+# main runtime dependencies.
+poetry install --with lint,test,docs
+
+# (GPU embedding worker only) flip torch from CPU to CUDA build:
+bash scripts/install_gpu_torch.sh
 
 # Start the full stack (requires PostgreSQL and RabbitMQ)
 bash scripts/manage.sh start
