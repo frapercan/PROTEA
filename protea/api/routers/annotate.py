@@ -46,7 +46,7 @@ _DEFAULT_CONFIG = {
 
 
 def _best_embedding_config(session: Session) -> EmbeddingConfig | None:
-    """Pick the smallest model that already has embeddings — the quick-annotation
+    """Pick the smallest model that already has embeddings; the quick-annotation
     path is latency-sensitive, so a 300M PLM beats a 3B one for the default."""
     rows = (
         session.query(

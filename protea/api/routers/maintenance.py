@@ -51,7 +51,7 @@ def vacuum_sequences(
 ) -> dict[str, Any]:
     """Delete sequences not referenced by any Protein or QuerySetEntry.
 
-    Safe to run at any time — orphan sequences have no embeddings that
+    Safe to run at any time: orphan sequences have no embeddings that
     can be reached from any active protein or query set.
     """
     with session_scope(factory) as session:
@@ -118,7 +118,7 @@ def vacuum_embeddings(
 ) -> dict[str, Any]:
     """Delete embeddings for sequences not referenced by any Protein.
 
-    Safe to run after predictions have been generated — query protein
+    Safe to run after predictions have been generated; query protein
     embeddings are only needed during the prediction job itself.
     """
     with session_scope(factory) as session:

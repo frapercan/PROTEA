@@ -22,7 +22,7 @@ def _require_admin_token(authorization: str | None) -> None:
     if not _ADMIN_TOKEN:
         raise HTTPException(
             status_code=403,
-            detail="Admin operations are disabled — set PROTEA_ADMIN_TOKEN env var to enable.",
+            detail="Admin operations are disabled; set PROTEA_ADMIN_TOKEN env var to enable.",
         )
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing Bearer token.")

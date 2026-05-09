@@ -107,7 +107,7 @@ def _operation_metadata(
     Returns ``(description, summary)``. Both are ``None`` if the operation
     is no longer registered (e.g. renamed/removed). ``summary`` is ``None``
     if the operation does not implement ``summarize_payload`` or raises while
-    rendering it — we never want metadata enrichment to break the jobs API.
+    rendering it; we never want metadata enrichment to break the jobs API.
 
     If ``summarize_payload`` accepts a ``session`` keyword (introspected via
     ``inspect.signature``), the active SQLAlchemy session is forwarded so the
@@ -530,7 +530,7 @@ def cancel_job(
 
     Already-finished jobs (SUCCEEDED/FAILED) are returned as-is with no state change.
     Children in QUEUED are cancelled immediately.  Children in RUNNING are also
-    marked CANCELLED — the worker's parent-check in BaseWorker.handle_job() will
+    marked CANCELLED; the worker's parent-check in BaseWorker.handle_job() will
     detect the cancelled parent on the next iteration and stop gracefully.
     """
     with session_scope(factory) as session:

@@ -8,10 +8,10 @@ LightGBM training path (see Phase 4 of the decoupling plan).
 
 Both multipart and JSON-by-reference flows are supported:
 
-* **multipart** — lab sends ``model.txt`` + ``spec.yaml`` + ``run.json``
+* **multipart**: lab sends ``model.txt`` + ``spec.yaml`` + ``run.json``
   inline. Server uploads the booster to ``rerankers/<run_id>/model.txt``.
   Simpler for dev.
-* **by-reference** — lab pre-uploads ``model.txt`` to MinIO under its
+* **by-reference**: lab pre-uploads ``model.txt`` to MinIO under its
   own key and POSTs JSON with ``artifact_uri`` + ``run_json`` +
   ``spec_yaml`` text. Cleaner for prod.
 
@@ -70,8 +70,8 @@ router = APIRouter(prefix="/reranker-models", tags=["reranker-models"])
 def _parse_cell(cell: str | None) -> tuple[str, str | None]:
     """Parse ``training.cell`` from spec.yaml into ``(category, aspect)``.
 
-    Accepts ``"pk"``, ``"pk-bpo"``, etc. Falls back to ``("pk", None)``
-    — category is NOT NULL on RerankerModel.
+    Accepts ``"pk"``, ``"pk-bpo"``, etc. Falls back to ``("pk", None)``;
+    category is NOT NULL on RerankerModel.
     """
     if not cell:
         return ("pk", None)
@@ -102,9 +102,9 @@ def _compute_feature_schema_sha(run: dict[str, Any]) -> str | None:
     """Derive the feature fingerprint recorded for the run.
 
     Preference order:
-      1. ``compute_feature_schema_sha(families, drop_features)`` — the
+      1. ``compute_feature_schema_sha(families, drop_features)``: the
          family-aware sha the lab writes into ``run.features``.
-      2. The dataset's ``schema_sha`` — fallback for older runs that
+      2. The dataset's ``schema_sha``: fallback for older runs that
          didn't record ``families_enabled``.
     """
     features = run.get("features", {}) or {}
@@ -126,7 +126,7 @@ def _resolve_optional_fk(
 
     Lab runs may carry FKs to entities that no longer exist in this
     PROTEA instance (DB resets, different deployment, etc.). NULL the
-    column rather than 500'ing — the booster itself is still valid;
+    column rather than 500'ing; the booster itself is still valid,
     only the back-references to local entities are unresolvable.
     """
     if not raw_id:
@@ -280,7 +280,7 @@ async def import_reranker_model_multipart(
 
     The three files (``model.txt``, ``spec.yaml``, ``run.json``) mirror
     the artefacts produced by ``protea-reranker-lab`` under
-    ``runs/<name>/``. Wire format unchanged — the FastAPI deps expose
+    ``runs/<name>/``. Wire format unchanged: the FastAPI deps expose
     every File/Form field as a discrete multipart part.
     """
     model_bytes = await files.model_file.read()
@@ -420,7 +420,7 @@ def import_reranker_model_by_reference(
 
     The lab uploads the booster directly (faster, no double-hop) and
     POSTs the URI + run.json + spec.yaml here. Server does not re-read
-    the artifact — it trusts the URI.
+    the artifact; it trusts the URI.
     """
     run_id = body.run.get("run_id") or "unknown"
     resolved_name = body.name or run_id

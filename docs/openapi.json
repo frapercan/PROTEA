@@ -2185,7 +2185,7 @@
     },
     "/v1/annotations/sets": {
       "get": {
-        "description": "List annotation sets with their annotation counts, newest first.\n\nCached 5 minutes \u2014 GROUP BY over protein_go_annotation (80M rows) takes\n6+ seconds. Per-source views are cached independently.",
+        "description": "List annotation sets with their annotation counts, newest first.\n\nCached 5 minutes: GROUP BY over protein_go_annotation (80M rows) takes\n6+ seconds. Per-source views are cached independently.",
         "operationId": "list_annotation_sets_v1_annotations_sets_get",
         "parameters": [
           {
@@ -2449,7 +2449,7 @@
     },
     "/v1/annotations/snapshots": {
       "get": {
-        "description": "List all loaded GO ontology snapshots with their GO term counts, newest first.\n\nCached 5 minutes \u2014 the GROUP BY over go_term (N million rows per snapshot)\ntakes multiple seconds, and snapshots are effectively immutable once loaded.",
+        "description": "List all loaded GO ontology snapshots with their GO term counts, newest first.\n\nCached 5 minutes: the GROUP BY over go_term (N million rows per snapshot)\ntakes multiple seconds, and snapshots are effectively immutable once loaded.",
         "operationId": "list_snapshots_v1_annotations_snapshots_get",
         "responses": {
           "200": {
@@ -2739,7 +2739,7 @@
     },
     "/v1/benchmark/embeddings": {
       "get": {
-        "description": "Return every ``EmbeddingConfig`` with its persisted display metadata.\n\nThe metadata lives in ``embedding_config.display_name / family /\nparam_count`` \u2014 filled at creation time by the seed scripts. No\nheuristic inference happens here.",
+        "description": "Return every ``EmbeddingConfig`` with its persisted display metadata.\n\nThe metadata lives in ``embedding_config.display_name / family /\nparam_count``: filled at creation time by the seed scripts. No\nheuristic inference happens here.",
         "operationId": "list_benchmark_embeddings_v1_benchmark_embeddings_get",
         "responses": {
           "200": {
@@ -3071,7 +3071,7 @@
     },
     "/v1/embeddings/configs": {
       "get": {
-        "description": "List all embedding configurations with their stored embedding counts, newest first.\n\nThe per-config GROUP BY over a 4M-row table is cached 5 minutes \u2014 new\nconfigs still appear immediately (they have 0 embeddings), only the\ncounts are stale.",
+        "description": "List all embedding configurations with their stored embedding counts, newest first.\n\nThe per-config GROUP BY over a 4M-row table is cached 5 minutes; new\nconfigs still appear immediately (they have 0 embeddings), only the\ncounts are stale.",
         "operationId": "list_embedding_configs_v1_embeddings_configs_get",
         "responses": {
           "200": {
@@ -3247,7 +3247,7 @@
     },
     "/v1/embeddings/predict": {
       "post": {
-        "description": "Queue a `predict_go_terms` job that runs KNN-based GO term transfer.\n\nThe coordinator partitions query proteins into batches, each dispatched to\n`protea.predictions.batch` workers for KNN search (numpy or FAISS) + GO annotation transfer.\nResults are written to a new `PredictionSet` via `protea.predictions.write` workers.\n\nRequired body fields: `embedding_config_id`, `annotation_set_id`, `ontology_snapshot_id`.\nOptional: `query_set_id` (FASTA upload), `limit_per_entry`, `distance_threshold`,\n`batch_size`, `search_backend`. Feature-engineering flags default to True \u2014\n`compute_alignments`, `compute_taxonomy`, `compute_reranker_features` all run\nunless explicitly set to false. `aspect_separated_knn` defaults to true\n(one KNN index per GO aspect to guarantee BPO/MFO/CCO coverage even when\nunified nearest neighbours carry only one aspect).",
+        "description": "Queue a `predict_go_terms` job that runs KNN-based GO term transfer.\n\nThe coordinator partitions query proteins into batches, each dispatched to\n`protea.predictions.batch` workers for KNN search (numpy or FAISS) + GO annotation transfer.\nResults are written to a new `PredictionSet` via `protea.predictions.write` workers.\n\nRequired body fields: `embedding_config_id`, `annotation_set_id`, `ontology_snapshot_id`.\nOptional: `query_set_id` (FASTA upload), `limit_per_entry`, `distance_threshold`,\n`batch_size`, `search_backend`. Feature-engineering flags default to True:\n`compute_alignments`, `compute_taxonomy`, `compute_reranker_features` all run\nunless explicitly set to false. `aspect_separated_knn` defaults to true\n(one KNN index per GO aspect to guarantee BPO/MFO/CCO coverage even when\nunified nearest neighbours carry only one aspect).",
         "operationId": "predict_go_terms_v1_embeddings_predict_post",
         "requestBody": {
           "content": {
@@ -3488,7 +3488,7 @@
     },
     "/v1/embeddings/prediction-sets/{set_id}/predictions-cafa.tsv": {
       "get": {
-        "description": "Stream predictions in CAFA format: ``protein_accession\\tgo_id\\tscore``.\n\nScore is computed as ``max(0.0, 1.0 - distance)`` so that closer neighbours\nreceive higher confidence scores in the [0, 1] range expected by the\nCAFA evaluator.  One row per (protein, GO term) pair \u2014 duplicate GO terms\nfor the same protein are deduplicated keeping the highest score (lowest distance).\n\nPass ``eval_id`` to restrict output to delta proteins only (NK + LK targets),\nwhich is required for a valid CAFA evaluation.",
+        "description": "Stream predictions in CAFA format: ``protein_accession\\tgo_id\\tscore``.\n\nScore is computed as ``max(0.0, 1.0 - distance)`` so that closer neighbours\nreceive higher confidence scores in the [0, 1] range expected by the\nCAFA evaluator.  One row per (protein, GO term) pair; duplicate GO terms\nfor the same protein are deduplicated keeping the highest score (lowest distance).\n\nPass ``eval_id`` to restrict output to delta proteins only (NK + LK targets),\nwhich is required for a valid CAFA evaluation.",
         "operationId": "download_predictions_cafa_v1_embeddings_prediction_sets__set_id__predictions_cafa_tsv_get",
         "parameters": [
           {
@@ -3585,7 +3585,7 @@
     },
     "/v1/embeddings/prediction-sets/{set_id}/predictions.tsv": {
       "get": {
-        "description": "Stream all GO predictions for a prediction set as a tab-separated file.\n\nEach row is one (protein, GO term, reference protein) triple. Columns include\nembedding distance, GO term metadata, annotation fields, and optional alignment\nand taxonomy features (columns are present but empty when not computed).\n\nOptional filters: ``accession``, ``aspect`` (F/P/C), ``max_distance``.\n\nThe response streams rows directly from the database \u2014 suitable for large\nprediction sets without loading everything into memory.",
+        "description": "Stream all GO predictions for a prediction set as a tab-separated file.\n\nEach row is one (protein, GO term, reference protein) triple. Columns include\nembedding distance, GO term metadata, annotation fields, and optional alignment\nand taxonomy features (columns are present but empty when not computed).\n\nOptional filters: ``accession``, ``aspect`` (F/P/C), ``max_distance``.\n\nThe response streams rows directly from the database; suitable for large\nprediction sets without loading everything into memory.",
         "operationId": "download_predictions_tsv_v1_embeddings_prediction_sets__set_id__predictions_tsv_get",
         "parameters": [
           {
@@ -4420,7 +4420,7 @@
     },
     "/v1/jobs/{job_id}/cancel": {
       "post": {
-        "description": "Mark a job (and any non-terminal child jobs) as CANCELLED.\n\nAlready-finished jobs (SUCCEEDED/FAILED) are returned as-is with no state change.\nChildren in QUEUED are cancelled immediately.  Children in RUNNING are also\nmarked CANCELLED \u2014 the worker's parent-check in BaseWorker.handle_job() will\ndetect the cancelled parent on the next iteration and stop gracefully.",
+        "description": "Mark a job (and any non-terminal child jobs) as CANCELLED.\n\nAlready-finished jobs (SUCCEEDED/FAILED) are returned as-is with no state change.\nChildren in QUEUED are cancelled immediately.  Children in RUNNING are also\nmarked CANCELLED; the worker's parent-check in BaseWorker.handle_job() will\ndetect the cancelled parent on the next iteration and stop gracefully.",
         "operationId": "cancel_job_v1_jobs__job_id__cancel_post",
         "parameters": [
           {
@@ -4704,7 +4704,7 @@
     },
     "/v1/maintenance/vacuum-embeddings": {
       "post": {
-        "description": "Delete embeddings for sequences not referenced by any Protein.\n\nSafe to run after predictions have been generated \u2014 query protein\nembeddings are only needed during the prediction job itself.",
+        "description": "Delete embeddings for sequences not referenced by any Protein.\n\nSafe to run after predictions have been generated; query protein\nembeddings are only needed during the prediction job itself.",
         "operationId": "vacuum_embeddings_v1_maintenance_vacuum_embeddings_post",
         "responses": {
           "200": {
@@ -4752,7 +4752,7 @@
     },
     "/v1/maintenance/vacuum-sequences": {
       "post": {
-        "description": "Delete sequences not referenced by any Protein or QuerySetEntry.\n\nSafe to run at any time \u2014 orphan sequences have no embeddings that\ncan be reached from any active protein or query set.",
+        "description": "Delete sequences not referenced by any Protein or QuerySetEntry.\n\nSafe to run at any time: orphan sequences have no embeddings that\ncan be reached from any active protein or query set.",
         "operationId": "vacuum_sequences_v1_maintenance_vacuum_sequences_post",
         "responses": {
           "200": {
@@ -5234,7 +5234,7 @@
     },
     "/v1/reranker-models/import": {
       "post": {
-        "description": "Upload a trained booster and register a ``RerankerModel`` row.\n\nThe three files (``model.txt``, ``spec.yaml``, ``run.json``) mirror\nthe artefacts produced by ``protea-reranker-lab`` under\n``runs/<name>/``. Wire format unchanged \u2014 the FastAPI deps expose\nevery File/Form field as a discrete multipart part.",
+        "description": "Upload a trained booster and register a ``RerankerModel`` row.\n\nThe three files (``model.txt``, ``spec.yaml``, ``run.json``) mirror\nthe artefacts produced by ``protea-reranker-lab`` under\n``runs/<name>/``. Wire format unchanged: the FastAPI deps expose\nevery File/Form field as a discrete multipart part.",
         "operationId": "import_reranker_model_multipart_v1_reranker_models_import_post",
         "requestBody": {
           "content": {
@@ -5283,7 +5283,7 @@
     },
     "/v1/reranker-models/import-by-reference": {
       "post": {
-        "description": "Register a ``RerankerModel`` whose booster is already in MinIO.\n\nThe lab uploads the booster directly (faster, no double-hop) and\nPOSTs the URI + run.json + spec.yaml here. Server does not re-read\nthe artifact \u2014 it trusts the URI.",
+        "description": "Register a ``RerankerModel`` whose booster is already in MinIO.\n\nThe lab uploads the booster directly (faster, no double-hop) and\nPOSTs the URI + run.json + spec.yaml here. Server does not re-read\nthe artifact; it trusts the URI.",
         "operationId": "import_reranker_model_by_reference_v1_reranker_models_import_by_reference_post",
         "requestBody": {
           "content": {
@@ -5425,7 +5425,7 @@
     },
     "/v1/scoring/configs/presets": {
       "post": {
-        "description": "Seed the database with the four built-in preset ScoringConfigs.\n\nIdempotent \u2014 presets matched by name are skipped silently. Returns\nthe list of preset names that were actually created.",
+        "description": "Seed the database with the four built-in preset ScoringConfigs.\n\nIdempotent: presets matched by name are skipped silently. Returns\nthe list of preset names that were actually created.",
         "operationId": "create_preset_configs_v1_scoring_configs_presets_post",
         "responses": {
           "201": {
@@ -5534,7 +5534,7 @@
     },
     "/v1/scoring/prediction-sets/{set_id}/metrics": {
       "get": {
-        "description": "Compute CAFA Fmax and AUC-PR for a PredictionSet under a ScoringConfig.\n\nGround truth is the NK or LK delta between the old and new annotation sets\nin ``eval_context``, following the CAFA4 protocol: only experimental\nevidence codes, NOT-qualifier annotations excluded with full DAG propagation.\n\nThe selected ``ScoringConfig`` \u2014 including any custom ``evidence_weights``\n\u2014 is applied to every ``GOPrediction`` row before computing the\nprecision-recall curve.\n\nParameters\n----------\nscoring_config_id:\n    Which stored ScoringConfig formula (and evidence weights) to apply.\neval_context:\n    Bundled ``(old_annotation_set_id, new_annotation_set_id,\n    ontology_snapshot_id)`` carried through the metrics pipeline. The\n    FastAPI dependency exposes the three fields as discrete query\n    parameters on the wire.\ncategory:\n    ``\"nk\"`` (no-knowledge) or ``\"lk\"`` (limited-knowledge) protein set.",
+        "description": "Compute CAFA Fmax and AUC-PR for a PredictionSet under a ScoringConfig.\n\nGround truth is the NK or LK delta between the old and new annotation sets\nin ``eval_context``, following the CAFA4 protocol: only experimental\nevidence codes, NOT-qualifier annotations excluded with full DAG propagation.\n\nThe selected ``ScoringConfig`` (including any custom ``evidence_weights``)\nis applied to every ``GOPrediction`` row before computing the\nprecision-recall curve.\n\nParameters\n----------\nscoring_config_id:\n    Which stored ScoringConfig formula (and evidence weights) to apply.\neval_context:\n    Bundled ``(old_annotation_set_id, new_annotation_set_id,\n    ontology_snapshot_id)`` carried through the metrics pipeline. The\n    FastAPI dependency exposes the three fields as discrete query\n    parameters on the wire.\ncategory:\n    ``\"nk\"`` (no-knowledge) or ``\"lk\"`` (limited-knowledge) protein set.",
         "operationId": "compute_metrics_v1_scoring_prediction_sets__set_id__metrics_get",
         "parameters": [
           {
@@ -5800,7 +5800,7 @@
     },
     "/v1/scoring/prediction-sets/{set_id}/score.tsv": {
       "get": {
-        "description": "Stream a TSV of predictions with computed confidence scores.\n\nThe score is computed on-the-fly for every row using the selected\n``ScoringConfig``, including any custom evidence-weight overrides stored\nin that config.  The session is closed before the generator starts so\nthe response is streamed without holding a DB connection open.\n\nQuery parameters\n----------------\nscoring_config_id:\n    UUID of the ``ScoringConfig`` to apply.\nmin_score:\n    Optional score threshold \u2014 rows below this value are omitted.\naccession:\n    Optional protein accession filter.\n\nTSV columns\n-----------\nprotein_accession, go_id, score, distance, ref_protein_accession,\nevidence_code, qualifier, identity_nw, identity_sw, taxonomic_distance.",
+        "description": "Stream a TSV of predictions with computed confidence scores.\n\nThe score is computed on-the-fly for every row using the selected\n``ScoringConfig``, including any custom evidence-weight overrides stored\nin that config.  The session is closed before the generator starts so\nthe response is streamed without holding a DB connection open.\n\nQuery parameters\n----------------\nscoring_config_id:\n    UUID of the ``ScoringConfig`` to apply.\nmin_score:\n    Optional score threshold; rows below this value are omitted.\naccession:\n    Optional protein accession filter.\n\nTSV columns\n-----------\nprotein_accession, go_id, score, distance, ref_protein_accession,\nevidence_code, qualifier, identity_nw, identity_sw, taxonomic_distance.",
         "operationId": "download_scored_predictions_v1_scoring_prediction_sets__set_id__score_tsv_get",
         "parameters": [
           {

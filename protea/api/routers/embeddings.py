@@ -67,7 +67,7 @@ def list_embedding_configs(
 ) -> list[dict[str, Any]]:
     """List all embedding configurations with their stored embedding counts, newest first.
 
-    The per-config GROUP BY over a 4M-row table is cached 5 minutes — new
+    The per-config GROUP BY over a 4M-row table is cached 5 minutes; new
     configs still appear immediately (they have 0 embeddings), only the
     counts are stale.
     """
@@ -160,7 +160,7 @@ def predict_go_terms(
 
     Required body fields: `embedding_config_id`, `annotation_set_id`, `ontology_snapshot_id`.
     Optional: `query_set_id` (FASTA upload), `limit_per_entry`, `distance_threshold`,
-    `batch_size`, `search_backend`. Feature-engineering flags default to True —
+    `batch_size`, `search_backend`. Feature-engineering flags default to True:
     `compute_alignments`, `compute_taxonomy`, `compute_reranker_features` all run
     unless explicitly set to false. `aspect_separated_knn` defaults to true
     (one KNN index per GO aspect to guarantee BPO/MFO/CCO coverage even when
@@ -316,7 +316,7 @@ def download_predictions_tsv(
 
     Optional filters: ``accession``, ``aspect`` (F/P/C), ``max_distance``.
 
-    The response streams rows directly from the database — suitable for large
+    The response streams rows directly from the database; suitable for large
     prediction sets without loading everything into memory.
     """
     try:
@@ -359,7 +359,7 @@ def download_predictions_cafa(
 
     Score is computed as ``max(0.0, 1.0 - distance)`` so that closer neighbours
     receive higher confidence scores in the [0, 1] range expected by the
-    CAFA evaluator.  One row per (protein, GO term) pair — duplicate GO terms
+    CAFA evaluator.  One row per (protein, GO term) pair; duplicate GO terms
     for the same protein are deduplicated keeping the highest score (lowest distance).
 
     Pass ``eval_id`` to restrict output to delta proteins only (NK + LK targets),
