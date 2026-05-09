@@ -37,6 +37,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from protea.core._training_dump_loaders import (
+    _build_skipped_outcome,
     _check_reranker_name_collisions,
     _collect_cat_gt_pairs,
     _count_embeddings_with_dim,
@@ -52,6 +53,8 @@ from protea.core._training_dump_loaders import (
     _TestQueryInputs,
     _TestSequences,
     _TestSplitContext,
+    _TrainSplitContext,
+    _TrainSplitOutcome,
 )
 from protea.core.anc2vec_embeddings import Anc2VecIndex
 from protea.core.anc2vec_embeddings import get_index as get_anc2vec_index
@@ -1297,6 +1300,235 @@ def _run_test_split(
 
 
 # ---------------------------------------------------------------------------
+# Per-train-split helpers (T2B.5 partial #6)
+#
+# Mirror the test-split helpers above for the per-pair training loop.
+# Each helper covers one phase of the per-iteration body so the
+# orchestrator stays under the §3 60-LOC method ceiling. Several
+# helpers reuse the test-side bundles (``_TestQueryInputs``,
+# ``_TestSequences``) and pure functions (``_compute_test_cat_membership``,
+# ``_load_test_sequences_and_taxonomy``) since the data shape is
+# identical between sides; a follow-up renames them generically.
+# ---------------------------------------------------------------------------
+
+
+def _resolve_train_split_eval(
+    session: Session,
+    ctx: _TrainSplitContext,
+    v_old: int,
+    v_new: int,
+) -> Any:
+    """Look up the EvaluationSet for a train pair and load its delta.
+
+    Raises ``RuntimeError`` if the eval set is missing because the
+    dump pipeline assumes the deltas were materialized beforehand.
+    """
+    old_set_id = ctx.version_to_set[v_old]
+    new_set_id = ctx.version_to_set[v_new]
+    eset = (
+        session.query(EvaluationSet)
+        .filter_by(
+            old_annotation_set_id=old_set_id,
+            new_annotation_set_id=new_set_id,
+        )
+        .one_or_none()
+    )
+    if eset is None:
+        raise RuntimeError(
+            f"EvaluationSet missing for train pair ({v_old}->{v_new}). "
+            "Materialize it via scripts/materialize_lab_intervals.py "
+            "or POST /annotations/evaluation-sets/generate before retrying."
+        )
+    eval_data, _ = load_evaluation_data_for_set(session, eset)
+    return eval_data
+
+
+def _prepare_split_query_inputs(
+    session: Session,
+    ctx: _TrainSplitContext,
+    old_set_id: uuid.UUID,
+    all_query_accessions: set[str],
+    emit: EmitFn,
+) -> _TestQueryInputs:
+    """Build references and the query-embedding slice for one split."""
+    ref_by_aspect = _build_reference_from_cache(
+        session,
+        old_set_id,
+        ctx.embedding_pool,
+        ctx.all_accessions,
+        ctx.acc_to_idx,
+        emit,
+    )
+    query_accs = [a for a in all_query_accessions if a in ctx.acc_to_idx]
+    query_indices = np.array(
+        [ctx.acc_to_idx[a] for a in query_accs], dtype=np.int32
+    )
+    query_emb = (
+        ctx.embedding_pool[query_indices].astype(np.float32)
+        if len(query_indices) > 0
+        else np.empty((0, ctx.embedding_pool.shape[1]), dtype=np.float32)
+    )
+    return _TestQueryInputs(
+        ref_by_aspect=ref_by_aspect, valid=query_accs, emb=query_emb
+    )
+
+
+def _knn_and_filter_to_pivot(
+    session: Session,
+    ctx: _TrainSplitContext,
+    q_inputs: _TestQueryInputs,
+    eval_data: Any,
+    sequences: _TestSequences,
+) -> list[dict[str, Any]]:
+    """Run KNN+transfer for one train split and filter to the pivot universe."""
+    p = ctx.payload
+    raw_preds = _knn_transfer_and_label(
+        session,
+        p,
+        KnnTransferContext(
+            valid_queries=q_inputs.valid,
+            query_emb=q_inputs.emb,
+            ref_by_aspect=q_inputs.ref_by_aspect,
+            go_id_map=ctx.go_id_map,
+            aspect_map=ctx.aspect_map,
+            gt_pairs=set(),
+            query_known_gos=eval_data.known,
+            parent_map_str=ctx.parent_map if p.expand_votes_to_ancestors else None,
+            ia_weights=ctx.ia_weights,
+            pca_state=ctx.pca_state,
+            embedding_pool=ctx.embedding_pool,
+        ),
+        sequence_context=SequenceContext(
+            query_sequences=sequences.query_sequences,
+            ref_sequences=sequences.ref_sequences,
+            query_tax_ids=sequences.query_tax_ids,
+            ref_tax_ids=sequences.ref_tax_ids,
+        ),
+    )
+    return cast(
+        "list[dict[str, Any]]",
+        [r for r in raw_preds if r["go_id"] in ctx.pivot_go_ids],  # type: ignore[index]
+    )
+
+
+def _label_and_write_train_split_shards(
+    unlabeled_preds: list[dict[str, Any]],
+    ctx: _TrainSplitContext,
+    cat_gt_pairs: dict[str, set[tuple[str, str]]],
+    eval_data: Any,
+    split_index: int,
+    split_stats: dict[str, Any],
+) -> dict[str, Path]:
+    """Label rows per category, write parquet shards. Mutates ``split_stats``."""
+    base_df = pd.DataFrame(unlabeled_preds, columns=ctx.keep_cols)
+    membership = _compute_test_cat_membership(
+        eval_data, ctx.go_id_map, ctx.aspect_map
+    )
+    cat_paths: dict[str, Path] = {}
+    for cat in _CATEGORIES:
+        members = membership[cat]
+        cat_mask = np.fromiter(
+            (
+                (acc, asp) in members
+                for acc, asp in zip(
+                    base_df["protein_accession"],
+                    base_df["aspect"],
+                    strict=False,
+                )
+            ),
+            count=len(base_df),
+            dtype=bool,
+        )
+        cat_df = base_df.loc[cat_mask].copy()
+        if cat_df.empty:
+            split_stats[f"{cat}_positives"] = 0
+            split_stats[f"{cat}_negatives"] = 0
+            continue
+        gt_p = cat_gt_pairs[cat]
+        labels = np.fromiter(
+            (
+                1 if (acc, go_id) in gt_p else 0
+                for acc, go_id in zip(
+                    cat_df["protein_accession"],
+                    cat_df["go_id"],
+                    strict=False,
+                )
+            ),
+            count=len(cat_df),
+            dtype=np.int8,
+        )
+        cat_df[LABEL_COLUMN] = labels
+        n_pos = int(labels.sum())
+        split_stats[f"{cat}_positives"] = n_pos
+        split_stats[f"{cat}_negatives"] = len(cat_df) - n_pos
+        pq_path = ctx.tmp_dir / f"train_{cat}_split{split_index}.parquet"
+        cat_df.to_parquet(pq_path, index=False)
+        cat_paths[cat] = pq_path
+    return cat_paths
+
+
+def _emit_split_skipped(emit: EmitFn, split_num: int, reason: str) -> None:
+    """Emit the audit-trail event for a skipped training split."""
+    emit(
+        "dump_helper.split_skipped",
+        None,
+        {"split": split_num, "reason": reason},
+        "warning",
+    )
+
+
+def _run_train_split(
+    session: Session,
+    ctx: _TrainSplitContext,
+    split_index: int,
+    emit: EmitFn,
+) -> _TrainSplitOutcome:
+    """Run one training-split iteration end-to-end."""
+    p = ctx.payload
+    v_old = p.train_versions[split_index]
+    v_new = p.train_versions[split_index + 1]
+    emit(
+        "dump_helper.split_start",
+        None,
+        {"split": split_index + 1, "v_old": v_old, "v_new": v_new},
+        "info",
+    )
+    eval_data = _resolve_train_split_eval(session, ctx, v_old, v_new)
+    cat_gt_pairs, all_query_accessions = _collect_cat_gt_pairs(eval_data)
+    if not all_query_accessions:
+        _emit_split_skipped(emit, split_index + 1, "no ground truth in any category")
+        return _build_skipped_outcome(v_old, v_new, "no ground truth")
+    q_inputs = _prepare_split_query_inputs(
+        session, ctx, ctx.version_to_set[v_old], all_query_accessions, emit
+    )
+    if not q_inputs.valid:
+        _emit_split_skipped(emit, split_index + 1, "no query embeddings")
+        gc.collect()
+        return _build_skipped_outcome(v_old, v_new, "no query embeddings")
+    sequences = _load_test_sequences_and_taxonomy(
+        session, p, q_inputs.valid, q_inputs.ref_by_aspect
+    )
+    session.expire_all()
+    unlabeled_preds = _knn_and_filter_to_pivot(
+        session, ctx, q_inputs, eval_data, sequences
+    )
+    gc.collect()
+    split_stats: dict[str, Any] = {
+        "v_old": v_old,
+        "v_new": v_new,
+        "skipped": False,
+        "total_unlabeled": len(unlabeled_preds),
+    }
+    cat_paths = _label_and_write_train_split_shards(
+        unlabeled_preds, ctx, cat_gt_pairs, eval_data, split_index, split_stats
+    )
+    session.expunge_all()
+    gc.collect()
+    emit("dump_helper.split_done", None, split_stats, "info")
+    return _TrainSplitOutcome(split_files=cat_paths, stats=split_stats, skipped=False)
+
+
+# ---------------------------------------------------------------------------
 # Auto operation
 # ---------------------------------------------------------------------------
 
@@ -1472,259 +1704,32 @@ class TrainRerankerAutoOperation:
         # ``snapshot_pair`` column per row.
         valid_split_versions: list[tuple[int, int]] = []
 
+        train_ctx = _TrainSplitContext(
+            payload=p,
+            version_to_set=version_to_set,
+            embedding_pool=all_embeddings,
+            all_accessions=all_accessions,
+            acc_to_idx=acc_to_idx,
+            go_id_map=go_id_map,
+            aspect_map=aspect_map,
+            parent_map=parent_map,
+            ia_weights=ia_weights,
+            pca_state=pca_state,
+            pivot_go_ids=pivot_go_ids,
+            keep_cols=_KEEP_COLS,
+            tmp_dir=tmp_dir,
+        )
+
         try:
             for i in range(len(p.train_versions) - 1):
-                v_old = p.train_versions[i]
-                v_new = p.train_versions[i + 1]
-                old_set_id = version_to_set[v_old]
-                new_set_id = version_to_set[v_new]
-
-                emit(
-                    "dump_helper.split_start",
-                    None,
-                    {"split": i + 1, "v_old": v_old, "v_new": v_new},
-                    "info",
-                )
-
-                # 3a. Load delta from the persisted EvaluationSet artifact.
-                # Per the project's "no on-the-fly reuse" rule, the delta
-                # must be materialized beforehand via
-                # /annotations/evaluation-sets/generate (or the
-                # scripts/materialize_lab_intervals.py helper).
-                eset = (
-                    session.query(EvaluationSet)
-                    .filter_by(
-                        old_annotation_set_id=old_set_id,
-                        new_annotation_set_id=new_set_id,
+                outcome = _run_train_split(session, train_ctx, i, emit)
+                for cat, path in outcome.split_files.items():
+                    split_files[cat].append(path)
+                if not outcome.skipped:
+                    valid_split_versions.append(
+                        (p.train_versions[i], p.train_versions[i + 1])
                     )
-                    .one_or_none()
-                )
-                if eset is None:
-                    raise RuntimeError(
-                        f"EvaluationSet missing for train pair ({v_old}->{v_new}). "
-                        "Materialize it via scripts/materialize_lab_intervals.py "
-                        "or POST /annotations/evaluation-sets/generate before retrying."
-                    )
-                eval_data, _ = load_evaluation_data_for_set(session, eset)
-
-                # Build gt_pairs for each category; collect union of query proteins
-                cat_gt_pairs, all_query_accessions = _collect_cat_gt_pairs(eval_data)
-
-                if not all_query_accessions:
-                    emit(
-                        "dump_helper.split_skipped",
-                        None,
-                        {"split": i + 1, "reason": "no ground truth in any category"},
-                        "warning",
-                    )
-                    per_split_stats.append(
-                        {
-                            "v_old": v_old,
-                            "v_new": v_new,
-                            "skipped": True,
-                            "reason": "no ground truth",
-                        }
-                    )
-                    continue
-
-                # 3b. Build references from preloaded embeddings (only loads annotations)
-                ref_by_aspect = _build_reference_from_cache(
-                    session, old_set_id, all_embeddings, all_accessions, acc_to_idx, emit
-                )
-
-                # 3c. Load query embeddings from preloaded cache
-                query_accs = [a for a in all_query_accessions if a in acc_to_idx]
-                query_indices = np.array([acc_to_idx[a] for a in query_accs], dtype=np.int32)
-                query_emb = (
-                    all_embeddings[query_indices].astype(np.float32)
-                    if len(query_indices) > 0
-                    else np.empty((0, all_embeddings.shape[1]), dtype=np.float32)
-                )
-                valid_queries = query_accs
-
-                if not valid_queries:
-                    emit(
-                        "dump_helper.split_skipped",
-                        None,
-                        {"split": i + 1, "reason": "no query embeddings"},
-                        "warning",
-                    )
-                    per_split_stats.append(
-                        {
-                            "v_old": v_old,
-                            "v_new": v_new,
-                            "skipped": True,
-                            "reason": "no query embeddings",
-                        }
-                    )
-                    del ref_by_aspect, query_emb, valid_queries
-                    gc.collect()
-                    continue
-
-                # 3d. Load sequences / taxonomy if requested
-                qs: dict[str, str] | None = None
-                rs: dict[str, str] | None = None
-                qt: dict[str, int | None] | None = None
-                rt: dict[str, int | None] | None = None
-                if p.compute_alignments or p.compute_taxonomy:
-                    all_ref_accs: set[str] = set()
-                    for asp in _ASPECTS:
-                        all_ref_accs.update(ref_by_aspect[asp]["accessions"])
-                    query_set = set(valid_queries)
-                    if p.compute_alignments:
-                        qs = _load_sequences(session, query_set)
-                        rs = _load_sequences(session, all_ref_accs)
-                    if p.compute_taxonomy:
-                        qt = _load_taxonomy_ids(session, query_set)
-                        rt = _load_taxonomy_ids(session, all_ref_accs)
-
-                # 3e. KNN + GO transfer (once, no labeling yet)
-                session.expire_all()
-                unlabeled_preds = _knn_transfer_and_label(
-                    session,
-                    p,
-                    KnnTransferContext(
-                        valid_queries=valid_queries,
-                        query_emb=query_emb,
-                        ref_by_aspect=ref_by_aspect,
-                        go_id_map=go_id_map,
-                        aspect_map=aspect_map,
-                        gt_pairs=set(),  # empty gt → all label=0
-                        query_known_gos=eval_data.known,
-                        parent_map_str=parent_map if p.expand_votes_to_ancestors else None,
-                        ia_weights=ia_weights,
-                        pca_state=pca_state,
-                        embedding_pool=all_embeddings,
-                    ),
-                    sequence_context=SequenceContext(
-                        query_sequences=qs,
-                        ref_sequences=rs,
-                        query_tax_ids=qt,
-                        ref_tax_ids=rt,
-                    ),
-                )
-
-                # Restrict predictions to terms present in the pivot universe —
-                # ground truth was reconciled into pivot space above.
-                # _knn_transfer_and_label always returns list[dict].
-                # Cast explicitly to silence the list-widening mypy
-                # check that fires on self-reassignment of unlabeled_preds.
-                unlabeled_preds = cast(
-                    "list[dict[str, Any]]",
-                    [
-                        r
-                        for r in unlabeled_preds
-                        if r["go_id"] in pivot_go_ids  # type: ignore[index]
-                    ],
-                )
-
-                # Free large objects immediately
-                del ref_by_aspect, query_emb, valid_queries, qs, rs, qt, rt
-                gc.collect()
-
-                split_stats: dict[str, Any] = {
-                    "v_old": v_old,
-                    "v_new": v_new,
-                    "skipped": False,
-                    "total_unlabeled": len(unlabeled_preds),
-                }
-
-                # 3e. Build DataFrame, label per category, write to parquet.
-                # Filter rows by genuine (protein, aspect) cat membership
-                # before labelling. Without this filter the same row appears
-                # in all three cat shards with only the label re-assigned;
-                # the resulting parquet leaks the cat boundary through
-                # ``anc2vec_query_known_count`` (constant 0 in NK whenever
-                # the protein is genuinely NK), which the booster picks up
-                # as a near-perfect positive proxy.
-                #
-                # Each (protein, aspect) maps to exactly one category by
-                # the CAFA definition: NK is global (zero pre-cutoff
-                # annotations across namespaces), LK and PK are per
-                # namespace. Membership is recovered from the aspects of
-                # the new annotations recorded in ``eval_data.cat``.
-                base_df = pd.DataFrame(unlabeled_preds, columns=_KEEP_COLS)
-                del unlabeled_preds
-                gc.collect()
-
-                # ``aspect_map`` is keyed by go_term_id (int); ``eval_data``
-                # carries go_id strings. Invert ``go_id_map`` once so the
-                # cat-membership lookup uses the same key space as the
-                # parquet's ``aspect`` column ("P"/"F"/"C" single codes).
-                aspect_by_go_id: dict[str, str] = {
-                    go_id: aspect_map[term_id]
-                    for term_id, go_id in go_id_map.items()
-                    if term_id in aspect_map
-                }
-                cat_membership: dict[str, set[tuple[str, str]]] = {}
-                for cat in _CATEGORIES:
-                    gt = getattr(eval_data, cat)
-                    members: set[tuple[str, str]] = set()
-                    for protein, go_ids in gt.items():
-                        for go_id in go_ids:
-                            asp = aspect_by_go_id.get(go_id, "")
-                            if asp:
-                                members.add((protein, asp))
-                    cat_membership[cat] = members
-
-                for cat in _CATEGORIES:
-                    members = cat_membership[cat]
-                    cat_mask = np.fromiter(
-                        (
-                            (acc, asp) in members
-                            for acc, asp in zip(
-                                base_df["protein_accession"],
-                                base_df["aspect"],
-                                strict=False,
-                            )
-                        ),
-                        count=len(base_df),
-                        dtype=bool,
-                    )
-                    cat_df = base_df.loc[cat_mask].copy()
-                    if cat_df.empty:
-                        split_stats[f"{cat}_positives"] = 0
-                        split_stats[f"{cat}_negatives"] = 0
-                        continue
-
-                    gt_p = cat_gt_pairs[cat]
-                    labels = np.fromiter(
-                        (
-                            1 if (acc, go_id) in gt_p else 0
-                            for acc, go_id in zip(
-                                cat_df["protein_accession"],
-                                cat_df["go_id"],
-                                strict=False,
-                            )
-                        ),
-                        count=len(cat_df),
-                        dtype=np.int8,
-                    )
-                    cat_df[LABEL_COLUMN] = labels
-                    n_pos = int(labels.sum())
-                    split_stats[f"{cat}_positives"] = n_pos
-                    split_stats[f"{cat}_negatives"] = len(cat_df) - n_pos
-
-                    pq_path = tmp_dir / f"train_{cat}_split{i}.parquet"
-                    cat_df.to_parquet(pq_path, index=False)
-                    split_files[cat].append(pq_path)
-                    del cat_df
-
-                del base_df
-                gc.collect()
-
-                # Evict the SQLAlchemy identity map — ``session.expire_all``
-                # (called earlier) only marks rows stale but keeps them in
-                # the identity map, so across 12+ splits the cached
-                # ``Sequence.protein_sequence`` strings leak ~30 GB. Full
-                # expunge + gc forces the ORM to release them before the
-                # next split's ``_load_sequences`` repopulates the cache.
-                session.expunge_all()
-                gc.collect()
-
-                valid_split_versions.append((v_old, v_new))
-                per_split_stats.append(split_stats)
-                emit("dump_helper.split_done", None, split_stats, "info")
+                per_split_stats.append(outcome.stats)
 
             # Check we have data
             if not any(split_files[c] for c in _CATEGORIES):
