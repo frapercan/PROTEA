@@ -21,7 +21,14 @@ class SupportCreate(BaseModel):
     submissions are rejected with 422 rather than silently truncated.
     """
 
-    comment: str | None = Field(default=None)
+    comment: str | None = Field(
+        default=None,
+        description=(
+            "Optional free-form note shown on the support feed. "
+            "Capped at ``api.max_comment_length`` from the tuning "
+            "config."
+        ),
+    )
 
     @field_validator("comment")
     @classmethod

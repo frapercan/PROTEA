@@ -142,6 +142,30 @@ class TestSchemas:
             "user-defined schemas missing description: " + ", ".join(offenders)
         )
 
+    def test_every_user_schema_field_has_description(self, spec: dict[str, Any]) -> None:
+        """T4.3 close (field-level): every property in user schemas has a description.
+
+        Catches future regressions where a new ``Field(...)`` lands without
+        a ``description=`` kwarg or a bare type annotation slips in (e.g.
+        ``foo: int`` instead of ``foo: int = Field(..., description=...)``).
+        Same scope rules as the schema-level test: framework-owned
+        ``Body_*`` + ``ValidationError`` entries are skipped.
+        """
+        offenders: list[str] = []
+        for name, schema in spec.get("components", {}).get("schemas", {}).items():
+            if name in self._AUTO_GENERATED:
+                continue
+            if name.startswith(self._AUTO_PREFIX):
+                continue
+            for prop_name, prop_def in schema.get("properties", {}).items():
+                if not isinstance(prop_def, dict):
+                    continue
+                if not prop_def.get("description"):
+                    offenders.append(f"{name}.{prop_name}")
+        assert offenders == [], (
+            "user-schema properties missing description: " + ", ".join(offenders)
+        )
+
 
 class TestOperations:
     def test_every_v1_operation_has_description(self, spec: dict[str, Any]) -> None:
