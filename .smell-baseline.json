@@ -133,15 +133,6 @@
       "threshold": 6
     },
     {
-      "key": "params::protea/core/feature_enricher.py::expand_predictions_to_ancestors",
-      "kind": "params",
-      "path": "protea/core/feature_enricher.py",
-      "name": "expand_predictions_to_ancestors",
-      "line": 136,
-      "metric": 7,
-      "threshold": 6
-    },
-    {
       "key": "params::protea/core/operations/load_quickgo_annotations.py::LoadQuickGOAnnotationsOperation._store_buffer",
       "kind": "params",
       "path": "protea/core/operations/load_quickgo_annotations.py",
