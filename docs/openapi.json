@@ -2711,6 +2711,25 @@
               "title": "Limit",
               "type": "integer"
             }
+          },
+          {
+            "description": "Cursor for pagination (T4.2): return rows with ``created_at < after`` only. Use the ``created_at`` of the last row from the previous page to walk forward.",
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cursor for pagination (T4.2): return rows with ``created_at < after`` only. Use the ``created_at`` of the last row from the previous page to walk forward.",
+              "title": "After"
+            }
           }
         ],
         "responses": {
