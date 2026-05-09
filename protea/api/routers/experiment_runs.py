@@ -101,13 +101,54 @@ class CreateExperimentRunRequest(BaseModel):
 class UpdateExperimentRunRequest(BaseModel):
     """All fields optional; absent ones leave the column untouched."""
 
-    description: str | None = None
-    hypothesis: str | None = None
-    findings: str | None = None
-    status: ExperimentRunStatus | None = None
-    config: dict[str, Any] | None = None
-    provenance: dict[str, Any] | None = None
-    tags: list[str] | None = None
+    description: str | None = Field(
+        default=None,
+        description=(
+            "Replace the run's narrative description text. ``None`` "
+            "leaves the column untouched."
+        ),
+    )
+    hypothesis: str | None = Field(
+        default=None,
+        description="Replace the hypothesis text. ``None`` leaves it untouched.",
+    )
+    findings: str | None = Field(
+        default=None,
+        description=(
+            "Free-form narrative recording the run's outcome. Set when "
+            "transitioning to ``done`` to capture the writeup."
+        ),
+    )
+    status: ExperimentRunStatus | None = Field(
+        default=None,
+        description=(
+            "Transition the run to a new status. The server stamps "
+            "``started_at`` on the first move to ``running`` and "
+            "``finished_at`` on the first move to ``done`` / "
+            "``abandoned`` (idempotent on re-entry)."
+        ),
+    )
+    config: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Replace the structured config blob. ``None`` leaves it "
+            "untouched; ``{}`` clears it."
+        ),
+    )
+    provenance: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Replace the provenance overlay. ``None`` leaves it "
+            "untouched; ``{}`` clears it."
+        ),
+    )
+    tags: list[str] | None = Field(
+        default=None,
+        description=(
+            "Replace the tag list. ``None`` leaves it untouched; "
+            "``[]`` clears it."
+        ),
+    )
 
 
 def _serialise_experiment_run(run: ExperimentRun) -> dict[str, Any]:
