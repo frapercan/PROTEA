@@ -34,7 +34,7 @@ def _resolve_reranker_metrics_entities(
     """Resolve PS + RerankerModel + EvaluationSet, raising on any miss.
 
     Returned ``EvaluationSet`` is the ORM row (typed ``Any`` to keep
-    the import local — only this helper needs it). Imports
+    the import local; only this helper needs it). Imports
     ``EntityNotFoundError`` lazily to avoid a circular dependency
     with ``scoring_service`` (which re-exports this module's
     orchestrator).

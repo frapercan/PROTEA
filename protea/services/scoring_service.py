@@ -1,4 +1,4 @@
-"""Scoring service — business logic extracted from ``protea.api.routers.scoring``.
+"""Scoring service: business logic extracted from ``protea.api.routers.scoring``.
 
 The router is a thin FastAPI translation layer. All non-trivial logic
 (booster loading, signal-coverage validation, ORM ↔ response model
@@ -39,7 +39,7 @@ class ScoringServiceError(Exception):
 
 
 class EntityNotFoundError(ScoringServiceError):
-    """Generic 404 — a referenced entity does not exist.
+    """Generic 404; a referenced entity does not exist.
 
     Construct with the entity label (e.g. ``"PredictionSet"``) and
     the looked-up UUID; the message becomes ``"<entity> not found"``.
@@ -67,7 +67,7 @@ class BoosterUnavailableError(ScoringServiceError):
     def __init__(self, reranker_id: uuid.UUID) -> None:
         self.reranker_id = reranker_id
         super().__init__(
-            f"RerankerModel {reranker_id} has no booster — both "
+            f"RerankerModel {reranker_id} has no booster: both "
             f"``model_data`` (legacy inline) and ``artifact_uri`` "
             f"(artifact-store path) are NULL."
         )
@@ -155,7 +155,7 @@ def delete_scoring_config_data(
 def create_preset_configs_data(session: Session) -> list[str]:
     """Insert built-in :data:`PRESET_CONFIGS` that are not already present.
 
-    Idempotent — presets matched by ``name`` are skipped silently.
+    Idempotent: presets matched by ``name`` are skipped silently.
     Returns the list of preset names actually created (for the HTTP
     response body).
     """

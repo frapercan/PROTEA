@@ -224,7 +224,7 @@ PRESET_CONFIGS: list[dict[str, Any]] = [
         },
         "description": (
             "Pure cosine similarity of the winning neighbour, converted to [0, 1]. "
-            "Baseline — tests the hypothesis that the nearest-neighbour distance "
+            "Baseline; tests the hypothesis that the nearest-neighbour distance "
             "alone is enough signal."
         ),
     },

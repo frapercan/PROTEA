@@ -1,4 +1,4 @@
-"""Annotations service — pure-logic helpers extracted from
+"""Annotations service: pure-logic helpers extracted from
 ``protea.api.routers.annotations``.
 
 ORM ↔ dict serialisers and the read-side handlers (snapshot/IA-url
@@ -36,7 +36,7 @@ class AnnotationsServiceError(Exception):
 
 
 class EntityNotFoundError(AnnotationsServiceError):
-    """Generic 404 — a referenced entity does not exist.
+    """Generic 404; a referenced entity does not exist.
 
     Pickle-safe via ``__reduce__`` so the structured ``entity`` /
     ``entity_id`` attrs survive a round-trip without tripping
@@ -238,8 +238,8 @@ def iter_groundtruth_tsv(
     ``category`` is ``"nk"``, ``"lk"``, ``"pk"`` or ``"known"``.
     Each row is ``"<protein>\\t<go_id>\\n"``; sorted by protein then GO id
     so the output is deterministic. The caller wraps the list in a
-    ``StreamingResponse`` (the materialised list is small enough — a
-    few thousand rows for typical CAFA splits — to fit in memory and
+    ``StreamingResponse`` (the materialised list is small enough, a
+    few thousand rows for typical CAFA splits, to fit in memory and
     keeps the streaming generator simple).
 
     Raises :class:`EntityNotFoundError` when the EvaluationSet does
@@ -421,7 +421,7 @@ def delete_evaluation_set_collect_keys(
     artifact keys those rows referenced (per-result cafaeval outputs)
     so the caller can wipe them from the store. The caller is also
     expected to delete the set's ground-truth artifact via
-    ``protea.core.evaluation.groundtruth_key_for(eval_id)`` —
+    ``protea.core.evaluation.groundtruth_key_for(eval_id)``;
     that key is not included here because it is a fixed function of
     ``eval_id``.
 

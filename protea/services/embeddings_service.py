@@ -1,4 +1,4 @@
-"""Embeddings service — pure-logic helpers extracted from
+"""Embeddings service: pure-logic helpers extracted from
 ``protea.api.routers.embeddings``.
 
 Validation rules, ORM ↔ dict serialisers, and the predictions-TSV
@@ -46,7 +46,7 @@ class EmbeddingsServiceError(Exception):
 
 
 class EntityNotFoundError(EmbeddingsServiceError):
-    """Generic 404 — a referenced entity does not exist.
+    """Generic 404; a referenced entity does not exist.
 
     Construct with the entity label (e.g. ``"PredictionSet"``) and
     the looked-up UUID; the message becomes ``"<entity> not found"``.
@@ -192,7 +192,7 @@ def list_prediction_sets_data(session: Session) -> list[dict[str, Any]]:
     annotation-set label, ontology version, plus the per-set
     ``prediction_count``. The per-set count comes from a single
     ``GROUP BY`` over GOPrediction (one index-only scan) rather than a
-    correlated subquery — for ~10⁷-row tables Postgres' planner falls
+    correlated subquery; for ~10⁷-row tables Postgres' planner falls
     into a per-row index probe with the correlated form (~30s per
     outer row). The grouped form returns all 100 counts at once.
     """
@@ -335,7 +335,7 @@ def iter_predictions_cafa_tsv(
 
     DB-level deduplication: a ``GROUP BY (protein_accession, go_term_id)``
     + ``MIN(distance)`` subquery keeps the best row per pair so the
-    Python side never needs an unbounded ``seen`` set — true streaming.
+    Python side never needs an unbounded ``seen`` set; true streaming.
     Score is ``max(0.0, 1.0 - distance)`` clamped to ``[0, 1]``.
     """
     with session_scope(factory) as session:
@@ -420,7 +420,7 @@ def get_predictions_for_protein(
     """Return all predicted GO terms for one protein, sorted by distance.
 
     Raises :class:`EntityNotFoundError` when the PredictionSet does
-    not resolve. (No 404 for unknown accession — returns empty list,
+    not resolve. (No 404 for unknown accession; returns empty list,
     matching the legacy endpoint's behaviour.)
     """
     if session.get(PredictionSet, prediction_set_id) is None:

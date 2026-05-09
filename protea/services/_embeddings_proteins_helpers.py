@@ -96,7 +96,7 @@ def _load_match_counts(
 
     A "match" = one ``(protein, go_id)`` pair that is both predicted
     in this prediction set and present as a known annotation in
-    ``annotation_set_id`` — a precision proxy.
+    ``annotation_set_id`` (a precision proxy).
     """
     if not accessions:
         return {}
@@ -135,7 +135,7 @@ def list_proteins_in_prediction_set(
     ``min_distance`` (closest neighbour), ``annotation_count``
     (known annotations against the same AnnotationSet) and
     ``match_count`` (predictions whose ``(protein, go_id)`` is in
-    the known set — a precision proxy).
+    the known set; a precision proxy).
 
     Decomposed into private helpers (``_paginate_protein_rows``,
     ``_load_protein_orm_map``, ``_load_annotation_counts``,

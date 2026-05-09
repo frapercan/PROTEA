@@ -53,7 +53,7 @@ def _bfs_ancestors(
     ``target`` (parent id), ``relation_type``.
 
     Takes the seed ``GOTerm`` objects directly (not just their ids)
-    so we do not re-query the DB for them — preserves the exact
+    so we do not re-query the DB for them; preserves the exact
     ``session.query`` call sequence the original implementation
     expected.
     """

@@ -23,7 +23,7 @@ def iter_evaluation_artifacts_zip(
 ) -> Iterator[bytes]:
     """Stream a deflate-compressed zip of the evaluation-result artifacts.
 
-    The artifact store is resolved internally from settings — the
+    The artifact store is resolved internally from settings; the
     caller does not need to thread the store through. Keys are
     rewritten to drop the ``eval_artifacts/<result_id>/`` prefix so
     the zip entries are the relative file names cafaeval emitted.
