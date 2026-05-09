@@ -111,7 +111,15 @@ def load_ontology_snapshot(
 def get_go_subgraph(
     snapshot_id: UUID,
     go_ids: str = Query(..., description="Comma-separated GO IDs, e.g. GO:0003674,GO:0008150"),
-    depth: int = Query(default=3, ge=1, le=6),
+    depth: int = Query(
+        default=3,
+        ge=1,
+        le=6,
+        description=(
+            "Number of ancestor hops to walk up the GO DAG from each "
+            "seed term; capped at 6 to keep the response bounded."
+        ),
+    ),
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
     """Return a subgraph of the GO DAG containing the requested terms and their ancestors up to ``depth`` levels."""

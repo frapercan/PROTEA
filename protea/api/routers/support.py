@@ -43,7 +43,15 @@ class SupportCreate(BaseModel):
 
 @router.get("")
 def get_support(
-    all_comments: bool = Query(False),
+    all_comments: bool = Query(
+        False,
+        description=(
+            "When false (default), the response carries only the most "
+            "recent N comments (per the tuning config). When true, "
+            "every comment is returned (uncapped; intended for moderation "
+            "tooling, not the public landing page)."
+        ),
+    ),
     factory=Depends(get_session_factory),
 ) -> dict[str, Any]:
     """Return total thumbs-up count and comments.

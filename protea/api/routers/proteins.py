@@ -91,11 +91,24 @@ def get_protein_stats(
 
 @router.get("", summary="List proteins")
 def list_proteins(
-    search: str | None = Query(default=None),
-    reviewed: bool | None = Query(default=None),
-    canonical_only: bool = Query(default=True),
-    limit: int = Query(default=50, le=500),
-    offset: int = Query(default=0, ge=0),
+    search: str | None = Query(
+        default=None,
+        description="Substring filter on accession/entry/gene/organism (case-insensitive).",
+    ),
+    reviewed: bool | None = Query(
+        default=None,
+        description="Filter to UniProt-reviewed (true) or unreviewed (false). None = no filter.",
+    ),
+    canonical_only: bool = Query(
+        default=True,
+        description="When true (default), exclude protein isoforms.",
+    ),
+    limit: int = Query(default=50, le=500, description="Max rows per page; capped at 500."),
+    offset: int = Query(
+        default=0,
+        ge=0,
+        description="Offset into alphabetically-ordered (by accession) results.",
+    ),
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
     """Paginated protein listing with optional full-text search across accession, entry name, gene name, and organism."""
@@ -244,7 +257,14 @@ def get_protein(
 @router.get("/{accession}/annotations", summary="List GO annotations for a protein")
 def get_protein_annotations(
     accession: str,
-    annotation_set_id: str | None = Query(default=None),
+    annotation_set_id: str | None = Query(
+        default=None,
+        description=(
+            "Optional UUID of an ``AnnotationSet`` to scope the "
+            "lookup. When omitted, annotations from every set the "
+            "protein appears in are returned. Invalid UUIDs return 422."
+        ),
+    ),
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> list[dict[str, Any]]:
     """Return all GO term annotations for a protein, joined with term details and annotation set source.

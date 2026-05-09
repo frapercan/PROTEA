@@ -191,6 +191,38 @@ class TestOperations:
             "v1 operations missing description: " + ", ".join(offenders)
         )
 
+    def test_every_v1_query_or_header_param_has_description(
+        self, spec: dict[str, Any]
+    ) -> None:
+        """T4.3 close (query-param level): every v1 query/header parameter is documented.
+
+        Path parameters are deliberately excluded: they are
+        self-documenting from the URL template (``{eval_id}``,
+        ``{job_id}``, ...). Catches future regressions where a new
+        ``Query(default=...)`` or ``Header(default=...)`` lands without
+        a ``description=`` kwarg.
+        """
+        offenders: list[str] = []
+        for path, item in spec["paths"].items():
+            if not isinstance(item, dict):
+                continue
+            if not path.startswith("/v1/"):
+                continue
+            for method, operation in item.items():
+                if method not in _OPERATION_KEYS or not isinstance(operation, dict):
+                    continue
+                for param in operation.get("parameters", []):
+                    if param.get("in") not in ("query", "header"):
+                        continue
+                    if not param.get("description"):
+                        offenders.append(
+                            f"{method.upper()} {path} :: {param.get('name')} "
+                            f"({param.get('in')})"
+                        )
+        assert offenders == [], (
+            "v1 query/header parameters missing description: " + ", ".join(offenders)
+        )
+
     def test_every_operation_has_responses(self, spec: dict[str, Any]) -> None:
         offenders: list[str] = []
         for path, item in spec["paths"].items():
