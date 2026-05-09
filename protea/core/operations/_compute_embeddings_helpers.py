@@ -16,11 +16,15 @@ from protea.infrastructure.orm.models.embedding.sequence_embedding import Sequen
 
 if TYPE_CHECKING:
     from protea.core.operations.compute_embeddings import (
+        ChunkEmbedding,
+        ComputeEmbeddingsBatchPayload,
         ComputeEmbeddingsPayload,
         StoreEmbeddingsPayload,
     )
+    from protea.infrastructure.orm.models.sequence.sequence import Sequence
 
 _BATCH_QUEUE = "protea.embeddings.batch"
+_WRITE_QUEUE = "protea.embeddings.write"
 
 
 def build_batch_dispatch_messages(
@@ -60,6 +64,55 @@ def build_batch_dispatch_messages(
         )
         for batch_seq_ids in batches
     ]
+
+
+def serialize_inferred_chunks(
+    sequences: list[Sequence],
+    batch_chunks: list[list[ChunkEmbedding]],
+) -> list[dict]:
+    """Build per-sequence dicts the store_embeddings worker consumes.
+
+    Pairs each input ``Sequence`` row with its inferred chunk list and
+    flattens each ``ChunkEmbedding`` into JSON-friendly fields. The
+    write worker uses these dicts directly without re-fetching from
+    the DB.
+    """
+    return [
+        {
+            "sequence_id": seq.id,
+            "chunks": [
+                {
+                    "chunk_index_s": c.chunk_index_s,
+                    "chunk_index_e": c.chunk_index_e,
+                    "vector": c.vector.tolist(),
+                    "embedding_dim": int(c.vector.shape[0]),
+                }
+                for c in chunks
+            ],
+        }
+        for seq, chunks in zip(sequences, batch_chunks, strict=False)
+    ]
+
+
+def build_store_message(
+    parent_job_id: uuid.UUID,
+    p: ComputeEmbeddingsBatchPayload,
+    write_sequences: list[dict],
+) -> tuple[str, dict]:
+    """Build the queue tuple that hands off inferred batches to the write worker."""
+    return (
+        _WRITE_QUEUE,
+        {
+            "operation": "store_embeddings",
+            "job_id": str(parent_job_id),
+            "payload": {
+                "parent_job_id": str(parent_job_id),
+                "embedding_config_id": p.embedding_config_id,
+                "skip_existing": p.skip_existing,
+                "sequences": write_sequences,
+            },
+        },
+    )
 
 
 def build_embedding_rows(

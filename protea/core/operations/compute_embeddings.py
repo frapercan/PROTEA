@@ -18,6 +18,8 @@ from protea.core.contracts.parent_progress import update_parent_progress
 from protea.core.operations._compute_embeddings_helpers import (
     build_batch_dispatch_messages,
     build_embedding_rows,
+    build_store_message,
+    serialize_inferred_chunks,
 )
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
@@ -351,8 +353,6 @@ class ComputeEmbeddingsBatchOperation:
         config_id = uuid.UUID(p.embedding_config_id)
         parent_job_id = UUID(p.parent_job_id)
 
-        # Skip processing if the parent job was cancelled or failed while this
-        # batch message was waiting in the queue.
         parent = session.get(Job, parent_job_id)
         if parent is not None and parent.status in (JobStatus.CANCELLED, JobStatus.FAILED):
             emit(
@@ -368,72 +368,46 @@ class ComputeEmbeddingsBatchOperation:
             raise ValueError(f"EmbeddingConfig {p.embedding_config_id} not found")
 
         sequences = session.query(Sequence).filter(Sequence.id.in_(p.sequence_ids)).all()
-
         t0 = time.perf_counter()
         emit(
             "compute_embeddings_batch.start",
             None,
-            {
-                "sequences": len(sequences),
-                "parent_job_id": str(parent_job_id),
-            },
+            {"sequences": len(sequences), "parent_job_id": str(parent_job_id)},
             "info",
         )
 
-        model, tokenizer = self._load_model(config, p.device, emit)
+        write_sequences = self._infer_all(config, sequences, p, emit)
 
-        # Run inference only — no DB writes here.
-        write_sequences = []
-        for i in range(0, len(sequences), p.batch_size):
-            batch = sequences[i : i + p.batch_size]
-            seq_strs = [s.sequence for s in batch]
-            batch_chunks = self._embed_batch(model, tokenizer, seq_strs, config, p.device)
-            for seq, chunks in zip(batch, batch_chunks, strict=False):
-                write_sequences.append(
-                    {
-                        "sequence_id": seq.id,
-                        "chunks": [
-                            {
-                                "chunk_index_s": c.chunk_index_s,
-                                "chunk_index_e": c.chunk_index_e,
-                                "vector": c.vector.tolist(),
-                                "embedding_dim": int(c.vector.shape[0]),
-                            }
-                            for c in chunks
-                        ],
-                    }
-                )
-
-        elapsed = time.perf_counter() - t0
         emit(
             "compute_embeddings_batch.done",
             None,
             {
                 "sequences_inferred": len(write_sequences),
-                "elapsed_seconds": elapsed,
+                "elapsed_seconds": time.perf_counter() - t0,
             },
             "info",
         )
-
-        # Hand off to the write worker — GPU is free to take the next batch.
         return OperationResult(
             result={"sequences_inferred": len(write_sequences)},
-            publish_operations=[
-                (
-                    _WRITE_QUEUE,
-                    {
-                        "operation": "store_embeddings",
-                        "job_id": str(parent_job_id),
-                        "payload": {
-                            "parent_job_id": str(parent_job_id),
-                            "embedding_config_id": p.embedding_config_id,
-                            "skip_existing": p.skip_existing,
-                            "sequences": write_sequences,
-                        },
-                    },
-                )
-            ],
+            publish_operations=[build_store_message(parent_job_id, p, write_sequences)],
         )
+
+    def _infer_all(
+        self,
+        config: EmbeddingConfig,
+        sequences: list[Sequence],
+        p: ComputeEmbeddingsBatchPayload,
+        emit: EmitFn,
+    ) -> list[dict]:
+        """Run model inference over ``sequences`` in batches of ``p.batch_size``."""
+        model, tokenizer = self._load_model(config, p.device, emit)
+        write_sequences: list[dict] = []
+        for i in range(0, len(sequences), p.batch_size):
+            batch = sequences[i : i + p.batch_size]
+            seq_strs = [s.sequence for s in batch]
+            batch_chunks = self._embed_batch(model, tokenizer, seq_strs, config, p.device)
+            write_sequences.extend(serialize_inferred_chunks(batch, batch_chunks))
+        return write_sequences
 
     def _load_model(self, config: EmbeddingConfig, device: str, emit: EmitFn) -> tuple[Any, Any]:
         return _get_or_load_model(config, device, emit)
