@@ -8,7 +8,7 @@ focused on payload validation, model loading, and the publish path.
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy.orm import Session
 
@@ -160,3 +160,29 @@ def build_embedding_rows(
             )
             embeddings_stored += 1
     return rows, embeddings_stored, sequences_skipped
+
+
+def t5_forward_pass(model: Any, input_ids: Any, attention_mask: Any) -> Any:
+    """Run a T5 encoder forward pass under ``no_grad``; return ``hidden_states``.
+
+    Lazy-imports ``torch`` so this module stays importable on machines
+    without it (e.g. the API process where embedding code is never
+    exercised). Frees the ``outputs`` reference and triggers a CUDA
+    cache flush before returning so the caller can reuse the residual
+    GPU memory for the per-sequence pool step.
+
+    Pulled out of ``_embed_t5`` to keep that backend entry point under
+    the §3 60-LOC ceiling.
+    """
+    import torch
+
+    with torch.no_grad():
+        outputs = model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            output_hidden_states=True,
+        )
+    hidden_states = outputs.hidden_states  # tuple of (B, L, D)
+    del outputs
+    torch.cuda.empty_cache()
+    return hidden_states
