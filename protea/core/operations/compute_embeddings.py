@@ -541,41 +541,16 @@ def _get_or_load_model(config: EmbeddingConfig, device: str, emit: EmitFn) -> tu
     return _MODEL_CACHE[key]
 
 
-# Cached map of backend plugins resolved from the ``protea.backends``
-# entry_points group.  Lazy: populated on first call to ``_load_model``.
-# ``None`` means "not yet discovered"; an empty dict means "no backends
-# installed" (which is a hard error at load time, not a registry warning).
-_BACKEND_PLUGINS: dict[str, Any] | None = None
-
-
 def _get_backend_plugins() -> dict[str, Any]:
-    """Discover and cache backend plugins via ``entry_points``.
+    """Thin wrapper around ``protea.core.plugins.discover_plugins``.
 
-    Returns a dict keyed by ``plugin.name``. Each plugin must implement
-    :class:`protea_contracts.EmbeddingBackend`. Discovery is performed
-    once per process; subsequent calls return the cached map.
-
-    A plugin whose ``name`` attribute disagrees with its entry_point
-    name is a hard error: the entry_points file and the class
-    declaration must agree, and silently letting them drift would make
-    "Unknown model_backend" errors confusing.
+    The shared discovery helper handles the cache + name-mismatch hard
+    error; this shim exists so the resolver below has a stable internal
+    name for monkey-patching in tests.
     """
-    global _BACKEND_PLUGINS
-    if _BACKEND_PLUGINS is None:
-        from importlib.metadata import entry_points
+    from protea.core.plugins import discover_plugins
 
-        cache: dict[str, Any] = {}
-        for ep in entry_points(group="protea.backends"):
-            plugin = ep.load()
-            if getattr(plugin, "name", None) != ep.name:
-                raise RuntimeError(
-                    f"Backend plugin name mismatch: entry_point {ep.name!r} "
-                    f"resolves to plugin with name "
-                    f"{getattr(plugin, 'name', None)!r}"
-                )
-            cache[ep.name] = plugin
-        _BACKEND_PLUGINS = cache
-    return _BACKEND_PLUGINS
+    return discover_plugins("protea.backends")
 
 
 def _resolve_backend(backend_name: str) -> Any:
