@@ -140,8 +140,19 @@ def create_dataset(
 @router.get("", summary="List registered datasets")
 def list_datasets(
     name_like: str | None = Query(default=None, description="Substring filter on name"),
-    embedding_config_id: UUID | None = Query(default=None),
-    limit: int = Query(default=50, ge=1, le=500),
+    embedding_config_id: UUID | None = Query(
+        default=None,
+        description=(
+            "Filter datasets to those derived from one specific "
+            "``embedding_config`` UUID."
+        ),
+    ),
+    limit: int = Query(
+        default=50,
+        ge=1,
+        le=500,
+        description="Max rows per page; capped at 500.",
+    ),
     after: datetime | None = Query(
         default=None,
         description=(

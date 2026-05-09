@@ -137,12 +137,23 @@ def create_experiment_run(
 
 @router.get("", summary="List experiment runs")
 def list_experiment_runs(
-    status: ExperimentRunStatus | None = Query(default=None),
-    limit: int = Query(default=50, ge=1, le=500),
+    status: ExperimentRunStatus | None = Query(
+        default=None,
+        description=(
+            "Filter by ``ExperimentRunStatus`` (``planned``, "
+            "``running``, ``done``, ``abandoned``)."
+        ),
+    ),
+    limit: int = Query(
+        default=50,
+        ge=1,
+        le=500,
+        description="Max rows per page; capped at 500.",
+    ),
     after: datetime | None = Query(
         default=None,
         description=(
-            "Cursor for pagination (T4.2) — return rows with "
+            "Cursor for pagination (T4.2); return rows with "
             "``created_at < after`` only. Use the ``created_at`` of "
             "the last row from the previous page to walk forward."
         ),

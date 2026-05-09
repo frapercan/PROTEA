@@ -40,15 +40,46 @@ class JobListFilters(NamedTuple):
 
 
 def _job_list_filters_dep(
-    status: str | None = Query(default=None),
-    operation: str | None = Query(default=None),
-    include_children: bool = Query(default=False),
-    parent_job_id: UUID | None = Query(default=None),
-    limit: int = Query(default=50, ge=1, le=500),
+    status: str | None = Query(
+        default=None,
+        description=(
+            "Filter by ``JobStatus`` enum value (``queued``, "
+            "``running``, ``succeeded``, ``failed``, ``cancelled``). "
+            "Unknown values return 400."
+        ),
+    ),
+    operation: str | None = Query(
+        default=None,
+        description=(
+            "Filter by registered operation name "
+            "(e.g. ``compute_embeddings``, ``predict_go_terms``)."
+        ),
+    ),
+    include_children: bool = Query(
+        default=False,
+        description=(
+            "When true, include batch sub-jobs (rows with a "
+            "non-null ``parent_job_id``). Default false keeps the "
+            "list focused on top-level work."
+        ),
+    ),
+    parent_job_id: UUID | None = Query(
+        default=None,
+        description=(
+            "Filter to sub-jobs of a specific parent (overrides "
+            "``include_children``). Useful for inspecting one batch."
+        ),
+    ),
+    limit: int = Query(
+        default=50,
+        ge=1,
+        le=500,
+        description="Max rows per page; capped at 500.",
+    ),
     after: datetime | None = Query(
         default=None,
         description=(
-            "Cursor for pagination — return rows with "
+            "Cursor for pagination; return rows with "
             "``created_at < after`` only. Use the ``created_at`` "
             "of the last row from the previous page to walk forward."
         ),
@@ -123,7 +154,7 @@ class CreateJobRequest(BaseModel):
     )
     description: str | None = Field(
         default=None,
-        description="Human-readable intent text shown on the run — D11 narrative field.",
+        description="Human-readable intent text shown on the run (D11 narrative field).",
     )
     tags: list[str] = Field(
         default_factory=list,
@@ -283,11 +314,16 @@ def get_job(
 @router.get("/{job_id}/events", summary="List job events")
 def get_job_events(
     job_id: UUID,
-    limit: int = Query(default=200, ge=1, le=2000),
+    limit: int = Query(
+        default=200,
+        ge=1,
+        le=2000,
+        description="Max events per page; capped at 2000.",
+    ),
     after: datetime | None = Query(
         default=None,
         description=(
-            "Cursor for pagination (T4.2) — return events with "
+            "Cursor for pagination (T4.2); return events with "
             "``ts < after`` only. Walks the newest-first stream "
             "backward by feeding the oldest visible event's ``ts``."
         ),
@@ -387,11 +423,16 @@ def create_job_comment(
 @router.get("/{job_id}/comments", summary="List job comments")
 def list_job_comments(
     job_id: UUID,
-    limit: int = Query(default=200, ge=1, le=2000),
+    limit: int = Query(
+        default=200,
+        ge=1,
+        le=2000,
+        description="Max comments per page; capped at 2000.",
+    ),
     after: datetime | None = Query(
         default=None,
         description=(
-            "Cursor for pagination (T4.2) — return comments with "
+            "Cursor for pagination (T4.2); return comments with "
             "``created_at > after`` only. Walks the oldest-first "
             "stream forward by feeding the newest visible comment's "
             "``created_at``."
