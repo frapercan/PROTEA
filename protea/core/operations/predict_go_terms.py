@@ -202,6 +202,7 @@ _PAIR_FEATURE_KEYS: tuple[str, ...] = (
 )
 
 
+@dataclass(frozen=True)
 class AspectSeparatedKnnContext:
     """Inputs for ``PredictGOTermsBatchOperation._run_aspect_separated_knn``.
 
