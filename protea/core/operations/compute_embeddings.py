@@ -306,15 +306,12 @@ class ComputeEmbeddingsOperation:
         config: EmbeddingConfig,
         device: str,
     ) -> list[list[ChunkEmbedding]]:
-        """Embed a list of sequences, returning per-chunk results for each."""
-        if config.model_backend == "esm3c":
-            return _embed_esm3c(model, sequences, config, device)
-        elif config.model_backend == "t5":
-            return _embed_t5(model, tokenizer, sequences, config, device)
-        elif config.model_backend == "ankh":
-            return _embed_ankh(model, tokenizer, sequences, config, device)
-        else:  # esm / auto
-            return _embed_esm(model, tokenizer, sequences, config, device)
+        """Embed a list of sequences, returning per-chunk results for each.
+
+        Dispatches to the per-backend embed function via ``_EMBED_BACKENDS``
+        (T2A.5). Falls back to ``_embed_esm`` for unknown backends.
+        """
+        return _dispatch_embed(model, tokenizer, sequences, config, device)
 
 
 # ---------------------------------------------------------------------------
@@ -420,14 +417,8 @@ class ComputeEmbeddingsBatchOperation:
         config: EmbeddingConfig,
         device: str,
     ) -> list[list[ChunkEmbedding]]:
-        if config.model_backend == "esm3c":
-            return _embed_esm3c(model, sequences, config, device)
-        elif config.model_backend == "t5":
-            return _embed_t5(model, tokenizer, sequences, config, device)
-        elif config.model_backend == "ankh":
-            return _embed_ankh(model, tokenizer, sequences, config, device)
-        else:
-            return _embed_esm(model, tokenizer, sequences, config, device)
+        """Per-batch dispatch shim — delegates to ``_dispatch_embed`` (T2A.5)."""
+        return _dispatch_embed(model, tokenizer, sequences, config, device)
 
 
 # ---------------------------------------------------------------------------
@@ -964,6 +955,58 @@ def _embed_esm3c(
         for seq_str in sequences:
             results.append(_embed_esm3c_one(model, seq_str, config, device_obj))
     return results
+
+
+# ---------------------------------------------------------------------------
+# Backend dispatch registry (T2A.5 of master plan v3.2)
+# ---------------------------------------------------------------------------
+
+_BACKEND_FN_NAMES: dict[str, str] = {
+    "esm3c": "_embed_esm3c",
+    "t5": "_embed_t5",
+    "ankh": "_embed_ankh",
+    "esm": "_embed_esm",
+}
+"""Per-``model_backend`` lookup replacing the duplicated
+``if model_backend ==`` chains in ``ComputeEmbeddings(Batch)Operation._embed_batch``.
+
+When ``model_backend`` is unset or unknown the dispatch falls back to
+``_embed_esm`` (HuggingFace ``EsmModel``), matching the legacy
+``# esm / auto`` branch.
+
+Stored as function names rather than direct references so
+``unittest.mock.patch("protea.core.operations.compute_embeddings._embed_ankh", ...)``
+behaves correctly — the dispatcher resolves the name via ``getattr`` on
+this module each call, so monkey-patching the symbol routes through.
+
+Once ``protea-backends`` exposes its plugin entry_points (T2A.1-T2A.4),
+this dict can be replaced with an ``importlib.metadata.entry_points``
+lookup without touching any caller.
+"""
+
+
+def _dispatch_embed(
+    model: Any,
+    tokenizer: Any,
+    sequences: list[str],
+    config: EmbeddingConfig,
+    device: str,
+) -> list[list[ChunkEmbedding]]:
+    """Look up the per-backend embed function in ``_BACKEND_FN_NAMES`` and call it.
+
+    Defaults to ``_embed_esm`` (HuggingFace ``EsmModel``) when
+    ``config.model_backend`` is missing from the registry. ESM3c is
+    special-cased because the ESMC SDK exposes a tokenizer-free interface
+    via ``model.encode`` — every other backend takes a HuggingFace tokenizer.
+    """
+    import sys
+
+    backend = config.model_backend
+    fn_name = _BACKEND_FN_NAMES.get(backend, "_embed_esm")
+    fn = getattr(sys.modules[__name__], fn_name)
+    if backend == "esm3c":
+        return fn(model, sequences, config, device)
+    return fn(model, tokenizer, sequences, config, device)
 
 
 # ---------------------------------------------------------------------------
