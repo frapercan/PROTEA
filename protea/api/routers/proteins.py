@@ -141,6 +141,54 @@ def list_proteins(
 # ── Detail ────────────────────────────────────────────────────────────────────
 
 
+def _serialise_uniprot_metadata(
+    meta: ProteinUniProtMetadata | None,
+) -> dict[str, Any] | None:
+    """Materialise the UniProt functional-metadata payload for a protein.
+
+    Returns ``None`` when the protein has no metadata row (Swiss-Prot
+    annotation has not been ingested for this canonical accession).
+    """
+    if meta is None:
+        return None
+    return {
+        "function_cc": meta.function_cc,
+        "ec_number": meta.ec_number,
+        "catalytic_activity": meta.catalytic_activity,
+        "pathway": meta.pathway,
+        "keywords": meta.keywords,
+        "cofactor": meta.cofactor,
+        "activity_regulation": meta.activity_regulation,
+        "absorption": meta.absorption,
+        "kinetics": meta.kinetics,
+        "ph_dependence": meta.ph_dependence,
+        "redox_potential": meta.redox_potential,
+        "temperature_dependence": meta.temperature_dependence,
+        "active_site": meta.active_site,
+        "binding_site": meta.binding_site,
+        "dna_binding": meta.dna_binding,
+        "rhea_id": meta.rhea_id,
+        "site": meta.site,
+        "features": meta.features,
+    }
+
+
+def _list_isoforms(session: Session, p: Protein) -> list[str]:
+    """Return non-canonical isoform accessions for a canonical protein."""
+    if not p.is_canonical:
+        return []
+    return [
+        row.accession
+        for row in session.query(Protein.accession)
+        .filter(
+            Protein.canonical_accession == p.canonical_accession,
+            Protein.is_canonical.is_(False),
+        )
+        .order_by(Protein.isoform_index)
+        .all()
+    ]
+
+
 @router.get("/{accession}", summary="Get protein details")
 def get_protein(
     accession: str,
@@ -158,7 +206,6 @@ def get_protein(
             .filter(ProteinUniProtMetadata.canonical_accession == p.canonical_accession)
             .first()
         )
-
         embedding_count = (
             session.query(func.count(SequenceEmbedding.id))
             .filter(SequenceEmbedding.sequence_id == p.sequence_id)
@@ -166,25 +213,11 @@ def get_protein(
             if p.sequence_id
             else 0
         )
-
         go_count = (
             session.query(func.count(ProteinGOAnnotation.id))
             .filter(ProteinGOAnnotation.protein_accession == accession)
             .scalar()
         )
-
-        isoforms = []
-        if p.is_canonical:
-            isoforms = [
-                row.accession
-                for row in session.query(Protein.accession)
-                .filter(
-                    Protein.canonical_accession == p.canonical_accession,
-                    Protein.is_canonical.is_(False),
-                )
-                .order_by(Protein.isoform_index)
-                .all()
-            ]
 
         return {
             "accession": p.accession,
@@ -197,32 +230,11 @@ def get_protein(
             "is_canonical": p.is_canonical,
             "canonical_accession": p.canonical_accession,
             "isoform_index": p.isoform_index,
-            "isoforms": isoforms,
+            "isoforms": _list_isoforms(session, p),
             "sequence_id": p.sequence_id,
             "embedding_count": embedding_count,
             "go_annotation_count": go_count,
-            "metadata": {
-                "function_cc": meta.function_cc,
-                "ec_number": meta.ec_number,
-                "catalytic_activity": meta.catalytic_activity,
-                "pathway": meta.pathway,
-                "keywords": meta.keywords,
-                "cofactor": meta.cofactor,
-                "activity_regulation": meta.activity_regulation,
-                "absorption": meta.absorption,
-                "kinetics": meta.kinetics,
-                "ph_dependence": meta.ph_dependence,
-                "redox_potential": meta.redox_potential,
-                "temperature_dependence": meta.temperature_dependence,
-                "active_site": meta.active_site,
-                "binding_site": meta.binding_site,
-                "dna_binding": meta.dna_binding,
-                "rhea_id": meta.rhea_id,
-                "site": meta.site,
-                "features": meta.features,
-            }
-            if meta
-            else None,
+            "metadata": _serialise_uniprot_metadata(meta),
         }
 
 

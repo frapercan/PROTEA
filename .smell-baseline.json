@@ -70,15 +70,6 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/api/routers/proteins.py::get_protein",
-      "kind": "method",
-      "path": "protea/api/routers/proteins.py",
-      "name": "get_protein",
-      "line": 145,
-      "metric": 82,
-      "threshold": 60
-    },
-    {
       "key": "method::protea/api/routers/query_sets.py::create_query_set",
       "kind": "method",
       "path": "protea/api/routers/query_sets.py",
