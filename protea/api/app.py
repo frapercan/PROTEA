@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from protea.api.middleware import VisitorCounterMiddleware
+from protea.api.problem_details import register_problem_handlers
 from protea.api.routers import admin as admin_router
 from protea.api.routers import annotate as annotate_router
 from protea.api.routers import annotations as annotations_router
@@ -267,6 +268,7 @@ def create_app(project_root: Path | None = None) -> FastAPI:
     app.state.benchmark_config = load_benchmark_config(project_root)
 
     _register_middlewares(app, settings.allowed_origins)
+    register_problem_handlers(app)
     _register_health_endpoints(app, factory, settings)
     _register_routers(app)
     _mount_static_assets(app, project_root)
