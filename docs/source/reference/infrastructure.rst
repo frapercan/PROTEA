@@ -262,7 +262,7 @@ this table to fetch the exact ``train.parquet`` / ``eval.parquet`` /
 Storage is backend-agnostic: ``train_uri`` / ``eval_uri`` /
 ``manifest_uri`` are opaque URIs (``file://…`` for the local backend,
 ``s3://bucket/key`` for MinIO) resolved through the
-:class:`ArtifactStore` interface — callers never need to know which
+:class:`ArtifactStore` interface; callers never need to know which
 backend is active. Two content fingerprints provide drift detection:
 ``schema_sha`` (16-char) records the feature-set version (must match
 the booster's ``feature_schema_sha`` at inference time) and
@@ -304,7 +304,7 @@ avoiding redundant embedding computation.
 ``VisitorEvent`` is the append-only log used by the Grafana
 "unique visitors" dashboard. One row is written per HTTP GET to a
 non-asset path. The schema deliberately omits IP addresses: each row
-stores only ``visitor_hash`` — the first 16 hex chars of
+stores only ``visitor_hash``, the first 16 hex chars of
 ``sha256(daily_salt || client_ip)`` where ``daily_salt`` is a 32-byte
 random value held in process memory and rotated every calendar day.
 Once the day rolls over the salt is gone, so cross-day correlation of a
@@ -361,12 +361,12 @@ consumed by ``run_cafa_evaluation``.
 
 ``ArtifactStore`` is a ``typing.Protocol`` with four methods:
 
-- ``put(key: str, src: Path | bytes) -> str`` — store a blob under
+- ``put(key: str, src: Path | bytes) -> str``: store a blob under
   ``key`` and return its URI.
-- ``get(key: str) -> bytes`` — fetch raw bytes stored at ``key``.
-- ``url(key: str) -> str`` — return the backend-specific URI for
+- ``get(key: str) -> bytes``: fetch raw bytes stored at ``key``.
+- ``url(key: str) -> str``: return the backend-specific URI for
   ``key`` without performing I/O.
-- ``exists(key: str) -> bool`` — check whether ``key`` is present.
+- ``exists(key: str) -> bool``: check whether ``key`` is present.
 
 URIs are always persisted verbatim in the database so consumers can
 resolve them without knowing the concrete backend:
@@ -375,7 +375,7 @@ resolve them without knowing the concrete backend:
 - ``MinioArtifactStore`` emits ``s3://<bucket>/<key>`` URIs.
 
 The ``MinioArtifactStore`` client is imported lazily so PROTEA can be
-installed without the ``minio`` package — the constructor raises a
+installed without the ``minio`` package; the constructor raises a
 clear ``ImportError`` pointing at the ``[storage]`` extra when the
 dependency is missing.
 
@@ -444,9 +444,9 @@ guaranteeing that workers always find the DB row before they try to claim it.
 
 .. seealso::
 
-   - :doc:`/architecture/data_model` — the conceptual model behind every
+   - :doc:`/architecture/data_model`: the conceptual model behind every
      ORM class above.
-   - :doc:`workers` — how ``BaseWorker`` and the consumer classes use the
+   - :doc:`workers`: how ``BaseWorker`` and the consumer classes use the
      publisher and session helpers documented here.
-   - :doc:`/adr/005-thread-local-rabbitmq-connections` — why the publisher
+   - :doc:`/adr/005-thread-local-rabbitmq-connections`: why the publisher
      reuses one connection per thread.
