@@ -1,0 +1,77 @@
+"""``ExperimentRun`` ORM (T3.8 of master plan v3.2 §24 Fase 4).
+
+The narrative anchor that F-EXP campaigns and the F8b Experiments page
+hang their per-run metadata off of. Mirrors :class:`Job`'s narrative
+trio (description / findings / tags from T3.9) but for the broader
+research-run scope: a single ``ExperimentRun`` typically aggregates
+multiple Jobs / EvaluationResults / RerankerModels under one name.
+
+Linkage to those sibling rows (Job FK array, EvaluationResult join,
+etc.) lives in follow-up tasks T4.7-T4.9 + the F-EXP campaign work
+so this slice stays a clean additive ORM bring-up.
+"""
+from __future__ import annotations
+
+import enum
+from datetime import datetime
+from typing import Any
+from uuid import UUID, uuid4
+
+from sqlalchemy import DateTime, Enum, Index, Text
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.orm import Mapped, mapped_column
+
+from protea.core.utils import utcnow
+from protea.infrastructure.orm.base import Base
+
+
+class ExperimentRunStatus(enum.StrEnum):
+    """Lifecycle states for an ``ExperimentRun``.
+
+    Mirrors ``JobStatus`` semantically but with ``planned`` as the
+    initial state (Jobs default to QUEUED; experiments often live as
+    drafts before any compute kicks off) and ``abandoned`` instead of
+    ``failed`` (a research run can be stopped without a hard error).
+    """
+
+    PLANNED = "planned"
+    RUNNING = "running"
+    DONE = "done"
+    ABANDONED = "abandoned"
+
+
+class ExperimentRun(Base):
+    """Per-research-run narrative + provenance anchor."""
+
+    __tablename__ = "experiment_run"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    hypothesis: Mapped[str | None] = mapped_column(Text, nullable=True)
+    findings: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    status: Mapped[ExperimentRunStatus] = mapped_column(
+        Enum(ExperimentRunStatus, name="experiment_run_status"),
+        nullable=False,
+        default=ExperimentRunStatus.PLANNED,
+    )
+
+    config: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    provenance: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    tags: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, default=list)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_experiment_run_name", "name", unique=True),
+        Index("ix_experiment_run_status_created_at", "status", "created_at"),
+    )
+
+
+__all__ = ["ExperimentRun", "ExperimentRunStatus"]
