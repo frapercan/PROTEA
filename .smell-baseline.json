@@ -52,15 +52,6 @@
       "threshold": 800
     },
     {
-      "key": "method::protea/api/routers/annotate.py::annotate",
-      "kind": "method",
-      "path": "protea/api/routers/annotate.py",
-      "name": "annotate",
-      "line": 78,
-      "metric": 167,
-      "threshold": 60
-    },
-    {
       "key": "method::protea/api/routers/benchmark.py::get_benchmark_matrix",
       "kind": "method",
       "path": "protea/api/routers/benchmark.py",
