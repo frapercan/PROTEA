@@ -6,7 +6,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import BigInteger, DateTime, Enum, ForeignKey, Index, Text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -57,6 +57,15 @@ class Job(Base):
 
     error_code: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Narrative fields (D11). ``description`` is set at creation time by the
+    # orchestrator; ``findings`` is set post-completion by a worker or curator;
+    # ``tags`` are lightweight grouping tokens that default to an empty list.
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    findings: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tags: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), nullable=False, default=list
+    )
 
     events: Mapped[list[JobEvent]] = relationship(
         "JobEvent",
