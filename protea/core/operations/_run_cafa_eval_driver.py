@@ -104,6 +104,60 @@ def _write_setting_predictions(
     return pred_dir
 
 
+def _invoke_cafaeval_signal_safe(
+    *,
+    ctx: CafaEvalRunContext,
+    pred_dir: str,
+    gt_file: str,
+    known_file: str | None,
+) -> tuple[Any, Any]:
+    """Run ``cafa_eval`` with default SIGTERM/SIGINT handlers restored.
+
+    Our ``_handle_stop`` handler only sets a flag without calling
+    ``sys.exit()``, so forked pool children would ignore SIGTERM and
+    ``pool.terminate()`` / ``pool.join()`` would block forever. Reset
+    to ``SIG_DFL`` for the duration of the call.
+    """
+    from cafaeval.evaluation import cafa_eval
+
+    old_sigterm = signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    old_sigint = signal.signal(signal.SIGINT, signal.SIG_DFL)
+    try:
+        return cafa_eval(
+            ctx.obo_path,
+            pred_dir,
+            gt_file,
+            ia=ctx.ia_path,
+            exclude=known_file,
+            prop="fill",
+            norm="cafa",
+            no_orphans=True,
+            toi_file=ctx.toi_path,
+            max_terms=500,
+            th_step=0.001,
+            n_cpu=1,
+        )
+    finally:
+        signal.signal(signal.SIGTERM, old_sigterm)
+        signal.signal(signal.SIGINT, old_sigint)
+
+
+def _persist_setting_artifacts(
+    ctx: CafaEvalRunContext,
+    setting: str,
+    df: Any,
+    dfs_best: Any,
+) -> None:
+    """Write PR curves + dfs_best artefacts to ``ctx.artifacts_root/<setting>/``."""
+    if df is None:
+        return
+    from cafaeval.evaluation import write_results as _write_results
+
+    setting_dir = ctx.artifacts_root / setting
+    setting_dir.mkdir(exist_ok=True)
+    _write_results(df, dfs_best, str(setting_dir))
+
+
 def _run_cafaeval_for_setting(
     *,
     setting: str,
@@ -116,49 +170,14 @@ def _run_cafaeval_for_setting(
     """Run cafaeval for one setting under signal-safe handlers.
 
     Returns the parsed per-namespace metrics dict (empty on failure).
-    Persists the full PR-curve + dfs_best artifacts to
-    ``ctx.artifacts_root/<setting>/`` so the upload loop in the
-    orchestrator picks them up.
     """
-    from cafaeval.evaluation import cafa_eval
-
     emit("run_cafa_evaluation.evaluating", None, {"setting": setting}, "info")
     try:
-        # Reset SIGTERM/SIGINT to defaults before cafaeval forks pool workers.
-        # Our `_handle_stop` handler only sets a flag without calling
-        # sys.exit(), so forked children would ignore SIGTERM from
-        # pool.terminate() and pool.join() would block forever.
-        old_sigterm = signal.signal(signal.SIGTERM, signal.SIG_DFL)
-        old_sigint = signal.signal(signal.SIGINT, signal.SIG_DFL)
-        try:
-            df, dfs_best = cafa_eval(
-                ctx.obo_path,
-                pred_dir,
-                gt_file,
-                ia=ctx.ia_path,
-                exclude=known_file,
-                prop="fill",
-                norm="cafa",
-                no_orphans=True,
-                toi_file=ctx.toi_path,
-                max_terms=500,
-                th_step=0.001,
-                n_cpu=1,
-            )
-        finally:
-            signal.signal(signal.SIGTERM, old_sigterm)
-            signal.signal(signal.SIGINT, old_sigint)
-
+        df, dfs_best = _invoke_cafaeval_signal_safe(
+            ctx=ctx, pred_dir=pred_dir, gt_file=gt_file, known_file=known_file
+        )
         result = _artifacts.parse_results(dfs_best)
-
-        # Persist full cafaeval output (PR curves + best metrics per metric type)
-        if df is not None:
-            from cafaeval.evaluation import write_results as _write_results
-
-            setting_dir = ctx.artifacts_root / setting
-            setting_dir.mkdir(exist_ok=True)
-            _write_results(df, dfs_best, str(setting_dir))
-
+        _persist_setting_artifacts(ctx, setting, df, dfs_best)
         emit(
             "run_cafa_evaluation.setting_done",
             None,
