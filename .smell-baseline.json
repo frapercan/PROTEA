@@ -70,15 +70,6 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/api/routers/showcase.py::get_showcase",
-      "kind": "method",
-      "path": "protea/api/routers/showcase.py",
-      "name": "get_showcase",
-      "line": 75,
-      "metric": 102,
-      "threshold": 60
-    },
-    {
       "key": "method::protea/core/operations/compute_embeddings.py::_embed_t5",
       "kind": "method",
       "path": "protea/core/operations/compute_embeddings.py",
