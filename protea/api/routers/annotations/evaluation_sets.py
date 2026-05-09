@@ -97,6 +97,12 @@ def get_evaluation_set(
     eval_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
+    """Fetch a single evaluation set with its NK / LK / PK delta counts.
+
+    The response carries the OLD/NEW snapshot fingerprints used to derive
+    the delta plus the cached protein-category histogram. Returns ``404``
+    if the id is unknown.
+    """
     try:
         with session_scope(factory) as session:
             return get_evaluation_set_data(session, eval_id)

@@ -34,6 +34,12 @@ def download_evaluation_metrics(
     result_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> StreamingResponse:
+    """Stream the per-aspect metrics table for one evaluation result.
+
+    Renders the cafaeval-style summary (Fmax, Smin, AUPRC) as TSV with one
+    row per CAFA aspect (``BPO``/``MFO``/``CCO``). Returns ``404`` if the
+    ``(eval_id, result_id)`` pair does not match.
+    """
     try:
         with session_scope(factory) as session:
             result, _ = get_eval_result_with_keys(session, eval_id, result_id)
@@ -57,6 +63,12 @@ def download_evaluation_artifacts(
     result_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> StreamingResponse:
+    """Stream all stored cafaeval artefacts for one evaluation result as a ZIP.
+
+    Bundles the per-result outputs (raw predictions, CAFA scoring TSVs,
+    plot images) that the artifact store keeps under the result's prefix.
+    Returns ``404`` if the result is unknown or has no artefacts persisted.
+    """
     try:
         with session_scope(factory) as session:
             _, keys = get_eval_result_with_keys(session, eval_id, result_id)
@@ -81,6 +93,13 @@ def list_evaluation_results(
     eval_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> list[dict[str, Any]]:
+    """List every cafaeval result row attached to one evaluation set.
+
+    Each row carries the prediction-set / scoring-config / reranker
+    triple used to produce it plus the cached metrics summary, so the UI
+    benchmark matrix can render without per-row drilldowns. Returns
+    ``404`` if the evaluation set itself is missing.
+    """
     try:
         with session_scope(factory) as session:
             return list_evaluation_results_data(session, eval_id)
@@ -98,6 +117,14 @@ def delete_evaluation_result(
     result_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> None:
+    """Delete one evaluation result row plus its stored artefacts.
+
+    Two-step: the ORM cascade clears the DB row first (collecting the
+    artifact keys); the artifact store ``delete()`` is then issued for
+    each key outside the session so a network failure here does not
+    leave the DB inconsistent. Returns ``204`` on success, ``404`` if
+    the result is unknown.
+    """
     from protea.infrastructure.settings import load_settings
     from protea.infrastructure.storage import get_artifact_store
 

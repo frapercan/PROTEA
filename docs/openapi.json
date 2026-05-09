@@ -1439,6 +1439,7 @@
         ]
       },
       "get": {
+        "description": "Fetch a single evaluation set with its NK / LK / PK delta counts.\n\nThe response carries the OLD/NEW snapshot fingerprints used to derive\nthe delta plus the cached protein-category histogram. Returns ``404``\nif the id is unknown.",
         "operationId": "get_evaluation_set_v1_annotations_evaluation_sets__eval_id__get",
         "parameters": [
           {
@@ -1711,6 +1712,7 @@
     },
     "/v1/annotations/evaluation-sets/{eval_id}/results": {
       "get": {
+        "description": "List every cafaeval result row attached to one evaluation set.\n\nEach row carries the prediction-set / scoring-config / reranker\ntriple used to produce it plus the cached metrics summary, so the UI\nbenchmark matrix can render without per-row drilldowns. Returns\n``404`` if the evaluation set itself is missing.",
         "operationId": "list_evaluation_results_v1_annotations_evaluation_sets__eval_id__results_get",
         "parameters": [
           {
@@ -1764,6 +1766,7 @@
     },
     "/v1/annotations/evaluation-sets/{eval_id}/results/{result_id}": {
       "delete": {
+        "description": "Delete one evaluation result row plus its stored artefacts.\n\nTwo-step: the ORM cascade clears the DB row first (collecting the\nartifact keys); the artifact store ``delete()`` is then issued for\neach key outside the session so a network failure here does not\nleave the DB inconsistent. Returns ``204`` on success, ``404`` if\nthe result is unknown.",
         "operationId": "delete_evaluation_result_v1_annotations_evaluation_sets__eval_id__results__result_id__delete",
         "parameters": [
           {
@@ -1815,6 +1818,7 @@
     },
     "/v1/annotations/evaluation-sets/{eval_id}/results/{result_id}/artifacts.zip": {
       "get": {
+        "description": "Stream all stored cafaeval artefacts for one evaluation result as a ZIP.\n\nBundles the per-result outputs (raw predictions, CAFA scoring TSVs,\nplot images) that the artifact store keeps under the result's prefix.\nReturns ``404`` if the result is unknown or has no artefacts persisted.",
         "operationId": "download_evaluation_artifacts_v1_annotations_evaluation_sets__eval_id__results__result_id__artifacts_zip_get",
         "parameters": [
           {
@@ -1871,6 +1875,7 @@
     },
     "/v1/annotations/evaluation-sets/{eval_id}/results/{result_id}/metrics.tsv": {
       "get": {
+        "description": "Stream the per-aspect metrics table for one evaluation result.\n\nRenders the cafaeval-style summary (Fmax, Smin, AUPRC) as TSV with one\nrow per CAFA aspect (``BPO``/``MFO``/``CCO``). Returns ``404`` if the\n``(eval_id, result_id)`` pair does not match.",
         "operationId": "download_evaluation_metrics_v1_annotations_evaluation_sets__eval_id__results__result_id__metrics_tsv_get",
         "parameters": [
           {
@@ -2663,6 +2668,7 @@
     },
     "/v1/datasets": {
       "get": {
+        "description": "Return registered frozen datasets newest-first.\n\nThe lab's ``pull_dataset.py`` polls this endpoint to discover dump\nartefacts produced by ``export_research_dataset``. Filters narrow by\nname substring or by source ``embedding_config_id``. Pagination is\ncursor-based (``after``) plus a hard ``limit`` ceiling.",
         "operationId": "list_datasets_v1_datasets_get",
         "parameters": [
           {
@@ -2819,6 +2825,7 @@
     },
     "/v1/datasets/{id_or_name}": {
       "get": {
+        "description": "Resolve a dataset by UUID or by the ``name`` slug.\n\nTries the UUID path first; on ``ValueError`` (non-UUID input), falls\nback to the ``name`` column. Returns ``404`` if neither resolves.\nThe lab uses the name path so dump callers can refer to ``bench-v1-K5``\nwithout juggling UUIDs.",
         "operationId": "get_dataset_v1_datasets__id_or_name__get",
         "parameters": [
           {
