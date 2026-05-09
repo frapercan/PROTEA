@@ -162,7 +162,7 @@ required: ``220`` (the ``t0`` reference) and ``229`` (the ``t1`` ground truth).
        -d "{
          \"gaf_url\": \"http://release.geneontology.org/2026-01-23/annotations/goa_uniprot_all.gaf.gz\",
          \"ontology_snapshot_id\": \"$SNAPSHOT_ID\",
-         \"source_tag\": \"goa_${REL}\"
+         \"source_version\": \"goa_${REL}\"
        }"
    done
 
@@ -170,12 +170,16 @@ Each load emits ``ProteinGOAnnotation`` rows filtered against canonical
 accessions already in the database, so ``insert_proteins`` for the UniProt
 slice of interest must have been executed beforehand.
 
-Record the two critical IDs once the jobs complete:
+Record the two critical IDs once the jobs complete. The ``GET /annotations/sets``
+endpoint accepts only a ``source`` filter (``goa`` or ``quickgo``); narrow
+to a specific release with ``jq``:
 
 .. code-block:: bash
 
-   OLD_SET=$(curl -s "$API/annotations/sets?source_tag=goa_220" | jq -r '.[0].id')
-   NEW_SET=$(curl -s "$API/annotations/sets?source_tag=goa_229" | jq -r '.[0].id')
+   OLD_SET=$(curl -s "$API/annotations/sets?source=goa" \
+     | jq -r '.[] | select(.source_version=="goa_220") | .id')
+   NEW_SET=$(curl -s "$API/annotations/sets?source=goa" \
+     | jq -r '.[] | select(.source_version=="goa_229") | .id')
 
 Step 1.3 — Generate the NK/LK/PK evaluation set
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

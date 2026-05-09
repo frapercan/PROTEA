@@ -169,15 +169,6 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/fetch_uniprot_metadata.py::FetchUniProtMetadataOperation.execute",
-      "kind": "method",
-      "path": "protea/core/operations/fetch_uniprot_metadata.py",
-      "name": "FetchUniProtMetadataOperation.execute",
-      "line": 135,
-      "metric": 86,
-      "threshold": 60
-    },
-    {
       "key": "method::protea/core/operations/generate_evaluation_set.py::GenerateEvaluationSetOperation.execute",
       "kind": "method",
       "path": "protea/core/operations/generate_evaluation_set.py",
