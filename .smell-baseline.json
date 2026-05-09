@@ -88,15 +88,6 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/insert_proteins.py::InsertProteinsOperation._store_records",
-      "kind": "method",
-      "path": "protea/core/operations/insert_proteins.py",
-      "name": "InsertProteinsOperation._store_records",
-      "line": 204,
-      "metric": 123,
-      "threshold": 60
-    },
-    {
       "key": "method::protea/core/operations/load_quickgo_annotations.py::LoadQuickGOAnnotationsOperation.execute",
       "kind": "method",
       "path": "protea/core/operations/load_quickgo_annotations.py",
