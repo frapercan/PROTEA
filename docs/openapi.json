@@ -4227,7 +4227,7 @@
     },
     "/v1/jobs/{job_id}/comments": {
       "get": {
-        "description": "Return every ``JobComment`` for a Job, oldest first.",
+        "description": "Return ``JobComment`` rows for a Job, oldest first.\n\nUse ``after`` to page forward (the comment thread grows oldest \u2192\nnewest, so cursor semantics flip vs. the newest-first lists).\n``limit`` caps each page at 2000 to keep payloads bounded.",
         "operationId": "list_job_comments_v1_jobs__job_id__comments_get",
         "parameters": [
           {
@@ -4238,6 +4238,37 @@
               "format": "uuid",
               "title": "Job Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 2000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Cursor for pagination (T4.2) \u2014 return comments with ``created_at > after`` only. Walks the oldest-first stream forward by feeding the newest visible comment's ``created_at``.",
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cursor for pagination (T4.2) \u2014 return comments with ``created_at > after`` only. Walks the oldest-first stream forward by feeding the newest visible comment's ``created_at``.",
+              "title": "After"
             }
           }
         ],
@@ -4363,6 +4394,25 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Cursor for pagination (T4.2) \u2014 return events with ``ts < after`` only. Walks the newest-first stream backward by feeding the oldest visible event's ``ts``.",
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cursor for pagination (T4.2) \u2014 return events with ``ts < after`` only. Walks the newest-first stream backward by feeding the oldest visible event's ``ts``.",
+              "title": "After"
             }
           }
         ],
