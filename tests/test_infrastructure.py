@@ -155,6 +155,33 @@ class TestCreateApp:
         routes = [r.path for r in app.routes]
         assert any("/jobs" in p for p in routes)
 
+    def test_routers_mounted_under_v1_prefix(self):
+        """T4.1: every router shows up under ``/v1/`` (canonical) AND at
+        the unprefixed legacy alias for the deprecation window."""
+        from protea.api.app import create_app
+
+        mock_settings = MagicMock()
+        mock_settings.db_url = "sqlite:///:memory:"
+        mock_settings.amqp_url = "amqp://guest:guest@localhost/"
+
+        with (
+            patch("protea.api.app.load_settings", return_value=mock_settings),
+            patch("protea.api.app.build_session_factory", return_value=MagicMock()),
+        ):
+            app = create_app(Path("/fake/root"))
+
+        routes = [r.path for r in app.routes]
+        # Canonical and legacy mounts both present.
+        assert any(p.startswith("/v1/jobs") for p in routes)
+        assert "/jobs" in routes  # legacy alias retained
+        # OpenAPI must only advertise the canonical path.
+        schema_paths = set(app.openapi().get("paths", {}).keys())
+        assert any(p.startswith("/v1/jobs") for p in schema_paths)
+        assert not any(
+            p.startswith("/jobs") and not p.startswith("/v1/")
+            for p in schema_paths
+        )
+
     def test_health_endpoint_registered(self):
         from protea.api.app import create_app
 
