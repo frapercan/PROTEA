@@ -38,7 +38,25 @@ class CreateDatasetRequest(BaseModel):
     ``protea.training`` worker (serialized, GPU/RAM-intensive).
     """
 
-    model_config = {"extra": "forbid"}
+    model_config = {
+        "extra": "forbid",
+        "json_schema_extra": {
+            "example": {
+                "output_name": "bench-v1-K5",
+                "embedding_config_id": "00000000-0000-0000-0000-000000000001",
+                "ontology_snapshot_id": "00000000-0000-0000-0000-000000000002",
+                "train_versions": [160, 165, 170, 175],
+                "test_versions": [230],
+                "annotation_source": "goa",
+                "k": 5,
+                "search_backend": "faiss",
+                "compute_alignments": True,
+                "compute_taxonomy": True,
+                "expand_votes_to_ancestors": False,
+                "use_embedding_pca": False,
+            }
+        },
+    }
 
     output_name: str = Field(
         ...,

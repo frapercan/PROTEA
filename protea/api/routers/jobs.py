@@ -149,7 +149,23 @@ class CreateJobRequest(BaseModel):
     surfaced in the UI run detail.
     """
 
-    model_config = {"extra": "forbid"}
+    model_config = {
+        "extra": "forbid",
+        "json_schema_extra": {
+            "example": {
+                "operation": "compute_embeddings",
+                "queue_name": "protea.embedding",
+                "payload": {
+                    "embedding_config_id": "00000000-0000-0000-0000-000000000001",
+                    "annotation_set_id": "00000000-0000-0000-0000-000000000002",
+                    "batch_size": 1,
+                },
+                "meta": {},
+                "description": "Recompute ESM-2 embeddings for the GOA 2024-04 set.",
+                "tags": ["ablation", "benchmark-v1"],
+            }
+        },
+    }
 
     operation: str = Field(
         ..., min_length=1, description="Registered operation name, e.g. `insert_proteins`."
@@ -384,7 +400,15 @@ class CreateJobCommentRequest(BaseModel):
     permitted in ``body``; the UI renders the thread chronologically.
     """
 
-    model_config = {"extra": "forbid"}
+    model_config = {
+        "extra": "forbid",
+        "json_schema_extra": {
+            "example": {
+                "body": "Re-running with k=10; k=5 hit the variance ceiling on PK.",
+                "author": "frapercan",
+            }
+        },
+    }
 
     body: str = Field(..., min_length=1, description="Comment payload (markdown allowed).")
     author: str | None = Field(
