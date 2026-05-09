@@ -16,15 +16,15 @@ Background: the CAFA temporal holdout
 CAFA evaluates protein function prediction by exploiting the growth of
 experimental GO annotations over time:
 
-- **t0** — an older annotation snapshot (the *reference* set). Methods may
+- **t0.** An older annotation snapshot (the *reference* set). Methods may
   use these annotations as training signal.
-- **t1** — a newer annotation snapshot (the *ground truth*). Proteins that
+- **t1.** A newer annotation snapshot (the *ground truth*). Proteins that
   gained new experimental GO annotations between t0 and t1 form the test set
   (the *delta*).
 
 Only annotations with experimental evidence codes are considered
 (EXP, IDA, IMP, IGI, IEP, IPI, and their ECO equivalents). Annotations with a
-NOT qualifier — meaning the protein is *not* associated with that term — are
+NOT qualifier (meaning the protein is *not* associated with that term) are
 excluded, and their exclusion is propagated to all GO descendants through the
 ``is_a`` and ``part_of`` relationships.
 
@@ -133,7 +133,7 @@ had **any** experimental annotation at :math:`t_0`:
 
    \kappa(p) \;=\; \mathbb{1}\!\Bigl[ \bigcup_{n' \in \mathcal{N}} A_0(p, n') \neq \emptyset \Bigr].
 
-**No-Knowledge (NK)** — a single per-protein category:
+**No-Knowledge (NK):** a single per-protein category:
 
 .. math::
 
@@ -142,7 +142,7 @@ had **any** experimental annotation at :math:`t_0`:
          \kappa(p) = 0,\;
          g \in \textstyle\bigcup_{n \in \mathcal{N}} \Delta(p, n) \bigr\}.
 
-**Limited-Knowledge (LK)** — a per-``(protein, namespace)`` category:
+**Limited-Knowledge (LK):** a per-``(protein, namespace)`` category:
 
 .. math::
 
@@ -152,7 +152,7 @@ had **any** experimental annotation at :math:`t_0`:
          A_0(p, n) = \emptyset,\;
          g \in \Delta(p, n) \bigr\}.
 
-**Partial-Knowledge (PK)** — also per-``(protein, namespace)``:
+**Partial-Knowledge (PK):** also per-``(protein, namespace)``:
 
 .. math::
 
@@ -223,19 +223,19 @@ Classification is determined **per (protein, namespace)**, where namespace is
 one of Molecular Function (MFO), Biological Process (BPO), or Cellular
 Component (CCO).
 
-**NK — No-Knowledge**
+**NK. No-Knowledge.**
    The protein had **no** experimental annotations in **any** namespace at t0.
    All its new annotations across all namespaces form the NK ground truth.
    Evaluating NK targets tests a method's ability to make predictions from
    sequence alone, without any prior functional signal.
 
-**LK — Limited-Knowledge**
+**LK. Limited-Knowledge.**
    The protein had experimental annotations in **some** namespaces at t0, but
    **not** in namespace S. It gained new annotations in S at t1. Those new
    annotations in S are the LK ground truth for that (protein, S) pair.
    Evaluating LK tests transfer across namespaces.
 
-**PK — Partial-Knowledge**
+**PK. Partial-Knowledge.**
    The protein already had experimental annotations in namespace S at t0, and
    gained **additional** annotations in S at t1. Only the novel terms are
    ground truth; the old terms are collected in a ``pk_known_terms.tsv`` file
@@ -322,14 +322,14 @@ See :doc:`../reference/infrastructure` for the full ORM schema.
 Benchmark: PROTEA vs external tools
 -------------------------------------
 
-.. admonition:: Provisional results — pending final recompute
+.. admonition:: Provisional results, pending final recompute
    :class: warning
 
    The Fmax values in the tables below were produced before the 2026-04-10
    unification of the embedding-backend slicing convention (see
    :doc:`operations`, section *Residue-tensor convention*). They will be
    regenerated end-to-end for the Zenodo deposit accompanying the thesis.
-   The experimental protocol is stable — only the numbers will change. See
+   The experimental protocol is stable; only the numbers will change. See
    :doc:`/results` for the full provisional notice.
 
 PROTEA was benchmarked against two widely used function annotation tools
@@ -337,7 +337,7 @@ using the temporal holdout GOA 220 → GOA 229 (NK: 2831, LK: 3410,
 PK: 15313 proteins). All evaluations use ``cafaeval`` with Information
 Accretion (IA) weighting from the CAFA6 benchmark.
 
-.. list-table:: Fmax (IA-weighted) — GOA 220 → 229
+.. list-table:: Fmax (IA-weighted): GOA 220 → 229
    :header-rows: 1
    :widths: 20 9 9 9 9 9 9 9 9 9
 
@@ -392,7 +392,7 @@ Accretion (IA) weighting from the CAFA6 benchmark.
      - 0.199
      - 0.325
 
-:sup:`†` Subject to temporal data leakage — see below.
+:sup:`†` Subject to temporal data leakage; see below.
 
 Temporal data leakage
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -430,8 +430,8 @@ between each tool's predictions and the ground truth:
      - **20,373 (50.9%)**
      - **10,308 (25.8%)**
 
-Pannzer2 exactly matches 62.4% of NK annotations — proteins that by
-definition had **no** experimental annotations at t0. This confirms that
+Pannzer2 exactly matches 62.4% of NK annotations (proteins that by
+definition had **no** experimental annotations at t0). This confirms that
 its reference database already contains the experimental evidence that
 appeared between GOA 220 and GOA 229.
 
@@ -469,8 +469,8 @@ Supported formats: ``emapper``, ``pannzer2``, ``interproscan``, ``blast``.
 Implementation reference
 -------------------------
 
-- Core logic: :mod:`protea.core.evaluation` — ``EvaluationData``,
-  ``compute_evaluation_data``
+- Core logic: :mod:`protea.core.evaluation` (``EvaluationData``,
+  ``compute_evaluation_data``)
 - Operations: :mod:`protea.core.operations.generate_evaluation_set`,
   :mod:`protea.core.operations.run_cafa_evaluation`
 - API router: ``protea/api/routers/annotations.py`` (download endpoints,
@@ -478,9 +478,9 @@ Implementation reference
 
 .. seealso::
 
-   - :doc:`/results` — the actual numbers obtained on the GOA 220 → 229
+   - :doc:`/results`: the actual numbers obtained on the GOA 220 → 229
      temporal holdout following this protocol.
-   - :doc:`/appendix/reproduction_guide` — the full ordered command sequence
+   - :doc:`/appendix/reproduction_guide`: the full ordered command sequence
      to regenerate every figure end-to-end.
-   - :doc:`operations` — the ``compute_evaluation_delta``, ``run_cafa_evaluation``,
+   - :doc:`operations`: the ``compute_evaluation_delta``, ``run_cafa_evaluation``,
      and ``train_reranker`` operations that implement the protocol.
