@@ -296,6 +296,30 @@ def _build_matrix_response(
     }
 
 
+def _benchmark_aggregation_stmt(evaluation_set_id: uuid.UUID | None) -> Any:
+    """Build the row-fetching select for the benchmark matrix.
+
+    Returns a Select that yields ``(EvaluationResult, embedding_config_id,
+    k, scoring_name)`` rows, optionally filtered to a single
+    ``evaluation_set_id``. Kept separate from
+    :func:`_aggregate_benchmark_matrix` so the SQL surface is auditable
+    in isolation and the matrix folder stays under the §3 60-LOC ceiling.
+    """
+    stmt = (
+        select(
+            EvaluationResult,
+            PredictionSet.embedding_config_id,
+            PredictionSet.limit_per_entry.label("k"),
+            ScoringConfig.name.label("scoring_name"),
+        )
+        .join(PredictionSet, PredictionSet.id == EvaluationResult.prediction_set_id)
+        .outerjoin(ScoringConfig, ScoringConfig.id == EvaluationResult.scoring_config_id)
+    )
+    if evaluation_set_id is not None:
+        stmt = stmt.where(EvaluationResult.evaluation_set_id == evaluation_set_id)
+    return stmt
+
+
 def _aggregate_benchmark_matrix(
     session: Session,
     evaluation_set_id: uuid.UUID | None,
@@ -310,18 +334,7 @@ def _aggregate_benchmark_matrix(
     Stage and K filters are applied in Python so the global leaderboard
     sees every row that passed ``hidden_stages``.
     """
-    stmt = (
-        select(
-            EvaluationResult,
-            PredictionSet.embedding_config_id,
-            PredictionSet.limit_per_entry.label("k"),
-            ScoringConfig.name.label("scoring_name"),
-        )
-        .join(PredictionSet, PredictionSet.id == EvaluationResult.prediction_set_id)
-        .outerjoin(ScoringConfig, ScoringConfig.id == EvaluationResult.scoring_config_id)
-    )
-    if evaluation_set_id is not None:
-        stmt = stmt.where(EvaluationResult.evaluation_set_id == evaluation_set_id)
+    stmt = _benchmark_aggregation_stmt(evaluation_set_id)
 
     best: dict[_BestKey, dict[str, Any]] = {}
     best_global: dict[_BestKey, dict[str, Any]] = {}
