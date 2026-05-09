@@ -49,6 +49,9 @@ from protea.core._training_dump_loaders import (
     _resolve_annotation_set_ids,
     _resolve_test_eval_inputs,
     _stream_embeddings,
+    _TestQueryInputs,
+    _TestSequences,
+    _TestSplitContext,
 )
 from protea.core.anc2vec_embeddings import Anc2VecIndex
 from protea.core.anc2vec_embeddings import get_index as get_anc2vec_index
@@ -1081,6 +1084,218 @@ _CATEGORIES = ("nk", "lk", "pk")
 _ASPECT_NAMES: dict[str, str] = {a.code: a.cafa.lower() for a in Aspect}
 
 
+def _prepare_test_query_inputs(
+    session: Session,
+    ctx: _TestSplitContext,
+    emit: EmitFn,
+) -> _TestQueryInputs:
+    """Resolve the test-pair reference set + query embeddings."""
+    test_ref = _build_reference_from_cache(
+        session,
+        ctx.test_old_set_id,
+        ctx.embedding_pool,
+        ctx.all_accessions,
+        ctx.acc_to_idx,
+        emit,
+    )
+    test_accs = [a for a in ctx.test_all_queries if a in ctx.acc_to_idx]
+    test_indices = np.array([ctx.acc_to_idx[a] for a in test_accs], dtype=np.int32)
+    test_emb = (
+        ctx.embedding_pool[test_indices].astype(np.float32)
+        if len(test_indices) > 0
+        else np.empty((0, ctx.embedding_pool.shape[1]), dtype=np.float32)
+    )
+    return _TestQueryInputs(ref_by_aspect=test_ref, valid=test_accs, emb=test_emb)
+
+
+def _load_test_sequences_and_taxonomy(
+    session: Session,
+    payload: TrainRerankerAutoPayload,
+    valid_queries: list[str],
+    test_ref: dict[str, dict[str, Any]],
+) -> _TestSequences:
+    """Optionally fetch sequence + taxonomy lookups for the test split."""
+    if not (payload.compute_alignments or payload.compute_taxonomy):
+        return _TestSequences(None, None, None, None)
+    test_ref_accs: set[str] = set()
+    for asp in _ASPECTS:
+        test_ref_accs.update(test_ref[asp]["accessions"])
+    test_query_set = set(valid_queries)
+    qs = _load_sequences(session, test_query_set) if payload.compute_alignments else None
+    rs = _load_sequences(session, test_ref_accs) if payload.compute_alignments else None
+    qt = _load_taxonomy_ids(session, test_query_set) if payload.compute_taxonomy else None
+    rt = _load_taxonomy_ids(session, test_ref_accs) if payload.compute_taxonomy else None
+    return _TestSequences(qs, rs, qt, rt)
+
+
+def _stream_test_predictions(
+    session: Session,
+    ctx: _TestSplitContext,
+    q_inputs: _TestQueryInputs,
+    sequences: _TestSequences,
+    output_path: Path,
+) -> dict[str, Any]:
+    """Run KNN+transfer for the test split, streaming rows to ``output_path``."""
+    p = ctx.payload
+    info = _knn_transfer_and_label(
+        session,
+        p,
+        KnnTransferContext(
+            valid_queries=q_inputs.valid,
+            query_emb=q_inputs.emb,
+            ref_by_aspect=q_inputs.ref_by_aspect,
+            go_id_map=ctx.go_id_map,
+            aspect_map=ctx.aspect_map,
+            gt_pairs=set(),
+            query_known_gos=ctx.test_eval_data.known,
+            parent_map_str=ctx.parent_map if p.expand_votes_to_ancestors else None,
+            ia_weights=ctx.ia_weights,
+            pca_state=ctx.pca_state,
+            pivot_go_ids=ctx.pivot_go_ids,
+            embedding_pool=ctx.embedding_pool,
+        ),
+        sequence_context=SequenceContext(
+            query_sequences=sequences.query_sequences,
+            ref_sequences=sequences.ref_sequences,
+            query_tax_ids=sequences.query_tax_ids,
+            ref_tax_ids=sequences.ref_tax_ids,
+        ),
+        stream_output=StreamOutput(output_parquet=output_path),
+    )
+    return cast("dict[str, Any]", info)
+
+
+def _compute_test_cat_membership(
+    eval_data: Any,
+    go_id_map: dict[Any, str],
+    aspect_map: dict[Any, str],
+) -> dict[str, set[tuple[str, str]]]:
+    """Derive per-cat ``(protein, aspect)`` membership from eval data."""
+    aspect_by_go_id: dict[str, str] = {
+        go_id: aspect_map[term_id]
+        for term_id, go_id in go_id_map.items()
+        if term_id in aspect_map
+    }
+    membership: dict[str, set[tuple[str, str]]] = {}
+    for cat in _CATEGORIES:
+        gt = getattr(eval_data, cat)
+        members: set[tuple[str, str]] = set()
+        for protein, go_ids in gt.items():
+            for go_id in go_ids:
+                asp = aspect_by_go_id.get(go_id, "")
+                if asp:
+                    members.add((protein, asp))
+        membership[cat] = members
+    return membership
+
+
+def _write_labeled_test_batches(
+    pf: pq.ParquetFile,
+    project_cols: list[str],
+    membership: dict[str, set[tuple[str, str]]],
+    test_cat_gt: dict[str, set[tuple[str, str]]],
+    cat_paths: dict[str, Path],
+) -> set[str]:
+    """Stream pyarrow batches into per-cat labeled shards. Returns cats written."""
+    cat_writers: dict[str, pq.ParquetWriter] = {}
+    try:
+        for batch in pf.iter_batches(batch_size=200_000, columns=project_cols):
+            if LABEL_COLUMN in batch.schema.names:
+                batch = batch.drop_columns([LABEL_COLUMN])
+            accs = batch.column("protein_accession").to_pylist()
+            asps = batch.column("aspect").to_pylist()
+            for cat in _CATEGORIES:
+                members = membership[cat]
+                mask_list = [
+                    (a, asp) in members for a, asp in zip(accs, asps, strict=False)
+                ]
+                if not any(mask_list):
+                    continue
+                mask_arr = pa.array(mask_list, type=pa.bool_())
+                cat_batch = batch.filter(mask_arr)
+                cat_accs = cat_batch.column("protein_accession").to_pylist()
+                cat_gids = cat_batch.column("go_id").to_pylist()
+                gt_p = test_cat_gt[cat]
+                labels = pa.array(
+                    [
+                        1 if (a, g) in gt_p else 0
+                        for a, g in zip(cat_accs, cat_gids, strict=False)
+                    ],
+                    type=pa.int8(),
+                )
+                cat_batch = cat_batch.append_column(LABEL_COLUMN, labels)
+                table = pa.Table.from_batches([cat_batch])
+                if cat not in cat_writers:
+                    cat_writers[cat] = pq.ParquetWriter(
+                        str(cat_paths[cat]), table.schema
+                    )
+                cat_writers[cat].write_table(table)
+    finally:
+        for w in cat_writers.values():
+            w.close()
+    return set(cat_writers.keys())
+
+
+def _label_test_split_per_category(
+    unlabeled_path: Path,
+    ctx: _TestSplitContext,
+    test_files: dict[str, Path | None],
+) -> None:
+    """Fan a streamed unlabeled test parquet out into per-category shards.
+
+    Mutates ``test_files[cat]`` in place — the orchestrator owns the
+    dict so the no-data branch can leave it as the all-``None`` initial
+    map. The intermediate parquet is unlinked once the writers close.
+    """
+    pf = pq.ParquetFile(str(unlabeled_path))
+    project_cols = [c for c in ctx.keep_cols if c in pf.schema_arrow.names]
+    membership = _compute_test_cat_membership(
+        ctx.test_eval_data, ctx.go_id_map, ctx.aspect_map
+    )
+    cat_paths: dict[str, Path] = {
+        cat: ctx.tmp_dir / f"test_{cat}.parquet" for cat in _CATEGORIES
+    }
+    written = _write_labeled_test_batches(
+        pf, project_cols, membership, ctx.test_cat_gt, cat_paths
+    )
+    for cat in written:
+        test_files[cat] = cat_paths[cat]
+    unlabeled_path.unlink(missing_ok=True)
+
+
+def _run_test_split(
+    session: Session,
+    ctx: _TestSplitContext,
+    emit: EmitFn,
+) -> dict[str, Path | None]:
+    """Run KNN once for the test pair and label per category.
+
+    Streams predictions to an intermediate parquet so the per-cat
+    labeled shards can be written without materialising ~10M records
+    in memory. Returns ``{cat: Path | None}`` — ``None`` for cats with
+    no rows in the test pair.
+    """
+    test_files: dict[str, Path | None] = {c: None for c in _CATEGORIES}
+    if not ctx.test_all_queries:
+        return test_files
+    q_inputs = _prepare_test_query_inputs(session, ctx, emit)
+    if not q_inputs.valid:
+        gc.collect()
+        return test_files
+    sequences = _load_test_sequences_and_taxonomy(
+        session, ctx.payload, q_inputs.valid, q_inputs.ref_by_aspect
+    )
+    session.expire_all()
+    test_unlabeled_path = ctx.tmp_dir / "test_unlabeled.parquet"
+    info = _stream_test_predictions(session, ctx, q_inputs, sequences, test_unlabeled_path)
+    gc.collect()
+    n_rows = int(info.get("n_rows", 0))
+    if n_rows > 0 and test_unlabeled_path.exists():
+        _label_test_split_per_category(test_unlabeled_path, ctx, test_files)
+    gc.collect()
+    return test_files
+
+
 # ---------------------------------------------------------------------------
 # Auto operation
 # ---------------------------------------------------------------------------
@@ -1526,159 +1741,29 @@ class TrainRerankerAutoOperation:
                 {"test_old": test_old_v, "test_new": test_new_v},
                 "info",
             )
-
-            # Write test data to parquet too
-            test_files: dict[str, Path | None] = {c: None for c in _CATEGORIES}
             test_cat_gt, test_all_queries = _collect_cat_gt_pairs(test_eval_data)
-
-            if test_all_queries:
-                test_ref = _build_reference_from_cache(
-                    session, test_old_set_id, all_embeddings, all_accessions, acc_to_idx, emit
-                )
-                test_accs = [a for a in test_all_queries if a in acc_to_idx]
-                test_indices = np.array([acc_to_idx[a] for a in test_accs], dtype=np.int32)
-                test_emb = (
-                    all_embeddings[test_indices].astype(np.float32)
-                    if len(test_indices) > 0
-                    else np.empty((0, all_embeddings.shape[1]), dtype=np.float32)
-                )
-                test_valid = test_accs
-                if test_valid:
-                    # Load sequences / taxonomy for test split
-                    test_qs: dict[str, str] | None = None
-                    test_rs: dict[str, str] | None = None
-                    test_qt: dict[str, int | None] | None = None
-                    test_rt: dict[str, int | None] | None = None
-                    if p.compute_alignments or p.compute_taxonomy:
-                        test_ref_accs: set[str] = set()
-                        for asp in _ASPECTS:
-                            test_ref_accs.update(test_ref[asp]["accessions"])
-                        test_query_set = set(test_valid)
-                        if p.compute_alignments:
-                            test_qs = _load_sequences(session, test_query_set)
-                            test_rs = _load_sequences(session, test_ref_accs)
-                        if p.compute_taxonomy:
-                            test_qt = _load_taxonomy_ids(session, test_query_set)
-                            test_rt = _load_taxonomy_ids(session, test_ref_accs)
-
-                    session.expire_all()
-                    # Stream the test split directly to parquet instead of
-                    # materialising ~10M records in a Python list. The
-                    # record-building loop inside ``_knn_transfer_and_label``
-                    # already filters by ``pivot_go_ids``, so the on-disk
-                    # intermediate is the pivot-reconciled set. Per-cat
-                    # labeling reads the intermediate back in pyarrow
-                    # batches and fans out to one writer per category —
-                    # peak RSS stays bounded by ``batch_size`` rows.
-                    test_unlabeled_path = tmp_dir / "test_unlabeled.parquet"
-                    test_stream_info = _knn_transfer_and_label(
-                        session,
-                        p,
-                        KnnTransferContext(
-                            valid_queries=test_valid,
-                            query_emb=test_emb,
-                            ref_by_aspect=test_ref,
-                            go_id_map=go_id_map,
-                            aspect_map=aspect_map,
-                            gt_pairs=set(),
-                            query_known_gos=test_eval_data.known,
-                            parent_map_str=parent_map if p.expand_votes_to_ancestors else None,
-                            ia_weights=ia_weights,
-                            pca_state=pca_state,
-                            pivot_go_ids=pivot_go_ids,
-                            embedding_pool=all_embeddings,
-                        ),
-                        sequence_context=SequenceContext(
-                            query_sequences=test_qs,
-                            ref_sequences=test_rs,
-                            query_tax_ids=test_qt,
-                            ref_tax_ids=test_rt,
-                        ),
-                        stream_output=StreamOutput(output_parquet=test_unlabeled_path),
-                    )
-                    del test_ref, test_emb, test_valid, test_qs, test_rs, test_qt, test_rt
-                    gc.collect()
-
-                    # test_stream_info is always a dict in this branch; the
-                    # list variant is only used for empty-split short-circuits.
-                    n_rows = int(test_stream_info.get("n_rows", 0))  # type: ignore[union-attr]
-                    if n_rows > 0 and test_unlabeled_path.exists():
-                        pf = pq.ParquetFile(str(test_unlabeled_path))
-                        project_cols = [c for c in _KEEP_COLS if c in pf.schema_arrow.names]
-                        # Per-cat (protein, aspect) membership recovered from
-                        # ``test_eval_data`` so each test row lands only in
-                        # the genuine cat bucket. See train-side comment for
-                        # rationale. ``aspect_map`` is keyed by int
-                        # go_term_id; invert ``go_id_map`` to look up by
-                        # the go_id string that ``test_eval_data`` carries.
-                        # Same name as train-side block; lexically distinct test path.
-                        aspect_by_go_id: dict[str, str] = {  # type: ignore[no-redef]
-                            go_id: aspect_map[term_id]
-                            for term_id, go_id in go_id_map.items()
-                            if term_id in aspect_map
-                        }
-                        test_cat_membership: dict[str, set[tuple[str, str]]] = {}
-                        for cat in _CATEGORIES:
-                            gt = getattr(test_eval_data, cat)
-                            members: set[tuple[str, str]] = set()  # type: ignore[no-redef]
-                            for protein, go_ids in gt.items():
-                                for go_id in go_ids:
-                                    asp = aspect_by_go_id.get(go_id, "")
-                                    if asp:
-                                        members.add((protein, asp))
-                            test_cat_membership[cat] = members
-                        cat_writers: dict[str, pq.ParquetWriter] = {}
-                        cat_paths: dict[str, Path] = {
-                            cat: tmp_dir / f"test_{cat}.parquet" for cat in _CATEGORIES
-                        }
-                        try:
-                            for batch in pf.iter_batches(batch_size=200_000, columns=project_cols):
-                                # Drop any pre-existing LABEL_COLUMN (it was
-                                # written as zero during streaming) so we can
-                                # append a fresh per-cat label column without
-                                # triggering a schema mismatch.
-                                if LABEL_COLUMN in batch.schema.names:
-                                    batch = batch.drop_columns([LABEL_COLUMN])
-                                accs = batch.column("protein_accession").to_pylist()
-                                asps = batch.column("aspect").to_pylist()
-                                for cat in _CATEGORIES:
-                                    members = test_cat_membership[cat]
-                                    mask_list = [
-                                        (a, asp) in members
-                                        for a, asp in zip(accs, asps, strict=False)
-                                    ]
-                                    if not any(mask_list):
-                                        continue
-                                    mask_arr = pa.array(mask_list, type=pa.bool_())
-                                    cat_batch = batch.filter(mask_arr)
-                                    cat_accs = cat_batch.column("protein_accession").to_pylist()
-                                    cat_gids = cat_batch.column("go_id").to_pylist()
-                                    gt_p = test_cat_gt[cat]
-                                    labels = pa.array(
-                                        [
-                                            1 if (a, g) in gt_p else 0
-                                            for a, g in zip(cat_accs, cat_gids, strict=False)
-                                        ],
-                                        type=pa.int8(),
-                                    )
-                                    cat_batch = cat_batch.append_column(LABEL_COLUMN, labels)
-                                    table = pa.Table.from_batches([cat_batch])
-                                    if cat not in cat_writers:
-                                        cat_writers[cat] = pq.ParquetWriter(
-                                            str(cat_paths[cat]), table.schema
-                                        )
-                                    cat_writers[cat].write_table(table)
-                        finally:
-                            for w in cat_writers.values():
-                                w.close()
-                        for cat in _CATEGORIES:
-                            if cat in cat_writers:
-                                test_files[cat] = cat_paths[cat]
-                        test_unlabeled_path.unlink(missing_ok=True)
-                    gc.collect()
-                else:
-                    del test_ref, test_emb, test_valid
-                    gc.collect()
+            test_files = _run_test_split(
+                session,
+                _TestSplitContext(
+                    payload=p,
+                    test_eval_data=test_eval_data,
+                    test_cat_gt=test_cat_gt,
+                    test_all_queries=test_all_queries,
+                    test_old_set_id=test_old_set_id,
+                    embedding_pool=all_embeddings,
+                    all_accessions=all_accessions,
+                    acc_to_idx=acc_to_idx,
+                    go_id_map=go_id_map,
+                    aspect_map=aspect_map,
+                    parent_map=parent_map,
+                    ia_weights=ia_weights,
+                    pca_state=pca_state,
+                    pivot_go_ids=pivot_go_ids,
+                    keep_cols=_KEEP_COLS,
+                    tmp_dir=tmp_dir,
+                ),
+                emit,
+            )
 
             # Release the preloaded embedding pool — from here on the
             # pipeline only reads from the per-split parquets on disk.

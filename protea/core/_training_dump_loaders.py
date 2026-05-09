@@ -426,6 +426,68 @@ def _collect_cat_gt_pairs(
     return cat_gt_pairs, all_query_accessions
 
 
+class _TestQueryInputs(NamedTuple):
+    """Computed inputs for the test-split KNN call.
+
+    Built by ``_prepare_test_query_inputs`` from ``_TestSplitContext``;
+    bundles the per-aspect reference set, the surviving query
+    accessions and the matching float32 embedding matrix so the KNN
+    helper does not need a 7-arg signature.
+    """
+
+    ref_by_aspect: dict[str, dict[str, Any]]
+    valid: list[str]
+    emb: np.ndarray
+
+
+class _TestSequences(NamedTuple):
+    """Optional sequence and taxonomy lookups for the test split.
+
+    All four fields default to ``None``; populated by
+    ``_load_test_sequences_and_taxonomy`` only when the payload sets
+    ``compute_alignments`` or ``compute_taxonomy``. Mirrors the field
+    layout of ``SequenceContext`` so the KNN helper can pass it
+    through without rewrapping.
+    """
+
+    query_sequences: dict[str, str] | None
+    ref_sequences: dict[str, str] | None
+    query_tax_ids: dict[str, int | None] | None
+    ref_tax_ids: dict[str, int | None] | None
+
+
+class _TestSplitContext(NamedTuple):
+    """Bundle of inputs threaded through :func:`_run_test_split`.
+
+    The test-split body needs sixteen pieces of state pulled from
+    ``TrainRerankerAutoOperation.execute``: the payload, eval data
+    derived from :func:`_resolve_test_eval_inputs` /
+    :func:`_collect_cat_gt_pairs`, the preloaded embedding pool, the
+    GO maps, optional enrichment maps (parent / IA / PCA), the GO
+    pivot universe and a couple of in-memory paths. NamedTuple keeps
+    the helper's signature at three params (session + ctx + emit) and
+    well under the §3 6-arg ceiling without prescribing field order at
+    every call site.
+    """
+
+    payload: Any
+    test_eval_data: Any
+    test_cat_gt: dict[str, set[tuple[str, str]]]
+    test_all_queries: set[str]
+    test_old_set_id: uuid.UUID
+    embedding_pool: np.ndarray
+    all_accessions: list[str]
+    acc_to_idx: dict[str, int]
+    go_id_map: dict[Any, str]
+    aspect_map: dict[Any, str]
+    parent_map: dict[str, set[str]] | None
+    ia_weights: dict[str, float] | None
+    pca_state: tuple[np.ndarray, np.ndarray] | None
+    pivot_go_ids: set[str]
+    keep_cols: list[str]
+    tmp_dir: Path
+
+
 def _resolve_test_eval_inputs(
     session: Session,
     train_versions: list[int],
