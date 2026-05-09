@@ -22,6 +22,7 @@ the join shape once it lands.
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -138,13 +139,28 @@ def create_experiment_run(
 def list_experiment_runs(
     status: ExperimentRunStatus | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=500),
+    after: datetime | None = Query(
+        default=None,
+        description=(
+            "Cursor for pagination (T4.2) — return rows with "
+            "``created_at < after`` only. Use the ``created_at`` of "
+            "the last row from the previous page to walk forward."
+        ),
+    ),
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> list[dict[str, Any]]:
-    """Return runs newest-first, optionally filtered by status."""
+    """Return runs newest-first, optionally filtered by status.
+
+    Pagination is cursor-based: pass ``after=<created_at>`` to get the
+    next page. Microsecond resolution on ``created_at`` keeps tie
+    collisions astronomically rare.
+    """
     with session_scope(factory) as session:
         q = session.query(ExperimentRun)
         if status is not None:
             q = q.filter(ExperimentRun.status == status)
+        if after is not None:
+            q = q.filter(ExperimentRun.created_at < after)
         rows = q.order_by(ExperimentRun.created_at.desc()).limit(limit).all()
         return [_serialise_experiment_run(r) for r in rows]
 

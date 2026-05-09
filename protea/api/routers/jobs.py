@@ -1,6 +1,7 @@
 # protea/api/routers/jobs.py
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, NamedTuple
 from uuid import UUID
 
@@ -19,9 +20,15 @@ from protea.infrastructure.session import session_scope
 class JobListFilters(NamedTuple):
     """Bundle of query-string filters consumed by ``GET /jobs``.
 
-    Carries the 5 user-visible knobs so the route handler signature stays
+    Carries the user-visible knobs so the route handler signature stays
     under the §3 6-param ceiling. The FastAPI dep ``_job_list_filters_dep``
     exposes each field as a discrete query parameter on the wire.
+
+    ``after`` is the cursor token for pagination (T4.2): when set, the
+    list only returns rows strictly older than the given UTC timestamp.
+    Clients page forward by reading the ``created_at`` of the last row
+    and feeding it back as ``after``. Microsecond resolution on
+    ``Job.created_at`` keeps tie collisions astronomically rare.
     """
 
     status: str | None
@@ -29,6 +36,7 @@ class JobListFilters(NamedTuple):
     include_children: bool
     parent_job_id: UUID | None
     limit: int
+    after: datetime | None
 
 
 def _job_list_filters_dep(
@@ -37,14 +45,23 @@ def _job_list_filters_dep(
     include_children: bool = Query(default=False),
     parent_job_id: UUID | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=500),
+    after: datetime | None = Query(
+        default=None,
+        description=(
+            "Cursor for pagination — return rows with "
+            "``created_at < after`` only. Use the ``created_at`` "
+            "of the last row from the previous page to walk forward."
+        ),
+    ),
 ) -> JobListFilters:
-    """FastAPI dependency that gathers the 5 ``GET /jobs`` query filters."""
+    """FastAPI dependency that gathers the ``GET /jobs`` query filters."""
     return JobListFilters(
         status=status,
         operation=operation,
         include_children=include_children,
         parent_job_id=parent_job_id,
         limit=limit,
+        after=after,
     )
 
 
@@ -190,6 +207,9 @@ def list_jobs(
 
         if filters.operation is not None:
             q = q.filter(Job.operation == filters.operation)
+
+        if filters.after is not None:
+            q = q.filter(Job.created_at < filters.after)
 
         rows = q.order_by(Job.created_at.desc()).limit(filters.limit).all()
         return [_serialise_job_summary(j, registry, session) for j in rows]
