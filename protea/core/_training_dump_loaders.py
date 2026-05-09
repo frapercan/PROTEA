@@ -314,6 +314,67 @@ def _maybe_fit_pca_state(
     return pca_state
 
 
+class _TrainSplitContext(NamedTuple):
+    """Bundle of invariant state used by every per-split iteration.
+
+    The training-split for-loop in
+    ``TrainRerankerAutoOperation.execute`` needs thirteen pieces of
+    state that do not change between splits: the payload, the
+    version → annotation-set lookup, the preloaded embedding pool,
+    the GO maps, optional enrichment maps, the pivot universe and a
+    couple of in-memory paths. Bundling them into a NamedTuple keeps
+    the helper's signature at four params (session + ctx +
+    split_index + emit) and well under the §3 6-arg ceiling.
+    """
+
+    payload: Any
+    version_to_set: dict[int, uuid.UUID]
+    embedding_pool: np.ndarray
+    all_accessions: list[str]
+    acc_to_idx: dict[str, int]
+    go_id_map: dict[Any, str]
+    aspect_map: dict[Any, str]
+    parent_map: dict[str, set[str]] | None
+    ia_weights: dict[str, float] | None
+    pca_state: tuple[np.ndarray, np.ndarray] | None
+    pivot_go_ids: set[str]
+    keep_cols: list[str]
+    tmp_dir: Path
+
+
+class _TrainSplitOutcome(NamedTuple):
+    """Outcome of a single training-split iteration.
+
+    ``split_files`` maps a category to its newly-written parquet path;
+    cats with no rows are absent from the dict (the caller appends to
+    its long-lived list only for present cats). ``stats`` is the
+    audit-trail row recorded for ``per_split_stats``. ``skipped`` is
+    ``True`` for early-exit branches (no ground truth in any cat or
+    no valid query embeddings); the caller uses it to gate the
+    ``valid_split_versions`` append.
+    """
+
+    split_files: dict[str, Path]
+    stats: dict[str, Any]
+    skipped: bool
+
+
+def _build_skipped_outcome(
+    v_old: int, v_new: int, reason: str
+) -> _TrainSplitOutcome:
+    """Build the outcome shape for a skipped training-split iteration."""
+    return _TrainSplitOutcome(
+        split_files={},
+        stats={
+            "v_old": v_old,
+            "v_new": v_new,
+            "skipped": True,
+            "reason": reason,
+        },
+        skipped=True,
+    )
+
+
 class _DumpRequest(NamedTuple):
     """Bundle of state passed to :func:`_perform_dataset_dump`.
 
