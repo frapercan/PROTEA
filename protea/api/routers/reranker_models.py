@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NamedTuple
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
@@ -221,33 +221,77 @@ def _register_model(
     return model.id
 
 
-@router.post("/import", status_code=201, summary="Import a lab-trained booster")
-async def import_reranker_model_multipart(
+class _RerankerImportFiles(NamedTuple):
+    """Three uploaded artefacts mirroring the lab's runs/<name>/ layout."""
+
+    model_file: UploadFile
+    spec_yaml: UploadFile
+    run_json: UploadFile
+
+
+def _reranker_import_files_dep(
     model_file: UploadFile = File(..., description="LightGBM model.txt"),
     spec_yaml: UploadFile = File(..., description="ExperimentSpec spec.yaml"),
     run_json: UploadFile = File(..., description="Lab run.json with metrics + provenance"),
+) -> _RerankerImportFiles:
+    """FastAPI dep collecting the three multipart files."""
+    return _RerankerImportFiles(
+        model_file=model_file, spec_yaml=spec_yaml, run_json=run_json
+    )
+
+
+class _RerankerImportFields(NamedTuple):
+    """Optional Form overrides on ``POST /reranker-models/import``."""
+
+    name: str | None
+    dataset_id: str | None
+    external_source: str | None
+    prediction_set_id: str | None
+    evaluation_set_id: str | None
+    force: bool
+
+
+def _reranker_import_fields_dep(
     name: str | None = Form(default=None, description="Override RerankerModel.name"),
     dataset_id: str | None = Form(default=None, description="Override linked Dataset UUID"),
     external_source: str | None = Form(default=None),
     prediction_set_id: str | None = Form(default=None),
     evaluation_set_id: str | None = Form(default=None),
     force: bool = Form(default=False),
+) -> _RerankerImportFields:
+    """FastAPI dep collecting the six optional Form overrides."""
+    return _RerankerImportFields(
+        name=name,
+        dataset_id=dataset_id,
+        external_source=external_source,
+        prediction_set_id=prediction_set_id,
+        evaluation_set_id=evaluation_set_id,
+        force=force,
+    )
+
+
+@router.post("/import", status_code=201, summary="Import a lab-trained booster")
+async def import_reranker_model_multipart(
+    files: _RerankerImportFiles = Depends(_reranker_import_files_dep),
+    fields: _RerankerImportFields = Depends(_reranker_import_fields_dep),
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
     """Upload a trained booster and register a ``RerankerModel`` row.
 
     The three files (``model.txt``, ``spec.yaml``, ``run.json``) mirror
-    the artefacts produced by ``protea-reranker-lab`` under ``runs/<name>/``.
+    the artefacts produced by ``protea-reranker-lab`` under
+    ``runs/<name>/``. Wire format unchanged — the FastAPI deps expose
+    every File/Form field as a discrete multipart part.
     """
-    model_bytes = await model_file.read()
-    spec_text = (await spec_yaml.read()).decode("utf-8")
+    model_bytes = await files.model_file.read()
+    spec_text = (await files.spec_yaml.read()).decode("utf-8")
     try:
-        run = json.loads((await run_json.read()).decode("utf-8"))
+        run = json.loads((await files.run_json.read()).decode("utf-8"))
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=422, detail=f"run.json is not valid JSON: {exc}") from exc
 
-    run_id = run.get("run_id") or (model_file.filename or "unknown").split(".")[0]
-    resolved_name = name or run_id
+    run_id = run.get("run_id") or (files.model_file.filename or "unknown").split(".")[0]
+    resolved_name = fields.name or run_id
 
     settings = load_settings(_resolve_project_root())
     store = get_artifact_store(settings)
@@ -262,11 +306,11 @@ async def import_reranker_model_multipart(
                 artifact_uri=artifact_uri,
                 run=run,
                 spec_yaml_text=spec_text,
-                dataset_id_override=dataset_id,
-                external_source=external_source,
-                prediction_set_id=prediction_set_id,
-                evaluation_set_id=evaluation_set_id,
-                force=force,
+                dataset_id_override=fields.dataset_id,
+                external_source=fields.external_source,
+                prediction_set_id=fields.prediction_set_id,
+                evaluation_set_id=fields.evaluation_set_id,
+                force=fields.force,
             ),
         )
 

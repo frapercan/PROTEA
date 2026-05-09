@@ -115,15 +115,6 @@
       "threshold": 60
     },
     {
-      "key": "params::protea/api/routers/reranker_models.py::import_reranker_model_multipart",
-      "kind": "params",
-      "path": "protea/api/routers/reranker_models.py",
-      "name": "import_reranker_model_multipart",
-      "line": 225,
-      "metric": 10,
-      "threshold": 6
-    },
-    {
       "key": "params::protea/core/retry.py::with_retry",
       "kind": "params",
       "path": "protea/core/retry.py",
