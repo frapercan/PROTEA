@@ -197,6 +197,42 @@ class TestListJobs:
 
         assert resp.status_code == 400
 
+    def test_after_cursor_filters_by_created_at(self, session):
+        """T4.2: ``after`` query param adds ``created_at < after`` to the query."""
+        job = _make_job()
+        q = MagicMock()
+        q.order_by.return_value.limit.return_value.all.return_value = [job]
+        session.query.return_value = q
+        q.filter.return_value = q
+
+        factory = MagicMock()
+        app = _make_app(factory)
+
+        cursor = "2026-04-01T10:00:00Z"
+        with patch(
+            "protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)
+        ):
+            c = TestClient(app)
+            resp = c.get(f"/jobs?after={cursor}")
+
+        assert resp.status_code == 200
+        # The last filter() invocation carries the ``Job.created_at <
+        # after`` clause; assert filter was called with at least one
+        # extra clause beyond the parent_job_id default.
+        assert q.filter.call_count >= 2
+
+    def test_invalid_after_cursor_returns_422(self, session):
+        factory = MagicMock()
+        app = _make_app(factory)
+
+        with patch(
+            "protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)
+        ):
+            c = TestClient(app, raise_server_exceptions=False)
+            resp = c.get("/jobs?after=not-a-date")
+
+        assert resp.status_code == 422
+
 
 # ---------------------------------------------------------------------------
 # GET /jobs/{id}

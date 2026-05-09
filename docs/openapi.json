@@ -3607,7 +3607,7 @@
     },
     "/v1/experiment-runs": {
       "get": {
-        "description": "Return runs newest-first, optionally filtered by status.",
+        "description": "Return runs newest-first, optionally filtered by status.\n\nPagination is cursor-based: pass ``after=<created_at>`` to get the\nnext page. Microsecond resolution on ``created_at`` keeps tie\ncollisions astronomically rare.",
         "operationId": "list_experiment_runs_v1_experiment_runs_get",
         "parameters": [
           {
@@ -3636,6 +3636,25 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Cursor for pagination (T4.2) \u2014 return rows with ``created_at < after`` only. Use the ``created_at`` of the last row from the previous page to walk forward.",
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cursor for pagination (T4.2) \u2014 return rows with ``created_at < after`` only. Use the ``created_at`` of the last row from the previous page to walk forward.",
+              "title": "After"
             }
           }
         ],
@@ -3948,6 +3967,25 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Cursor for pagination \u2014 return rows with ``created_at < after`` only. Use the ``created_at`` of the last row from the previous page to walk forward.",
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cursor for pagination \u2014 return rows with ``created_at < after`` only. Use the ``created_at`` of the last row from the previous page to walk forward.",
+              "title": "After"
             }
           }
         ],

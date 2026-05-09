@@ -146,6 +146,30 @@ class TestRead:
         assert isinstance(rows, list)
         assert rows[0]["name"] == run.name
 
+    def test_after_cursor_filters_by_created_at(self, session) -> None:
+        """T4.2: ``after`` adds a ``created_at < after`` clause."""
+        run = _make_run()
+        q = MagicMock()
+        q.order_by.return_value.limit.return_value.all.return_value = [run]
+        session.query.return_value = q
+        q.filter.return_value = q
+
+        factory = MagicMock()
+        app = _make_app(factory)
+
+        cursor = "2026-04-01T10:00:00Z"
+        with patch(
+            "protea.api.routers.experiment_runs.session_scope",
+            side_effect=lambda _: _mock_scope(session),
+        ):
+            c = TestClient(app)
+            resp = c.get(f"/experiment-runs?after={cursor}")
+
+        assert resp.status_code == 200
+        # The handler calls filter() once for the cursor (no status filter
+        # in this test) so call_count is exactly 1.
+        assert q.filter.call_count == 1
+
     def test_get_one_returns_row(self, session) -> None:
         run = _make_run()
         session.get.return_value = run
