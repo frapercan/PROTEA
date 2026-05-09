@@ -329,15 +329,61 @@ class ImportRerankerByReferenceRequest(BaseModel):
     under its own key and just needs PROTEA to register the URI.
     """
 
-    artifact_uri: str = Field(..., min_length=1)
+    artifact_uri: str = Field(
+        ...,
+        min_length=1,
+        description=(
+            "Storage URI of the booster blob (``s3://…/model.txt`` or "
+            "``file://…/model.txt``). PROTEA registers this verbatim "
+            "without re-reading or copying the artifact."
+        ),
+    )
     spec_yaml: str = Field(..., description="Full spec.yaml text")
     run: dict[str, Any] = Field(..., description="Parsed run.json")
-    name: str | None = None
-    dataset_id: str | None = None
-    external_source: str | None = None
-    prediction_set_id: str | None = None
-    evaluation_set_id: str | None = None
-    force: bool = False
+    name: str | None = Field(
+        default=None,
+        description=(
+            "Override row name. When omitted, falls back to the "
+            "``run.run_id`` from the run.json payload."
+        ),
+    )
+    dataset_id: str | None = Field(
+        default=None,
+        description=(
+            "UUID of the source ``Dataset`` row this booster was "
+            "trained on. Used to track the lab → PROTEA lineage."
+        ),
+    )
+    external_source: str | None = Field(
+        default=None,
+        description=(
+            "Free-form provenance tag (e.g. "
+            "``protea-reranker-lab@<git-sha>``) for boosters trained "
+            "outside PROTEA."
+        ),
+    )
+    prediction_set_id: str | None = Field(
+        default=None,
+        description=(
+            "Optional UUID of a ``PredictionSet`` whose vote pattern "
+            "the booster targets; nullable so abstract boosters can be "
+            "registered without binding to a specific run."
+        ),
+    )
+    evaluation_set_id: str | None = Field(
+        default=None,
+        description=(
+            "Optional UUID of an ``EvaluationSet`` the booster was "
+            "tuned against (NK / LK / PK delta)."
+        ),
+    )
+    force: bool = Field(
+        default=False,
+        description=(
+            "When true, allow overwriting an existing row with the "
+            "same ``name``. Default false rejects duplicates with 409."
+        ),
+    )
 
 
 @router.post(

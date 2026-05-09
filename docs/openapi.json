@@ -255,6 +255,7 @@
         "properties": {
           "config": {
             "additionalProperties": true,
+            "description": "Structured run configuration (hyperparameters, feature flags, reference dataset slugs). Free-form JSON; consumers agree on the schema per campaign.",
             "title": "Config",
             "type": "object"
           },
@@ -267,6 +268,7 @@
                 "type": "null"
               }
             ],
+            "description": "Human-readable intent text shown on the experiment-run detail page (D11 narrative).",
             "title": "Description"
           },
           "hypothesis": {
@@ -278,6 +280,7 @@
                 "type": "null"
               }
             ],
+            "description": "What the run is trying to verify or falsify; surfaces in the F-EXP campaign view.",
             "title": "Hypothesis"
           },
           "name": {
@@ -288,10 +291,12 @@
           },
           "provenance": {
             "additionalProperties": true,
+            "description": "Provenance overlay; the server merges in baseline fields from ``capture_provenance()`` (git sha, hostname, timestamp) so the caller only needs to add domain-specific context.",
             "title": "Provenance",
             "type": "object"
           },
           "tags": {
+            "description": "Lightweight grouping tokens (e.g. ``ablation``, ``benchmark-v1``) used for filtering.",
             "items": {
               "type": "string"
             },
@@ -416,6 +421,7 @@
         "description": "Body for ``POST /reranker-models/import-by-reference``.\n\nUse this when the lab has already uploaded ``model.txt`` to MinIO\nunder its own key and just needs PROTEA to register the URI.",
         "properties": {
           "artifact_uri": {
+            "description": "Storage URI of the booster blob (``s3://\u2026/model.txt`` or ``file://\u2026/model.txt``). PROTEA registers this verbatim without re-reading or copying the artifact.",
             "minLength": 1,
             "title": "Artifact Uri",
             "type": "string"
@@ -429,6 +435,7 @@
                 "type": "null"
               }
             ],
+            "description": "UUID of the source ``Dataset`` row this booster was trained on. Used to track the lab \u2192 PROTEA lineage.",
             "title": "Dataset Id"
           },
           "evaluation_set_id": {
@@ -440,6 +447,7 @@
                 "type": "null"
               }
             ],
+            "description": "Optional UUID of an ``EvaluationSet`` the booster was tuned against (NK / LK / PK delta).",
             "title": "Evaluation Set Id"
           },
           "external_source": {
@@ -451,10 +459,12 @@
                 "type": "null"
               }
             ],
+            "description": "Free-form provenance tag (e.g. ``protea-reranker-lab@<git-sha>``) for boosters trained outside PROTEA.",
             "title": "External Source"
           },
           "force": {
             "default": false,
+            "description": "When true, allow overwriting an existing row with the same ``name``. Default false rejects duplicates with 409.",
             "title": "Force",
             "type": "boolean"
           },
@@ -467,6 +477,7 @@
                 "type": "null"
               }
             ],
+            "description": "Override row name. When omitted, falls back to the ``run.run_id`` from the run.json payload.",
             "title": "Name"
           },
           "prediction_set_id": {
@@ -478,6 +489,7 @@
                 "type": "null"
               }
             ],
+            "description": "Optional UUID of a ``PredictionSet`` whose vote pattern the booster targets; nullable so abstract boosters can be registered without binding to a specific run.",
             "title": "Prediction Set Id"
           },
           "run": {

@@ -51,11 +51,44 @@ class CreateExperimentRunRequest(BaseModel):
     """
 
     name: str = Field(..., min_length=1, description="Unique slug for the run.")
-    description: str | None = Field(default=None)
-    hypothesis: str | None = Field(default=None)
-    config: dict[str, Any] = Field(default_factory=dict)
-    provenance: dict[str, Any] = Field(default_factory=dict)
-    tags: list[str] = Field(default_factory=list)
+    description: str | None = Field(
+        default=None,
+        description=(
+            "Human-readable intent text shown on the experiment-run "
+            "detail page (D11 narrative)."
+        ),
+    )
+    hypothesis: str | None = Field(
+        default=None,
+        description=(
+            "What the run is trying to verify or falsify; surfaces in "
+            "the F-EXP campaign view."
+        ),
+    )
+    config: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Structured run configuration (hyperparameters, feature "
+            "flags, reference dataset slugs). Free-form JSON; consumers "
+            "agree on the schema per campaign."
+        ),
+    )
+    provenance: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Provenance overlay; the server merges in baseline fields "
+            "from ``capture_provenance()`` (git sha, hostname, "
+            "timestamp) so the caller only needs to add domain-specific "
+            "context."
+        ),
+    )
+    tags: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Lightweight grouping tokens (e.g. ``ablation``, "
+            "``benchmark-v1``) used for filtering."
+        ),
+    )
 
     @field_validator("name", mode="before")
     @classmethod
