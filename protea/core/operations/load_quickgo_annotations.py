@@ -225,14 +225,7 @@ class LoadQuickGOAnnotationsOperation:
         Final flush after the loop passes ``emit=None`` to skip the per-page
         progress event; in-loop flushes pass the real emit.
         """
-        inserted, skipped = self._store_buffer(
-            session,
-            buffer,
-            store_ctx.annotation_set_id,
-            store_ctx.protein_accessions,
-            store_ctx.go_term_map,
-            store_ctx.eco_map,
-        )
+        inserted, skipped = self._store_buffer(session, buffer, store_ctx)
         totals.pages += 1
         totals.inserted += inserted
         totals.skipped += skipped
@@ -337,31 +330,28 @@ class LoadQuickGOAnnotationsOperation:
         self,
         session: Session,
         records: list[QuickGoAnnotationRecord],
-        annotation_set_id: uuid.UUID,
-        valid_accessions: set[str],
-        go_term_map: dict[str, int],
-        eco_map: dict[str, str],
+        store_ctx: _QuickGoStoreCtx,
     ) -> tuple[int, int]:
         to_add: list[dict] = []
         skipped = 0
 
         for rec in records:
-            if rec.accession not in valid_accessions:
+            if rec.accession not in store_ctx.protein_accessions:
                 skipped += 1
                 continue
 
-            go_term_id = go_term_map.get(rec.go_id)
+            go_term_id = store_ctx.go_term_map.get(rec.go_id)
             if go_term_id is None:
                 skipped += 1
                 continue
 
             evidence_code = (
-                eco_map.get(rec.eco_id, rec.eco_id) if rec.eco_id else None
+                store_ctx.eco_map.get(rec.eco_id, rec.eco_id) if rec.eco_id else None
             )
 
             to_add.append(
                 {
-                    "annotation_set_id": annotation_set_id,
+                    "annotation_set_id": store_ctx.annotation_set_id,
                     "protein_accession": rec.accession,
                     "go_term_id": go_term_id,
                     "qualifier": rec.qualifier,

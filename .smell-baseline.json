@@ -133,15 +133,6 @@
       "threshold": 6
     },
     {
-      "key": "params::protea/core/operations/load_quickgo_annotations.py::LoadQuickGOAnnotationsOperation._store_buffer",
-      "kind": "params",
-      "path": "protea/core/operations/load_quickgo_annotations.py",
-      "name": "LoadQuickGOAnnotationsOperation._store_buffer",
-      "line": 336,
-      "metric": 7,
-      "threshold": 6
-    },
-    {
       "key": "params::protea/core/retry.py::with_retry",
       "kind": "params",
       "path": "protea/core/retry.py",
