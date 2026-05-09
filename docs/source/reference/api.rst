@@ -5,7 +5,7 @@ HTTP API
    :local:
    :depth: 2
 
-The PROTEA HTTP API is a FastAPI application that exposes sixteen routers.
+The PROTEA HTTP API is a FastAPI application that exposes seventeen routers.
 All state mutations flow through this layer: it writes ``Job`` rows to
 PostgreSQL and publishes messages to RabbitMQ. The API is stateless between
 requests — the session factory and AMQP URL are injected via ``app.state``
@@ -15,6 +15,29 @@ imports.
 All endpoints return JSON. Error responses follow FastAPI's default
 ``{"detail": "..."}`` format. Timestamps are ISO 8601 UTC strings.
 UUID identifiers are lowercase hyphenated strings.
+
+Versioning and the ``/v1/`` prefix
+----------------------------------
+
+Every router is mounted twice (T4.1, decision D4):
+
+- **Canonical** under ``/v1/`` — the prefix surfaced in OpenAPI /
+  Swagger and the only path schema exporters and codegen tools see.
+  All new clients should target this form.
+- **Legacy alias** at the root path — the same handler reachable
+  without a prefix, ``include_in_schema=False`` so OpenAPI does *not*
+  advertise it. This exists for the deprecation window so existing
+  frontend, CLI, and CI traffic keeps working without a coordinated
+  cutover.
+
+The endpoint paths in the per-router sections and the *Endpoints
+summary* below are listed without the prefix for terseness; both
+``/jobs`` and ``/v1/jobs`` resolve to the same handler today. Health
+endpoints (``/health``, ``/health/ready``) stay at the root by
+convention. When the legacy aliases are retired the second
+``include_router`` call in
+``protea.api.app._register_routers`` will be removed; this page is
+the source of truth for that timing.
 
 Application factory
 -------------------
@@ -291,6 +314,25 @@ caches the result in-process to stay under the unauthenticated 60 req/h
 rate limit (set ``PROTEA_GITHUB_TOKEN`` to lift to 5000 req/h).
 
 .. automodule:: protea.api.routers.stack
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Experiment runs router
+----------------------
+
+The ``/experiment-runs`` router exposes CRUD over the
+``ExperimentRun`` ORM (T4.7-T4.9, decision D11). One row aggregates
+multiple ``Job`` / ``EvaluationResult`` / ``RerankerModel`` rows
+under a unique human ``name`` and carries the narrative trio
+(``description`` / ``hypothesis`` / ``findings``) plus JSONB
+``config`` / ``provenance`` and ``Text[]`` ``tags``.
+``PATCH /experiment-runs/{run_id}`` accepts partial updates; status
+transitions stamp ``started_at`` (on ``planned → running``) and
+``finished_at`` (on ``running → done`` or ``→ abandoned``)
+idempotently — re-entering a state never resets its timestamp.
+
+.. automodule:: protea.api.routers.experiment_runs
    :members:
    :undoc-members:
    :show-inheritance:
@@ -642,6 +684,27 @@ Endpoints summary
    * - ``GET``
      - ``/stack/pulls``
      - Aggregate open pull requests across every repo in the stack.
+
+   * -
+     - **Experiment Runs**
+     -
+   * - ``POST``
+     - ``/experiment-runs``
+     - Create an ``ExperimentRun`` (T4.7). Body: ``name`` required +
+       optional narrative trio + status + JSONB / tags.
+   * - ``GET``
+     - ``/experiment-runs``
+     - List experiment runs (T4.8).
+   * - ``GET``
+     - ``/experiment-runs/{run_id}``
+     - Retrieve one experiment run.
+   * - ``PATCH``
+     - ``/experiment-runs/{run_id}``
+     - Partial update (T4.9). Status transitions stamp
+       ``started_at`` / ``finished_at`` idempotently.
+   * - ``DELETE``
+     - ``/experiment-runs/{run_id}``
+     - Delete an experiment run (returns 204).
 
 Request body for ``POST /jobs``
 --------------------------------
