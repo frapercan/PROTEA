@@ -23,6 +23,19 @@ keeps raising ``HTTPException`` exactly as before; only the wire
 format changed. Timestamps are ISO 8601 UTC strings. UUID identifiers
 are lowercase hyphenated strings.
 
+Every client request body is **strict** (``model_config =
+ConfigDict(extra="forbid")``, PR #215): unknown keys raise a 422
+instead of being silently dropped, so ``{"oepration": "ping"}`` on
+``POST /jobs`` (typo for ``operation``) fails fast against the
+schema rather than parsing as if ``operation`` were missing. The
+contract covers every documented request body
+(``CreateJobRequest`` / ``CreateJobCommentRequest`` /
+``ScoringConfigCreate`` / ``CreateExperimentRunRequest`` /
+``UpdateExperimentRunRequest`` / ``CreateDatasetRequest`` /
+``ImportRerankerByReferenceRequest`` / ``SupportCreate``); response
+models are not constrained because they are server-built and never
+parse client input.
+
 Versioning and the ``/v1/`` prefix
 ----------------------------------
 
