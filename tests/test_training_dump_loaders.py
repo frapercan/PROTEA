@@ -19,7 +19,7 @@ a mocked SQLAlchemy ``Session`` / ``Connection``).
 from __future__ import annotations
 
 import uuid
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -27,9 +27,12 @@ import pytest
 from protea.core._training_dump_loaders import (
     _check_reranker_name_collisions,
     _count_embeddings_with_dim,
+    _DumpRequest,
     _load_annotation_aggregations,
     _load_go_maps,
     _load_ia_weights,
+    _maybe_fit_pca_state,
+    _perform_dataset_dump,
     _resolve_annotation_set_ids,
     _stream_embeddings,
 )
@@ -259,3 +262,114 @@ class TestLoadGoMaps:
         # ``aspect=None`` row is skipped from the aspect map.
         assert aspect_map == {1: "P", 2: "F"}
         assert pivot_go_ids == {"GO:0001", "GO:0002"}
+
+
+class TestMaybeFitPcaState:
+    def _captured_emit(self) -> tuple[list[tuple], MagicMock]:
+        events: list[tuple] = []
+
+        def emit(event, message, fields, level):
+            events.append((event, message, fields, level))
+
+        return events, emit
+
+    def test_returns_none_when_pca_disabled(self) -> None:
+        events, emit = self._captured_emit()
+        embeddings = np.array([[1.0, 2.0]], dtype=np.float32)
+        out = _maybe_fit_pca_state(uuid.uuid4(), embeddings, use_pca=False, emit=emit)
+        assert out is None
+        assert events == []  # no audit event when PCA is off
+
+    def test_returns_none_for_empty_pool(self) -> None:
+        events, emit = self._captured_emit()
+        empty = np.empty((0, 2), dtype=np.float32)
+        out = _maybe_fit_pca_state(uuid.uuid4(), empty, use_pca=True, emit=emit)
+        assert out is None
+        assert events == []  # short-circuit before the cache hit
+
+    def test_delegates_to_shared_cache_and_emits(self) -> None:
+        events, emit = self._captured_emit()
+        embeddings = np.array(
+            [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32
+        )
+        cfg_id = uuid.uuid4()
+
+        with patch(
+            "protea.core.pca_cache._load_or_fit_pca_state",
+            return_value=("MEAN_FAKE", "COMPONENTS_FAKE"),
+        ) as mock_cache:
+            out = _maybe_fit_pca_state(cfg_id, embeddings, use_pca=True, emit=emit)
+
+        assert out == ("MEAN_FAKE", "COMPONENTS_FAKE")
+        mock_cache.assert_called_once_with(cfg_id, embeddings)
+        # One audit event with the expected payload shape.
+        assert len(events) == 1
+        event, _, fields, level = events[0]
+        assert event == "dump_helper.pca_fit"
+        assert level == "info"
+        assert fields["n_refs"] == 2
+        assert fields["dim_in"] == 3
+        assert fields["source"] == "shared_cache"
+
+
+class TestPerformDatasetDump:
+    def _request(self, *, dump_to: str | None = "/tmp/fake-dump") -> _DumpRequest:
+        payload = MagicMock()
+        payload.dump_to = dump_to
+        payload.name = "fake-bench"
+        payload.limit_per_entry = 5
+        payload.annotation_source = "goa"
+        return _DumpRequest(
+            payload=payload,
+            split_files={"NK": [], "LK": [], "PK": []},
+            valid_split_versions=[(160, 165), (165, 170)],
+            test_files={"NK": None, "LK": None, "PK": None},
+            test_old_v=170,
+            test_new_v=230,
+            emb_config_id=uuid.uuid4(),
+            ontology_snapshot_id=uuid.uuid4(),
+        )
+
+    def _captured_emit(self) -> tuple[list[tuple], MagicMock]:
+        events: list[tuple] = []
+
+        def emit(event, message, fields, level):
+            events.append((event, message, fields, level))
+
+        return events, emit
+
+    def test_raises_when_dump_to_unset(self) -> None:
+        request = self._request(dump_to=None)
+        events, emit = self._captured_emit()
+
+        with pytest.raises(ValueError, match="dump_helper requires dump_to"):
+            _perform_dataset_dump(request, MagicMock(), 0.0, emit)
+
+        assert events == []  # No audit event when validation fails.
+
+    def test_returns_operation_result_with_dump_metadata(self) -> None:
+        request = self._request()
+        events, emit = self._captured_emit()
+        dump_fn = MagicMock(return_value={"dump_dir": "/tmp/fake-dump", "n_train_rows": 42})
+
+        # Patch parquet_export imports so the helper does not need a real
+        # ParquetExportContext / git sha resolver.
+        with patch(
+            "protea.core.parquet_export.resolve_protea_git_sha",
+            return_value="deadbeef",
+        ), patch(
+            "protea.core.parquet_export.ParquetExportContext"
+        ) as mock_ctx_cls:
+            result = _perform_dataset_dump(request, dump_fn, t0=0.0, emit=emit)
+
+        # ``dump_fn`` is called once with the constructed context.
+        dump_fn.assert_called_once()
+        mock_ctx_cls.assert_called_once()
+        # Result carries dump_path + dump_stats + elapsed_seconds.
+        assert result.result["dumped"] is True
+        assert result.result["dump_path"] == "/tmp/fake-dump"
+        assert result.result["dump_stats"] == {"dump_dir": "/tmp/fake-dump", "n_train_rows": 42}
+        assert "elapsed_seconds" in result.result
+        # Two events fire in order: dump_done then done.
+        event_names = [ev[0] for ev in events]
+        assert event_names == ["dump_helper.dump_done", "dump_helper.done"]

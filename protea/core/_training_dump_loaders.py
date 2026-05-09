@@ -21,9 +21,11 @@ ballooning further.
 
 from __future__ import annotations
 
+import time
 import uuid
-from collections.abc import Iterable
-from typing import Any
+from collections.abc import Callable, Iterable
+from pathlib import Path
+from typing import Any, NamedTuple
 
 import numpy as np
 from sqlalchemy import text
@@ -31,6 +33,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 
 from protea.core.annotation_intern import intern_string
+from protea.core.contracts.operation import EmitFn, OperationResult
 from protea.core.domain.aspect import ASPECT_CODES as _ASPECTS
 
 
@@ -268,3 +271,125 @@ def _load_go_maps(
     ).fetchall()
     pivot_go_ids: set[str] = {row[0] for row in pivot_rows}
     return go_id_map, aspect_map, pivot_go_ids
+
+
+def _maybe_fit_pca_state(
+    embedding_config_id: uuid.UUID,
+    all_embeddings: np.ndarray,
+    use_pca: bool,
+    emit: EmitFn,
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """Resolve the embedding-PCA state via the shared cache when requested.
+
+    Returns ``None`` for the no-PCA path (either ``use_pca`` is false or
+    the preloaded pool is empty) so callers can use ``pca_state is None``
+    as the gate for the PCA-projected feature columns. When the cache
+    hit produces components, an ``dump_helper.pca_fit`` audit event is
+    emitted with the input/output dims so downstream listeners know the
+    PCA shape used at training time matches what ``predict_go_terms``
+    will use at inference.
+
+    The shared cache is load-bearing: a fresh per-call fit (the legacy
+    behaviour) silently produced different components from a randomly
+    subsampled pool, breaking ``emb_pca_query_*`` parity for the booster
+    even when every other feature was correct.
+    """
+    if not use_pca or not all_embeddings.size:
+        return None
+    from protea.core.pca_cache import _load_or_fit_pca_state
+    from protea.core.reranker import EMBEDDING_PCA_DIM
+
+    pca_state = _load_or_fit_pca_state(embedding_config_id, all_embeddings)
+    emit(
+        "dump_helper.pca_fit",
+        None,
+        {
+            "n_refs": int(all_embeddings.shape[0]),
+            "dim_in": int(all_embeddings.shape[1]),
+            "dim_out": EMBEDDING_PCA_DIM,
+            "source": "shared_cache",
+        },
+        "info",
+    )
+    return pca_state
+
+
+class _DumpRequest(NamedTuple):
+    """Bundle of state passed to :func:`_perform_dataset_dump`.
+
+    Aggregates the per-split shard list, the test-split shard map and
+    the trio of payload-derived UUIDs/strings the parquet exporter
+    needs. Frozen NamedTuple so the helper signature stays at 4 params
+    (request + dump_fn + t0 + emit) and well under the §3 ceiling.
+    """
+
+    payload: Any
+    split_files: dict[str, list[Path]]
+    valid_split_versions: list[tuple[int, int]]
+    test_files: dict[str, Path | None]
+    test_old_v: int
+    test_new_v: int
+    emb_config_id: uuid.UUID
+    ontology_snapshot_id: uuid.UUID
+
+
+def _perform_dataset_dump(
+    request: _DumpRequest,
+    dump_fn: Callable[[Any], dict[str, Any]],
+    t0: float,
+    emit: EmitFn,
+) -> OperationResult:
+    """Run the frozen-parquet dump and shape the success ``OperationResult``.
+
+    Raises ``ValueError`` when ``payload.dump_to`` is unset because the
+    legacy in-process LightGBM training path was moved to
+    ``protea-reranker-lab``; every caller must now target a dump path
+    (``ExportResearchDatasetOperation`` always does).
+
+    ``dump_fn`` is the (caller-owned) shim around
+    ``export_reranker_parquets`` -- typically
+    ``TrainRerankerAutoOperation._dump_frozen_dataset``. Passing it in
+    lets the helper stay free of the ``ParquetExportContext`` import
+    at module-load time.
+    """
+    p = request.payload
+    if not p.dump_to:
+        raise ValueError(
+            "dump_helper requires dump_to: LightGBM training has been "
+            "moved to protea-reranker-lab. Use "
+            "ExportResearchDatasetOperation / POST /datasets."
+        )
+    from protea import __version__ as _protea_version
+    from protea.core.parquet_export import (
+        ParquetExportContext,
+        resolve_protea_git_sha,
+    )
+
+    dump_stats = dump_fn(
+        ParquetExportContext(
+            stage_dir=Path(p.dump_to),
+            split_files=request.split_files,
+            valid_split_versions=request.valid_split_versions,
+            test_files=request.test_files,
+            test_old_v=request.test_old_v,
+            test_new_v=request.test_new_v,
+            name=p.name,
+            k=int(p.limit_per_entry),
+            embedding_config_id=str(request.emb_config_id),
+            ontology_snapshot_id=str(request.ontology_snapshot_id),
+            annotation_source=p.annotation_source,
+            store=None,
+            producer_version=_protea_version,
+            producer_git_sha=resolve_protea_git_sha(),
+        )
+    )
+    emit("dump_helper.dump_done", None, dump_stats, "info")
+    elapsed = round(time.perf_counter() - t0, 1)
+    result: dict[str, Any] = {
+        "dumped": True,
+        "dump_path": str(p.dump_to),
+        "dump_stats": dump_stats,
+        "elapsed_seconds": elapsed,
+    }
+    emit("dump_helper.done", None, result, "info")
+    return OperationResult(result=result)
