@@ -116,7 +116,7 @@ any entry from another page.
    ESM
       **Evolutionary Scale Modeling.** A family of protein language models
       from Meta AI. PROTEA primarily uses ``ESMC 300M`` to produce
-      512-dimensional sequence embeddings.
+      960-dimensional sequence embeddings.
 
    OntologySnapshot
       One full GO release stored in PROTEA, versioned by ``obo_version``
@@ -150,6 +150,7 @@ any entry from another page.
    manage.sh
       The shell script under ``scripts/manage.sh`` that starts, stops,
       scales, and inspects the long-running processes that make up the
-      PROTEA dev stack: the FastAPI server, the eleven RabbitMQ workers
-      (one per queue plus the stale-job reaper), and the Next.js
+      PROTEA dev stack: the FastAPI server, the ten RabbitMQ queue
+      workers (one per queue), the stale-job reaper (a periodic
+      database scanner, not a queue consumer), and the Next.js
       frontend. The reference for everyday operations.
