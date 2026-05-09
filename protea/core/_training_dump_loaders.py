@@ -31,6 +31,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 
 from protea.core.annotation_intern import intern_string
+from protea.core.contracts.operation import EmitFn
 from protea.core.domain.aspect import ASPECT_CODES as _ASPECTS
 
 
@@ -268,3 +269,44 @@ def _load_go_maps(
     ).fetchall()
     pivot_go_ids: set[str] = {row[0] for row in pivot_rows}
     return go_id_map, aspect_map, pivot_go_ids
+
+
+def _maybe_fit_pca_state(
+    embedding_config_id: uuid.UUID,
+    all_embeddings: np.ndarray,
+    use_pca: bool,
+    emit: EmitFn,
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """Resolve the embedding-PCA state via the shared cache when requested.
+
+    Returns ``None`` for the no-PCA path (either ``use_pca`` is false or
+    the preloaded pool is empty) so callers can use ``pca_state is None``
+    as the gate for the PCA-projected feature columns. When the cache
+    hit produces components, an ``dump_helper.pca_fit`` audit event is
+    emitted with the input/output dims so downstream listeners know the
+    PCA shape used at training time matches what ``predict_go_terms``
+    will use at inference.
+
+    The shared cache is load-bearing: a fresh per-call fit (the legacy
+    behaviour) silently produced different components from a randomly
+    subsampled pool, breaking ``emb_pca_query_*`` parity for the booster
+    even when every other feature was correct.
+    """
+    if not use_pca or not all_embeddings.size:
+        return None
+    from protea.core.pca_cache import _load_or_fit_pca_state
+    from protea.core.reranker import EMBEDDING_PCA_DIM
+
+    pca_state = _load_or_fit_pca_state(embedding_config_id, all_embeddings)
+    emit(
+        "dump_helper.pca_fit",
+        None,
+        {
+            "n_refs": int(all_embeddings.shape[0]),
+            "dim_in": int(all_embeddings.shape[1]),
+            "dim_out": EMBEDDING_PCA_DIM,
+            "source": "shared_cache",
+        },
+        "info",
+    )
+    return pca_state

@@ -19,7 +19,7 @@ a mocked SQLAlchemy ``Session`` / ``Connection``).
 from __future__ import annotations
 
 import uuid
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -30,6 +30,7 @@ from protea.core._training_dump_loaders import (
     _load_annotation_aggregations,
     _load_go_maps,
     _load_ia_weights,
+    _maybe_fit_pca_state,
     _resolve_annotation_set_ids,
     _stream_embeddings,
 )
@@ -259,3 +260,51 @@ class TestLoadGoMaps:
         # ``aspect=None`` row is skipped from the aspect map.
         assert aspect_map == {1: "P", 2: "F"}
         assert pivot_go_ids == {"GO:0001", "GO:0002"}
+
+
+class TestMaybeFitPcaState:
+    def _captured_emit(self) -> tuple[list[tuple], MagicMock]:
+        events: list[tuple] = []
+
+        def emit(event, message, fields, level):
+            events.append((event, message, fields, level))
+
+        return events, emit
+
+    def test_returns_none_when_pca_disabled(self) -> None:
+        events, emit = self._captured_emit()
+        embeddings = np.array([[1.0, 2.0]], dtype=np.float32)
+        out = _maybe_fit_pca_state(uuid.uuid4(), embeddings, use_pca=False, emit=emit)
+        assert out is None
+        assert events == []  # no audit event when PCA is off
+
+    def test_returns_none_for_empty_pool(self) -> None:
+        events, emit = self._captured_emit()
+        empty = np.empty((0, 2), dtype=np.float32)
+        out = _maybe_fit_pca_state(uuid.uuid4(), empty, use_pca=True, emit=emit)
+        assert out is None
+        assert events == []  # short-circuit before the cache hit
+
+    def test_delegates_to_shared_cache_and_emits(self) -> None:
+        events, emit = self._captured_emit()
+        embeddings = np.array(
+            [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32
+        )
+        cfg_id = uuid.uuid4()
+
+        with patch(
+            "protea.core.pca_cache._load_or_fit_pca_state",
+            return_value=("MEAN_FAKE", "COMPONENTS_FAKE"),
+        ) as mock_cache:
+            out = _maybe_fit_pca_state(cfg_id, embeddings, use_pca=True, emit=emit)
+
+        assert out == ("MEAN_FAKE", "COMPONENTS_FAKE")
+        mock_cache.assert_called_once_with(cfg_id, embeddings)
+        # One audit event with the expected payload shape.
+        assert len(events) == 1
+        event, _, fields, level = events[0]
+        assert event == "dump_helper.pca_fit"
+        assert level == "info"
+        assert fields["n_refs"] == 2
+        assert fields["dim_in"] == 3
+        assert fields["source"] == "shared_cache"

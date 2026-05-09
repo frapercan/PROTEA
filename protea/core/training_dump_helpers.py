@@ -42,6 +42,7 @@ from protea.core._training_dump_loaders import (
     _load_annotation_aggregations,
     _load_go_maps,
     _load_ia_weights,
+    _maybe_fit_pca_state,
     _resolve_annotation_set_ids,
     _stream_embeddings,
 )
@@ -53,7 +54,6 @@ from protea.core.domain.aspect import Aspect
 from protea.core.evaluation import load_evaluation_data_for_set
 from protea.core.feature_engineering import compute_alignment, compute_taxonomy
 from protea.core.knn_search import search_knn
-from protea.core.pca_cache import _load_or_fit_pca_state
 from protea.core.reranker import (
     ALL_FEATURES,
     EMBEDDING_PCA_DIM,
@@ -1231,36 +1231,13 @@ class TrainRerankerAutoOperation:
         # Parent map on pivot — used for TPR max-propagation in test metrics.
         parent_map = _load_parent_map(session, ontology_snapshot_id)
 
-        # Optional sequence-embedding PCA — fit once on the preloaded pool.
-        pca_state: tuple[np.ndarray, np.ndarray] | None = None
-
-        # ── 2b. Preload ALL embeddings once ─────────────────────────────
+        # ── 2b. Preload ALL embeddings once + optional PCA fit ──────────
         all_embeddings, all_accessions, acc_to_idx = _preload_all_embeddings(
             session, emb_config_id, emit
         )
-
-        if p.use_embedding_pca and all_embeddings.size:
-            # Use the shared PCA cache so the projection components match
-            # whatever ``predict_go_terms`` will use at inference time.
-            # Previously this called ``fit_embedding_pca`` directly, which
-            # produced a fresh fit on a different (and randomly subsampled)
-            # pool — the resulting components only matched the live cache by
-            # coincidence, and any drift silently broke ``emb_pca_query_*``
-            # parity for the trained reranker. Boosters trained on a
-            # mismatched PCA score garbage at predict time even when every
-            # other feature is correct.
-            pca_state = _load_or_fit_pca_state(emb_config_id, all_embeddings)
-            emit(
-                "dump_helper.pca_fit",
-                None,
-                {
-                    "n_refs": int(all_embeddings.shape[0]),
-                    "dim_in": int(all_embeddings.shape[1]),
-                    "dim_out": EMBEDDING_PCA_DIM,
-                    "source": "shared_cache",
-                },
-                "info",
-            )
+        pca_state = _maybe_fit_pca_state(
+            emb_config_id, all_embeddings, p.use_embedding_pca, emit
+        )
 
         # ── 3. Generate training data from consecutive pairs ─────────────
         # Memory-optimised: each split writes to parquet on disk, then all
