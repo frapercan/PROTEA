@@ -22,33 +22,67 @@ Reproduction guide
    for the Zenodo deposit. See :doc:`/results` for the full provisional
    notice and the reason behind the recompute.
 
-.. admonition:: API drift in Stage 4 (re-ranker training)
+.. admonition:: API drift across Stages 1.3 – 4
    :class: caution
 
-   The curl recipes in **Stage 4 — Re-ranker training** below (Experiments
-   4–6) target the in-process ``POST /scoring/rerankers/train`` endpoint,
-   which was retired in F0 / T0.6: ``train_reranker`` and
-   ``train_reranker_auto`` are no longer registered in
-   ``operation_catalog.build_operation_registry()``. LightGBM training has
-   moved to the sibling repo
+   The curl recipes from **Step 1.3 onward** still use field names that
+   the current Pydantic payloads no longer accept. Stage 1 up to and
+   including Step 1.2 is correct (PR #138 fixed
+   ``source_tag`` → ``source_version`` there); everything after needs
+   manual translation before it can be re-run end-to-end. The
+   *procedure* (the order of jobs, the conceptual inputs / outputs) is
+   stable; only the field names drifted.
+
+   Concrete renames operators must apply:
+
+   .. list-table::
+      :header-rows: 1
+      :widths: 28 32 40
+
+      * - Where
+        - Doc says
+        - Current payload uses
+      * - Step 1.3 (``generate``) and the GET filter
+        - ``"name": "goa_220_to_229"``, ``?name=…``
+        - ``GenerateEvaluationSetPayload`` accepts no ``name``
+          field; filter the GET response client-side with ``jq``.
+      * - Step 1.4 (``compute_embeddings``)
+        - ``"target": "all_sequences"``
+        - ``ComputeEmbeddingsPayload`` accepts ``accessions`` (list)
+          or ``query_set_id`` (UUID); ``null`` for both = embed all.
+      * - Stage 2 (``predict_go_terms``)
+        - ``query_annotation_set_id``, ``reference_annotation_set_id``
+        - The payload has a single ``annotation_set_id`` (the reference
+          set) plus ``query_set_id`` (a ``QuerySet`` UUID). The query
+          *set* is no longer keyed off another ``AnnotationSet``.
+      * - Stage 2 (``predict_go_terms``)
+        - ``"k": 5``, ``"backend": "faiss"``, ``"index_type": …``,
+          ``"name": "k5_aspect_sep"``
+        - ``limit_per_entry``, ``search_backend``, ``faiss_index_type``;
+          there is no ``name`` field on ``PredictGoTermsPayload``.
+      * - Stages 3 and 4 (``run_cafa_evaluation``)
+        - ``scoring_config_name``, ``reranker_name``
+        - ``scoring_config_id`` (UUID) plus either flat
+          ``reranker_id_{nk,lk,pk}`` UUIDs or the nested ``rerankers``
+          mapping. See :class:`RunCafaEvaluationPayload` in
+          :mod:`protea.core.operations.run_cafa_evaluation`.
+
+   **Stage 4 specifically** also targets the retired
+   ``POST /scoring/rerankers/train`` endpoint
+   (``train_reranker`` / ``train_reranker_auto`` were unregistered in
+   F0 / T0.6). LightGBM training has moved to the sibling repo
    `protea-reranker-lab <https://github.com/frapercan/protea-reranker-lab>`_,
    which consumes a frozen parquet dataset published by PROTEA via
-   ``export_research_dataset`` and registers the resulting booster through
-   ``POST /reranker-models/import``. The four-step flow is documented in
-   :ref:`Register a reranker from protea-reranker-lab
+   ``export_research_dataset`` and registers the booster through
+   ``POST /reranker-models/import``. The four-step flow is documented
+   in :ref:`Register a reranker from protea-reranker-lab
    <howto-register-reranker>`.
 
-   The ``run_cafa_evaluation`` payloads in Stages 3 and 4 also use the old
-   field names ``scoring_config_name`` and ``reranker_name``; the current
-   payload uses ``scoring_config_id`` (UUID) and either the flat
-   ``reranker_id_{nk,lk,pk}`` UUIDs or the nested ``rerankers`` mapping
-   (see :class:`RunCafaEvaluationPayload` in
-   :mod:`protea.core.operations.run_cafa_evaluation`).
-
-   The historical experiments below produced the v1 / v2 / v3 boosters that
-   still back the numbers in :doc:`/results`; the *commands* must be
-   translated to the current API before they can be re-run. A staged
-   rewrite of this guide is on the doc-writer roadmap.
+   The historical experiments below produced the v1 / v2 / v3 boosters
+   that still back the numbers in :doc:`/results`; the *commands* must
+   be translated against the contracts in
+   :doc:`/architecture/operations` before they can be re-run. A
+   staged rewrite of this guide is on the doc-writer roadmap.
 
 This appendix documents the exact sequence of steps required to reproduce the
 experimental results reported in :doc:`../results`. The target is a fresh
