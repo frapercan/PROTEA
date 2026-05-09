@@ -7,6 +7,12 @@ from typing import Any
 
 import yaml
 
+_DEFAULT_ALLOWED_ORIGINS: tuple[str, ...] = (
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://protea.ngrok.app",
+)
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -21,6 +27,7 @@ class Settings:
     minio_access_key: str | None = None
     minio_secret_key: str | None = None
     minio_secure: bool = False
+    allowed_origins: tuple[str, ...] = _DEFAULT_ALLOWED_ORIGINS
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -93,6 +100,28 @@ def _resolve_storage_block(
     }
 
 
+def _resolve_allowed_origins(
+    system: dict[str, Any], env_prefix: str
+) -> tuple[str, ...]:
+    """Resolve the CORS allowlist (T5.5).
+
+    Priority: env ``PROTEA_ALLOWED_ORIGINS`` > YAML ``cors.allowed_origins``
+    > built-in dev default. The env var is comma-separated; the YAML
+    block accepts a list of strings. Empty string in the env disables
+    CORS by returning an empty tuple (useful for behind-a-proxy
+    deployments that handle CORS upstream).
+    """
+    raw_env = os.getenv(f"{env_prefix}ALLOWED_ORIGINS")
+    if raw_env is not None:
+        parts = [p.strip() for p in raw_env.split(",") if p.strip()]
+        return tuple(parts)
+    cors_cfg = system.get("cors", {}) or {}
+    yaml_list = cors_cfg.get("allowed_origins")
+    if yaml_list:
+        return tuple(str(o).strip() for o in yaml_list if str(o).strip())
+    return _DEFAULT_ALLOWED_ORIGINS
+
+
 def load_settings(project_root: Path, *, env_prefix: str = "PROTEA_") -> Settings:
     """
     Load settings from:
@@ -109,6 +138,7 @@ def load_settings(project_root: Path, *, env_prefix: str = "PROTEA_") -> Setting
       - PROTEA_MINIO_ACCESS_KEY
       - PROTEA_MINIO_SECRET_KEY
       - PROTEA_MINIO_SECURE               (truthy for HTTPS)
+      - PROTEA_ALLOWED_ORIGINS            (comma-separated CORS allowlist)
     """
     system_path = project_root / "protea" / "config" / "system.yaml"
     system = _load_yaml(system_path)
@@ -127,10 +157,12 @@ def load_settings(project_root: Path, *, env_prefix: str = "PROTEA_") -> Setting
         os.getenv(f"{env_prefix}ADMIN_TOKEN") or system.get("admin", {}).get("token") or ""
     )
     storage = _resolve_storage_block(project_root, system, env_prefix)
+    allowed_origins = _resolve_allowed_origins(system, env_prefix)
 
     return Settings(
         db_url=db_url,
         amqp_url=amqp_url,
         admin_token=admin_token,
+        allowed_origins=allowed_origins,
         **storage,
     )
