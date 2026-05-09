@@ -630,6 +630,56 @@ def _load_model(config: EmbeddingConfig, device: str, emit: EmitFn) -> tuple[Any
 # ---------------------------------------------------------------------------
 
 
+def _embed_esm_one(
+    model: Any,
+    tokenizer: Any,
+    seq_str: str,
+    config: EmbeddingConfig,
+    device: str,
+) -> list[ChunkEmbedding]:
+    """ESM-2 forward pass + pooling for one sequence.
+
+    Used by :func:`_embed_esm` to keep the per-batch loop body
+    readable. Excludes CLS (position 0) and EOS (last valid position)
+    from residue-level operations. ``attention_mask.sum()`` covers
+    CLS + content + EOS, so the residue slice is ``[1:actual_len-1]``.
+    """
+    import torch
+    import torch.nn.functional as F
+
+    tokens = tokenizer(
+        seq_str,
+        return_tensors="pt",
+        truncation=True,
+        max_length=config.max_length,
+        add_special_tokens=True,
+    )
+    tokens = {k: v.to(device) for k, v in tokens.items()}
+    outputs = model(**tokens, output_hidden_states=True)
+    hidden_states = outputs.hidden_states
+    valid_layers = _validate_layers(config.layer_indices, hidden_states, "ESM", seq_str[:20])
+    if config.pooling == "cls":
+        layer_tensors_1d = [
+            hidden_states[-(li + 1)][0, 0, :].float() for li in valid_layers
+        ]
+        pooled = _aggregate_1d(layer_tensors_1d, config.layer_agg)
+        if config.normalize:
+            pooled = F.normalize(pooled.unsqueeze(0), p=2, dim=1).squeeze(0)
+        chunks = [ChunkEmbedding(0, None, pooled.cpu().numpy())]
+    else:
+        actual_len = int(tokens["attention_mask"].sum().item())
+        layer_tensors_2d = [
+            hidden_states[-(li + 1)][0, 1 : actual_len - 1, :].float() for li in valid_layers
+        ]
+        residues = _aggregate_residue_layers(layer_tensors_2d, config.layer_agg)
+        if config.normalize_residues:
+            residues = F.normalize(residues, p=2, dim=1)
+        chunks = _chunk_and_pool(residues, config)
+    del outputs, hidden_states
+    torch.cuda.empty_cache()
+    return chunks
+
+
 def _embed_esm(
     model: Any,
     tokenizer: Any,
@@ -639,57 +689,15 @@ def _embed_esm(
 ) -> list[list[ChunkEmbedding]]:
     """Embed sequences with ESM-2 / EsmModel.
 
-    Processes one sequence at a time to handle variable lengths without
-    OOM issues.  CLS (position 0) and EOS (last valid position) tokens are
-    excluded from all residue-level operations.
+    Processes one sequence at a time to handle variable lengths
+    without OOM issues.
     """
     import torch
-    import torch.nn.functional as F
 
     results: list[list[ChunkEmbedding]] = []
-
     with torch.no_grad():
         for seq_str in sequences:
-            tokens = tokenizer(
-                seq_str,
-                return_tensors="pt",
-                truncation=True,
-                max_length=config.max_length,
-                add_special_tokens=True,
-            )
-            tokens = {k: v.to(device) for k, v in tokens.items()}
-            outputs = model(**tokens, output_hidden_states=True)
-            hidden_states = outputs.hidden_states  # tuple of (1, L, D)
-
-            valid_layers = _validate_layers(
-                config.layer_indices, hidden_states, "ESM", seq_str[:20]
-            )
-
-            if config.pooling == "cls":
-                # CLS token at position 0 of the raw hidden states
-                layer_tensors_1d = [
-                    hidden_states[-(li + 1)][0, 0, :].float() for li in valid_layers
-                ]
-                pooled = _aggregate_1d(layer_tensors_1d, config.layer_agg)
-                if config.normalize:
-                    pooled = F.normalize(pooled.unsqueeze(0), p=2, dim=1).squeeze(0)
-                results.append([ChunkEmbedding(0, None, pooled.cpu().numpy())])
-            else:
-                # Strip CLS (pos 0) and EOS (last valid pos)
-                # attention_mask.sum() = CLS + content + EOS
-                actual_len = int(tokens["attention_mask"].sum().item())
-                layer_tensors_2d = [
-                    hidden_states[-(li + 1)][0, 1 : actual_len - 1, :].float()
-                    for li in valid_layers
-                ]
-                residues = _aggregate_residue_layers(layer_tensors_2d, config.layer_agg)
-                if config.normalize_residues:
-                    residues = F.normalize(residues, p=2, dim=1)
-                results.append(_chunk_and_pool(residues, config))
-
-            del outputs, hidden_states
-            torch.cuda.empty_cache()
-
+            results.append(_embed_esm_one(model, tokenizer, seq_str, config, device))
     return results
 
 
