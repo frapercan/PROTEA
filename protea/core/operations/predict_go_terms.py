@@ -349,23 +349,10 @@ class PredictGOTermsOperation:
     ) -> OperationResult:
         p = PredictGOTermsPayload.model_validate(payload)
         parent_job_id = UUID(payload["_job_id"])
-
         embedding_config_id, annotation_set_id, ontology_snapshot_id, config = (
             self._validate_inputs(session, p)
         )
-        emit(
-            "predict_go_terms.start",
-            None,
-            {
-                "embedding_config_id": p.embedding_config_id,
-                "model_name": config.model_name,
-                "annotation_set_id": p.annotation_set_id,
-                "limit_per_entry": p.limit_per_entry,
-                "search_backend": p.search_backend,
-            },
-            "info",
-        )
-
+        self._emit_start(emit, p, config.model_name)
         binding = self._resolve_reranker_binding(session, p, emit)
 
         query_accessions = self._load_query_accessions(session, p, embedding_config_id, emit)
@@ -390,17 +377,7 @@ class PredictGOTermsOperation:
             for i in range(0, len(query_accessions), p.batch_size)
         ]
         n_batches = len(batches)
-        emit(
-            "predict_go_terms.dispatching",
-            None,
-            {
-                "queries": len(query_accessions),
-                "batches": n_batches,
-                "prediction_set_id": str(prediction_set.id),
-            },
-            "info",
-        )
-
+        self._emit_dispatching(emit, len(query_accessions), n_batches, prediction_set.id)
         operations = [
             (_BATCH_QUEUE, self._build_batch_message(p, prediction_set.id, parent_job_id, accs, binding))
             for accs in batches
@@ -415,6 +392,38 @@ class PredictGOTermsOperation:
             progress_total=n_batches,
             deferred=True,
             publish_operations=operations,
+        )
+
+    @staticmethod
+    def _emit_start(emit: EmitFn, p: PredictGOTermsPayload, model_name: str) -> None:
+        """Emit the ``predict_go_terms.start`` event with the resolved config."""
+        emit(
+            "predict_go_terms.start",
+            None,
+            {
+                "embedding_config_id": p.embedding_config_id,
+                "model_name": model_name,
+                "annotation_set_id": p.annotation_set_id,
+                "limit_per_entry": p.limit_per_entry,
+                "search_backend": p.search_backend,
+            },
+            "info",
+        )
+
+    @staticmethod
+    def _emit_dispatching(
+        emit: EmitFn, queries: int, batches: int, prediction_set_id: uuid.UUID
+    ) -> None:
+        """Emit the ``predict_go_terms.dispatching`` event before the workers fan out."""
+        emit(
+            "predict_go_terms.dispatching",
+            None,
+            {
+                "queries": queries,
+                "batches": batches,
+                "prediction_set_id": str(prediction_set_id),
+            },
+            "info",
         )
 
     @staticmethod
@@ -637,24 +646,9 @@ class PredictGOTermsBatchOperation:
         if knn_result is None:
             return OperationResult(result={"predictions": 0})
 
-        if (
-            p.compute_v6_features
-            and knn_result.v6_ctx is not None
-            and knn_result.prediction_dicts
-        ):
-            self._apply_v6_features(session, ctx, knn_result, ref_data, emit)
-
-        # Ancestor expansion — required for the lab booster's candidate
-        # distribution. Runs AFTER v6 enrichment so synthetic ancestor
-        # records inherit the leaf's anc2vec_/emb_pca_ values, mirroring
-        # what the dump helper emits.
-        prediction_dicts = knn_result.prediction_dicts
-        if p.expand_votes_to_ancestors and prediction_dicts:
-            prediction_dicts = self._expand_to_ancestors(session, p, prediction_dicts, emit)
-
-        reranker_stats: dict[str, Any] | None = None
-        if p.reranker_model_id and prediction_dicts:
-            reranker_stats = self._apply_reranker_if_aligned(session, prediction_dicts, p, emit)
+        prediction_dicts, reranker_stats = self._run_post_knn_pipeline(
+            session, ctx, knn_result, ref_data, emit
+        )
 
         self._emit_done(
             emit,
@@ -675,6 +669,37 @@ class PredictGOTermsBatchOperation:
             },
             publish_operations=store_messages,
         )
+
+    def _run_post_knn_pipeline(
+        self,
+        session: Session,
+        ctx: _BatchExecCtx,
+        knn_result: _KnnResult,
+        ref_data: Any,
+        emit: EmitFn,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+        """Apply v6 enrichment, ancestor expansion, and the reranker to the
+        KNN candidates. Returns ``(prediction_dicts, reranker_stats)``.
+
+        Ancestor expansion runs AFTER v6 so synthetic ancestor records
+        inherit the leaf's anc2vec_/emb_pca_ values, mirroring what the
+        dump helper emits — without that the lab booster sees a feature
+        distribution it never trained on.
+        """
+        p = ctx.p
+        if (
+            p.compute_v6_features
+            and knn_result.v6_ctx is not None
+            and knn_result.prediction_dicts
+        ):
+            self._apply_v6_features(session, ctx, knn_result, ref_data, emit)
+        prediction_dicts = knn_result.prediction_dicts
+        if p.expand_votes_to_ancestors and prediction_dicts:
+            prediction_dicts = self._expand_to_ancestors(session, p, prediction_dicts, emit)
+        reranker_stats: dict[str, Any] | None = None
+        if p.reranker_model_id and prediction_dicts:
+            reranker_stats = self._apply_reranker_if_aligned(session, prediction_dicts, p, emit)
+        return prediction_dicts, reranker_stats
 
     @staticmethod
     def _should_skip_for_parent(

@@ -24,7 +24,7 @@ import logging
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import pandas as pd
 from protea_contracts import compute_schema_sha as _canonical_schema_sha
@@ -113,25 +113,26 @@ def _validate_manifest_with_contracts(manifest: dict[str, Any]) -> None:
     ManifestV1.model_validate(manifest)
 
 
+class _ExportMetrics(NamedTuple):
+    """Frame metadata threaded through manifest + result builders."""
+
+    train_df: pd.DataFrame
+    eval_df: pd.DataFrame
+    train_snapshot_pairs: list[str]
+    eval_pair: str
+    schema_sha: str
+
+
 def export_reranker_parquets(ctx: ParquetExportContext) -> dict[str, Any]:
-    """Consolidate per-cat per-split parquet shards into the frozen
-    dataset layout and optionally publish via an ``ArtifactStore``.
+    """Consolidate per-cat per-split parquet shards into the frozen dataset
+    layout and optionally publish via the configured ``ArtifactStore``.
 
-    All inputs live on :class:`ParquetExportContext`. Notable fields:
-
-    - ``stage_dir``: local staging area (always written here; uploaded
-      under ``key_prefix`` if ``store`` is set).
-    - ``split_files``: per-category training shard paths, parallel to
-      ``valid_split_versions``.
-    - ``test_files``: per-category test shard path (may be ``None``).
-    - ``store`` / ``key_prefix``: optional artifact-store upload.
-    - ``producer_version`` / ``producer_git_sha``: manifest provenance.
-    - ``validate_with_contracts``: best-effort validate against the
-      lab's ``ManifestV1`` before writing.
+    All inputs live on :class:`ParquetExportContext`. Sub-helpers handle
+    shard loading, canonical-column assertion, manifest write, and
+    optional store upload.
     """
     ctx.stage_dir.mkdir(parents=True, exist_ok=True)
     aspect_norm = dict(_ASPECT_NAMES)
-
     train_df, train_snapshot_pairs = _load_train_shards(ctx, aspect_norm)
     eval_pair = f"v{ctx.test_old_v}-v{ctx.test_new_v}"
     eval_df = _load_eval_shards(ctx, eval_pair, aspect_norm)
@@ -155,13 +156,34 @@ def export_reranker_parquets(ctx: ParquetExportContext) -> dict[str, Any]:
     if not eval_df.empty:
         eval_df.to_parquet(eval_path, index=False, compression="snappy")
 
-    # Legacy schema_sha hash kept in the manifest until T1.6 of master
-    # plan v3 lands the schema_sha_v2 migration. The T1.8 invariant
-    # above already guarantees the column set is correct.
-    schema_sha = hashlib.sha256(
+    metrics = _ExportMetrics(
+        train_df=train_df,
+        eval_df=eval_df,
+        train_snapshot_pairs=train_snapshot_pairs,
+        eval_pair=eval_pair,
+        schema_sha=_compute_schema_sha(),
+    )
+    _build_and_write_manifest(ctx, manifest_path, metrics)
+    result = _build_result(ctx, metrics)
+    if ctx.store is not None:
+        _publish_to_store(ctx, train_path, eval_path, manifest_path, result)
+    return result
+
+
+def _compute_schema_sha() -> str:
+    """Legacy schema_sha hash kept in the manifest until T1.6 of master plan
+    v3 lands the schema_sha_v2 migration. The T1.8 invariant guarantees the
+    column set is correct."""
+    return hashlib.sha256(
         json.dumps(list(ALL_FEATURES), sort_keys=True).encode()
     ).hexdigest()[:12]
 
+
+def _build_and_write_manifest(
+    ctx: ParquetExportContext, manifest_path: Path, metrics: _ExportMetrics
+) -> None:
+    """Assemble the ManifestV1 dict, run optional contract validation, write
+    JSON to disk."""
     manifest: dict[str, Any] = {
         "schema_version": "v2",
         "name": ctx.name,
@@ -169,11 +191,11 @@ def export_reranker_parquets(ctx: ParquetExportContext) -> dict[str, Any]:
         "embedding_config_id": ctx.embedding_config_id,
         "ontology_snapshot_id": ctx.ontology_snapshot_id,
         "annotation_source": ctx.annotation_source,
-        "train_snapshot_pairs": train_snapshot_pairs,
-        "eval_snapshot_pair": eval_pair,
-        "schema_sha": schema_sha,
-        "n_train_rows": int(len(train_df)),
-        "n_eval_rows": int(len(eval_df)),
+        "train_snapshot_pairs": metrics.train_snapshot_pairs,
+        "eval_snapshot_pair": metrics.eval_pair,
+        "schema_sha": metrics.schema_sha,
+        "n_train_rows": int(len(metrics.train_df)),
+        "n_eval_rows": int(len(metrics.eval_df)),
         "format": "parquet",
         "producer_version": ctx.producer_version,
         "producer_git_sha": ctx.producer_git_sha,
@@ -182,17 +204,20 @@ def export_reranker_parquets(ctx: ParquetExportContext) -> dict[str, Any]:
         _validate_manifest_with_contracts(manifest)
     manifest_path.write_text(json.dumps(manifest, indent=2))
 
-    result: dict[str, Any] = {
+
+def _build_result(
+    ctx: ParquetExportContext, metrics: _ExportMetrics
+) -> dict[str, Any]:
+    """Compose the function's return payload (URIs are stamped later when the
+    optional artefact-store upload runs)."""
+    return {
         "stage_dir": str(ctx.stage_dir),
-        "n_train_rows": int(len(train_df)),
-        "n_eval_rows": int(len(eval_df)),
-        "train_snapshot_pairs": train_snapshot_pairs,
-        "eval_snapshot_pair": eval_pair,
-        "schema_sha": schema_sha,
+        "n_train_rows": int(len(metrics.train_df)),
+        "n_eval_rows": int(len(metrics.eval_df)),
+        "train_snapshot_pairs": metrics.train_snapshot_pairs,
+        "eval_snapshot_pair": metrics.eval_pair,
+        "schema_sha": metrics.schema_sha,
     }
-    if ctx.store is not None:
-        _publish_to_store(ctx, train_path, eval_path, manifest_path, result)
-    return result
 
 
 def _load_train_shards(
