@@ -12,6 +12,7 @@ for the lab's ``pull_dataset.py`` and for UI consumers.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -141,6 +142,14 @@ def list_datasets(
     name_like: str | None = Query(default=None, description="Substring filter on name"),
     embedding_config_id: UUID | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=500),
+    after: datetime | None = Query(
+        default=None,
+        description=(
+            "Cursor for pagination (T4.2): return rows with "
+            "``created_at < after`` only. Use the ``created_at`` of "
+            "the last row from the previous page to walk forward."
+        ),
+    ),
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> list[dict[str, Any]]:
     with session_scope(factory) as session:
@@ -149,6 +158,8 @@ def list_datasets(
             q = q.filter(Dataset.name.ilike(f"%{name_like}%"))
         if embedding_config_id is not None:
             q = q.filter(Dataset.embedding_config_id == embedding_config_id)
+        if after is not None:
+            q = q.filter(Dataset.created_at < after)
         rows = q.order_by(Dataset.created_at.desc()).limit(limit).all()
         return [_dataset_to_dict(r) for r in rows]
 

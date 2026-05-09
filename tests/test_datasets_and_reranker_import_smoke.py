@@ -173,6 +173,28 @@ class TestDatasetsRouter:
         assert payload[0]["storage_backend"] == "local"
         assert payload[0]["k"] == 5
 
+    def test_after_cursor_filters_by_created_at(self, datasets_client):
+        """T4.2: ``after`` query param adds a ``created_at < after`` clause."""
+        client, session, _ = datasets_client
+        rows = [_make_dataset_row(name="bench-A")]
+        q = session.query.return_value
+        q.filter.return_value = q
+        q.order_by.return_value.limit.return_value.all.return_value = rows
+
+        cursor = "2026-04-01T10:00:00Z"
+        resp = client.get(f"/datasets?after={cursor}")
+
+        assert resp.status_code == 200
+        # The handler calls filter() once for the cursor (no name_like /
+        # embedding_config_id filters in this test) so call_count is 1.
+        assert q.filter.call_count == 1
+
+    def test_invalid_after_cursor_returns_422(self, datasets_client):
+        client, _, _ = datasets_client
+        c = TestClient(client.app, raise_server_exceptions=False)
+        resp = c.get("/datasets?after=not-a-datetime")
+        assert resp.status_code == 422
+
     def test_get_by_name_resolves_non_uuid(self, datasets_client):
         client, session, _ = datasets_client
         row = _make_dataset_row(name="bench-by-name")
