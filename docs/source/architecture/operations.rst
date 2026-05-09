@@ -517,8 +517,12 @@ Payload fields
      - ``true``
      - Skip sequences that already have an embedding for this config.
    * - ``batch_size``
-     - ``8``
-     - Model forward-pass batch size inside each batch worker.
+     - ``1``
+     - Model forward-pass batch size inside each batch worker. Default of
+       ``1`` is deliberate: the largest supported backend
+       (``prot_t5_xl_uniref50`` at ``max_length=2048``) OOMs on a 12 GB
+       GPU with anything higher. Callers running smaller models on roomier
+       GPUs can raise this explicitly.
 
 Execution flow
 ~~~~~~~~~~~~~~
