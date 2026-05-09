@@ -724,9 +724,15 @@ Payload fields
    * - ``new_annotation_set_id``
      - *(required)*
      - UUID of the newer annotation set (t1, ground truth source).
+   * - ``pivot_ontology_snapshot_id``
+     - ``null``
+     - Optional UUID of an ``OntologySnapshot`` to use as the pivot for
+       NOT-propagation when the two annotation sets reference different
+       snapshots. Ignored when both sets share a snapshot.
 
-Both annotation sets must share the same ``ontology_snapshot_id``; the
-operation raises ``ValueError`` otherwise.
+If ``pivot_ontology_snapshot_id`` is not set, both annotation sets must
+share the same ``ontology_snapshot_id``; the operation raises
+``ValueError`` otherwise.
 
 Execution flow
 ~~~~~~~~~~~~~~
@@ -795,11 +801,44 @@ Payload fields
      - ``null``
      - Discard predictions with cosine distance above this threshold before
        scoring (range 0 – 2). ``null`` = no threshold.
-   * - ``artifacts_dir``
+   * - ``scoring_config_id``
      - ``null``
-     - Filesystem path where cafaeval output files (PR curves, TSVs) are
-       written. ``null`` = artifacts are written to a temp directory and
-       discarded after the job.
+     - UUID of a ``ScoringConfig`` to apply to the prediction set before
+       evaluation. ``null`` = score with the raw KNN-distance derived
+       probability.
+   * - ``reranker_id_nk``
+     - ``null``
+     - UUID of a ``RerankerModel`` to apply to NK-category predictions
+       before evaluation. Validated against the live feature schema; falls
+       back to KNN ordering on ``feature_schema_sha`` mismatch.
+   * - ``reranker_id_lk``
+     - ``null``
+     - Same as ``reranker_id_nk`` but for the LK category.
+   * - ``reranker_id_pk``
+     - ``null``
+     - Same as ``reranker_id_nk`` but for the PK category.
+   * - ``rerankers``
+     - ``null``
+     - Nested mapping of category → aspect → reranker_model_id, e.g.
+       ``{"nk": {"bpo": "<uuid>", "mfo": "<uuid>"}, "lk": {...}}``.
+       Overrides the flat ``reranker_id_*`` fields when present and lets
+       a single run mix per-aspect boosters within a category.
+   * - ``ia_file``
+     - ``null``
+     - Path to an Information Accretion (IA) TSV file (two columns:
+       ``go_id``, ``ia_value``). When provided, ``cafaeval`` weights each
+       GO term by its IC so rare, specific terms count more than common,
+       easy-to-predict ones. Without this file ``cafaeval`` runs with
+       uniform IC=1, which inflates Fmax. For CAFA6 evaluations use the
+       ``IA_cafa6.tsv`` file shipped with the benchmark.
+   * - ``restrict_gt_to_predicted``
+     - ``true``
+     - Standard CAFA practice: drop ground-truth proteins not present in
+       the ``PredictionSet`` before evaluation, so coverage / Fmax measure
+       performance on the actually-predicted cohort. Disable only when the
+       eval set is guaranteed to be a subset of the predicted query set
+       (e.g. a re-eval of a frozen lab dump where this filter has already
+       been applied).
 
 Execution flow
 ~~~~~~~~~~~~~~
@@ -819,7 +858,9 @@ Execution flow
       b. LK pass: cafa_eval(obo, predictions/, gt_LK.tsv)
       c. PK pass: cafa_eval(obo, predictions/, gt_PK.tsv, exclude=pk_known_terms.tsv)
       d. parse per-namespace Fmax / precision / recall / τ / coverage
-      e. if artifacts_dir: write cafaeval PR curves and metric TSVs
+      e. write cafaeval outputs (PR curves, metric TSVs) into a persistent
+         staging dir under ``settings.storage.artifacts_dir`` and upload them
+         through the configured ``ArtifactStore``
    8. INSERT EvaluationResult row with results dict (NK → {BPO, MFO, CCO})
    9. return OperationResult(result={evaluation_result_id, results})
 
