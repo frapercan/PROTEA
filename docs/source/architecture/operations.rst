@@ -463,6 +463,9 @@ Payload fields
    * - ``page_size``
      - ``10000``
      - Rows buffered per commit.
+   * - ``timeout_seconds``
+     - ``300``
+     - HTTP stream timeout per QuickGO request, in seconds.
    * - ``commit_every_page``
      - ``true``
      - Commit after each page.
