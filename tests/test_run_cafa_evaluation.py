@@ -1269,3 +1269,38 @@ class TestConstants:
 
     def test_ns_short_set(self):
         assert _NS_SHORT == {"BPO", "MFO", "CCO"}
+
+
+# ---------------------------------------------------------------------------
+# LOC regression guard (T2B.5 closure)
+# ---------------------------------------------------------------------------
+
+
+class TestSmellBudgetGuard:
+    """Ratchet tests: assert no method in RunCafaEvaluationOperation exceeds
+    the master-plan v3.2 §3 ceiling of 60 LOC. If a future edit pushes a
+    method over the limit, this test fails before check_smells.py runs in CI,
+    giving the author an early, targeted signal."""
+
+    def test_all_methods_under_60_loc(self):
+        import ast
+        from pathlib import Path
+
+        src_path = (
+            Path(__file__).resolve().parents[1]
+            / "protea"
+            / "core"
+            / "operations"
+            / "run_cafa_evaluation.py"
+        )
+        tree = ast.parse(src_path.read_text())
+        offenders: list[tuple[str, int]] = []
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                loc = (node.end_lineno or node.lineno) - node.lineno + 1
+                if loc > 60:
+                    offenders.append((node.name, loc))
+        assert not offenders, (
+            f"Methods exceed 60-LOC ceiling (T2B.5): {offenders}. "
+            "Extract the body or apply the Method Object pattern."
+        )
