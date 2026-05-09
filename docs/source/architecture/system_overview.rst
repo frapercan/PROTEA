@@ -7,25 +7,25 @@ Requirements and design goals
 The design of PROTEA is governed by five requirements derived from the
 limitations of its predecessors (PIS and FANTASIA):
 
-**R1 — Reproducibility**
+**R1. Reproducibility.**
    A prediction produced today must be exactly reproducible in the future.
    This requires recording the ontology version, reference annotation set, and
    embedding model configuration used for every prediction run.
 
-**R2 — Scalability**
+**R2. Scalability.**
    The system must handle reference sets of hundreds of thousands of proteins
    and query sets of thousands without holding all data in memory simultaneously.
 
-**R3 — Separation of concerns**
+**R3. Separation of concerns.**
    Domain logic (what to compute), execution flow (how jobs are dispatched and
    tracked), and infrastructure (database, message queue) must be independently
    replaceable.
 
-**R4 — Observability**
+**R4. Observability.**
    Every job must produce a structured audit trail so that failures can be
    diagnosed without replaying the computation.
 
-**R5 — Accessibility**
+**R5. Accessibility.**
    Researchers without machine-learning infrastructure expertise must be able
    to submit sequences and retrieve predictions through a web interface or a
    REST API.
@@ -78,7 +78,7 @@ Services and data stores
 
 **RabbitMQ (port 5672 / 15672)**
 
-   Message broker. Standard queues carry the job UUID — all state lives in PostgreSQL.
+   Message broker. Standard queues carry the job UUID; all state lives in PostgreSQL.
    Ephemeral batch queues carry the full operation payload (no DB row per message).
    Durable queues ensure messages survive broker restarts.
 
@@ -98,7 +98,7 @@ Services and data stores
           ``generate_evaluation_set``
       * - ``protea.training``
         - QueueConsumer
-        - ``export_research_dataset`` — serialised, GPU/RAM-intensive KNN + feature
+        - ``export_research_dataset``: serialised, GPU/RAM-intensive KNN + feature
           generation + artifact-store upload. LightGBM training itself has been
           moved to ``protea-reranker-lab`` and no longer runs inside PROTEA.
       * - ``protea.embeddings``
@@ -106,22 +106,22 @@ Services and data stores
         - ``compute_embeddings`` coordinator (serialised: one at a time, 60 s retry delay if GPU busy)
       * - ``protea.embeddings.batch``
         - OperationConsumer
-        - ``compute_embeddings_batch`` — GPU inference per batch (ephemeral, no DB Job row)
+        - ``compute_embeddings_batch``: GPU inference per batch (ephemeral, no DB Job row)
       * - ``protea.embeddings.write``
         - OperationConsumer
-        - ``store_embeddings`` — bulk pgvector insert (ephemeral, no DB Job row)
+        - ``store_embeddings``: bulk pgvector insert (ephemeral, no DB Job row)
       * - ``protea.predictions``
         - QueueConsumer
         - ``predict_go_terms`` coordinator (serialised; fans out KNN batches)
       * - ``protea.predictions.batch``
         - OperationConsumer
-        - ``predict_go_terms_batch`` — KNN search + GO transfer (ephemeral, no DB Job row)
+        - ``predict_go_terms_batch``: KNN search + GO transfer (ephemeral, no DB Job row)
       * - ``protea.predictions.write``
         - OperationConsumer
-        - ``store_predictions`` — bulk GOPrediction insert (ephemeral, no DB Job row)
+        - ``store_predictions``: bulk GOPrediction insert (ephemeral, no DB Job row)
       * - ``protea.evaluations``
         - QueueConsumer
-        - ``run_cafa_evaluation`` — runs ``cafaeval`` for NK/LK/PK against a
+        - ``run_cafa_evaluation``: runs ``cafaeval`` for NK/LK/PK against a
           prediction set; serialised because cafaeval is single-process and
           each run can take minutes
 
@@ -129,9 +129,9 @@ Services and data stores
 
    Two consumer patterns exist in ``protea/infrastructure/queue/consumer.py``:
 
-   - **QueueConsumer** — reads a job UUID from the queue, delegates to ``BaseWorker.handle_job()``.
+   - **QueueConsumer.** Reads a job UUID from the queue, delegates to ``BaseWorker.handle_job()``.
      Creates a full Job row with status transitions and event log.
-   - **OperationConsumer** — reads a raw operation payload from the queue and executes it directly.
+   - **OperationConsumer.** Reads a raw operation payload from the queue and executes it directly.
      Used for high-throughput batch workers where creating thousands of child Job rows would cause
      queue bloat. Progress is tracked at the parent level only.
 
@@ -157,8 +157,8 @@ Services and data stores
 
 **Artifact store (local FS by default, optional MinIO)**
 
-   Large produced blobs — re-ranker boosters, exported research datasets
-   (``train.parquet`` / ``eval.parquet`` / ``manifest.json``) — do not live
+   Large produced blobs (re-ranker boosters, exported research datasets
+   ``train.parquet`` / ``eval.parquet`` / ``manifest.json``) do not live
    in PostgreSQL. They are written through the ``ArtifactStore`` protocol
    defined in ``protea/infrastructure/storage/``. Two backends are
    available:
@@ -174,7 +174,7 @@ Services and data stores
    Both backends satisfy the same four-method protocol (``put``, ``get``,
    ``url``, ``exists``), so operation code is agnostic of which backend
    is active. If MinIO is configured but unreachable at startup the
-   factory logs a warning and degrades to the local FS — a missing
+   factory logs a warning and degrades to the local FS; a missing
    optional service never crashes the stack.
 
 **Next.js frontend (port 3000)**
@@ -272,7 +272,7 @@ Technology stack
      - 3.x
    * - ANN search
      - NumPy / FAISS
-     - —
+     - n/a
    * - Frontend
      - Next.js + React + Tailwind
      - 16 / 19 / 4
@@ -363,7 +363,7 @@ The test suite is split into two categories:
 
 .. seealso::
 
-   - :doc:`job_lifecycle` — how a single job moves through the worker layer.
-   - :doc:`data_model` — the relational tables that back every layer above.
-   - :doc:`operations` — the units of domain logic dispatched by workers.
-   - :doc:`/adr/index` — design decisions behind the layering above.
+   - :doc:`job_lifecycle`: how a single job moves through the worker layer.
+   - :doc:`data_model`: the relational tables that back every layer above.
+   - :doc:`operations`: the units of domain logic dispatched by workers.
+   - :doc:`/adr/index`: design decisions behind the layering above.
