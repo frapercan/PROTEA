@@ -50,6 +50,8 @@ class CreateExperimentRunRequest(BaseModel):
     ``planned`` status; transitions happen via ``PATCH``.
     """
 
+    model_config = {"extra": "forbid"}
+
     name: str = Field(..., min_length=1, description="Unique slug for the run.")
     description: str | None = Field(
         default=None,
@@ -100,6 +102,8 @@ class CreateExperimentRunRequest(BaseModel):
 
 class UpdateExperimentRunRequest(BaseModel):
     """All fields optional; absent ones leave the column untouched."""
+
+    model_config = {"extra": "forbid"}
 
     description: str | None = Field(
         default=None,

@@ -21,6 +21,8 @@ class SupportCreate(BaseModel):
     submissions are rejected with 422 rather than silently truncated.
     """
 
+    model_config = {"extra": "forbid"}
+
     comment: str | None = Field(
         default=None,
         description=(

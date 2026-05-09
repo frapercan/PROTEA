@@ -149,6 +149,8 @@ class CreateJobRequest(BaseModel):
     surfaced in the UI run detail.
     """
 
+    model_config = {"extra": "forbid"}
+
     operation: str = Field(
         ..., min_length=1, description="Registered operation name, e.g. `insert_proteins`."
     )
@@ -381,6 +383,8 @@ class CreateJobCommentRequest(BaseModel):
     opinionated message and an optional ``author`` tag. Markdown is
     permitted in ``body``; the UI renders the thread chronologically.
     """
+
+    model_config = {"extra": "forbid"}
 
     body: str = Field(..., min_length=1, description="Comment payload (markdown allowed).")
     author: str | None = Field(
