@@ -117,52 +117,73 @@ def _compute_feature_schema_sha(run: dict[str, Any]) -> str | None:
     return run.get("dataset", {}).get("schema_sha")
 
 
+def _resolve_optional_fk(
+    session: Session,
+    raw_id: str | None,
+    pk_column: Any,
+) -> uuid.UUID | None:
+    """Resolve an optional UUID FK against ``pk_column``.
+
+    Lab runs may carry FKs to entities that no longer exist in this
+    PROTEA instance (DB resets, different deployment, etc.). NULL the
+    column rather than 500'ing — the booster itself is still valid;
+    only the back-references to local entities are unresolvable.
+    """
+    if not raw_id:
+        return None
+    candidate = uuid.UUID(raw_id)
+    return candidate if session.query(pk_column).filter(pk_column == candidate).first() else None
+
+
+def _resolve_dataset_uuid(
+    session: Session,
+    dataset: dict[str, Any],
+    override: str | None,
+) -> uuid.UUID | None:
+    """Pick the explicit override, otherwise look up by lab's dataset name."""
+    if override:
+        return uuid.UUID(override)
+    dataset_name = dataset.get("name")
+    if not dataset_name:
+        return None
+    row = session.query(Dataset).filter(Dataset.name == dataset_name).first()
+    return row.id if row is not None else None
+
+
+def _evict_existing_or_409(
+    session: Session,
+    name: str,
+    force: bool,
+) -> None:
+    """Delete an existing ``RerankerModel`` row when ``force=True``; otherwise 409."""
+    existing = session.query(RerankerModel).filter(RerankerModel.name == name).first()
+    if existing is None:
+        return
+    if not force:
+        raise HTTPException(
+            status_code=409,
+            detail=f"RerankerModel name={name!r} already exists (id={existing.id})",
+        )
+    session.delete(existing)
+    session.flush()
+
+
 def _register_model(
     session: Session,
     reg: _RerankerRegistration,
 ) -> uuid.UUID:
-    existing = session.query(RerankerModel).filter(RerankerModel.name == reg.name).first()
-    if existing is not None:
-        if not reg.force:
-            raise HTTPException(
-                status_code=409,
-                detail=f"RerankerModel name={reg.name!r} already exists (id={existing.id})",
-            )
-        session.delete(existing)
-        session.flush()
+    _evict_existing_or_409(session, reg.name, reg.force)
 
     category, aspect = _parse_cell(_extract_cell_from_spec(reg.spec_yaml_text))
-
     dataset = reg.run.get("dataset", {}) or {}
-    dataset_uuid: uuid.UUID | None = None
-    if reg.dataset_id_override:
-        dataset_uuid = uuid.UUID(reg.dataset_id_override)
-    else:
-        dataset_name = dataset.get("name")
-        if dataset_name:
-            row = session.query(Dataset).filter(Dataset.name == dataset_name).first()
-            if row is not None:
-                dataset_uuid = row.id
-
+    dataset_uuid = _resolve_dataset_uuid(session, dataset, reg.dataset_id_override)
+    embedding_config_id = _resolve_optional_fk(
+        session, dataset.get("embedding_config_id"), EmbeddingConfig.id
+    )
+    ontology_snapshot_id = _resolve_optional_fk(
+        session, dataset.get("ontology_snapshot_id"), OntologySnapshot.id
+    )
     feature_schema_sha = _compute_feature_schema_sha(reg.run)
-    embedding_config_id_raw = dataset.get("embedding_config_id")
-    ontology_snapshot_id_raw = dataset.get("ontology_snapshot_id")
-
-    # Lab runs may carry FKs to entities that no longer exist in this PROTEA
-    # instance (DB resets, different deployment, etc.). NULL them rather than
-    # 500'ing — the booster itself is still valid; only the back-references
-    # to local entities are unresolvable.
-    embedding_config_id: uuid.UUID | None = None
-    if embedding_config_id_raw:
-        candidate = uuid.UUID(embedding_config_id_raw)
-        if session.query(EmbeddingConfig.id).filter(EmbeddingConfig.id == candidate).first():
-            embedding_config_id = candidate
-
-    ontology_snapshot_id: uuid.UUID | None = None
-    if ontology_snapshot_id_raw:
-        candidate = uuid.UUID(ontology_snapshot_id_raw)
-        if session.query(OntologySnapshot.id).filter(OntologySnapshot.id == candidate).first():
-            ontology_snapshot_id = candidate
 
     model = RerankerModel(
         name=reg.name,
