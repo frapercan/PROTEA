@@ -29,6 +29,6 @@ Consequences
 Resolution
 ----------
 **Accepted as recommended.** Universal ``/v1/`` prefix on all routers.
-Implementation when F4 entry opens (T4.1) — keep deprecated unprefixed
+Implementation when F4 entry opens (T4.1); keep deprecated unprefixed
 mounts for one release to avoid breaking ``protea.ngrok.app`` and
 front-end clients during the transition.

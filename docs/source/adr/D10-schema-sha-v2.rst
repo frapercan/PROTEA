@@ -34,7 +34,7 @@ Consequences
 Resolution
 ----------
 **Accepted as recommended.** User greenlight 2026-05-06 with the
-explicit constraint **"no subir a prod hasta que no esté listo"** —
+explicit constraint **"no subir a prod hasta que no esté listo"**:
 implementation must land in staging (or a local-DB rehearsal) and the
 backfill must be verified there before any production migration.
 Implementation order: (1) Alembic migration adding ``schema_sha_v2``
