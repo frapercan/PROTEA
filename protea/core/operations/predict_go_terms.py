@@ -65,6 +65,14 @@ from protea.infrastructure.storage import get_artifact_store
 _BATCH_QUEUE = "protea.predictions.batch"
 _WRITE_QUEUE = "protea.predictions.write"
 
+
+@dataclass(frozen=True)
+class _RerankerBinding:
+    """Resolved RerankerModel artifact pointer + feature schema fingerprint."""
+
+    artifact_uri: str
+    feature_schema_sha: str
+
 # GO aspect single-character codes used in GOTerm.aspect — imported above
 # from the canonical protea.core.domain.aspect module.
 
@@ -279,18 +287,9 @@ class PredictGOTermsOperation:
         p = PredictGOTermsPayload.model_validate(payload)
         parent_job_id = UUID(payload["_job_id"])
 
-        embedding_config_id = uuid.UUID(p.embedding_config_id)
-        annotation_set_id = uuid.UUID(p.annotation_set_id)
-        ontology_snapshot_id = uuid.UUID(p.ontology_snapshot_id)
-
-        config = session.get(EmbeddingConfig, embedding_config_id)
-        if config is None:
-            raise ValueError(f"EmbeddingConfig {p.embedding_config_id} not found")
-        if session.get(AnnotationSet, annotation_set_id) is None:
-            raise ValueError(f"AnnotationSet {p.annotation_set_id} not found")
-        if session.get(OntologySnapshot, ontology_snapshot_id) is None:
-            raise ValueError(f"OntologySnapshot {p.ontology_snapshot_id} not found")
-
+        embedding_config_id, annotation_set_id, ontology_snapshot_id, config = (
+            self._validate_inputs(session, p)
+        )
         emit(
             "predict_go_terms.start",
             None,
@@ -304,34 +303,7 @@ class PredictGOTermsOperation:
             "info",
         )
 
-        reranker_artifact_uri: str | None = None
-        reranker_feature_schema_sha: str | None = None
-        if p.reranker_model_id:
-            reranker_row = session.get(RerankerModel, uuid.UUID(p.reranker_model_id))
-            if reranker_row is None:
-                raise ValueError(f"RerankerModel {p.reranker_model_id} not found")
-            if not reranker_row.artifact_uri:
-                raise ValueError(
-                    f"RerankerModel {p.reranker_model_id} has no artifact_uri — "
-                    "register it via scripts/register_reranker.py"
-                )
-            if not reranker_row.feature_schema_sha:
-                raise ValueError(
-                    f"RerankerModel {p.reranker_model_id} has no feature_schema_sha — "
-                    "cannot validate feature alignment at inference time"
-                )
-            reranker_artifact_uri = reranker_row.artifact_uri
-            reranker_feature_schema_sha = reranker_row.feature_schema_sha
-            emit(
-                "predict_go_terms.reranker_bound",
-                None,
-                {
-                    "reranker_model_id": p.reranker_model_id,
-                    "reranker_name": reranker_row.name,
-                    "feature_schema_sha": reranker_feature_schema_sha,
-                },
-                "info",
-            )
+        binding = self._resolve_reranker_binding(session, p, emit)
 
         query_accessions = self._load_query_accessions(session, p, embedding_config_id, emit)
         if not query_accessions:
@@ -355,7 +327,6 @@ class PredictGOTermsOperation:
             for i in range(0, len(query_accessions), p.batch_size)
         ]
         n_batches = len(batches)
-
         emit(
             "predict_go_terms.dispatching",
             None,
@@ -367,45 +338,10 @@ class PredictGOTermsOperation:
             "info",
         )
 
-        operations: list[tuple[str, dict[str, Any]]] = []
-        for batch_accs in batches:
-            operations.append(
-                (
-                    _BATCH_QUEUE,
-                    {
-                        "operation": "predict_go_terms_batch",
-                        "job_id": str(parent_job_id),
-                        "payload": {
-                            "embedding_config_id": p.embedding_config_id,
-                            "annotation_set_id": p.annotation_set_id,
-                            "ontology_snapshot_id": p.ontology_snapshot_id,
-                            "prediction_set_id": str(prediction_set.id),
-                            "parent_job_id": str(parent_job_id),
-                            "query_accessions": batch_accs,
-                            "query_set_id": p.query_set_id,
-                            "limit_per_entry": p.limit_per_entry,
-                            "distance_threshold": p.distance_threshold,
-                            "search_backend": p.search_backend,
-                            "metric": p.metric,
-                            "faiss_index_type": p.faiss_index_type,
-                            "faiss_nlist": p.faiss_nlist,
-                            "faiss_nprobe": p.faiss_nprobe,
-                            "faiss_hnsw_m": p.faiss_hnsw_m,
-                            "faiss_hnsw_ef_search": p.faiss_hnsw_ef_search,
-                            "compute_alignments": p.compute_alignments,
-                            "compute_taxonomy": p.compute_taxonomy,
-                            "compute_reranker_features": p.compute_reranker_features,
-                            "compute_v6_features": p.compute_v6_features,
-                            "expand_votes_to_ancestors": p.expand_votes_to_ancestors,
-                            "aspect_separated_knn": p.aspect_separated_knn,
-                            "reranker_model_id": p.reranker_model_id,
-                            "reranker_artifact_uri": reranker_artifact_uri,
-                            "reranker_feature_schema_sha": reranker_feature_schema_sha,
-                        },
-                    },
-                )
-            )
-
+        operations = [
+            (_BATCH_QUEUE, self._build_batch_message(p, prediction_set.id, parent_job_id, accs, binding))
+            for accs in batches
+        ]
         return OperationResult(
             result={
                 "batches": n_batches,
@@ -417,6 +353,99 @@ class PredictGOTermsOperation:
             deferred=True,
             publish_operations=operations,
         )
+
+    @staticmethod
+    def _validate_inputs(
+        session: Session, p: PredictGOTermsPayload
+    ) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID, EmbeddingConfig]:
+        """Resolve and validate the three FK UUIDs; return the EmbeddingConfig row."""
+        embedding_config_id = uuid.UUID(p.embedding_config_id)
+        annotation_set_id = uuid.UUID(p.annotation_set_id)
+        ontology_snapshot_id = uuid.UUID(p.ontology_snapshot_id)
+        config = session.get(EmbeddingConfig, embedding_config_id)
+        if config is None:
+            raise ValueError(f"EmbeddingConfig {p.embedding_config_id} not found")
+        if session.get(AnnotationSet, annotation_set_id) is None:
+            raise ValueError(f"AnnotationSet {p.annotation_set_id} not found")
+        if session.get(OntologySnapshot, ontology_snapshot_id) is None:
+            raise ValueError(f"OntologySnapshot {p.ontology_snapshot_id} not found")
+        return embedding_config_id, annotation_set_id, ontology_snapshot_id, config
+
+    @staticmethod
+    def _resolve_reranker_binding(
+        session: Session, p: PredictGOTermsPayload, emit: EmitFn
+    ) -> _RerankerBinding | None:
+        """Look up the RerankerModel row, validate its artifact + schema fields."""
+        if not p.reranker_model_id:
+            return None
+        reranker_row = session.get(RerankerModel, uuid.UUID(p.reranker_model_id))
+        if reranker_row is None:
+            raise ValueError(f"RerankerModel {p.reranker_model_id} not found")
+        if not reranker_row.artifact_uri:
+            raise ValueError(
+                f"RerankerModel {p.reranker_model_id} has no artifact_uri — "
+                "register it via scripts/register_reranker.py"
+            )
+        if not reranker_row.feature_schema_sha:
+            raise ValueError(
+                f"RerankerModel {p.reranker_model_id} has no feature_schema_sha — "
+                "cannot validate feature alignment at inference time"
+            )
+        emit(
+            "predict_go_terms.reranker_bound",
+            None,
+            {
+                "reranker_model_id": p.reranker_model_id,
+                "reranker_name": reranker_row.name,
+                "feature_schema_sha": reranker_row.feature_schema_sha,
+            },
+            "info",
+        )
+        return _RerankerBinding(
+            artifact_uri=reranker_row.artifact_uri,
+            feature_schema_sha=reranker_row.feature_schema_sha,
+        )
+
+    @staticmethod
+    def _build_batch_message(
+        p: PredictGOTermsPayload,
+        prediction_set_id: uuid.UUID,
+        parent_job_id: UUID,
+        batch_accs: list[str],
+        binding: _RerankerBinding | None,
+    ) -> dict[str, Any]:
+        """Serialise one batch into the predict_go_terms_batch dispatch payload."""
+        return {
+            "operation": "predict_go_terms_batch",
+            "job_id": str(parent_job_id),
+            "payload": {
+                "embedding_config_id": p.embedding_config_id,
+                "annotation_set_id": p.annotation_set_id,
+                "ontology_snapshot_id": p.ontology_snapshot_id,
+                "prediction_set_id": str(prediction_set_id),
+                "parent_job_id": str(parent_job_id),
+                "query_accessions": batch_accs,
+                "query_set_id": p.query_set_id,
+                "limit_per_entry": p.limit_per_entry,
+                "distance_threshold": p.distance_threshold,
+                "search_backend": p.search_backend,
+                "metric": p.metric,
+                "faiss_index_type": p.faiss_index_type,
+                "faiss_nlist": p.faiss_nlist,
+                "faiss_nprobe": p.faiss_nprobe,
+                "faiss_hnsw_m": p.faiss_hnsw_m,
+                "faiss_hnsw_ef_search": p.faiss_hnsw_ef_search,
+                "compute_alignments": p.compute_alignments,
+                "compute_taxonomy": p.compute_taxonomy,
+                "compute_reranker_features": p.compute_reranker_features,
+                "compute_v6_features": p.compute_v6_features,
+                "expand_votes_to_ancestors": p.expand_votes_to_ancestors,
+                "aspect_separated_knn": p.aspect_separated_knn,
+                "reranker_model_id": p.reranker_model_id,
+                "reranker_artifact_uri": binding.artifact_uri if binding else None,
+                "reranker_feature_schema_sha": binding.feature_schema_sha if binding else None,
+            },
+        }
 
     def _load_query_accessions(
         self,
