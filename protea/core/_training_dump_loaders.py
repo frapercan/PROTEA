@@ -393,3 +393,84 @@ def _perform_dataset_dump(
     }
     emit("dump_helper.done", None, result, "info")
     return OperationResult(result=result)
+
+
+def _collect_cat_gt_pairs(
+    eval_data: Any,
+) -> tuple[dict[str, set[tuple[str, str]]], set[str]]:
+    """Flatten the per-category ground-truth into ``(protein, go_id)`` pairs.
+
+    Returns ``(cat_gt_pairs, all_query_accessions)``:
+
+    * ``cat_gt_pairs[cat]`` is the set of every ground-truth pair across
+      proteins in that category, used to derive the row-level label
+      column for the per-category training shards.
+    * ``all_query_accessions`` is the union of proteins across NK/LK/PK,
+      used as the KNN-query set for the split.
+
+    Identical shape on the train side and the test side; pulling the
+    flatten loop here removes a 10-line code-duplication smell. Caller
+    looks up ``eval_data.nk`` / ``eval_data.lk`` / ``eval_data.pk`` via
+    ``getattr`` against the lowercase category strings.
+    """
+    cat_gt_pairs: dict[str, set[tuple[str, str]]] = {}
+    all_query_accessions: set[str] = set()
+    for cat_attr in ("nk", "lk", "pk"):
+        gt: dict[str, set[str]] = getattr(eval_data, cat_attr)
+        pairs: set[tuple[str, str]] = set()
+        for protein, go_ids in gt.items():
+            for go_id in go_ids:
+                pairs.add((protein, go_id))
+        cat_gt_pairs[cat_attr] = pairs
+        all_query_accessions.update(gt.keys())
+    return cat_gt_pairs, all_query_accessions
+
+
+def _resolve_test_eval_inputs(
+    session: Session,
+    train_versions: list[int],
+    test_versions: list[int],
+    version_to_set: dict[int, uuid.UUID],
+) -> tuple[Any, Any, int, int]:
+    """Resolve and load the test-pair ``EvaluationSet`` + its ``EvaluationData``.
+
+    Picks the last training version as the "old" side of the test pair
+    (all train splits up to and including that version are seen during
+    training) and the first test version as the "new" side. Looks up
+    the persisted ``EvaluationSet`` row keyed by the
+    ``(old_set_id, new_set_id)`` pair; raises ``RuntimeError`` if it is
+    missing because the dump pipeline assumes the eval set was
+    materialized beforehand (``scripts/materialize_lab_intervals.py`` or
+    ``POST /annotations/evaluation-sets/generate``).
+
+    Returns ``(test_eset, test_eval_data, test_old_v, test_new_v)`` so
+    the caller has both the ORM row (for downstream FK lookups, e.g.
+    ``test_old_set_id = version_to_set[test_old_v]``) and the eagerly-
+    loaded delta data.
+    """
+    from protea.core.evaluation import load_evaluation_data_for_set
+    from protea.infrastructure.orm.models.annotation.evaluation_set import (
+        EvaluationSet,
+    )
+
+    test_old_v = train_versions[-1]
+    test_new_v = test_versions[0]
+    test_old_set_id = version_to_set[test_old_v]
+    test_new_set_id = version_to_set[test_new_v]
+
+    test_eset = (
+        session.query(EvaluationSet)
+        .filter_by(
+            old_annotation_set_id=test_old_set_id,
+            new_annotation_set_id=test_new_set_id,
+        )
+        .one_or_none()
+    )
+    if test_eset is None:
+        raise RuntimeError(
+            f"EvaluationSet missing for test pair ({test_old_v}->{test_new_v}). "
+            "Materialize it via scripts/materialize_lab_intervals.py "
+            "or POST /annotations/evaluation-sets/generate before retrying."
+        )
+    test_eval_data, _ = load_evaluation_data_for_set(session, test_eset)
+    return test_eset, test_eval_data, test_old_v, test_new_v

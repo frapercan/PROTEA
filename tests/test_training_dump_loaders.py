@@ -26,6 +26,7 @@ import pytest
 
 from protea.core._training_dump_loaders import (
     _check_reranker_name_collisions,
+    _collect_cat_gt_pairs,
     _count_embeddings_with_dim,
     _DumpRequest,
     _load_annotation_aggregations,
@@ -34,6 +35,7 @@ from protea.core._training_dump_loaders import (
     _maybe_fit_pca_state,
     _perform_dataset_dump,
     _resolve_annotation_set_ids,
+    _resolve_test_eval_inputs,
     _stream_embeddings,
 )
 
@@ -373,3 +375,76 @@ class TestPerformDatasetDump:
         # Two events fire in order: dump_done then done.
         event_names = [ev[0] for ev in events]
         assert event_names == ["dump_helper.dump_done", "dump_helper.done"]
+
+
+class TestCollectCatGtPairs:
+    def test_flattens_per_category_and_unions_proteins(self) -> None:
+        eval_data = MagicMock()
+        eval_data.nk = {"P1": {"GO:0001", "GO:0002"}, "P2": {"GO:0003"}}
+        eval_data.lk = {"P3": {"GO:0004"}}
+        eval_data.pk = {"P4": {"GO:0005"}, "P1": {"GO:0006"}}
+
+        cat_pairs, all_queries = _collect_cat_gt_pairs(eval_data)
+
+        assert cat_pairs["nk"] == {("P1", "GO:0001"), ("P1", "GO:0002"), ("P2", "GO:0003")}
+        assert cat_pairs["lk"] == {("P3", "GO:0004")}
+        assert cat_pairs["pk"] == {("P4", "GO:0005"), ("P1", "GO:0006")}
+        # ``P1`` appears in NK + PK; the union dedupes it.
+        assert all_queries == {"P1", "P2", "P3", "P4"}
+
+    def test_empty_categories_produce_empty_sets(self) -> None:
+        eval_data = MagicMock()
+        eval_data.nk = {}
+        eval_data.lk = {}
+        eval_data.pk = {}
+
+        cat_pairs, all_queries = _collect_cat_gt_pairs(eval_data)
+
+        assert cat_pairs == {"nk": set(), "lk": set(), "pk": set()}
+        assert all_queries == set()
+
+
+class TestResolveTestEvalInputs:
+    def test_returns_eset_eval_data_and_versions(self) -> None:
+        old_id = uuid.uuid4()
+        new_id = uuid.uuid4()
+        version_to_set = {170: old_id, 230: new_id}
+
+        eset = MagicMock()
+        eval_data = MagicMock()
+
+        session = MagicMock()
+        session.query.return_value.filter_by.return_value.one_or_none.return_value = eset
+
+        with patch(
+            "protea.core.evaluation.load_evaluation_data_for_set",
+            return_value=(eval_data, "fake-pivot-id"),
+        ) as mock_load:
+            out_eset, out_data, out_old_v, out_new_v = _resolve_test_eval_inputs(
+                session,
+                train_versions=[160, 165, 170],
+                test_versions=[230],
+                version_to_set=version_to_set,
+            )
+
+        assert out_eset is eset
+        assert out_data is eval_data
+        assert out_old_v == 170
+        assert out_new_v == 230
+        mock_load.assert_called_once_with(session, eset)
+
+    def test_missing_eset_raises_runtime_error(self) -> None:
+        old_id = uuid.uuid4()
+        new_id = uuid.uuid4()
+        version_to_set = {170: old_id, 230: new_id}
+
+        session = MagicMock()
+        session.query.return_value.filter_by.return_value.one_or_none.return_value = None
+
+        with pytest.raises(RuntimeError, match="EvaluationSet missing for test pair"):
+            _resolve_test_eval_inputs(
+                session,
+                train_versions=[170],
+                test_versions=[230],
+                version_to_set=version_to_set,
+            )
