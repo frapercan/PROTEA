@@ -20,6 +20,7 @@ from protea.core.operations._compute_embeddings_helpers import (
     build_embedding_rows,
     build_store_message,
     serialize_inferred_chunks,
+    t5_forward_pass,
 )
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
@@ -815,15 +816,9 @@ def _embed_t5(
     inputs = _t5_tokenise(tokenizer, cleaned, config, mode, use_aa2fold)
     inputs = {k: v.to(device) for k, v in inputs.items()}
 
-    with torch.no_grad():
-        outputs = model(
-            input_ids=inputs["input_ids"],
-            attention_mask=inputs["attention_mask"],
-            output_hidden_states=True,
-        )
-    hidden_states = outputs.hidden_states  # tuple of (B, L, D)
-    del outputs
-    torch.cuda.empty_cache()
+    hidden_states = t5_forward_pass(
+        model, inputs["input_ids"], inputs["attention_mask"]
+    )
 
     valid_layers = _validate_layers(config.layer_indices, hidden_states, "T5", "batch")
     start_idx = 1 if use_aa2fold else 0  # skip <AA2fold> on ProstT5
