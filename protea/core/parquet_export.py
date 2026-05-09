@@ -129,64 +129,12 @@ def export_reranker_parquets(ctx: ParquetExportContext) -> dict[str, Any]:
     - ``validate_with_contracts``: best-effort validate against the
       lab's ``ManifestV1`` before writing.
     """
-    stage_dir = ctx.stage_dir
-    split_files = ctx.split_files
-    valid_split_versions = ctx.valid_split_versions
-    test_files = ctx.test_files
-    test_old_v = ctx.test_old_v
-    test_new_v = ctx.test_new_v
-    name = ctx.name
-    k = ctx.k
-    embedding_config_id = ctx.embedding_config_id
-    ontology_snapshot_id = ctx.ontology_snapshot_id
-    annotation_source = ctx.annotation_source
-    store = ctx.store
-    key_prefix = ctx.key_prefix
-    producer_version = ctx.producer_version
-    producer_git_sha = ctx.producer_git_sha
-    validate_with_contracts = ctx.validate_with_contracts
-
-    stage_dir.mkdir(parents=True, exist_ok=True)
+    ctx.stage_dir.mkdir(parents=True, exist_ok=True)
     aspect_norm = dict(_ASPECT_NAMES)
 
-    train_frames: list[pd.DataFrame] = []
-    train_snapshot_pairs: list[str] = []
-    for cat in _CATEGORIES:
-        shards = split_files.get(cat, [])
-        for shard_idx, shard_path in enumerate(shards):
-            v_old, v_new = valid_split_versions[shard_idx]
-            snap_pair = f"v{v_old}-v{v_new}"
-            if snap_pair not in train_snapshot_pairs:
-                train_snapshot_pairs.append(snap_pair)
-            sdf = pd.read_parquet(shard_path)
-            sdf["category"] = cat
-            sdf["snapshot_pair"] = snap_pair
-            if "aspect" in sdf.columns:
-                sdf["aspect"] = sdf["aspect"].map(aspect_norm).fillna(sdf["aspect"])
-            sdf = sdf.rename(columns={"go_id": "go_term_id"})
-            train_frames.append(sdf)
-    train_df = (
-        pd.concat(train_frames, ignore_index=True) if train_frames else pd.DataFrame()
-    )
-    del train_frames
-
-    eval_pair = f"v{test_old_v}-v{test_new_v}"
-    eval_frames: list[pd.DataFrame] = []
-    for cat in _CATEGORIES:
-        path = test_files.get(cat)
-        if path is None:
-            continue
-        edf = pd.read_parquet(path)
-        edf["category"] = cat
-        edf["snapshot_pair"] = eval_pair
-        if "aspect" in edf.columns:
-            edf["aspect"] = edf["aspect"].map(aspect_norm).fillna(edf["aspect"])
-        edf = edf.rename(columns={"go_id": "go_term_id"})
-        eval_frames.append(edf)
-    eval_df = (
-        pd.concat(eval_frames, ignore_index=True) if eval_frames else pd.DataFrame()
-    )
-    del eval_frames
+    train_df, train_snapshot_pairs = _load_train_shards(ctx, aspect_norm)
+    eval_pair = f"v{ctx.test_old_v}-v{ctx.test_new_v}"
+    eval_df = _load_eval_shards(ctx, eval_pair, aspect_norm)
 
     reserved = [
         "protein_accession",
@@ -197,34 +145,11 @@ def export_reranker_parquets(ctx: ParquetExportContext) -> dict[str, Any]:
     ]
     train_df = _reorder(train_df, reserved)
     eval_df = _reorder(eval_df, reserved)
+    _assert_canonical_columns(train_df, eval_df, reserved)
 
-    # T1.8 boundary validation: before writing, the actual feature columns
-    # of every non-empty shard must equal ALL_FEATURES exactly. The
-    # canonical compute_schema_sha (lab format) is used on both sides; if
-    # the shard is missing or carries unknown feature columns the sha
-    # differs and we raise instead of silently shipping a partial dump.
-    canonical_features_sha = _canonical_schema_sha(list(ALL_FEATURES))
-    for shard_name, shard in (("train", train_df), ("eval", eval_df)):
-        if shard.empty:
-            continue
-        present_features = [c for c in shard.columns if c in ALL_FEATURES]
-        present_sha = _canonical_schema_sha(present_features)
-        if present_sha != canonical_features_sha:
-            missing = [c for c in ALL_FEATURES if c not in shard.columns]
-            extras = [
-                c
-                for c in shard.columns
-                if c not in ALL_FEATURES and c not in reserved
-            ]
-            raise ValueError(
-                f"{shard_name} shard fails the canonical column invariant. "
-                f"missing={missing!r} extras={extras!r}. "
-                "All ALL_FEATURES columns must be present before write."
-            )
-
-    train_path = stage_dir / "train.parquet"
-    eval_path = stage_dir / "eval.parquet"
-    manifest_path = stage_dir / "manifest.json"
+    train_path = ctx.stage_dir / "train.parquet"
+    eval_path = ctx.stage_dir / "eval.parquet"
+    manifest_path = ctx.stage_dir / "manifest.json"
     if not train_df.empty:
         train_df.to_parquet(train_path, index=False, compression="snappy")
     if not eval_df.empty:
@@ -239,39 +164,117 @@ def export_reranker_parquets(ctx: ParquetExportContext) -> dict[str, Any]:
 
     manifest: dict[str, Any] = {
         "schema_version": "v2",
-        "name": name,
-        "k": k,
-        "embedding_config_id": embedding_config_id,
-        "ontology_snapshot_id": ontology_snapshot_id,
-        "annotation_source": annotation_source,
+        "name": ctx.name,
+        "k": ctx.k,
+        "embedding_config_id": ctx.embedding_config_id,
+        "ontology_snapshot_id": ctx.ontology_snapshot_id,
+        "annotation_source": ctx.annotation_source,
         "train_snapshot_pairs": train_snapshot_pairs,
         "eval_snapshot_pair": eval_pair,
         "schema_sha": schema_sha,
         "n_train_rows": int(len(train_df)),
         "n_eval_rows": int(len(eval_df)),
         "format": "parquet",
-        "producer_version": producer_version,
-        "producer_git_sha": producer_git_sha,
+        "producer_version": ctx.producer_version,
+        "producer_git_sha": ctx.producer_git_sha,
     }
-    if validate_with_contracts:
+    if ctx.validate_with_contracts:
         _validate_manifest_with_contracts(manifest)
     manifest_path.write_text(json.dumps(manifest, indent=2))
 
     result: dict[str, Any] = {
-        "stage_dir": str(stage_dir),
+        "stage_dir": str(ctx.stage_dir),
         "n_train_rows": int(len(train_df)),
         "n_eval_rows": int(len(eval_df)),
         "train_snapshot_pairs": train_snapshot_pairs,
         "eval_snapshot_pair": eval_pair,
         "schema_sha": schema_sha,
     }
-
-    if store is not None:
-        prefix = key_prefix or ""
-        if train_path.exists():
-            result["train_uri"] = store.put(prefix + "train.parquet", train_path)
-        if eval_path.exists():
-            result["eval_uri"] = store.put(prefix + "eval.parquet", eval_path)
-        result["manifest_uri"] = store.put(prefix + "manifest.json", manifest_path)
-
+    if ctx.store is not None:
+        _publish_to_store(ctx, train_path, eval_path, manifest_path, result)
     return result
+
+
+def _load_train_shards(
+    ctx: ParquetExportContext, aspect_norm: dict[str, str]
+) -> tuple[pd.DataFrame, list[str]]:
+    """Read every per-cat training shard, stamp ``category`` + ``snapshot_pair``,
+    and concat into a single frame. Returns ``(df, snapshot_pairs)`` where the
+    snapshot_pairs list keeps insertion order."""
+    train_frames: list[pd.DataFrame] = []
+    train_snapshot_pairs: list[str] = []
+    for cat in _CATEGORIES:
+        shards = ctx.split_files.get(cat, [])
+        for shard_idx, shard_path in enumerate(shards):
+            v_old, v_new = ctx.valid_split_versions[shard_idx]
+            snap_pair = f"v{v_old}-v{v_new}"
+            if snap_pair not in train_snapshot_pairs:
+                train_snapshot_pairs.append(snap_pair)
+            sdf = pd.read_parquet(shard_path)
+            sdf["category"] = cat
+            sdf["snapshot_pair"] = snap_pair
+            if "aspect" in sdf.columns:
+                sdf["aspect"] = sdf["aspect"].map(aspect_norm).fillna(sdf["aspect"])
+            sdf = sdf.rename(columns={"go_id": "go_term_id"})
+            train_frames.append(sdf)
+    train_df = pd.concat(train_frames, ignore_index=True) if train_frames else pd.DataFrame()
+    return train_df, train_snapshot_pairs
+
+
+def _load_eval_shards(
+    ctx: ParquetExportContext, eval_pair: str, aspect_norm: dict[str, str]
+) -> pd.DataFrame:
+    """Read each per-cat test shard, stamp ``category`` + ``snapshot_pair``, concat."""
+    eval_frames: list[pd.DataFrame] = []
+    for cat in _CATEGORIES:
+        path = ctx.test_files.get(cat)
+        if path is None:
+            continue
+        edf = pd.read_parquet(path)
+        edf["category"] = cat
+        edf["snapshot_pair"] = eval_pair
+        if "aspect" in edf.columns:
+            edf["aspect"] = edf["aspect"].map(aspect_norm).fillna(edf["aspect"])
+        edf = edf.rename(columns={"go_id": "go_term_id"})
+        eval_frames.append(edf)
+    return pd.concat(eval_frames, ignore_index=True) if eval_frames else pd.DataFrame()
+
+
+def _assert_canonical_columns(
+    train_df: pd.DataFrame, eval_df: pd.DataFrame, reserved: list[str]
+) -> None:
+    """T1.8 boundary check: every non-empty shard's feature columns must equal
+    ``ALL_FEATURES`` exactly under the canonical lab schema sha. Raises
+    ``ValueError`` with the missing/extras diff before any parquet is written.
+    """
+    canonical_features_sha = _canonical_schema_sha(list(ALL_FEATURES))
+    for shard_name, shard in (("train", train_df), ("eval", eval_df)):
+        if shard.empty:
+            continue
+        present_features = [c for c in shard.columns if c in ALL_FEATURES]
+        if _canonical_schema_sha(present_features) == canonical_features_sha:
+            continue
+        missing = [c for c in ALL_FEATURES if c not in shard.columns]
+        extras = [c for c in shard.columns if c not in ALL_FEATURES and c not in reserved]
+        raise ValueError(
+            f"{shard_name} shard fails the canonical column invariant. "
+            f"missing={missing!r} extras={extras!r}. "
+            "All ALL_FEATURES columns must be present before write."
+        )
+
+
+def _publish_to_store(
+    ctx: ParquetExportContext,
+    train_path: Path,
+    eval_path: Path,
+    manifest_path: Path,
+    result: dict[str, Any],
+) -> None:
+    """Upload train/eval/manifest to ``ctx.store`` and stamp URIs on ``result``."""
+    assert ctx.store is not None
+    prefix = ctx.key_prefix or ""
+    if train_path.exists():
+        result["train_uri"] = ctx.store.put(prefix + "train.parquet", train_path)
+    if eval_path.exists():
+        result["eval_uri"] = ctx.store.put(prefix + "eval.parquet", eval_path)
+    result["manifest_uri"] = ctx.store.put(prefix + "manifest.json", manifest_path)

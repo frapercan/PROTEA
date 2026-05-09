@@ -120,7 +120,7 @@
       "path": "protea/core/parquet_export.py",
       "name": "export_reranker_parquets",
       "line": 116,
-      "metric": 162,
+      "metric": 80,
       "threshold": 60
     },
     {
