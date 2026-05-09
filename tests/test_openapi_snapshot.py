@@ -166,6 +166,39 @@ class TestSchemas:
             "user-schema properties missing description: " + ", ".join(offenders)
         )
 
+    # Request bodies a consumer hand-builds from a script or curl benefit
+    # most from a runnable example payload in the OpenAPI viewer. Response
+    # models are server-built and don't need one.
+    _REQUEST_BODIES_NEEDING_EXAMPLE = {
+        "CreateJobRequest",
+        "CreateJobCommentRequest",
+        "CreateExperimentRunRequest",
+        "UpdateExperimentRunRequest",
+        "CreateDatasetRequest",
+        "ImportRerankerByReferenceRequest",
+    }
+
+    def test_critical_request_bodies_have_example(self, spec: dict[str, Any]) -> None:
+        """Each canonical request body must ship a model-level example.
+
+        Pydantic v2 promotes ``model_config["json_schema_extra"]["example"]``
+        to the OpenAPI ``example`` field on the schema. Swagger UI
+        renders this as a "Try it out" template; without one consumers
+        have to hand-roll a payload from individual field types.
+        """
+        offenders: list[str] = []
+        schemas = spec.get("components", {}).get("schemas", {})
+        for name in self._REQUEST_BODIES_NEEDING_EXAMPLE:
+            schema = schemas.get(name)
+            if schema is None:
+                offenders.append(f"{name} (schema missing)")
+                continue
+            if not (schema.get("example") or schema.get("examples")):
+                offenders.append(name)
+        assert offenders == [], (
+            "request bodies missing model-level example: " + ", ".join(offenders)
+        )
+
 
 class TestOperations:
     def test_every_v1_operation_has_description(self, spec: dict[str, Any]) -> None:

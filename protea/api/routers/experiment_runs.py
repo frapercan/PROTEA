@@ -50,7 +50,19 @@ class CreateExperimentRunRequest(BaseModel):
     ``planned`` status; transitions happen via ``PATCH``.
     """
 
-    model_config = {"extra": "forbid"}
+    model_config = {
+        "extra": "forbid",
+        "json_schema_extra": {
+            "example": {
+                "name": "ablation-K-2026-05-09",
+                "description": "Sweep K in {3, 5, 10} on the bench-v1 dataset.",
+                "hypothesis": "Larger K hurts PK but is neutral on NK/LK.",
+                "config": {"K_values": [3, 5, 10], "embedding_backend": "esm2"},
+                "provenance": {"campaign": "bench-v1"},
+                "tags": ["ablation", "K-sweep"],
+            }
+        },
+    }
 
     name: str = Field(..., min_length=1, description="Unique slug for the run.")
     description: str | None = Field(
@@ -103,7 +115,16 @@ class CreateExperimentRunRequest(BaseModel):
 class UpdateExperimentRunRequest(BaseModel):
     """All fields optional; absent ones leave the column untouched."""
 
-    model_config = {"extra": "forbid"}
+    model_config = {
+        "extra": "forbid",
+        "json_schema_extra": {
+            "example": {
+                "status": "done",
+                "findings": "Fmax +0.03 on bench-v1-K5 vs K=3; PK regressed -0.005.",
+                "tags": ["ablation", "K-sweep", "results-in"],
+            }
+        },
+    }
 
     description: str | None = Field(
         default=None,

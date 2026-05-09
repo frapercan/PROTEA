@@ -159,6 +159,27 @@
       "CreateDatasetRequest": {
         "additionalProperties": false,
         "description": "Body for ``POST /datasets``.\n\nMirrors the ``export_research_dataset`` operation payload. The caller\ndoes not pick a queue: the dataset export always runs on the\n``protea.training`` worker (serialized, GPU/RAM-intensive).",
+        "example": {
+          "annotation_source": "goa",
+          "compute_alignments": true,
+          "compute_taxonomy": true,
+          "embedding_config_id": "00000000-0000-0000-0000-000000000001",
+          "expand_votes_to_ancestors": false,
+          "k": 5,
+          "ontology_snapshot_id": "00000000-0000-0000-0000-000000000002",
+          "output_name": "bench-v1-K5",
+          "search_backend": "faiss",
+          "test_versions": [
+            230
+          ],
+          "train_versions": [
+            160,
+            165,
+            170,
+            175
+          ],
+          "use_embedding_pca": false
+        },
         "properties": {
           "annotation_source": {
             "default": "goa",
@@ -254,6 +275,26 @@
       "CreateExperimentRunRequest": {
         "additionalProperties": false,
         "description": "Body for ``POST /experiment-runs``.\n\nCarries the narrative trio (``description`` / ``hypothesis`` /\n``findings``) plus structured ``config`` + ``provenance`` overlays\nthat the F-EXP campaign tooling reads back. New rows always start in\n``planned`` status; transitions happen via ``PATCH``.",
+        "example": {
+          "config": {
+            "K_values": [
+              3,
+              5,
+              10
+            ],
+            "embedding_backend": "esm2"
+          },
+          "description": "Sweep K in {3, 5, 10} on the bench-v1 dataset.",
+          "hypothesis": "Larger K hurts PK but is neutral on NK/LK.",
+          "name": "ablation-K-2026-05-09",
+          "provenance": {
+            "campaign": "bench-v1"
+          },
+          "tags": [
+            "ablation",
+            "K-sweep"
+          ]
+        },
         "properties": {
           "config": {
             "additionalProperties": true,
@@ -315,6 +356,10 @@
       "CreateJobCommentRequest": {
         "additionalProperties": false,
         "description": "Body for ``POST /jobs/{job_id}/comments``.\n\nCurator/operator note attached to a Job (D11 narrative thread).\nDistinct from machine-emitted ``JobEvent`` rows: comments carry an\nopinionated message and an optional ``author`` tag. Markdown is\npermitted in ``body``; the UI renders the thread chronologically.",
+        "example": {
+          "author": "frapercan",
+          "body": "Re-running with k=10; k=5 hit the variance ceiling on PK."
+        },
         "properties": {
           "author": {
             "anyOf": [
@@ -344,6 +389,21 @@
       "CreateJobRequest": {
         "additionalProperties": false,
         "description": "Body for ``POST /jobs``.\n\nTells PROTEA which registered operation to run (``operation``) and\nwhich RabbitMQ queue to publish the work onto (``queue_name``). The\n``payload`` blob is op-specific; the operation registry validates it\non dequeue. ``description`` / ``tags`` are the D11 narrative fields\nsurfaced in the UI run detail.",
+        "example": {
+          "description": "Recompute ESM-2 embeddings for the GOA 2024-04 set.",
+          "meta": {},
+          "operation": "compute_embeddings",
+          "payload": {
+            "annotation_set_id": "00000000-0000-0000-0000-000000000002",
+            "batch_size": 1,
+            "embedding_config_id": "00000000-0000-0000-0000-000000000001"
+          },
+          "queue_name": "protea.embedding",
+          "tags": [
+            "ablation",
+            "benchmark-v1"
+          ]
+        },
         "properties": {
           "description": {
             "anyOf": [
@@ -424,6 +484,23 @@
       "ImportRerankerByReferenceRequest": {
         "additionalProperties": false,
         "description": "Body for ``POST /reranker-models/import-by-reference``.\n\nUse this when the lab has already uploaded ``model.txt`` to MinIO\nunder its own key and just needs PROTEA to register the URI.",
+        "example": {
+          "artifact_uri": "s3://protea-rerankers/runs/r1/model.txt",
+          "dataset_id": "00000000-0000-0000-0000-000000000003",
+          "evaluation_set_id": "00000000-0000-0000-0000-000000000005",
+          "external_source": "protea-reranker-lab@cec8ccd",
+          "force": false,
+          "name": "r1-k5-bench-v1",
+          "prediction_set_id": "00000000-0000-0000-0000-000000000004",
+          "run": {
+            "feature_schema_sha": "ab12cd34ef56",
+            "metrics": {
+              "fmax": 0.5427
+            },
+            "run_id": "r1"
+          },
+          "spec_yaml": "# ExperimentSpec contents\nname: r1\nfeature_families: [embedding, alignment]\n"
+        },
         "properties": {
           "artifact_uri": {
             "description": "Storage URI of the booster blob (``s3://\u2026/model.txt`` or ``file://\u2026/model.txt``). PROTEA registers this verbatim without re-reading or copying the artifact.",
@@ -1118,6 +1195,15 @@
       "UpdateExperimentRunRequest": {
         "additionalProperties": false,
         "description": "All fields optional; absent ones leave the column untouched.",
+        "example": {
+          "findings": "Fmax +0.03 on bench-v1-K5 vs K=3; PK regressed -0.005.",
+          "status": "done",
+          "tags": [
+            "ablation",
+            "K-sweep",
+            "results-in"
+          ]
+        },
         "properties": {
           "config": {
             "anyOf": [

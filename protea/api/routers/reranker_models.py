@@ -329,7 +329,26 @@ class ImportRerankerByReferenceRequest(BaseModel):
     under its own key and just needs PROTEA to register the URI.
     """
 
-    model_config = {"extra": "forbid"}
+    model_config = {
+        "extra": "forbid",
+        "json_schema_extra": {
+            "example": {
+                "artifact_uri": "s3://protea-rerankers/runs/r1/model.txt",
+                "spec_yaml": "# ExperimentSpec contents\nname: r1\nfeature_families: [embedding, alignment]\n",
+                "run": {
+                    "run_id": "r1",
+                    "metrics": {"fmax": 0.5427},
+                    "feature_schema_sha": "ab12cd34ef56",
+                },
+                "name": "r1-k5-bench-v1",
+                "dataset_id": "00000000-0000-0000-0000-000000000003",
+                "external_source": "protea-reranker-lab@cec8ccd",
+                "prediction_set_id": "00000000-0000-0000-0000-000000000004",
+                "evaluation_set_id": "00000000-0000-0000-0000-000000000005",
+                "force": False,
+            }
+        },
+    }
 
     artifact_uri: str = Field(
         ...,
