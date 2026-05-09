@@ -22,7 +22,7 @@ alignment and taxonomic features, CAFA-style temporal holdout evaluation (NK/LK/
 LightGBM re-ranking. A scoring engine and one-click annotation endpoint make the system
 accessible to researchers without machine-learning infrastructure expertise.
 
-The platform is designed to accommodate continuous extension — new operations, new data
-sources, new models — without architectural regression. Computational efficiency is preserved
+The platform is designed to accommodate continuous extension (new operations, new data
+sources, new models) without architectural regression. Computational efficiency is preserved
 at each migration step, with sequence deduplication by MD5 hash, cursor-based pagination,
 and exponential backoff against upstream rate limits.
