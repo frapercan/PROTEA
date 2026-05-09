@@ -35,6 +35,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from protea.api.deps import get_session_factory
+from protea.core.evaluation import EvalContext
 from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
 from protea.infrastructure.session import session_scope
 from protea.services.scoring_service import (
@@ -175,20 +176,31 @@ def download_scored_predictions(
 
 # CAFA metrics endpoint ----------------------------------------
 
+def _eval_context_dep(
+    old_annotation_set_id: uuid.UUID = Query(...),
+    new_annotation_set_id: uuid.UUID = Query(...),
+    ontology_snapshot_id: uuid.UUID = Query(...),
+) -> EvalContext:
+    """FastAPI dependency that bundles the (old, new, snapshot) triple."""
+    return EvalContext(
+        old_annotation_set_id=old_annotation_set_id,
+        new_annotation_set_id=new_annotation_set_id,
+        ontology_snapshot_id=ontology_snapshot_id,
+    )
+
+
 @router.get("/prediction-sets/{set_id}/metrics")
 def compute_metrics(
     set_id: uuid.UUID,
     scoring_config_id: uuid.UUID = Query(...),
-    old_annotation_set_id: uuid.UUID = Query(...),
-    new_annotation_set_id: uuid.UUID = Query(...),
-    ontology_snapshot_id: uuid.UUID = Query(...),
+    eval_context: EvalContext = Depends(_eval_context_dep),
     category: str = Query("nk", pattern="^(nk|lk)$"),
     factory=Depends(get_session_factory),
 ):
     """Compute CAFA Fmax and AUC-PR for a PredictionSet under a ScoringConfig.
 
-    Ground truth is the NK or LK delta between *old_annotation_set* and
-    *new_annotation_set*, following the CAFA4 protocol: only experimental
+    Ground truth is the NK or LK delta between the old and new annotation sets
+    in ``eval_context``, following the CAFA4 protocol: only experimental
     evidence codes, NOT-qualifier annotations excluded with full DAG propagation.
 
     The selected ``ScoringConfig`` — including any custom ``evidence_weights``
@@ -199,10 +211,11 @@ def compute_metrics(
     ----------
     scoring_config_id:
         Which stored ScoringConfig formula (and evidence weights) to apply.
-    old_annotation_set_id / new_annotation_set_id:
-        The two AnnotationSets used to compute the temporal ground-truth delta.
-    ontology_snapshot_id:
-        GO DAG snapshot used for NOT-qualifier propagation.
+    eval_context:
+        Bundled ``(old_annotation_set_id, new_annotation_set_id,
+        ontology_snapshot_id)`` carried through the metrics pipeline. The
+        FastAPI dependency exposes the three fields as discrete query
+        parameters on the wire.
     category:
         ``"nk"`` (no-knowledge) or ``"lk"`` (limited-knowledge) protein set.
     """
@@ -212,9 +225,7 @@ def compute_metrics(
                 session,
                 prediction_set_id=set_id,
                 scoring_config_id=scoring_config_id,
-                old_annotation_set_id=old_annotation_set_id,
-                new_annotation_set_id=new_annotation_set_id,
-                ontology_snapshot_id=ontology_snapshot_id,
+                eval_context=eval_context,
                 category=category,
             )
     except EntityNotFoundError as exc:

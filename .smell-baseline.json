@@ -142,15 +142,6 @@
       "threshold": 6
     },
     {
-      "key": "params::protea/api/routers/scoring.py::compute_metrics",
-      "kind": "params",
-      "path": "protea/api/routers/scoring.py",
-      "name": "compute_metrics",
-      "line": 179,
-      "metric": 7,
-      "threshold": 6
-    },
-    {
       "key": "params::protea/core/feature_enricher.py::expand_predictions_to_ancestors",
       "kind": "params",
       "path": "protea/core/feature_enricher.py",
@@ -183,15 +174,6 @@
       "path": "protea/infrastructure/queue/consumer.py",
       "name": "OperationConsumer.__init__",
       "line": 191,
-      "metric": 7,
-      "threshold": 6
-    },
-    {
-      "key": "params::protea/services/_scoring_prediction_metrics_helpers.py::compute_prediction_metrics",
-      "kind": "params",
-      "path": "protea/services/_scoring_prediction_metrics_helpers.py",
-      "name": "compute_prediction_metrics",
-      "line": 116,
       "metric": 7,
       "threshold": 6
     }

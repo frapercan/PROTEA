@@ -16,7 +16,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from protea.core.evaluation import compute_evaluation_data
+from protea.core.evaluation import EvalContext, compute_evaluation_data
 from protea.core.metrics import compute_cafa_metrics
 from protea.core.scoring import compute_score
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
@@ -118,9 +118,7 @@ def compute_prediction_metrics(
     *,
     prediction_set_id: uuid.UUID,
     scoring_config_id: uuid.UUID,
-    old_annotation_set_id: uuid.UUID,
-    new_annotation_set_id: uuid.UUID,
-    ontology_snapshot_id: uuid.UUID,
+    eval_context: EvalContext,
     category: str,
 ) -> dict[str, Any]:
     """Compute CAFA Fmax and AUC-PR for a PredictionSet under a ScoringConfig.
@@ -141,9 +139,9 @@ def compute_prediction_metrics(
     )
     eval_data = compute_evaluation_data(
         session,
-        old_annotation_set_id=old_annotation_set_id,
-        new_annotation_set_id=new_annotation_set_id,
-        ontology_snapshot_id=ontology_snapshot_id,
+        old_annotation_set_id=eval_context.old_annotation_set_id,
+        new_annotation_set_id=eval_context.new_annotation_set_id,
+        ontology_snapshot_id=eval_context.ontology_snapshot_id,
     )
     scored = _score_prediction_rows(session, prediction_set_id, config_snap)
     metrics = compute_cafa_metrics(scored, eval_data, category=category)
