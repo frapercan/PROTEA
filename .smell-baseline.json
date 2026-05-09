@@ -88,15 +88,6 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/load_quickgo_annotations.py::LoadQuickGOAnnotationsOperation.execute",
-      "kind": "method",
-      "path": "protea/core/operations/load_quickgo_annotations.py",
-      "name": "LoadQuickGOAnnotationsOperation.execute",
-      "line": 91,
-      "metric": 121,
-      "threshold": 60
-    },
-    {
       "key": "method::protea/core/operations/predict_go_terms.py::PredictGOTermsOperation.execute",
       "kind": "method",
       "path": "protea/core/operations/predict_go_terms.py",
@@ -245,7 +236,7 @@
       "kind": "params",
       "path": "protea/core/operations/load_quickgo_annotations.py",
       "name": "LoadQuickGOAnnotationsOperation._store_buffer",
-      "line": 296,
+      "line": 336,
       "metric": 7,
       "threshold": 6
     },
