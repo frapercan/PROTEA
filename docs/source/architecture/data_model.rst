@@ -31,7 +31,7 @@ Protein and sequence deduplication
 
 **Sequence**
    Stores unique amino-acid sequences, deduplicated by MD5 hash (``sequence_hash``).
-   Many ``Protein`` rows can reference the same ``Sequence`` — ``sequence_id`` is
+   Many ``Protein`` rows can reference the same ``Sequence``; ``sequence_id`` is
    deliberately non-unique.
 
 **Protein**
@@ -242,7 +242,7 @@ Predictions
    re-ranker aggregate columns are populated: ``vote_count``,
    ``k_position``, ``go_term_frequency``, ``ref_annotation_density``,
    ``neighbor_distance_std``, ``neighbor_vote_fraction``,
-   ``neighbor_min_distance``, ``neighbor_mean_distance`` — eight fields in
+   ``neighbor_min_distance``, ``neighbor_mean_distance``: eight fields in
    total.
 
    When ``compute_v6_features=true`` (opt-in, default ``False``) the v6
@@ -253,7 +253,7 @@ Predictions
    tax-voter aggregates (``tax_voters_same_frac``,
    ``tax_voters_close_frac``, ``tax_voters_mean_common_ancestors``) and
    16 PCA-projected embedding columns (``emb_pca_query_0`` …
-   ``emb_pca_query_15``) — 25 additional fields. PCA state is fit once
+   ``emb_pca_query_15``): 25 additional fields. PCA state is fit once
    per ``EmbeddingConfig`` and cached on disk
    (``PROTEA_PCA_ARTIFACTS_DIR``).
 
@@ -262,17 +262,17 @@ Predictions
    ``PredictionSet`` and ``EvaluationSet`` used for training (both
    ``SET NULL`` on delete). Two storage modes coexist:
 
-   - **Inline (legacy)** — ``model_data`` (``Text``, now nullable) holds the
+   - **Inline (legacy).** ``model_data`` (``Text``, now nullable) holds the
      serialized booster string. Rows created before the 2026-04 integration
      with ``protea-reranker-lab`` use this path.
-   - **Artifact-backed (preferred)** — ``artifact_uri`` (``String(512)``)
+   - **Artifact-backed (preferred).** ``artifact_uri`` (``String(512)``)
      points at a ``file://`` or ``s3://`` URI resolved by the
      ``ArtifactStore``. Rows inserted via ``scripts/register_reranker.py``
      always use this path and leave ``model_data`` NULL.
 
    Additional provenance columns record the lab run that produced the model:
 
-   - ``feature_schema_sha`` (``String(16)``) — 12-hex-char fingerprint
+   - ``feature_schema_sha`` (``String(16)``): 12-hex-char fingerprint
      of the feature families the booster was trained on, computed via
      ``protea_reranker_lab.contracts.compute_feature_schema_sha``.
      **Load-bearing at inference time**: ``predict_go_terms`` refuses to
@@ -280,12 +280,12 @@ Predictions
      feature set, falling back to KNN ordering rather than scoring with
      NaN-filled columns.
    - ``embedding_config_id`` / ``ontology_snapshot_id`` (FKs, both
-     ``SET NULL``) — the embedding recipe and ontology release the
+     ``SET NULL``): the embedding recipe and ontology release the
      booster was trained against.
    - ``producer_version`` (``String(64)``) / ``producer_git_sha``
-     (``String(40)``) — PROTEA ``__version__`` and HEAD sha at export
+     (``String(40)``): PROTEA ``__version__`` and HEAD sha at export
      time, recorded in the dataset manifest and propagated here.
-   - ``spec_yaml`` (``Text``) — the full ``ExperimentSpec`` YAML used to
+   - ``spec_yaml`` (``Text``): the full ``ExperimentSpec`` YAML used to
      drive the lab training run, for reproducibility.
 
 **ScoringConfig**
@@ -408,7 +408,7 @@ Visitor events
    ``daily_salt`` is a 32-byte random value held in process memory and
    regenerated every calendar day. Once the day rolls over the salt is
    gone, so cross-day correlation becomes cryptographically infeasible
-   — the same no-PII model used by Plausible and Fathom. The ``(day,
+   (the same no-PII model used by Plausible and Fathom). The ``(day,
    visitor_hash)`` index drives unique-visitor counts per day; the
    ``path`` index drives top-page reports.
 
@@ -450,7 +450,7 @@ Job queue
    the operator (or a downstream tool) can write back via the existing
    PATCH path, and ``tags`` is a free-form ``Text[]`` (default ``[]``)
    for ad-hoc grouping. None of the three are interpreted by
-   ``BaseWorker`` — they are operator metadata only.
+   ``BaseWorker``; they are operator metadata only.
 
 **JobEvent**
    Append-only audit log. Written by the ``emit`` callback during execution. The frontend
@@ -527,10 +527,10 @@ Status enum
 
 .. seealso::
 
-   - :doc:`operations` — every operation lists the tables it touches.
-   - :doc:`/reference/infrastructure` — the SQLAlchemy ``Mapped[]`` classes
+   - :doc:`operations`: every operation lists the tables it touches.
+   - :doc:`/reference/infrastructure`: the SQLAlchemy ``Mapped[]`` classes
      behind every table on this page.
-   - :doc:`/adr/006-sequence-deduplication-by-md5` — why the
+   - :doc:`/adr/006-sequence-deduplication-by-md5`: why the
      ``Sequence`` ↔ ``Protein`` split exists.
-   - :doc:`/adr/001-knn-without-pgvector` — why ``SequenceEmbedding`` uses
+   - :doc:`/adr/001-knn-without-pgvector`: why ``SequenceEmbedding`` uses
      pgvector for storage but not for search.

@@ -16,8 +16,8 @@ concern and links to the others where they intersect.
    the soft-cancellation contract.
 
 :doc:`data_model`
-   The relational schema in five logical groups — sequences and proteins,
-   ontology and annotations, embeddings, predictions, query sets and jobs —
+   The relational schema in five logical groups (sequences and proteins,
+   ontology and annotations, embeddings, predictions, query sets and jobs)
    with the deduplication and versioning rules that make every prediction
    reproducible.
 
@@ -35,7 +35,7 @@ Architecture Decision Records
 -----------------------------
 
 The pages above describe **what** the architecture looks like today. The
-:doc:`/adr/index` records explain **why** each major decision was taken —
+:doc:`/adr/index` records explain **why** each major decision was taken:
 the constraint, the rejected alternatives, and the trade-off that closed
 the question.
 
