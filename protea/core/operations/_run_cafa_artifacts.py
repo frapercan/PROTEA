@@ -103,6 +103,24 @@ def write_gt(annotations: dict[str, set[str]], path: str) -> None:
                 f.write(f"{protein}\t{go_id}\n")
 
 
+def _score_unranked_pred(
+    pred: GOPrediction,
+    scoring_config: ScoringConfig | None,
+) -> float:
+    """Score one prediction with a ``ScoringConfig`` or the distance fallback."""
+    if scoring_config is None:
+        return max(0.0, 1.0 - (pred.distance or 0.0) / 2.0)
+    pred_dict = {
+        "distance": pred.distance,
+        "identity_nw": pred.identity_nw,
+        "identity_sw": pred.identity_sw,
+        "evidence_code": pred.evidence_code,
+        "taxonomic_distance": pred.taxonomic_distance,
+        "neighbor_vote_fraction": pred.neighbor_vote_fraction,
+    }
+    return compute_score(pred_dict, scoring_config)
+
+
 def write_predictions(
     session: Session,
     ctx: WritePredictionsContext,
@@ -121,8 +139,7 @@ def write_predictions(
       3. Otherwise fall back to ``1 - cosine_distance / 2``.
 
     ``known_gos`` carries the query's pre-cutoff annotations (LK / PK
-    settings) and is used to override ``anc2vec_query_known_*`` before the
-    reranker sees the DataFrame. For NK it must stay ``None``.
+    settings); for NK it must stay ``None``.
     """
     if reranker_model_str is not None:
         write_predictions_reranked(
@@ -133,7 +150,6 @@ def write_predictions(
             known_gos=known_gos,
         )
         return
-
     q = (
         session.query(GOPrediction, GOTerm)
         .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
@@ -143,7 +159,6 @@ def write_predictions(
     if ctx.max_distance is not None:
         q = q.filter(GOPrediction.distance <= ctx.max_distance)
     q = q.order_by(GOPrediction.protein_accession, GOTerm.go_id, GOPrediction.distance)
-
     seen: set[tuple[str, str]] = set()
     with open(ctx.path, "w") as f:
         for pred, gt in q.yield_per(1000):
@@ -151,18 +166,7 @@ def write_predictions(
             if key in seen:
                 continue
             seen.add(key)
-            if scoring_config is not None:
-                pred_dict = {
-                    "distance": pred.distance,
-                    "identity_nw": pred.identity_nw,
-                    "identity_sw": pred.identity_sw,
-                    "evidence_code": pred.evidence_code,
-                    "taxonomic_distance": pred.taxonomic_distance,
-                    "neighbor_vote_fraction": pred.neighbor_vote_fraction,
-                }
-                score = compute_score(pred_dict, scoring_config)
-            else:
-                score = max(0.0, 1.0 - (pred.distance or 0.0) / 2.0)
+            score = _score_unranked_pred(pred, scoring_config)
             f.write(f"{pred.protein_accession}\t{gt.go_id}\t{score:.4f}\n")
 
 

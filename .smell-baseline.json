@@ -88,15 +88,6 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/_run_cafa_artifacts.py::write_predictions",
-      "kind": "method",
-      "path": "protea/core/operations/_run_cafa_artifacts.py",
-      "name": "write_predictions",
-      "line": 106,
-      "metric": 61,
-      "threshold": 60
-    },
-    {
       "key": "method::protea/core/operations/compute_embeddings.py::_embed_t5",
       "kind": "method",
       "path": "protea/core/operations/compute_embeddings.py",
