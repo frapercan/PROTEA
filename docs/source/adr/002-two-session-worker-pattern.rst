@@ -20,18 +20,18 @@ What we do
 
 ``BaseWorker.handle_job(job_id)`` opens **two independent sessions**:
 
-1. **Claim session** — changes the job to ``RUNNING``, records
+1. **Claim session.** Changes the job to ``RUNNING``, records
    ``started_at`` and the ``job.started`` event, and **commits immediately**.
    From this point the job is visible as running.
 
-2. **Execute session** — runs the operation.  On success: ``SUCCEEDED``.
+2. **Execute session.** Runs the operation. On success: ``SUCCEEDED``.
    On failure: ``FAILED`` with ``error_code`` and ``error_message``.
    A rollback here does not affect the claim.
 
 Trade-offs
 ----------
 
-- Two round-trips to DB per job — irrelevant when the operation takes
+- Two round-trips to DB per job, irrelevant when the operation takes
   minutes.
 - RabbitMQ delivers each message to a single consumer (``prefetch=1``),
   so there is no real race condition between workers for the same job.

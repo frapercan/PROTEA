@@ -21,14 +21,14 @@ What we do
 
 Two consumers coexist:
 
-**QueueConsumer** — for user-facing jobs with full lifecycle tracking:
+**QueueConsumer.** For user-facing jobs with full lifecycle tracking:
 
 - Receives ``{"job_id": "<uuid>"}`` and delegates to
   ``BaseWorker.handle_job()``.
 - Used by: ``protea.ping``, ``protea.jobs``, ``protea.training``,
   ``protea.embeddings``, ``protea.predictions``, ``protea.evaluations``.
 
-**OperationConsumer** — for ephemeral batches with no individual DB row:
+**OperationConsumer.** For ephemeral batches with no individual DB row:
 
 - Receives ``{"operation": "...", "job_id": "<parent>", "payload": {...}}``.
 - Executes the operation in a single session, ack/nack, done.
@@ -47,7 +47,7 @@ Trade-offs
 - Two code paths for consuming messages, but both are short (~100 lines)
   and share infrastructure (DLQ, registry, emit).
 - If a batch fails and goes to the DLQ, there is no individual retry
-  counter — just the dead message for inspection.
+  counter, just the dead message for inspection.
 
 Rejected
 --------

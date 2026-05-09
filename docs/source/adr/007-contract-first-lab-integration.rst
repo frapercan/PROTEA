@@ -35,28 +35,28 @@ What we do
 PROTEA and ``protea-reranker-lab`` live in **separate repositories**
 coupled only through a narrow contract:
 
-1. **A file-format contract** — the frozen dataset layout. PROTEA's
+1. **A file-format contract.** The frozen dataset layout. PROTEA's
    ``export_research_dataset`` operation writes exactly three files
    under an ``ArtifactStore`` key prefix:
 
-   - ``train.parquet`` — all training shards concatenated with
+   - ``train.parquet``: all training shards concatenated with
      ``category`` and ``snapshot_pair`` columns;
-   - ``eval.parquet`` — held-out evaluation shards;
-   - ``manifest.json`` — schema version ``v2``, producer version and
+   - ``eval.parquet``: held-out evaluation shards;
+   - ``manifest.json``: schema version ``v2``, producer version and
      git sha, snapshot pair list, ``schema_sha`` fingerprint.
 
-2. **A code contract** — the lab's ``protea_reranker_lab.contracts``
+2. **A code contract.** The lab's ``protea_reranker_lab.contracts``
    module exposes two symbols PROTEA imports:
 
-   - ``ManifestV1`` — Pydantic model for the manifest, used by
+   - ``ManifestV1``: Pydantic model for the manifest, used by
      ``protea.core.parquet_export`` at export time for best-effort
      validation (dev-only; silently skipped in production images that
      don't install the lab);
-   - ``compute_feature_schema_sha(feature_families: list[str]) -> str``
-     — deterministic 12-hex-char fingerprint used at **predict time**
+   - ``compute_feature_schema_sha(feature_families: list[str]) -> str``:
+     deterministic 12-hex-char fingerprint used at **predict time**
      to verify the live feature set matches the booster's expectations.
 
-3. **An artefact contract** — lab training writes
+3. **An artefact contract.** Lab training writes
    ``runs/<name>/{run.json, spec.yaml, model.txt}``. PROTEA's
    ``scripts/register_reranker.py`` parses those files, uploads the
    booster through the ``ArtifactStore``, and inserts a
@@ -69,7 +69,7 @@ Strict feature-schema equality
 ``feature_schema_sha`` is computed over the sorted list of feature
 families active at training time. At predict time the batch worker
 recomputes it from its own active flags and compares for **strict
-equality** — not subset, not prefix.
+equality**, not subset, not prefix.
 
 Rejected alternative: subset compatibility. If the booster was trained
 on ``{knn, annotation_meta, alignment_nw, length}`` and the live
@@ -93,7 +93,7 @@ Trade-offs
   match any PROTEA-side snapshot of the same feature-family list.
 - **Production images ship without the lab.** ``protea_reranker_lab``
   is a dev-only dependency of PROTEA. The predict-time import is
-  guarded — a missing lab install causes the batch worker to emit
+  guarded; a missing lab install causes the batch worker to emit
   ``reranker.skipped`` with ``reason=contracts_unavailable`` and fall
   back to KNN ordering, without crashing. In production we ship the
   lab alongside PROTEA (single editable path dep) precisely so
@@ -104,7 +104,7 @@ Rejected
 
 - **Dynamic feature-family negotiation.** Letting the worker infer
   which columns the booster expects from ``booster.feature_name()``
-  and building them lazily. Too fragile — names in the booster do
+  and building them lazily. Too fragile: names in the booster do
   not carry family grouping, so every feature engineering change
   would need manual backwards-compat shims.
 - **Pickling ``ExperimentSpec`` objects across repos.** Requires both

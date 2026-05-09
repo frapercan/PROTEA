@@ -27,7 +27,7 @@ Multiple ``Protein`` rows (one per UniProt accession) point to the same
 ``Sequence``.  The FK ``Protein.sequence_id`` is intentionally non-unique.
 
 When the embedding pipeline runs, it only processes ``Sequence`` rows
-without an embedding — duplicates are skipped automatically.
+without an embedding; duplicates are skipped automatically.
 
 Trade-offs
 ----------
@@ -35,7 +35,7 @@ Trade-offs
 - MD5 is not cryptographically secure, but that does not matter here:
   there is no adversarial input, only biological sequences.
 - Sequences with a single mutation produce different hashes and are stored
-  separately.  This is correct — a mutation changes the embedding.
+  separately. This is correct: a mutation changes the embedding.
 
 Rejected
 --------

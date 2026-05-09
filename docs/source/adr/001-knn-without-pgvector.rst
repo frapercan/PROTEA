@@ -31,7 +31,7 @@ KNN runs **on CPU**, entirely in Python:
 
 Reference embeddings are loaded once from PostgreSQL into a process-level
 cache (``_REF_CACHE``, float16, ~4 GB for 500K vectors).  ``pgvector``
-remains as storage only — the ``VECTOR`` type is there, but we never
+remains as storage only: the ``VECTOR`` type is there, but we never
 search with ``<=>``.
 
 Trade-offs
