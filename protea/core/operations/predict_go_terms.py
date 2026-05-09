@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -30,6 +30,7 @@ from protea.core.feature_engineering import compute_alignment, compute_taxonomy
 from protea.core.feature_enricher import NEW_V6_FEATURE_KEYS as _NEW_V6_FEATURE_KEYS
 from protea.core.feature_enricher import KnnEnrichmentContext, enrich_v6_features
 from protea.core.knn_search import search_knn
+from protea.core.operations._predict_go_terms_adapter import AdapterResult
 from protea.core.pca_cache import (
     _load_or_fit_pca_state,
 )
@@ -114,34 +115,19 @@ _STORE_FLOAT_KEYS: tuple[str, ...] = (
 
 
 @dataclass(frozen=True)
-class BatchPredictContext:
-    """Inputs for ``PredictGOTermsBatchOperation._predict_batch``.
+class _UnifiedPredictContext:
+    """Inputs for ``PredictGOTermsBatchOperation._unified_predict_via_pipeline``.
 
-    Bundles the per-batch query/reference data and optional enrichment
-    maps so the entry-point signature stays under flake8-bugbear's
-    parameter ceiling (master plan v3.2 §3 — ``param_count`` >6).
-    The payload ``p`` and ``prediction_set_id`` are configuration-shaped
-    and could live alongside; keeping them on the context too lets
-    callers pass a single value.
-
-    ``ref_data`` must have keys ``accessions``, ``embeddings``, and ``go_map``.
-    ``neighbors`` may be pre-computed (KNN already done by ``execute()``);
-    when ``None``, ``_predict_batch`` runs KNN itself.
+    Bundles the per-batch ids and the cached reference pool so the
+    helper signature stays under flake8-bugbear's parameter ceiling.
     """
 
-    query_accessions: list[str]
+    p: PredictGOTermsBatchPayload
+    annotation_set_id: uuid.UUID
+    prediction_set_id: uuid.UUID
+    valid_accessions: list[str]
     query_embeddings: np.ndarray
     ref_data: dict[str, Any]
-    prediction_set_id: uuid.UUID
-    # ``PredictGOTermsBatchPayload`` is imported below; the
-    # ``from __future__ import annotations`` directive keeps this
-    # annotation as a string until evaluated lazily.
-    payload: PredictGOTermsBatchPayload
-    neighbors: list[list[tuple[str, float]]] | None = None
-    ref_sequences: dict[str, str] = field(default_factory=dict)
-    query_sequences: dict[str, str] = field(default_factory=dict)
-    ref_tax_ids: dict[str, int | None] = field(default_factory=dict)
-    query_tax_ids: dict[str, int | None] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -592,74 +578,23 @@ class PredictGOTermsBatchOperation:
                 emit("predict_go_terms_batch.no_references", None, {}, "warning")
                 return OperationResult(result={"predictions": 0})
 
-            # --- KNN: use precomputed f32 (cosine-normalised if metric == cosine) ---
-            use_cos = p.metric == "cosine"
-            ref_embeddings_f32 = (
-                ref_data["embeddings_f32_cos"] if use_cos else ref_data["embeddings_f32"]
-            )
-            neighbors = search_knn(
-                query_embeddings,
-                ref_embeddings_f32,
-                ref_data["accessions"],
-                k=p.limit_per_entry,
-                distance_threshold=p.distance_threshold,
-                backend=p.search_backend,
-                metric=p.metric,
-                pre_normalized=use_cos,
-                faiss_index_type=p.faiss_index_type,
-                faiss_nlist=p.faiss_nlist,
-                faiss_nprobe=p.faiss_nprobe,
-                faiss_hnsw_m=p.faiss_hnsw_m,
-                faiss_hnsw_ef_search=p.faiss_hnsw_ef_search,
-            )
-
-            # --- lazy GO annotation load: only for neighbors actually found ---
-            unique_neighbors: set[str] = set()
-            for top_refs in neighbors:
-                for ref_acc, _ in top_refs:
-                    unique_neighbors.add(ref_acc)
-            go_map = self._load_annotations_for(session, annotation_set_id, unique_neighbors)
-
-            # --- feature engineering sequences / taxonomy (opt-in) ---
-            ref_sequences: dict[str, str] = {}
-            query_sequences: dict[str, str] = {}
-            ref_tax_ids: dict[str, int | None] = {}
-            query_tax_ids: dict[str, int | None] = {}
-
-            if p.compute_alignments:
-                ref_sequences = self._load_sequences_for_proteins(session, unique_neighbors)
-                query_sequences = self._load_sequences_for_queries(session, p, valid_accessions)
-
-            if p.compute_taxonomy:
-                ref_tax_ids = self._load_taxonomy_ids_for_proteins(session, unique_neighbors)
-                query_tax_ids = self._load_taxonomy_ids_for_queries(session, p, valid_accessions)
-
-            ref_data_with_annotations = {
-                "accessions": ref_data["accessions"],
-                "embeddings": ref_embeddings_f32,
-                "go_map": go_map,
-            }
-            prediction_dicts, neighbors, pair_features = self._predict_batch(
-                BatchPredictContext(
-                    query_accessions=valid_accessions,
-                    query_embeddings=query_embeddings,
-                    ref_data=ref_data_with_annotations,
+            adapter_result = self._unified_predict_via_pipeline(
+                session,
+                _UnifiedPredictContext(
+                    p=p,
+                    annotation_set_id=annotation_set_id,
                     prediction_set_id=prediction_set_id,
-                    payload=p,
-                    neighbors=neighbors,
-                    ref_sequences=ref_sequences,
-                    query_sequences=query_sequences,
-                    ref_tax_ids=ref_tax_ids,
-                    query_tax_ids=query_tax_ids,
-                )
+                    valid_accessions=valid_accessions,
+                    query_embeddings=query_embeddings,
+                    ref_data=ref_data,
+                ),
             )
+            prediction_dicts = adapter_result.predictions
             if p.compute_v6_features:
-                # Unified mode: collapse to a single synthetic aspect key so the
-                # enricher can partition GO terms via the aspect map.
                 v6_ctx = {
-                    "neighbors_by_aspect": {"": neighbors},
-                    "go_map_by_aspect": {"": go_map},
-                    "pair_features": pair_features,
+                    "neighbors_by_aspect": adapter_result.neighbors_by_aspect,
+                    "go_map_by_aspect": adapter_result.go_map_by_aspect,
+                    "pair_features": adapter_result.pair_features,
                 }
 
         # --- v6 feature enrichment (Anc2Vec + tax_voters + emb_pca) ---------
@@ -710,129 +645,26 @@ class PredictGOTermsBatchOperation:
         # records inherit the leaf's anc2vec_/emb_pca_ values, mirroring
         # what the dump helper emits.
         if p.expand_votes_to_ancestors and prediction_dicts:
-            from sqlalchemy import select
-
-            from protea.core.feature_enricher import (
-                expand_predictions_to_ancestors,
-                load_parent_map,
-            )
-
-            # predict_go_terms keys candidates by integer ``go_term_id``;
-            # the expansion helper (and parent_map) operate on string GO
-            # accessions (``"GO:0006357"``). Materialise the map once for
-            # this batch's candidate set, then add ``go_id`` to each record
-            # before expanding. After expansion, synthetic ancestor records
-            # need ``go_term_id`` resolved back so the bulk insert can use
-            # the FK — pull both directions from ``go_term`` in one query.
-            parent_map = load_parent_map(session, uuid.UUID(p.ontology_snapshot_id))
-            unique_int_ids = {
-                rec["go_term_id"] for rec in prediction_dicts if rec.get("go_term_id")
-            }
-            id_pairs = session.execute(
-                select(GOTerm.id, GOTerm.go_id).where(GOTerm.id.in_(unique_int_ids))
-            ).all()
-            int_to_str = {gid: go_id for gid, go_id in id_pairs}
-            for rec in prediction_dicts:
-                gid = rec.get("go_term_id")
-                if gid is not None and gid in int_to_str:
-                    rec["go_id"] = int_to_str[gid]
-
-            n_before = len(prediction_dicts)
-            prediction_dicts = expand_predictions_to_ancestors(
-                prediction_dicts,
-                parent_map=parent_map,
-                k_limit=p.limit_per_entry,
-                ia_weights=None,
-            )
-
-            # Synthetic ancestors get a ``go_id`` string but no ``go_term_id``
-            # (the helper just clones the leaf record). Resolve the FK so
-            # store_predictions can insert the row.
-            ancestor_strs = {
-                rec["go_id"]
-                for rec in prediction_dicts
-                if rec.get("go_id") and rec["go_id"] not in {v for v in int_to_str.values()}
-            }
-            if ancestor_strs:
-                anc_pairs = session.execute(
-                    select(GOTerm.id, GOTerm.go_id).where(
-                        GOTerm.go_id.in_(ancestor_strs),
-                        GOTerm.ontology_snapshot_id == uuid.UUID(p.ontology_snapshot_id),
-                    )
-                ).all()
-                str_to_int = {go_id: gid for gid, go_id in anc_pairs}
-                str_to_int.update({v: k for k, v in int_to_str.items()})
-                # Drop ancestors that don't exist in this snapshot — predict
-                # cannot store rows without a valid go_term FK.
-                prediction_dicts = [
-                    {**rec, "go_term_id": str_to_int[rec["go_id"]]}
-                    for rec in prediction_dicts
-                    if rec.get("go_id") in str_to_int
-                ]
-
-            emit(
-                "predict_go_terms_batch.expanded_to_ancestors",
-                None,
-                {
-                    "rows_before": n_before,
-                    "rows_after": len(prediction_dicts),
-                    "expansion_ratio": (len(prediction_dicts) / n_before if n_before else 0.0),
-                },
-                "info",
+            prediction_dicts = self._expand_to_ancestors(
+                session, p, prediction_dicts, emit
             )
 
         reranker_stats: dict[str, Any] | None = None
         if p.reranker_model_id and prediction_dicts:
             reranker_stats = self._apply_reranker_if_aligned(session, prediction_dicts, p, emit)
 
-        elapsed = time.perf_counter() - t0
-
-        done_fields: dict[str, Any] = {
-            "queries": len(valid_accessions),
-            "predictions": len(prediction_dicts),
-            "elapsed_seconds": elapsed,
-        }
-        if reranker_stats is not None:
-            done_fields["reranker"] = reranker_stats
-        emit(
-            "predict_go_terms_batch.done",
-            None,
-            done_fields,
-            "info",
+        self._emit_done(
+            emit,
+            valid_accessions=valid_accessions,
+            prediction_dicts=prediction_dicts,
+            reranker_stats=reranker_stats,
+            started_at=t0,
         )
-
-        # RabbitMQ caps message size at 128 MB; ancestor-expanded batches
-        # serialise to ~250-300 MB and silently land in the dead-letter
-        # queue. Split into ≤10k-row chunks (~20-25 MB each) so the write
-        # worker actually receives them and broker memory pressure stays low
-        # even when many batches publish concurrently. Only the final chunk
-        # advances the coordinator's batch counter (``is_final_chunk=True``)
-        # so the parent job doesn't mark itself succeeded after the first
-        # batch's chunks finish.
-        from protea.config.tuning import get_tuning
-
-        store_chunk_size = get_tuning().operation.store_chunk_size
-        chunks: list[list[dict[str, Any]]] = [
-            prediction_dicts[s : s + store_chunk_size]
-            for s in range(0, len(prediction_dicts), store_chunk_size)
-        ] or [[]]
-        store_messages: list[tuple[str, dict[str, Any]]] = []
-        for i, chunk in enumerate(chunks):
-            store_messages.append(
-                (
-                    _WRITE_QUEUE,
-                    {
-                        "operation": "store_predictions",
-                        "job_id": str(parent_job_id),
-                        "payload": {
-                            "parent_job_id": str(parent_job_id),
-                            "prediction_set_id": str(prediction_set_id),
-                            "predictions": chunk,
-                            "is_final_chunk": i == len(chunks) - 1,
-                        },
-                    },
-                )
-            )
+        store_messages = self._chunked_publish(
+            parent_job_id=parent_job_id,
+            prediction_set_id=prediction_set_id,
+            prediction_dicts=prediction_dicts,
+        )
 
         return OperationResult(
             result={
@@ -843,6 +675,293 @@ class PredictGOTermsBatchOperation:
         )
 
     # ── helpers ──────────────────────────────────────────────────────────────
+
+    def _unified_predict_via_pipeline(
+        self,
+        session: Session,
+        ctx: _UnifiedPredictContext,
+    ) -> AdapterResult:
+        """Run the unified KNN path through ``protea_method.pipeline.predict``.
+
+        Resolves the GO term metadata maps, sequences / taxonomy inputs
+        (when the payload requests them), and the lazy ``go_map`` keyed
+        on neighbours actually found, then delegates to
+        :func:`call_pipeline_predict`. The adapter returns the legacy
+        prediction shape PROTEA's downstream consumers expect, plus the
+        ``pair_features`` and aspect maps the v6 enricher needs.
+        """
+        from protea.core.operations._predict_go_terms_adapter import (
+            AdapterInputs,
+            call_pipeline_predict,
+        )
+
+        annotations, unique_neighbors = self._unified_load_annotations(session, ctx)
+        ref_sequences, query_sequences, ref_tax_ids, query_tax_ids = (
+            self._unified_load_pair_inputs(session, ctx, unique_neighbors)
+        )
+        go_id_map, go_aspect_map = self._load_go_term_metadata(session, annotations)
+        return call_pipeline_predict(
+            AdapterInputs(
+                p=ctx.p,
+                valid_accessions=ctx.valid_accessions,
+                query_embeddings=ctx.query_embeddings,
+                ref_data=ctx.ref_data,
+                annotations=annotations,
+                go_id_map=go_id_map,
+                go_aspect_map=go_aspect_map,
+                prediction_set_id=ctx.prediction_set_id,
+                ref_sequences=ref_sequences,
+                query_sequences=query_sequences,
+                ref_tax_ids=ref_tax_ids,
+                query_tax_ids=query_tax_ids,
+            )
+        )
+
+    def _unified_load_annotations(
+        self,
+        session: Session,
+        ctx: _UnifiedPredictContext,
+    ) -> tuple[dict[str, list[dict[str, Any]]], set[str]]:
+        """Pre-search KNN to resolve the unique-neighbour set, then load
+        the lazy go-map only for those references."""
+        from protea.core.knn_search import search_knn
+
+        p = ctx.p
+        use_cos = p.metric == "cosine"
+        ref_embeddings_f32 = (
+            ctx.ref_data["embeddings_f32_cos"] if use_cos else ctx.ref_data["embeddings_f32"]
+        )
+        neighbors = search_knn(
+            ctx.query_embeddings,
+            ref_embeddings_f32,
+            ctx.ref_data["accessions"],
+            k=p.limit_per_entry,
+            distance_threshold=p.distance_threshold,
+            backend=p.search_backend,
+            metric=p.metric,
+            pre_normalized=use_cos,
+            faiss_index_type=p.faiss_index_type,
+            faiss_nlist=p.faiss_nlist,
+            faiss_nprobe=p.faiss_nprobe,
+            faiss_hnsw_m=p.faiss_hnsw_m,
+            faiss_hnsw_ef_search=p.faiss_hnsw_ef_search,
+        )
+        unique_neighbors: set[str] = {
+            ref_acc for top_refs in neighbors for ref_acc, _ in top_refs
+        }
+        annotations = self._load_annotations_for(session, ctx.annotation_set_id, unique_neighbors)
+        return annotations, unique_neighbors
+
+    def _unified_load_pair_inputs(
+        self,
+        session: Session,
+        ctx: _UnifiedPredictContext,
+        unique_neighbors: set[str],
+    ) -> tuple[
+        dict[str, str],
+        dict[str, str],
+        dict[str, int | None],
+        dict[str, int | None],
+    ]:
+        """Conditionally load sequences (alignments) and taxonomy ids."""
+        p = ctx.p
+        ref_sequences: dict[str, str] = {}
+        query_sequences: dict[str, str] = {}
+        ref_tax_ids: dict[str, int | None] = {}
+        query_tax_ids: dict[str, int | None] = {}
+        if p.compute_alignments:
+            ref_sequences = self._load_sequences_for_proteins(session, unique_neighbors)
+            query_sequences = self._load_sequences_for_queries(session, p, ctx.valid_accessions)
+        if p.compute_taxonomy:
+            ref_tax_ids = self._load_taxonomy_ids_for_proteins(session, unique_neighbors)
+            query_tax_ids = self._load_taxonomy_ids_for_queries(session, p, ctx.valid_accessions)
+        return ref_sequences, query_sequences, ref_tax_ids, query_tax_ids
+
+    def _load_go_term_metadata(
+        self,
+        session: Session,
+        annotations: dict[str, list[dict[str, Any]]],
+    ) -> tuple[dict[int, str], dict[int, str]]:
+        """Build ``(go_id_map, go_aspect_map)`` for every gtid in play."""
+        gtids_in_play: set[int] = {
+            int(ann["go_term_id"]) for anns in annotations.values() for ann in anns
+        }
+        go_id_map: dict[int, str] = {}
+        go_aspect_map: dict[int, str] = {}
+        if not gtids_in_play:
+            return go_id_map, go_aspect_map
+        from protea.config.tuning import get_tuning
+
+        chunk_size = get_tuning().operation.annotation_chunk_size
+        ids_list = list(gtids_in_play)
+        for i in range(0, len(ids_list), chunk_size):
+            chunk = ids_list[i : i + chunk_size]
+            rows = (
+                session.query(GOTerm.id, GOTerm.go_id, GOTerm.aspect)
+                .filter(GOTerm.id.in_(chunk))
+                .all()
+            )
+            for gid, go_str, aspect in rows:
+                go_id_map[gid] = go_str
+                go_aspect_map[gid] = aspect or ""
+        return go_id_map, go_aspect_map
+
+    def _expand_to_ancestors(
+        self,
+        session: Session,
+        p: PredictGOTermsBatchPayload,
+        prediction_dicts: list[dict[str, Any]],
+        emit: EmitFn,
+    ) -> list[dict[str, Any]]:
+        """Expand each leaf prediction to its ancestor closure.
+
+        Mirrors what the offline dump helper emits so live predictions
+        carry the same candidate distribution the booster trained on.
+        """
+        from protea.core.feature_enricher import (
+            expand_predictions_to_ancestors,
+            load_parent_map,
+        )
+
+        snapshot_id = uuid.UUID(p.ontology_snapshot_id)
+        parent_map = load_parent_map(session, snapshot_id)
+        int_to_str = self._stamp_go_ids(session, prediction_dicts)
+        n_before = len(prediction_dicts)
+        prediction_dicts = expand_predictions_to_ancestors(
+            prediction_dicts,
+            parent_map=parent_map,
+            k_limit=p.limit_per_entry,
+            ia_weights=None,
+        )
+        prediction_dicts = self._resolve_synthetic_fks(
+            session, prediction_dicts, int_to_str, snapshot_id
+        )
+        emit(
+            "predict_go_terms_batch.expanded_to_ancestors",
+            None,
+            {
+                "rows_before": n_before,
+                "rows_after": len(prediction_dicts),
+                "expansion_ratio": (len(prediction_dicts) / n_before if n_before else 0.0),
+            },
+            "info",
+        )
+        return prediction_dicts
+
+    def _stamp_go_ids(
+        self,
+        session: Session,
+        prediction_dicts: list[dict[str, Any]],
+    ) -> dict[int, str]:
+        """Materialise ``go_id`` strings on each prediction by FK lookup.
+
+        Returns the ``int -> str`` map so the synthetic-ancestor FK
+        resolver can reuse it without re-querying.
+        """
+        from sqlalchemy import select
+
+        unique_int_ids = {
+            rec["go_term_id"] for rec in prediction_dicts if rec.get("go_term_id")
+        }
+        id_pairs = session.execute(
+            select(GOTerm.id, GOTerm.go_id).where(GOTerm.id.in_(unique_int_ids))
+        ).all()
+        int_to_str = {gid: go_id for gid, go_id in id_pairs}
+        for rec in prediction_dicts:
+            gid = rec.get("go_term_id")
+            if gid is not None and gid in int_to_str:
+                rec["go_id"] = int_to_str[gid]
+        return int_to_str
+
+    def _resolve_synthetic_fks(
+        self,
+        session: Session,
+        prediction_dicts: list[dict[str, Any]],
+        int_to_str: dict[int, str],
+        snapshot_id: uuid.UUID,
+    ) -> list[dict[str, Any]]:
+        """Stamp ``go_term_id`` on synthetic ancestor records via the snapshot."""
+        from sqlalchemy import select
+
+        leaf_strs = set(int_to_str.values())
+        ancestor_strs = {
+            rec["go_id"]
+            for rec in prediction_dicts
+            if rec.get("go_id") and rec["go_id"] not in leaf_strs
+        }
+        if not ancestor_strs:
+            return prediction_dicts
+        anc_pairs = session.execute(
+            select(GOTerm.id, GOTerm.go_id).where(
+                GOTerm.go_id.in_(ancestor_strs),
+                GOTerm.ontology_snapshot_id == snapshot_id,
+            )
+        ).all()
+        str_to_int = {go_id: gid for gid, go_id in anc_pairs}
+        str_to_int.update({v: k for k, v in int_to_str.items()})
+        return [
+            {**rec, "go_term_id": str_to_int[rec["go_id"]]}
+            for rec in prediction_dicts
+            if rec.get("go_id") in str_to_int
+        ]
+
+    def _emit_done(
+        self,
+        emit: EmitFn,
+        *,
+        valid_accessions: list[str],
+        prediction_dicts: list[dict[str, Any]],
+        reranker_stats: dict[str, Any] | None,
+        started_at: float,
+    ) -> None:
+        """Emit the per-batch ``done`` audit event."""
+        done_fields: dict[str, Any] = {
+            "queries": len(valid_accessions),
+            "predictions": len(prediction_dicts),
+            "elapsed_seconds": time.perf_counter() - started_at,
+        }
+        if reranker_stats is not None:
+            done_fields["reranker"] = reranker_stats
+        emit("predict_go_terms_batch.done", None, done_fields, "info")
+
+    def _chunked_publish(
+        self,
+        *,
+        parent_job_id: UUID,
+        prediction_set_id: uuid.UUID,
+        prediction_dicts: list[dict[str, Any]],
+    ) -> list[tuple[str, dict[str, Any]]]:
+        """Split predictions into RabbitMQ-sized chunks for the write queue.
+
+        RabbitMQ caps message size at 128 MB; ancestor-expanded batches
+        serialise to ~250-300 MB and silently land in the dead-letter
+        queue. Splitting into ~10k-row chunks (~20-25 MB each) keeps
+        the broker happy and lets the parent job's batch counter
+        advance only on the final chunk via ``is_final_chunk``.
+        """
+        from protea.config.tuning import get_tuning
+
+        store_chunk_size = get_tuning().operation.store_chunk_size
+        chunks: list[list[dict[str, Any]]] = [
+            prediction_dicts[s : s + store_chunk_size]
+            for s in range(0, len(prediction_dicts), store_chunk_size)
+        ] or [[]]
+        return [
+            (
+                _WRITE_QUEUE,
+                {
+                    "operation": "store_predictions",
+                    "job_id": str(parent_job_id),
+                    "payload": {
+                        "parent_job_id": str(parent_job_id),
+                        "prediction_set_id": str(prediction_set_id),
+                        "predictions": chunk,
+                        "is_final_chunk": i == len(chunks) - 1,
+                    },
+                },
+            )
+            for i, chunk in enumerate(chunks)
+        ]
 
     def _apply_reranker_if_aligned(
         self,
@@ -1656,174 +1775,6 @@ class PredictGOTermsBatchOperation:
         # Rows return pgvector HalfVector instances (halfvec column since 2026-04-11).
         embeddings = np.array([r[1].to_list() for r in rows], dtype=np.float32)
         return embeddings, valid_accessions
-
-    def _predict_batch(
-        self,
-        ctx: BatchPredictContext,
-    ) -> tuple[
-        list[dict[str, Any]],
-        list[list[tuple[str, float]]],
-        dict[tuple[str, str], dict[str, Any]],
-    ]:
-        """Build serializable prediction dicts from KNN results.
-
-        All inputs live on :class:`BatchPredictContext`. If
-        ``ctx.neighbors`` is provided (pre-computed by ``execute()``),
-        KNN is skipped. Returns ``(predictions, neighbors, pair_features)``;
-        the last two are used by ``_enrich_with_v6_features`` when
-        ``compute_v6_features`` is on. ``pair_features`` is keyed by
-        ``(query_accession, ref_accession)``.
-        """
-        query_accessions = ctx.query_accessions
-        query_embeddings = ctx.query_embeddings
-        ref_data = ctx.ref_data
-        prediction_set_id = ctx.prediction_set_id
-        p = ctx.payload
-        ref_sequences = ctx.ref_sequences
-        query_sequences = ctx.query_sequences
-        ref_tax_ids = ctx.ref_tax_ids
-        query_tax_ids = ctx.query_tax_ids
-        neighbors = ctx.neighbors
-
-        if neighbors is None:
-            ref_emb = ref_data["embeddings"]
-            if ref_emb.dtype != np.float32:
-                ref_emb = ref_emb.astype(np.float32)
-            neighbors = search_knn(
-                query_embeddings,
-                ref_emb,
-                ref_data["accessions"],
-                k=p.limit_per_entry,
-                distance_threshold=p.distance_threshold,
-                backend=p.search_backend,
-                metric=p.metric,
-                faiss_index_type=p.faiss_index_type,
-                faiss_nlist=p.faiss_nlist,
-                faiss_nprobe=p.faiss_nprobe,
-                faiss_hnsw_m=p.faiss_hnsw_m,
-                faiss_hnsw_ef_search=p.faiss_hnsw_ef_search,
-            )
-
-        go_map = ref_data["go_map"]
-        predictions: list[dict[str, Any]] = []
-        # Global (q_acc, ref_acc) keying lets callers reuse the pair features
-        # for post-hoc v6 feature enrichment without recomputing taxonomy.
-        pair_features: dict[tuple[str, str], dict[str, Any]] = {}
-
-        # Pre-compute reranker aggregates if requested
-        compute_rr = p.compute_reranker_features
-        go_term_freq: dict[int, int] = {}
-        ref_ann_density: dict[str, int] = {}
-        if compute_rr:
-            for acc, anns in go_map.items():
-                ref_ann_density[acc] = len(anns)
-                for ann in anns:
-                    gtid = ann["go_term_id"]
-                    go_term_freq[gtid] = go_term_freq.get(gtid, 0) + 1
-
-        for q_acc, top_refs in zip(query_accessions, neighbors, strict=False):
-            seen_terms: set[int] = set()
-
-            # Reranker: pre-compute per-query stats
-            rr_distance_std: float | None = None
-            rr_vote_count: dict[int, int] = {}
-            rr_k_position: dict[int, int] = {}
-            rr_vote_min_d: dict[int, float] = {}
-            rr_vote_sum_d: dict[int, float] = {}
-            if compute_rr and top_refs:
-                rr_distance_std = (
-                    float(np.std([d for _, d in top_refs])) if len(top_refs) > 1 else 0.0
-                )
-                for k_pos, (ref_acc, dist) in enumerate(top_refs, 1):
-                    for ann in go_map.get(ref_acc, []):
-                        gtid = ann["go_term_id"]
-                        rr_vote_count[gtid] = rr_vote_count.get(gtid, 0) + 1
-                        if gtid not in rr_k_position:
-                            rr_k_position[gtid] = k_pos
-                        prev_min = rr_vote_min_d.get(gtid)
-                        if prev_min is None or dist < prev_min:
-                            rr_vote_min_d[gtid] = dist
-                        rr_vote_sum_d[gtid] = rr_vote_sum_d.get(gtid, 0.0) + dist
-
-            for ref_acc, distance in top_refs:
-                pair_key = (q_acc, ref_acc)
-                if pair_key not in pair_features:
-                    features: dict[str, Any] = {}
-
-                    if p.compute_alignments:
-                        q_seq = query_sequences.get(q_acc, "")
-                        r_seq = ref_sequences.get(ref_acc, "")
-                        if q_seq and r_seq:
-                            features.update(compute_alignment(q_seq, r_seq))
-
-                    if p.compute_taxonomy:
-                        q_tid = query_tax_ids.get(q_acc)
-                        r_tid = ref_tax_ids.get(ref_acc)
-                        tax = compute_taxonomy(q_tid, r_tid)
-                        features.update(tax)
-                        features["query_taxonomy_id"] = q_tid
-                        features["ref_taxonomy_id"] = r_tid
-
-                    pair_features[pair_key] = features
-
-                features = pair_features[pair_key]
-
-                for ann in go_map.get(ref_acc, []):
-                    go_term_id = ann["go_term_id"]
-                    if go_term_id in seen_terms:
-                        continue
-                    seen_terms.add(go_term_id)
-                    # Only include non-None optional fields to keep message compact
-                    pred: dict[str, Any] = {
-                        "prediction_set_id": str(prediction_set_id),
-                        "protein_accession": q_acc,
-                        "go_term_id": go_term_id,
-                        "ref_protein_accession": ref_acc,
-                        "distance": distance,
-                    }
-                    if ann.get("qualifier"):
-                        pred["qualifier"] = ann["qualifier"]
-                    if ann.get("evidence_code"):
-                        pred["evidence_code"] = ann["evidence_code"]
-                    if compute_rr:
-                        vc_val = rr_vote_count.get(go_term_id, 1)
-                        pred["vote_count"] = vc_val
-                        pred["k_position"] = rr_k_position.get(go_term_id, 1)
-                        pred["go_term_frequency"] = go_term_freq.get(go_term_id, 0)
-                        pred["ref_annotation_density"] = ref_ann_density.get(ref_acc, 0)
-                        pred["neighbor_distance_std"] = rr_distance_std
-                        pred["neighbor_vote_fraction"] = (
-                            vc_val / p.limit_per_entry if p.limit_per_entry else None
-                        )
-                        pred["neighbor_min_distance"] = rr_vote_min_d.get(go_term_id)
-                        if vc_val > 0 and go_term_id in rr_vote_sum_d:
-                            pred["neighbor_mean_distance"] = rr_vote_sum_d[go_term_id] / vc_val
-                    for key in (
-                        "identity_nw",
-                        "similarity_nw",
-                        "alignment_score_nw",
-                        "gaps_pct_nw",
-                        "alignment_length_nw",
-                        "identity_sw",
-                        "similarity_sw",
-                        "alignment_score_sw",
-                        "gaps_pct_sw",
-                        "alignment_length_sw",
-                        "length_query",
-                        "length_ref",
-                        "query_taxonomy_id",
-                        "ref_taxonomy_id",
-                        "taxonomic_lca",
-                        "taxonomic_distance",
-                        "taxonomic_common_ancestors",
-                        "taxonomic_relation",
-                    ):
-                        val = features.get(key)
-                        if val is not None:
-                            pred[key] = val
-                    predictions.append(pred)
-
-        return predictions, neighbors, pair_features
 
     # ── v6 reranker features ─────────────────────────────────────────────────
 
