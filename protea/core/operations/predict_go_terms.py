@@ -4,7 +4,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 from uuid import UUID
 
 import numpy as np
@@ -495,6 +495,35 @@ class PredictGOTermsOperation:
 # ---------------------------------------------------------------------------
 
 
+class _BatchExecCtx(NamedTuple):
+    """Static identifiers for one ``PredictGOTermsBatchOperation.execute`` call."""
+
+    p: PredictGOTermsBatchPayload
+    parent_job_id: UUID
+    prediction_set_id: uuid.UUID
+    embedding_config_id: uuid.UUID
+    annotation_set_id: uuid.UUID
+
+
+class _QueryBatch(NamedTuple):
+    """Per-batch query inputs used by KNN dispatch + v6 enrichment."""
+
+    valid_accessions: list[str]
+    query_embeddings: np.ndarray
+
+
+class _KnnResult(NamedTuple):
+    """KNN dispatch outcome shared between v6 enrichment and ancestor expansion.
+
+    Carries the query batch alongside the predictions so the v6 enrichment
+    helper can reuse it without an extra parameter.
+    """
+
+    prediction_dicts: list[dict[str, Any]]
+    v6_ctx: dict[str, Any] | None
+    query_batch: _QueryBatch
+
+
 class PredictGOTermsBatchOperation:
     """CPU batch worker: KNN search + GO annotation transfer for one query chunk.
 
@@ -520,12 +549,75 @@ class PredictGOTermsBatchOperation:
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
         p = PredictGOTermsBatchPayload.model_validate(payload)
-        parent_job_id = UUID(p.parent_job_id)
-        prediction_set_id = uuid.UUID(p.prediction_set_id)
-        embedding_config_id = uuid.UUID(p.embedding_config_id)
-        annotation_set_id = uuid.UUID(p.annotation_set_id)
+        ctx = _BatchExecCtx(
+            p=p,
+            parent_job_id=UUID(p.parent_job_id),
+            prediction_set_id=uuid.UUID(p.prediction_set_id),
+            embedding_config_id=uuid.UUID(p.embedding_config_id),
+            annotation_set_id=uuid.UUID(p.annotation_set_id),
+        )
+        if self._should_skip_for_parent(session, ctx.parent_job_id, emit):
+            return OperationResult(result={"skipped": True})
 
-        # Skip if parent was cancelled/failed
+        ref_data = self._ensure_reference_cache(session, ctx, emit)
+        query_embeddings, valid_accessions = self._load_query_embeddings(
+            session, p.query_accessions, ctx.embedding_config_id, p, emit
+        )
+        if not query_embeddings.size:
+            return OperationResult(result={"predictions": 0})
+
+        t0 = time.perf_counter()
+        query_batch = _QueryBatch(
+            valid_accessions=valid_accessions, query_embeddings=query_embeddings
+        )
+        knn_result = self._run_knn_path(session, ctx, query_batch, ref_data, emit)
+        if knn_result is None:
+            return OperationResult(result={"predictions": 0})
+
+        if (
+            p.compute_v6_features
+            and knn_result.v6_ctx is not None
+            and knn_result.prediction_dicts
+        ):
+            self._apply_v6_features(session, ctx, knn_result, ref_data, emit)
+
+        # Ancestor expansion — required for the lab booster's candidate
+        # distribution. Runs AFTER v6 enrichment so synthetic ancestor
+        # records inherit the leaf's anc2vec_/emb_pca_ values, mirroring
+        # what the dump helper emits.
+        prediction_dicts = knn_result.prediction_dicts
+        if p.expand_votes_to_ancestors and prediction_dicts:
+            prediction_dicts = self._expand_to_ancestors(session, p, prediction_dicts, emit)
+
+        reranker_stats: dict[str, Any] | None = None
+        if p.reranker_model_id and prediction_dicts:
+            reranker_stats = self._apply_reranker_if_aligned(session, prediction_dicts, p, emit)
+
+        self._emit_done(
+            emit,
+            valid_accessions=valid_accessions,
+            prediction_dicts=prediction_dicts,
+            reranker_stats=reranker_stats,
+            started_at=t0,
+        )
+        store_messages = self._chunked_publish(
+            parent_job_id=ctx.parent_job_id,
+            prediction_set_id=ctx.prediction_set_id,
+            prediction_dicts=prediction_dicts,
+        )
+        return OperationResult(
+            result={
+                "predictions": len(prediction_dicts),
+                "store_chunks": len(store_messages),
+            },
+            publish_operations=store_messages,
+        )
+
+    @staticmethod
+    def _should_skip_for_parent(
+        session: Session, parent_job_id: UUID, emit: EmitFn
+    ) -> bool:
+        """Skip the batch if its parent Job was cancelled or failed in flight."""
         parent = session.get(Job, parent_job_id)
         if parent is not None and parent.status in (JobStatus.CANCELLED, JobStatus.FAILED):
             emit(
@@ -534,14 +626,22 @@ class PredictGOTermsBatchOperation:
                 {"parent_job_id": str(parent_job_id)},
                 "warning",
             )
-            return OperationResult(result={"skipped": True})
+            return True
+        return False
 
-        # --- reference cache (load once per process per config+annotation_set+mode) ---
-        # The cache key includes aspect_separated_knn so that switching modes on the
-        # same worker process does not serve stale data from a previous run.
+    def _ensure_reference_cache(
+        self, session: Session, ctx: _BatchExecCtx, emit: EmitFn
+    ) -> Any:
+        """Load (or reuse) the per-process reference embedding cache for this
+        ``(embedding_config, annotation_set, aspect_separated_knn)`` triple.
+
+        The cache key includes ``aspect_separated_knn`` so switching modes on
+        the same worker does not serve stale data from a previous run. When
+        the cache is full, the oldest entry is evicted to free numpy memory.
+        """
+        p = ctx.p
         cache_key = (p.embedding_config_id, p.annotation_set_id, p.aspect_separated_knn)
         if cache_key not in _REF_CACHE:
-            # Evict oldest entry when cache is full to free numpy arrays from memory.
             from protea.config.tuning import get_tuning
 
             cache_max = get_tuning().worker.ref_cache_max
@@ -560,147 +660,155 @@ class PredictGOTermsBatchOperation:
             )
             if p.aspect_separated_knn:
                 _REF_CACHE[cache_key] = self._load_reference_data_per_aspect(
-                    session, embedding_config_id, annotation_set_id, emit
+                    session, ctx.embedding_config_id, ctx.annotation_set_id, emit
                 )
             else:
                 _REF_CACHE[cache_key] = self._load_reference_data(
-                    session, embedding_config_id, annotation_set_id, emit
+                    session, ctx.embedding_config_id, ctx.annotation_set_id, emit
                 )
+        return _REF_CACHE[cache_key]
 
-        # --- query embeddings for this batch ---
-        query_embeddings, valid_accessions = self._load_query_embeddings(
-            session, p.query_accessions, embedding_config_id, p, emit
+    def _run_knn_path(
+        self,
+        session: Session,
+        ctx: _BatchExecCtx,
+        query_batch: _QueryBatch,
+        ref_data: Any,
+        emit: EmitFn,
+    ) -> _KnnResult | None:
+        """Dispatch the KNN path: aspect-separated vs unified-pool.
+
+        Returns ``None`` for the unified path when the reference pool is empty
+        (caller short-circuits with a no-op result).
+        """
+        if ctx.p.aspect_separated_knn:
+            return self._run_aspect_separated_path(session, ctx, query_batch, ref_data)
+        return self._run_unified_path(session, ctx, query_batch, ref_data, emit)
+
+    def _run_aspect_separated_path(
+        self,
+        session: Session,
+        ctx: _BatchExecCtx,
+        query_batch: _QueryBatch,
+        ref_data: Any,
+    ) -> _KnnResult:
+        """Aspect-separated KNN dispatch — one pass per GO aspect."""
+        p = ctx.p
+        (
+            prediction_dicts,
+            neighbors_by_aspect,
+            go_map_by_aspect,
+            pair_features,
+        ) = self._run_aspect_separated_knn(
+            session,
+            AspectSeparatedKnnContext(
+                valid_accessions=query_batch.valid_accessions,
+                query_embeddings=query_batch.query_embeddings,
+                ref_data_by_aspect=ref_data,
+                annotation_set_id=ctx.annotation_set_id,
+                prediction_set_id=ctx.prediction_set_id,
+                payload=p,
+            ),
         )
-        if not query_embeddings.size:
-            return OperationResult(result={"predictions": 0})
-
-        t0 = time.perf_counter()
-
         v6_ctx: dict[str, Any] | None = None
+        if p.compute_v6_features:
+            v6_ctx = {
+                "neighbors_by_aspect": neighbors_by_aspect,
+                "go_map_by_aspect": go_map_by_aspect,
+                "pair_features": pair_features,
+            }
+        return _KnnResult(
+            prediction_dicts=prediction_dicts, v6_ctx=v6_ctx, query_batch=query_batch
+        )
 
+    def _run_unified_path(
+        self,
+        session: Session,
+        ctx: _BatchExecCtx,
+        query_batch: _QueryBatch,
+        ref_data: Any,
+        emit: EmitFn,
+    ) -> _KnnResult | None:
+        """Unified-pool KNN via ``protea_method.pipeline.predict``."""
+        if not ref_data["embeddings"].size:
+            emit("predict_go_terms_batch.no_references", None, {}, "warning")
+            return None
+        adapter_result = self._unified_predict_via_pipeline(
+            session,
+            _UnifiedPredictContext(
+                p=ctx.p,
+                annotation_set_id=ctx.annotation_set_id,
+                prediction_set_id=ctx.prediction_set_id,
+                valid_accessions=query_batch.valid_accessions,
+                query_embeddings=query_batch.query_embeddings,
+                ref_data=ref_data,
+            ),
+        )
+        v6_ctx: dict[str, Any] | None = None
+        if ctx.p.compute_v6_features:
+            v6_ctx = {
+                "neighbors_by_aspect": adapter_result.neighbors_by_aspect,
+                "go_map_by_aspect": adapter_result.go_map_by_aspect,
+                "pair_features": adapter_result.pair_features,
+            }
+        return _KnnResult(
+            prediction_dicts=adapter_result.predictions,
+            v6_ctx=v6_ctx,
+            query_batch=query_batch,
+        )
+
+    def _apply_v6_features(
+        self,
+        session: Session,
+        ctx: _BatchExecCtx,
+        knn_result: _KnnResult,
+        ref_data: Any,
+        emit: EmitFn,
+    ) -> None:
+        """Run Anc2Vec / tax_voters / emb_pca enrichment on the prediction
+        list in place. PCA is fitted (or loaded from cache) over the full
+        unified embedding pool — for aspect-separated mode the per-aspect
+        f32 arrays are concatenated first.
+        """
+        p = ctx.p
+        v6_ctx = knn_result.v6_ctx
+        assert v6_ctx is not None  # caller guards on this
         if p.aspect_separated_knn:
-            (
-                prediction_dicts,
-                neighbors_by_aspect,
-                go_map_by_aspect,
-                pair_features,
-            ) = self._run_aspect_separated_knn(
-                session,
-                AspectSeparatedKnnContext(
-                    valid_accessions=valid_accessions,
-                    query_embeddings=query_embeddings,
-                    ref_data_by_aspect=_REF_CACHE[cache_key],
-                    annotation_set_id=annotation_set_id,
-                    prediction_set_id=prediction_set_id,
-                    payload=p,
-                ),
+            pools = [
+                ref_data[a]["embeddings_f32"]
+                for a in _ASPECTS
+                if ref_data[a].get("embeddings_f32") is not None
+                and ref_data[a]["embeddings_f32"].size
+            ]
+            pca_pool = (
+                np.concatenate(pools, axis=0) if pools else np.empty((0,), dtype=np.float32)
             )
-            if p.compute_v6_features:
-                v6_ctx = {
-                    "neighbors_by_aspect": neighbors_by_aspect,
-                    "go_map_by_aspect": go_map_by_aspect,
-                    "pair_features": pair_features,
-                }
         else:
-            ref_data = _REF_CACHE[cache_key]
-            if not ref_data["embeddings"].size:
-                emit("predict_go_terms_batch.no_references", None, {}, "warning")
-                return OperationResult(result={"predictions": 0})
+            pca_pool = ref_data.get("embeddings_f32", np.empty((0,), dtype=np.float32))
 
-            adapter_result = self._unified_predict_via_pipeline(
-                session,
-                _UnifiedPredictContext(
-                    p=p,
-                    annotation_set_id=annotation_set_id,
-                    prediction_set_id=prediction_set_id,
-                    valid_accessions=valid_accessions,
-                    query_embeddings=query_embeddings,
-                    ref_data=ref_data,
-                ),
-            )
-            prediction_dicts = adapter_result.predictions
-            if p.compute_v6_features:
-                v6_ctx = {
-                    "neighbors_by_aspect": adapter_result.neighbors_by_aspect,
-                    "go_map_by_aspect": adapter_result.go_map_by_aspect,
-                    "pair_features": adapter_result.pair_features,
-                }
-
-        # --- v6 feature enrichment (Anc2Vec + tax_voters + emb_pca) ---------
-        if p.compute_v6_features and v6_ctx is not None and prediction_dicts:
-            ref_unified = _REF_CACHE[cache_key]
-            # For aspect-separated mode, the cache is a per-aspect dict —
-            # concatenate f32 embeddings to fit PCA on the full pool.
-            if p.aspect_separated_knn:
-                pools = [
-                    ref_unified[a]["embeddings_f32"]
-                    for a in _ASPECTS
-                    if ref_unified[a].get("embeddings_f32") is not None
-                    and ref_unified[a]["embeddings_f32"].size
-                ]
-                pca_pool = (
-                    np.concatenate(pools, axis=0) if pools else np.empty((0,), dtype=np.float32)
-                )
-            else:
-                pca_pool = ref_unified.get("embeddings_f32", np.empty((0,), dtype=np.float32))
-
-            pca_state = _load_or_fit_pca_state(embedding_config_id, pca_pool)
-            enrich_v6_features(
-                prediction_dicts,
-                session=session,
-                ctx=KnnEnrichmentContext(
-                    valid_accessions=valid_accessions,
-                    query_embeddings=query_embeddings,
-                    neighbors_by_aspect=v6_ctx["neighbors_by_aspect"],
-                    go_map_by_aspect=v6_ctx["go_map_by_aspect"],
-                    pair_features=v6_ctx["pair_features"],
-                    pca_state=pca_state,
-                ),
-                compute_taxonomy=p.compute_taxonomy,
-            )
-            emit(
-                "predict_go_terms_batch.v6_features_done",
-                None,
-                {
-                    "pca_state_fit": pca_state is not None,
-                    "pca_dim": EMBEDDING_PCA_DIM if pca_state is not None else 0,
-                    "rows_enriched": len(prediction_dicts),
-                },
-                "info",
-            )
-
-        # Ancestor expansion — required for the lab booster's candidate
-        # distribution. Runs AFTER v6 enrichment so synthetic ancestor
-        # records inherit the leaf's anc2vec_/emb_pca_ values, mirroring
-        # what the dump helper emits.
-        if p.expand_votes_to_ancestors and prediction_dicts:
-            prediction_dicts = self._expand_to_ancestors(
-                session, p, prediction_dicts, emit
-            )
-
-        reranker_stats: dict[str, Any] | None = None
-        if p.reranker_model_id and prediction_dicts:
-            reranker_stats = self._apply_reranker_if_aligned(session, prediction_dicts, p, emit)
-
-        self._emit_done(
-            emit,
-            valid_accessions=valid_accessions,
-            prediction_dicts=prediction_dicts,
-            reranker_stats=reranker_stats,
-            started_at=t0,
+        pca_state = _load_or_fit_pca_state(ctx.embedding_config_id, pca_pool)
+        enrich_v6_features(
+            knn_result.prediction_dicts,
+            session=session,
+            ctx=KnnEnrichmentContext(
+                valid_accessions=knn_result.query_batch.valid_accessions,
+                query_embeddings=knn_result.query_batch.query_embeddings,
+                neighbors_by_aspect=v6_ctx["neighbors_by_aspect"],
+                go_map_by_aspect=v6_ctx["go_map_by_aspect"],
+                pair_features=v6_ctx["pair_features"],
+                pca_state=pca_state,
+            ),
+            compute_taxonomy=p.compute_taxonomy,
         )
-        store_messages = self._chunked_publish(
-            parent_job_id=parent_job_id,
-            prediction_set_id=prediction_set_id,
-            prediction_dicts=prediction_dicts,
-        )
-
-        return OperationResult(
-            result={
-                "predictions": len(prediction_dicts),
-                "store_chunks": len(store_messages),
+        emit(
+            "predict_go_terms_batch.v6_features_done",
+            None,
+            {
+                "pca_state_fit": pca_state is not None,
+                "pca_dim": EMBEDDING_PCA_DIM if pca_state is not None else 0,
+                "rows_enriched": len(knn_result.prediction_dicts),
             },
-            publish_operations=store_messages,
+            "info",
         )
 
     # ── helpers ──────────────────────────────────────────────────────────────
