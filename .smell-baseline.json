@@ -106,15 +106,6 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/_run_cafa_eval_driver.py::_run_cafaeval_for_setting",
-      "kind": "method",
-      "path": "protea/core/operations/_run_cafa_eval_driver.py",
-      "name": "_run_cafaeval_for_setting",
-      "line": 107,
-      "metric": 70,
-      "threshold": 60
-    },
-    {
       "key": "method::protea/core/operations/compute_embeddings.py::_embed_esm",
       "kind": "method",
       "path": "protea/core/operations/compute_embeddings.py",
