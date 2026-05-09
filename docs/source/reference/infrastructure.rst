@@ -316,6 +316,27 @@ no-PII model used by Plausible and Fathom.
    :undoc-members:
    :show-inheritance:
 
+**Experiment Runs**
+
+``ExperimentRun`` is the per-research-run narrative + provenance
+anchor introduced in T3.8 (Fase 4). A single row aggregates multiple
+``Job`` / ``EvaluationResult`` / ``RerankerModel`` rows under one
+human ``name`` (unique). The narrative trio
+(``description`` / ``hypothesis`` / ``findings``) mirrors ``Job``'s
+T3.9 D11 columns, and the JSONB ``config`` + ``provenance`` bags
+are designed to receive snapshots from
+:func:`protea.core.provenance.capture_provenance`. The
+``ExperimentRunStatus`` enum is ``planned`` →  ``running`` → ``done``
+or ``abandoned``; ``planned`` (rather than queued) reflects the
+draft-first lifecycle of a research run, and ``abandoned`` (rather
+than failed) covers stops without a hard error. Linkage to sibling
+rows lands in T4.7-T4.9.
+
+.. automodule:: protea.infrastructure.orm.models.experiment_run
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Logging
 -------
 
