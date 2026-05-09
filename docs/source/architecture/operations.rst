@@ -1173,10 +1173,15 @@ re-ranker.
 .. note::
    Cross-validation is **not** performed inside the training operation.
    The temporal-holdout re-ranker design uses 13 historical GOA splits
-   (releases 160 through 220) as independent training folds; the
-   cross-validation loop is driven at a higher level by
-   ``scripts/run_experiments.py``, which invokes ``train_reranker`` once per
-   split. See :doc:`../results` for the aggregate numbers.
+   (releases 160 through 220) as independent training folds; that
+   cross-validation loop now lives in
+   `protea-reranker-lab <https://github.com/frapercan/protea-reranker-lab>`_,
+   which consumes the frozen parquet datasets PROTEA publishes via
+   ``export_research_dataset`` (see
+   :ref:`export-research-dataset-operation`). The lab fits one booster
+   per split and emits the run directory consumed by
+   ``scripts/register_reranker.py``. See :doc:`../results` for the
+   aggregate numbers.
 
 train_reranker_auto
 ~~~~~~~~~~~~~~~~~~~
