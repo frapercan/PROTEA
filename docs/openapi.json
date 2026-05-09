@@ -6125,7 +6125,7 @@
     },
     "/v1/stack": {
       "get": {
-        "description": "Return the eight-repo PROTEA stack registry.\n\nSingle source of truth: ``docs/source/_data/stack.yaml`` in this\nrepo. Edit that file (and run ``scripts/sync_stack.py``) to refresh\nthe README block and the Sphinx page in the same commit.\n\nPer-repo ``local_docs_path`` and the top-level ``thesis_pdf_url``\nare computed from the filesystem at request time: the field is\npopulated whenever the corresponding artefact has been built into\n``docs/build/<slug>/html/`` or ``static/thesis.pdf`` respectively,\nand is ``None`` otherwise.",
+        "description": "Return the eight-repo PROTEA stack registry.\n\nSingle source of truth: ``docs/source/_data/stack.yaml`` in this\nrepo. Edit that file (and run ``scripts/sync_stack.py``) to refresh\nthe README block and the Sphinx page in the same commit.\n\nPer-repo ``local_docs_path`` and the top-level ``thesis_pdf_url``\nare computed from the filesystem at request time: the field is\npopulated whenever the corresponding artefact has been built into\n``docs/build/<slug>/html/`` or ``apps/web/public/thesis.pdf``\nrespectively, and is ``None`` otherwise.",
         "operationId": "get_stack_v1_stack_get",
         "responses": {
           "200": {
