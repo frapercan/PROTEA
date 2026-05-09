@@ -1533,6 +1533,193 @@ def _run_train_split(
 # ---------------------------------------------------------------------------
 
 
+class _DumpRunner:
+    """Method Object for ``TrainRerankerAutoOperation.execute``.
+
+    Holds per-run state as attributes so the per-phase methods do
+    not need to thread 13+ variables through their signatures.
+    """
+
+    def __init__(
+        self,
+        session: Session,
+        payload: dict[str, Any],
+        emit: EmitFn,
+        dump_fn: Any,
+    ) -> None:
+        self.session = session
+        self.p = TrainRerankerAutoPayload.model_validate(payload)
+        self.emit = emit
+        self._dump_fn = dump_fn
+        self.t0 = time.perf_counter()
+
+    def run(self) -> OperationResult:
+        self._resolve_setup()
+        self._load_inputs()
+        self._init_accumulators()
+        self.tmp_dir = Path(tempfile.mkdtemp(prefix="protea_reranker_"))
+        try:
+            self._run_train_splits()
+            if not any(self.split_files[c] for c in _CATEGORIES):
+                raise ValueError("No training data produced from any split")
+            self._run_test_split()
+            del self.all_embeddings, self.all_accessions, self.acc_to_idx
+            gc.collect()
+            return self._dump()
+        finally:
+            shutil.rmtree(self.tmp_dir, ignore_errors=True)
+
+    def _resolve_setup(self) -> None:
+        """Phase 1: validate IDs, resolve annotation sets, emit start."""
+        self.emb_config_id = uuid.UUID(self.p.embedding_config_id)
+        self.ontology_snapshot_id = uuid.UUID(self.p.ontology_snapshot_id)
+        all_versions = sorted(set(self.p.train_versions + self.p.test_versions))
+        self.version_to_set, self.version_to_native = _resolve_annotation_set_ids(
+            self.session, self.p.annotation_source, all_versions
+        )
+        if self.session.get(EmbeddingConfig, self.emb_config_id) is None:
+            raise ValueError(f"EmbeddingConfig {self.emb_config_id} not found")
+        candidate_names: list[str] = [f"{self.p.name}-{cat}" for cat in _CATEGORIES]
+        if self.p.training_scope == "per_cell":
+            candidate_names.extend(
+                f"{self.p.name}-{cat}-{_ASPECT_NAMES[asp]}"
+                for cat in _CATEGORIES
+                for asp in _ASPECTS
+            )
+        if not self.p.dump_only:
+            _check_reranker_name_collisions(self.session, candidate_names)
+        self.ia_weights = _load_ia_weights(self.p.ia_file)
+        if self.ia_weights is not None:
+            self.emit(
+                "dump_helper.ia_loaded",
+                None,
+                {"ia_file": self.p.ia_file, "n_terms": len(self.ia_weights)},
+                "info",
+            )
+        self.emit(
+            "dump_helper.start",
+            None,
+            {
+                "name": self.p.name,
+                "train_versions": self.p.train_versions,
+                "test_versions": self.p.test_versions,
+                "n_pairs": len(self.p.train_versions) - 1,
+                "training_scope": self.p.training_scope,
+                "max_models": len(candidate_names),
+                "per_cell_min_positives": int(self.p.per_cell_min_positives)
+                if self.p.training_scope == "per_cell"
+                else None,
+                "ia_weighted": self.ia_weights is not None,
+            },
+            "info",
+        )
+
+    def _load_inputs(self) -> None:
+        """Phase 2: GO maps, parent map, embedding preload, optional PCA fit."""
+        self.go_id_map, self.aspect_map, self.pivot_go_ids = _load_go_maps(
+            self.session,
+            self.ontology_snapshot_id,
+            set(self.version_to_native.values()),
+        )
+        self.parent_map = _load_parent_map(self.session, self.ontology_snapshot_id)
+        self.all_embeddings, self.all_accessions, self.acc_to_idx = _preload_all_embeddings(
+            self.session, self.emb_config_id, self.emit
+        )
+        self.pca_state = _maybe_fit_pca_state(
+            self.emb_config_id, self.all_embeddings, self.p.use_embedding_pca, self.emit
+        )
+
+    def _init_accumulators(self) -> None:
+        """Initialise per-split accumulator state."""
+        self.keep_cols: list[str] = (
+            ["protein_accession", "go_id"] + ALL_FEATURES + [LABEL_COLUMN]
+        )
+        self.per_split_stats: list[dict[str, Any]] = []
+        self.split_files: dict[str, list[Path]] = {c: [] for c in _CATEGORIES}
+        self.valid_split_versions: list[tuple[int, int]] = []
+
+    def _train_split_context(self) -> _TrainSplitContext:
+        return _TrainSplitContext(
+            payload=self.p,
+            version_to_set=self.version_to_set,
+            embedding_pool=self.all_embeddings,
+            all_accessions=self.all_accessions,
+            acc_to_idx=self.acc_to_idx,
+            go_id_map=self.go_id_map,
+            aspect_map=self.aspect_map,
+            parent_map=self.parent_map,
+            ia_weights=self.ia_weights,
+            pca_state=self.pca_state,
+            pivot_go_ids=self.pivot_go_ids,
+            keep_cols=self.keep_cols,
+            tmp_dir=self.tmp_dir,
+        )
+
+    def _run_train_splits(self) -> None:
+        train_ctx = self._train_split_context()
+        for i in range(len(self.p.train_versions) - 1):
+            outcome = _run_train_split(self.session, train_ctx, i, self.emit)
+            for cat, path in outcome.split_files.items():
+                self.split_files[cat].append(path)
+            if not outcome.skipped:
+                self.valid_split_versions.append(
+                    (self.p.train_versions[i], self.p.train_versions[i + 1])
+                )
+            self.per_split_stats.append(outcome.stats)
+
+    def _run_test_split(self) -> None:
+        _eset, test_eval_data, self.test_old_v, self.test_new_v = _resolve_test_eval_inputs(
+            self.session, self.p.train_versions, self.p.test_versions, self.version_to_set
+        )
+        test_old_set_id = self.version_to_set[self.test_old_v]
+        self.emit(
+            "dump_helper.test_knn",
+            None,
+            {"test_old": self.test_old_v, "test_new": self.test_new_v},
+            "info",
+        )
+        test_cat_gt, test_all_queries = _collect_cat_gt_pairs(test_eval_data)
+        self.test_files = _run_test_split(
+            self.session,
+            _TestSplitContext(
+                payload=self.p,
+                test_eval_data=test_eval_data,
+                test_cat_gt=test_cat_gt,
+                test_all_queries=test_all_queries,
+                test_old_set_id=test_old_set_id,
+                embedding_pool=self.all_embeddings,
+                all_accessions=self.all_accessions,
+                acc_to_idx=self.acc_to_idx,
+                go_id_map=self.go_id_map,
+                aspect_map=self.aspect_map,
+                parent_map=self.parent_map,
+                ia_weights=self.ia_weights,
+                pca_state=self.pca_state,
+                pivot_go_ids=self.pivot_go_ids,
+                keep_cols=self.keep_cols,
+                tmp_dir=self.tmp_dir,
+            ),
+            self.emit,
+        )
+
+    def _dump(self) -> OperationResult:
+        return _perform_dataset_dump(
+            _DumpRequest(
+                payload=self.p,
+                split_files=self.split_files,
+                valid_split_versions=self.valid_split_versions,
+                test_files=self.test_files,
+                test_old_v=self.test_old_v,
+                test_new_v=self.test_new_v,
+                emb_config_id=self.emb_config_id,
+                ontology_snapshot_id=self.ontology_snapshot_id,
+            ),
+            self._dump_fn,
+            self.t0,
+            self.emit,
+        )
+
+
 class TrainRerankerAutoOperation:
     """Automated multi-split temporal holdout re-ranker training.
 
@@ -1612,191 +1799,4 @@ class TrainRerankerAutoOperation:
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
-        p = TrainRerankerAutoPayload.model_validate(payload)
-        t0 = time.perf_counter()
-
-        emb_config_id = uuid.UUID(p.embedding_config_id)
-        ontology_snapshot_id = uuid.UUID(p.ontology_snapshot_id)
-
-        # ── 1. Resolve annotation set IDs ────────────────────────────────
-        all_versions = sorted(set(p.train_versions + p.test_versions))
-        version_to_set, version_to_native = _resolve_annotation_set_ids(
-            session, p.annotation_source, all_versions
-        )
-
-        if session.get(EmbeddingConfig, emb_config_id) is None:
-            raise ValueError(f"EmbeddingConfig {emb_config_id} not found")
-
-        # Candidate model names (also used in the start event's max_models count).
-        candidate_names: list[str] = [f"{p.name}-{cat}" for cat in _CATEGORIES]
-        if p.training_scope == "per_cell":
-            candidate_names.extend(
-                f"{p.name}-{cat}-{_ASPECT_NAMES[asp]}" for cat in _CATEGORIES for asp in _ASPECTS
-            )
-        # Name-collision check; skipped when dump_only=True since no
-        # RerankerModel rows are written.
-        if not p.dump_only:
-            _check_reranker_name_collisions(session, candidate_names)
-
-        # Load IA weights for sample weighting (optional)
-        ia_weights = _load_ia_weights(p.ia_file)
-        if ia_weights is not None:
-            emit(
-                "dump_helper.ia_loaded",
-                None,
-                {"ia_file": p.ia_file, "n_terms": len(ia_weights)},
-                "info",
-            )
-
-        max_models = len(candidate_names)
-        emit(
-            "dump_helper.start",
-            None,
-            {
-                "name": p.name,
-                "train_versions": p.train_versions,
-                "test_versions": p.test_versions,
-                "n_pairs": len(p.train_versions) - 1,
-                "training_scope": p.training_scope,
-                "max_models": max_models,
-                "per_cell_min_positives": int(p.per_cell_min_positives)
-                if p.training_scope == "per_cell"
-                else None,
-                "ia_weighted": ia_weights is not None,
-            },
-            "info",
-        )
-
-        # ── 2. Load GO maps ──────────────────────────────────────────────
-        # Each training/test GOA release has its own contemporary OBO snapshot,
-        # so reference annotations use native go_term.id UUIDs different from
-        # the pivot snapshot's ids. The helper builds a union id→(go_id, aspect)
-        # map across the pivot + every native snapshot encountered, so native
-        # go_term_ids from any set resolve correctly. Predictions are later
-        # filtered to ``pivot_go_ids`` so the dump's term universe matches the
-        # reconciled ground-truth space.
-        go_id_map, aspect_map, pivot_go_ids = _load_go_maps(
-            session, ontology_snapshot_id, set(version_to_native.values())
-        )
-
-        # Parent map on pivot — used for TPR max-propagation in test metrics.
-        parent_map = _load_parent_map(session, ontology_snapshot_id)
-
-        # ── 2b. Preload ALL embeddings once + optional PCA fit ──────────
-        all_embeddings, all_accessions, acc_to_idx = _preload_all_embeddings(
-            session, emb_config_id, emit
-        )
-        pca_state = _maybe_fit_pca_state(
-            emb_config_id, all_embeddings, p.use_embedding_pca, emit
-        )
-
-        # ── 3. Generate training data from consecutive pairs ─────────────
-        # Memory-optimised: each split writes to parquet on disk, then all
-        # RAM is freed before the next split.  Training reads from disk.
-        # "aspect" is now part of ALL_FEATURES (categorical) — keep protein_accession/go_id
-        # for grouping/metrics but avoid duplicating the column name.
-        _KEEP_COLS = ["protein_accession", "go_id"] + ALL_FEATURES + [LABEL_COLUMN]
-        tmp_dir = Path(tempfile.mkdtemp(prefix="protea_reranker_"))
-        per_split_stats: list[dict[str, Any]] = []
-        split_files: dict[str, list[Path]] = {c: [] for c in _CATEGORIES}
-        # Parallel to split_files[cat]: records (v_old, v_new) for each
-        # successfully generated split shard, so --dump-to can stamp a
-        # ``snapshot_pair`` column per row.
-        valid_split_versions: list[tuple[int, int]] = []
-
-        train_ctx = _TrainSplitContext(
-            payload=p,
-            version_to_set=version_to_set,
-            embedding_pool=all_embeddings,
-            all_accessions=all_accessions,
-            acc_to_idx=acc_to_idx,
-            go_id_map=go_id_map,
-            aspect_map=aspect_map,
-            parent_map=parent_map,
-            ia_weights=ia_weights,
-            pca_state=pca_state,
-            pivot_go_ids=pivot_go_ids,
-            keep_cols=_KEEP_COLS,
-            tmp_dir=tmp_dir,
-        )
-
-        try:
-            for i in range(len(p.train_versions) - 1):
-                outcome = _run_train_split(session, train_ctx, i, emit)
-                for cat, path in outcome.split_files.items():
-                    split_files[cat].append(path)
-                if not outcome.skipped:
-                    valid_split_versions.append(
-                        (p.train_versions[i], p.train_versions[i + 1])
-                    )
-                per_split_stats.append(outcome.stats)
-
-            # Check we have data
-            if not any(split_files[c] for c in _CATEGORIES):
-                raise ValueError("No training data produced from any split")
-
-            # ── 4. Test split: KNN once, label per category ──────────────
-            test_eset, test_eval_data, test_old_v, test_new_v = _resolve_test_eval_inputs(
-                session, p.train_versions, p.test_versions, version_to_set
-            )
-            test_old_set_id = version_to_set[test_old_v]
-            emit(
-                "dump_helper.test_knn",
-                None,
-                {"test_old": test_old_v, "test_new": test_new_v},
-                "info",
-            )
-            test_cat_gt, test_all_queries = _collect_cat_gt_pairs(test_eval_data)
-            test_files = _run_test_split(
-                session,
-                _TestSplitContext(
-                    payload=p,
-                    test_eval_data=test_eval_data,
-                    test_cat_gt=test_cat_gt,
-                    test_all_queries=test_all_queries,
-                    test_old_set_id=test_old_set_id,
-                    embedding_pool=all_embeddings,
-                    all_accessions=all_accessions,
-                    acc_to_idx=acc_to_idx,
-                    go_id_map=go_id_map,
-                    aspect_map=aspect_map,
-                    parent_map=parent_map,
-                    ia_weights=ia_weights,
-                    pca_state=pca_state,
-                    pivot_go_ids=pivot_go_ids,
-                    keep_cols=_KEEP_COLS,
-                    tmp_dir=tmp_dir,
-                ),
-                emit,
-            )
-
-            # Release the preloaded embedding pool — from here on the
-            # pipeline only reads from the per-split parquets on disk.
-            # Keeps ~1.2 GB out of RSS before dump / training.
-            del all_embeddings, all_accessions, acc_to_idx
-            gc.collect()
-
-            # ── 4b. Dataset dump ──────────────────────────────────────────
-            # Training moved to protea-reranker-lab; this operation now
-            # only materializes the frozen parquets + manifest that the
-            # lab consumes via ``scripts/pull_dataset.py``. Callers must
-            # pass ``dump_to`` (``ExportResearchDatasetOperation`` always
-            # does); the helper raises if it's unset.
-            return _perform_dataset_dump(
-                _DumpRequest(
-                    payload=p,
-                    split_files=split_files,
-                    valid_split_versions=valid_split_versions,
-                    test_files=test_files,
-                    test_old_v=test_old_v,
-                    test_new_v=test_new_v,
-                    emb_config_id=emb_config_id,
-                    ontology_snapshot_id=ontology_snapshot_id,
-                ),
-                self._dump_frozen_dataset,
-                t0,
-                emit,
-            )
-
-        finally:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
+        return _DumpRunner(session, payload, emit, self._dump_frozen_dataset).run()
