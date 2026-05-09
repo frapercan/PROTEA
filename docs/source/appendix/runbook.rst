@@ -51,7 +51,7 @@ and that the URLs in ``protea/config/system.yaml`` are correct.
 Scaling workers
 ~~~~~~~~~~~~~~~
 
-Batch workers are stateless — they can be added on the fly:
+Batch workers are stateless; they can be added on the fly:
 
 .. code-block:: bash
 
@@ -108,7 +108,7 @@ in ``RUNNING`` for more than 6 hours (21 600 s).
    curl -s -X DELETE http://127.0.0.1:8000/jobs/<job-id>
 
 To re-run, create a new job with the same operation and payload.
-There is no "retry" button — jobs are immutable once finished.
+There is no "retry" button; jobs are immutable once finished.
 
 Batch failures
 ~~~~~~~~~~~~~~
@@ -116,13 +116,13 @@ Batch failures
 Batches (``compute_embeddings_batch``, ``predict_go_terms_batch``) do not
 have their own row in ``job``.  To diagnose:
 
-1. **Parent job events** — failures are recorded as ``child.failed``:
+1. **Parent job events.** Failures are recorded as ``child.failed``:
 
    .. code-block:: bash
 
       curl -s http://127.0.0.1:8000/jobs/<parent-id>/events?limit=50 | python -m json.tool
 
-2. **Worker logs** — each worker writes structured JSON:
+2. **Worker logs.** Each worker writes structured JSON:
 
    .. code-block:: bash
 
@@ -134,7 +134,7 @@ have their own row in ``job``.  To diagnose:
       # Search for a specific job
       cat logs/worker-jobs.log | jq 'select(.message | contains("<job-id>"))'
 
-3. **Dead letter queue** — permanently failed messages:
+3. **Dead letter queue.** Permanently failed messages:
 
    .. code-block:: bash
 
@@ -190,7 +190,7 @@ Database
      -c "DELETE FROM job WHERE finished_at < now() - interval '30 days'
          AND status IN ('succeeded', 'failed', 'cancelled');"
 
-   # Full reset (destructive — deletes EVERYTHING)
+   # Full reset (destructive: deletes EVERYTHING)
    curl -s -X POST http://127.0.0.1:8000/admin/reset-db
 
 Dead letter queue
