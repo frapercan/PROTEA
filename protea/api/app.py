@@ -14,6 +14,7 @@ from protea.api.routers import annotations as annotations_router
 from protea.api.routers import benchmark as benchmark_router
 from protea.api.routers import datasets as datasets_router
 from protea.api.routers import embeddings as embeddings_router
+from protea.api.routers import experiment_runs as experiment_runs_router
 from protea.api.routers import jobs as jobs_router
 from protea.api.routers import maintenance as maintenance_router
 from protea.api.routers import proteins as proteins_router
@@ -98,6 +99,14 @@ _OPENAPI_TAGS: list[dict[str, str]] = [
             "live aggregate of their open pull requests."
         ),
     },
+    {
+        "name": "experiment-runs",
+        "description": (
+            "Per-research-run narrative + provenance anchor "
+            "(decision D11). Powers the F8b Experiments page and "
+            "the F-EXP campaign tooling."
+        ),
+    },
 ]
 
 _ROUTER_MODULES = (
@@ -117,23 +126,33 @@ _ROUTER_MODULES = (
     reranker_models_router,
     registry_router,
     stack_router,
+    experiment_runs_router,
 )
 
-_CORS_ORIGINS = (
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "https://protea.ngrok.app",
-)
+# T4.1 (D4 accepted 2026-05-06): version prefix for the public API.
+# Mount every router under ``/v1/`` so OpenAPI exposes the canonical
+# paths; keep an unprefixed alias hidden from the schema for the
+# deprecation window so existing frontend / CLI traffic doesn't break.
+# When the legacy aliases get retired, drop the second include_router
+# call in ``_register_routers``.
+_API_VERSION_PREFIX = "/v1"
 
+def _register_middlewares(app: FastAPI, allowed_origins: tuple[str, ...]) -> None:
+    """Wire up CORS + visitor counter middlewares.
 
-def _register_middlewares(app: FastAPI) -> None:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=list(_CORS_ORIGINS),
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    ``allowed_origins`` comes from ``Settings.allowed_origins`` (T5.5):
+    env ``PROTEA_ALLOWED_ORIGINS`` > YAML ``cors.allowed_origins`` >
+    built-in dev default. An empty tuple disables the CORS middleware
+    entirely so a fronting proxy can own the policy.
+    """
+    if allowed_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(allowed_origins),
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
     # Anonymous visitor counter — writes one row per GET into visitor_event
     # with a daily-rotated-salt hash instead of the IP. Powers the Grafana
     # "unique visitors" dashboard.
@@ -184,8 +203,20 @@ def _register_health_endpoints(app: FastAPI, factory, settings) -> None:
 
 
 def _register_routers(app: FastAPI) -> None:
+    """Mount each router under ``/v1/`` (canonical) and at the root path
+    (deprecated alias hidden from OpenAPI).
+
+    The dual-include strategy lets existing clients keep hitting the
+    unprefixed routes during the deprecation window while the OpenAPI
+    schema only advertises the versioned paths. Health endpoints stay
+    at the root by convention (handled by ``_register_health_endpoints``).
+    """
     for module in _ROUTER_MODULES:
-        app.include_router(module.router)
+        app.include_router(module.router, prefix=_API_VERSION_PREFIX)
+        # Legacy alias — same routes mounted at ``/`` so frontends and
+        # CLIs that haven't been updated keep working. ``include_in_schema``
+        # off so OpenAPI / Swagger only surface the canonical ``/v1`` paths.
+        app.include_router(module.router, include_in_schema=False)
 
 
 def _mount_sibling_docs(app: FastAPI, docs_build_root: Path) -> None:
@@ -235,7 +266,7 @@ def create_app(project_root: Path | None = None) -> FastAPI:
     app.state.operation_registry = build_operation_registry()
     app.state.benchmark_config = load_benchmark_config(project_root)
 
-    _register_middlewares(app)
+    _register_middlewares(app, settings.allowed_origins)
     _register_health_endpoints(app, factory, settings)
     _register_routers(app)
     _mount_static_assets(app, project_root)
