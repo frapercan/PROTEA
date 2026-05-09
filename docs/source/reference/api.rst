@@ -337,6 +337,14 @@ Endpoints summary
    * - ``DELETE``
      - ``/jobs/{id}``
      - Delete a job that is not in ``RUNNING`` status.
+   * - ``POST``
+     - ``/jobs/{id}/comments``
+     - Append a ``JobComment`` (T3.10 / D11). Body fields: ``body``
+       (required, non-empty), ``author`` (optional). Returns 201.
+   * - ``GET``
+     - ``/jobs/{id}/comments``
+     - List the ``JobComment`` thread chronologically (``created_at``
+       ASC, ``id`` ASC tiebreaker).
 
    * -
      - **Proteins**
