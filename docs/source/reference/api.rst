@@ -658,7 +658,8 @@ Endpoints summary
      - Enqueue an ``export_research_dataset`` job.
    * - ``GET``
      - ``/datasets``
-     - List registered re-ranker datasets.
+     - List registered re-ranker datasets. Cursor pagination (T4.2):
+       pass ``after=<created_at>`` to walk forward past the limit.
    * - ``GET``
      - ``/datasets/{id_or_name}``
      - Get a dataset by id or name.
