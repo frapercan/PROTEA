@@ -30,7 +30,7 @@
       "path": "protea/core/operations/compute_embeddings.py",
       "name": "",
       "line": 0,
-      "metric": 1136,
+      "metric": 1131,
       "threshold": 800
     },
     {
@@ -68,15 +68,6 @@
       "line": 1159,
       "metric": 674,
       "threshold": 60
-    },
-    {
-      "key": "params::protea/core/retry.py::with_retry",
-      "kind": "params",
-      "path": "protea/core/retry.py",
-      "name": "with_retry",
-      "line": 67,
-      "metric": 7,
-      "threshold": 6
     }
   ]
 }
