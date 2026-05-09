@@ -1,4 +1,4 @@
-"""Jobs service — shared helpers for the queue-dispatch pattern.
+"""Jobs service: shared helpers for the queue-dispatch pattern.
 
 Multiple routers (annotations, embeddings, predictions) follow the
 same shape when an HTTP endpoint queues background work:

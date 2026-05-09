@@ -40,8 +40,8 @@ def compute_missing_signals(
     """Return human-readable strings for every required signal absent from the set.
 
     For each signal with a non-zero weight in ``config_snap.weights``
-    (plus ``evidence_code`` when the formula is ``evidence_weighted`` —
-    the multiplier is always applied), count how many rows in the
+    (plus ``evidence_code`` when the formula is ``evidence_weighted``,
+    where the multiplier is always applied), count how many rows in the
     PredictionSet have the backing column non-NULL. Empty list means
     full coverage. The service-layer wrapper raises
     ``SignalCoverageError`` when this list is non-empty.
