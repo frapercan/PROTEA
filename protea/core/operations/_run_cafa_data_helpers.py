@@ -106,7 +106,7 @@ def write_ground_truth_files(
 
     Returns a dict ``{label → path}`` so the caller can pass each path
     to the per-setting cafaeval driver. ``artifacts_root`` is a
-    :class:`pathlib.Path` (or anything convertible via ``str``) — kept
+    :class:`pathlib.Path` (or anything convertible via ``str``); kept
     typed as :data:`Any` so the helper does not import ``pathlib``
     just for one signature.
     """

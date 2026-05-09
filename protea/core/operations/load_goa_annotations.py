@@ -63,7 +63,7 @@ class LoadGOAAnnotationsPayload(ProteaPayload, frozen=True):
 class LoadGOAAnnotationsOperation:
     """Streams a GOA GAF file (gzip or plain) and upserts ProteinGOAnnotation rows.
 
-    The GAF file is streamed line by line from ``gaf_url`` — it is never fully
+    The GAF file is streamed line by line from ``gaf_url``; it is never fully
     loaded into memory, making it suitable for the full UniProt GAF (hundreds
     of millions of lines).
 

@@ -43,7 +43,7 @@ def resolve_reranker_model_bundle(rm: RerankerModelORM) -> dict[str, Any]:
     ``__categorical_codes__``) is the lab's per-column sorted-unique
     string vocabulary, used at predict time to reproduce the encoding
     seen during training. Without it, ``reranker_predict`` falls back
-    to ``pd.factorize`` over the inference batch — which silently
+    to ``pd.factorize`` over the inference batch, which silently
     produces the wrong codes for per-aspect inference and tanks the
     LK / PK fmax. See :func:`protea.core.reranker.predict`.
     """
@@ -60,7 +60,7 @@ def resolve_reranker_model_bundle(rm: RerankerModelORM) -> dict[str, Any]:
         model_str = booster.model_to_string()
     else:
         raise ValueError(
-            f"RerankerModel {rm.id} has no booster — both ``model_data`` "
+            f"RerankerModel {rm.id} has no booster: both ``model_data`` "
             f"(legacy inline) and ``artifact_uri`` (artifact-store path) are NULL."
         )
     cat_codes = (rm.metrics or {}).get("__categorical_codes__")
