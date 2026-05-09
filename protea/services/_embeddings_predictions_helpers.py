@@ -166,6 +166,47 @@ def iter_predictions_tsv(
             yield buf.getvalue()
 
 
+def _prediction_row_to_dict(pred: GOPrediction, gt: GOTerm) -> dict[str, Any]:
+    """Shape one ``(GOPrediction, GOTerm)`` join row for the API response.
+
+    Owns the column list so any future GOPrediction column reaches every
+    consumer (currently just ``GET /v1/embeddings/prediction-sets/.../proteins/{accession}``,
+    but the per-protein view is the authoritative wire shape).
+    """
+    return {
+        "go_id": gt.go_id,
+        "name": gt.name,
+        "aspect": gt.aspect,
+        "distance": round(pred.distance, 4),
+        "ref_protein_accession": pred.ref_protein_accession,
+        "qualifier": pred.qualifier,
+        "evidence_code": pred.evidence_code,
+        "identity_nw": pred.identity_nw,
+        "similarity_nw": pred.similarity_nw,
+        "alignment_score_nw": pred.alignment_score_nw,
+        "gaps_pct_nw": pred.gaps_pct_nw,
+        "alignment_length_nw": pred.alignment_length_nw,
+        "identity_sw": pred.identity_sw,
+        "similarity_sw": pred.similarity_sw,
+        "alignment_score_sw": pred.alignment_score_sw,
+        "gaps_pct_sw": pred.gaps_pct_sw,
+        "alignment_length_sw": pred.alignment_length_sw,
+        "length_query": pred.length_query,
+        "length_ref": pred.length_ref,
+        "query_taxonomy_id": pred.query_taxonomy_id,
+        "ref_taxonomy_id": pred.ref_taxonomy_id,
+        "taxonomic_lca": pred.taxonomic_lca,
+        "taxonomic_distance": pred.taxonomic_distance,
+        "taxonomic_common_ancestors": pred.taxonomic_common_ancestors,
+        "taxonomic_relation": pred.taxonomic_relation,
+        "vote_count": pred.vote_count,
+        "k_position": pred.k_position,
+        "go_term_frequency": pred.go_term_frequency,
+        "ref_annotation_density": pred.ref_annotation_density,
+        "neighbor_distance_std": pred.neighbor_distance_std,
+    }
+
+
 def build_predictions_for_protein(
     session: Session,
     *,
@@ -188,39 +229,4 @@ def build_predictions_for_protein(
         .order_by(GOPrediction.distance)
         .all()
     )
-
-    return [
-        {
-            "go_id": gt.go_id,
-            "name": gt.name,
-            "aspect": gt.aspect,
-            "distance": round(pred.distance, 4),
-            "ref_protein_accession": pred.ref_protein_accession,
-            "qualifier": pred.qualifier,
-            "evidence_code": pred.evidence_code,
-            "identity_nw": pred.identity_nw,
-            "similarity_nw": pred.similarity_nw,
-            "alignment_score_nw": pred.alignment_score_nw,
-            "gaps_pct_nw": pred.gaps_pct_nw,
-            "alignment_length_nw": pred.alignment_length_nw,
-            "identity_sw": pred.identity_sw,
-            "similarity_sw": pred.similarity_sw,
-            "alignment_score_sw": pred.alignment_score_sw,
-            "gaps_pct_sw": pred.gaps_pct_sw,
-            "alignment_length_sw": pred.alignment_length_sw,
-            "length_query": pred.length_query,
-            "length_ref": pred.length_ref,
-            "query_taxonomy_id": pred.query_taxonomy_id,
-            "ref_taxonomy_id": pred.ref_taxonomy_id,
-            "taxonomic_lca": pred.taxonomic_lca,
-            "taxonomic_distance": pred.taxonomic_distance,
-            "taxonomic_common_ancestors": pred.taxonomic_common_ancestors,
-            "taxonomic_relation": pred.taxonomic_relation,
-            "vote_count": pred.vote_count,
-            "k_position": pred.k_position,
-            "go_term_frequency": pred.go_term_frequency,
-            "ref_annotation_density": pred.ref_annotation_density,
-            "neighbor_distance_std": pred.neighbor_distance_std,
-        }
-        for pred, gt in rows
-    ]
+    return [_prediction_row_to_dict(pred, gt) for pred, gt in rows]
