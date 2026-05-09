@@ -374,6 +374,8 @@ Endpoints summary
    * - ``GET``
      - ``/jobs``
      - List jobs; filter by ``status`` and/or ``operation``. Max 500 rows.
+       Cursor pagination (T4.2): pass ``after=<created_at>`` to walk forward
+       past the limit.
    * - ``GET``
      - ``/jobs/{id}``
      - Retrieve a single job with full payload and meta.
@@ -701,7 +703,9 @@ Endpoints summary
        optional narrative trio + status + JSONB / tags.
    * - ``GET``
      - ``/experiment-runs``
-     - List experiment runs (T4.8).
+     - List experiment runs newest-first; filter by ``status`` (T4.8).
+       Cursor pagination (T4.2): pass ``after=<created_at>`` from the
+       previous page's last row.
    * - ``GET``
      - ``/experiment-runs/{run_id}``
      - Retrieve one experiment run.
