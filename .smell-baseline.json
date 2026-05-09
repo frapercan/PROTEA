@@ -70,15 +70,6 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/api/routers/query_sets.py::create_query_set",
-      "kind": "method",
-      "path": "protea/api/routers/query_sets.py",
-      "name": "create_query_set",
-      "line": 99,
-      "metric": 85,
-      "threshold": 60
-    },
-    {
       "key": "method::protea/api/routers/showcase.py::get_showcase",
       "kind": "method",
       "path": "protea/api/routers/showcase.py",
