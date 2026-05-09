@@ -34,22 +34,99 @@ class CreateDatasetRequest(BaseModel):
     """Body for ``POST /datasets``.
 
     Mirrors the ``export_research_dataset`` operation payload. The caller
-    does not pick a queue — the dataset export always runs on the
+    does not pick a queue: the dataset export always runs on the
     ``protea.training`` worker (serialized, GPU/RAM-intensive).
     """
 
-    output_name: str = Field(..., min_length=1, max_length=255)
-    embedding_config_id: str = Field(..., min_length=1)
-    ontology_snapshot_id: str = Field(..., min_length=1)
-    train_versions: list[int] = Field(..., min_length=2)
-    test_versions: list[int] = Field(..., min_length=1)
-    annotation_source: str = "goa"
-    k: int = Field(default=5, gt=0)
-    search_backend: str = "faiss"
-    compute_alignments: bool = False
-    compute_taxonomy: bool = False
-    expand_votes_to_ancestors: bool = False
-    use_embedding_pca: bool = False
+    output_name: str = Field(
+        ...,
+        min_length=1,
+        max_length=255,
+        description=(
+            "Unique slug for the dataset; becomes the artifact-store "
+            "prefix and the row's ``name`` column. Must be non-empty."
+        ),
+    )
+    embedding_config_id: str = Field(
+        ...,
+        min_length=1,
+        description=(
+            "UUID of the ``EmbeddingConfig`` that drives source "
+            "embeddings (vector dim, backend, model name)."
+        ),
+    )
+    ontology_snapshot_id: str = Field(
+        ...,
+        min_length=1,
+        description=(
+            "UUID of the ``OntologySnapshot`` anchoring the GO term "
+            "graph (defines aspect / ancestor lookups)."
+        ),
+    )
+    train_versions: list[int] = Field(
+        ...,
+        min_length=2,
+        description=(
+            "GOA snapshot versions used for training. At least two are "
+            "required so the dump can build a temporal split."
+        ),
+    )
+    test_versions: list[int] = Field(
+        ...,
+        min_length=1,
+        description=(
+            "GOA snapshot versions used for evaluation; typically a "
+            "single recent release."
+        ),
+    )
+    annotation_source: str = Field(
+        default="goa",
+        description=(
+            "``goa`` (default, UniProt-GOA) or ``quickgo``. Controls "
+            "which annotation table the dump pulls from."
+        ),
+    )
+    k: int = Field(
+        default=5,
+        gt=0,
+        description="KNN neighbour count per query protein.",
+    )
+    search_backend: str = Field(
+        default="faiss",
+        description=(
+            "``faiss`` (CPU-IVF, default) or ``numpy`` (exact brute "
+            "force). Both return identical neighbours within "
+            "numerical noise."
+        ),
+    )
+    compute_alignments: bool = Field(
+        default=False,
+        description=(
+            "When true, materialise pairwise alignment features "
+            "(parasail). Slow but feeds the reranker."
+        ),
+    )
+    compute_taxonomy: bool = Field(
+        default=False,
+        description=(
+            "When true, attach taxonomy-distance features per "
+            "neighbour pair."
+        ),
+    )
+    expand_votes_to_ancestors: bool = Field(
+        default=False,
+        description=(
+            "Legacy knob; ancestor-expanded ground-truth is now "
+            "reconciled inside the eval-set itself."
+        ),
+    )
+    use_embedding_pca: bool = Field(
+        default=False,
+        description=(
+            "When true, project embeddings through the cached PCA "
+            "before KNN (smaller index, slight Fmax loss)."
+        ),
+    )
 
     @field_validator("output_name", "embedding_config_id", "ontology_snapshot_id", mode="before")
     @classmethod
