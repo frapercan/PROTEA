@@ -609,6 +609,26 @@ Payload fields
    * - ``faiss_index_type``
      - ``"Flat"``
      - FAISS index type: ``"Flat"``, ``"IVFFlat"``, or ``"HNSW"``.
+   * - ``faiss_nlist``
+     - ``100``
+     - Number of Voronoi cells when ``faiss_index_type="IVFFlat"``. Larger
+       values give finer partitioning at higher build cost. Ignored for
+       ``Flat`` and ``HNSW``.
+   * - ``faiss_nprobe``
+     - ``10``
+     - Number of Voronoi cells visited per query when
+       ``faiss_index_type="IVFFlat"``. Trades recall against query latency.
+       Ignored for ``Flat`` and ``HNSW``.
+   * - ``faiss_hnsw_m``
+     - ``32``
+     - HNSW graph degree (edges per node) when
+       ``faiss_index_type="HNSW"``. Larger values raise recall and memory.
+       Ignored for ``Flat`` and ``IVFFlat``.
+   * - ``faiss_hnsw_ef_search``
+     - ``64``
+     - HNSW search-time queue size when ``faiss_index_type="HNSW"``.
+       Larger values raise recall at the cost of query latency.
+       Ignored for ``Flat`` and ``IVFFlat``.
    * - ``compute_alignments``
      - ``true``
      - Compute NW + SW pairwise alignments (parasail) for each prediction.
