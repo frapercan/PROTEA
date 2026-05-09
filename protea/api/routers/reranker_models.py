@@ -329,6 +329,8 @@ class ImportRerankerByReferenceRequest(BaseModel):
     under its own key and just needs PROTEA to register the URI.
     """
 
+    model_config = {"extra": "forbid"}
+
     artifact_uri: str = Field(
         ...,
         min_length=1,

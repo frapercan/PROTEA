@@ -157,6 +157,7 @@
         "type": "object"
       },
       "CreateDatasetRequest": {
+        "additionalProperties": false,
         "description": "Body for ``POST /datasets``.\n\nMirrors the ``export_research_dataset`` operation payload. The caller\ndoes not pick a queue: the dataset export always runs on the\n``protea.training`` worker (serialized, GPU/RAM-intensive).",
         "properties": {
           "annotation_source": {
@@ -251,6 +252,7 @@
         "type": "object"
       },
       "CreateExperimentRunRequest": {
+        "additionalProperties": false,
         "description": "Body for ``POST /experiment-runs``.\n\nCarries the narrative trio (``description`` / ``hypothesis`` /\n``findings``) plus structured ``config`` + ``provenance`` overlays\nthat the F-EXP campaign tooling reads back. New rows always start in\n``planned`` status; transitions happen via ``PATCH``.",
         "properties": {
           "config": {
@@ -311,6 +313,7 @@
         "type": "object"
       },
       "CreateJobCommentRequest": {
+        "additionalProperties": false,
         "description": "Body for ``POST /jobs/{job_id}/comments``.\n\nCurator/operator note attached to a Job (D11 narrative thread).\nDistinct from machine-emitted ``JobEvent`` rows: comments carry an\nopinionated message and an optional ``author`` tag. Markdown is\npermitted in ``body``; the UI renders the thread chronologically.",
         "properties": {
           "author": {
@@ -339,6 +342,7 @@
         "type": "object"
       },
       "CreateJobRequest": {
+        "additionalProperties": false,
         "description": "Body for ``POST /jobs``.\n\nTells PROTEA which registered operation to run (``operation``) and\nwhich RabbitMQ queue to publish the work onto (``queue_name``). The\n``payload`` blob is op-specific; the operation registry validates it\non dequeue. ``description`` / ``tags`` are the D11 narrative fields\nsurfaced in the UI run detail.",
         "properties": {
           "description": {
@@ -418,6 +422,7 @@
         "type": "object"
       },
       "ImportRerankerByReferenceRequest": {
+        "additionalProperties": false,
         "description": "Body for ``POST /reranker-models/import-by-reference``.\n\nUse this when the lab has already uploaded ``model.txt`` to MinIO\nunder its own key and just needs PROTEA to register the URI.",
         "properties": {
           "artifact_uri": {
@@ -1091,6 +1096,7 @@
         "type": "object"
       },
       "SupportCreate": {
+        "additionalProperties": false,
         "description": "Body for ``POST /support``.\n\nA thumbs-up may carry an optional free-form ``comment``. The text is\ncapped at ``api.max_comment_length`` from the tuning config; longer\nsubmissions are rejected with 422 rather than silently truncated.",
         "properties": {
           "comment": {
@@ -1110,6 +1116,7 @@
         "type": "object"
       },
       "UpdateExperimentRunRequest": {
+        "additionalProperties": false,
         "description": "All fields optional; absent ones leave the column untouched.",
         "properties": {
           "config": {

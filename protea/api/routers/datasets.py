@@ -38,6 +38,8 @@ class CreateDatasetRequest(BaseModel):
     ``protea.training`` worker (serialized, GPU/RAM-intensive).
     """
 
+    model_config = {"extra": "forbid"}
+
     output_name: str = Field(
         ...,
         min_length=1,
