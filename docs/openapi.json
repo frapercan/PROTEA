@@ -537,6 +537,58 @@
         "title": "PluginListResponse",
         "type": "object"
       },
+      "ProblemDetail": {
+        "description": "Pydantic model for an RFC 7807 problem-details payload.",
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Detail"
+          },
+          "instance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Instance"
+          },
+          "status": {
+            "maximum": 599,
+            "minimum": 100,
+            "title": "Status",
+            "type": "integer"
+          },
+          "title": {
+            "description": "Short, stable summary of the problem.",
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "description": "URI reference identifying the problem class. Relative URIs resolve under the API host; use ``about:blank`` for generic.",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status"
+        ],
+        "title": "ProblemDetail",
+        "type": "object"
+      },
       "PullRequest": {
         "properties": {
           "author": {
@@ -1203,6 +1255,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -1245,6 +1302,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -1319,6 +1381,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -1355,6 +1422,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -1398,6 +1470,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -1448,6 +1525,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -1484,6 +1566,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -1522,6 +1609,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -1559,6 +1651,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -1595,6 +1692,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -1644,6 +1746,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -1689,6 +1796,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -1741,6 +1853,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -1791,6 +1908,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -1850,6 +1972,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -1907,6 +2034,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -1952,6 +2084,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -1999,6 +2136,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -2045,6 +2187,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -2088,6 +2235,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -2162,6 +2314,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -2207,6 +2364,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -2265,6 +2427,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -2334,6 +2501,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -2473,6 +2645,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -2558,6 +2735,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -2599,6 +2781,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -2643,6 +2830,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -2715,6 +2907,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -2761,6 +2958,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -2804,6 +3006,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -2850,6 +3057,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -2924,6 +3136,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -2967,6 +3184,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -3023,6 +3245,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -3116,6 +3343,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -3207,6 +3439,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -3289,6 +3526,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -3346,6 +3588,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -3414,6 +3661,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -3456,6 +3708,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -3492,6 +3749,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -3536,6 +3798,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -3590,6 +3857,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -3701,6 +3973,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -3742,6 +4019,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -3789,6 +4071,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -3832,6 +4119,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -3878,6 +4170,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -3927,6 +4224,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -3981,6 +4283,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -4042,6 +4349,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -4239,6 +4551,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -4308,6 +4625,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -4371,6 +4693,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -4441,6 +4768,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -4487,6 +4819,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -4530,6 +4867,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -4575,6 +4917,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -4618,6 +4965,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -4707,6 +5059,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -4764,6 +5121,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -4805,6 +5167,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -4899,6 +5266,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -4967,6 +5339,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -5044,6 +5421,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -5131,6 +5513,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -5192,6 +5579,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -5256,6 +5648,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -5297,6 +5694,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },
@@ -5434,6 +5836,11 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
               }
             },
             "description": "Validation Error"
@@ -5475,6 +5882,11 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             },

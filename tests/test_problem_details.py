@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from protea.api.problem_details import (
     PROBLEM_JSON_MEDIA_TYPE,
+    install_problem_openapi_schema,
     register_problem_handlers,
 )
 
@@ -106,3 +107,74 @@ class TestProblemDetailsUnhandled:
         # Generic detail — no traceback bleed-through to the wire.
         assert "unexpected error" in body["detail"].lower()
         assert body["type"] == "/problems/internal-server-error"
+
+
+class TestInstallProblemOpenapiSchema:
+    """T4.3 — OpenAPI advertises ``application/problem+json`` for 4xx/5xx."""
+
+    def _patched_app(self) -> FastAPI:
+        app = _make_app()
+        install_problem_openapi_schema(app)
+        return app
+
+    def test_problemdetail_schema_in_components(self) -> None:
+        spec = self._patched_app().openapi()
+        assert "ProblemDetail" in spec["components"]["schemas"]
+        # Pydantic-generated schema preserves the canonical fields.
+        problem_schema = spec["components"]["schemas"]["ProblemDetail"]
+        assert {"type", "title", "status"} <= set(problem_schema["properties"])
+
+    def test_4xx_5xx_responses_advertise_problem_json(self) -> None:
+        spec = self._patched_app().openapi()
+        # The /raise/{status} route documents 200; 4xx come from the
+        # framework's auto-generated 422 (path validation) so we expect
+        # at least one 4xx response per route to carry the schema ref.
+        any_problem = False
+        for path_item in spec["paths"].values():
+            for method, op in path_item.items():
+                if method == "parameters":
+                    continue
+                for code, resp in op.get("responses", {}).items():
+                    if not code.startswith(("4", "5")):
+                        continue
+                    content = resp.get("content", {})
+                    if "application/problem+json" in content:
+                        any_problem = True
+                        ref = content["application/problem+json"]["schema"]["$ref"]
+                        assert ref == "#/components/schemas/ProblemDetail"
+        assert any_problem, "No 4xx/5xx response carried application/problem+json"
+
+    def test_idempotent_on_repeat_call(self) -> None:
+        # Calling ``app.openapi()`` twice yields the same dict (cached).
+        app = self._patched_app()
+        first = app.openapi()
+        second = app.openapi()
+        assert first is second
+
+    def test_existing_problem_content_left_alone(self) -> None:
+        """If a future endpoint declares its own ``application/problem+json``
+        schema, our hook must not overwrite it."""
+        app = FastAPI()
+
+        @app.get(
+            "/specific",
+            responses={
+                "404": {
+                    "content": {
+                        "application/problem+json": {
+                            "schema": {"$ref": "#/components/schemas/CustomProblem"}
+                        }
+                    }
+                }
+            },
+        )
+        def _ep() -> dict[str, str]:
+            return {"ok": "1"}
+
+        install_problem_openapi_schema(app)
+        spec = app.openapi()
+        ref = (
+            spec["paths"]["/specific"]["get"]["responses"]["404"]
+            ["content"]["application/problem+json"]["schema"]["$ref"]
+        )
+        assert ref == "#/components/schemas/CustomProblem"
