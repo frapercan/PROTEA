@@ -603,16 +603,33 @@ Payload fields
      - ``"Flat"``
      - FAISS index type: ``"Flat"``, ``"IVFFlat"``, or ``"HNSW"``.
    * - ``compute_alignments``
-     - ``false``
+     - ``true``
      - Compute NW + SW pairwise alignments (parasail) for each prediction.
    * - ``compute_taxonomy``
-     - ``false``
+     - ``true``
      - Compute taxonomic distance (ete3 NCBITaxa) for each prediction.
    * - ``compute_reranker_features``
-     - ``false``
+     - ``true``
      - Compute 5 aggregate re-ranker features per prediction: ``vote_count``,
        ``k_position``, ``go_term_frequency``, ``ref_annotation_density``, and
        ``neighbor_distance_std``.
+   * - ``compute_v6_features``
+     - ``false``
+     - Compute the 25-column v6 feature family: 6 anc2vec ancestry signals,
+       3 taxonomic-voter aggregates, 16 PCA-projected embedding columns. PCA
+       state is fit once per ``EmbeddingConfig`` and persisted; enabling this
+       flag adds those 25 columns to every ``GOPrediction`` row.
+   * - ``expand_votes_to_ancestors``
+     - ``false``
+     - Synthesise the ``is_a`` / ``part_of`` ancestor closure of every leaf
+       candidate as additional records. Matches the candidate distribution
+       a lab booster sees when trained with ancestor expansion enabled.
+   * - ``aspect_separated_knn``
+     - ``true``
+     - Build three separate KNN indices, one per GO aspect (BPO/MFO/CCO),
+       so every query receives candidates in every aspect even when its
+       nearest neighbours in a unified index happen to be annotated only
+       in one or two. A common cause of BPO recall ceilings.
    * - ``reranker_model_id``
      - ``null``
      - Optional UUID of a registered ``RerankerModel`` (typically produced
