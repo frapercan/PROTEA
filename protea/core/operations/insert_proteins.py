@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Iterator
 from collections.abc import Sequence as Seq
+from dataclasses import dataclass
 from typing import Annotated, Any
 
 from protea_contracts import UniProtFastaStreamPayload, UniProtProteinRecord
@@ -16,6 +17,19 @@ from protea.infrastructure.orm.models.sequence.sequence import Sequence as Seque
 
 PositiveInt = Annotated[int, Field(gt=0)]
 NonNegativeFloat = Annotated[float, Field(ge=0.0)]
+
+
+@dataclass
+class _InsertTotals:
+    """Mutable counters threaded through the per-page flush loop."""
+
+    pages: int = 0
+    retrieved: int = 0
+    isoforms: int = 0
+    proteins_inserted: int = 0
+    proteins_updated: int = 0
+    sequences_inserted: int = 0
+    sequences_reused: int = 0
 
 
 class InsertProteinsPayload(ProteaPayload, frozen=True):
@@ -79,7 +93,6 @@ class InsertProteinsOperation(Operation):
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
         p = InsertProteinsPayload.model_validate(payload)
-
         t0 = time.perf_counter()
         emit(
             "insert_proteins.start",
@@ -88,20 +101,10 @@ class InsertProteinsOperation(Operation):
             "info",
         )
 
-        pages = 0
-        retrieved = 0
-        isoforms = 0
-        proteins_inserted = 0
-        proteins_updated = 0
-        sequences_inserted = 0
-        sequences_reused = 0
-
-        # Buffer per-record into operation-controlled pages of size
-        # ``p.page_size``. The plugin yields one record at a time
-        # (D-MIGR-01); the operation owns batching policy.
+        totals = _InsertTotals()
         buffer: list[UniProtProteinRecord] = []
         for record in self._stream_fasta(p, emit):
-            if p.total_limit is not None and retrieved >= p.total_limit:
+            if p.total_limit is not None and totals.retrieved >= p.total_limit:
                 emit(
                     "insert_proteins.limit_reached",
                     None,
@@ -109,69 +112,68 @@ class InsertProteinsOperation(Operation):
                     "warning",
                 )
                 break
-
             buffer.append(record)
-            retrieved += 1
+            totals.retrieved += 1
             if record.isoform_index is not None:
-                isoforms += 1
-
+                totals.isoforms += 1
             if len(buffer) >= p.page_size:
-                pages += 1
-                ins_p, upd_p, ins_s, re_s = self._store_records(session, buffer, emit)
-                proteins_inserted += ins_p
-                proteins_updated += upd_p
-                sequences_inserted += ins_s
-                sequences_reused += re_s
+                self._flush_page(session, buffer, p, emit, totals)
                 buffer.clear()
 
-                http_req, http_ret = self._uniprot_plugin.http_counters
-                emit(
-                    "insert_proteins.page_done",
-                    None,
-                    {
-                        "page": pages,
-                        "retrieved_total": retrieved,
-                        "proteins_inserted_total": proteins_inserted,
-                        "proteins_updated_total": proteins_updated,
-                        "sequences_inserted_total": sequences_inserted,
-                        "sequences_reused_total": sequences_reused,
-                        "http_requests": http_req,
-                        "http_retries": http_ret,
-                        "_progress_current": retrieved,
-                        **(
-                            {"_progress_total": p.total_limit}
-                            if p.total_limit
-                            else {}
-                        ),
-                    },
-                    "info",
-                )
-
-        # Flush remaining buffer.
         if buffer:
-            pages += 1
+            totals.pages += 1
             ins_p, upd_p, ins_s, re_s = self._store_records(session, buffer, emit)
-            proteins_inserted += ins_p
-            proteins_updated += upd_p
-            sequences_inserted += ins_s
-            sequences_reused += re_s
+            totals.proteins_inserted += ins_p
+            totals.proteins_updated += upd_p
+            totals.sequences_inserted += ins_s
+            totals.sequences_reused += re_s
 
-        elapsed = time.perf_counter() - t0
         http_req, http_ret = self._uniprot_plugin.http_counters
         result_dict = {
-            "pages": pages,
-            "retrieved_records": retrieved,
-            "isoform_records": isoforms,
-            "proteins_inserted": proteins_inserted,
-            "proteins_updated": proteins_updated,
-            "sequences_inserted": sequences_inserted,
-            "sequences_reused": sequences_reused,
+            "pages": totals.pages,
+            "retrieved_records": totals.retrieved,
+            "isoform_records": totals.isoforms,
+            "proteins_inserted": totals.proteins_inserted,
+            "proteins_updated": totals.proteins_updated,
+            "sequences_inserted": totals.sequences_inserted,
+            "sequences_reused": totals.sequences_reused,
             "http_requests": http_req,
             "http_retries": http_ret,
-            "elapsed_seconds": elapsed,
+            "elapsed_seconds": time.perf_counter() - t0,
         }
         emit("insert_proteins.done", None, result_dict, "info")
         return OperationResult(result=result_dict)
+
+    def _flush_page(
+        self,
+        session: Session,
+        buffer: list[UniProtProteinRecord],
+        p: InsertProteinsPayload,
+        emit: EmitFn,
+        totals: _InsertTotals,
+    ) -> None:
+        """Persist one page worth of buffered records + emit progress."""
+        totals.pages += 1
+        ins_p, upd_p, ins_s, re_s = self._store_records(session, buffer, emit)
+        totals.proteins_inserted += ins_p
+        totals.proteins_updated += upd_p
+        totals.sequences_inserted += ins_s
+        totals.sequences_reused += re_s
+        http_req, http_ret = self._uniprot_plugin.http_counters
+        fields: dict[str, Any] = {
+            "page": totals.pages,
+            "retrieved_total": totals.retrieved,
+            "proteins_inserted_total": totals.proteins_inserted,
+            "proteins_updated_total": totals.proteins_updated,
+            "sequences_inserted_total": totals.sequences_inserted,
+            "sequences_reused_total": totals.sequences_reused,
+            "http_requests": http_req,
+            "http_retries": http_ret,
+            "_progress_current": totals.retrieved,
+        }
+        if p.total_limit:
+            fields["_progress_total"] = p.total_limit
+        emit("insert_proteins.page_done", None, fields, "info")
 
     def _stream_fasta(
         self, p: InsertProteinsPayload, emit: EmitFn
