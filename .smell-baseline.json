@@ -70,15 +70,6 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/export_research_dataset.py::ExportResearchDatasetOperation.execute",
-      "kind": "method",
-      "path": "protea/core/operations/export_research_dataset.py",
-      "name": "ExportResearchDatasetOperation.execute",
-      "line": 110,
-      "metric": 129,
-      "threshold": 60
-    },
-    {
       "key": "method::protea/core/operations/predict_go_terms.py::PredictGOTermsOperation.execute",
       "kind": "method",
       "path": "protea/core/operations/predict_go_terms.py",
