@@ -104,6 +104,14 @@ class CreateJobRequest(BaseModel):
     meta: dict[str, Any] = Field(
         default_factory=dict, description="Optional free-form metadata stored alongside the job."
     )
+    description: str | None = Field(
+        default=None,
+        description="Human-readable intent text shown on the run — D11 narrative field.",
+    )
+    tags: list[str] = Field(
+        default_factory=list,
+        description="Lightweight grouping tokens (e.g. `ablation`, `benchmark-v1`).",
+    )
 
     @field_validator("operation", "queue_name", mode="before")
     @classmethod
@@ -130,6 +138,8 @@ def create_job(
             queue_name=body.queue_name,
             payload=body.payload,
             meta=body.meta,
+            description=body.description,
+            tags=list(body.tags),
         )
         session.add(job)
         session.flush()
@@ -182,30 +192,35 @@ def list_jobs(
             q = q.filter(Job.operation == filters.operation)
 
         rows = q.order_by(Job.created_at.desc()).limit(filters.limit).all()
-        out: list[dict[str, Any]] = []
-        for j in rows:
-            description, summary = _operation_metadata(
-                registry, j.operation, j.payload, session=session
-            )
-            out.append(
-                {
-                    "id": str(j.id),
-                    "operation": j.operation,
-                    "operation_description": description,
-                    "operation_summary": summary,
-                    "queue_name": j.queue_name,
-                    "status": j.status.value,
-                    "parent_job_id": str(j.parent_job_id) if j.parent_job_id else None,
-                    "created_at": j.created_at.isoformat(),
-                    "started_at": j.started_at.isoformat() if j.started_at else None,
-                    "finished_at": j.finished_at.isoformat() if j.finished_at else None,
-                    "progress_current": j.progress_current,
-                    "progress_total": j.progress_total,
-                    "error_code": j.error_code,
-                    "error_message": j.error_message,
-                }
-            )
-        return out
+        return [_serialise_job_summary(j, registry, session) for j in rows]
+
+
+def _serialise_job_summary(
+    j: Job, registry: OperationRegistry, session: Session
+) -> dict[str, Any]:
+    """Shape a Job ORM row for the list endpoint (no payload / meta)."""
+    description, summary = _operation_metadata(
+        registry, j.operation, j.payload, session=session
+    )
+    return {
+        "id": str(j.id),
+        "operation": j.operation,
+        "operation_description": description,
+        "operation_summary": summary,
+        "queue_name": j.queue_name,
+        "status": j.status.value,
+        "parent_job_id": str(j.parent_job_id) if j.parent_job_id else None,
+        "created_at": j.created_at.isoformat(),
+        "started_at": j.started_at.isoformat() if j.started_at else None,
+        "finished_at": j.finished_at.isoformat() if j.finished_at else None,
+        "progress_current": j.progress_current,
+        "progress_total": j.progress_total,
+        "error_code": j.error_code,
+        "error_message": j.error_message,
+        "description": j.description,
+        "findings": j.findings,
+        "tags": list(j.tags or []),
+    }
 
 
 @router.get("/{job_id}", summary="Get job details")
@@ -239,6 +254,9 @@ def get_job(
             "progress_total": j.progress_total,
             "error_code": j.error_code,
             "error_message": j.error_message,
+            "description": j.description,
+            "findings": j.findings,
+            "tags": list(j.tags or []),
         }
 
 
