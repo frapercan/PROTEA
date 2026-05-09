@@ -1,4 +1,4 @@
-"""Showcase endpoint — aggregates platform stats and the single best evaluation
+"""Showcase endpoint: aggregates platform stats and the single best evaluation
 result with full embedding attribution.
 
 Unlike :mod:`protea.api.routers.benchmark`, which exposes the full per-model
@@ -13,7 +13,7 @@ buckets (``knn_baseline`` / ``knn_scored`` / ``knn_reranker``) and took the
 maximum Fmax across *all* embeddings in each bucket.  That hid which concrete
 embedding won a given cell, and silently dropped losing embeddings from the
 UI entirely.  With the introduction of the 8-model benchmark, that collapse
-is actively misleading — so this endpoint now returns a single named winner
+is actively misleading; so this endpoint now returns a single named winner
 and a link to ``/benchmark`` for the full matrix.
 """
 
@@ -54,8 +54,8 @@ def _approx_count(session: Session, table: str) -> int:
 def _avg_fmax(results: dict[str, Any]) -> float | None:
     """Mean Fmax across the 9 (category × aspect) cells, ignoring missing ones.
 
-    Returns ``None`` if the ``results`` blob is empty or has no Fmax values —
-    that way a malformed or partial evaluation does not pretend to be
+    Returns ``None`` if the ``results`` blob is empty or has no Fmax values
+    so a malformed or partial evaluation does not pretend to be
     "the best".
     """
     values: list[float] = []

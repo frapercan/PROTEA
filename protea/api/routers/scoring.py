@@ -6,7 +6,7 @@ endpoints that apply a stored config to an existing ``PredictionSet``:
 ``GET /scoring/prediction-sets/{id}/score.tsv``
     Stream a TSV of scored predictions.  The score column is computed on-the-fly
     by applying the selected ``ScoringConfig`` formula to the raw signals stored
-    in ``GOPrediction`` rows — no re-running of the KNN pipeline is required.
+    in ``GOPrediction`` rows; no re-running of the KNN pipeline is required.
 
 ``GET /scoring/prediction-sets/{id}/metrics``
     Compute CAFA Fmax / AUC-PR for a (PredictionSet, ScoringConfig, category)
@@ -88,7 +88,7 @@ def create_scoring_config(
 def create_preset_configs(factory=Depends(get_session_factory)):
     """Seed the database with the four built-in preset ScoringConfigs.
 
-    Idempotent — presets matched by name are skipped silently. Returns
+    Idempotent: presets matched by name are skipped silently. Returns
     the list of preset names that were actually created.
     """
     with session_scope(factory) as session:
@@ -154,7 +154,7 @@ def download_scored_predictions(
     scoring_config_id:
         UUID of the ``ScoringConfig`` to apply.
     min_score:
-        Optional score threshold — rows below this value are omitted.
+        Optional score threshold; rows below this value are omitted.
     accession:
         Optional protein accession filter.
 
@@ -247,8 +247,8 @@ def compute_metrics(
     in ``eval_context``, following the CAFA4 protocol: only experimental
     evidence codes, NOT-qualifier annotations excluded with full DAG propagation.
 
-    The selected ``ScoringConfig`` — including any custom ``evidence_weights``
-    — is applied to every ``GOPrediction`` row before computing the
+    The selected ``ScoringConfig`` (including any custom ``evidence_weights``)
+    is applied to every ``GOPrediction`` row before computing the
     precision-recall curve.
 
     Parameters

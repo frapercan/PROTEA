@@ -7,17 +7,17 @@ JSON shape exposed by the jobs router for consistency.
 Endpoints
 ---------
 
-* ``POST   /experiment-runs``           — create (status=planned).
-* ``GET    /experiment-runs``           — list, optional status filter.
-* ``GET    /experiment-runs/{id}``      — fetch one.
-* ``PATCH  /experiment-runs/{id}``      — update narrative + status +
+* ``POST   /experiment-runs``           : create (status=planned).
+* ``GET    /experiment-runs``           : list, optional status filter.
+* ``GET    /experiment-runs/{id}``      : fetch one.
+* ``PATCH  /experiment-runs/{id}``      : update narrative + status +
                                           provenance overlay; transitions
                                           stamp ``started_at`` /
                                           ``finished_at`` automatically.
-* ``DELETE /experiment-runs/{id}``      — remove (rare; mostly drafts).
+* ``DELETE /experiment-runs/{id}``      : remove (rare; mostly drafts).
 
 Linkage to Job / EvaluationResult / RerankerModel rows is intentionally
-out of scope here — the F-EXP campaign work (T-EXP.1-T-EXP.7) defines
+out of scope here; the F-EXP campaign work (T-EXP.1-T-EXP.7) defines
 the join shape once it lands.
 """
 from __future__ import annotations

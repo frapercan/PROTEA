@@ -7,14 +7,14 @@ benchmark.
 Where the ``/showcase`` endpoint collapses all models into a few method
 buckets and takes the maximum across every embedding, this module preserves
 **which** embedding produced each number and **which scoring config** was
-used — one stage per distinct ``scoring_config.name`` found in the DB, plus
+used: one stage per distinct ``scoring_config.name`` found in the DB, plus
 an implicit ``"reranker"`` stage for evaluations that used a reranker.
 
 Zero domain constants are hardcoded here: stage labels, preferred default,
 baseline tag, GO categories and aspects all come from
 ``protea/config/benchmark.yaml`` via :class:`BenchmarkConfig`. Model display
 metadata (display name, family, param count) comes from the dedicated columns
-on ``embedding_config`` — no HF-name regex heuristics.
+on ``embedding_config``; no HF-name regex heuristics.
 
 Two endpoints are provided:
 
@@ -23,7 +23,7 @@ Two endpoints are provided:
 
 ``GET /benchmark/matrix``
     One row per
-    ``(embedding_config, evaluation_set, stage, category, aspect)`` tuple —
+    ``(embedding_config, evaluation_set, stage, category, aspect)`` tuple,
     best-Fmax only. Response also includes:
 
     - ``stages``:            every stage observed in the data (with label/kind)
@@ -188,7 +188,7 @@ def list_benchmark_embeddings(
     """Return every ``EmbeddingConfig`` with its persisted display metadata.
 
     The metadata lives in ``embedding_config.display_name / family /
-    param_count`` — filled at creation time by the seed scripts. No
+    param_count``: filled at creation time by the seed scripts. No
     heuristic inference happens here.
     """
     with session_scope(factory) as session:

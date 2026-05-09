@@ -37,7 +37,7 @@ def list_annotation_sets(
 ) -> list[dict[str, Any]]:
     """List annotation sets with their annotation counts, newest first.
 
-    Cached 5 minutes — GROUP BY over protein_go_annotation (80M rows) takes
+    Cached 5 minutes: GROUP BY over protein_go_annotation (80M rows) takes
     6+ seconds. Per-source views are cached independently.
     """
 
