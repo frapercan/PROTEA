@@ -21,7 +21,7 @@ export function DocLinks() {
         Docs
       </a>
       <a
-        href={`${base}/static/thesis.pdf`}
+        href="/thesis.pdf"
         target="_blank"
         rel="noopener noreferrer"
         className="hover:text-slate-900"

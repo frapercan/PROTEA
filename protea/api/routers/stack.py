@@ -32,7 +32,7 @@ router = APIRouter(tags=["stack"])
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _STACK_YAML = _PROJECT_ROOT / "docs" / "source" / "_data" / "stack.yaml"
 _DOCS_BUILD_ROOT = _PROJECT_ROOT / "docs" / "build"
-_THESIS_PDF = _PROJECT_ROOT / "static" / "thesis.pdf"
+_THESIS_PDF = _PROJECT_ROOT / "apps" / "web" / "public" / "thesis.pdf"
 _PULLS_TTL_SECONDS = 300
 _GITHUB_API = "https://api.github.com"
 
@@ -199,7 +199,9 @@ def _local_docs_path(slug: str) -> str | None:
 
 
 def _thesis_pdf_url() -> str | None:
-    return "/static/thesis.pdf" if _THESIS_PDF.exists() else None
+    # The PDF lives in apps/web/public/, which Next serves at / under the
+    # frontend host. No FastAPI proxy hop, no /static mount dependency.
+    return "/thesis.pdf" if _THESIS_PDF.exists() else None
 
 
 def _load_repos() -> list[RepoEntry]:
@@ -236,8 +238,8 @@ def get_stack() -> StackResponse:
     Per-repo ``local_docs_path`` and the top-level ``thesis_pdf_url``
     are computed from the filesystem at request time: the field is
     populated whenever the corresponding artefact has been built into
-    ``docs/build/<slug>/html/`` or ``static/thesis.pdf`` respectively,
-    and is ``None`` otherwise.
+    ``docs/build/<slug>/html/`` or ``apps/web/public/thesis.pdf``
+    respectively, and is ``None`` otherwise.
     """
     return StackResponse(repos=_load_repos(), thesis_pdf_url=_thesis_pdf_url())
 
