@@ -38,6 +38,7 @@ from sqlalchemy.orm import Session
 
 from protea.core._training_dump_loaders import (
     _check_reranker_name_collisions,
+    _collect_cat_gt_pairs,
     _count_embeddings_with_dim,
     _DumpRequest,
     _load_annotation_aggregations,
@@ -46,6 +47,7 @@ from protea.core._training_dump_loaders import (
     _maybe_fit_pca_state,
     _perform_dataset_dump,
     _resolve_annotation_set_ids,
+    _resolve_test_eval_inputs,
     _stream_embeddings,
 )
 from protea.core.anc2vec_embeddings import Anc2VecIndex
@@ -1291,16 +1293,7 @@ class TrainRerankerAutoOperation:
                 eval_data, _ = load_evaluation_data_for_set(session, eset)
 
                 # Build gt_pairs for each category; collect union of query proteins
-                cat_gt_pairs: dict[str, set[tuple[str, str]]] = {}
-                all_query_accessions: set[str] = set()
-                for cat in _CATEGORIES:
-                    gt: dict[str, set[str]] = getattr(eval_data, cat)
-                    pairs: set[tuple[str, str]] = set()
-                    for protein, go_ids in gt.items():
-                        for go_id in go_ids:
-                            pairs.add((protein, go_id))
-                    cat_gt_pairs[cat] = pairs
-                    all_query_accessions.update(gt.keys())
+                cat_gt_pairs, all_query_accessions = _collect_cat_gt_pairs(eval_data)
 
                 if not all_query_accessions:
                     emit(
@@ -1523,11 +1516,10 @@ class TrainRerankerAutoOperation:
                 raise ValueError("No training data produced from any split")
 
             # ── 4. Test split: KNN once, label per category ──────────────
-            test_old_v = p.train_versions[-1]
-            test_new_v = p.test_versions[0]
+            test_eset, test_eval_data, test_old_v, test_new_v = _resolve_test_eval_inputs(
+                session, p.train_versions, p.test_versions, version_to_set
+            )
             test_old_set_id = version_to_set[test_old_v]
-            test_new_set_id = version_to_set[test_new_v]
-
             emit(
                 "dump_helper.test_knn",
                 None,
@@ -1535,35 +1527,9 @@ class TrainRerankerAutoOperation:
                 "info",
             )
 
-            test_eset = (
-                session.query(EvaluationSet)
-                .filter_by(
-                    old_annotation_set_id=test_old_set_id,
-                    new_annotation_set_id=test_new_set_id,
-                )
-                .one_or_none()
-            )
-            if test_eset is None:
-                raise RuntimeError(
-                    f"EvaluationSet missing for test pair ({test_old_v}->{test_new_v}). "
-                    "Materialize it via scripts/materialize_lab_intervals.py "
-                    "or POST /annotations/evaluation-sets/generate before retrying."
-                )
-            test_eval_data, _ = load_evaluation_data_for_set(session, test_eset)
-
             # Write test data to parquet too
             test_files: dict[str, Path | None] = {c: None for c in _CATEGORIES}
-            test_all_queries: set[str] = set()
-            test_cat_gt: dict[str, set[tuple[str, str]]] = {}
-            for cat in _CATEGORIES:
-                # gt + pairs reused from train-side block above; lexically distinct usage.
-                gt: dict[str, set[str]] = getattr(test_eval_data, cat)  # type: ignore[no-redef]
-                pairs: set[tuple[str, str]] = set()  # type: ignore[no-redef]
-                for protein, go_ids in gt.items():
-                    for go_id in go_ids:
-                        pairs.add((protein, go_id))
-                test_cat_gt[cat] = pairs
-                test_all_queries.update(gt.keys())
+            test_cat_gt, test_all_queries = _collect_cat_gt_pairs(test_eval_data)
 
             if test_all_queries:
                 test_ref = _build_reference_from_cache(
