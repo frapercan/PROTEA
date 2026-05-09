@@ -22,11 +22,13 @@ ballooning further.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable
 from typing import Any
 
 import numpy as np
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
+from sqlalchemy.orm import Session
 
 from protea.core.annotation_intern import intern_string
 from protea.core.domain.aspect import ASPECT_CODES as _ASPECTS
@@ -148,3 +150,121 @@ def _load_annotation_aggregations(
             )
 
     return aspect_accs, aspect_go_map
+
+
+def _resolve_annotation_set_ids(
+    session: Session,
+    source: str,
+    versions: Iterable[int],
+) -> tuple[dict[int, uuid.UUID], dict[int, uuid.UUID]]:
+    """Resolve ``(version → annotation_set_id, version → native_snapshot_id)``.
+
+    Looks up one ``AnnotationSet`` per version under ``source`` and raises
+    ``ValueError`` for any version that lacks a row, so the caller does
+    not have to guard the lookup. Used at the start of the dump pipeline
+    to translate human-friendly GOA release numbers into the UUIDs the
+    downstream queries need.
+    """
+    from protea.infrastructure.orm.models.annotation.annotation_set import (
+        AnnotationSet,
+    )
+
+    version_to_set: dict[int, uuid.UUID] = {}
+    version_to_native: dict[int, uuid.UUID] = {}
+    for v in versions:
+        aset = (
+            session.query(AnnotationSet)
+            .filter(
+                AnnotationSet.source == source,
+                AnnotationSet.source_version == str(v),
+            )
+            .first()
+        )
+        if aset is None:
+            raise ValueError(
+                f"AnnotationSet not found for source={source!r}, "
+                f"source_version={str(v)!r}"
+            )
+        version_to_set[v] = aset.id
+        version_to_native[v] = aset.ontology_snapshot_id
+    return version_to_set, version_to_native
+
+
+def _check_reranker_name_collisions(session: Session, names: Iterable[str]) -> None:
+    """Raise ``ValueError`` if any ``RerankerModel`` row already uses ``name``.
+
+    Caller batches every candidate name (``{base}-{cat}`` plus the
+    optional per-cell extras) so the dump fails fast before running KNN
+    over multiple GOA pairs. ``dump_only`` mode skips this check entirely;
+    the caller decides whether to invoke us.
+    """
+    from protea.infrastructure.orm.models.embedding.reranker_model import (
+        RerankerModel,
+    )
+
+    for model_name in names:
+        existing = (
+            session.query(RerankerModel)
+            .filter(RerankerModel.name == model_name)
+            .first()
+        )
+        if existing is not None:
+            raise ValueError(f"RerankerModel {model_name!r} already exists")
+
+
+def _load_ia_weights(ia_file: str | None) -> dict[str, float] | None:
+    """Parse a CAFA-style IA TSV (``go_id\\tweight`` per line).
+
+    Returns ``None`` when ``ia_file`` is empty/None so the caller can use
+    membership in ``ia_weights is not None`` to gate sample-weighting.
+    Whitespace lines and rows with fewer than two tab-separated fields
+    are silently skipped, matching the reference ``cafaeval`` parser.
+    """
+    if not ia_file:
+        return None
+    weights: dict[str, float] = {}
+    with open(ia_file) as f:
+        for raw in f:
+            line = raw.strip()
+            if not line:
+                continue
+            parts = line.split("\t")
+            if len(parts) >= 2:
+                weights[parts[0]] = float(parts[1])
+    return weights
+
+
+def _load_go_maps(
+    session: Session,
+    ontology_snapshot_id: uuid.UUID,
+    native_snapshots: set[uuid.UUID],
+) -> tuple[dict[Any, str], dict[Any, str], set[str]]:
+    """Load the ``(id→go_id, id→aspect, pivot_go_ids)`` triple used by the dump.
+
+    ``go_id_map`` and ``aspect_map`` are keyed by the integer
+    ``go_term.id`` so reference annotations from ANY native snapshot can
+    be resolved back to a ``go_id`` string. ``pivot_go_ids`` is the
+    set of GO IDs that exist in the pivot ontology snapshot; predictions
+    are later filtered against it so the dump's term universe matches the
+    reconciled ground-truth space.
+    """
+    map_snapshots = {ontology_snapshot_id} | set(native_snapshots)
+    union_rows = session.execute(
+        text(
+            "SELECT id, go_id, aspect FROM go_term WHERE ontology_snapshot_id = ANY(:snap_ids)"
+        ),
+        {"snap_ids": [str(s) for s in map_snapshots]},
+    ).fetchall()
+    go_id_map: dict[Any, str] = {row_id: go_id for row_id, go_id, _ in union_rows}
+    aspect_map: dict[Any, str] = {
+        row_id: aspect for row_id, _, aspect in union_rows if aspect
+    }
+    pivot_rows = session.execute(
+        text(
+            "SELECT go_id FROM go_term "
+            "WHERE ontology_snapshot_id = :snap_id AND aspect IS NOT NULL"
+        ),
+        {"snap_id": ontology_snapshot_id},
+    ).fetchall()
+    pivot_go_ids: set[str] = {row[0] for row in pivot_rows}
+    return go_id_map, aspect_map, pivot_go_ids

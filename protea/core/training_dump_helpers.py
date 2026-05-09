@@ -37,8 +37,12 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from protea.core._training_dump_loaders import (
+    _check_reranker_name_collisions,
     _count_embeddings_with_dim,
     _load_annotation_aggregations,
+    _load_go_maps,
+    _load_ia_weights,
+    _resolve_annotation_set_ids,
     _stream_embeddings,
 )
 from protea.core.anc2vec_embeddings import Anc2VecIndex
@@ -55,10 +59,8 @@ from protea.core.reranker import (
     EMBEDDING_PCA_DIM,
     LABEL_COLUMN,
 )
-from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
-from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
 from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
 
@@ -1167,24 +1169,9 @@ class TrainRerankerAutoOperation:
 
         # ── 1. Resolve annotation set IDs ────────────────────────────────
         all_versions = sorted(set(p.train_versions + p.test_versions))
-        version_to_set: dict[int, uuid.UUID] = {}
-        version_to_native: dict[int, uuid.UUID] = {}
-        for v in all_versions:
-            aset = (
-                session.query(AnnotationSet)
-                .filter(
-                    AnnotationSet.source == p.annotation_source,
-                    AnnotationSet.source_version == str(v),
-                )
-                .first()
-            )
-            if aset is None:
-                raise ValueError(
-                    f"AnnotationSet not found for source='{p.annotation_source}', "
-                    f"source_version='{v}'"
-                )
-            version_to_set[v] = aset.id
-            version_to_native[v] = aset.ontology_snapshot_id
+        version_to_set, version_to_native = _resolve_annotation_set_ids(
+            session, p.annotation_source, all_versions
+        )
 
         if session.get(EmbeddingConfig, emb_config_id) is None:
             raise ValueError(f"EmbeddingConfig {emb_config_id} not found")
@@ -1195,28 +1182,14 @@ class TrainRerankerAutoOperation:
             candidate_names.extend(
                 f"{p.name}-{cat}-{_ASPECT_NAMES[asp]}" for cat in _CATEGORIES for asp in _ASPECTS
             )
-        # Name-collision check — skipped when dump_only=True since no
+        # Name-collision check; skipped when dump_only=True since no
         # RerankerModel rows are written.
         if not p.dump_only:
-            for model_name in candidate_names:
-                existing = (
-                    session.query(RerankerModel).filter(RerankerModel.name == model_name).first()
-                )
-                if existing is not None:
-                    raise ValueError(f"RerankerModel '{model_name}' already exists")
+            _check_reranker_name_collisions(session, candidate_names)
 
         # Load IA weights for sample weighting (optional)
-        ia_weights: dict[str, float] | None = None
-        if p.ia_file:
-            ia_weights = {}
-            with open(p.ia_file) as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    parts = line.split("\t")
-                    if len(parts) >= 2:
-                        ia_weights[parts[0]] = float(parts[1])
+        ia_weights = _load_ia_weights(p.ia_file)
+        if ia_weights is not None:
             emit(
                 "dump_helper.ia_loaded",
                 None,
@@ -1245,29 +1218,15 @@ class TrainRerankerAutoOperation:
 
         # ── 2. Load GO maps ──────────────────────────────────────────────
         # Each training/test GOA release has its own contemporary OBO snapshot,
-        # so reference annotations use native go_term.id UUIDs — different from
-        # the pivot snapshot's ids. Build a union id→(go_id, aspect) map across
-        # the pivot + every native snapshot encountered, so native go_term_ids
-        # from any set resolve correctly. Predictions are later filtered to
-        # terms that also exist in the pivot term universe, matching the
+        # so reference annotations use native go_term.id UUIDs different from
+        # the pivot snapshot's ids. The helper builds a union id→(go_id, aspect)
+        # map across the pivot + every native snapshot encountered, so native
+        # go_term_ids from any set resolve correctly. Predictions are later
+        # filtered to ``pivot_go_ids`` so the dump's term universe matches the
         # reconciled ground-truth space.
-        map_snapshots = {ontology_snapshot_id} | set(version_to_native.values())
-        union_rows = session.execute(
-            text(
-                "SELECT id, go_id, aspect FROM go_term WHERE ontology_snapshot_id = ANY(:snap_ids)"
-            ),
-            {"snap_ids": [str(s) for s in map_snapshots]},
-        ).fetchall()
-        go_id_map: dict[Any, str] = {row_id: go_id for row_id, go_id, _ in union_rows}
-        aspect_map: dict[Any, str] = {row_id: aspect for row_id, _, aspect in union_rows if aspect}
-        pivot_rows = session.execute(
-            text(
-                "SELECT go_id FROM go_term "
-                "WHERE ontology_snapshot_id = :snap_id AND aspect IS NOT NULL"
-            ),
-            {"snap_id": ontology_snapshot_id},
-        ).fetchall()
-        pivot_go_ids: set[str] = {row[0] for row in pivot_rows}
+        go_id_map, aspect_map, pivot_go_ids = _load_go_maps(
+            session, ontology_snapshot_id, set(version_to_native.values())
+        )
 
         # Parent map on pivot — used for TPR max-propagation in test metrics.
         parent_map = _load_parent_map(session, ontology_snapshot_id)

@@ -1,10 +1,20 @@
 """Unit tests for ``protea.core._training_dump_loaders``.
 
-The three helpers were extracted out of ``training_dump_helpers`` to
-keep ``_preload_all_embeddings`` and ``_build_reference_from_cache``
-under the §3 60-LOC method ceiling. These tests pin their wire shape
-without standing up a real database (they exercise SQL composition +
-result-row handling against a mocked SQLAlchemy ``Connection``).
+The first three helpers (``_count_embeddings_with_dim``,
+``_stream_embeddings``, ``_load_annotation_aggregations``) were
+extracted out of ``_preload_all_embeddings`` /
+``_build_reference_from_cache`` to keep those under the §3 60-LOC
+method ceiling.
+
+The next four (``_resolve_annotation_set_ids``,
+``_check_reranker_name_collisions``, ``_load_ia_weights``,
+``_load_go_maps``) were extracted out of
+``TrainRerankerAutoOperation.execute`` for T2B.5 partial #1 to start
+chipping the 670-LOC method down toward the §3 ceiling.
+
+These tests pin each helper's wire shape without standing up a real
+database (they exercise SQL composition + result-row handling against
+a mocked SQLAlchemy ``Session`` / ``Connection``).
 """
 from __future__ import annotations
 
@@ -12,10 +22,15 @@ import uuid
 from unittest.mock import MagicMock
 
 import numpy as np
+import pytest
 
 from protea.core._training_dump_loaders import (
+    _check_reranker_name_collisions,
     _count_embeddings_with_dim,
     _load_annotation_aggregations,
+    _load_go_maps,
+    _load_ia_weights,
+    _resolve_annotation_set_ids,
     _stream_embeddings,
 )
 
@@ -148,3 +163,99 @@ class TestLoadAnnotationAggregations:
         f_records = aspect_go_map["F"]["P1"]
         assert len(f_records) == 2
         assert {r["go_term_id"] for r in f_records} == {"GO:0001", "GO:0042"}
+
+
+# ---------------------------------------------------------------------------
+# T2B.5 partial #1 helpers (extracted from TrainRerankerAutoOperation.execute)
+# ---------------------------------------------------------------------------
+
+
+class TestResolveAnnotationSetIds:
+    def test_returns_two_dicts_keyed_by_version(self) -> None:
+        """``(version → set_id, version → native_snapshot_id)`` for every version."""
+        aset160 = MagicMock()
+        aset160.id = uuid.uuid4()
+        aset160.ontology_snapshot_id = uuid.uuid4()
+        aset170 = MagicMock()
+        aset170.id = uuid.uuid4()
+        aset170.ontology_snapshot_id = uuid.uuid4()
+
+        session = MagicMock()
+        # ``.filter(...).first()`` is called once per version.
+        session.query.return_value.filter.return_value.first.side_effect = [
+            aset160,
+            aset170,
+        ]
+
+        v_to_set, v_to_native = _resolve_annotation_set_ids(session, "goa", [160, 170])
+
+        assert v_to_set == {160: aset160.id, 170: aset170.id}
+        assert v_to_native == {
+            160: aset160.ontology_snapshot_id,
+            170: aset170.ontology_snapshot_id,
+        }
+
+    def test_missing_version_raises_value_error(self) -> None:
+        session = MagicMock()
+        session.query.return_value.filter.return_value.first.return_value = None
+
+        with pytest.raises(ValueError, match="AnnotationSet not found"):
+            _resolve_annotation_set_ids(session, "goa", [999])
+
+
+class TestCheckRerankerNameCollisions:
+    def test_passes_when_no_existing_rows(self) -> None:
+        session = MagicMock()
+        session.query.return_value.filter.return_value.first.return_value = None
+        # No raise = pass.
+        _check_reranker_name_collisions(session, ["foo-NK", "foo-LK", "foo-PK"])
+
+    def test_raises_with_quoted_name_on_collision(self) -> None:
+        session = MagicMock()
+        session.query.return_value.filter.return_value.first.return_value = MagicMock()
+
+        with pytest.raises(ValueError, match="RerankerModel 'foo-NK' already exists"):
+            _check_reranker_name_collisions(session, ["foo-NK"])
+
+
+class TestLoadIAWeights:
+    def test_returns_none_for_empty_path(self, tmp_path) -> None:
+        assert _load_ia_weights(None) is None
+        assert _load_ia_weights("") is None
+
+    def test_parses_tab_separated_lines(self, tmp_path) -> None:
+        ia_file = tmp_path / "ia.tsv"
+        ia_file.write_text("GO:0008150\t1.0\nGO:0003674\t2.5\n")
+        weights = _load_ia_weights(str(ia_file))
+        assert weights == {"GO:0008150": 1.0, "GO:0003674": 2.5}
+
+    def test_skips_blank_and_short_lines(self, tmp_path) -> None:
+        ia_file = tmp_path / "ia.tsv"
+        ia_file.write_text("GO:0008150\t1.0\n\nbad-row-no-tab\nGO:0003674\t2.5\n")
+        weights = _load_ia_weights(str(ia_file))
+        # Only the two well-formed rows survive.
+        assert weights == {"GO:0008150": 1.0, "GO:0003674": 2.5}
+
+
+class TestLoadGoMaps:
+    def test_returns_id_maps_plus_pivot_set(self) -> None:
+        session = MagicMock()
+        # First execute() returns the union rows; second returns the pivot rows.
+        union_result = MagicMock()
+        union_result.fetchall.return_value = [
+            (1, "GO:0001", "P"),
+            (2, "GO:0002", "F"),
+            (3, "GO:0003", None),  # filtered out of aspect_map
+        ]
+        pivot_result = MagicMock()
+        pivot_result.fetchall.return_value = [("GO:0001",), ("GO:0002",)]
+        session.execute.side_effect = [union_result, pivot_result]
+
+        snap = uuid.uuid4()
+        native = {uuid.uuid4()}
+        go_id_map, aspect_map, pivot_go_ids = _load_go_maps(session, snap, native)
+
+        assert go_id_map == {1: "GO:0001", 2: "GO:0002", 3: "GO:0003"}
+        # ``aspect=None`` row is skipped from the aspect map.
+        assert aspect_map == {1: "P", 2: "F"}
+        assert pivot_go_ids == {"GO:0001", "GO:0002"}
