@@ -70,15 +70,6 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/metrics.py::compute_cafa_metrics",
-      "kind": "method",
-      "path": "protea/core/metrics.py",
-      "name": "compute_cafa_metrics",
-      "line": 103,
-      "metric": 64,
-      "threshold": 60
-    },
-    {
       "key": "method::protea/core/operations/compute_embeddings.py::_embed_t5",
       "kind": "method",
       "path": "protea/core/operations/compute_embeddings.py",
