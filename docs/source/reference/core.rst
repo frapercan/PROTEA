@@ -92,6 +92,43 @@ new operation is a one-line edit here plus a new module under
    :undoc-members:
    :show-inheritance:
 
+Plugin discovery
+----------------
+
+``protea.core.plugins`` centralises ``importlib.metadata.entry_points``
+discovery for every PROTEA plugin group (``protea.backends``,
+``protea.sources``, ``protea.runners``). ``discover_plugins(group)``
+returns a cached ``{name: plugin}`` map and hard-errors with
+``RuntimeError`` if a plugin's ``name`` attribute drifts from its
+entry-point name. ``reset_plugin_cache`` is a test-only seam for
+suites that install/uninstall plugins between cases. Added in T2A.5
+for backend dispatch and generalised in T2A.8 (PR #240).
+
+.. automodule:: protea.core.plugins
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Experiment runners
+------------------
+
+``protea.core.runners`` adapts the generic plugin discovery to the
+``protea.runners`` group. ``resolve_runner(name)`` maps an identifier
+(``"knn"`` / ``"baseline"`` / ``"lightgbm"``) to a runner plugin
+instance implementing the ``protea_contracts.ExperimentRunner``
+interface; unknown names raise ``ValueError`` listing the discovered
+set. PROTEA does not yet dispatch to runners at inference time (the
+active KNN + reranker path stays in ``PredictGOTermsBatchOperation``
+until F2C of master plan v3 hoists the inference core into a shared
+package). The adapter exists so ``GET /v1/registry/runners`` has a
+stable resolver and future code has a one-line entry. Closes T2A.8
+(PR #240).
+
+.. automodule:: protea.core.runners
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Utilities
 ---------
 
