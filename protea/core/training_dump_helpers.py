@@ -36,9 +36,13 @@ from pydantic import Field, field_validator
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from protea.core._training_dump_loaders import (
+    _count_embeddings_with_dim,
+    _load_annotation_aggregations,
+    _stream_embeddings,
+)
 from protea.core.anc2vec_embeddings import Anc2VecIndex
 from protea.core.anc2vec_embeddings import get_index as get_anc2vec_index
-from protea.core.annotation_intern import intern_string
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.domain.aspect import ASPECT_CODES as _ASPECTS
 from protea.core.domain.aspect import Aspect
@@ -189,22 +193,10 @@ def _preload_all_embeddings(
     Returns (embeddings_f16, accessions, acc_to_idx).
     This avoids reloading 527K vectors from PostgreSQL on every split.
     """
-    conn = session.connection()
+    from protea.config.tuning import get_tuning
 
-    count_row = conn.execute(
-        text(
-            "SELECT COUNT(*), "
-            "       (SELECT vector_dims(se2.embedding) "
-            "          FROM sequence_embedding se2 "
-            "         WHERE se2.embedding_config_id = :ecid LIMIT 1) "
-            "  FROM protein p "
-            "  JOIN sequence_embedding se "
-            "    ON se.sequence_id = p.sequence_id "
-            "   AND se.embedding_config_id = :ecid"
-        ),
-        {"ecid": emb_config_id},
-    ).one()
-    total, dim = int(count_row[0]), int(count_row[1]) if count_row[1] else 960
+    conn = session.connection()
+    total, dim = _count_embeddings_with_dim(conn, emb_config_id)
 
     emit(
         "dump_helper.preloading_embeddings",
@@ -213,31 +205,10 @@ def _preload_all_embeddings(
         "info",
     )
 
-    from protea.config.tuning import get_tuning
-
     stream_chunk = get_tuning().operation.stream_chunk_size
-
-    embeddings = np.empty((total, dim), dtype=np.float16)
-    accessions: list[str] = []
-    result_proxy = conn.execute(
-        text(
-            "SELECT p.accession, se.embedding "
-            "  FROM protein p "
-            "  JOIN sequence_embedding se "
-            "    ON se.sequence_id = p.sequence_id "
-            "   AND se.embedding_config_id = :ecid"
-        ),
-        {"ecid": emb_config_id},
-    ).yield_per(stream_chunk)
-
-    for i, (acc, emb_str) in enumerate(result_proxy):
-        if isinstance(emb_str, str):
-            emb_arr = np.fromstring(emb_str.strip("[]"), sep=",", dtype=np.float16)
-        else:
-            emb_arr = np.array(emb_str, dtype=np.float16)
-        embeddings[i] = emb_arr
-        accessions.append(acc)
-
+    embeddings, accessions = _stream_embeddings(
+        conn, emb_config_id, total, dim, stream_chunk
+    )
     acc_to_idx = {acc: i for i, acc in enumerate(accessions)}
 
     emit(
@@ -268,33 +239,9 @@ def _build_reference_from_cache(
     the preloaded embedding matrix in memory.
     """
     conn = session.connection()
-
-    ann_rows = conn.execute(
-        text(
-            "SELECT pga.protein_accession, gt.aspect, pga.go_term_id, "
-            "       pga.qualifier, pga.evidence_code "
-            "  FROM protein_go_annotation pga "
-            "  JOIN go_term gt ON gt.id = pga.go_term_id "
-            " WHERE pga.annotation_set_id = :asid "
-            "   AND gt.aspect IN ('P', 'F', 'C') "
-            "   AND (pga.qualifier IS NULL OR pga.qualifier NOT LIKE '%%NOT%%')"
-        ),
-        {"asid": annotation_set_id},
-    ).yield_per(50_000)
-
-    aspect_accs: dict[str, set[str]] = {a: set() for a in _ASPECTS}
-    aspect_go_map: dict[str, dict[str, list[dict[str, Any]]]] = {a: {} for a in _ASPECTS}
-    for acc, asp, go_term_id, qualifier, evidence_code in ann_rows:
-        if asp in aspect_accs and acc in acc_to_idx:
-            aspect_accs[asp].add(acc)
-            aspect_go_map[asp].setdefault(acc, []).append(
-                {
-                    "go_term_id": go_term_id,
-                    # Flyweight — see ``protea.core.annotation_intern``.
-                    "qualifier": intern_string(qualifier),
-                    "evidence_code": intern_string(evidence_code),
-                }
-            )
+    aspect_accs, aspect_go_map = _load_annotation_aggregations(
+        conn, annotation_set_id, acc_to_idx
+    )
 
     result: dict[str, dict[str, Any]] = {}
     for asp in _ASPECTS:
