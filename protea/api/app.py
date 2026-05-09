@@ -137,21 +137,22 @@ _ROUTER_MODULES = (
 # call in ``_register_routers``.
 _API_VERSION_PREFIX = "/v1"
 
-_CORS_ORIGINS = (
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "https://protea.ngrok.app",
-)
+def _register_middlewares(app: FastAPI, allowed_origins: tuple[str, ...]) -> None:
+    """Wire up CORS + visitor counter middlewares.
 
-
-def _register_middlewares(app: FastAPI) -> None:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=list(_CORS_ORIGINS),
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    ``allowed_origins`` comes from ``Settings.allowed_origins`` (T5.5):
+    env ``PROTEA_ALLOWED_ORIGINS`` > YAML ``cors.allowed_origins`` >
+    built-in dev default. An empty tuple disables the CORS middleware
+    entirely so a fronting proxy can own the policy.
+    """
+    if allowed_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(allowed_origins),
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
     # Anonymous visitor counter — writes one row per GET into visitor_event
     # with a daily-rotated-salt hash instead of the IP. Powers the Grafana
     # "unique visitors" dashboard.
@@ -265,7 +266,7 @@ def create_app(project_root: Path | None = None) -> FastAPI:
     app.state.operation_registry = build_operation_registry()
     app.state.benchmark_config = load_benchmark_config(project_root)
 
-    _register_middlewares(app)
+    _register_middlewares(app, settings.allowed_origins)
     _register_health_endpoints(app, factory, settings)
     _register_routers(app)
     _mount_static_assets(app, project_root)
