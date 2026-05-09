@@ -79,15 +79,6 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/evaluation.py::compute_evaluation_data_reconciled",
-      "kind": "method",
-      "path": "protea/core/evaluation.py",
-      "name": "compute_evaluation_data_reconciled",
-      "line": 546,
-      "metric": 91,
-      "threshold": 60
-    },
-    {
       "key": "method::protea/core/metrics.py::compute_cafa_metrics",
       "kind": "method",
       "path": "protea/core/metrics.py",

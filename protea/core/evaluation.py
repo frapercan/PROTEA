@@ -591,49 +591,11 @@ def compute_evaluation_data_reconciled(
 
     old_by_ns = _apply_negatives(old_exp, merged_neg)
     new_by_ns = _apply_negatives(new_exp, merged_neg)
-
-    nk: dict[str, set[str]] = {}
-    lk: dict[str, set[str]] = defaultdict(set)
-    pk: dict[str, set[str]] = defaultdict(set)
-    pk_known: dict[str, set[str]] = defaultdict(set)
-
-    all_proteins = set(old_by_ns) | set(new_by_ns)
-    for protein in all_proteins:
-        old_ns_map = old_by_ns.get(protein, {})
-        new_ns_map = new_by_ns.get(protein, {})
-
-        new_all = {go for terms in new_ns_map.values() for go in terms}
-        if not new_all:
-            continue
-
-        had_anything_old = bool(old_ns_map)
-
-        if not had_anything_old:
-            nk[protein] = new_all
-        else:
-            for ns in _NAMESPACES:
-                old_ns = old_ns_map.get(ns, set())
-                new_ns = new_ns_map.get(ns, set())
-                delta_ns = new_ns - old_ns
-                if not delta_ns:
-                    continue
-                if not old_ns:
-                    lk[protein] |= delta_ns
-                else:
-                    pk[protein] |= delta_ns
-                    pk_known[protein] |= old_ns
-
+    nk, lk, pk, pk_known = _classify_protein_deltas(old_by_ns, new_by_ns)
     known = {
         p: {go for terms in ns_map.values() for go in terms} for p, ns_map in old_by_ns.items()
     }
-
-    return EvaluationData(
-        nk=nk,
-        lk=dict(lk),
-        pk=dict(pk),
-        pk_known=dict(pk_known),
-        known=known,
-    )
+    return EvaluationData(nk=nk, lk=lk, pk=pk, pk_known=pk_known, known=known)
 
 
 def _eval_data_to_dataframe(data: EvaluationData):
