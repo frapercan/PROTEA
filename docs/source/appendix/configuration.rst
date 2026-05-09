@@ -4,8 +4,8 @@ Configuration Reference
 PROTEA loads its configuration from two sources, merged in this order
 (later entries win):
 
-1. ``protea/config/system.yaml`` — file-based defaults
-2. Environment variables — runtime overrides
+1. ``protea/config/system.yaml`` (file-based defaults)
+2. Environment variables (runtime overrides)
 
 YAML structure
 --------------
@@ -40,7 +40,7 @@ startup.
 The ``storage`` block drives the ``ArtifactStore`` abstraction described
 in :doc:`/reference/infrastructure`. With ``backend: local`` (default)
 all blobs land under ``storage/artifacts/`` on the API host. Setting
-``backend: minio`` activates the S3-compatible path — requires the
+``backend: minio`` activates the S3-compatible path; requires the
 ``[storage]`` extra (``pip install 'protea[storage]'``) and a running
 MinIO instance (see ``docker compose --profile storage up``). Paths
 under ``storage.*`` are resolved relative to the project root when not
@@ -64,7 +64,7 @@ Environment variable overrides
      - Overrides ``storage.artifacts_dir`` (the ``cafaeval`` artefacts
        directory used by ``run_cafa_evaluation``).
    * - ``PROTEA_STORAGE_BACKEND``
-     - Overrides ``storage.backend`` — ``local`` (default) or ``minio``.
+     - Overrides ``storage.backend``: ``local`` (default) or ``minio``.
    * - ``PROTEA_STORAGE_ROOT``
      - Overrides ``storage.root`` (local backend root directory).
    * - ``PROTEA_MINIO_ENDPOINT``
@@ -76,7 +76,7 @@ Environment variable overrides
    * - ``PROTEA_MINIO_SECRET_KEY``
      - Overrides ``storage.minio.secret_key``.
    * - ``PROTEA_MINIO_SECURE``
-     - Overrides ``storage.minio.secure`` — truthy enables HTTPS.
+     - Overrides ``storage.minio.secure``: truthy enables HTTPS.
    * - ``PROTEA_ADMIN_TOKEN``
      - Overrides ``admin.token``.
    * - ``PROTEA_REF_CACHE_DIR``
@@ -99,7 +99,7 @@ Environment variable overrides
        ``OperationTuning.numpy_query_chunk`` (set via
        ``PROTEA_TUNING__OPERATION__NUMPY_QUERY_CHUNK`` or
        ``system.yaml``); set the env var directly only as an escape
-       hatch — it short-circuits the tuning sync.
+       hatch; it short-circuits the tuning sync.
    * - ``PROTEA_ALLOWED_ORIGINS``
      - Comma-separated CORS allowlist for the FastAPI app (T5.5).
        Priority: this env var overrides ``cors.allowed_origins`` in
@@ -179,19 +179,19 @@ credentials ``guest`` / ``guest``). The ten PROTEA queues are:
      - ``compute_embeddings`` coordinator (serialised, one at a time)
    * - ``protea.embeddings.batch``
      - OperationConsumer
-     - ``compute_embeddings_batch`` — GPU inference (ephemeral)
+     - ``compute_embeddings_batch``: GPU inference (ephemeral)
    * - ``protea.embeddings.write``
      - OperationConsumer
-     - ``store_embeddings`` — bulk pgvector insert (ephemeral)
+     - ``store_embeddings``: bulk pgvector insert (ephemeral)
    * - ``protea.predictions``
      - QueueConsumer
      - ``predict_go_terms`` coordinator
    * - ``protea.predictions.batch``
      - OperationConsumer
-     - ``predict_go_terms_batch`` — KNN + GO transfer (ephemeral)
+     - ``predict_go_terms_batch``: KNN + GO transfer (ephemeral)
    * - ``protea.predictions.write``
      - OperationConsumer
-     - ``store_predictions`` — bulk GOPrediction insert (ephemeral)
+     - ``store_predictions``: bulk GOPrediction insert (ephemeral)
    * - ``protea.evaluations``
      - QueueConsumer
      - ``run_cafa_evaluation``
