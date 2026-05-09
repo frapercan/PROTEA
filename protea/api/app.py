@@ -14,6 +14,7 @@ from protea.api.routers import annotations as annotations_router
 from protea.api.routers import benchmark as benchmark_router
 from protea.api.routers import datasets as datasets_router
 from protea.api.routers import embeddings as embeddings_router
+from protea.api.routers import experiment_runs as experiment_runs_router
 from protea.api.routers import jobs as jobs_router
 from protea.api.routers import maintenance as maintenance_router
 from protea.api.routers import proteins as proteins_router
@@ -98,6 +99,14 @@ _OPENAPI_TAGS: list[dict[str, str]] = [
             "live aggregate of their open pull requests."
         ),
     },
+    {
+        "name": "experiment-runs",
+        "description": (
+            "Per-research-run narrative + provenance anchor "
+            "(decision D11). Powers the F8b Experiments page and "
+            "the F-EXP campaign tooling."
+        ),
+    },
 ]
 
 _ROUTER_MODULES = (
@@ -117,6 +126,7 @@ _ROUTER_MODULES = (
     reranker_models_router,
     registry_router,
     stack_router,
+    experiment_runs_router,
 )
 
 _CORS_ORIGINS = (
