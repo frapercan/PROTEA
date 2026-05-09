@@ -31,7 +31,16 @@ def _require_admin_token(authorization: str | None) -> None:
 
 
 @router.post("/reset-db")
-def reset_db(request: Request, authorization: str | None = Header(default=None)) -> dict:
+def reset_db(
+    request: Request,
+    authorization: str | None = Header(
+        default=None,
+        description=(
+            "Bearer token matching ``PROTEA_ADMIN_TOKEN`` env var. "
+            "Required: requests without it are rejected with 403."
+        ),
+    ),
+) -> dict:
     """Drop and recreate the public schema, then re-apply all Alembic migrations."""
     _require_admin_token(authorization)
     settings = load_settings(_PROJECT_ROOT)

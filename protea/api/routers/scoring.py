@@ -126,9 +126,20 @@ def delete_scoring_config(
 @router.get("/prediction-sets/{set_id}/score.tsv")
 def download_scored_predictions(
     set_id: uuid.UUID,
-    scoring_config_id: uuid.UUID = Query(...),
-    min_score: float | None = Query(None, ge=0.0, le=1.0),
-    accession: str | None = Query(None),
+    scoring_config_id: uuid.UUID = Query(
+        ...,
+        description="UUID of the ``ScoringConfig`` whose formula computes the score column.",
+    ),
+    min_score: float | None = Query(
+        None,
+        ge=0.0,
+        le=1.0,
+        description="Optional score threshold in [0, 1]; rows below are omitted.",
+    ),
+    accession: str | None = Query(
+        None,
+        description="Optional protein accession filter; only rows for this protein streamed.",
+    ),
     factory=Depends(get_session_factory),
 ):
     """Stream a TSV of predictions with computed confidence scores.
@@ -177,9 +188,28 @@ def download_scored_predictions(
 # CAFA metrics endpoint ----------------------------------------
 
 def _eval_context_dep(
-    old_annotation_set_id: uuid.UUID = Query(...),
-    new_annotation_set_id: uuid.UUID = Query(...),
-    ontology_snapshot_id: uuid.UUID = Query(...),
+    old_annotation_set_id: uuid.UUID = Query(
+        ...,
+        description=(
+            "UUID of the OLD ``AnnotationSet`` (the t0 baseline) used "
+            "to derive NK / LK / PK protein partitions."
+        ),
+    ),
+    new_annotation_set_id: uuid.UUID = Query(
+        ...,
+        description=(
+            "UUID of the NEW ``AnnotationSet`` (the t1 target) used as "
+            "the ground-truth delta in CAFA scoring."
+        ),
+    ),
+    ontology_snapshot_id: uuid.UUID = Query(
+        ...,
+        description=(
+            "UUID of the ``OntologySnapshot`` to use for DAG ancestor "
+            "propagation. Should be aligned with the OLD annotation "
+            "set's snapshot for valid scoring."
+        ),
+    ),
 ) -> EvalContext:
     """FastAPI dependency that bundles the (old, new, snapshot) triple."""
     return EvalContext(
@@ -192,9 +222,23 @@ def _eval_context_dep(
 @router.get("/prediction-sets/{set_id}/metrics")
 def compute_metrics(
     set_id: uuid.UUID,
-    scoring_config_id: uuid.UUID = Query(...),
+    scoring_config_id: uuid.UUID = Query(
+        ...,
+        description=(
+            "UUID of the ``ScoringConfig`` whose formula and evidence "
+            "weights are applied to every prediction before computing "
+            "the curve."
+        ),
+    ),
     eval_context: EvalContext = Depends(_eval_context_dep),
-    category: str = Query("nk", pattern="^(nk|lk)$"),
+    category: str = Query(
+        "nk",
+        pattern="^(nk|lk)$",
+        description=(
+            "CAFA category to score against: ``nk`` (no-knowledge "
+            "proteins, default) or ``lk`` (limited-knowledge)."
+        ),
+    ),
     factory=Depends(get_session_factory),
 ):
     """Compute CAFA Fmax and AUC-PR for a PredictionSet under a ScoringConfig.
@@ -362,7 +406,15 @@ def compute_reranker_metrics(
     set_id: uuid.UUID,
     reranker_id: uuid.UUID = Query(..., description="UUID of the trained RerankerModel"),
     evaluation_set_id: uuid.UUID = Query(..., description="UUID of the EvaluationSet"),
-    category: str = Query("nk", pattern="^(nk|lk|pk)$"),
+    category: str = Query(
+        "nk",
+        pattern="^(nk|lk|pk)$",
+        description=(
+            "CAFA category to score against: ``nk`` (no-knowledge, "
+            "default), ``lk`` (limited-knowledge), or ``pk`` "
+            "(partial-knowledge)."
+        ),
+    ),
     factory=Depends(get_session_factory),
 ):
     """Compute CAFA Fmax and AUC-PR using re-ranker scores instead of ScoringConfig.

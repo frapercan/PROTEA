@@ -217,9 +217,22 @@ def get_prediction_set(
 @router.get("/prediction-sets/{set_id}/proteins", summary="List proteins in a prediction set")
 def list_prediction_set_proteins(
     set_id: UUID,
-    search: str | None = None,
-    limit: int = 50,
-    offset: int = 0,
+    search: str | None = Query(
+        default=None,
+        description=(
+            "Substring filter on protein accession; case-insensitive. "
+            "Pairs with ``limit`` / ``offset`` for client-driven "
+            "pagination."
+        ),
+    ),
+    limit: int = Query(
+        default=50,
+        description="Max rows per page.",
+    ),
+    offset: int = Query(
+        default=0,
+        description="Offset into the alphabetically-ordered result set.",
+    ),
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
     """Paginated list of proteins in a prediction set with their predicted GO count, minimum distance,
@@ -261,7 +274,13 @@ def get_protein_predictions(
 )
 def get_go_term_distribution(
     set_id: UUID,
-    limit: int = 50,
+    limit: int = Query(
+        default=50,
+        description=(
+            "Max number of top-N GO terms to return per aspect "
+            "(``F``/``P``/``C``)."
+        ),
+    ),
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
     """Return the most frequently predicted GO terms grouped by aspect (F/P/C)

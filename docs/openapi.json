@@ -1315,6 +1315,7 @@
         "operationId": "reset_db_v1_admin_reset_db_post",
         "parameters": [
           {
+            "description": "Bearer token matching ``PROTEA_ADMIN_TOKEN`` env var. Required: requests without it are rejected with 403.",
             "in": "header",
             "name": "authorization",
             "required": false,
@@ -1327,6 +1328,7 @@
                   "type": "null"
                 }
               ],
+              "description": "Bearer token matching ``PROTEA_ADMIN_TOKEN`` env var. Required: requests without it are rejected with 403.",
               "title": "Authorization"
             }
           }
@@ -2571,11 +2573,13 @@
             }
           },
           {
+            "description": "Number of ancestor hops to walk up the GO DAG from each seed term; capped at 6 to keep the response bounded.",
             "in": "query",
             "name": "depth",
             "required": false,
             "schema": {
               "default": 3,
+              "description": "Number of ancestor hops to walk up the GO DAG from each seed term; capped at 6 to keep the response bounded.",
               "maximum": 6,
               "minimum": 1,
               "title": "Depth",
@@ -3342,11 +3346,13 @@
             }
           },
           {
+            "description": "Max number of top-N GO terms to return per aspect (``F``/``P``/``C``).",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "default": 50,
+              "description": "Max number of top-N GO terms to return per aspect (``F``/``P``/``C``).",
               "title": "Limit",
               "type": "integer"
             }
@@ -3596,6 +3602,7 @@
             }
           },
           {
+            "description": "Substring filter on protein accession; case-insensitive. Pairs with ``limit`` / ``offset`` for client-driven pagination.",
             "in": "query",
             "name": "search",
             "required": false,
@@ -3608,25 +3615,30 @@
                   "type": "null"
                 }
               ],
+              "description": "Substring filter on protein accession; case-insensitive. Pairs with ``limit`` / ``offset`` for client-driven pagination.",
               "title": "Search"
             }
           },
           {
+            "description": "Max rows per page.",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "default": 50,
+              "description": "Max rows per page.",
               "title": "Limit",
               "type": "integer"
             }
           },
           {
+            "description": "Offset into the alphabetically-ordered result set.",
             "in": "query",
             "name": "offset",
             "required": false,
             "schema": {
               "default": 0,
+              "description": "Offset into the alphabetically-ordered result set.",
               "title": "Offset",
               "type": "integer"
             }
@@ -4699,6 +4711,7 @@
         "operationId": "list_proteins_v1_proteins_get",
         "parameters": [
           {
+            "description": "Substring filter on accession/entry/gene/organism (case-insensitive).",
             "in": "query",
             "name": "search",
             "required": false,
@@ -4711,10 +4724,12 @@
                   "type": "null"
                 }
               ],
+              "description": "Substring filter on accession/entry/gene/organism (case-insensitive).",
               "title": "Search"
             }
           },
           {
+            "description": "Filter to UniProt-reviewed (true) or unreviewed (false). None = no filter.",
             "in": "query",
             "name": "reviewed",
             "required": false,
@@ -4727,36 +4742,43 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter to UniProt-reviewed (true) or unreviewed (false). None = no filter.",
               "title": "Reviewed"
             }
           },
           {
+            "description": "When true (default), exclude protein isoforms.",
             "in": "query",
             "name": "canonical_only",
             "required": false,
             "schema": {
               "default": true,
+              "description": "When true (default), exclude protein isoforms.",
               "title": "Canonical Only",
               "type": "boolean"
             }
           },
           {
+            "description": "Max rows per page; capped at 500.",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "default": 50,
+              "description": "Max rows per page; capped at 500.",
               "maximum": 500,
               "title": "Limit",
               "type": "integer"
             }
           },
           {
+            "description": "Offset into alphabetically-ordered (by accession) results.",
             "in": "query",
             "name": "offset",
             "required": false,
             "schema": {
               "default": 0,
+              "description": "Offset into alphabetically-ordered (by accession) results.",
               "minimum": 0,
               "title": "Offset",
               "type": "integer"
@@ -4887,6 +4909,7 @@
             }
           },
           {
+            "description": "Optional UUID of an ``AnnotationSet`` to scope the lookup. When omitted, annotations from every set the protein appears in are returned. Invalid UUIDs return 422.",
             "in": "query",
             "name": "annotation_set_id",
             "required": false,
@@ -4899,6 +4922,7 @@
                   "type": "null"
                 }
               ],
+              "description": "Optional UUID of an ``AnnotationSet`` to scope the lookup. When omitted, annotations from every set the protein appears in are returned. Invalid UUIDs return 422.",
               "title": "Annotation Set Id"
             }
           }
@@ -5431,51 +5455,61 @@
             }
           },
           {
+            "description": "UUID of the ``ScoringConfig`` whose formula and evidence weights are applied to every prediction before computing the curve.",
             "in": "query",
             "name": "scoring_config_id",
             "required": true,
             "schema": {
+              "description": "UUID of the ``ScoringConfig`` whose formula and evidence weights are applied to every prediction before computing the curve.",
               "format": "uuid",
               "title": "Scoring Config Id",
               "type": "string"
             }
           },
           {
+            "description": "CAFA category to score against: ``nk`` (no-knowledge proteins, default) or ``lk`` (limited-knowledge).",
             "in": "query",
             "name": "category",
             "required": false,
             "schema": {
               "default": "nk",
+              "description": "CAFA category to score against: ``nk`` (no-knowledge proteins, default) or ``lk`` (limited-knowledge).",
               "pattern": "^(nk|lk)$",
               "title": "Category",
               "type": "string"
             }
           },
           {
+            "description": "UUID of the OLD ``AnnotationSet`` (the t0 baseline) used to derive NK / LK / PK protein partitions.",
             "in": "query",
             "name": "old_annotation_set_id",
             "required": true,
             "schema": {
+              "description": "UUID of the OLD ``AnnotationSet`` (the t0 baseline) used to derive NK / LK / PK protein partitions.",
               "format": "uuid",
               "title": "Old Annotation Set Id",
               "type": "string"
             }
           },
           {
+            "description": "UUID of the NEW ``AnnotationSet`` (the t1 target) used as the ground-truth delta in CAFA scoring.",
             "in": "query",
             "name": "new_annotation_set_id",
             "required": true,
             "schema": {
+              "description": "UUID of the NEW ``AnnotationSet`` (the t1 target) used as the ground-truth delta in CAFA scoring.",
               "format": "uuid",
               "title": "New Annotation Set Id",
               "type": "string"
             }
           },
           {
+            "description": "UUID of the ``OntologySnapshot`` to use for DAG ancestor propagation. Should be aligned with the OLD annotation set's snapshot for valid scoring.",
             "in": "query",
             "name": "ontology_snapshot_id",
             "required": true,
             "schema": {
+              "description": "UUID of the ``OntologySnapshot`` to use for DAG ancestor propagation. Should be aligned with the OLD annotation set's snapshot for valid scoring.",
               "format": "uuid",
               "title": "Ontology Snapshot Id",
               "type": "string"
@@ -5627,11 +5661,13 @@
             }
           },
           {
+            "description": "CAFA category to score against: ``nk`` (no-knowledge, default), ``lk`` (limited-knowledge), or ``pk`` (partial-knowledge).",
             "in": "query",
             "name": "category",
             "required": false,
             "schema": {
               "default": "nk",
+              "description": "CAFA category to score against: ``nk`` (no-knowledge, default), ``lk`` (limited-knowledge), or ``pk`` (partial-knowledge).",
               "pattern": "^(nk|lk|pk)$",
               "title": "Category",
               "type": "string"
@@ -5685,16 +5721,19 @@
             }
           },
           {
+            "description": "UUID of the ``ScoringConfig`` whose formula computes the score column.",
             "in": "query",
             "name": "scoring_config_id",
             "required": true,
             "schema": {
+              "description": "UUID of the ``ScoringConfig`` whose formula computes the score column.",
               "format": "uuid",
               "title": "Scoring Config Id",
               "type": "string"
             }
           },
           {
+            "description": "Optional score threshold in [0, 1]; rows below are omitted.",
             "in": "query",
             "name": "min_score",
             "required": false,
@@ -5709,10 +5748,12 @@
                   "type": "null"
                 }
               ],
+              "description": "Optional score threshold in [0, 1]; rows below are omitted.",
               "title": "Min Score"
             }
           },
           {
+            "description": "Optional protein accession filter; only rows for this protein streamed.",
             "in": "query",
             "name": "accession",
             "required": false,
@@ -5725,6 +5766,7 @@
                   "type": "null"
                 }
               ],
+              "description": "Optional protein accession filter; only rows for this protein streamed.",
               "title": "Accession"
             }
           }
@@ -6038,11 +6080,13 @@
         "operationId": "get_support_v1_support_get",
         "parameters": [
           {
+            "description": "When false (default), the response carries only the most recent N comments (per the tuning config). When true, every comment is returned (uncapped; intended for moderation tooling, not the public landing page).",
             "in": "query",
             "name": "all_comments",
             "required": false,
             "schema": {
               "default": false,
+              "description": "When false (default), the response carries only the most recent N comments (per the tuning config). When true, every comment is returned (uncapped; intended for moderation tooling, not the public landing page).",
               "title": "All Comments",
               "type": "boolean"
             }
