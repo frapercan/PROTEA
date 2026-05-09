@@ -70,12 +70,12 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/metrics.py::compute_cafa_metrics",
+      "key": "method::protea/api/routers/showcase.py::get_showcase",
       "kind": "method",
-      "path": "protea/core/metrics.py",
-      "name": "compute_cafa_metrics",
-      "line": 103,
-      "metric": 64,
+      "path": "protea/api/routers/showcase.py",
+      "name": "get_showcase",
+      "line": 75,
+      "metric": 102,
       "threshold": 60
     },
     {

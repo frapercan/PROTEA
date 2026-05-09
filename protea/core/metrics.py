@@ -100,45 +100,16 @@ def _evaluate_at_threshold(
     )
 
 
-def compute_cafa_metrics(
-    scored_predictions: list[dict[str, Any]],
-    evaluation_data: EvaluationData,
-    category: str = "nk",
-) -> CAFAMetrics:
-    """Compute CAFA Fmax and PR curve.
+def _walk_thresholds(
+    ground_truth: dict[str, set[str]],
+    preds_by_protein: dict[str, list[tuple[float, str]]],
+    total_gt_terms: int,
+) -> tuple[list[PRPoint], float, float]:
+    """Sweep ``_N_THRESHOLDS`` thresholds and track the running Fmax.
 
-    Parameters
-    ----------
-    scored_predictions:
-        List of dicts, each must have:
-          - ``protein_accession`` (str)
-          - ``go_id`` (str, e.g. ``GO:0005488``)
-          - ``score`` (float in [0, 1])
-    evaluation_data:
-        Ground truth from ``compute_evaluation_data()``.
-    category:
-        ``"nk"`` (no-knowledge), ``"lk"`` (limited-knowledge), or ``"pk"`` (prior-knowledge).
-
-    Returns
-    -------
-    CAFAMetrics
+    Returns ``(curve, best_f, best_threshold)``: the full PR curve in
+    threshold order plus the threshold that maximises F1.
     """
-    if category not in ("nk", "lk", "pk"):
-        raise ValueError(f"category must be 'nk', 'lk', or 'pk', got {category!r}")
-
-    ground_truth: dict[str, set[str]] = getattr(evaluation_data, category)
-
-    # Group predictions by protein, keep only proteins in ground truth
-    preds_by_protein: dict[str, list[tuple[float, str]]] = defaultdict(list)
-    for p in scored_predictions:
-        acc = p["protein_accession"]
-        if acc in ground_truth:
-            preds_by_protein[acc].append((float(p["score"]), str(p["go_id"])))
-
-    n_gt = len(ground_truth)
-    total_gt_terms = sum(len(v) for v in ground_truth.values())
-    n_predicted = len(preds_by_protein)
-
     curve: list[PRPoint] = []
     best_f = 0.0
     best_t = 0.0
@@ -148,19 +119,41 @@ def compute_cafa_metrics(
         if point.f1 > best_f:
             best_f = point.f1
             best_t = point.threshold
+    return curve, best_f, best_t
 
-    # AUC-PR: trapezoidal integration (recall on x-axis, precision on y-axis)
+
+def compute_cafa_metrics(
+    scored_predictions: list[dict[str, Any]],
+    evaluation_data: EvaluationData,
+    category: str = "nk",
+) -> CAFAMetrics:
+    """Compute CAFA Fmax and PR curve.
+
+    ``scored_predictions`` must carry ``protein_accession``, ``go_id``,
+    ``score`` per row. ``category`` selects ``nk`` / ``lk`` / ``pk`` from
+    the evaluation ground truth.
+    """
+    if category not in ("nk", "lk", "pk"):
+        raise ValueError(f"category must be 'nk', 'lk', or 'pk', got {category!r}")
+    ground_truth: dict[str, set[str]] = getattr(evaluation_data, category)
+    preds_by_protein: dict[str, list[tuple[float, str]]] = defaultdict(list)
+    for p in scored_predictions:
+        acc = p["protein_accession"]
+        if acc in ground_truth:
+            preds_by_protein[acc].append((float(p["score"]), str(p["go_id"])))
+    total_gt_terms = sum(len(v) for v in ground_truth.values())
+    curve, best_f, best_t = _walk_thresholds(ground_truth, preds_by_protein, total_gt_terms)
+    # AUC-PR: trapezoidal integration (recall on x-axis, precision on y-axis).
     recalls = [p.recall for p in curve]
     precisions = [p.precision for p in curve]
     auc = float(abs(np.trapezoid(precisions, recalls)))
-
     return CAFAMetrics(
         category=category,
         fmax=round(best_f, 4),
         threshold_at_fmax=round(best_t, 4),
         auc_pr=round(auc, 4),
-        n_ground_truth_proteins=n_gt,
-        n_predicted_proteins=n_predicted,
+        n_ground_truth_proteins=len(ground_truth),
+        n_predicted_proteins=len(preds_by_protein),
         n_predictions=len(scored_predictions),
         curve=curve,
     )
