@@ -91,135 +91,18 @@ async def annotate(
     Returns the IDs the frontend needs to monitor progress and chain
     ``predict_go_terms`` once embeddings are ready.
     """
-    # ── Parse FASTA ──────────────────────────────────────────────────
-    from protea.config.tuning import get_tuning
+    content = await _read_fasta_content(file, fasta_text)
+    records = _parse_and_dedup_records(content)
 
-    max_bytes = get_tuning().api.max_fasta_bytes
-    if file is not None:
-        raw = await file.read()
-        if len(raw) > max_bytes:
-            raise HTTPException(
-                status_code=413,
-                detail=f"FASTA file exceeds {max_bytes // (1024 * 1024)} MB limit",
-            )
-        try:
-            content = raw.decode("utf-8")
-        except UnicodeDecodeError:
-            raise HTTPException(
-                status_code=422, detail="FASTA file must be UTF-8 encoded"
-            ) from None
-    elif fasta_text:
-        if len(fasta_text.encode("utf-8")) > max_bytes:
-            raise HTTPException(
-                status_code=413,
-                detail=f"FASTA text exceeds {max_bytes // (1024 * 1024)} MB limit",
-            )
-        content = fasta_text
-    else:
-        raise HTTPException(status_code=422, detail="Provide a FASTA file or fasta_text")
-
-    records = _parse_fasta(content)
-    if not records:
-        raise HTTPException(status_code=422, detail="No valid sequences found in the FASTA input")
-
-    seen: set[str] = set()
-    for acc, _, _ in records:
-        if acc in seen:
-            raise HTTPException(status_code=422, detail=f"Duplicate accession: '{acc}'")
-        seen.add(acc)
-
-    # ── Create QuerySet + upsert sequences ───────────────────────────
     with session_scope(factory) as session:
-        # Upsert sequences
-        hash_to_seq_id: dict[str, int] = {}
-        hashes = [Sequence.compute_hash(seq) for _, seq, _ in records]
-        existing = (
-            session.query(Sequence.sequence_hash, Sequence.id)
-            .filter(Sequence.sequence_hash.in_(hashes))
-            .all()
+        query_set_id = _upsert_query_set(session, name, records)
+        config_id, annotation_set_id, ontology_snapshot_id, reranker_id = (
+            _resolve_dispatch_resources(session)
         )
-        for h, sid in existing:
-            hash_to_seq_id[h] = sid
-        for (_, seq, _), h in zip(records, hashes, strict=False):
-            if h not in hash_to_seq_id:
-                new_seq = Sequence(sequence=seq, sequence_hash=h)
-                session.add(new_seq)
-                session.flush()
-                hash_to_seq_id[h] = new_seq.id
-
-        qs = QuerySet(name=name, description="Created via quick annotation")
-        session.add(qs)
-        session.flush()
-        entries = [
-            QuerySetEntry(
-                query_set_id=qs.id,
-                sequence_id=hash_to_seq_id[h],
-                accession=acc,
-            )
-            for (acc, _, _), h in zip(records, hashes, strict=False)
-        ]
-        session.add_all(entries)
-        session.flush()
-        query_set_id = qs.id
-
-        # ── Auto-select best resources ───────────────────────────────
-        config = _best_embedding_config(session)
-        if config is None:
-            config = EmbeddingConfig(**_DEFAULT_CONFIG)
-            session.add(config)
-            session.flush()
-        config_id = config.id
-
-        ann = _newest_annotation_set(session)
-        if ann is None:
-            raise HTTPException(
-                status_code=409,
-                detail="No annotation sets available. Load GO annotations first.",
-            )
-        annotation_set_id = ann.id
-
-        snap = _newest_ontology_snapshot(session)
-        if snap is None:
-            raise HTTPException(
-                status_code=409,
-                detail="No ontology snapshots available. Load a GO ontology first.",
-            )
-        ontology_snapshot_id = snap.id
-
-        # ── Check for trained reranker ────────────────────────────────
-        best_reranker = (
-            session.query(RerankerModel).order_by(RerankerModel.created_at.desc()).first()
-        )
-        reranker_id = best_reranker.id if best_reranker else None
-
-        # ── Create compute_embeddings job ────────────────────────────
-        embed_payload = {
-            "embedding_config_id": str(config_id),
-            "query_set_id": str(query_set_id),
-            "device": "cuda",
-            "skip_existing": True,
-            "batch_size": 8,
-            "sequences_per_job": 64,
-        }
-        job = Job(
-            operation="compute_embeddings",
-            queue_name="protea.embeddings",
-            payload=embed_payload,
-        )
-        session.add(job)
-        session.flush()
-        embed_job_id = job.id
-        session.add(
-            JobEvent(
-                job_id=embed_job_id,
-                event="job.created",
-                fields={"operation": "compute_embeddings", "source": "annotate"},
-            )
-        )
+        embed_job_id = _enqueue_embed_job(session, config_id, query_set_id)
 
     publish_job(amqp_url, "protea.embeddings", embed_job_id)
 
-    # Build the predict payload the frontend will POST when embeddings finish.
     predict_payload: dict[str, Any] = {
         "embedding_config_id": str(config_id),
         "annotation_set_id": str(annotation_set_id),
@@ -231,7 +114,6 @@ async def annotate(
         "compute_taxonomy": True,
         "compute_reranker_features": True,
     }
-
     return {
         "query_set_id": str(query_set_id),
         "embedding_config_id": str(config_id),
@@ -242,3 +124,145 @@ async def annotate(
         "reranker_id": str(reranker_id) if reranker_id else None,
         "sequence_count": len(records),
     }
+
+
+async def _read_fasta_content(
+    file: UploadFile | None, fasta_text: str | None
+) -> str:
+    """Resolve the FASTA payload: prefer the uploaded file, fall back to ``fasta_text``.
+
+    Enforces the configured byte cap (HTTP 413) and validates UTF-8
+    (HTTP 422). Raises 422 when neither input is provided.
+    """
+    from protea.config.tuning import get_tuning
+
+    max_bytes = get_tuning().api.max_fasta_bytes
+    if file is not None:
+        raw = await file.read()
+        if len(raw) > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"FASTA file exceeds {max_bytes // (1024 * 1024)} MB limit",
+            )
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError:
+            raise HTTPException(
+                status_code=422, detail="FASTA file must be UTF-8 encoded"
+            ) from None
+    if fasta_text:
+        if len(fasta_text.encode("utf-8")) > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"FASTA text exceeds {max_bytes // (1024 * 1024)} MB limit",
+            )
+        return fasta_text
+    raise HTTPException(status_code=422, detail="Provide a FASTA file or fasta_text")
+
+
+def _parse_and_dedup_records(content: str) -> list[tuple[str, str, str]]:
+    """Parse the FASTA payload and reject duplicate accessions (HTTP 422)."""
+    records = _parse_fasta(content)
+    if not records:
+        raise HTTPException(
+            status_code=422, detail="No valid sequences found in the FASTA input"
+        )
+    seen: set[str] = set()
+    for acc, _, _ in records:
+        if acc in seen:
+            raise HTTPException(status_code=422, detail=f"Duplicate accession: '{acc}'")
+        seen.add(acc)
+    return records
+
+
+def _upsert_query_set(
+    session: Session, name: str, records: list[tuple[str, str, str]]
+) -> Any:
+    """Upsert ``Sequence`` rows for the FASTA records and create a ``QuerySet``
+    with one ``QuerySetEntry`` per record. Returns the new ``QuerySet`` id."""
+    hash_to_seq_id: dict[str, int] = {}
+    hashes = [Sequence.compute_hash(seq) for _, seq, _ in records]
+    existing = (
+        session.query(Sequence.sequence_hash, Sequence.id)
+        .filter(Sequence.sequence_hash.in_(hashes))
+        .all()
+    )
+    for h, sid in existing:
+        hash_to_seq_id[h] = sid
+    for (_, seq, _), h in zip(records, hashes, strict=False):
+        if h not in hash_to_seq_id:
+            new_seq = Sequence(sequence=seq, sequence_hash=h)
+            session.add(new_seq)
+            session.flush()
+            hash_to_seq_id[h] = new_seq.id
+
+    qs = QuerySet(name=name, description="Created via quick annotation")
+    session.add(qs)
+    session.flush()
+    session.add_all(
+        [
+            QuerySetEntry(query_set_id=qs.id, sequence_id=hash_to_seq_id[h], accession=acc)
+            for (acc, _, _), h in zip(records, hashes, strict=False)
+        ]
+    )
+    session.flush()
+    return qs.id
+
+
+def _resolve_dispatch_resources(session: Session) -> tuple[Any, Any, Any, Any]:
+    """Pick the best embedding config (creating the default ESM-2 if none exists),
+    the newest AnnotationSet + OntologySnapshot, and the latest RerankerModel.
+
+    Raises HTTP 409 when no annotation set or ontology snapshot is loaded yet.
+    Returns ``(config_id, annotation_set_id, ontology_snapshot_id, reranker_id)``;
+    ``reranker_id`` is ``None`` when no RerankerModel rows exist."""
+    config = _best_embedding_config(session)
+    if config is None:
+        config = EmbeddingConfig(**_DEFAULT_CONFIG)
+        session.add(config)
+        session.flush()
+    ann = _newest_annotation_set(session)
+    if ann is None:
+        raise HTTPException(
+            status_code=409,
+            detail="No annotation sets available. Load GO annotations first.",
+        )
+    snap = _newest_ontology_snapshot(session)
+    if snap is None:
+        raise HTTPException(
+            status_code=409,
+            detail="No ontology snapshots available. Load a GO ontology first.",
+        )
+    best_reranker = (
+        session.query(RerankerModel).order_by(RerankerModel.created_at.desc()).first()
+    )
+    reranker_id = best_reranker.id if best_reranker else None
+    return config.id, ann.id, snap.id, reranker_id
+
+
+def _enqueue_embed_job(session: Session, config_id: Any, query_set_id: Any) -> Any:
+    """Insert a ``compute_embeddings`` Job row + its ``job.created`` JobEvent.
+
+    Returns the new job id; the AMQP publish happens after the session commits."""
+    job = Job(
+        operation="compute_embeddings",
+        queue_name="protea.embeddings",
+        payload={
+            "embedding_config_id": str(config_id),
+            "query_set_id": str(query_set_id),
+            "device": "cuda",
+            "skip_existing": True,
+            "batch_size": 8,
+            "sequences_per_job": 64,
+        },
+    )
+    session.add(job)
+    session.flush()
+    session.add(
+        JobEvent(
+            job_id=job.id,
+            event="job.created",
+            fields={"operation": "compute_embeddings", "source": "annotate"},
+        )
+    )
+    return job.id
