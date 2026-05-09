@@ -64,7 +64,7 @@ class ComputeEmbeddingsPayload(ProteaPayload, frozen=True):
 
     The coordinator publishes N ephemeral operation messages to
     ``protea.embeddings.batch``.  Any worker consuming that queue picks up a
-    message and runs ``ComputeEmbeddingsBatchOperation`` — no child Job rows
+    message and runs ``ComputeEmbeddingsBatchOperation``: no child Job rows
     are created in the DB.
 
     Fields
@@ -418,7 +418,7 @@ class ComputeEmbeddingsBatchOperation:
         config: EmbeddingConfig,
         device: str,
     ) -> list[list[ChunkEmbedding]]:
-        """Per-batch dispatch shim — delegates to ``_dispatch_embed`` (T2A.5)."""
+        """Per-batch dispatch shim; delegates to ``_dispatch_embed`` (T2A.5)."""
         return _dispatch_embed(model, tokenizer, sequences, config, device)
 
 
@@ -556,7 +556,7 @@ def _get_backend_plugins() -> dict[str, Any]:
     once per process; subsequent calls return the cached map.
 
     A plugin whose ``name`` attribute disagrees with its entry_point
-    name is a hard error — the entry_points file and the class
+    name is a hard error: the entry_points file and the class
     declaration must agree, and silently letting them drift would make
     "Unknown model_backend" errors confusing.
     """
@@ -755,8 +755,8 @@ def _t5_pool_one(
     """Pool one batched sequence's hidden states into ChunkEmbedding rows.
 
     Two pooling paths:
-    * ``cls`` — position 0 (``<AA2fold>`` on ProstT5, otherwise first AA).
-    * residue — strip prefix (``start_idx``) and trailing EOS so residues
+    * ``cls``: position 0 (``<AA2fold>`` on ProstT5, otherwise first AA).
+    * residue: strip prefix (``start_idx``) and trailing EOS so residues
       start at AA 0 and ``residues.shape[0]`` equals the amino-acid count.
     """
     import torch.nn.functional as F
@@ -938,7 +938,7 @@ def _embed_esm3c(
 ) -> list[list[ChunkEmbedding]]:
     """Embed sequences with ESMC (ESM3c family).
 
-    Uses the ESM SDK directly — no external tokenizer.  The model must have
+    Uses the ESM SDK directly: no external tokenizer.  The model must have
     been loaded with ``ESMC.from_pretrained`` and cast to FP16.  Hidden states
     are returned via ``LogitsConfig(return_hidden_states=True)``.
     """
@@ -971,7 +971,7 @@ When ``model_backend`` is unset or unknown the dispatch falls back to
 
 Stored as function names rather than direct references so
 ``unittest.mock.patch("protea.core.operations.compute_embeddings._embed_ankh", ...)``
-behaves correctly — the dispatcher resolves the name via ``getattr`` on
+behaves correctly: the dispatcher resolves the name via ``getattr`` on
 this module each call, so monkey-patching the symbol routes through.
 
 Once ``protea-backends`` exposes its plugin entry_points (T2A.1-T2A.4),
@@ -992,7 +992,7 @@ def _dispatch_embed(
     Defaults to ``_embed_esm`` (HuggingFace ``EsmModel``) when
     ``config.model_backend`` is missing from the registry. ESM3c is
     special-cased because the ESMC SDK exposes a tokenizer-free interface
-    via ``model.encode`` — every other backend takes a HuggingFace tokenizer.
+    via ``model.encode``; every other backend takes a HuggingFace tokenizer.
     """
     import sys
 
@@ -1114,7 +1114,7 @@ def _chunk_and_pool(residues: Any, config: EmbeddingConfig) -> list[ChunkEmbeddi
 def _compute_chunk_spans(length: int, chunk_size: int, overlap: int) -> list[tuple[int, int]]:
     """Compute (start, end) spans for overlapping chunks over a sequence of ``length`` residues.
 
-    Raises ``ValueError`` if ``overlap >= chunk_size`` — such a configuration
+    Raises ``ValueError`` if ``overlap >= chunk_size``; such a configuration
     would produce O(L) single-residue chunks or an infinite loop.
     """
     if overlap >= chunk_size:
