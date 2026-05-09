@@ -52,7 +52,7 @@ All models use SQLAlchemy 2.x declarative style with ``Mapped[]`` type
 annotations. The schema is managed by Alembic; migrations are generated via
 ``alembic revision --autogenerate`` and stored under ``alembic/versions/``.
 
-**Job and JobEvent**
+**Job, JobEvent, and JobComment**
 
 ``Job`` is the central entity of the job queue. It implements a five-state
 machine (``QUEUED → RUNNING → SUCCEEDED | FAILED``, or ``QUEUED →
@@ -60,11 +60,21 @@ CANCELLED``). The ``parent_job_id`` foreign key links batch child jobs to
 their coordinator parent. ``payload`` and ``meta`` are PostgreSQL JSONB
 columns, allowing arbitrary structured data without schema migrations for
 new operation types. ``progress_current`` and ``progress_total`` are updated
-atomically by write workers to drive the frontend progress bar.
+atomically by write workers to drive the frontend progress bar. The
+narrative columns ``description`` / ``findings`` (Text, nullable) and
+``tags`` (``Text[]``, default empty) carry operator-supplied context
+and never affect dispatch (T3.9 / D11).
 
 ``JobEvent`` is an append-only audit log: rows are written by the ``emit``
 callback during execution and are never updated or deleted. The frontend
 renders them as a chronological event timeline.
+
+``JobComment`` is the human-authored note thread attached to a ``Job``
+(T3.10 / D11). One row per comment with ``author`` (Text, nullable),
+``body`` (Text, required), and ``created_at`` (Timestamptz). Foreign
+key to ``job(id)`` cascades on delete. Written via
+``POST /jobs/{job_id}/comments`` and read chronologically via
+``GET /jobs/{job_id}/comments``.
 
 .. automodule:: protea.infrastructure.orm.models.job
    :members:

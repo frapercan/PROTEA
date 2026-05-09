@@ -6,7 +6,7 @@ Data Model
    :depth: 2
 
 All models use SQLAlchemy 2.x declarative style with ``Mapped[]`` type annotations.
-The schema is managed by Alembic (33 migrations to date).
+The schema is managed by Alembic (34 migrations to date).
 
 Protein and sequence deduplication
 ------------------------------------
@@ -455,6 +455,17 @@ Job queue
 **JobEvent**
    Append-only audit log. Written by the ``emit`` callback during execution. The frontend
    renders these as a chronological timeline. Events are never updated or deleted.
+
+**JobComment**
+   Human-authored note thread attached to a ``Job`` (T3.10 / D11).
+   One-to-many: ``job_id`` UUID FK to ``job(id)`` with ``ON DELETE
+   CASCADE``, ``author`` Text nullable, ``body`` Text required,
+   ``created_at`` Timestamptz default ``now()``. Indexed by
+   ``(job_id, created_at)`` for the natural read pattern. Comments
+   are written through ``POST /jobs/{job_id}/comments`` and read
+   chronologically through ``GET /jobs/{job_id}/comments``; they
+   complement ``JobEvent`` (which is machine-emitted) by giving
+   curators / operators a place for free-form annotations.
 
 Status enum
 -----------
