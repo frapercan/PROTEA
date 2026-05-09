@@ -1098,16 +1098,13 @@ class PredictGOTermsBatchOperation:
     ) -> dict[str, Any]:
         """Load reference accessions and embeddings (float16) into the process cache.
 
-        Checks the disk cache first (survives worker restarts). On miss, fetches
-        from PostgreSQL and writes the result to disk for future restarts.
-
-        GO annotations are NOT loaded here — they are fetched lazily per batch
-        for only the unique neighbors found by KNN, saving several GB of RAM.
-        Embeddings are stored as float16 (half the memory of float32); they are
-        cast to float32 at search time with negligible accuracy loss.
+        Checks the disk cache first (survives worker restarts). On miss,
+        fetches from PostgreSQL and writes the result to disk for future
+        restarts. GO annotations are NOT loaded here; they are fetched
+        lazily per batch for only the unique neighbours found by KNN,
+        saving several GB of RAM.
         """
         emit("predict_go_terms_batch.load_references_start", None, {}, "info")
-
         cached = _load_from_disk_cache(embedding_config_id, annotation_set_id)
         if cached is not None:
             emit(
@@ -1121,8 +1118,36 @@ class PredictGOTermsBatchOperation:
                 "info",
             )
             return _derive_reference_views(cached["accessions"], cached["embeddings"])
+        accessions, embeddings = self._stream_reference_pool(
+            session, embedding_config_id, annotation_set_id
+        )
+        _save_to_disk_cache(embedding_config_id, annotation_set_id, accessions, embeddings)
+        emit(
+            "predict_go_terms_batch.load_references_done",
+            None,
+            {
+                "references": len(accessions),
+                "embeddings_mb": round(embeddings.nbytes / 1024 / 1024),
+                "source": "database",
+            },
+            "info",
+        )
+        return _derive_reference_views(accessions, embeddings)
 
-        annotated_accessions_sq = (
+    def _stream_reference_pool(
+        self,
+        session: Session,
+        embedding_config_id: uuid.UUID,
+        annotation_set_id: uuid.UUID,
+    ) -> tuple[list[str], np.ndarray]:
+        """Stream the ``(accession, embedding)`` rows for all annotated proteins.
+
+        Pre-allocates a float16 numpy array sized to the row count so
+        peak Python-object memory stays bounded by the cursor chunk;
+        without pre-allocation a ``.all()`` on 400k rows materialises
+        ~14 GB of Python float objects.
+        """
+        annotated_sq = (
             session.query(ProteinGOAnnotation.protein_accession)
             .filter(ProteinGOAnnotation.annotation_set_id == annotation_set_id)
             .distinct()
@@ -1135,28 +1160,14 @@ class PredictGOTermsBatchOperation:
                 (SequenceEmbedding.sequence_id == Protein.sequence_id)
                 & (SequenceEmbedding.embedding_config_id == embedding_config_id),
             )
-            .join(
-                annotated_accessions_sq,
-                Protein.accession == annotated_accessions_sq.c.protein_accession,
-            )
+            .join(annotated_sq, Protein.accession == annotated_sq.c.protein_accession)
         )
-
-        # Count first so we can pre-allocate the numpy array and never build a
-        # list-of-lists in Python.  Without pre-allocation, .all() on 400k rows
-        # materialises ~14 GB of Python float objects and hits swap.
         total = base_q.count()
         if total == 0:
-            return _derive_reference_views([], np.empty((0,), dtype=np.float16))
-
-        # Determine embedding dimension from a single row.  Rows come back as
-        # pgvector HalfVector instances after the 2026-04-11 halfvec migration —
-        # they expose .dimensions() and .to_numpy() but not len() / __array__.
-        first_emb = base_q.limit(1).one()[1]
-        dim = first_emb.dimensions()
-
-        # Pre-allocate float16 array; fill row-by-row via yield_per so the
-        # cursor fetches stream_chunk_size rows at a time, peak Python-object
-        # memory stays at ~chunk_size x dim x 28 bytes ~= tens of MB, not 14 GB.
+            return [], np.empty((0,), dtype=np.float16)
+        # pgvector HalfVector exposes .dimensions() / .to_numpy() after the
+        # 2026-04-11 halfvec migration; pull dimension from the first row.
+        dim = base_q.limit(1).one()[1].dimensions()
         from protea.config.tuning import get_tuning
 
         stream_chunk = get_tuning().operation.stream_chunk_size
@@ -1165,21 +1176,7 @@ class PredictGOTermsBatchOperation:
         for i, (acc, emb) in enumerate(base_q.yield_per(stream_chunk)):
             embeddings[i] = emb.to_numpy()
             accessions.append(acc)
-
-        _save_to_disk_cache(embedding_config_id, annotation_set_id, accessions, embeddings)
-
-        emit(
-            "predict_go_terms_batch.load_references_done",
-            None,
-            {
-                "references": len(accessions),
-                "embeddings_mb": round(embeddings.nbytes / 1024 / 1024),
-                "source": "database",
-            },
-            "info",
-        )
-
-        return _derive_reference_views(accessions, embeddings)
+        return accessions, embeddings
 
     def _load_reference_data_per_aspect(
         self,
