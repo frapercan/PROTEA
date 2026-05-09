@@ -1222,33 +1222,12 @@ class PredictGOTermsBatchOperation:
         annotation_set_id: uuid.UUID,
         emit: EmitFn,
     ) -> dict[str, dict[str, Any]]:
-        """Build per-aspect views over the single unified reference cache.
+        """Build per-aspect reference views as numpy slices over a single unified cache.
 
-        Strategy — one array, three index slices:
-
-        1. Load (or build) the **unified** reference embeddings exactly as
-           :meth:`_load_reference_data` does — a single 1 GB float16 array shared
-           across all three aspects.  No embeddings are duplicated on disk or in RAM.
-        2. For each aspect (P / F / C) load (or build) a tiny **index array** — a
-           1-D int32 array of row positions inside the unified array that correspond
-           to proteins annotated in that aspect.  Index arrays are ~2 MB each and
-           are built with a lightweight accession-only query (no embedding data fetched).
-        3. Return per-aspect sub-arrays as numpy fancy-index results (a copy in
-           float16, ~300 MB per aspect at most).
-
-        Disk layout::
-
-            {key}_embeddings.npy            ← unified, ~1 GB float16  (shared)
-            {key}_accessions.npy            ← unified accession list   (shared)
-            {key}__P_indices.npy            ← int32 row indices, ~2 MB
-            {key}__F_indices.npy
-            {key}__C_indices.npy
-            {key}__P_anno_gtids.npy         ← CSR annotation cache per aspect
-            {key}__P_anno_quals.npy
-            {key}__P_anno_ecodes.npy
-            {key}__P_anno_offsets.npy
-            {key}__F_anno_*.npy
-            {key}__C_anno_*.npy
+        One ~1 GB float16 embedding array + three int32 index arrays (~2 MB each)
+        live on disk. Every per-aspect view is a fancy-index slice into the unified
+        array — no embedding duplication. See :meth:`_query_and_persist_aspect_caches`
+        for the on-disk layout and the (one-shot) DB scan path.
         """
         emit(
             "predict_go_terms_batch.load_references_per_aspect_start",
@@ -1260,7 +1239,6 @@ class PredictGOTermsBatchOperation:
             "info",
         )
 
-        # ── step 1: unified embeddings (reuses existing disk cache or builds it once) ──
         unified = self._load_reference_data(session, embedding_config_id, annotation_set_id, emit)
         if not unified["accessions"]:
             return {
@@ -1269,125 +1247,184 @@ class PredictGOTermsBatchOperation:
             }
 
         acc_to_idx: dict[str, int] = {acc: i for i, acc in enumerate(unified["accessions"])}
+        missing_aspects = self._find_missing_aspects(embedding_config_id, annotation_set_id)
+        if missing_aspects:
+            self._query_and_persist_aspect_caches(
+                session,
+                missing_aspects,
+                unified["accessions"],
+                acc_to_idx,
+                embedding_config_id,
+                annotation_set_id,
+            )
 
-        # ── step 2: per-aspect index arrays ──────────────────────────────────────────
+        result, total_refs = self._assemble_all_aspect_views(
+            unified, missing_aspects, embedding_config_id, annotation_set_id, emit
+        )
+        emit(
+            "predict_go_terms_batch.load_references_per_aspect_all_done",
+            None,
+            {"total_references": total_refs},
+            "info",
+        )
+        return result
+
+    def _assemble_all_aspect_views(
+        self,
+        unified: dict[str, Any],
+        missing_aspects: list[str],
+        embedding_config_id: uuid.UUID,
+        annotation_set_id: uuid.UUID,
+        emit: EmitFn,
+    ) -> tuple[dict[str, dict[str, Any]], int]:
+        """Slice the unified cache into per-aspect views, emit one ``done`` event
+        per aspect, and return ``(views, total_refs)``."""
         result: dict[str, dict[str, Any]] = {}
         total_refs = 0
+        for aspect in _ASPECTS:
+            view, n_refs = self._assemble_aspect_view(
+                aspect, unified, embedding_config_id, annotation_set_id
+            )
+            result[aspect] = view
+            total_refs += n_refs
+            emit(
+                "predict_go_terms_batch.load_references_per_aspect_done",
+                None,
+                {
+                    "aspect": aspect,
+                    "references": n_refs,
+                    "source": "database" if aspect in missing_aspects else "disk_cache",
+                },
+                "info",
+            )
+        return result, total_refs
 
-        # Determine which aspects still need DB queries (index or annotation cache missing)
-        missing_aspects = [
+    @staticmethod
+    def _find_missing_aspects(
+        embedding_config_id: uuid.UUID, annotation_set_id: uuid.UUID
+    ) -> list[str]:
+        """Return aspects whose index file or annotation CSR is absent on disk —
+        these still need the DB query path to repopulate the on-disk cache."""
+        return [
             asp
             for asp in _ASPECTS
             if not _aspect_index_path(embedding_config_id, annotation_set_id, asp).exists()
             or _load_anno_csr_from_disk(embedding_config_id, annotation_set_id, asp) is None
         ]
 
-        # Single-pass query for ALL missing aspects: fetch full annotation rows
-        # (accession, aspect, go_term_id, qualifier, evidence_code) in one table scan.
-        # This replaces both the old index-only query and all per-batch IN queries.
+    @staticmethod
+    def _query_and_persist_aspect_caches(
+        session: Session,
+        missing_aspects: list[str],
+        unified_accessions: list[str],
+        acc_to_idx: dict[str, int],
+        embedding_config_id: uuid.UUID,
+        annotation_set_id: uuid.UUID,
+    ) -> None:
+        """Single-pass DB scan + per-aspect on-disk persistence for the missing aspects.
+
+        Collects ``(aspect_to_accset, aspect_to_go_map)`` via
+        :meth:`_collect_aspect_annotations`, then writes the index array +
+        annotation CSR for every missing aspect. Downstream batches read the
+        CSR straight from disk — zero per-batch IN queries.
+        """
+        aspect_to_accset, aspect_to_go_map = (
+            PredictGOTermsBatchOperation._collect_aspect_annotations(
+                session, missing_aspects, annotation_set_id
+            )
+        )
+        for asp in missing_aspects:
+            idx_path = _aspect_index_path(embedding_config_id, annotation_set_id, asp)
+            indices = np.array(
+                [acc_to_idx[acc] for acc in aspect_to_accset[asp] if acc in acc_to_idx],
+                dtype=np.int32,
+            )
+            idx_path.parent.mkdir(parents=True, exist_ok=True)
+            np.save(idx_path, indices)
+            asp_accessions = [unified_accessions[i] for i in indices]
+            anno_csr = _build_anno_csr(asp_accessions, aspect_to_go_map[asp])
+            _save_anno_csr_to_disk(embedding_config_id, annotation_set_id, asp, anno_csr)
+
+    @staticmethod
+    def _collect_aspect_annotations(
+        session: Session,
+        missing_aspects: list[str],
+        annotation_set_id: uuid.UUID,
+    ) -> tuple[
+        dict[str, set[str]],
+        dict[str, dict[str, list[dict[str, Any]]]],
+    ]:
+        """Single-pass query that fetches every ``ProteinGOAnnotation`` row for
+        the missing aspects in one table scan, returning per-aspect accession
+        sets + per-protein GO maps. Skips ``NOT`` qualifiers."""
         aspect_to_accset: dict[str, set[str]] = {asp: set() for asp in missing_aspects}
         aspect_to_go_map: dict[str, dict[str, list[dict[str, Any]]]] = {
             asp: {} for asp in missing_aspects
         }
-        if missing_aspects:
-            rows = (
-                session.query(
-                    ProteinGOAnnotation.protein_accession,
-                    GOTerm.aspect,
-                    ProteinGOAnnotation.go_term_id,
-                    ProteinGOAnnotation.qualifier,
-                    ProteinGOAnnotation.evidence_code,
-                )
-                .join(ProteinGOAnnotation.go_term)
-                .filter(
-                    ProteinGOAnnotation.annotation_set_id == annotation_set_id,
-                    GOTerm.aspect.in_(missing_aspects),
-                    (
-                        ProteinGOAnnotation.qualifier.is_(None)
-                        | ~ProteinGOAnnotation.qualifier.like("%NOT%")
-                    ),
-                )
-                .yield_per(50_000)
+        rows = (
+            session.query(
+                ProteinGOAnnotation.protein_accession,
+                GOTerm.aspect,
+                ProteinGOAnnotation.go_term_id,
+                ProteinGOAnnotation.qualifier,
+                ProteinGOAnnotation.evidence_code,
             )
-            for acc, asp, go_term_id, qualifier, evidence_code in rows:
-                if asp in aspect_to_accset:
-                    aspect_to_accset[asp].add(acc)
-                    aspect_to_go_map[asp].setdefault(acc, []).append(
-                        {
-                            "go_term_id": go_term_id,
-                            # Flyweight — see ``protea.core.annotation_intern``.
-                            "qualifier": intern_string(qualifier),
-                            "evidence_code": intern_string(evidence_code),
-                        }
-                    )
+            .join(ProteinGOAnnotation.go_term)
+            .filter(
+                ProteinGOAnnotation.annotation_set_id == annotation_set_id,
+                GOTerm.aspect.in_(missing_aspects),
+                (
+                    ProteinGOAnnotation.qualifier.is_(None)
+                    | ~ProteinGOAnnotation.qualifier.like("%NOT%")
+                ),
+            )
+            .yield_per(50_000)
+        )
+        for acc, asp, go_term_id, qualifier, evidence_code in rows:
+            if asp not in aspect_to_accset:
+                continue
+            aspect_to_accset[asp].add(acc)
+            aspect_to_go_map[asp].setdefault(acc, []).append(
+                {
+                    "go_term_id": go_term_id,
+                    # Flyweight — see ``protea.core.annotation_intern``.
+                    "qualifier": intern_string(qualifier),
+                    "evidence_code": intern_string(evidence_code),
+                }
+            )
+        return aspect_to_accset, aspect_to_go_map
 
-            for asp in missing_aspects:
-                # Save embedding index array
-                idx_path = _aspect_index_path(embedding_config_id, annotation_set_id, asp)
-                indices = np.array(
-                    [acc_to_idx[acc] for acc in aspect_to_accset[asp] if acc in acc_to_idx],
-                    dtype=np.int32,
-                )
-                idx_path.parent.mkdir(parents=True, exist_ok=True)
-                np.save(idx_path, indices)
-
-                # Save annotation CSR cache — zero DB queries during batch processing
-                asp_accessions = [unified["accessions"][i] for i in indices]
-                anno_csr = _build_anno_csr(asp_accessions, aspect_to_go_map[asp])
-                _save_anno_csr_to_disk(
-                    embedding_config_id, annotation_set_id, asp, anno_csr
-                )
-
-        for aspect in _ASPECTS:
-            idx_path = _aspect_index_path(embedding_config_id, annotation_set_id, aspect)
-            indices = np.load(idx_path)
-            source = "disk_cache" if aspect not in missing_aspects else "database"
-
-            aspect_accessions = [unified["accessions"][i] for i in indices]
-            aspect_embeddings = unified["embeddings"][indices]  # float16 copy, ~300 MB max
-            aspect_embeddings_f32 = unified["embeddings_f32"][indices]
-            aspect_embeddings_f32_cos = unified["embeddings_f32_cos"][indices]
-
-            anno_csr = _load_anno_csr_from_disk(embedding_config_id, annotation_set_id, aspect)
-            anno_data: dict[str, Any] = {}
-            if anno_csr is not None:
-                gtids, quals, ecodes, offsets = anno_csr
-                anno_data = {
+    @staticmethod
+    def _assemble_aspect_view(
+        aspect: str,
+        unified: dict[str, Any],
+        embedding_config_id: uuid.UUID,
+        annotation_set_id: uuid.UUID,
+    ) -> tuple[dict[str, Any], int]:
+        """Slice the unified embeddings by the aspect's on-disk index array and
+        attach the CSR annotation cache. Returns ``(view, n_refs)``."""
+        idx_path = _aspect_index_path(embedding_config_id, annotation_set_id, aspect)
+        indices = np.load(idx_path)
+        aspect_accessions = [unified["accessions"][i] for i in indices]
+        view: dict[str, Any] = {
+            "accessions": aspect_accessions,
+            "embeddings": unified["embeddings"][indices],
+            "embeddings_f32": unified["embeddings_f32"][indices],
+            "embeddings_f32_cos": unified["embeddings_f32_cos"][indices],
+        }
+        anno_csr = _load_anno_csr_from_disk(embedding_config_id, annotation_set_id, aspect)
+        if anno_csr is not None:
+            gtids, quals, ecodes, offsets = anno_csr
+            view.update(
+                {
                     "anno_gtids": gtids,
                     "anno_quals": quals,
                     "anno_ecodes": ecodes,
                     "anno_offsets": offsets,
                     "acc_to_anno_idx": {acc: i for i, acc in enumerate(aspect_accessions)},
                 }
-
-            result[aspect] = {
-                "accessions": aspect_accessions,
-                "embeddings": aspect_embeddings,
-                "embeddings_f32": aspect_embeddings_f32,
-                "embeddings_f32_cos": aspect_embeddings_f32_cos,
-                **anno_data,
-            }
-            total_refs += len(indices)
-            emit(
-                "predict_go_terms_batch.load_references_per_aspect_done",
-                None,
-                {
-                    "aspect": aspect,
-                    "references": len(indices),
-                    "source": source,
-                },
-                "info",
             )
-
-        emit(
-            "predict_go_terms_batch.load_references_per_aspect_all_done",
-            None,
-            {
-                "total_references": total_refs,
-            },
-            "info",
-        )
-        return result
+        return view, len(indices)
 
     def _run_aspect_separated_knn(
         self,
