@@ -23,6 +23,63 @@ router = APIRouter(prefix="/proteins", tags=["proteins"])
 # ── Stats ─────────────────────────────────────────────────────────────────────
 
 
+def _compute_protein_stats(
+    factory: sessionmaker[Session],
+) -> dict[str, Any]:
+    """Run the per-stat SQL counts and shape them into the API payload.
+
+    Sits at module scope (not nested inside the route handler) so the
+    handler stays under the §3 60-LOC ceiling and the per-count SQL
+    is independently swappable when the schema changes.
+    """
+    with session_scope(factory) as session:
+        total = session.query(func.count(Protein.accession)).scalar() or 0
+        canonical = (
+            session.query(func.count(Protein.accession))
+            .filter(Protein.is_canonical.is_(True))
+            .scalar()
+            or 0
+        )
+        reviewed = (
+            session.query(func.count(Protein.accession))
+            .filter(Protein.reviewed.is_(True))
+            .scalar()
+            or 0
+        )
+        with_metadata = (
+            session.query(func.count(distinct(Protein.canonical_accession)))
+            .join(
+                ProteinUniProtMetadata,
+                Protein.canonical_accession == ProteinUniProtMetadata.canonical_accession,
+            )
+            .scalar()
+            or 0
+        )
+        with_embeddings = (
+            session.query(func.count(distinct(Protein.accession)))
+            .join(
+                SequenceEmbedding,
+                Protein.sequence_id == SequenceEmbedding.sequence_id,
+            )
+            .scalar()
+            or 0
+        )
+        with_go = (
+            session.query(func.count(distinct(ProteinGOAnnotation.protein_accession))).scalar()
+            or 0
+        )
+        return {
+            "total": total,
+            "canonical": canonical,
+            "isoforms": total - canonical,
+            "reviewed": reviewed,
+            "unreviewed": total - reviewed,
+            "with_metadata": with_metadata,
+            "with_embeddings": with_embeddings,
+            "with_go_annotations": with_go,
+        }
+
+
 @router.get("/stats", summary="Aggregate protein statistics")
 def get_protein_stats(
     factory: sessionmaker[Session] = Depends(get_session_factory),
@@ -30,60 +87,11 @@ def get_protein_stats(
     """Return aggregate counts: total proteins, canonical vs isoforms, reviewed,
     and how many have metadata, embeddings, or GO annotations.
 
-    Cached for 5 minutes — the DISTINCT-over-JOIN counts scan 4M–80M rows and
+    Cached for 5 minutes: the DISTINCT-over-JOIN counts scan 4M–80M rows and
     take 30+ seconds to run from scratch. Counts move slowly enough that a
     5-min staleness is invisible to users.
     """
-
-    def _compute() -> dict[str, Any]:
-        with session_scope(factory) as session:
-            total = session.query(func.count(Protein.accession)).scalar() or 0
-            canonical = (
-                session.query(func.count(Protein.accession))
-                .filter(Protein.is_canonical.is_(True))
-                .scalar()
-                or 0
-            )
-            reviewed = (
-                session.query(func.count(Protein.accession))
-                .filter(Protein.reviewed.is_(True))
-                .scalar()
-                or 0
-            )
-            with_metadata = (
-                session.query(func.count(distinct(Protein.canonical_accession)))
-                .join(
-                    ProteinUniProtMetadata,
-                    Protein.canonical_accession == ProteinUniProtMetadata.canonical_accession,
-                )
-                .scalar()
-                or 0
-            )
-            with_embeddings = (
-                session.query(func.count(distinct(Protein.accession)))
-                .join(
-                    SequenceEmbedding,
-                    Protein.sequence_id == SequenceEmbedding.sequence_id,
-                )
-                .scalar()
-                or 0
-            )
-            with_go = (
-                session.query(func.count(distinct(ProteinGOAnnotation.protein_accession))).scalar()
-                or 0
-            )
-            return {
-                "total": total,
-                "canonical": canonical,
-                "isoforms": total - canonical,
-                "reviewed": reviewed,
-                "unreviewed": total - reviewed,
-                "with_metadata": with_metadata,
-                "with_embeddings": with_embeddings,
-                "with_go_annotations": with_go,
-            }
-
-    return cached("proteins:stats", 300.0, _compute)
+    return cached("proteins:stats", 300.0, lambda: _compute_protein_stats(factory))
 
 
 # ── List ──────────────────────────────────────────────────────────────────────
