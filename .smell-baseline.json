@@ -340,15 +340,6 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/scoring.py::compute_score",
-      "kind": "method",
-      "path": "protea/core/scoring.py",
-      "name": "compute_score",
-      "line": 101,
-      "metric": 82,
-      "threshold": 60
-    },
-    {
       "key": "method::protea/core/training_dump_helpers.py::_preload_all_embeddings",
       "kind": "method",
       "path": "protea/core/training_dump_helpers.py",

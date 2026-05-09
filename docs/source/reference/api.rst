@@ -659,25 +659,22 @@ Common payload examples by operation:
 .. code-block:: json
 
    { "operation": "fetch_uniprot_metadata",  "queue_name": "protea.jobs",
-     "payload": { "accessions": ["P04637", "P53350"] } }
+     "payload": { "search_criteria": "reviewed:true AND organism_id:9606" } }
 
 .. code-block:: json
 
    { "operation": "compute_embeddings", "queue_name": "protea.embeddings",
-     "payload": { "embedding_config_id": "<uuid>", "batch_size": 64 } }
+     "payload": { "embedding_config_id": "<uuid>", "sequences_per_job": 64 } }
 
 .. code-block:: json
 
-   { "operation": "predict_go_terms", "queue_name": "protea.jobs",
+   { "operation": "predict_go_terms", "queue_name": "protea.predictions",
      "payload": {
        "embedding_config_id": "<uuid>",
        "annotation_set_id": "<uuid>",
        "ontology_snapshot_id": "<uuid>",
        "query_set_id": "<uuid>",
-       "k": 5,
-       "compute_alignments": false,
-       "compute_taxonomy": false,
-       "compute_reranker_features": false
+       "limit_per_entry": 5
      }
    }
 
