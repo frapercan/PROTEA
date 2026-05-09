@@ -208,7 +208,8 @@ Code layout
        routers/           jobs, proteins, annotations, embeddings,
                           query_sets, maintenance, admin, scoring,
                           annotate, showcase, support, benchmark,
-                          datasets, registry, reranker_models, stack
+                          datasets, registry, reranker_models, stack,
+                          experiment_runs   (17 routers total)
      core/
        contracts/         Operation protocol, ProteaPayload, OperationResult
        operations/        Domain logic (11 operation modules, 15 registered instances)
@@ -222,7 +223,8 @@ Code layout
        utils.py           UniProtHttpMixin, chunks(), utcnow()
      infrastructure/
        orm/models/        SQLAlchemy 2.x ORM models (protein, sequence, annotation,
-                          embedding, prediction, query, job, evaluation, scoring, support)
+                          embedding, prediction, query, job, evaluation, scoring,
+                          dataset, reranker_model, support, experiment_run, visitor_event)
        queue/             RabbitMQ consumer (QueueConsumer, OperationConsumer) and publisher
        logging.py         Structured JSON logging
        session.py         session_scope context manager
