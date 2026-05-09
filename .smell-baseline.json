@@ -79,20 +79,11 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/evaluation.py::compute_evaluation_data",
-      "kind": "method",
-      "path": "protea/core/evaluation.py",
-      "name": "compute_evaluation_data",
-      "line": 258,
-      "metric": 87,
-      "threshold": 60
-    },
-    {
       "key": "method::protea/core/evaluation.py::compute_evaluation_data_reconciled",
       "kind": "method",
       "path": "protea/core/evaluation.py",
       "name": "compute_evaluation_data_reconciled",
-      "line": 549,
+      "line": 546,
       "metric": 91,
       "threshold": 60
     },

@@ -255,6 +255,49 @@ def _load_experimental_annotations_by_ns(
 # ---------------------------------------------------------------------------
 
 
+def _classify_protein_deltas(
+    old_by_ns: dict[str, dict[str, set[str]]],
+    new_by_ns: dict[str, dict[str, set[str]]],
+) -> tuple[
+    dict[str, set[str]],
+    dict[str, set[str]],
+    dict[str, set[str]],
+    dict[str, set[str]],
+]:
+    """Sort each protein into the (NK, LK, PK, pk_known) buckets.
+
+    Per-(protein, namespace) classification following the CAFA5
+    protocol; same protein can be LK in one namespace and PK in
+    another. See :func:`compute_evaluation_data` for the full rules.
+    """
+    nk: dict[str, set[str]] = {}
+    lk: dict[str, set[str]] = defaultdict(set)
+    pk: dict[str, set[str]] = defaultdict(set)
+    pk_known: dict[str, set[str]] = defaultdict(set)
+    for protein in set(old_by_ns) | set(new_by_ns):
+        old_ns_map = old_by_ns.get(protein, {})
+        new_ns_map = new_by_ns.get(protein, {})
+        new_all = {go for terms in new_ns_map.values() for go in terms}
+        if not new_all:
+            continue
+        if not old_ns_map:
+            # NK: no experimental annotations anywhere at t0.
+            nk[protein] = new_all
+            continue
+        for ns in _NAMESPACES:
+            old_ns = old_ns_map.get(ns, set())
+            new_ns = new_ns_map.get(ns, set())
+            delta_ns = new_ns - old_ns
+            if not delta_ns:
+                continue
+            if not old_ns:
+                lk[protein] |= delta_ns
+            else:
+                pk[protein] |= delta_ns
+                pk_known[protein] |= old_ns
+    return nk, dict(lk), dict(pk), dict(pk_known)
+
+
 def compute_evaluation_data(
     session: Session,
     old_annotation_set_id: uuid.UUID,
@@ -280,68 +323,22 @@ def compute_evaluation_data(
     """
     go_id_map, aspect_map = _load_go_maps(session, ontology_snapshot_id)
     children_map = _load_children_map(session, ontology_snapshot_id)
-
     negative_keys = _build_negative_keys(
         session,
         [old_annotation_set_id, new_annotation_set_id],
         children_map,
     )
-
     old_by_ns = _load_experimental_annotations_by_ns(
         session, old_annotation_set_id, negative_keys, go_id_map, aspect_map
     )
     new_by_ns = _load_experimental_annotations_by_ns(
         session, new_annotation_set_id, negative_keys, go_id_map, aspect_map
     )
-
-    nk: dict[str, set[str]] = {}
-    lk: dict[str, set[str]] = defaultdict(set)
-    pk: dict[str, set[str]] = defaultdict(set)
-    pk_known: dict[str, set[str]] = defaultdict(set)
-
-    all_proteins = set(old_by_ns) | set(new_by_ns)
-    for protein in all_proteins:
-        old_ns_map = old_by_ns.get(protein, {})
-        new_ns_map = new_by_ns.get(protein, {})
-
-        new_all = {go for terms in new_ns_map.values() for go in terms}
-        if not new_all:
-            continue
-
-        had_anything_old = bool(old_ns_map)
-
-        if not had_anything_old:
-            # NK: no experimental annotations anywhere at t0.
-            # Novel = all new terms (nothing to subtract).
-            nk[protein] = new_all
-        else:
-            # Classify per namespace.
-            for ns in _NAMESPACES:
-                old_ns = old_ns_map.get(ns, set())
-                new_ns = new_ns_map.get(ns, set())
-                delta_ns = new_ns - old_ns
-                if not delta_ns:
-                    continue
-                if not old_ns:
-                    # LK: protein had nothing in this namespace at t0.
-                    lk[protein] |= delta_ns
-                else:
-                    # PK: protein had annotations in this namespace at t0.
-                    pk[protein] |= delta_ns
-                    pk_known[protein] |= old_ns
-
-    # known = all old experimental annotations flattened (for reference download)
+    nk, lk, pk, pk_known = _classify_protein_deltas(old_by_ns, new_by_ns)
     known = {
         p: {go for terms in ns_map.values() for go in terms} for p, ns_map in old_by_ns.items()
     }
-
-    return EvaluationData(
-        nk=nk,
-        lk=dict(lk),
-        pk=dict(pk),
-        pk_known=dict(pk_known),
-        known=known,
-    )
+    return EvaluationData(nk=nk, lk=lk, pk=pk, pk_known=pk_known, known=known)
 
 
 # ---------------------------------------------------------------------------
