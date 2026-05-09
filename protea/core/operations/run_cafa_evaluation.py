@@ -13,6 +13,7 @@ from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPaylo
 from protea.core.evaluation import EvaluationData, load_evaluation_data_for_set
 from protea.core.operations import _run_cafa_artifacts as _artifacts
 from protea.core.operations import _run_cafa_data_helpers as _data
+from protea.core.operations import _run_cafa_summary as _summary
 from protea.core.operations._run_cafa_eval_driver import (
     CafaEvalRunContext,
     evaluate_all_settings,
@@ -140,59 +141,10 @@ class RunCafaEvaluationOperation:
         "PredictionSet, optionally weighted by Information Accretion."
     )
 
-    def summarize_payload(self, payload: dict[str, Any], *, session: Session | None = None) -> str:
-        p = payload or {}
-        bits: list[str] = []
-
-        pred_id_raw = p.get("prediction_set_id")
-        if pred_id_raw and session is not None:
-            try:
-                pred = session.get(PredictionSet, uuid.UUID(str(pred_id_raw)))
-            except Exception:
-                pred = None
-            if pred is not None and pred.embedding_config_id is not None:
-                from protea.infrastructure.orm.models.embedding.embedding_config import (
-                    EmbeddingConfig,
-                )
-
-                cfg = session.get(EmbeddingConfig, pred.embedding_config_id)
-                if cfg is not None:
-                    label = cfg.display_name or cfg.model_name or str(cfg.id)[:8]
-                    bits.append(label)
-            if pred is None:
-                bits.append(f"pred={str(pred_id_raw)[:8]}")
-        elif pred_id_raw:
-            bits.append(f"pred={str(pred_id_raw)[:8]}")
-
-        eval_id_raw = p.get("evaluation_set_id")
-        if eval_id_raw and session is not None:
-            try:
-                ev = session.get(EvaluationSet, uuid.UUID(str(eval_id_raw)))
-            except Exception:
-                ev = None
-            if ev is not None:
-                old_v = getattr(ev, "old_source_version", None) or "?"
-                new_v = getattr(ev, "new_source_version", None) or "?"
-                bits.append(f"eval={old_v}→{new_v}")
-        elif eval_id_raw:
-            bits.append(f"eval={str(eval_id_raw)[:8]}")
-
-        scoring_id_raw = p.get("scoring_config_id")
-        if scoring_id_raw and session is not None:
-            try:
-                sc = session.get(ScoringConfig, uuid.UUID(str(scoring_id_raw)))
-            except Exception:
-                sc = None
-            if sc is not None:
-                bits.append(f"scoring={sc.name}")
-        elif scoring_id_raw:
-            bits.append(f"scoring={str(scoring_id_raw)[:8]}")
-
-        if p.get("reranker_model_id"):
-            bits.append("+reranker")
-        if p.get("max_distance") is not None:
-            bits.append(f"max_d={p['max_distance']}")
-        return " · ".join(bits)
+    def summarize_payload(
+        self, payload: dict[str, Any], *, session: Session | None = None
+    ) -> str:
+        return _summary.summarize_payload(payload or {}, session)
 
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
