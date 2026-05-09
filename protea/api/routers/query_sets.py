@@ -95,6 +95,61 @@ def _query_set_to_dict(qs: QuerySet, entry_count: int) -> dict[str, Any]:
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 
+def _parse_and_validate_fasta(raw: bytes, max_bytes: int) -> list[tuple[str, str, str]]:
+    """Decode + parse a FASTA upload into ``(accession, sequence, header)`` rows.
+
+    Raises ``HTTPException`` for size overflow, encoding errors, empty
+    parses, and duplicate accessions within the same upload.
+    """
+    if len(raw) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"FASTA file exceeds {max_bytes // (1024 * 1024)} MB limit",
+        )
+    try:
+        content = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=422, detail="FASTA file must be UTF-8 encoded") from None
+    records = _parse_fasta(content)
+    if not records:
+        raise HTTPException(status_code=422, detail="No valid sequences found in the FASTA file")
+    seen_accs: set[str] = set()
+    for acc, _, _ in records:
+        if acc in seen_accs:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Duplicate accession in FASTA: '{acc}'",
+            )
+        seen_accs.add(acc)
+    return records
+
+
+def _upsert_sequences(
+    session: Session,
+    records: list[tuple[str, str, str]],
+    hashes: list[str],
+) -> dict[str, int]:
+    """Resolve sequence IDs for ``records``; insert new rows for unseen hashes.
+
+    Returns ``hash -> sequence_id``, one entry per distinct hash.
+    """
+    hash_to_seq_id: dict[str, int] = {}
+    existing = (
+        session.query(Sequence.sequence_hash, Sequence.id)
+        .filter(Sequence.sequence_hash.in_(hashes))
+        .all()
+    )
+    for h, sid in existing:
+        hash_to_seq_id[h] = sid
+    for (_, seq, _), h in zip(records, hashes, strict=False):
+        if h not in hash_to_seq_id:
+            new_seq = Sequence(sequence=seq, sequence_hash=h)
+            session.add(new_seq)
+            session.flush()
+            hash_to_seq_id[h] = new_seq.id
+    return hash_to_seq_id
+
+
 @router.post("", status_code=201)
 async def create_query_set(
     file: UploadFile,
@@ -111,58 +166,17 @@ async def create_query_set(
     """
     from protea.config.tuning import get_tuning
 
-    max_bytes = get_tuning().api.max_fasta_bytes
     raw = await file.read()
-    if len(raw) > max_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail=f"FASTA file exceeds {max_bytes // (1024 * 1024)} MB limit",
-        )
-    try:
-        content = raw.decode("utf-8")
-    except UnicodeDecodeError:
-        raise HTTPException(status_code=422, detail="FASTA file must be UTF-8 encoded") from None
-
-    records = _parse_fasta(content)
-    if not records:
-        raise HTTPException(status_code=422, detail="No valid sequences found in the FASTA file")
-
-    # Reject duplicate accessions within the upload
-    seen_accs: set[str] = set()
-    for acc, _, _ in records:
-        if acc in seen_accs:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Duplicate accession in FASTA: '{acc}'",
-            )
-        seen_accs.add(acc)
+    records = _parse_and_validate_fasta(raw, get_tuning().api.max_fasta_bytes)
 
     with session_scope(factory) as session:
-        # 1) Upsert sequences (deduplicated by MD5 hash)
-        hash_to_seq_id: dict[str, int] = {}
         hashes = [Sequence.compute_hash(seq) for _, seq, _ in records]
+        hash_to_seq_id = _upsert_sequences(session, records, hashes)
 
-        existing = (
-            session.query(Sequence.sequence_hash, Sequence.id)
-            .filter(Sequence.sequence_hash.in_(hashes))
-            .all()
-        )
-        for h, sid in existing:
-            hash_to_seq_id[h] = sid
-
-        for (_, seq, _), h in zip(records, hashes, strict=False):
-            if h not in hash_to_seq_id:
-                new_seq = Sequence(sequence=seq, sequence_hash=h)
-                session.add(new_seq)
-                session.flush()
-                hash_to_seq_id[h] = new_seq.id
-
-        # 2) Create QuerySet
         qs = QuerySet(name=name, description=description)
         session.add(qs)
         session.flush()
 
-        # 3) Create entries (extract UniProt OX=/OS= when present)
         entries = []
         for (acc, _, header), h in zip(records, hashes, strict=False):
             meta = extract_uniprot_header_metadata(header)
