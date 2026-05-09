@@ -30,7 +30,7 @@
       "path": "protea/core/operations/compute_embeddings.py",
       "name": "",
       "line": 0,
-      "metric": 1082,
+      "metric": 1093,
       "threshold": 800
     },
     {
@@ -67,15 +67,6 @@
       "name": "get_benchmark_matrix",
       "line": 185,
       "metric": 209,
-      "threshold": 60
-    },
-    {
-      "key": "method::protea/core/operations/compute_embeddings.py::_embed_t5",
-      "kind": "method",
-      "path": "protea/core/operations/compute_embeddings.py",
-      "name": "_embed_t5",
-      "line": 709,
-      "metric": 128,
       "threshold": 60
     },
     {
@@ -219,15 +210,6 @@
       "path": "protea/core/feature_enricher.py",
       "name": "expand_predictions_to_ancestors",
       "line": 136,
-      "metric": 7,
-      "threshold": 6
-    },
-    {
-      "key": "params::protea/core/operations/compute_embeddings.py::_embed_t5",
-      "kind": "params",
-      "path": "protea/core/operations/compute_embeddings.py",
-      "name": "_embed_t5",
-      "line": 709,
       "metric": 7,
       "threshold": 6
     },
