@@ -52,15 +52,6 @@
       "threshold": 800
     },
     {
-      "key": "method::protea/api/routers/benchmark.py::get_benchmark_matrix",
-      "kind": "method",
-      "path": "protea/api/routers/benchmark.py",
-      "name": "get_benchmark_matrix",
-      "line": 185,
-      "metric": 209,
-      "threshold": 60
-    },
-    {
       "key": "method::protea/core/operations/predict_go_terms.py::PredictGOTermsOperation.execute",
       "kind": "method",
       "path": "protea/core/operations/predict_go_terms.py",
