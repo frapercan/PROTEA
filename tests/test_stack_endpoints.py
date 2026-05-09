@@ -201,4 +201,4 @@ class TestLocalArtefacts:
 
         pdf.write_bytes(b"%PDF-1.7 fake")
         body = client.get("/stack").json()
-        assert body["thesis_pdf_url"] == "/static/thesis.pdf"
+        assert body["thesis_pdf_url"] == "/thesis.pdf"

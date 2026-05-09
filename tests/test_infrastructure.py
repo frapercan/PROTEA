@@ -328,24 +328,3 @@ class TestCreateApp:
 
         route_paths = [r.path for r in app.routes]
         assert any("/sphinx" in p for p in route_paths)
-
-    def test_static_mount_when_directory_exists(self, tmp_path):
-        """When static/ exists, /static is mounted."""
-        from protea.api.app import create_app
-
-        static_dir = tmp_path / "static"
-        static_dir.mkdir()
-        (static_dir / "test.txt").write_text("hello")
-
-        mock_settings = MagicMock()
-        mock_settings.db_url = "sqlite:///:memory:"
-        mock_settings.amqp_url = "amqp://guest:guest@localhost/"
-
-        with (
-            patch("protea.api.app.load_settings", return_value=mock_settings),
-            patch("protea.api.app.build_session_factory", return_value=MagicMock()),
-        ):
-            app = create_app(project_root=tmp_path)
-
-        route_paths = [r.path for r in app.routes]
-        assert any("/static" in p for p in route_paths)

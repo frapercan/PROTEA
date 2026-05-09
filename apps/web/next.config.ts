@@ -17,7 +17,6 @@ const nextConfig: NextConfig = {
       { source: "/sphinx/:path*", destination: `${apiUrl}/sphinx/:path*` },
       { source: "/docs/:slug/", destination: `${apiUrl}/docs/:slug/` },
       { source: "/docs/:slug/:path*", destination: `${apiUrl}/docs/:slug/:path*` },
-      { source: "/static/:path*", destination: `${apiUrl}/static/:path*` },
       {
         source: "/api-proxy/:path*",
         destination: `${apiUrl}/:path*`,

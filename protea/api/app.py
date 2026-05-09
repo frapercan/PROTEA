@@ -245,10 +245,6 @@ def _mount_static_assets(app: FastAPI, project_root: Path) -> None:
     if docs_build_root.exists():
         _mount_sibling_docs(app, docs_build_root)
 
-    static_dir = project_root / "static"
-    if static_dir.exists():
-        app.mount("/static", StaticFiles(directory=static_dir), name="static")
-
 
 def create_app(project_root: Path | None = None) -> FastAPI:
     if project_root is None:
