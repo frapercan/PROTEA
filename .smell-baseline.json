@@ -178,15 +178,6 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/load_goa_annotations.py::LoadGOAAnnotationsOperation._maybe_enqueue_atomic_eval",
-      "kind": "method",
-      "path": "protea/core/operations/load_goa_annotations.py",
-      "name": "LoadGOAAnnotationsOperation._maybe_enqueue_atomic_eval",
-      "line": 218,
-      "metric": 88,
-      "threshold": 60
-    },
-    {
       "key": "method::protea/core/operations/load_quickgo_annotations.py::LoadQuickGOAnnotationsOperation.execute",
       "kind": "method",
       "path": "protea/core/operations/load_quickgo_annotations.py",

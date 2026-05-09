@@ -221,20 +221,8 @@ class LoadGOAAnnotationsOperation:
         new_set: AnnotationSet,
         emit: EmitFn,
     ) -> uuid.UUID | None:
-        candidates = (
-            session.query(AnnotationSet)
-            .filter(
-                AnnotationSet.source == "goa",
-                AnnotationSet.id != new_set.id,
-            )
-            .all()
-        )
-        prior_candidates = [
-            s for s in candidates
-            if self._numeric_version_key(s.source_version)
-            < self._numeric_version_key(new_set.source_version)
-        ]
-        if not prior_candidates:
+        prior = self._select_prior_annotation_set(session, new_set)
+        if prior is None:
             emit(
                 "load_goa_annotations.auto_eval_skipped",
                 None,
@@ -242,9 +230,49 @@ class LoadGOAAnnotationsOperation:
                 "info",
             )
             return None
-        prior = max(prior_candidates, key=lambda s: self._numeric_version_key(s.source_version))
+        existing_id = self._existing_evaluation_set_id(session, prior, new_set)
+        if existing_id is not None:
+            emit(
+                "load_goa_annotations.auto_eval_skipped",
+                None,
+                {
+                    "reason": "evaluation_set_exists",
+                    "existing_evaluation_set_id": str(existing_id),
+                    "old_annotation_set_id": str(prior.id),
+                    "new_annotation_set_id": str(new_set.id),
+                },
+                "info",
+            )
+            return None
+        return self._enqueue_auto_eval_job(session, prior, new_set, emit)
 
-        existing = (
+    def _select_prior_annotation_set(
+        self,
+        session: Session,
+        new_set: AnnotationSet,
+    ) -> AnnotationSet | None:
+        """Return the most recent ``goa`` set strictly older than ``new_set``."""
+        candidates = (
+            session.query(AnnotationSet)
+            .filter(AnnotationSet.source == "goa", AnnotationSet.id != new_set.id)
+            .all()
+        )
+        new_key = self._numeric_version_key(new_set.source_version)
+        prior_candidates = [
+            s for s in candidates if self._numeric_version_key(s.source_version) < new_key
+        ]
+        if not prior_candidates:
+            return None
+        return max(prior_candidates, key=lambda s: self._numeric_version_key(s.source_version))
+
+    def _existing_evaluation_set_id(
+        self,
+        session: Session,
+        prior: AnnotationSet,
+        new_set: AnnotationSet,
+    ) -> uuid.UUID | None:
+        """Look up an EvaluationSet already covering this (old, new) pair."""
+        row = (
             session.query(EvaluationSet.id)
             .filter(
                 EvaluationSet.old_annotation_set_id == prior.id,
@@ -252,20 +280,16 @@ class LoadGOAAnnotationsOperation:
             )
             .first()
         )
-        if existing is not None:
-            emit(
-                "load_goa_annotations.auto_eval_skipped",
-                None,
-                {
-                    "reason": "evaluation_set_exists",
-                    "existing_evaluation_set_id": str(existing[0]),
-                    "old_annotation_set_id": str(prior.id),
-                    "new_annotation_set_id": str(new_set.id),
-                },
-                "info",
-            )
-            return None
+        return row[0] if row is not None else None
 
+    def _enqueue_auto_eval_job(
+        self,
+        session: Session,
+        prior: AnnotationSet,
+        new_set: AnnotationSet,
+        emit: EmitFn,
+    ) -> uuid.UUID:
+        """Create a ``generate_evaluation_set`` child job + audit trail."""
         payload = {
             "old_annotation_set_id": str(prior.id),
             "new_annotation_set_id": str(new_set.id),
