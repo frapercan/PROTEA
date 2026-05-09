@@ -1,4 +1,4 @@
-"""Annotations router package — aggregates the four endpoint subrouters
+"""Annotations router package: aggregates the four endpoint subrouters
 (snapshots / sets / evaluation_sets / evaluation_results) into one
 ``/annotations``-prefixed APIRouter.
 

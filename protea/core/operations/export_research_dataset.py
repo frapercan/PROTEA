@@ -231,7 +231,7 @@ class ExportResearchDatasetOperation:
         manifest_path = stage_dir / "manifest.json"
         if not manifest_path.exists():
             raise RuntimeError(
-                "export_research_dataset: manifest.json missing from stage dir — "
+                "export_research_dataset: manifest.json missing from stage dir; "
                 "dump path did not produce the expected layout"
             )
         manifest_bytes = manifest_path.read_bytes()

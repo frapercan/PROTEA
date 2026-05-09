@@ -48,7 +48,7 @@ class LoadQuickGOAnnotationsPayload(ProteaPayload, frozen=True):
     """Payload for loading GO annotations from the QuickGO bulk download endpoint.
 
     QuickGO returns a single streamed TSV filtered by the canonical accessions
-    already present in the DB — no external accession list is needed.
+    already present in the DB; no external accession list is needed.
 
     ``eco_mapping_url`` (optional) points to a GAF-ECO mapping file
     (space-separated: ``ECO:XXXXXXX  CODE``). When provided, ECO IDs are
@@ -80,7 +80,7 @@ class LoadQuickGOAnnotationsOperation:
     """Streams GO annotations from the QuickGO bulk download API.
 
     Proteins to annotate are determined by the canonical accessions already
-    present in the DB — no external FASTA or accession list is needed.
+    present in the DB; no external FASTA or accession list is needed.
 
     The QuickGO TSV columns used:
       GENE PRODUCT ID → protein accession
@@ -248,9 +248,9 @@ class LoadQuickGOAnnotationsOperation:
     def _load_accessions(self, session: Session, emit: EmitFn) -> tuple[set[str], set[str]]:
         """Returns (canonical_accessions, protein_accessions).
 
-        canonical_accessions — used to build the QuickGO geneProductId filter.
-        protein_accessions   — actual protein.accession values; used for FK-safe
-                               filtering before insertion.
+        canonical_accessions: used to build the QuickGO geneProductId filter.
+        protein_accessions:   actual protein.accession values; used for FK-safe
+                              filtering before insertion.
         """
         emit("load_quickgo_annotations.load_accessions_start", None, {}, "info")
         canonical_accessions = set(session.scalars(select(distinct(Protein.canonical_accession))))

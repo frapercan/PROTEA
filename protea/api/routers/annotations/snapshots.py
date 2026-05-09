@@ -37,7 +37,7 @@ def list_snapshots(
 ) -> list[dict[str, Any]]:
     """List all loaded GO ontology snapshots with their GO term counts, newest first.
 
-    Cached 5 minutes — the GROUP BY over go_term (N million rows per snapshot)
+    Cached 5 minutes: the GROUP BY over go_term (N million rows per snapshot)
     takes multiple seconds, and snapshots are effectively immutable once loaded.
     """
 

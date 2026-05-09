@@ -26,7 +26,7 @@ def extract_uniprot_header_metadata(description: str) -> dict[str, Any]:
     Matches the SwissProt/TrEMBL convention ``sp|ACC|NAME OS=<species> OX=<taxid>
     GN=<gene> PE=<level> SV=<version>``. Returns ``{'taxonomy_id': int | None,
     'species': str | None}``. Silent no-op for headers that don't follow the
-    convention — fields simply come back as ``None``.
+    convention; fields simply come back as ``None``.
     """
     tax_match = _TAX_RE.search(description)
     species_match = _SPECIES_RE.search(description)

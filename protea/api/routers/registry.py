@@ -3,15 +3,15 @@
 Three read-only endpoints listing the plugins discovered at runtime
 via :mod:`importlib.metadata.entry_points`:
 
-  * ``GET /backends`` — embedding backend plugins (``protea.backends``)
-  * ``GET /sources`` — annotation source plugins (``protea.sources``)
-  * ``GET /runners`` — experiment runner plugins (``protea.runners``)
+  * ``GET /backends``: embedding backend plugins (``protea.backends``)
+  * ``GET /sources``: annotation source plugins (``protea.sources``)
+  * ``GET /runners``: experiment runner plugins (``protea.runners``)
 
 Each response is a flat list of :class:`PluginInfo` records describing
 the entry-point name, class, module path, and any plugin-specific
 metadata exposed via attributes (e.g. :attr:`AnnotationSource.version`).
 
-The endpoints are intentionally stateless — they re-scan
+The endpoints are intentionally stateless: they re-scan
 ``entry_points`` on every call rather than caching, so a worker
 that's just been restarted with a newly-installed extra surfaces in
 the next request without an API restart. The scan is cheap (sub-ms
@@ -91,7 +91,7 @@ def _discover(group: str) -> list[PluginInfo]:
     effects but should not raise for any first-party plugin (the
     bootstrapping pattern keeps top-level imports cheap). If a
     third-party plugin's load raises, the caller surfaces it as a
-    500 — better to fail loud than silently hide a broken install.
+    500: better to fail loud than silently hide a broken install.
     """
     discovered: list[PluginInfo] = []
     for ep in entry_points(group=group):
@@ -113,7 +113,7 @@ def _discover(group: str) -> list[PluginInfo]:
 
 
 def _list_for(slug: str) -> PluginListResponse:
-    """Shared body for the three endpoints — looks up the canonical
+    """Shared body for the three endpoints; looks up the canonical
     ``entry_points`` group from ``_KNOWN_GROUPS`` and returns the
     discovered plugins.
     """
