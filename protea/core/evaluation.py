@@ -40,6 +40,7 @@ import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import NamedTuple
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -62,6 +63,20 @@ _NAMESPACES = ("F", "P", "C")
 # ---------------------------------------------------------------------------
 # Data structures
 # ---------------------------------------------------------------------------
+
+
+class EvalContext(NamedTuple):
+    """The (old, new, snapshot) triple that identifies one evaluation delta.
+
+    Bundles the three IDs that travel together through the metrics endpoints
+    (``/scoring/prediction-sets/{id}/metrics``) and the
+    :func:`compute_evaluation_data` / ``_reconciled`` helpers, keeping
+    downstream signatures under the master-plan §3 6-param ceiling.
+    """
+
+    old_annotation_set_id: uuid.UUID
+    new_annotation_set_id: uuid.UUID
+    ontology_snapshot_id: uuid.UUID
 
 
 @dataclass
