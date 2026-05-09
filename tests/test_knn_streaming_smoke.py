@@ -147,7 +147,7 @@ def _run(mode: str, tmp_path: Path | None = None, *, expand: bool, pivot=None):
     )
 
     with patch(
-        "protea.core.training_dump_helpers.get_anc2vec_index",
+        "protea.core._anc2vec_phases.get_anc2vec_index",
         return_value=_StubAnc2Vec(),
     ):
         return _knn_transfer_and_label(
