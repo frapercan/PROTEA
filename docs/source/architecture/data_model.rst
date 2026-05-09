@@ -6,7 +6,7 @@ Data Model
    :depth: 2
 
 All models use SQLAlchemy 2.x declarative style with ``Mapped[]`` type annotations.
-The schema is managed by Alembic (32 migrations to date).
+The schema is managed by Alembic (33 migrations to date).
 
 Protein and sequence deduplication
 ------------------------------------
@@ -431,6 +431,9 @@ Job queue
    │ progress_total             │
    │ error_code                 │
    │ error_message              │
+   │ description (Text, null)   │
+   │ findings (Text, null)      │
+   │ tags (ARRAY[Text])         │
    │ created_at / started_at /  │
    │ finished_at                │
    └────────────────────────────┘
@@ -439,6 +442,15 @@ Job queue
    Central entity of the job queue. ``parent_job_id`` links child batch jobs to their
    coordinator parent (used in distributed pipelines). ``progress_current`` /
    ``progress_total`` track batch completion for progress bars.
+
+   The three narrative columns (``description``, ``findings``, ``tags``)
+   were added in T3.9 / D11 to give every run a place for human context:
+   ``description`` carries the pre-execution intent supplied at
+   ``POST /jobs`` time, ``findings`` is a free-form post-completion note
+   the operator (or a downstream tool) can write back via the existing
+   PATCH path, and ``tags`` is a free-form ``Text[]`` (default ``[]``)
+   for ad-hoc grouping. None of the three are interpreted by
+   ``BaseWorker`` — they are operator metadata only.
 
 **JobEvent**
    Append-only audit log. Written by the ``emit`` callback during execution. The frontend

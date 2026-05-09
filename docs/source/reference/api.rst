@@ -641,7 +641,11 @@ Request body for ``POST /jobs``
 The ``operation`` and ``queue_name`` fields are required. ``payload`` is
 passed verbatim to the operation's ``execute`` method after Pydantic
 validation; its schema depends on the operation. ``meta`` is stored on
-the ``Job`` row and never interpreted by the API.
+the ``Job`` row and never interpreted by the API. ``description`` and
+``tags`` are optional D11 narrative fields surfaced on the
+``GET /jobs`` and ``GET /jobs/{id}`` responses; they let any caller
+attach human intent and ad-hoc grouping tokens at submission time
+without round-tripping through a separate metadata endpoint.
 
 .. code-block:: json
 
@@ -651,7 +655,9 @@ the ``Job`` row and never interpreted by the API.
      "payload": {
        "search_criteria": "reviewed:true AND organism_id:9606"
      },
-     "meta": {}
+     "meta": {},
+     "description": "Backfill reviewed Swiss-Prot for benchmark-v1",
+     "tags": ["ablation", "benchmark-v1"]
    }
 
 Common payload examples by operation:
