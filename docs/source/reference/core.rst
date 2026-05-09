@@ -59,15 +59,18 @@ across coordinators.
 Retry middleware
 ----------------
 
-``protea.core.retry`` implements the ``with_retry`` decorator used by
-``BaseWorker`` to wrap the execute session against transient
+``protea.core.retry`` exposes ``with_retry``, a wrapper function used
+by ``BaseWorker`` to run the execute session against transient
 database errors (deadlocks, connection drops, serialisation
-failures). Exponential backoff with jitter; the maximum number of
-attempts and the backoff base are controlled by
-``settings.WorkerTuning.retry_max_attempts`` and
-``settings.WorkerTuning.retry_backoff_base`` (see
-:doc:`/appendix/configuration`). Added as part of F0 (T0.3) of the
-master plan v3.
+failures) and brief network blips. Exponential backoff with jitter;
+all knobs (``max_attempts``, ``base_delay``, ``max_delay``,
+``jitter_ratio``, ``predicate``, ``on_retry``) are bundled in a
+``RetryPolicy`` frozen dataclass passed via the ``policy`` keyword
+argument (T-CONTEXTS, PR #237). ``BaseWorker`` instantiates a fixed
+policy at call site (``RetryPolicy(max_attempts=3, base_delay=1.0,
+max_delay=10.0, jitter_ratio=0.3)``); there is no global
+``TuningSettings`` field for these values. Added as part of F0
+(T0.3) of the master plan v3.
 
 .. automodule:: protea.core.retry
    :members:
