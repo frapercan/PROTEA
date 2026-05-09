@@ -171,25 +171,12 @@ def insert_new_snapshot(
     session.add_all(relationships)
     session.flush()
 
-    elapsed = time.perf_counter() - started_at
-    emit(
-        "load_ontology_snapshot.done",
-        None,
-        {
-            "ontology_snapshot_id": str(snapshot.id),
-            "obo_version": obo_version,
-            "terms_inserted": len(go_terms),
-            "relationships_inserted": len(relationships),
-            "elapsed_seconds": elapsed,
-        },
-        "info",
-    )
-    return OperationResult(
-        result={
-            "ontology_snapshot_id": str(snapshot.id),
-            "obo_version": obo_version,
-            "terms_inserted": len(go_terms),
-            "relationships_inserted": len(relationships),
-            "elapsed_seconds": elapsed,
-        }
-    )
+    summary = {
+        "ontology_snapshot_id": str(snapshot.id),
+        "obo_version": obo_version,
+        "terms_inserted": len(go_terms),
+        "relationships_inserted": len(relationships),
+        "elapsed_seconds": time.perf_counter() - started_at,
+    }
+    emit("load_ontology_snapshot.done", None, summary, "info")
+    return OperationResult(result=summary)
