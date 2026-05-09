@@ -169,15 +169,6 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/generate_evaluation_set.py::GenerateEvaluationSetOperation.execute",
-      "kind": "method",
-      "path": "protea/core/operations/generate_evaluation_set.py",
-      "name": "GenerateEvaluationSetOperation.execute",
-      "line": 82,
-      "metric": 89,
-      "threshold": 60
-    },
-    {
       "key": "method::protea/core/operations/insert_proteins.py::InsertProteinsOperation.execute",
       "kind": "method",
       "path": "protea/core/operations/insert_proteins.py",
