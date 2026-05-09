@@ -45,9 +45,29 @@ class ProblemDetail(BaseModel):
         ),
     )
     title: str = Field(..., description="Short, stable summary of the problem.")
-    status: int = Field(..., ge=100, le=599)
-    detail: str | None = Field(default=None)
-    instance: str | None = Field(default=None)
+    status: int = Field(
+        ...,
+        ge=100,
+        le=599,
+        description=(
+            "HTTP status code repeated in the body so the payload is "
+            "self-contained for clients that drop the status line."
+        ),
+    )
+    detail: str | None = Field(
+        default=None,
+        description=(
+            "Human-readable explanation of this specific occurrence, "
+            "distinct from the generic ``title``."
+        ),
+    )
+    instance: str | None = Field(
+        default=None,
+        description=(
+            "URI of the specific occurrence (typically the request "
+            "path); helps correlate with logs."
+        ),
+    )
 
 
 def _slugify_status(status: int) -> str:

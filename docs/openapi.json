@@ -577,6 +577,7 @@
               }
             ],
             "default": null,
+            "description": "Human-readable explanation of this specific occurrence, distinct from the generic ``title``.",
             "title": "Detail"
           },
           "instance": {
@@ -589,9 +590,11 @@
               }
             ],
             "default": null,
+            "description": "URI of the specific occurrence (typically the request path); helps correlate with logs.",
             "title": "Instance"
           },
           "status": {
+            "description": "HTTP status code repeated in the body so the payload is self-contained for clients that drop the status line.",
             "maximum": 599,
             "minimum": 100,
             "title": "Status",
@@ -1066,6 +1069,7 @@
                 "type": "null"
               }
             ],
+            "description": "Replace the structured config blob. ``None`` leaves it untouched; ``{}`` clears it.",
             "title": "Config"
           },
           "description": {
@@ -1077,6 +1081,7 @@
                 "type": "null"
               }
             ],
+            "description": "Replace the run's narrative description text. ``None`` leaves the column untouched.",
             "title": "Description"
           },
           "findings": {
@@ -1088,6 +1093,7 @@
                 "type": "null"
               }
             ],
+            "description": "Free-form narrative recording the run's outcome. Set when transitioning to ``done`` to capture the writeup.",
             "title": "Findings"
           },
           "hypothesis": {
@@ -1099,6 +1105,7 @@
                 "type": "null"
               }
             ],
+            "description": "Replace the hypothesis text. ``None`` leaves it untouched.",
             "title": "Hypothesis"
           },
           "provenance": {
@@ -1111,6 +1118,7 @@
                 "type": "null"
               }
             ],
+            "description": "Replace the provenance overlay. ``None`` leaves it untouched; ``{}`` clears it.",
             "title": "Provenance"
           },
           "status": {
@@ -1121,7 +1129,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Transition the run to a new status. The server stamps ``started_at`` on the first move to ``running`` and ``finished_at`` on the first move to ``done`` / ``abandoned`` (idempotent on re-entry)."
           },
           "tags": {
             "anyOf": [
@@ -1135,6 +1144,7 @@
                 "type": "null"
               }
             ],
+            "description": "Replace the tag list. ``None`` leaves it untouched; ``[]`` clears it.",
             "title": "Tags"
           }
         },
