@@ -38,6 +38,61 @@ def _as_bool(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _resolve_storage_block(
+    project_root: Path,
+    system: dict[str, Any],
+    env_prefix: str,
+) -> dict[str, Any]:
+    """Resolve the storage-related fields (artifacts_dir, backend, root, minio.*).
+
+    Each value is sourced from env (highest priority), then the
+    ``storage:`` block of ``system.yaml``, then the documented default.
+    Path-shaped values are absolutised against ``project_root`` when
+    set as a relative string.
+    """
+    storage_cfg = system.get("storage", {}) or {}
+    minio_cfg = storage_cfg.get("minio", {}) or {}
+
+    raw_artifacts = (
+        os.getenv(f"{env_prefix}ARTIFACTS_DIR")
+        or storage_cfg.get("artifacts_dir")
+        or "storage/evaluation_artifacts"
+    )
+    artifacts_dir = Path(raw_artifacts)
+    if not artifacts_dir.is_absolute():
+        artifacts_dir = project_root / artifacts_dir
+
+    raw_storage_root = os.getenv(f"{env_prefix}STORAGE_ROOT") or storage_cfg.get("root")
+    storage_root: Path | None = None
+    if raw_storage_root:
+        storage_root = Path(raw_storage_root)
+        if not storage_root.is_absolute():
+            storage_root = project_root / storage_root
+
+    return {
+        "artifacts_dir": artifacts_dir,
+        "storage_backend": (
+            os.getenv(f"{env_prefix}STORAGE_BACKEND")
+            or storage_cfg.get("backend")
+            or "local"
+        ).lower(),
+        "storage_root": storage_root,
+        "minio_endpoint": os.getenv(f"{env_prefix}MINIO_ENDPOINT") or minio_cfg.get("endpoint"),
+        "minio_bucket": (
+            os.getenv(f"{env_prefix}MINIO_BUCKET") or minio_cfg.get("bucket") or "protea"
+        ),
+        "minio_access_key": (
+            os.getenv(f"{env_prefix}MINIO_ACCESS_KEY") or minio_cfg.get("access_key")
+        ),
+        "minio_secret_key": (
+            os.getenv(f"{env_prefix}MINIO_SECRET_KEY") or minio_cfg.get("secret_key")
+        ),
+        "minio_secure": _as_bool(
+            os.getenv(f"{env_prefix}MINIO_SECURE", minio_cfg.get("secure", False))
+        ),
+    }
+
+
 def load_settings(project_root: Path, *, env_prefix: str = "PROTEA_") -> Settings:
     """
     Load settings from:
@@ -58,70 +113,24 @@ def load_settings(project_root: Path, *, env_prefix: str = "PROTEA_") -> Setting
     system_path = project_root / "protea" / "config" / "system.yaml"
     system = _load_yaml(system_path)
 
-    file_db_url: str | None = system.get("database", {}).get("url")
-    file_amqp_url: str | None = system.get("queue", {}).get("amqp_url")
-
     db_url = (
         os.getenv(f"{env_prefix}DB_URL")
-        or file_db_url
+        or system.get("database", {}).get("url")
         or "postgresql+psycopg://usuario:clave@localhost:5432/BioData"
     )
     amqp_url = (
-        os.getenv(f"{env_prefix}AMQP_URL") or file_amqp_url or "amqp://guest:guest@localhost:5672/"
+        os.getenv(f"{env_prefix}AMQP_URL")
+        or system.get("queue", {}).get("amqp_url")
+        or "amqp://guest:guest@localhost:5672/"
     )
-
-    storage_cfg = system.get("storage", {}) or {}
-
-    raw_artifacts = (
-        os.getenv(f"{env_prefix}ARTIFACTS_DIR")
-        or storage_cfg.get("artifacts_dir")
-        or "storage/evaluation_artifacts"
-    )
-    artifacts_dir = Path(raw_artifacts)
-    if not artifacts_dir.is_absolute():
-        artifacts_dir = project_root / artifacts_dir
-
     admin_token = (
         os.getenv(f"{env_prefix}ADMIN_TOKEN") or system.get("admin", {}).get("token") or ""
     )
-
-    storage_backend = (
-        os.getenv(f"{env_prefix}STORAGE_BACKEND")
-        or storage_cfg.get("backend")
-        or "local"
-    ).lower()
-
-    raw_storage_root = (
-        os.getenv(f"{env_prefix}STORAGE_ROOT")
-        or storage_cfg.get("root")
-    )
-    storage_root: Path | None
-    if raw_storage_root:
-        storage_root = Path(raw_storage_root)
-        if not storage_root.is_absolute():
-            storage_root = project_root / storage_root
-    else:
-        storage_root = None
-
-    minio_cfg = storage_cfg.get("minio", {}) or {}
-    minio_endpoint = os.getenv(f"{env_prefix}MINIO_ENDPOINT") or minio_cfg.get("endpoint")
-    minio_bucket = os.getenv(f"{env_prefix}MINIO_BUCKET") or minio_cfg.get("bucket") or "protea"
-    minio_access_key = os.getenv(f"{env_prefix}MINIO_ACCESS_KEY") or minio_cfg.get("access_key")
-    minio_secret_key = os.getenv(f"{env_prefix}MINIO_SECRET_KEY") or minio_cfg.get("secret_key")
-    minio_secure = _as_bool(
-        os.getenv(f"{env_prefix}MINIO_SECURE", minio_cfg.get("secure", False))
-    )
+    storage = _resolve_storage_block(project_root, system, env_prefix)
 
     return Settings(
         db_url=db_url,
         amqp_url=amqp_url,
-        artifacts_dir=artifacts_dir,
         admin_token=admin_token,
-        storage_backend=storage_backend,
-        storage_root=storage_root,
-        minio_endpoint=minio_endpoint,
-        minio_bucket=minio_bucket,
-        minio_access_key=minio_access_key,
-        minio_secret_key=minio_secret_key,
-        minio_secure=minio_secure,
+        **storage,
     )

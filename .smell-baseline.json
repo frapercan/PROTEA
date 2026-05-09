@@ -385,15 +385,6 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/infrastructure/settings.py::load_settings",
-      "kind": "method",
-      "path": "protea/infrastructure/settings.py",
-      "name": "load_settings",
-      "line": 41,
-      "metric": 87,
-      "threshold": 60
-    },
-    {
       "key": "method::protea/services/_embeddings_predictions_helpers.py::iter_predictions_tsv",
       "kind": "method",
       "path": "protea/services/_embeddings_predictions_helpers.py",
