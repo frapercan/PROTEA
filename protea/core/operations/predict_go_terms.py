@@ -1668,61 +1668,65 @@ class PredictGOTermsBatchOperation:
     ) -> dict[str, list[dict[str, Any]]]:
         """Load GO annotations for the given accessions, chunked to avoid param limits.
 
-        Only non-negated annotations are loaded: rows with a NOT qualifier (e.g.
-        ``'NOT'``, ``'NOT|involved_in'``) assert that the protein does *not* have
-        the annotated function and must never be transferred as positive predictions.
-        Although NOT annotations are rare in GOA/QuickGO (~0.1 % of rows), including
-        them would introduce false positives that are silently penalised by cafaeval
-        without any obvious trace in the prediction artefacts.
-
-        When ``aspect`` is given (``'P'``, ``'F'``, or ``'C'``), only annotations
-        whose GO term belongs to that aspect are returned.  This is used by the
-        per-aspect KNN mode so that BPO-index neighbors transfer only BPO terms,
-        MFO-index neighbors transfer only MFO terms, etc.  The join to ``go_term``
-        is added only when needed to keep the no-aspect path as fast as before.
+        Only non-negated annotations are loaded: rows with a NOT qualifier
+        (e.g. ``'NOT'``, ``'NOT|involved_in'``) assert that the protein does
+        *not* have the annotated function and must never be transferred as
+        positive predictions. When ``aspect`` is provided (``'P'`` / ``'F'``
+        / ``'C'``), only annotations whose GO term belongs to that aspect are
+        returned (per-aspect KNN mode).
         """
         from protea.config.tuning import get_tuning
 
         chunk_size = get_tuning().operation.annotation_chunk_size
         go_map: dict[str, list[dict[str, Any]]] = {}
         accessions_list = list(accessions)
-
         for i in range(0, len(accessions_list), chunk_size):
             chunk = accessions_list[i : i + chunk_size]
-            q = session.query(
-                ProteinGOAnnotation.protein_accession,
-                ProteinGOAnnotation.go_term_id,
-                ProteinGOAnnotation.qualifier,
-                ProteinGOAnnotation.evidence_code,
-            ).filter(
-                ProteinGOAnnotation.annotation_set_id == annotation_set_id,
-                ProteinGOAnnotation.protein_accession.in_(chunk),
-                # Exclude NOT-qualified annotations (e.g. 'NOT', 'NOT|involved_in').
-                # qualifier IS NULL must be preserved explicitly because SQL LIKE
-                # returns NULL for NULL inputs, which would silently drop those rows.
-                (
-                    ProteinGOAnnotation.qualifier.is_(None)
-                    | ~ProteinGOAnnotation.qualifier.like("%NOT%")
-                ),
-            )
-            if aspect is not None:
-                # Join go_term only when aspect filtering is requested to avoid
-                # an unnecessary join on the common (non-aspect-separated) path.
-                q = q.join(ProteinGOAnnotation.go_term).filter(GOTerm.aspect == aspect)
-            rows = q.all()
+            rows = self._fetch_annotation_chunk(session, annotation_set_id, chunk, aspect)
             for acc, go_term_id, qualifier, evidence_code in rows:
                 go_map.setdefault(acc, []).append(
                     {
                         "go_term_id": go_term_id,
-                        # Flyweight — qualifier / evidence_code take ~5-10 distinct
-                        # values across millions of rows; interning collapses every
-                        # duplicate to one shared string instance.
+                        # Flyweight — qualifier / evidence_code take ~5-10
+                        # distinct values across millions of rows; interning
+                        # collapses every duplicate to one shared string.
                         "qualifier": intern_string(qualifier),
                         "evidence_code": intern_string(evidence_code),
                     }
                 )
-
         return go_map
+
+    def _fetch_annotation_chunk(
+        self,
+        session: Session,
+        annotation_set_id: uuid.UUID,
+        chunk: list[str],
+        aspect: str | None,
+    ) -> list[Any]:
+        """Query one accession chunk for non-negated annotations.
+
+        Returns the raw rows; the join to ``go_term`` is added only when
+        aspect filtering is requested so the common (non-aspect-separated)
+        path stays as fast as before. ``qualifier IS NULL`` is preserved
+        explicitly because SQL ``LIKE`` returns NULL for NULL inputs and
+        would otherwise drop those rows.
+        """
+        q = session.query(
+            ProteinGOAnnotation.protein_accession,
+            ProteinGOAnnotation.go_term_id,
+            ProteinGOAnnotation.qualifier,
+            ProteinGOAnnotation.evidence_code,
+        ).filter(
+            ProteinGOAnnotation.annotation_set_id == annotation_set_id,
+            ProteinGOAnnotation.protein_accession.in_(chunk),
+            (
+                ProteinGOAnnotation.qualifier.is_(None)
+                | ~ProteinGOAnnotation.qualifier.like("%NOT%")
+            ),
+        )
+        if aspect is not None:
+            q = q.join(ProteinGOAnnotation.go_term).filter(GOTerm.aspect == aspect)
+        return q.all()
 
     def _load_query_embeddings(
         self,
