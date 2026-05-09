@@ -104,3 +104,31 @@ class JobEvent(Base):
         Index("ix_job_event_job_id_ts_desc", "job_id", "ts"),
         Index("ix_job_event_event_ts_desc", "event", "ts"),
     )
+
+
+class JobComment(Base):
+    """Free-form note attached to a Job (decision D11 thread).
+
+    Unlike :class:`JobEvent` (machine-emitted, structured fields), a
+    ``JobComment`` carries an opinionated curator/operator note plus its
+    author tag. Cascades on parent delete; sorted chronologically by
+    ``created_at`` via the supporting index.
+    """
+
+    __tablename__ = "job_comment"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    job_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("job.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    author: Mapped[str | None] = mapped_column(Text, nullable=True)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utcnow
+    )
+
+    __table_args__ = (
+        Index("ix_job_comment_job_id_created_at", "job_id", "created_at"),
+    )

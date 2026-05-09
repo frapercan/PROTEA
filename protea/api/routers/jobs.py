@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from protea.api.deps import get_amqp_url, get_operation_registry, get_session_factory
 from protea.core.contracts.registry import OperationRegistry
 from protea.core.utils import utcnow
-from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
+from protea.infrastructure.orm.models.job import Job, JobComment, JobEvent, JobStatus
 from protea.infrastructure.queue.publisher import publish_job
 from protea.infrastructure.session import session_scope
 
@@ -296,6 +296,85 @@ def get_job_events(
             }
             for e in events
         ]
+
+
+# ---------------------------------------------------------------------------
+# Job comments (T3.10 / decision D11 thread)
+# ---------------------------------------------------------------------------
+
+
+class CreateJobCommentRequest(BaseModel):
+    body: str = Field(..., min_length=1, description="Comment payload (markdown allowed).")
+    author: str | None = Field(
+        default=None,
+        description="Free-form actor tag (e.g. user login, bot id, cron name).",
+    )
+
+    @field_validator("body", mode="before")
+    @classmethod
+    def strip_body(cls, v: str) -> str:
+        if not isinstance(v, str) or not v.strip():
+            raise ValueError("body must be a non-empty string")
+        return v.strip()
+
+
+def _serialise_job_comment(c: JobComment) -> dict[str, Any]:
+    """Shape one ``JobComment`` row for the API response."""
+    return {
+        "id": c.id,
+        "job_id": str(c.job_id),
+        "author": c.author,
+        "body": c.body,
+        "created_at": c.created_at.isoformat(),
+    }
+
+
+@router.post(
+    "/{job_id}/comments",
+    status_code=201,
+    summary="Append a comment to a job",
+)
+def create_job_comment(
+    job_id: UUID,
+    body: CreateJobCommentRequest,
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+) -> dict[str, Any]:
+    """Append a free-form comment to a Job.
+
+    Curators / operators use this thread to record observations,
+    follow-ups, or post-mortems; the worker fleet keeps writing to
+    ``JobEvent`` for machine-emitted progress.
+    """
+    with session_scope(factory) as session:
+        if session.get(Job, job_id) is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        # Stamp created_at explicitly so the response carries it even when
+        # the test fixture replaces session.flush() with a no-op (the ORM-
+        # level ``default=utcnow`` only fires at the SQL INSERT boundary).
+        comment = JobComment(
+            job_id=job_id, body=body.body, author=body.author, created_at=utcnow()
+        )
+        session.add(comment)
+        session.flush()
+        return _serialise_job_comment(comment)
+
+
+@router.get("/{job_id}/comments", summary="List job comments")
+def list_job_comments(
+    job_id: UUID,
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+) -> list[dict[str, Any]]:
+    """Return every ``JobComment`` for a Job, oldest first."""
+    with session_scope(factory) as session:
+        if session.get(Job, job_id) is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        rows = (
+            session.query(JobComment)
+            .filter(JobComment.job_id == job_id)
+            .order_by(JobComment.created_at.asc(), JobComment.id.asc())
+            .all()
+        )
+        return [_serialise_job_comment(c) for c in rows]
 
 
 @router.delete("/{job_id}", summary="Delete a job")
