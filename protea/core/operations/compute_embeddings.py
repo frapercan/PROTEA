@@ -4,7 +4,7 @@ import re
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Annotated, Any
+from typing import Annotated, Any, NamedTuple
 from uuid import UUID
 
 import numpy as np
@@ -706,67 +706,33 @@ def _embed_esm(
 # ---------------------------------------------------------------------------
 
 
-def _embed_t5(
-    model: Any,
-    tokenizer: Any,
-    sequences: list[str],
-    config: EmbeddingConfig,
-    device: str,
-    *,
-    use_aa2fold: bool | None = None,
-    split_into_words: bool = False,
-) -> list[list[ChunkEmbedding]]:
-    """Embed sequences with T5EncoderModel (ProstT5, prot_t5_xl, Ankh, …).
+class _T5Mode(NamedTuple):
+    """Tokenisation/prefix mode for ``_embed_t5``.
 
-    Sequences are processed as a padded batch.  ProSTT5 mode is auto-detected
-    from ``config.model_name`` (looks for ``prostt5`` substring, case-insensitive)
-    when ``use_aa2fold`` is ``None``; callers (e.g. the Ankh backend) can pass
-    ``use_aa2fold=False`` to disable the prefix unconditionally.
-
-    Tokeniser input format
-    ----------------------
-    Two tokenisation strategies are supported:
-
-    * ``split_into_words=False`` (default) — each sequence is joined with
-      single spaces (``"A C D E"``) and passed as a string.  This matches the
-      ProstT5 / ``prot_t5_xl_uniref50`` SentencePiece models, which recognise
-      space-separated amino acids as individual tokens.
-    * ``split_into_words=True`` — each sequence is passed as a list of
-      characters with ``is_split_into_words=True``.  Required by Ankh
-      (``ElnaggarLab/ankh-base`` / ``-large``): Ankh's SentencePiece
-      tokeniser maps a literal space to ``<unk>``, so the space-joined path
-      produces ~50% ``<unk>`` tokens and NaN outputs under FP16.
-
-    Residue slicing
-    ---------------
-    T5 has no CLS token at position 0, but ProstT5 injects a ``<AA2fold>``
-    prefix token there, and every T5 tokenizer appends an EOS at the last
-    valid position.  The residue-level slice strips both so that
-    ``residues[0]`` is always the first amino acid and ``residues.shape[0]``
-    equals the amino-acid count, consistent with ``_embed_esm`` /
-    ``_embed_esm3c`` which strip CLS/BOS+EOS:
-
-        start = 1 if use_aa2fold else 0   # skip <AA2fold> on ProstT5 only
-        end   = actual_len - 1            # drop trailing EOS
-
-    This makes ``chunk_index_s`` / ``chunk_index_e`` mean the same thing on
-    every backend: indices into the amino-acid sequence, not into the
-    backend-specific residue tensor.  The CLS pooling path is unchanged
-    (position 0 = ``<AA2fold>`` for ProstT5, arbitrary first AA otherwise).
+    ``use_aa2fold=None`` triggers auto-detect from ``config.model_name``
+    (ProstT5 substring); callers like Ankh override with explicit values.
     """
-    import torch
-    import torch.nn.functional as F
 
-    if use_aa2fold is None:
-        use_aa2fold = "prostt5" in config.model_name.lower()
+    use_aa2fold: bool | None = None
+    split_into_words: bool = False
 
-    # Replace ambiguous amino acids (U/Z/O/B → X) regardless of tokenisation mode.
-    cleaned = [re.sub(r"[UZOB]", "X", seq_str) for seq_str in sequences]
 
-    if split_into_words:
-        # Ankh path: pass list-of-chars with is_split_into_words=True so the
+def _t5_tokenise(
+    tokenizer: Any,
+    cleaned: list[str],
+    config: EmbeddingConfig,
+    mode: _T5Mode,
+    use_aa2fold: bool,
+) -> Any:
+    """Apply the tokeniser branch picked by ``mode.split_into_words``.
+
+    ``use_aa2fold`` here is the resolved boolean (auto-detected or
+    explicitly set), used only on the space-joined path.
+    """
+    if mode.split_into_words:
+        # Ankh path: list-of-chars with is_split_into_words=True so the
         # tokeniser treats each residue as one word and never falls back to <unk>.
-        inputs = tokenizer.batch_encode_plus(
+        return tokenizer.batch_encode_plus(
             [list(c) for c in cleaned],
             padding="longest",
             truncation=True,
@@ -775,18 +741,87 @@ def _embed_t5(
             is_split_into_words=True,
             return_tensors="pt",
         )
-    else:
-        processed = [
-            ("<AA2fold> " if use_aa2fold else "") + " ".join(c) for c in cleaned
+    processed = [("<AA2fold> " if use_aa2fold else "") + " ".join(c) for c in cleaned]
+    return tokenizer.batch_encode_plus(
+        processed,
+        padding="longest",
+        truncation=True,
+        max_length=config.max_length,
+        add_special_tokens=True,
+        return_tensors="pt",
+    )
+
+
+def _t5_pool_one(
+    seq_idx: int,
+    hidden_states: Any,
+    attention_mask: Any,
+    valid_layers: list[int],
+    start_idx: int,
+    config: EmbeddingConfig,
+) -> list[ChunkEmbedding]:
+    """Pool one batched sequence's hidden states into ChunkEmbedding rows.
+
+    Two pooling paths:
+    * ``cls`` — position 0 (``<AA2fold>`` on ProstT5, otherwise first AA).
+    * residue — strip prefix (``start_idx``) and trailing EOS so residues
+      start at AA 0 and ``residues.shape[0]`` equals the amino-acid count.
+    """
+    import torch.nn.functional as F
+
+    actual_len = int(attention_mask[seq_idx].sum().item())
+    if config.pooling == "cls":
+        layer_tensors_1d = [
+            hidden_states[-(li + 1)][seq_idx, 0, :].float() for li in valid_layers
         ]
-        inputs = tokenizer.batch_encode_plus(
-            processed,
-            padding="longest",
-            truncation=True,
-            max_length=config.max_length,
-            add_special_tokens=True,
-            return_tensors="pt",
-        )
+        pooled = _aggregate_1d(layer_tensors_1d, config.layer_agg)
+        if config.normalize:
+            pooled = F.normalize(pooled.unsqueeze(0), p=2, dim=1).squeeze(0)
+        return [ChunkEmbedding(0, None, pooled.cpu().numpy())]
+    layer_tensors_2d = [
+        hidden_states[-(li + 1)][seq_idx, start_idx : actual_len - 1, :].float()
+        for li in valid_layers
+    ]
+    residues = _aggregate_residue_layers(layer_tensors_2d, config.layer_agg)
+    if config.normalize_residues:
+        residues = F.normalize(residues, p=2, dim=1)
+    return _chunk_and_pool(residues, config)
+
+
+def _embed_t5(
+    model: Any,
+    tokenizer: Any,
+    sequences: list[str],
+    config: EmbeddingConfig,
+    device: str,
+    mode: _T5Mode = _T5Mode(),
+) -> list[list[ChunkEmbedding]]:
+    """Embed sequences with T5EncoderModel (ProstT5, prot_t5_xl, Ankh, …).
+
+    Sequences are processed as a padded batch.  ProSTT5 mode is auto-detected
+    from ``config.model_name`` (looks for ``prostt5`` substring, case-insensitive)
+    when ``mode.use_aa2fold`` is ``None``; callers (e.g. the Ankh backend) can
+    pass ``use_aa2fold=False`` via ``mode`` to disable the prefix unconditionally.
+
+    Tokenisation strategies live on ``mode.split_into_words``:
+    ``False`` → space-joined string (ProstT5 / prot_t5_xl SentencePiece);
+    ``True`` → per-residue list with ``is_split_into_words=True`` (Ankh,
+    whose tokeniser maps a literal space to ``<unk>``).
+
+    Residue slicing strips the optional ``<AA2fold>`` prefix and trailing
+    EOS so ``residues[0]`` is always AA 0 and ``residues.shape[0]`` equals
+    the amino-acid count, matching the convention used by ``_embed_esm`` /
+    ``_embed_esm3c``.
+    """
+    import torch
+
+    use_aa2fold = (
+        mode.use_aa2fold
+        if mode.use_aa2fold is not None
+        else "prostt5" in config.model_name.lower()
+    )
+    cleaned = [re.sub(r"[UZOB]", "X", seq_str) for seq_str in sequences]
+    inputs = _t5_tokenise(tokenizer, cleaned, config, mode, use_aa2fold)
     inputs = {k: v.to(device) for k, v in inputs.items()}
 
     with torch.no_grad():
@@ -795,44 +830,21 @@ def _embed_t5(
             attention_mask=inputs["attention_mask"],
             output_hidden_states=True,
         )
-
     hidden_states = outputs.hidden_states  # tuple of (B, L, D)
     del outputs
     torch.cuda.empty_cache()
 
     valid_layers = _validate_layers(config.layer_indices, hidden_states, "T5", "batch")
-
-    # On ProstT5 the <AA2fold> prefix lives at token position 0; skip it.
-    start_idx = 1 if use_aa2fold else 0
-
-    results: list[list[ChunkEmbedding]] = []
-    for i in range(len(sequences)):
-        # actual_len = (optional <AA2fold>) + N residues + EOS
-        actual_len = int(inputs["attention_mask"][i].sum().item())
-
-        if config.pooling == "cls":
-            # CLS pooling on T5 uses position 0 — the <AA2fold> hidden state
-            # on ProstT5, otherwise the first amino-acid hidden state.
-            layer_tensors_1d = [hidden_states[-(li + 1)][i, 0, :].float() for li in valid_layers]
-            pooled = _aggregate_1d(layer_tensors_1d, config.layer_agg)
-            if config.normalize:
-                pooled = F.normalize(pooled.unsqueeze(0), p=2, dim=1).squeeze(0)
-            results.append([ChunkEmbedding(0, None, pooled.cpu().numpy())])
-        else:
-            # Residue slice: strip <AA2fold> (if present) and trailing EOS so
-            # residues[0] is AA 0 and residues.shape[0] == amino-acid count.
-            layer_tensors_2d = [
-                hidden_states[-(li + 1)][i, start_idx : actual_len - 1, :].float()
-                for li in valid_layers
-            ]
-            residues = _aggregate_residue_layers(layer_tensors_2d, config.layer_agg)
-            if config.normalize_residues:
-                residues = F.normalize(residues, p=2, dim=1)
-            results.append(_chunk_and_pool(residues, config))
+    start_idx = 1 if use_aa2fold else 0  # skip <AA2fold> on ProstT5
+    results: list[list[ChunkEmbedding]] = [
+        _t5_pool_one(
+            i, hidden_states, inputs["attention_mask"], valid_layers, start_idx, config
+        )
+        for i in range(len(sequences))
+    ]
 
     del hidden_states
     torch.cuda.empty_cache()
-
     return results
 
 
@@ -867,8 +879,7 @@ def _embed_ankh(
         sequences,
         config,
         device,
-        use_aa2fold=False,
-        split_into_words=True,
+        mode=_T5Mode(use_aa2fold=False, split_into_words=True),
     )
 
 
