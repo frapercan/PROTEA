@@ -115,15 +115,6 @@
       "threshold": 60
     },
     {
-      "key": "params::protea/api/routers/jobs.py::list_jobs",
-      "kind": "params",
-      "path": "protea/api/routers/jobs.py",
-      "name": "list_jobs",
-      "line": 119,
-      "metric": 7,
-      "threshold": 6
-    },
-    {
       "key": "params::protea/api/routers/reranker_models.py::import_reranker_model_multipart",
       "kind": "params",
       "path": "protea/api/routers/reranker_models.py",
