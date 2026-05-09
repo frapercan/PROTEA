@@ -12,9 +12,16 @@ requests — the session factory and AMQP URL are injected via ``app.state``
 at startup, keeping every router free of global state and infrastructure
 imports.
 
-All endpoints return JSON. Error responses follow FastAPI's default
-``{"detail": "..."}`` format. Timestamps are ISO 8601 UTC strings.
-UUID identifiers are lowercase hyphenated strings.
+All endpoints return JSON. Error responses follow the **RFC 7807
+``application/problem+json``** shape (T4.4 / D4): every error body
+includes ``type`` (relative URI under ``/problems/{slug}``,
+e.g. ``/problems/not-found``), ``title`` (short stable summary),
+``status`` (mirror of the HTTP code), and an optional ``detail`` +
+``instance`` (request URI). Validation errors carry an extra
+``errors`` array with the offending field paths. Existing route code
+keeps raising ``HTTPException`` exactly as before — only the wire
+format changed. Timestamps are ISO 8601 UTC strings. UUID identifiers
+are lowercase hyphenated strings.
 
 Versioning and the ``/v1/`` prefix
 ----------------------------------
