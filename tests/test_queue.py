@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from protea.infrastructure.queue.consumer import QueueConsumer
+from protea.infrastructure.queue.consumer import ConsumerOptions, QueueConsumer
 from protea.infrastructure.queue.publisher import publish_job
 
 # ---------------------------------------------------------------------------
@@ -42,7 +42,7 @@ def _consumer(worker=None, requeue_on_failure=False):
         amqp_url="amqp://guest:guest@localhost/",
         queue_name="test.jobs",
         worker=worker or _make_worker(),
-        requeue_on_failure=requeue_on_failure,
+        options=ConsumerOptions(requeue_on_failure=requeue_on_failure),
     )
 
 
@@ -438,7 +438,7 @@ class TestOperationConsumerOnMessage:
             queue_name="test.ops",
             registry=registry,
             session_factory=factory,
-            requeue_on_failure=requeue_on_failure,
+            options=ConsumerOptions(requeue_on_failure=requeue_on_failure),
         )
         return consumer, sessions, factory, op
 
@@ -846,7 +846,7 @@ class TestOperationConsumerRun:
             queue_name="test.ops",
             registry=MagicMock(),
             session_factory=MagicMock(),
-            prefetch_count=4,
+            options=ConsumerOptions(prefetch_count=4),
         )
 
         conn = MagicMock()

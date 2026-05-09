@@ -14,7 +14,11 @@ import time
 from pathlib import Path
 
 from protea.core.operation_catalog import build_operation_registry
-from protea.infrastructure.queue.consumer import OperationConsumer, QueueConsumer
+from protea.infrastructure.queue.consumer import (
+    ConsumerOptions,
+    OperationConsumer,
+    QueueConsumer,
+)
 from protea.infrastructure.session import build_session_factory
 from protea.infrastructure.settings import load_settings
 from protea.workers.base_worker import BaseWorker, WorkerConfig
@@ -80,13 +84,14 @@ def main() -> None:
         reaper.run(interval_seconds=60)
         return
 
+    options = ConsumerOptions(requeue_on_failure=args.requeue_on_failure)
     if args.queue in _OPERATION_QUEUES:
         consumer: QueueConsumer | OperationConsumer = OperationConsumer(
             amqp_url=settings.amqp_url,
             queue_name=args.queue,
             registry=registry,
             session_factory=factory,
-            requeue_on_failure=args.requeue_on_failure,
+            options=options,
         )
     else:
         worker = BaseWorker(factory, registry, WorkerConfig(worker_name="queue-worker"), amqp_url=settings.amqp_url)
@@ -94,7 +99,7 @@ def main() -> None:
             amqp_url=settings.amqp_url,
             queue_name=args.queue,
             worker=worker,
-            requeue_on_failure=args.requeue_on_failure,
+            options=options,
         )
 
     # Pre-warm taxonomy DB for prediction workers that may need it.
