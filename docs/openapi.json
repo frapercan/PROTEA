@@ -330,7 +330,7 @@
                 "type": "null"
               }
             ],
-            "description": "Human-readable intent text shown on the run \u2014 D11 narrative field.",
+            "description": "Human-readable intent text shown on the run (D11 narrative field).",
             "title": "Description"
           },
           "meta": {
@@ -2690,6 +2690,7 @@
             }
           },
           {
+            "description": "Filter datasets to those derived from one specific ``embedding_config`` UUID.",
             "in": "query",
             "name": "embedding_config_id",
             "required": false,
@@ -2703,15 +2704,18 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter datasets to those derived from one specific ``embedding_config`` UUID.",
               "title": "Embedding Config Id"
             }
           },
           {
+            "description": "Max rows per page; capped at 500.",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "default": 50,
+              "description": "Max rows per page; capped at 500.",
               "maximum": 500,
               "minimum": 1,
               "title": "Limit",
@@ -3637,6 +3641,7 @@
         "operationId": "list_experiment_runs_v1_experiment_runs_get",
         "parameters": [
           {
+            "description": "Filter by ``ExperimentRunStatus`` (``planned``, ``running``, ``done``, ``abandoned``).",
             "in": "query",
             "name": "status",
             "required": false,
@@ -3649,15 +3654,18 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter by ``ExperimentRunStatus`` (``planned``, ``running``, ``done``, ``abandoned``).",
               "title": "Status"
             }
           },
           {
+            "description": "Max rows per page; capped at 500.",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "default": 50,
+              "description": "Max rows per page; capped at 500.",
               "maximum": 500,
               "minimum": 1,
               "title": "Limit",
@@ -3665,7 +3673,7 @@
             }
           },
           {
-            "description": "Cursor for pagination (T4.2) \u2014 return rows with ``created_at < after`` only. Use the ``created_at`` of the last row from the previous page to walk forward.",
+            "description": "Cursor for pagination (T4.2); return rows with ``created_at < after`` only. Use the ``created_at`` of the last row from the previous page to walk forward.",
             "in": "query",
             "name": "after",
             "required": false,
@@ -3679,7 +3687,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Cursor for pagination (T4.2) \u2014 return rows with ``created_at < after`` only. Use the ``created_at`` of the last row from the previous page to walk forward.",
+              "description": "Cursor for pagination (T4.2); return rows with ``created_at < after`` only. Use the ``created_at`` of the last row from the previous page to walk forward.",
               "title": "After"
             }
           }
@@ -3925,6 +3933,7 @@
         "operationId": "list_jobs_v1_jobs_get",
         "parameters": [
           {
+            "description": "Filter by ``JobStatus`` enum value (``queued``, ``running``, ``succeeded``, ``failed``, ``cancelled``). Unknown values return 400.",
             "in": "query",
             "name": "status",
             "required": false,
@@ -3937,10 +3946,12 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter by ``JobStatus`` enum value (``queued``, ``running``, ``succeeded``, ``failed``, ``cancelled``). Unknown values return 400.",
               "title": "Status"
             }
           },
           {
+            "description": "Filter by registered operation name (e.g. ``compute_embeddings``, ``predict_go_terms``).",
             "in": "query",
             "name": "operation",
             "required": false,
@@ -3953,20 +3964,24 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter by registered operation name (e.g. ``compute_embeddings``, ``predict_go_terms``).",
               "title": "Operation"
             }
           },
           {
+            "description": "When true, include batch sub-jobs (rows with a non-null ``parent_job_id``). Default false keeps the list focused on top-level work.",
             "in": "query",
             "name": "include_children",
             "required": false,
             "schema": {
               "default": false,
+              "description": "When true, include batch sub-jobs (rows with a non-null ``parent_job_id``). Default false keeps the list focused on top-level work.",
               "title": "Include Children",
               "type": "boolean"
             }
           },
           {
+            "description": "Filter to sub-jobs of a specific parent (overrides ``include_children``). Useful for inspecting one batch.",
             "in": "query",
             "name": "parent_job_id",
             "required": false,
@@ -3980,15 +3995,18 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter to sub-jobs of a specific parent (overrides ``include_children``). Useful for inspecting one batch.",
               "title": "Parent Job Id"
             }
           },
           {
+            "description": "Max rows per page; capped at 500.",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "default": 50,
+              "description": "Max rows per page; capped at 500.",
               "maximum": 500,
               "minimum": 1,
               "title": "Limit",
@@ -3996,7 +4014,7 @@
             }
           },
           {
-            "description": "Cursor for pagination \u2014 return rows with ``created_at < after`` only. Use the ``created_at`` of the last row from the previous page to walk forward.",
+            "description": "Cursor for pagination; return rows with ``created_at < after`` only. Use the ``created_at`` of the last row from the previous page to walk forward.",
             "in": "query",
             "name": "after",
             "required": false,
@@ -4010,7 +4028,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Cursor for pagination \u2014 return rows with ``created_at < after`` only. Use the ``created_at`` of the last row from the previous page to walk forward.",
+              "description": "Cursor for pagination; return rows with ``created_at < after`` only. Use the ``created_at`` of the last row from the previous page to walk forward.",
               "title": "After"
             }
           }
@@ -4267,11 +4285,13 @@
             }
           },
           {
+            "description": "Max comments per page; capped at 2000.",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "default": 200,
+              "description": "Max comments per page; capped at 2000.",
               "maximum": 2000,
               "minimum": 1,
               "title": "Limit",
@@ -4279,7 +4299,7 @@
             }
           },
           {
-            "description": "Cursor for pagination (T4.2) \u2014 return comments with ``created_at > after`` only. Walks the oldest-first stream forward by feeding the newest visible comment's ``created_at``.",
+            "description": "Cursor for pagination (T4.2); return comments with ``created_at > after`` only. Walks the oldest-first stream forward by feeding the newest visible comment's ``created_at``.",
             "in": "query",
             "name": "after",
             "required": false,
@@ -4293,7 +4313,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Cursor for pagination (T4.2) \u2014 return comments with ``created_at > after`` only. Walks the oldest-first stream forward by feeding the newest visible comment's ``created_at``.",
+              "description": "Cursor for pagination (T4.2); return comments with ``created_at > after`` only. Walks the oldest-first stream forward by feeding the newest visible comment's ``created_at``.",
               "title": "After"
             }
           }
@@ -4411,11 +4431,13 @@
             }
           },
           {
+            "description": "Max events per page; capped at 2000.",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "default": 200,
+              "description": "Max events per page; capped at 2000.",
               "maximum": 2000,
               "minimum": 1,
               "title": "Limit",
@@ -4423,7 +4445,7 @@
             }
           },
           {
-            "description": "Cursor for pagination (T4.2) \u2014 return events with ``ts < after`` only. Walks the newest-first stream backward by feeding the oldest visible event's ``ts``.",
+            "description": "Cursor for pagination (T4.2); return events with ``ts < after`` only. Walks the newest-first stream backward by feeding the oldest visible event's ``ts``.",
             "in": "query",
             "name": "after",
             "required": false,
@@ -4437,7 +4459,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Cursor for pagination (T4.2) \u2014 return events with ``ts < after`` only. Walks the newest-first stream backward by feeding the oldest visible event's ``ts``.",
+              "description": "Cursor for pagination (T4.2); return events with ``ts < after`` only. Walks the newest-first stream backward by feeding the oldest visible event's ``ts``.",
               "title": "After"
             }
           }
