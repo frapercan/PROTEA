@@ -482,5 +482,9 @@ Implementation reference
      temporal holdout following this protocol.
    - :doc:`/appendix/reproduction_guide`: the full ordered command sequence
      to regenerate every figure end-to-end.
-   - :doc:`operations`: the ``compute_evaluation_delta``, ``run_cafa_evaluation``,
-     and ``train_reranker`` operations that implement the protocol.
+   - :doc:`operations`: the ``generate_evaluation_set`` and
+     ``run_cafa_evaluation`` operations that implement the protocol live.
+     Booster training has moved out-of-tree to ``protea-reranker-lab``
+     and is registered through ``POST /reranker-models/import``; see
+     :ref:`Register a reranker from protea-reranker-lab
+     <howto-register-reranker>`.
