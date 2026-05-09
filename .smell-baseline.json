@@ -97,15 +97,6 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/load_goa_annotations.py::LoadGOAAnnotationsOperation.execute",
-      "kind": "method",
-      "path": "protea/core/operations/load_goa_annotations.py",
-      "name": "LoadGOAAnnotationsOperation.execute",
-      "line": 87,
-      "metric": 119,
-      "threshold": 60
-    },
-    {
       "key": "method::protea/core/operations/load_quickgo_annotations.py::LoadQuickGOAnnotationsOperation.execute",
       "kind": "method",
       "path": "protea/core/operations/load_quickgo_annotations.py",
