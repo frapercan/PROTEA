@@ -66,6 +66,55 @@ class _PipelineCtx(NamedTuple):
     artifact_store: ArtifactStore
 
 
+def _load_terms_of_interest(
+    session: Session, pivot_snapshot_id: uuid.UUID
+) -> list[str]:
+    """Return every GO id under the pivot snapshot (the term universe).
+
+    Result feeds straight into cafaeval as the ``-toi`` argument so the
+    scorer evaluates against exactly the terms present in the resolved
+    snapshot, not the full ontology.
+    """
+    return [
+        gid
+        for (gid,) in session.query(GOTerm.go_id)
+        .filter(GOTerm.ontology_snapshot_id == pivot_snapshot_id)
+        .all()
+    ]
+
+
+def _emit_evaluation_setup_events(emit: EmitFn, inputs: _EvalInputs) -> None:
+    """Fire the ``start`` + ``delta_done`` events the UI gates on.
+
+    Pulled out of :meth:`RunCafaEvaluationOperation._load_evaluation_inputs`
+    to keep that method under the §3 60-LOC ceiling. Order matters:
+    ``start`` first (so the UI can flip to running) then
+    ``delta_done`` once the per-category counts are computed.
+    """
+    emit(
+        "run_cafa_evaluation.start",
+        None,
+        {
+            "evaluation_set_id": str(inputs.eval_set_id),
+            "prediction_set_id": str(inputs.pred_set_id),
+            "pivot_ontology_snapshot_id": str(inputs.pivot_snapshot_id),
+            "mode": (inputs.eval_set.stats or {}).get("mode", "same_snapshot"),
+            "obo_url": inputs.snapshot.obo_url,
+        },
+        "info",
+    )
+    emit(
+        "run_cafa_evaluation.delta_done",
+        None,
+        {
+            "nk_proteins": inputs.data.nk_proteins,
+            "lk_proteins": inputs.data.lk_proteins,
+            "pk_proteins": inputs.data.pk_proteins,
+        },
+        "info",
+    )
+
+
 class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
     evaluation_set_id: str
     prediction_set_id: str
@@ -221,37 +270,7 @@ class RunCafaEvaluationOperation:
         snapshot = session.get(OntologySnapshot, pivot_snapshot_id)
         if snapshot is None:
             raise ValueError(f"Pivot OntologySnapshot {pivot_snapshot_id} not found")
-        toi_go_ids: list[str] = [
-            gid
-            for (gid,) in session.query(GOTerm.go_id)
-            .filter(GOTerm.ontology_snapshot_id == pivot_snapshot_id)
-            .all()
-        ]
-        emit(
-            "run_cafa_evaluation.start",
-            None,
-            {
-                "evaluation_set_id": str(eval_set_id),
-                "prediction_set_id": str(pred_set_id),
-                "pivot_ontology_snapshot_id": str(pivot_snapshot_id),
-                "mode": (eval_set.stats or {}).get("mode", "same_snapshot"),
-                "obo_url": snapshot.obo_url,
-            },
-            "info",
-        )
-        emit(
-            "run_cafa_evaluation.delta_done",
-            None,
-            {
-                "nk_proteins": data.nk_proteins,
-                "lk_proteins": data.lk_proteins,
-                "pk_proteins": data.pk_proteins,
-            },
-            "info",
-        )
-        if data.delta_proteins == 0:
-            raise ValueError("No delta proteins found — cannot evaluate")
-        return _EvalInputs(
+        inputs = _EvalInputs(
             eval_set_id=eval_set_id,
             pred_set_id=pred_set_id,
             eval_set=eval_set,
@@ -259,8 +278,12 @@ class RunCafaEvaluationOperation:
             data=data,
             snapshot=snapshot,
             pivot_snapshot_id=pivot_snapshot_id,
-            toi_go_ids=toi_go_ids,
+            toi_go_ids=_load_terms_of_interest(session, pivot_snapshot_id),
         )
+        _emit_evaluation_setup_events(emit, inputs)
+        if data.delta_proteins == 0:
+            raise ValueError("No delta proteins found; cannot evaluate")
+        return inputs
 
     @staticmethod
     def _resolve_scoring_snapshot(
