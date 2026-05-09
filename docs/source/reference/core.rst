@@ -314,6 +314,28 @@ different namespaces simultaneously (e.g., LK in CCO and PK in BPO).
    :undoc-members:
    :show-inheritance:
 
+Provenance
+----------
+
+``protea.core.provenance`` provides ``capture_provenance(extra=None)``,
+a side-effect-free runtime snapshot for jobs / experiments / artefacts
+to carry an audit trail without DB or network probes. Returns a fresh
+``dict[str, Any]`` with auto-keys ``protea_version`` (from
+``importlib.metadata``), ``protea_git_sha`` (delegates to
+``parquet_export.resolve_protea_git_sha``), ``python_version``,
+``platform``, ``hostname``, and ``captured_at`` (ISO-8601 UTC). Any
+caller-supplied ``extra`` mapping is overlaid last, so callers always
+win on key collisions.
+
+Every probe is wrapped: missing distribution metadata, a non-git
+checkout, or an absent ``git`` binary all degrade to ``None`` rather
+than raising. Added in T3.11 of master plan v3.2 §24 Fase 4.
+
+.. automodule:: protea.core.provenance
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Operations
 ----------
 
