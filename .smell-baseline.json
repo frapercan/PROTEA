@@ -97,15 +97,6 @@
       "threshold": 60
     },
     {
-      "key": "method::protea/core/operations/_run_cafa_artifacts.py::write_predictions_per_aspect",
-      "kind": "method",
-      "path": "protea/core/operations/_run_cafa_artifacts.py",
-      "name": "write_predictions_per_aspect",
-      "line": 219,
-      "metric": 72,
-      "threshold": 60
-    },
-    {
       "key": "method::protea/core/operations/compute_embeddings.py::_embed_esm",
       "kind": "method",
       "path": "protea/core/operations/compute_embeddings.py",

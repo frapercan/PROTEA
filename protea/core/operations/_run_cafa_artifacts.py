@@ -216,29 +216,11 @@ def write_predictions_reranked(
             f.write(f"{row['protein_accession']}\t{row['go_id']}\t{row['score']:.4f}\n")
 
 
-def write_predictions_per_aspect(
+def _load_aspect_records(
     session: Session,
     ctx: WritePredictionsContext,
-    *,
-    aspect_models: dict[str, dict[str, Any]],
-    known_gos: dict[str, set[str]] | None = None,
-) -> None:
-    """Write CAFA-format predictions applying per-aspect LightGBM models.
-
-    ``aspect_models`` maps GO aspect char (P/F/C) to ``{"model": str,
-    "cat_codes": dict|None}`` bundles. Predictions whose aspect has no
-    model fall back to ``1 - distance/2``.
-
-    ``known_gos`` carries the query's pre-cutoff annotations (LK / PK
-    settings) so the per-aspect model sees the same
-    ``anc2vec_query_known_*`` features it was trained with. Must be
-    ``None`` for NK.
-    """
-    import pandas as pd
-
-    from protea.core.reranker import model_from_string
-    from protea.core.reranker import predict as reranker_predict
-
+) -> list[dict[str, Any]]:
+    """Stream the (pred, go_id, aspect) rows for ``ctx.delta_proteins`` into records."""
     q = (
         session.query(GOPrediction, GOTerm.go_id, GOTerm.aspect)
         .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
@@ -247,19 +229,16 @@ def write_predictions_per_aspect(
     )
     if ctx.max_distance is not None:
         q = q.filter(GOPrediction.distance <= ctx.max_distance)
+    return [_record_from_pred(pred, go_id, aspect) for pred, go_id, aspect in q.yield_per(5000)]
 
-    records: list[dict[str, Any]] = [
-        _record_from_pred(pred, go_id, aspect) for pred, go_id, aspect in q.yield_per(5000)
-    ]
 
-    if not records:
-        with open(ctx.path, "w") as f:
-            pass
-        return
-
-    df = pd.DataFrame(records)
-    if known_gos:
-        _patch_query_known_features(df, known_gos)
+def _apply_per_aspect_scores(
+    df: Any,
+    aspect_models: dict[str, dict[str, Any]],
+) -> None:
+    """Mutate ``df['score']`` by aspect-keyed LightGBM model; fall back to 1 - d/2."""
+    from protea.core.reranker import model_from_string
+    from protea.core.reranker import predict as reranker_predict
 
     df["score"] = 0.0
     for aspect_char, bundle in aspect_models.items():
@@ -272,19 +251,43 @@ def write_predictions_per_aspect(
             df.loc[mask],
             categorical_codes=bundle.get("cat_codes"),
         )
-
-    modeled_aspects = set(aspect_models.keys())
-    fallback_mask = ~df["aspect"].isin(modeled_aspects)
+    fallback_mask = ~df["aspect"].isin(set(aspect_models.keys()))
     if fallback_mask.any():
         df.loc[fallback_mask, "score"] = df.loc[fallback_mask, "distance"].apply(
             lambda d: max(0.0, 1.0 - (d or 0.0) / 2.0)
         )
 
+
+def write_predictions_per_aspect(
+    session: Session,
+    ctx: WritePredictionsContext,
+    *,
+    aspect_models: dict[str, dict[str, Any]],
+    known_gos: dict[str, set[str]] | None = None,
+) -> None:
+    """Write CAFA-format predictions applying per-aspect LightGBM models.
+
+    ``aspect_models`` maps GO aspect char (P/F/C) to ``{"model": str,
+    "cat_codes": dict|None}`` bundles. Predictions whose aspect has no
+    model fall back to ``1 - distance/2``. ``known_gos`` carries the
+    query's pre-cutoff annotations (LK / PK settings); must be ``None``
+    for NK.
+    """
+    import pandas as pd
+
+    records = _load_aspect_records(session, ctx)
+    if not records:
+        with open(ctx.path, "w") as f:
+            pass
+        return
+    df = pd.DataFrame(records)
+    if known_gos:
+        _patch_query_known_features(df, known_gos)
+    _apply_per_aspect_scores(df, aspect_models)
     df = df.sort_values("score", ascending=False).drop_duplicates(
         subset=["protein_accession", "go_id"],
         keep="first",
     )
-
     with open(ctx.path, "w") as f:
         for _, row in df.iterrows():
             f.write(f"{row['protein_accession']}\t{row['go_id']}\t{row['score']:.4f}\n")
