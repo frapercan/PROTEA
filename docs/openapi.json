@@ -4915,7 +4915,7 @@
     },
     "/v1/proteins/stats": {
       "get": {
-        "description": "Return aggregate counts: total proteins, canonical vs isoforms, reviewed,\nand how many have metadata, embeddings, or GO annotations.\n\nCached for 5 minutes \u2014 the DISTINCT-over-JOIN counts scan 4M\u201380M rows and\ntake 30+ seconds to run from scratch. Counts move slowly enough that a\n5-min staleness is invisible to users.",
+        "description": "Return aggregate counts: total proteins, canonical vs isoforms, reviewed,\nand how many have metadata, embeddings, or GO annotations.\n\nCached for 5 minutes: the DISTINCT-over-JOIN counts scan 4M\u201380M rows and\ntake 30+ seconds to run from scratch. Counts move slowly enough that a\n5-min staleness is invisible to users.",
         "operationId": "get_protein_stats_v1_proteins_stats_get",
         "responses": {
           "200": {
