@@ -11,8 +11,8 @@
       "kind": "class",
       "path": "protea/core/operations/predict_go_terms.py",
       "name": "PredictGOTermsBatchOperation",
-      "line": 590,
-      "metric": 1573,
+      "line": 599,
+      "metric": 1589,
       "threshold": 500
     },
     {
@@ -39,7 +39,7 @@
       "path": "protea/core/operations/predict_go_terms.py",
       "name": "",
       "line": 0,
-      "metric": 2231,
+      "metric": 2256,
       "threshold": 800
     },
     {
@@ -50,33 +50,6 @@
       "line": 0,
       "metric": 1885,
       "threshold": 800
-    },
-    {
-      "key": "method::protea/core/operations/predict_go_terms.py::PredictGOTermsOperation.execute",
-      "kind": "method",
-      "path": "protea/core/operations/predict_go_terms.py",
-      "name": "PredictGOTermsOperation.execute",
-      "line": 347,
-      "metric": 72,
-      "threshold": 60
-    },
-    {
-      "key": "method::protea/core/operations/predict_go_terms.py::PredictGOTermsBatchOperation.execute",
-      "kind": "method",
-      "path": "protea/core/operations/predict_go_terms.py",
-      "name": "PredictGOTermsBatchOperation.execute",
-      "line": 611,
-      "metric": 67,
-      "threshold": 60
-    },
-    {
-      "key": "method::protea/core/parquet_export.py::export_reranker_parquets",
-      "kind": "method",
-      "path": "protea/core/parquet_export.py",
-      "name": "export_reranker_parquets",
-      "line": 116,
-      "metric": 80,
-      "threshold": 60
     },
     {
       "key": "method::protea/core/training_dump_helpers.py::_preload_all_embeddings",
