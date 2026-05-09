@@ -16,6 +16,32 @@ from protea.core.operations._load_ontology_helpers import (
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 
 
+def _flush_term(
+    current: dict[str, Any],
+    terms: list[dict[str, Any]],
+    aspect_map: dict[str, str],
+) -> None:
+    """Append the in-progress OBO term to ``terms`` and reset ``current``.
+
+    Pulled out of ``LoadOntologySnapshotOperation._parse_terms`` to keep
+    that method under the §3 60-LOC ceiling. Caller passes the class's
+    ``_ASPECT_MAP`` explicitly so this helper has no implicit ``self``
+    dependency.
+    """
+    if "go_id" in current:
+        terms.append(
+            {
+                "go_id": current["go_id"],
+                "name": current.get("name"),
+                "aspect": aspect_map.get(current.get("namespace", ""), None),
+                "definition": current.get("definition"),
+                "is_obsolete": current.get("is_obsolete", False),
+                "relationships": current.get("relationships", []),
+            }
+        )
+    current.clear()
+
+
 class LoadOntologySnapshotPayload(ProteaPayload, frozen=True):
     obo_url: str
     timeout_seconds: int = 120
@@ -113,30 +139,15 @@ class LoadOntologySnapshotOperation:
     def _parse_terms(self, obo_text: str) -> list[dict[str, Any]]:
         terms: list[dict[str, Any]] = []
         current: dict[str, Any] = {}
-
-        def flush() -> None:
-            if "go_id" in current:
-                terms.append(
-                    {
-                        "go_id": current["go_id"],
-                        "name": current.get("name"),
-                        "aspect": self._ASPECT_MAP.get(current.get("namespace", ""), None),
-                        "definition": current.get("definition"),
-                        "is_obsolete": current.get("is_obsolete", False),
-                        "relationships": current.get("relationships", []),
-                    }
-                )
-            current.clear()
-
         in_term = False
         for raw in obo_text.splitlines():
             line = raw.strip()
             if line == "[Term]":
-                flush()
+                _flush_term(current, terms, self._ASPECT_MAP)
                 in_term = True
                 continue
             if line.startswith("[") and line != "[Term]":
-                flush()
+                _flush_term(current, terms, self._ASPECT_MAP)
                 in_term = False
                 continue
             if not in_term or not line or line.startswith("!"):
@@ -167,5 +178,5 @@ class LoadOntologySnapshotOperation:
                 ):
                     current.setdefault("relationships", []).append((parts[0], parts[1]))
 
-        flush()
+        _flush_term(current, terms, self._ASPECT_MAP)
         return terms
