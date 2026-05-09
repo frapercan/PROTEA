@@ -286,6 +286,106 @@ class TestGetJobEvents:
 
 
 # ---------------------------------------------------------------------------
+# POST /jobs/{id}/comments + GET /jobs/{id}/comments  (T3.10)
+# ---------------------------------------------------------------------------
+
+
+def _make_job_comment(comment_id=1, job_id=None, body="note", author=None):
+    c = MagicMock()
+    c.id = comment_id
+    c.job_id = job_id or uuid4()
+    c.author = author
+    c.body = body
+    c.created_at = MagicMock()
+    c.created_at.isoformat.return_value = "2024-01-01T00:00:00"
+    return c
+
+
+class TestJobCommentsCreate:
+    def test_create_comment_returns_201_and_payload(self, session):
+        job = _make_job()
+        session.get.return_value = job
+        session.flush = MagicMock()
+
+        factory = MagicMock()
+        app = _make_app(factory)
+
+        with patch(
+            "protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)
+        ):
+            c = TestClient(app)
+            resp = c.post(
+                f"/jobs/{job.id}/comments",
+                json={"body": "looks good", "author": "frapercan"},
+            )
+
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["body"] == "looks good"
+        assert body["author"] == "frapercan"
+        assert body["job_id"] == str(job.id)
+
+    def test_missing_job_returns_404(self, session):
+        session.get.return_value = None
+
+        factory = MagicMock()
+        app = _make_app(factory)
+
+        with patch(
+            "protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)
+        ):
+            c = TestClient(app, raise_server_exceptions=False)
+            resp = c.post(f"/jobs/{uuid4()}/comments", json={"body": "x"})
+
+        assert resp.status_code == 404
+
+    def test_empty_body_returns_422(self, client):
+        resp = client.post(f"/jobs/{uuid4()}/comments", json={"body": "  "})
+        assert resp.status_code == 422
+
+
+class TestJobCommentsList:
+    def test_returns_comments_in_order(self, session):
+        job = _make_job()
+        session.get.return_value = job
+
+        c1 = _make_job_comment(1, job.id, "first")
+        c2 = _make_job_comment(2, job.id, "second", author="anpha")
+
+        q = MagicMock()
+        q.filter.return_value.order_by.return_value.all.return_value = [c1, c2]
+        session.query.return_value = q
+
+        factory = MagicMock()
+        app = _make_app(factory)
+
+        with patch(
+            "protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)
+        ):
+            cli = TestClient(app)
+            resp = cli.get(f"/jobs/{job.id}/comments")
+
+        assert resp.status_code == 200
+        rows = resp.json()
+        assert [r["body"] for r in rows] == ["first", "second"]
+        assert rows[1]["author"] == "anpha"
+
+    def test_missing_job_returns_404(self, session):
+        session.get.return_value = None
+
+        factory = MagicMock()
+        app = _make_app(factory)
+
+        with patch(
+            "protea.api.routers.jobs.session_scope", side_effect=lambda _: _mock_scope(session)
+        ):
+            c = TestClient(app, raise_server_exceptions=False)
+            resp = c.get(f"/jobs/{uuid4()}/comments")
+
+        assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
 # POST /jobs/{id}/cancel
 # ---------------------------------------------------------------------------
 
