@@ -1400,22 +1400,38 @@ predict_go_terms_batch
 
 **Queue:** ``protea.predictions.batch`` — **consumer:** ``OperationConsumer``
 
-Runs the KNN + GO transfer pipeline for one batch of query proteins:
+Runs the KNN + GO transfer pipeline for one batch of query proteins. As
+of F2C.5 the heavy lifting is delegated to
+``protea_method.pipeline.predict()`` (``protea-method >= 0.2.0``); the
+in-tree adapter ``protea.core.operations._predict_go_terms_adapter``
+re-derives PROTEA-only fields from the ``PredictDiagnostics`` the
+unified path returns.
 
 1. Loads query embeddings from the DB.
 2. Resolves the reference cache (process-level float16 array; loaded from disk
    at ``data/ref_cache/<embedding_config>__<annotation_set>_*.npy`` if present,
    otherwise streamed from PostgreSQL in chunks of 2 000 rows and persisted).
-3. Performs per-aspect KNN search via numpy or FAISS (``Flat``, ``IVFFlat``,
-   ``HNSW``) using the configured metric (``cosine`` or ``l2``).
-4. Transfers GO terms from neighbours to the query, computing predicted
-   distances, optional alignment features (NW/SW via ``parasail``), optional
-   taxonomic features (``ete3`` NCBITaxa), and optional re-ranker aggregate
-   features.
+3. Calls ``protea_method.pipeline.predict()`` with
+   ``return_diagnostics=True``: per-aspect KNN search via numpy or
+   FAISS (``Flat`` / ``IVFFlat`` / ``HNSW``) using the configured metric
+   (``cosine`` or ``l2``), neighbour vote accumulation, and optional
+   ancestor expansion live in the pure inference library.
+4. The PROTEA adapter walks ``neighbors_by_aspect`` and
+   ``go_map_by_aspect`` to attach ``prediction_set_id``,
+   ``ref_protein_accession``, ``qualifier``, ``evidence_code`` plus the
+   legacy re-ranker aggregates (``k_position``, ``go_term_frequency``,
+   ``ref_annotation_density``, ``neighbor_distance_std``,
+   ``neighbor_vote_fraction``). Optional alignment features (NW/SW via
+   ``parasail``) and taxonomic features (``ete3`` NCBITaxa) are
+   computed on top, plus the v6 feature shim
+   (``enrich_v6_features``) when ``compute_v6_features=true``.
 5. Publishes a ``StorePredictions`` message to ``protea.predictions.write``.
 
 GPU is not required — KNN search runs on CPU unless a FAISS GPU index is
-configured at process startup.
+configured at process startup. The re-ranker (``booster``) is applied
+*after* ancestor expansion via ``_apply_reranker_if_aligned``, not
+inside ``protea_method.pipeline.predict``, so the historical scoring
+order remains bit-exact.
 
 store_predictions
 ~~~~~~~~~~~~~~~~~
