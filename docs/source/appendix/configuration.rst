@@ -100,6 +100,14 @@ Environment variable overrides
        ``PROTEA_TUNING__OPERATION__NUMPY_QUERY_CHUNK`` or
        ``system.yaml``); set the env var directly only as an escape
        hatch — it short-circuits the tuning sync.
+   * - ``PROTEA_ALLOWED_ORIGINS``
+     - Comma-separated CORS allowlist for the FastAPI app (T5.5).
+       Priority: this env var overrides ``cors.allowed_origins`` in
+       ``system.yaml``, which in turn overrides the built-in default
+       ``http://localhost:3000, http://127.0.0.1:3000,
+       https://protea.ngrok.app``. Empty values are stripped; the
+       resolved tuple is read by
+       ``protea.api.app._register_middlewares`` at startup.
 
 Frontend
 --------
