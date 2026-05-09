@@ -18,7 +18,20 @@ Install dependencies
 
    git clone <repo-url> PROTEA
    cd PROTEA
-   poetry install          # installs runtime + dev dependencies
+   poetry install                              # runtime only (slimmest install)
+   poetry install --with lint,test,docs        # full local dev environment
+
+The dev tooling is split into three optional Poetry groups so each CI
+job installs only the packages it needs:
+
+- ``--with lint`` — ruff, mypy, type stubs, taskipy.
+- ``--with test`` — pytest, pytest-cov, httpx, uvicorn, plus
+  ``protea-reranker-lab`` for parity tests.
+- ``--with docs`` — Sphinx, furo, sphinx-copybutton, sphinx-design,
+  shibuya theme, sphinxcontrib-bibtex.
+
+A bare ``poetry install`` no longer installs Sphinx or pytest — pick
+the groups you need.
 
 Optional extras:
 

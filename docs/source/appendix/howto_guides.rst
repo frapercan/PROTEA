@@ -507,10 +507,16 @@ memory consumption.
 Build the documentation locally
 --------------------------------
 
+Sphinx and the theme stack live in the optional ``docs`` Poetry
+group. Install once, then build:
+
 .. code-block:: bash
 
+   poetry install --with docs       # one-time: pulls Sphinx, furo, etc.
    poetry run task html_docs
    # or directly:
    cd docs && poetry run sphinx-build -b html source build/html
 
-Open ``docs/build/html/index.html`` in a browser.
+Open ``docs/build/html/index.html`` in a browser. The ``html_docs``
+task is defined under ``[tool.taskipy.tasks]`` in ``pyproject.toml``;
+it requires ``taskipy`` (installed via ``--with lint``).
