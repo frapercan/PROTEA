@@ -39,10 +39,12 @@ from sqlalchemy.orm import Session
 from protea.core._training_dump_loaders import (
     _check_reranker_name_collisions,
     _count_embeddings_with_dim,
+    _DumpRequest,
     _load_annotation_aggregations,
     _load_go_maps,
     _load_ia_weights,
     _maybe_fit_pca_state,
+    _perform_dataset_dump,
     _resolve_annotation_set_ids,
     _stream_embeddings,
 )
@@ -1722,47 +1724,23 @@ class TrainRerankerAutoOperation:
             # Training moved to protea-reranker-lab; this operation now
             # only materializes the frozen parquets + manifest that the
             # lab consumes via ``scripts/pull_dataset.py``. Callers must
-            # pass ``dump_to`` — ExportResearchDatasetOperation always does.
-            if not p.dump_to:
-                raise ValueError(
-                    "dump_helper requires dump_to — LightGBM "
-                    "training has been moved to protea-reranker-lab. Use "
-                    "ExportResearchDatasetOperation / POST /datasets."
-                )
-            from protea import __version__ as _protea_version
-            from protea.core.parquet_export import (
-                ParquetExportContext,
-                resolve_protea_git_sha,
-            )
-
-            dump_stats = self._dump_frozen_dataset(
-                ParquetExportContext(
-                    stage_dir=Path(p.dump_to),
+            # pass ``dump_to`` (``ExportResearchDatasetOperation`` always
+            # does); the helper raises if it's unset.
+            return _perform_dataset_dump(
+                _DumpRequest(
+                    payload=p,
                     split_files=split_files,
                     valid_split_versions=valid_split_versions,
                     test_files=test_files,
                     test_old_v=test_old_v,
                     test_new_v=test_new_v,
-                    name=p.name,
-                    k=int(p.limit_per_entry),
-                    embedding_config_id=str(emb_config_id),
-                    ontology_snapshot_id=str(ontology_snapshot_id),
-                    annotation_source=p.annotation_source,
-                    store=None,
-                    producer_version=_protea_version,
-                    producer_git_sha=resolve_protea_git_sha(),
-                )
+                    emb_config_id=emb_config_id,
+                    ontology_snapshot_id=ontology_snapshot_id,
+                ),
+                self._dump_frozen_dataset,
+                t0,
+                emit,
             )
-            emit("dump_helper.dump_done", None, dump_stats, "info")
-            elapsed = round(time.perf_counter() - t0, 1)
-            result: dict[str, Any] = {
-                "dumped": True,
-                "dump_path": str(p.dump_to),
-                "dump_stats": dump_stats,
-                "elapsed_seconds": elapsed,
-            }
-            emit("dump_helper.done", None, result, "info")
-            return OperationResult(result=result)
 
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)

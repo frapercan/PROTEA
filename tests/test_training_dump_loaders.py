@@ -27,10 +27,12 @@ import pytest
 from protea.core._training_dump_loaders import (
     _check_reranker_name_collisions,
     _count_embeddings_with_dim,
+    _DumpRequest,
     _load_annotation_aggregations,
     _load_go_maps,
     _load_ia_weights,
     _maybe_fit_pca_state,
+    _perform_dataset_dump,
     _resolve_annotation_set_ids,
     _stream_embeddings,
 )
@@ -308,3 +310,66 @@ class TestMaybeFitPcaState:
         assert fields["n_refs"] == 2
         assert fields["dim_in"] == 3
         assert fields["source"] == "shared_cache"
+
+
+class TestPerformDatasetDump:
+    def _request(self, *, dump_to: str | None = "/tmp/fake-dump") -> _DumpRequest:
+        payload = MagicMock()
+        payload.dump_to = dump_to
+        payload.name = "fake-bench"
+        payload.limit_per_entry = 5
+        payload.annotation_source = "goa"
+        return _DumpRequest(
+            payload=payload,
+            split_files={"NK": [], "LK": [], "PK": []},
+            valid_split_versions=[(160, 165), (165, 170)],
+            test_files={"NK": None, "LK": None, "PK": None},
+            test_old_v=170,
+            test_new_v=230,
+            emb_config_id=uuid.uuid4(),
+            ontology_snapshot_id=uuid.uuid4(),
+        )
+
+    def _captured_emit(self) -> tuple[list[tuple], MagicMock]:
+        events: list[tuple] = []
+
+        def emit(event, message, fields, level):
+            events.append((event, message, fields, level))
+
+        return events, emit
+
+    def test_raises_when_dump_to_unset(self) -> None:
+        request = self._request(dump_to=None)
+        events, emit = self._captured_emit()
+
+        with pytest.raises(ValueError, match="dump_helper requires dump_to"):
+            _perform_dataset_dump(request, MagicMock(), 0.0, emit)
+
+        assert events == []  # No audit event when validation fails.
+
+    def test_returns_operation_result_with_dump_metadata(self) -> None:
+        request = self._request()
+        events, emit = self._captured_emit()
+        dump_fn = MagicMock(return_value={"dump_dir": "/tmp/fake-dump", "n_train_rows": 42})
+
+        # Patch parquet_export imports so the helper does not need a real
+        # ParquetExportContext / git sha resolver.
+        with patch(
+            "protea.core.parquet_export.resolve_protea_git_sha",
+            return_value="deadbeef",
+        ), patch(
+            "protea.core.parquet_export.ParquetExportContext"
+        ) as mock_ctx_cls:
+            result = _perform_dataset_dump(request, dump_fn, t0=0.0, emit=emit)
+
+        # ``dump_fn`` is called once with the constructed context.
+        dump_fn.assert_called_once()
+        mock_ctx_cls.assert_called_once()
+        # Result carries dump_path + dump_stats + elapsed_seconds.
+        assert result.result["dumped"] is True
+        assert result.result["dump_path"] == "/tmp/fake-dump"
+        assert result.result["dump_stats"] == {"dump_dir": "/tmp/fake-dump", "n_train_rows": 42}
+        assert "elapsed_seconds" in result.result
+        # Two events fire in order: dump_done then done.
+        event_names = [ev[0] for ev in events]
+        assert event_names == ["dump_helper.dump_done", "dump_helper.done"]
