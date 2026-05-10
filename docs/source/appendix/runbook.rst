@@ -15,12 +15,18 @@ Day-to-day operations
 Starting and stopping
 ~~~~~~~~~~~~~~~~~~~~~
 
+The dev stack is split in two: the **infrastructure** (PostgreSQL, RabbitMQ,
+MinIO) runs in ``docker compose``, and the **application** (API, workers,
+frontend) runs bare-metal under ``manage.sh`` so code changes hot-reload
+without container rebuilds.
+
 .. code-block:: bash
 
-   # Prerequisite: PostgreSQL and RabbitMQ must be running
-   docker start pgvectorsql rabbitmq
+   # Prerequisite: bring up the infrastructure once (idempotent — leaves
+   # running containers alone)
+   docker compose --profile storage up -d postgres rabbitmq minio
 
-   # Start everything (API + workers + frontend)
+   # Start the application stack (API + workers + frontend)
    bash scripts/manage.sh start
 
    # Start with 3 batch workers per GPU pipeline
@@ -212,3 +218,227 @@ Logs grow without limit.  To truncate without restarting workers:
 .. code-block:: bash
 
    for f in logs/*.log; do : > "$f"; done
+
+
+Backups
+-------
+
+PROTEA's persistent state lives in four places. A complete backup covers
+all four; partial backups are useful for targeted recovery (rollback the
+DB without replaying MinIO uploads, for example).
+
+What to back up
+~~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 18 22 60
+
+   * - Source
+     - Tool
+     - Notes
+   * - Postgres ``protea`` DB
+     - ``pg_dump -Fc -Z6``
+     - Custom format with compression. Includes schema, data, sequences.
+       Restore in any order with ``pg_restore --jobs``.
+   * - MinIO bucket ``protea``
+     - ``mc mirror`` to a host directory
+     - Object-level copy of every Dataset, RerankerModel, EvaluationResult
+       artefact. Not deduplicated — expect ~bucket-size on disk.
+   * - ``protea-reranker-lab/{datasets,runs,experiments}``
+     - ``tar -czf``
+     - Pulled datasets, training runs, spec catalog. Re-pullable from
+       PROTEA but rebuilds boosters from scratch.
+   * - ``thesis/`` LaTeX manuscript
+     - ``git bundle --all``
+     - Local-only git repo; bundle is a single-file portable archive.
+
+Full backup procedure
+~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: bash
+
+   STAMP=$(date +%Y-%m-%d)
+   BACKUP=~/Thesis2/backups
+
+   # 1. Postgres dump (custom format, compressed)
+   docker exec protea-postgres-1 pg_dump -U protea -d protea \\
+     -Fc -Z6 -f "/tmp/protea-${STAMP}.dump"
+   docker cp "protea-postgres-1:/tmp/protea-${STAMP}.dump" \\
+     "${BACKUP}/protea-${STAMP}.dump"
+   docker exec protea-postgres-1 rm "/tmp/protea-${STAMP}.dump"
+
+   # 2. MinIO mirror via a temporary mc container with bind mount
+   mkdir -p "${BACKUP}/minio-${STAMP}"
+   docker run --rm --network host \\
+     -v "${BACKUP}/minio-${STAMP}:/backup" \\
+     --entrypoint sh minio/mc:latest -c "
+       mc alias set local http://localhost:9000 minioadmin minioadmin &&
+       mc mirror --quiet local/protea /backup
+     "
+
+   # 3. Lab data (datasets + training runs + spec catalog)
+   tar -czf "${BACKUP}/lab-${STAMP}.tar.gz" \\
+     -C ~/Thesis2/repositories/protea-reranker-lab \\
+     datasets runs experiments
+
+   # 4. Thesis git bundle
+   git -C ~/Thesis2/thesis bundle create \\
+     "${BACKUP}/thesis-${STAMP}.bundle" --all
+
+Verifying a backup
+~~~~~~~~~~~~~~~~~~
+
+Quick (shallow) integrity checks before relying on a backup:
+
+.. code-block:: bash
+
+   # 1. pg_restore can parse the TOC (table of contents)
+   docker cp "${BACKUP}/protea-${STAMP}.dump" \\
+     protea-postgres-1:/tmp/verify.dump
+   docker exec protea-postgres-1 pg_restore --list /tmp/verify.dump | head
+   docker exec protea-postgres-1 pg_restore --list /tmp/verify.dump |
+     grep -c "TABLE DATA"   # should match expected table count
+   docker exec protea-postgres-1 rm /tmp/verify.dump
+
+   # 2. MinIO mirror file count matches bucket
+   find "${BACKUP}/minio-${STAMP}/" -type f | wc -l
+   docker run --rm --network host --entrypoint sh minio/mc:latest -c "
+     mc alias set local http://localhost:9000 minioadmin minioadmin &&
+     mc ls --recursive local/protea | wc -l
+   "
+
+   # 3. Lab tarball lists files without extracting
+   tar -tzf "${BACKUP}/lab-${STAMP}.tar.gz" | head
+
+   # 4. Thesis bundle integrity
+   git bundle verify "${BACKUP}/thesis-${STAMP}.bundle"
+
+Deep verification (slow, optional) restores into a temporary database
+and compares row counts table-by-table against the live DB.
+
+
+Disaster recovery
+-----------------
+
+Restoring after a database loss
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When the Postgres volume is lost or corrupted but the dump survives:
+
+.. code-block:: bash
+
+   # 1. Stop the application stack so no client touches the DB
+   bash scripts/manage.sh stop
+
+   # 2. Drop and recreate the database (run each command separately;
+   #    DROP DATABASE cannot run inside a transaction block)
+   docker exec protea-postgres-1 psql -U protea -d postgres \\
+     -c "DROP DATABASE IF EXISTS protea;"
+   docker exec protea-postgres-1 psql -U protea -d postgres \\
+     -c "CREATE DATABASE protea OWNER protea;"
+
+   # 3. Copy the dump into the container and restore in parallel
+   docker cp ~/Thesis2/backups/protea-2026-05-10.dump \\
+     protea-postgres-1:/tmp/restore.dump
+   docker exec protea-postgres-1 pg_restore -U protea -d protea \\
+     --jobs=4 --no-owner /tmp/restore.dump
+   docker exec protea-postgres-1 rm /tmp/restore.dump
+
+   # 4. Verify table count and a few row counts
+   docker exec protea-postgres-1 psql -U protea -d protea \\
+     -c "SELECT count(*) FROM information_schema.tables
+         WHERE table_schema='public';"
+   docker exec protea-postgres-1 psql -U protea -d protea \\
+     -c "SELECT count(*) FROM job;"
+
+   # 5. Restart the stack
+   bash scripts/manage.sh start
+
+Restoring the MinIO bucket
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When the ``protea_minio_data`` volume is lost but the local mirror survives:
+
+.. code-block:: bash
+
+   # mc create + mirror back from the host directory
+   docker run --rm --network host \\
+     -v ~/Thesis2/backups/minio-2026-05-10:/backup:ro \\
+     --entrypoint sh minio/mc:latest -c "
+       mc alias set local http://localhost:9000 minioadmin minioadmin &&
+       mc mb local/protea --ignore-existing &&
+       mc mirror --quiet /backup local/protea
+     "
+
+Full from-zero rebuild
+~~~~~~~~~~~~~~~~~~~~~~
+
+When the entire Docker Desktop VM is reset (recoverable because all
+state lives in named volumes that get recreated empty):
+
+.. code-block:: bash
+
+   # 1. Stop everything
+   bash scripts/manage.sh stop
+   pkill -f "ngrok http" || true
+
+   # 2. Stop Docker Desktop and wipe the VM disk
+   docker desktop stop
+   rm ~/.docker/desktop/vms/0/data/Docker.raw
+   docker desktop start
+
+   # 3. Wait for the daemon to come up
+   while ! docker ps >/dev/null 2>&1; do sleep 5; done
+
+   # 4. Bring the infra back up (creates fresh empty volumes)
+   docker compose --profile storage up -d postgres rabbitmq minio
+   # Wait for "healthy"
+   until docker compose --profile storage ps |
+         grep -E "(postgres|rabbitmq|minio).*healthy" |
+         wc -l | grep -q 3; do sleep 5; done
+
+   # 5. Restore Postgres + MinIO from backups (sections above)
+
+   # 6. Restart the application stack
+   bash scripts/manage.sh start
+
+   # 7. Re-expose via ngrok if needed
+   bash scripts/expose.sh
+
+
+Docker Desktop disk reclamation
+-------------------------------
+
+Docker Desktop on Linux holds container/image state inside a sparse
+disk image at ``~/.docker/desktop/vms/0/data/Docker.raw``. When you
+remove containers, images or volumes the freed space stays *inside*
+the VM. ``docker system df`` reports the new low usage but ``df -h``
+on the host still shows the old footprint.
+
+What works
+~~~~~~~~~~
+
+Reset the VM disk completely (recoverable via the from-zero rebuild
+procedure above):
+
+.. code-block:: bash
+
+   docker desktop stop
+   rm ~/.docker/desktop/vms/0/data/Docker.raw
+   docker desktop start
+
+What does not work reliably
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+* ``fstrim`` from a privileged container does run, but the discard
+  commands rarely propagate to the host raw file (in-place hole
+  punching depends on hypervisor support that Docker Desktop does not
+  guarantee on Linux).
+* ``qemu-img convert`` to compact requires roughly the actual data
+  size in temporary disk space; impractical when the VM is already
+  consuming most of the drive.
+
+Recommendation: take backups, then nuke ``Docker.raw`` and restore.
+The procedure above takes about 15-30 minutes for a 60 GB DB and a
+40 GB bucket.

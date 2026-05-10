@@ -34,6 +34,11 @@ tasks, the script to reproduce the thesis results, and the on-call runbook.
    On-call procedures: diagnosing stuck jobs, draining queues, recovering
    after a worker crash, restoring from backup.
 
+:doc:`monitoring`
+   Visitor analytics middleware, the optional Grafana stack with auto-
+   provisioned dashboard, and the privacy design behind the rotating
+   daily salt.
+
 :doc:`secrets`
    sops + age workflow for encrypted secret material: one-time install
    and key generation, day-to-day editing and decryption, CI integration,
@@ -49,4 +54,5 @@ tasks, the script to reproduce the thesis results, and the on-call runbook.
    howto_guides
    reproduction_guide
    runbook
+   monitoring
    secrets
