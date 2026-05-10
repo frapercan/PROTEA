@@ -138,7 +138,6 @@ class _UnifiedPredictContext:
     ref_data: dict[str, Any]
 
 
-@dataclass(frozen=True)
 @dataclass
 class _AspectKnnAccumulator:
     """Mutable per-batch state threaded through the aspect-separated KNN loop.
