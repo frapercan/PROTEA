@@ -73,40 +73,58 @@ Frontend configuration:
 
    echo "NEXT_PUBLIC_API_URL=http://127.0.0.1:8000" > apps/web/.env.local
 
+Bring up infrastructure
+-----------------------
+
+Postgres, RabbitMQ and MinIO run in ``docker compose``; the application
+runs bare-metal (next section). The split keeps hot-reload natural for
+the application while pinning infra versions.
+
+.. code-block:: bash
+
+   # Bring up postgres, rabbitmq and minio (the storage profile activates MinIO)
+   docker compose --profile storage up -d postgres rabbitmq minio
+
+   # Wait for healthchecks
+   docker compose --profile storage ps
+
+The MinIO console is then available at http://localhost:9001
+(default credentials ``minioadmin`` / ``minioadmin``).
+
+.. note::
+   ``docker-compose.yml`` also declares ``api``, ``frontend`` and the
+   worker services so that a single ``docker compose --profile storage
+   up -d`` can run the entire platform in containers (production-style
+   deployment, see ``docker-compose.prod.yml``). For dev work where you
+   iterate on Python and Next.js code, leave those services down and
+   use ``manage.sh`` instead so file changes hot-reload without an
+   image rebuild.
+
 Initialise the database
 -----------------------
 
-Run this once (or after a full DB reset) to create all tables:
+The Compose ``postgres`` service runs ``docker/init.sql`` at first
+volume creation, which only enables the ``vector`` extension. Tables
+are created either by ``init_db.py`` (fresh setup) or by Alembic
+migrations (existing schema):
 
 .. code-block:: bash
 
+   # Fresh: create every table from SQLAlchemy metadata
    poetry run python scripts/init_db.py
 
-To apply Alembic migrations instead:
-
-.. code-block:: bash
-
+   # Existing: bring schema up to head
    alembic upgrade head
 
-Start the dev stack
--------------------
+If you are restoring from a backup instead, skip both — see
+:doc:`runbook` "Disaster recovery" for the ``pg_restore`` procedure.
+
+Start the application stack
+---------------------------
 
 .. code-block:: bash
 
    bash scripts/manage.sh start [N]   # N = batch workers per pipeline (default 1)
-
-.. note::
-   The optional MinIO artifact store is declared under a dedicated
-   Compose profile and is **not** started by the default
-   ``docker compose up``. To bring it up alongside the rest of the
-   infrastructure containers, use:
-
-   .. code-block:: bash
-
-      docker compose --profile storage up -d minio
-
-   The MinIO console is then available at http://localhost:9001
-   (default credentials ``minioadmin`` / ``minioadmin``).
 
 This starts all processes in the background and writes PIDs to ``logs/pids/``:
 

@@ -31,6 +31,12 @@ concern and links to the others where they intersect.
    end-to-end evaluation workflow used to produce the figures in
    :doc:`/results`.
 
+:doc:`orchestration`
+   How PROTEA relates to the rest of the working tree: the satellite
+   repositories, the optional ``agent-farm`` orchestration system, and
+   the contract surface (HTTP API + artefact store) the platform exposes
+   for automated consumption.
+
 Architecture Decision Records
 -----------------------------
 
@@ -78,4 +84,5 @@ The full ADR index lives at :doc:`/adr/index`.
    data_model
    operations
    evaluation
+   orchestration
    /adr/index
