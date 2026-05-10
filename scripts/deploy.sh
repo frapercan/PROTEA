@@ -2,9 +2,9 @@
 # scripts/deploy.sh - deploy any git ref (or local snapshot) of PROTEA to a
 # fixed worktree, decoupled from the dev tree.
 #
-# The dev tree (~/Thesis/repositories/PROTEA) can be on any branch and a
+# The dev tree (~/Thesis2/repositories/PROTEA) can be on any branch and a
 # parallel agent can move it freely. This script targets a separate slot
-# (default ~/Thesis/worktrees/protea-deploy) and re-deploys it explicitly
+# (default ~/Thesis2/worktrees/protea-deploy) and re-deploys it explicitly
 # from a chosen ref or from a local folder snapshot.
 #
 # Usage:
@@ -17,7 +17,7 @@
 #   bash scripts/deploy.sh --no-deps             # skip poetry install (deps unchanged)
 #
 # Env overrides:
-#   PROTEA_DEPLOY_PATH   target worktree path (default: ~/Thesis/worktrees/protea-deploy)
+#   PROTEA_DEPLOY_PATH   target worktree path (default: ~/Thesis2/worktrees/protea-deploy)
 #   PROTEA_DEPLOY_REF    default ref when none given (default: origin/develop)
 #   PROTEA_DEPLOY_GPU    auto|1|0 (default auto = nvidia-smi -L decides). When the
 #                        host has GPU drivers loaded, torch is flipped to the
@@ -26,7 +26,7 @@
 
 set -euo pipefail
 
-DEPLOY_PATH="${PROTEA_DEPLOY_PATH:-$HOME/Thesis/worktrees/protea-deploy}"
+DEPLOY_PATH="${PROTEA_DEPLOY_PATH:-$HOME/Thesis2/worktrees/protea-deploy}"
 DEFAULT_REF="${PROTEA_DEPLOY_REF:-origin/develop}"
 
 REF=""
@@ -163,9 +163,9 @@ fi
 # build_docs.py reads SIBLINGS_DIR. We default it to a frozen worktree
 # directory so the docs are built against origin/develop of every
 # sibling, not whatever feature branch happens to be checked out in
-# ~/Thesis/repositories/<slug>/ (where other agents may have WIP).
+# ~/Thesis2/repositories/<slug>/ (where other agents may have WIP).
 # The loop's protea_refresh_siblings.sh keeps that directory on tip.
-default_siblings="$HOME/Thesis/worktrees/_siblings"
+default_siblings="$HOME/Thesis2/worktrees/_siblings"
 export SIBLINGS_DIR="${PROTEA_SIBLINGS_DIR:-${SIBLINGS_DIR:-$default_siblings}}"
 echo "${C_BOLD}building docs${C_RESET} (siblings_dir=$SIBLINGS_DIR)"
 poetry run task docs 2>&1 | tail -10 || echo "${C_YELLOW}docs build failed (non-fatal)${C_RESET}"

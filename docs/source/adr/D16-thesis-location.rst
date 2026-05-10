@@ -13,7 +13,7 @@ history.
 
 Decision
 --------
-``~/Thesis/thesis/``, git-initialised on 2026-05-05 with master branch
+``~/Thesis2/thesis/``, git-initialised on 2026-05-05 with master branch
 at commit ``4fcd449``. ``.gitignore`` filters LaTeX intermediate
 artefacts.
 
