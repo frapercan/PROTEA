@@ -19,7 +19,7 @@ Decision
 Structure C: seven code repositories plus the thesis manuscript. Plugins
 are discovered via Python ``entry_points``. Granularity is per group
 (sources, runners, backends), not per individual plugin. Thesis lives at
-``~/Thesis/thesis/``.
+``~/Thesis2/thesis/``.
 
 Repos: ``protea-core``, ``protea-contracts``, ``protea-method``,
 ``protea-cafaeval``, ``protea-sources``, ``protea-runners``,

@@ -84,5 +84,5 @@ References
 - PR #267 (``feat/T2B5-predict-go-terms-method-object``)
 - Master plan v3.2 §24 (memory ``project_protea_master_plan.md``)
 - Prior PRs that refactored execute(): #162, #169, #170, #177
-- Shepherd scan 2026-05-09 (loop2 task ``shepherd-1778344365-5fe7``)
-- Executor task ``executor-1778344622-5ca0``
+- Shepherd scan 2026-05-09
+- Executor task records pinning the AST audit (T2B.5 partial #4 closure)

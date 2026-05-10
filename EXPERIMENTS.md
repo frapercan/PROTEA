@@ -304,8 +304,8 @@ Pannzer2 acierta el 62.4% de las anotaciones NK — proteínas que por definici�
 
 **Conclusión:** PROTEA es la única herramienta del benchmark que garantiza integridad temporal: la referencia se congela en t0, el ground truth se computa como delta, y todo queda versionado en la BD. Los números de Pannzer2 y eggNOG-mapper representan un **upper bound optimista** bajo data leakage, no una comparación fair.
 
-- Parsing de resultados Pannzer2: `/home/frapercan/Thesis/pannzer2_results/parse_pannzer2.py`
-- Raw HTML: `/home/frapercan/Thesis/pannzer2_results/raw/PANZ_{1-21}.html`
+- Parsing de resultados Pannzer2: `/home/frapercan/Thesis2/pannzer2_results/parse_pannzer2.py`
+- Raw HTML: `/home/frapercan/Thesis2/pannzer2_results/raw/PANZ_{1-21}.html`
 - Script de evaluación: `scripts/evaluate_external_tool.py --tool pannzer2`
 
 ---
