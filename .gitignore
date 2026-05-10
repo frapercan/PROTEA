@@ -56,3 +56,9 @@ var/
 # is also tracked.
 secrets/secrets.dev.yaml
 secrets/secrets.prod.yaml
+
+# LibreOffice lock files
+.~lock.*
+
+# Coverage XML reports (CI artifacts, not source)
+.baseline/
