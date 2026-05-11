@@ -77,6 +77,7 @@ metadata enrichment, and job orchestration.
    guides/plugin-authoring/index
    results
    appendix/index
+   runbooks/index
    glossary
    references
 
