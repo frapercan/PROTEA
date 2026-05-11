@@ -11,3 +11,5 @@ fix sequence that an operator can execute without prior context.
    stale-job-reaper
    dlq-triage
    ngrok-deploy-recovery
+   embedding-worker-oom
+   schema-sha-v2-backfill
