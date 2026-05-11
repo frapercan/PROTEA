@@ -277,7 +277,7 @@ export default function ProteinsPage() {
           </div>
 
           {/* Desktop table */}
-          <div className="hidden lg:block rounded-lg border bg-white shadow-sm overflow-hidden">
+          <div className="hidden lg:block rounded-lg border bg-white shadow-sm">
             <div className="protea-thead-sticky grid grid-cols-[130px_140px_120px_1fr_80px_110px] gap-2 border-b bg-slate-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
               <div>{t("browseTab.tableHeaders.accession")}</div>
               <div>{t("browseTab.tableHeaders.entryName")}</div>
