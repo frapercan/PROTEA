@@ -52,3 +52,6 @@ jobs:
 
       - name: smell budget (master plan v3.2 §3)
         run: poetry run python scripts/check_smells.py
+
+      - name: em-dash check (no em-dashes in publishable prose)
+        run: python scripts/check_no_em_dashes.py

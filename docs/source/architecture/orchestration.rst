@@ -8,7 +8,7 @@ parallel orchestration system that drives long-running engineering
 work via Claude Code agents (`agent-farm
 <https://github.com/frapercan/agent-farm>`_).
 
-This page describes how those pieces relate to PROTEA at runtime — the
+This page describes how those pieces relate to PROTEA at runtime: the
 shared filesystem layout, the boundaries the orchestration system
 respects, and the contract surface the platform exposes for agent
 consumption.
@@ -152,5 +152,5 @@ Thesis manuscript boundary
 PROTEA neither reads nor writes it at runtime. The thesis-writer
 orchestration agent imports numbers from ``EvaluationResult`` rows and
 figure scripts from ``protea-reranker-lab/runs/`` but does so by
-reading exported artefacts (CSV, parquet, PNG) — never the live DB —
+reading exported artefacts (CSV, parquet, PNG), never the live DB,
 so a thesis build is reproducible from a frozen snapshot.
