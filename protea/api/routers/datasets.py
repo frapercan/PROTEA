@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session, sessionmaker
 
+from protea.api.auth import require_api_key
 from protea.api.deps import get_amqp_url, get_session_factory
 from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.embedding.dataset import Dataset
@@ -184,7 +185,11 @@ def _dataset_to_dict(d: Dataset) -> dict[str, Any]:
     }
 
 
-@router.post("", summary="Enqueue a dataset export job")
+@router.post(
+    "",
+    summary="Enqueue a dataset export job",
+    dependencies=[Depends(require_api_key)],
+)
 def create_dataset(
     body: CreateDatasetRequest,
     factory: sessionmaker[Session] = Depends(get_session_factory),

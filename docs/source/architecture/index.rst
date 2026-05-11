@@ -37,6 +37,10 @@ concern and links to the others where they intersect.
    the contract surface (HTTP API + artefact store) the platform exposes
    for automated consumption.
 
+:doc:`auth`
+   API key authentication for the most sensitive POST endpoints
+   (T5.6a first iteration). Header format, key lifecycle, dev override.
+
 Architecture Decision Records
 -----------------------------
 
@@ -85,4 +89,5 @@ The full ADR index lives at :doc:`/adr/index`.
    operations
    evaluation
    orchestration
+   auth
    /adr/index

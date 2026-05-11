@@ -15,6 +15,7 @@ from protea.api.problem_details import (
 from protea.api.routers import admin as admin_router
 from protea.api.routers import annotate as annotate_router
 from protea.api.routers import annotations as annotations_router
+from protea.api.routers import auth_api_keys as auth_api_keys_router
 from protea.api.routers import benchmark as benchmark_router
 from protea.api.routers import datasets as datasets_router
 from protea.api.routers import embeddings as embeddings_router
@@ -111,10 +112,18 @@ _OPENAPI_TAGS: list[dict[str, str]] = [
             "the F-EXP campaign tooling."
         ),
     },
+    {
+        "name": "auth",
+        "description": (
+            "API key lifecycle (T5.6a) — mint, list, revoke keys "
+            "used to authenticate sensitive POSTs."
+        ),
+    },
 ]
 
 _ROUTER_MODULES = (
     annotate_router,
+    auth_api_keys_router,
     jobs_router,
     proteins_router,
     annotations_router,

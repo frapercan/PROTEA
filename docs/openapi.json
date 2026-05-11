@@ -156,6 +156,27 @@
         "title": "Body_import_reranker_model_multipart_v1_reranker_models_import_post",
         "type": "object"
       },
+      "CreateApiKeyRequest": {
+        "additionalProperties": false,
+        "description": "Body for ``POST /auth/api-keys``.\n\nThe caller only chooses the human-readable label; entropy is\ngenerated server-side so we never trust a client-supplied value.",
+        "example": {
+          "name": "lab-runner-2026-05"
+        },
+        "properties": {
+          "name": {
+            "description": "Human-readable label shown in listings. Free-form (no validation beyond length); typically the service or operator the key belongs to.",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "CreateApiKeyRequest",
+        "type": "object"
+      },
       "CreateDatasetRequest": {
         "additionalProperties": false,
         "description": "Body for ``POST /datasets``.\n\nMirrors the ``export_research_dataset`` operation payload. The caller\ndoes not pick a queue: the dataset export always runs on the\n``protea.training`` worker (serialized, GPU/RAM-intensive).",
@@ -2715,6 +2736,174 @@
         ]
       }
     },
+    "/v1/auth/api-keys": {
+      "get": {
+        "description": "Return registered API keys newest-first.\n\nThe response never includes the secret \u2014 only the prefix and the\nname. Use this endpoint to confirm a key was created or to look\nup the id of a key you want to revoke.",
+        "operationId": "list_api_keys_v1_auth_api_keys_get",
+        "parameters": [
+          {
+            "description": "When false (default), revoked keys are hidden from the listing. Set true to audit the full history.",
+            "in": "query",
+            "name": "include_revoked",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "When false (default), revoked keys are hidden from the listing. Set true to audit the full history.",
+              "title": "Include Revoked",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Max rows per page; capped at 500.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Max rows per page; capped at 500.",
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Api Keys V1 Auth Api Keys Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List API keys",
+        "tags": [
+          "auth"
+        ]
+      },
+      "post": {
+        "description": "Create a fresh API key and return its raw value **once**.\n\nResponse shape::\n\n    {\n      \"id\": \"<uuid>\",\n      \"prefix\": \"abc12345\",\n      \"name\": \"lab-runner-2026-05\",\n      \"key\": \"<the only chance to copy this>\",\n      \"created_at\": \"...\"\n    }\n\nThe raw ``key`` field is the value the caller should store in their\nsecret manager / CI. PROTEA stores only the sha256 hash + the\n8-char prefix; we cannot recover the value if it is lost (just mint\nanother and revoke the misplaced one).",
+        "operationId": "create_api_key_v1_auth_api_keys_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateApiKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Api Key V1 Auth Api Keys Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mint a new API key",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/api-keys/{key_id}": {
+      "delete": {
+        "description": "Mark an API key as revoked.\n\nSets ``revoked_at`` to the current UTC timestamp. Subsequent uses\nof the key are rejected by :func:`require_api_key` with a 401.\nThe row is preserved (not deleted) so the audit trail of\nhistorical access stays intact.",
+        "operationId": "revoke_api_key_v1_auth_api_keys__key_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Revoke Api Key V1 Auth Api Keys  Key Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revoke an API key",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/v1/backends": {
       "get": {
         "description": "List all installed embedding backend plugins.\n\nThe plugin set depends on which ``protea-backends[<extra>]``\nextras are installed (esm, t5, ankh, esm3c). With the default\ninstall all four are discoverable; only the ones whose lazy\nimports succeed at ``stream_*`` time will actually run on GPU.",
@@ -2974,6 +3163,44 @@
       "post": {
         "description": "Enqueue an ``export_research_dataset`` job.\n\nReturns ``{job_id}``. Poll ``GET /jobs/{job_id}`` for status; once the\njob is ``SUCCEEDED``, ``GET /datasets/{name}`` returns the registered\nrow with its artifact URIs.",
         "operationId": "create_dataset_v1_datasets_post",
+        "parameters": [
+          {
+            "description": "API-key challenge in the ``Authorization: ApiKey <key>`` form (T5.6a). Mutually exclusive with ``X-Api-Key``; whichever arrives first wins.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "API-key challenge in the ``Authorization: ApiKey <key>`` form (T5.6a). Mutually exclusive with ``X-Api-Key``; whichever arrives first wins.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -4273,6 +4500,44 @@
       "post": {
         "description": "Create a Job row and publish its ID to the specified RabbitMQ queue.\n\nThe job transitions `QUEUED \u2192 RUNNING \u2192 SUCCEEDED/FAILED` as the worker processes it.\nUse `GET /jobs/{id}/events` to poll structured progress events in real time.",
         "operationId": "create_job_v1_jobs_post",
+        "parameters": [
+          {
+            "description": "API-key challenge in the ``Authorization: ApiKey <key>`` form (T5.6a). Mutually exclusive with ``X-Api-Key``; whichever arrives first wins.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "API-key challenge in the ``Authorization: ApiKey <key>`` form (T5.6a). Mutually exclusive with ``X-Api-Key``; whichever arrives first wins.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -5236,6 +5501,44 @@
       "post": {
         "description": "Upload a trained booster and register a ``RerankerModel`` row.\n\nThe three files (``model.txt``, ``spec.yaml``, ``run.json``) mirror\nthe artefacts produced by ``protea-reranker-lab`` under\n``runs/<name>/``. Wire format unchanged: the FastAPI deps expose\nevery File/Form field as a discrete multipart part.",
         "operationId": "import_reranker_model_multipart_v1_reranker_models_import_post",
+        "parameters": [
+          {
+            "description": "API-key challenge in the ``Authorization: ApiKey <key>`` form (T5.6a). Mutually exclusive with ``X-Api-Key``; whichever arrives first wins.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "API-key challenge in the ``Authorization: ApiKey <key>`` form (T5.6a). Mutually exclusive with ``X-Api-Key``; whichever arrives first wins.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "multipart/form-data": {
@@ -5285,6 +5588,44 @@
       "post": {
         "description": "Register a ``RerankerModel`` whose booster is already in MinIO.\n\nThe lab uploads the booster directly (faster, no double-hop) and\nPOSTs the URI + run.json + spec.yaml here. Server does not re-read\nthe artifact; it trusts the URI.",
         "operationId": "import_reranker_model_by_reference_v1_reranker_models_import_by_reference_post",
+        "parameters": [
+          {
+            "description": "API-key challenge in the ``Authorization: ApiKey <key>`` form (T5.6a). Mutually exclusive with ``X-Api-Key``; whichever arrives first wins.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "API-key challenge in the ``Authorization: ApiKey <key>`` form (T5.6a). Mutually exclusive with ``X-Api-Key``; whichever arrives first wins.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -6328,6 +6669,10 @@
     {
       "description": "Per-research-run narrative + provenance anchor (decision D11). Powers the F8b Experiments page and the F-EXP campaign tooling.",
       "name": "experiment-runs"
+    },
+    {
+      "description": "API key lifecycle (T5.6a) \u2014 mint, list, revoke keys used to authenticate sensitive POSTs.",
+      "name": "auth"
     }
   ]
 }
