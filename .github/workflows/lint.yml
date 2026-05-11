@@ -52,3 +52,6 @@ jobs:
 
       - name: smell budget (master plan v3.2 §3)
         run: poetry run python scripts/check_smells.py
+
+      - name: doc ref drift gate (DS.2)
+        run: poetry run python scripts/check_doc_refs.py

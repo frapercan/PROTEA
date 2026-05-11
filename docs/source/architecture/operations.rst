@@ -683,7 +683,7 @@ The flow is:
    ``applied=False``. The batch continues using the KNN ordering with **no
    crash** and no partial scoring.
 3. On match, the worker attaches the GOTerm aspect to each dict, calls
-   :func:`protea.core.reranking.apply_reranker`, and writes the
+   :func:`protea.core.reranker.apply_reranker`, and writes the
    ``reranker_score`` field into every prediction dict in memory.
 
 ``reranker_score`` is **in-memory only**: ``GOPrediction`` does not yet
@@ -1073,8 +1073,7 @@ direction at each split.
 Training protocol
 ~~~~~~~~~~~~~~~~~
 
-The training loop is implemented in :func:`protea.core.reranker.train` and
-proceeds as follows:
+The training loop (now in ``protea-reranker-lab``) proceeds as follows:
 
 1. **Label derivation.** Each row of the training DataFrame carries a binary
    ``label`` column: ``1`` if the predicted ``(protein, go_term)`` pair is
@@ -1164,7 +1163,7 @@ written to ``RerankerModel.metrics`` as a JSONB dict:
 - ``positive_rate``: fraction of rows with ``label == 1`` *before* any
   subsampling.
 
-In addition, :func:`~protea.core.reranker.train` returns a
+In addition, the training step returns a
 gain-based feature-importance dictionary (``feature_name → total gain``),
 which is persisted in ``RerankerModel.feature_importance``. This is the
 signal used in :doc:`../results` to drive the v1 → v2 → v3 iterations of the
