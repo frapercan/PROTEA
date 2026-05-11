@@ -26,11 +26,15 @@ from protea.core.disk_cache import (
     _save_to_disk_cache,
 )
 from protea.core.domain.aspect import ASPECT_CODES as _ASPECTS
-from protea.core.feature_engineering import compute_alignment, compute_taxonomy
 from protea.core.feature_enricher import NEW_V6_FEATURE_KEYS as _NEW_V6_FEATURE_KEYS
 from protea.core.feature_enricher import KnnEnrichmentContext, enrich_v6_features
 from protea.core.knn_search import search_knn
-from protea.core.operations._predict_go_terms_adapter import AdapterResult
+from protea.core.operations._predict_go_terms_adapter import (
+    AdapterInputs,
+    AdapterResult,
+    call_pipeline_predict,
+    call_pipeline_predict_aspect_separated,
+)
 from protea.core.pca_cache import (
     _load_or_fit_pca_state,
 )
@@ -88,6 +92,14 @@ class _RerankerBinding:
 # ---------------------------------------------------------------------------
 _REF_CACHE: dict[tuple[str, str, bool], dict[str, Any]] = {}
 
+# Sentinel key under which the aspect-separated reference cache stashes
+# the underlying unified pool. The aspect-separated KNN delegation
+# (``call_pipeline_predict_aspect_separated``) hands this unified pool
+# to ``protea_method.pipeline.predict`` so the partitioned KNN runs
+# without a second DB round-trip. Chosen to never collide with the
+# single-letter aspect codes in ``_ASPECTS``.
+_UNIFIED_REF_KEY = "__unified__"
+
 # ---------------------------------------------------------------------------
 # v6 reranker feature constants
 # ---------------------------------------------------------------------------
@@ -136,47 +148,6 @@ class _UnifiedPredictContext:
     valid_accessions: list[str]
     query_embeddings: np.ndarray
     ref_data: dict[str, Any]
-
-
-@dataclass
-class _AspectKnnAccumulator:
-    """Mutable per-batch state threaded through the aspect-separated KNN loop.
-
-    Holds the prediction list, dedup tracking, pair feature cache, per-aspect
-    go_maps, and the reranker aggregate counters that need to span all three
-    aspects (e.g. ``go_term_frequency`` is summed across the union of votes).
-    """
-
-    predictions: list[dict[str, Any]]
-    seen_per_query: dict[str, set[int]]
-    pair_features: dict[tuple[str, str], dict[str, Any]]
-    go_map_by_aspect: dict[str, dict[str, list[dict[str, Any]]]]
-    rr_distance_std_per_query: dict[str, float]
-    rr_vote_count_per_query: dict[str, dict[int, int]]
-    rr_k_position_per_query: dict[str, dict[int, int]]
-    rr_vote_min_d_per_query: dict[str, dict[int, float]]
-    rr_vote_sum_d_per_query: dict[str, dict[int, float]]
-    all_go_term_freq: dict[int, int]
-    all_ref_ann_density: dict[str, int]
-
-
-class _FeatureInputs(NamedTuple):
-    """Sequence + taxonomy lookups feeding the per-pair feature computation."""
-
-    ref_sequences: dict[str, str]
-    query_sequences: dict[str, str]
-    ref_tax_ids: dict[str, Any]
-    query_tax_ids: dict[str, Any]
-
-
-class _PredCellInputs(NamedTuple):
-    """One (query, ref, annotation) cell handed to the prediction-dict builder."""
-
-    q_acc: str
-    ref_acc: str
-    distance: float
-    ann: dict[str, Any]
-    feats: dict[str, Any]
 
 
 _PAIR_FEATURE_KEYS: tuple[str, ...] = (
@@ -915,11 +886,6 @@ class PredictGOTermsBatchOperation:
         prediction shape PROTEA's downstream consumers expect, plus the
         ``pair_features`` and aspect maps the v6 enricher needs.
         """
-        from protea.core.operations._predict_go_terms_adapter import (
-            AdapterInputs,
-            call_pipeline_predict,
-        )
-
         annotations, unique_neighbors = self._unified_load_annotations(session, ctx)
         ref_sequences, query_sequences, ref_tax_ids, query_tax_ids = (
             self._unified_load_pair_inputs(session, ctx, unique_neighbors)
@@ -1437,10 +1403,12 @@ class PredictGOTermsBatchOperation:
 
         unified = self._load_reference_data(session, embedding_config_id, annotation_set_id, emit)
         if not unified["accessions"]:
-            return {
+            empty = {
                 asp: _derive_reference_views([], np.empty((0,), dtype=np.float16))
                 for asp in _ASPECTS
             }
+            empty[_UNIFIED_REF_KEY] = unified
+            return empty
 
         acc_to_idx: dict[str, int] = {acc: i for i, acc in enumerate(unified["accessions"])}
         missing_aspects = self._find_missing_aspects(embedding_config_id, annotation_set_id)
@@ -1457,6 +1425,7 @@ class PredictGOTermsBatchOperation:
         result, total_refs = self._assemble_all_aspect_views(
             unified, missing_aspects, embedding_config_id, annotation_set_id, emit
         )
+        result[_UNIFIED_REF_KEY] = unified  # F2C.5b: pipeline.predict() needs unified pool
         emit(
             "predict_go_terms_batch.load_references_per_aspect_all_done",
             None,
@@ -1623,25 +1592,26 @@ class PredictGOTermsBatchOperation:
         return view, len(indices)
 
     def _run_aspect_separated_knn(
-        self,
-        session: Session,
-        ctx: AspectSeparatedKnnContext,
+        self, session: Session, ctx: AspectSeparatedKnnContext,
     ) -> tuple[
         list[dict[str, Any]],
         dict[str, list[list[tuple[str, float]]]],
         dict[str, dict[str, list[dict[str, Any]]]],
         dict[tuple[str, str], dict[str, Any]],
     ]:
-        """Run three independent KNN searches (one per GO aspect) and merge results.
-
-        Thin wrapper that delegates the per-aspect KNN orchestration to the
-        :class:`_AspectSeparatedKnnRunner` Method Object. The runner owns the
-        per-batch accumulator and the helper methods (KNN per aspect, go_map
-        loading, reranker aggregates, prediction-dict assembly). Public API
-        unchanged: returns the same tuple shape consumers already expect.
-        """
-        runner = _AspectSeparatedKnnRunner(session=session, ctx=ctx, parent=self)
-        return runner.run()
+        """Delegate aspect-separated KNN + vote tally to ``pipeline.predict``
+        (``aspect_separated=True``). Returns the legacy 4-tuple shape v6 /
+        ancestor / reranker consumers still expect. See F2C.5b notes."""
+        neighbors_by_aspect, inputs = _build_aspect_adapter_inputs(self, session, ctx)
+        result = call_pipeline_predict_aspect_separated(
+            inputs, neighbors_by_aspect=neighbors_by_aspect,
+        )
+        return (
+            result.predictions,
+            result.neighbors_by_aspect,
+            result.go_map_by_aspect,
+            result.pair_features,
+        )
 
     def _load_feature_engineering_data(
         self,
@@ -1882,322 +1852,34 @@ class PredictGOTermsBatchOperation:
 
 
 # ---------------------------------------------------------------------------
-# Aspect-separated KNN runner (Method Object, T2B.5)
+# Aspect-separated KNN pre-search (delegation prep)
 # ---------------------------------------------------------------------------
 
 
-class _AspectSeparatedKnnRunner:
-    """Method Object for the aspect-separated KNN path of one batch.
+class _AspectKnnPreSearch:
+    """Per-aspect KNN pre-search used before the ``pipeline.predict()`` call.
 
-    Bundles the per-batch state (``ctx``, accumulator, session) and the
-    step methods (KNN per aspect, go_map loading, reranker aggregates,
-    prediction-dict assembly) that previously lived as nine private methods
-    on :class:`PredictGOTermsBatchOperation`.
-
-    The parent operation reference is kept only so the runner can reuse
-    the DB helpers ``_load_annotations_for`` and
-    ``_load_feature_engineering_data``, which legitimately belong to the
-    operation alongside its other ORM loaders.
+    The aspect-separated wire delegates the vote tally + row
+    materialisation to ``protea_method.pipeline.predict``. PROTEA still
+    runs a thin per-aspect KNN pass first so it can scope the
+    annotation / sequence / taxonomy loads to refs that actually got
+    hit. ``pipeline.predict`` then re-runs the partitioned KNN against
+    the unified pool with bit-exact partitioning rules (a ref is in
+    aspect ``a``'s bank iff one of its annotations resolves to ``a``).
     """
 
-    def __init__(
-        self,
-        *,
-        session: Session,
-        ctx: AspectSeparatedKnnContext,
-        parent: PredictGOTermsBatchOperation,
-    ) -> None:
-        self._session = session
-        self._ctx = ctx
-        self._parent = parent
-
+    @staticmethod
     def run(
-        self,
-    ) -> tuple[
-        list[dict[str, Any]],
-        dict[str, list[list[tuple[str, float]]]],
-        dict[str, dict[str, list[dict[str, Any]]]],
-        dict[tuple[str, str], dict[str, Any]],
-    ]:
-        """Execute three KNN searches (one per GO aspect) and merge results.
-
-        For each aspect (P/F/C): build a KNN index from the aspect-filtered
-        references, take the top ``limit_per_entry`` neighbours of every
-        query, load aspect-scoped GO annotations, and transfer them as
-        predictions. Guarantees BPO + MFO + CCO candidates even when the
-        globally nearest neighbours all happen to carry one or two aspects.
-
-        Feature engineering (alignments / taxonomy) runs on the union of
-        neighbours across aspects to avoid redundant work.
-        """
-        ctx = self._ctx
-        p = ctx.payload
-        neighbors_by_aspect, all_unique_neighbors = self._run_knn_per_aspect(
-            ctx.valid_accessions, ctx.query_embeddings, ctx.ref_data_by_aspect, p
-        )
-        feature_inputs = _FeatureInputs(
-            *self._parent._load_feature_engineering_data(
-                self._session, p, ctx.valid_accessions, all_unique_neighbors
-            )
-        )
-        acc = self._init_aspect_accumulator(ctx.valid_accessions, neighbors_by_aspect, p)
-
-        for aspect in _ASPECTS:
-            unique_neighbors_aspect: set[str] = set()
-            for top_refs in neighbors_by_aspect[aspect]:
-                for ref_acc, _ in top_refs:
-                    unique_neighbors_aspect.add(ref_acc)
-            go_map = self._load_aspect_go_map(
-                ctx.ref_data_by_aspect[aspect],
-                ctx.annotation_set_id,
-                unique_neighbors_aspect,
-                aspect,
-            )
-            acc.go_map_by_aspect[aspect] = go_map
-            if p.compute_reranker_features:
-                self._update_reranker_aggregates(
-                    acc, ctx.valid_accessions, neighbors_by_aspect, go_map, aspect
-                )
-            self._build_aspect_predictions(
-                acc, neighbors_by_aspect[aspect], go_map, feature_inputs
-            )
-
-        return (
-            acc.predictions,
-            neighbors_by_aspect,
-            acc.go_map_by_aspect,
-            acc.pair_features,
-        )
-
-    @staticmethod
-    def _init_aspect_accumulator(
-        valid_accessions: list[str],
-        neighbors_by_aspect: dict[str, list[list[tuple[str, float]]]],
-        p: PredictGOTermsBatchPayload,
-    ) -> _AspectKnnAccumulator:
-        """Build the per-batch accumulator and pre-compute the per-query
-        ``neighbor_distance_std`` aggregate (uses the union of distances
-        across all three aspects)."""
-        acc = _AspectKnnAccumulator(
-            predictions=[],
-            seen_per_query={a: set() for a in valid_accessions},
-            pair_features={},
-            go_map_by_aspect={},
-            rr_distance_std_per_query={},
-            rr_vote_count_per_query={},
-            rr_k_position_per_query={},
-            rr_vote_min_d_per_query={},
-            rr_vote_sum_d_per_query={},
-            all_go_term_freq={},
-            all_ref_ann_density={},
-        )
-        if not p.compute_reranker_features:
-            return acc
-        for q_idx, q_acc in enumerate(valid_accessions):
-            acc.rr_vote_count_per_query[q_acc] = {}
-            acc.rr_k_position_per_query[q_acc] = {}
-            acc.rr_vote_min_d_per_query[q_acc] = {}
-            acc.rr_vote_sum_d_per_query[q_acc] = {}
-            all_distances: list[float] = []
-            for aspect in _ASPECTS:
-                aspect_neighbors = neighbors_by_aspect[aspect]
-                if q_idx < len(aspect_neighbors):
-                    all_distances.extend(d for _, d in aspect_neighbors[q_idx])
-            acc.rr_distance_std_per_query[q_acc] = (
-                float(np.std(all_distances)) if len(all_distances) > 1 else 0.0
-            )
-        return acc
-
-    def _load_aspect_go_map(
-        self,
-        aspect_ref: dict[str, Any],
-        annotation_set_id: uuid.UUID,
-        unique_neighbors_aspect: set[str],
-        aspect: str,
-    ) -> dict[str, list[dict[str, Any]]]:
-        """Resolve the per-aspect ``ref_acc → annotations`` map: in-memory CSR
-        cache when available, fall back to a DB query keyed on the aspect."""
-        if "anno_gtids" in aspect_ref:
-            return _csr_lookup(
-                unique_neighbors_aspect,
-                aspect_ref["acc_to_anno_idx"],
-                AnnoCsr(
-                    gtids=aspect_ref["anno_gtids"],
-                    quals=aspect_ref["anno_quals"],
-                    ecodes=aspect_ref["anno_ecodes"],
-                    offsets=aspect_ref["anno_offsets"],
-                ),
-            )
-        return self._parent._load_annotations_for(
-            self._session, annotation_set_id, unique_neighbors_aspect, aspect=aspect
-        )
-
-    @staticmethod
-    def _update_reranker_aggregates(
-        acc: _AspectKnnAccumulator,
-        valid_accessions: list[str],
-        neighbors_by_aspect: dict[str, list[list[tuple[str, float]]]],
-        go_map: dict[str, list[dict[str, Any]]],
-        aspect: str,
-    ) -> None:
-        """Fold this aspect's go_map into the running reranker counters:
-        ``go_term_frequency``, ``ref_annotation_density``, ``vote_count``,
-        ``k_position``, ``vote_min_distance``, ``vote_sum_distance``."""
-        for ref_acc, anns in go_map.items():
-            acc.all_ref_ann_density[ref_acc] = (
-                acc.all_ref_ann_density.get(ref_acc, 0) + len(anns)
-            )
-            for ann in anns:
-                gtid = ann["go_term_id"]
-                acc.all_go_term_freq[gtid] = acc.all_go_term_freq.get(gtid, 0) + 1
-        aspect_neighbors = neighbors_by_aspect[aspect]
-        for q_idx, q_acc in enumerate(valid_accessions):
-            if q_idx >= len(aspect_neighbors):
-                continue
-            vc = acc.rr_vote_count_per_query[q_acc]
-            kp = acc.rr_k_position_per_query[q_acc]
-            min_d = acc.rr_vote_min_d_per_query[q_acc]
-            sum_d = acc.rr_vote_sum_d_per_query[q_acc]
-            for k_pos, (ref_acc, dist) in enumerate(aspect_neighbors[q_idx], 1):
-                for ann in go_map.get(ref_acc, []):
-                    gtid = ann["go_term_id"]
-                    vc[gtid] = vc.get(gtid, 0) + 1
-                    if gtid not in kp:
-                        kp[gtid] = k_pos
-                    prev_min = min_d.get(gtid)
-                    if prev_min is None or dist < prev_min:
-                        min_d[gtid] = dist
-                    sum_d[gtid] = sum_d.get(gtid, 0.0) + dist
-
-    def _build_aspect_predictions(
-        self,
-        acc: _AspectKnnAccumulator,
-        aspect_top_refs: list[list[tuple[str, float]]],
-        go_map: dict[str, list[dict[str, Any]]],
-        feature_inputs: _FeatureInputs,
-    ) -> None:
-        """Walk this aspect's per-query neighbours and emit one prediction
-        dict per (query, ref, go_term) tuple, deduped against
-        ``acc.seen_per_query`` so a term carried by multiple aspects only
-        yields one row in the final list."""
-        ctx = self._ctx
-        p = ctx.payload
-        for q_acc, top_refs in zip(ctx.valid_accessions, aspect_top_refs, strict=False):
-            seen_terms = acc.seen_per_query[q_acc]
-            for ref_acc, distance in top_refs:
-                feats = self._resolve_pair_features(
-                    acc.pair_features, p, q_acc, ref_acc, feature_inputs
-                )
-                for ann in go_map.get(ref_acc, []):
-                    go_term_id = ann["go_term_id"]
-                    if go_term_id in seen_terms:
-                        continue
-                    seen_terms.add(go_term_id)
-                    cell = _PredCellInputs(
-                        q_acc=q_acc,
-                        ref_acc=ref_acc,
-                        distance=distance,
-                        ann=ann,
-                        feats=feats,
-                    )
-                    acc.predictions.append(self._build_prediction_dict(acc, cell))
-
-    @staticmethod
-    def _resolve_pair_features(
-        pair_features: dict[tuple[str, str], dict[str, Any]],
-        p: PredictGOTermsBatchPayload,
-        q_acc: str,
-        ref_acc: str,
-        feature_inputs: _FeatureInputs,
-    ) -> dict[str, Any]:
-        """Return (and cache) per-(query, ref) pair features. Computes
-        alignments + taxonomy once per pair across the aspect loop."""
-        pair_key = (q_acc, ref_acc)
-        if pair_key in pair_features:
-            return pair_features[pair_key]
-        feats: dict[str, Any] = {}
-        if p.compute_alignments:
-            q_seq = feature_inputs.query_sequences.get(q_acc, "")
-            r_seq = feature_inputs.ref_sequences.get(ref_acc, "")
-            if q_seq and r_seq:
-                feats.update(compute_alignment(q_seq, r_seq))
-        if p.compute_taxonomy:
-            q_tid = feature_inputs.query_tax_ids.get(q_acc)
-            r_tid = feature_inputs.ref_tax_ids.get(ref_acc)
-            feats.update(compute_taxonomy(q_tid, r_tid))
-            feats["query_taxonomy_id"] = q_tid
-            feats["ref_taxonomy_id"] = r_tid
-        pair_features[pair_key] = feats
-        return feats
-
-    def _build_prediction_dict(
-        self,
-        acc: _AspectKnnAccumulator,
-        cell: _PredCellInputs,
-    ) -> dict[str, Any]:
-        """Construct one prediction dict: base fields, reranker stats,
-        non-null pair features. Output schema matches the unified-pool path."""
-        ctx = self._ctx
-        ann = cell.ann
-        go_term_id = ann["go_term_id"]
-        pred: dict[str, Any] = {
-            "prediction_set_id": str(ctx.prediction_set_id),
-            "protein_accession": cell.q_acc,
-            "go_term_id": go_term_id,
-            "ref_protein_accession": cell.ref_acc,
-            "distance": cell.distance,
-        }
-        if ann.get("qualifier"):
-            pred["qualifier"] = ann["qualifier"]
-        if ann.get("evidence_code"):
-            pred["evidence_code"] = ann["evidence_code"]
-        if ctx.payload.compute_reranker_features:
-            self._stamp_reranker_features(pred, acc, cell)
-        for key in _PAIR_FEATURE_KEYS:
-            val = cell.feats.get(key)
-            if val is not None:
-                pred[key] = val
-        return pred
-
-    def _stamp_reranker_features(
-        self,
-        pred: dict[str, Any],
-        acc: _AspectKnnAccumulator,
-        cell: _PredCellInputs,
-    ) -> None:
-        """Fill the per-prediction reranker stats (vote / position / frequency
-        / density / distance aggregates) from the running ``acc`` counters."""
-        p = self._ctx.payload
-        go_term_id = cell.ann["go_term_id"]
-        q_acc = cell.q_acc
-        vc_val = acc.rr_vote_count_per_query.get(q_acc, {}).get(go_term_id, 1)
-        pred["vote_count"] = vc_val
-        pred["k_position"] = acc.rr_k_position_per_query.get(q_acc, {}).get(go_term_id, 1)
-        pred["go_term_frequency"] = acc.all_go_term_freq.get(go_term_id, 0)
-        pred["ref_annotation_density"] = acc.all_ref_ann_density.get(cell.ref_acc, 0)
-        pred["neighbor_distance_std"] = acc.rr_distance_std_per_query.get(q_acc, 0.0)
-        pred["neighbor_vote_fraction"] = (
-            vc_val / p.limit_per_entry if p.limit_per_entry else None
-        )
-        min_d_map = acc.rr_vote_min_d_per_query.get(q_acc, {})
-        sum_d_map = acc.rr_vote_sum_d_per_query.get(q_acc, {})
-        pred["neighbor_min_distance"] = min_d_map.get(go_term_id)
-        if vc_val > 0 and go_term_id in sum_d_map:
-            pred["neighbor_mean_distance"] = sum_d_map[go_term_id] / vc_val
-
-    @staticmethod
-    def _run_knn_per_aspect(
         valid_accessions: list[str],
         query_embeddings: np.ndarray,
         ref_data_by_aspect: dict[str, dict[str, Any]],
         p: PredictGOTermsBatchPayload,
     ) -> tuple[dict[str, list[list[tuple[str, float]]]], set[str]]:
-        """Run one independent KNN search per GO aspect and accumulate
-        the union of all neighbors across aspects.
+        """Return ``(neighbors_by_aspect, all_unique_neighbors)``.
 
-        Returns ``(neighbors_by_aspect, all_unique_neighbors)``. Feature
-        engineering downstream is computed once per pair regardless of how
-        many aspects reference it, so the union is the right call surface.
+        ``all_unique_neighbors`` is the union across aspects so the
+        feature-engineering loaders run once per pair regardless of how
+        many aspects reference it.
         """
         neighbors_by_aspect: dict[str, list[list[tuple[str, float]]]] = {}
         all_unique_neighbors: set[str] = set()
@@ -2233,6 +1915,108 @@ class _AspectSeparatedKnnRunner:
                     all_unique_neighbors.add(ref_acc)
 
         return neighbors_by_aspect, all_unique_neighbors
+
+
+def _load_aspect_go_map_for_hits(
+    op: PredictGOTermsBatchOperation,
+    session: Session,
+    aspect_ref: dict[str, Any],
+    annotation_set_id: uuid.UUID,
+    hits_in_aspect: set[str],
+    aspect: str,
+) -> dict[str, list[dict[str, Any]]]:
+    """Resolve one aspect's ``ref_acc → annotations`` map for hit refs.
+
+    Prefers the in-memory CSR cache attached to ``aspect_ref`` by
+    :meth:`PredictGOTermsBatchOperation._assemble_aspect_view`; falls
+    back to a DB query with the aspect filter when the CSR is absent.
+    """
+    if "anno_gtids" in aspect_ref:
+        return _csr_lookup(
+            hits_in_aspect,
+            aspect_ref["acc_to_anno_idx"],
+            AnnoCsr(
+                gtids=aspect_ref["anno_gtids"],
+                quals=aspect_ref["anno_quals"],
+                ecodes=aspect_ref["anno_ecodes"],
+                offsets=aspect_ref["anno_offsets"],
+            ),
+        )
+    return op._load_annotations_for(
+        session, annotation_set_id, hits_in_aspect, aspect=aspect
+    )
+
+
+def _load_aspect_separated_annotations(
+    op: PredictGOTermsBatchOperation,
+    session: Session,
+    ref_data_by_aspect: dict[str, dict[str, Any]],
+    annotation_set_id: uuid.UUID,
+    all_unique_neighbors: set[str],
+) -> dict[str, list[dict[str, Any]]]:
+    """Union per-aspect annotations into a single ``ref_acc -> [anns]`` dict.
+
+    ``pipeline.predict()``'s ``_annotation_aggregates`` sums
+    ``go_term_frequency`` and ``ref_annotation_density`` across the
+    full annotation set; restricting to one aspect's annotations would
+    under-count both PROTEA-style and break the bit-exact
+    aggregate-stamping the booster ingested at training time. Reuses
+    the per-aspect CSR cache when present.
+    """
+    annotations: dict[str, list[dict[str, Any]]] = {}
+    for aspect in _ASPECTS:
+        aspect_ref = ref_data_by_aspect[aspect]
+        hits_in_aspect = all_unique_neighbors & set(aspect_ref["accessions"])
+        if not hits_in_aspect:
+            continue
+        asp_go_map = _load_aspect_go_map_for_hits(
+            op, session, aspect_ref, annotation_set_id, hits_in_aspect, aspect,
+        )
+        for ref_acc, anns in asp_go_map.items():
+            annotations.setdefault(ref_acc, []).extend(anns)
+    return annotations
+
+
+def _build_aspect_adapter_inputs(
+    op: PredictGOTermsBatchOperation,
+    session: Session,
+    ctx: AspectSeparatedKnnContext,
+) -> tuple[dict[str, list[list[tuple[str, float]]]], AdapterInputs]:
+    """Gather everything the aspect-separated adapter call needs.
+
+    Runs the per-aspect KNN pre-search, loads hit-ref annotations
+    across aspects, hydrates the feature-engineering inputs, and
+    materialises the GO term metadata maps. Returns both the
+    pre-search neighbours (so the pair-feature builder can walk them
+    once) and the ``AdapterInputs`` tuple the adapter consumes.
+    """
+    p = ctx.payload
+    neighbors_by_aspect, all_unique_neighbors = _AspectKnnPreSearch.run(
+        ctx.valid_accessions, ctx.query_embeddings, ctx.ref_data_by_aspect, p,
+    )
+    annotations = _load_aspect_separated_annotations(
+        op, session, ctx.ref_data_by_aspect, ctx.annotation_set_id, all_unique_neighbors,
+    )
+    ref_sequences, query_sequences, ref_tax_ids, query_tax_ids = (
+        op._load_feature_engineering_data(
+            session, p, ctx.valid_accessions, all_unique_neighbors,
+        )
+    )
+    go_id_map, go_aspect_map = op._load_go_term_metadata(session, annotations)
+    return neighbors_by_aspect, AdapterInputs(
+        p=p,
+        valid_accessions=ctx.valid_accessions,
+        query_embeddings=ctx.query_embeddings,
+        ref_data=ctx.ref_data_by_aspect[_UNIFIED_REF_KEY],
+        annotations=annotations,
+        go_id_map=go_id_map,
+        go_aspect_map=go_aspect_map,
+        prediction_set_id=ctx.prediction_set_id,
+        ref_sequences=ref_sequences,
+        query_sequences=query_sequences,
+        ref_tax_ids=ref_tax_ids,
+        query_tax_ids=query_tax_ids,
+    )
 
 
 # ---------------------------------------------------------------------------

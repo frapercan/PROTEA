@@ -2960,7 +2960,7 @@ resolved_reference = "3936b70fe6fb1a3a1925009d694a0df8f2a72d91"
 
 [[package]]
 name = "protea-method"
-version = "0.2.0"
+version = "0.3.0"
 description = "Pure inference: KNN search, feature compute, apply reranker. Standalone library; no FastAPI, no SQLAlchemy."
 optional = false
 python-versions = ">=3.12,<4.0"
@@ -2979,7 +2979,7 @@ protea-contracts = {git = "https://github.com/frapercan/protea-contracts.git", b
 type = "git"
 url = "https://github.com/frapercan/protea-method.git"
 reference = "master"
-resolved_reference = "fb28aeaf5ac58ec2f5f6e27cde6a41e24c342c82"
+resolved_reference = "3a05fd80aa8bf38ced8f3c45ee4844bf0030dfc8"
 
 [[package]]
 name = "protea-reranker-lab"
