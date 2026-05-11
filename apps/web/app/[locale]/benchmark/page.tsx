@@ -166,38 +166,56 @@ export default function BenchmarkPage() {
     ks: number[];
   }>({ stages: [], evalSets: [], categories: [], aspects: [], ks: [] });
 
+  // Single effect that handles both the catalog probe (first mount) and
+  // filter-change re-fetches. On mount we issue the catalog probe and the
+  // embeddings list in parallel, derive the default stage from the catalog
+  // response, then dispatch the stage-filtered matrix. After that, this
+  // effect re-runs only when filter state changes, and it never re-probes
+  // the catalog. This collapses the previous two-wave cascade into a single
+  // Promise.all wave on initial load.
   useEffect(() => {
-    getBenchmarkMatrix()
-      .then((m) => {
-        setCatalog({
-          stages: m.stages,
-          evalSets: m.evaluation_sets,
-          categories: m.categories,
-          aspects: m.aspects,
-          ks: m.ks ?? [],
-        });
-        // Only seed a default if the URL didn't already pin one.
-        if (stage == null) setStage(pickDefaultStage(m.stages));
-        if (selectedK == null) setSelectedK(m.ks?.[0] ?? null);
-      })
-      .catch((e) => setError(e.message));
-  }, []);
-
-  useEffect(() => {
-    if (stage === null) return;
     setError(null);
-    Promise.all([
-      getBenchmarkEmbeddings(),
-      getBenchmarkMatrix({
-        stage,
-        evaluation_set_id: evalSetId === "all" ? undefined : evalSetId,
-        k: selectedK ?? undefined,
-      }),
-    ])
-      .then(([e, m]) => {
-        setEmbeddings(e.embeddings);
-        setMatrix(m);
-      })
+    if (catalog.stages.length === 0) {
+      // First mount: catalog + embeddings in parallel.
+      Promise.all([getBenchmarkMatrix(), getBenchmarkEmbeddings()])
+        .then(([m, e]) => {
+          setCatalog({
+            stages: m.stages,
+            evalSets: m.evaluation_sets,
+            categories: m.categories,
+            aspects: m.aspects,
+            ks: m.ks ?? [],
+          });
+          setEmbeddings(e.embeddings);
+          const resolvedStage = stage ?? pickDefaultStage(m.stages);
+          const resolvedK = selectedK ?? m.ks?.[0] ?? null;
+          if (stage == null) setStage(resolvedStage);
+          if (selectedK == null) setSelectedK(resolvedK);
+          // If no filters are pinned and the no-params response already
+          // covers the resolved view, reuse it; otherwise fire one filtered
+          // request. The no-params response is multi-stage, so when a stage
+          // is resolved we always need a stage-filtered fetch.
+          if (resolvedStage == null) {
+            setMatrix(m);
+            return;
+          }
+          return getBenchmarkMatrix({
+            stage: resolvedStage,
+            evaluation_set_id: evalSetId === "all" ? undefined : evalSetId,
+            k: resolvedK ?? undefined,
+          }).then(setMatrix);
+        })
+        .catch((e) => setError(e.message));
+      return;
+    }
+    // Subsequent runs: filter change only. Catalog and embeddings are stable.
+    if (stage === null) return;
+    getBenchmarkMatrix({
+      stage,
+      evaluation_set_id: evalSetId === "all" ? undefined : evalSetId,
+      k: selectedK ?? undefined,
+    })
+      .then(setMatrix)
       .catch((e) => setError(e.message));
   }, [stage, evalSetId, selectedK]);
 

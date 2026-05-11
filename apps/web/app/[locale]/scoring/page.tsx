@@ -25,6 +25,7 @@
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useToast } from "@/components/Toast";
+import { SkeletonTableRow } from "@/components/Skeleton";
 import {
   listScoringConfigs,
   createScoringConfig,
@@ -661,7 +662,13 @@ export default function ScoringPage() {
         </div>
       </div>
 
-      {loading && <p className="text-sm text-slate-600">Loading…</p>}
+      {loading && (
+        <div className="rounded-lg border bg-white shadow-sm overflow-hidden">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <SkeletonTableRow key={i} cols={5} />
+          ))}
+        </div>
+      )}
 
       {!loading && (
         <div className="space-y-3">

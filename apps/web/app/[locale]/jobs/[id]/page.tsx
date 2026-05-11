@@ -6,6 +6,7 @@ import { use, useEffect, useRef, useState } from "react";
 import { cancelJob, deleteJob, getJob, getJobEvents, listJobs, JobEvent, Job } from "@/lib/api";
 import { StatusBadge } from "@/components/StatusBadge";
 import { EventTimeline } from "@/components/EventTimeline";
+import { Skeleton, SkeletonTableRow } from "@/components/Skeleton";
 import { useToast } from "@/components/Toast";
 import { useTranslations } from "next-intl";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -78,11 +79,11 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
       const [j, ev, ch] = await Promise.all([
         getJob(jobId),
         getJobEvents(jobId, 200),
-        listJobs({ limit: 500 }),
+        listJobs({ parent_job_id: jobId, limit: 200 }),
       ]);
       setJob(j);
       setEvents([...ev].reverse()); // chronological
-      setChildren(ch.filter((c) => c.parent_job_id === jobId));
+      setChildren(ch);
       // Notify when job reaches a terminal state
       if (prevStatusRef.current && prevStatusRef.current !== j.status) {
         if (j.status === "succeeded") toast("Job succeeded", "success");
@@ -187,6 +188,30 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
       )}
 
       {/* Job card */}
+      {!job && !error && (
+        <div className="mt-4 rounded-lg border bg-white p-4 shadow-sm space-y-3">
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-5 w-20" />
+            <Skeleton className="h-4 w-40" />
+            <Skeleton className="h-3 w-60" />
+          </div>
+          <Skeleton className="h-3 w-3/4" />
+          <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+            <Skeleton className="h-3 w-32" />
+            <Skeleton className="h-3 w-32" />
+            <Skeleton className="h-3 w-32" />
+            <Skeleton className="h-3 w-32" />
+          </div>
+          <Skeleton className="h-2.5 w-full" />
+        </div>
+      )}
+      {!job && !error && (
+        <div className="mt-6 rounded-lg border bg-white shadow-sm overflow-hidden">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <SkeletonTableRow key={i} cols={3} />
+          ))}
+        </div>
+      )}
       {job && (
         <div className="mt-4 rounded-lg border bg-white p-4 shadow-sm space-y-3">
           <div className="flex items-center gap-3">

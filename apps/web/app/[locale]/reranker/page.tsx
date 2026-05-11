@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ContextBanner } from "@/components/ContextBanner";
+import { SkeletonTableRow } from "@/components/Skeleton";
 import {
   baseUrl,
   listPredictionSets,
@@ -564,7 +565,13 @@ export default function RerankerPage() {
       </div>
 
       {/* List of rerankers */}
-      {loading && <p className="text-sm text-slate-600">Loading...</p>}
+      {loading && (
+        <div className="rounded-lg border bg-white shadow-sm overflow-hidden">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <SkeletonTableRow key={i} cols={5} />
+          ))}
+        </div>
+      )}
       {error && <p className="text-sm text-red-500">{error}</p>}
 
       {!loading && rerankers.length === 0 && (

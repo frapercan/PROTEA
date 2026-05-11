@@ -179,20 +179,15 @@ export default function MaintenancePage() {
     async function init() {
       setSeqLoading(true);
       setEmbLoading(true);
-      try {
-        setSeqPreview(await previewVacuumSequences());
-      } catch {
-        // silently skip on initial load
-      } finally {
-        setSeqLoading(false);
-      }
-      try {
-        setEmbPreview(await previewVacuumEmbeddings());
-      } catch {
-        // silently skip on initial load
-      } finally {
-        setEmbLoading(false);
-      }
+      // Fire both previews in parallel. They are independent endpoints.
+      const [seqRes, embRes] = await Promise.allSettled([
+        previewVacuumSequences(),
+        previewVacuumEmbeddings(),
+      ]);
+      if (seqRes.status === "fulfilled") setSeqPreview(seqRes.value);
+      setSeqLoading(false);
+      if (embRes.status === "fulfilled") setEmbPreview(embRes.value);
+      setEmbLoading(false);
     }
     init();
   }, []);
