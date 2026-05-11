@@ -28,20 +28,20 @@ the rest are pluggable contracts, runtime modules, and tooling.
      - Shared contract surface. ABCs, pydantic payloads, feature schema, schema_sha. Imported by every other repo.
    * - `protea-method <https://github.com/frapercan/protea-method>`_
      - Inference
-     - ``skeleton``
-     - Pure inference path (KNN, feature compute, reranker apply). Target of the F2C extraction. Bind-mounted by the LAFA containers.
+     - ``active``
+     - Pure inference path (KNN, feature compute, reranker apply). Delegation target for the F2C extraction; live in production since F2C.5b. Bind-mounted by the LAFA containers.
    * - `protea-sources <https://github.com/frapercan/protea-sources>`_
      - Source plugin
-     - ``skeleton``
-     - Annotation source plugins (GOA, QuickGO, UniProt). Discovered via Python entry_points.
+     - ``active``
+     - Annotation source plugins (GOA, QuickGO, UniProt). Discovered via Python entry_points (goa, quickgo, uniprot).
    * - `protea-runners <https://github.com/frapercan/protea-runners>`_
      - Runner plugin
-     - ``skeleton``
-     - Experiment runner plugins (LightGBM lab, KNN baseline, future GNN). Discovered via Python entry_points.
+     - ``active``
+     - Experiment runner plugins (LightGBM, KNN, baseline). Discovered via Python entry_points (lightgbm, knn, baseline).
    * - `protea-backends <https://github.com/frapercan/protea-backends>`_
      - Backend plugin
-     - ``skeleton``
-     - Protein language model embedding backends (ESM family, T5/ProstT5, Ankh, ESM3-C). Discovered via Python entry_points.
+     - ``active``
+     - Protein language model embedding backends (ESM family, T5/ProstT5, Ankh, ESM3-C). Discovered via Python entry_points (esm, t5, ankh, esm3c).
    * - `protea-reranker-lab <https://github.com/frapercan/protea-reranker-lab>`_
      - Lab
      - ``active``
