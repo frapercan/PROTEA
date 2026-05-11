@@ -74,6 +74,7 @@ metadata enrichment, and job orchestration.
    related_work
    architecture/index
    plugin-authoring
+   guides/plugin-authoring/index
    results
    appendix/index
    glossary
