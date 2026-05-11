@@ -96,7 +96,7 @@ export function SupportButton() {
                   rows={3}
                   className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-slate-600">
                   {t("publicNote")}
                 </p>
                 <button
@@ -114,14 +114,14 @@ export function SupportButton() {
           {data && data.comments?.length > 0 && (
             <div className="border-t border-slate-100 px-4 py-3 space-y-2 max-h-48 overflow-y-auto">
               <div className="flex items-center justify-between">
-                <p className="text-xs font-medium text-slate-400 uppercase tracking-wide">{t("recentComments")}</p>
+                <p className="text-xs font-medium text-slate-600 uppercase tracking-wide">{t("recentComments")}</p>
                 <Link href="/support" className="text-xs text-blue-500 hover:underline" onClick={() => setOpen(false)}>
                   {t("viewAll")}
                 </Link>
               </div>
               {data.comments.map((c) => (
                 <div key={c.id} className="text-xs text-slate-600 leading-relaxed">
-                  <span className="text-slate-400 mr-1">{new Date(c.created_at).toLocaleDateString()}</span>
+                  <span className="text-slate-600 mr-1">{new Date(c.created_at).toLocaleDateString()}</span>
                   {c.comment}
                 </div>
               ))}

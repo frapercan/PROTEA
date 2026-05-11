@@ -130,7 +130,7 @@ export default function QuerySetsPage() {
 
         {!loading && sets.length === 0 && (
           <div className="px-4 py-10 text-center">
-            <p className="text-sm text-slate-400 mb-2">{t("noQuerySets")}</p>
+            <p className="text-sm text-slate-600 mb-2">{t("noQuerySets")}</p>
             <button
               onClick={openModal}
               className="text-sm text-blue-600 underline"
@@ -149,12 +149,12 @@ export default function QuerySetsPage() {
               <div>
                 <span className="font-medium text-slate-900">{qs.name}</span>
                 {qs.description && (
-                  <span className="ml-2 text-xs text-slate-400">{qs.description}</span>
+                  <span className="ml-2 text-xs text-slate-600">{qs.description}</span>
                 )}
                 <div className="font-mono text-xs text-slate-300 mt-0.5">{qs.id}</div>
               </div>
               <div className="text-slate-700">{qs.entry_count}</div>
-              <div className="text-xs text-slate-400">{formatDate(qs.created_at)}</div>
+              <div className="text-xs text-slate-600">{formatDate(qs.created_at)}</div>
               <div className="flex justify-end">
                 <button
                   onClick={(e) => { e.stopPropagation(); handleDelete(qs.id, qs.name); }}
@@ -174,7 +174,7 @@ export default function QuerySetsPage() {
                   {qs.entries.map((entry) => (
                     <div key={entry.accession} className="flex gap-4 text-xs text-slate-600 font-mono">
                       <span className="text-slate-900">{entry.accession}</span>
-                      <span className="text-slate-400">seq_id={entry.sequence_id}</span>
+                      <span className="text-slate-600">seq_id={entry.sequence_id}</span>
                     </div>
                   ))}
                 </div>
@@ -192,7 +192,7 @@ export default function QuerySetsPage() {
               <h2 className="text-base font-semibold">{t("uploadModal.title")}</h2>
               <button
                 onClick={() => setShowModal(false)}
-                className="text-slate-400 hover:text-slate-600 text-xl leading-none"
+                className="text-slate-600 hover:text-slate-600 text-xl leading-none"
               >
                 {t("uploadModal.close")}
               </button>

@@ -73,7 +73,7 @@ export default async function LocaleLayout({
                     <span className="text-[17px] font-bold tracking-tight text-slate-900 group-hover:text-blue-700 transition-colors">
                       PROTEA
                     </span>
-                    <span className="hidden sm:block text-[10px] uppercase tracking-[0.14em] text-slate-400 font-medium">
+                    <span className="hidden sm:block text-[10px] uppercase tracking-[0.14em] text-slate-600 font-medium">
                       Functional Annotation
                     </span>
                   </span>

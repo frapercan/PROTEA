@@ -160,7 +160,7 @@ export default function HomePage() {
         <section className="mx-auto max-w-5xl">
           <div className="flex items-end justify-between mb-4">
             <div>
-              <h2 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+              <h2 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-600">
                 {t("bestOverall")}
               </h2>
               <p className="text-sm text-slate-500 mt-1">
@@ -199,7 +199,7 @@ export default function HomePage() {
                     {t(STAGE_LABELS[best.stage] as any)}
                   </span>
                 </div>
-                <div className="text-[12px] text-slate-400 mt-2 font-mono break-all">
+                <div className="text-[12px] text-slate-600 mt-2 font-mono break-all">
                   {best.embedding.model_name}
                 </div>
               </div>
@@ -257,7 +257,7 @@ export default function HomePage() {
       {/* ── Pipeline diagram ──────────────────────────────────────── */}
       <section className="mx-auto max-w-6xl">
         <div className="mb-4">
-          <h2 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+          <h2 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-600">
             {t("pipeline")}
           </h2>
           <p className="text-sm text-slate-500 mt-1">
@@ -286,7 +286,7 @@ export default function HomePage() {
                   <span className="text-[12px] font-semibold text-slate-700 mt-2 group-hover:text-slate-900">
                     {t(STAGE_I18N[stage.name] as any)}
                   </span>
-                  <span className="text-[11px] text-slate-400 tabular-nums mt-0.5 font-medium">
+                  <span className="text-[11px] text-slate-600 tabular-nums mt-0.5 font-medium">
                     {stage.count.toLocaleString()}
                   </span>
                 </button>
@@ -303,7 +303,7 @@ export default function HomePage() {
                 <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100/70 text-slate-300 text-sm font-bold">
                   LLM
                 </span>
-                <span className="text-[12px] font-medium text-slate-400 mt-2">{t("stageLlm")}</span>
+                <span className="text-[12px] font-medium text-slate-600 mt-2">{t("stageLlm")}</span>
                 <span className="text-[10px] text-slate-300 mt-0.5 font-semibold uppercase tracking-wider">
                   soon
                 </span>
@@ -316,7 +316,7 @@ export default function HomePage() {
       {/* ── Stats bar ─────────────────────────────────────────────── */}
       <section className="mx-auto max-w-6xl">
         <div className="mb-4">
-          <h2 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+          <h2 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-600">
             {t("stats")}
           </h2>
           <p className="text-sm text-slate-500 mt-1">Live counts across the data layer</p>

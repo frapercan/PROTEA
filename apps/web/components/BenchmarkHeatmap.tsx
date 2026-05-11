@@ -85,13 +85,13 @@ function HeatmapCell({
           <span className="text-slate-300">·</span>
           <span className={`text-[11px] font-bold tracking-[0.12em] ${tone.text}`}>{asp}</span>
         </div>
-        <span className="text-[10px] text-slate-400 hidden sm:inline">
+        <span className="text-[10px] text-slate-600 hidden sm:inline">
           {ASPECT_LABELS[asp] ?? ""}
         </span>
       </div>
       <div className="p-3">
         {empty ? (
-          <p className="text-[12px] text-slate-400 text-center py-6">No data</p>
+          <p className="text-[12px] text-slate-600 text-center py-6">No data</p>
         ) : (
           <ul className="space-y-1.5">
             {rows.map((r, i) => {
@@ -191,7 +191,7 @@ export function BenchmarkHeatmap({
           )),
         )}
       </div>
-      <p className="text-[10px] text-slate-400 italic">
+      <p className="text-[10px] text-slate-600 italic">
         Hover any bar for stage / K / Fmax detail. CI whiskers will render
         in the same slot once bootstrap intervals are persisted.
       </p>

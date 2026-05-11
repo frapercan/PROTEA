@@ -29,7 +29,7 @@ function InlineProgress({
         <div className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-100">
           <div className="h-1.5 w-8 rounded-full bg-blue-400 animate-pulse" />
         </div>
-        <span className="text-xs text-slate-400">{(current ?? 0).toLocaleString()}</span>
+        <span className="text-xs text-slate-600">{(current ?? 0).toLocaleString()}</span>
       </div>
     );
   }
@@ -42,7 +42,7 @@ function InlineProgress({
           style={{ width: `${pct}%` }}
         />
       </div>
-      <span className="text-xs text-slate-400">{pct}%</span>
+      <span className="text-xs text-slate-600">{pct}%</span>
     </div>
   );
 }
@@ -161,13 +161,13 @@ export default function JobsPage() {
           </div>
         ))}
         {!loading && jobs.length === 0 && (
-          <div className="rounded-lg border bg-white px-4 py-8 text-center text-sm text-slate-400 shadow-sm">{t("noJobsFound")}</div>
+          <div className="rounded-lg border bg-white px-4 py-8 text-center text-sm text-slate-600 shadow-sm">{t("noJobsFound")}</div>
         )}
         {!loading && jobs.map((j) => (
           <Link key={j.id} href={`/jobs/${j.id}`} className="block rounded-lg border bg-white p-3 shadow-sm hover:border-blue-200 hover:bg-blue-50 transition-colors">
             <div className="flex items-start justify-between gap-2">
               <StatusBadge status={j.status} />
-              <span className="text-xs text-slate-400">{formatDate(j.created_at)}</span>
+              <span className="text-xs text-slate-600">{formatDate(j.created_at)}</span>
             </div>
             <p className="mt-1.5 text-sm font-medium text-slate-800">{j.operation}</p>
             {j.operation_description && (
@@ -177,7 +177,7 @@ export default function JobsPage() {
               <p className="mt-1 text-xs font-mono text-slate-700 break-words">{j.operation_summary}</p>
             )}
             <InlineProgress current={j.progress_current} total={j.progress_total} />
-            <p className="mt-1 font-mono text-xs text-slate-400 truncate">{j.id}</p>
+            <p className="mt-1 font-mono text-xs text-slate-600 truncate">{j.id}</p>
           </Link>
         ))}
       </div>
@@ -215,20 +215,20 @@ export default function JobsPage() {
               ) : (
                 <span className="text-xs text-slate-300">—</span>
               )}
-              <span className="font-mono text-[10px] text-slate-400 truncate block">{j.id}</span>
+              <span className="font-mono text-[10px] text-slate-600 truncate block">{j.id}</span>
             </div>
             <div className="text-slate-500 text-xs">{formatDate(j.created_at)}</div>
           </Link>
         ))}
 
         {!loading && jobs.length === 0 && (
-          <div className="px-4 py-8 text-center text-sm text-slate-400">
+          <div className="px-4 py-8 text-center text-sm text-slate-600">
             {t("noJobsFound")}
           </div>
         )}
       </div>
 
-      <p className="mt-2 text-xs text-slate-400">{jobs.length} job{jobs.length !== 1 ? "s" : ""} shown</p>
+      <p className="mt-2 text-xs text-slate-600">{jobs.length} job{jobs.length !== 1 ? "s" : ""} shown</p>
     </>
   );
 }

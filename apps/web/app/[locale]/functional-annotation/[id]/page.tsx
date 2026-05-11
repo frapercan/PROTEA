@@ -163,7 +163,7 @@ function WeightPanel({
           );
         })}
         {config.description && (
-          <span className="text-slate-400 italic ml-1">{config.description}</span>
+          <span className="text-slate-600 italic ml-1">{config.description}</span>
         )}
       </div>
     );
@@ -226,7 +226,7 @@ function WeightPanel({
               </button>
               <button
                 onClick={() => { setShowSaveForm(false); setSaveName(""); }}
-                className="text-xs text-slate-400 hover:text-slate-600 px-1"
+                className="text-xs text-slate-600 hover:text-slate-600 px-1"
               >
                 ✕
               </button>
@@ -346,7 +346,7 @@ function PredictionTable({ preds, knownByGoId, scoringConfig }: {
   return (
     <div className="rounded-md border bg-white text-xs">
       {/* Desktop header */}
-      <div className={`hidden lg:grid ${gridClass} gap-x-3 border-b bg-slate-50 px-3 py-1.5 font-semibold uppercase tracking-wide text-slate-400`}>
+      <div className={`hidden lg:grid ${gridClass} gap-x-3 border-b bg-slate-50 px-3 py-1.5 font-semibold uppercase tracking-wide text-slate-600`}>
         {hasScore && <div>Score</div>}
         <div>GO ID</div>
         <div>Name</div>
@@ -383,7 +383,7 @@ function PredictionTable({ preds, knownByGoId, scoringConfig }: {
               </div>
               <p className="text-slate-700 leading-snug text-xs mb-1">{pred.name ?? "—"}</p>
               <div className="flex flex-wrap items-center gap-2 text-[10px]">
-                <span className="text-slate-400">via</span>
+                <span className="text-slate-600">via</span>
                 <Link
                   href={`/proteins/${pred.ref_protein_accession}`}
                   className="font-mono text-blue-500 hover:underline"
@@ -446,12 +446,12 @@ function PredictionTable({ preds, knownByGoId, scoringConfig }: {
               <div className="border-b bg-slate-50 px-4 py-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
                 {hasAlignment && (
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-600 mb-2">
                       Alignment — query vs {pred.ref_protein_accession}
                     </p>
                     <table className="w-full text-xs">
                       <thead>
-                        <tr className="text-slate-400">
+                        <tr className="text-slate-600">
                           <th className="text-left font-medium pr-4 pb-1">Metric</th>
                           <th className="text-right font-medium pr-4 pb-1">NW (global)</th>
                           <th className="text-right font-medium pb-1">SW (local)</th>
@@ -470,7 +470,7 @@ function PredictionTable({ preds, knownByGoId, scoringConfig }: {
                 )}
                 {hasTaxonomy && (
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-600 mb-2">
                       Taxonomy — query vs {pred.ref_protein_accession}
                     </p>
                     <div className="space-y-1.5 text-xs">
@@ -490,7 +490,7 @@ function PredictionTable({ preds, knownByGoId, scoringConfig }: {
                 )}
                 {hasReranker && (
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-600 mb-2">
                       Re-ranker features
                     </p>
                     <div className="space-y-1.5 text-xs">
@@ -587,10 +587,10 @@ function ProteinDetail({
             {loadingGraph ? "Loading…" : showGraph ? "Hide graph" : "GO graph"}
           </button>
         )}
-        <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-lg leading-none ml-auto sm:ml-2">×</button>
+        <button onClick={onClose} className="text-slate-600 hover:text-slate-600 text-lg leading-none ml-auto sm:ml-2">×</button>
       </div>
 
-      {loading && <p className="text-sm text-slate-400">Loading…</p>}
+      {loading && <p className="text-sm text-slate-600">Loading…</p>}
 
       {showGraph && subgraph && (
         <div className="mb-4">
@@ -604,7 +604,7 @@ function ProteinDetail({
       )}
 
       {!loading && predictions.length === 0 && annotations.length === 0 && (
-        <p className="text-sm text-slate-400">No data found.</p>
+        <p className="text-sm text-slate-600">No data found.</p>
       )}
 
       {!loading && aspects.map((asp) => {
@@ -616,7 +616,7 @@ function ProteinDetail({
             <div className="flex items-center gap-2 mb-2">
               <AspectBadge aspect={asp} />
               <span className="text-xs font-semibold text-slate-600">{ASPECT_LABELS[asp]}</span>
-              <span className="text-xs text-slate-400 ml-1">{uniquePredCount} predicted · {knownInAspect.length} known</span>
+              <span className="text-xs text-slate-600 ml-1">{uniquePredCount} predicted · {knownInAspect.length} known</span>
             </div>
             <PredictionTable preds={preds} knownByGoId={knownByGoId} scoringConfig={scoringConfig} />
           </div>
@@ -630,7 +630,7 @@ function ProteinDetail({
             Known annotations not covered by any prediction ({uncoveredKnown.length})
           </p>
           <div className="overflow-x-auto rounded-md border bg-white text-xs">
-            <div className="grid grid-cols-[90px_1fr_80px] gap-2 border-b bg-slate-50 px-3 py-1.5 font-semibold uppercase tracking-wide text-slate-400">
+            <div className="grid grid-cols-[90px_1fr_80px] gap-2 border-b bg-slate-50 px-3 py-1.5 font-semibold uppercase tracking-wide text-slate-600">
               <div>GO ID</div><div>Name</div><div>Evidence</div>
             </div>
             {uncoveredKnown.map((ann) => (
@@ -687,7 +687,7 @@ function DownloadButton({ setId, scoringConfigId, customBlocked }: { setId: stri
 
       {open && (
         <div className="absolute right-0 top-10 z-20 w-64 rounded-lg border bg-white p-4 shadow-lg">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">Download options</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 mb-3">Download options</p>
 
           {!isScored && (
             <>
@@ -893,7 +893,7 @@ export default function PredictionSetDetailPage({ params }: { params: Promise<{ 
             Prediction Set <span className="font-mono text-base text-slate-500">{shortId(setId)}…</span>
           </h1>
           {limitPerEntry != null && (
-            <p className="text-xs text-slate-400 mt-0.5">k = {limitPerEntry}</p>
+            <p className="text-xs text-slate-600 mt-0.5">k = {limitPerEntry}</p>
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -1000,7 +1000,7 @@ export default function PredictionSetDetailPage({ params }: { params: Promise<{ 
                 </button>
               )}
             </form>
-            <span className="text-sm text-slate-400">{proteinTotal.toLocaleString()} proteins</span>
+            <span className="text-sm text-slate-600">{proteinTotal.toLocaleString()} proteins</span>
           </div>
 
           {/* Mobile card list */}
@@ -1012,7 +1012,7 @@ export default function PredictionSetDetailPage({ params }: { params: Promise<{ 
               </div>
             ))}
             {!loadingProteins && proteins.length === 0 && (
-              <div className="rounded-lg border bg-white px-4 py-12 text-center text-sm text-slate-400 shadow-sm">No proteins found.</div>
+              <div className="rounded-lg border bg-white px-4 py-12 text-center text-sm text-slate-600 shadow-sm">No proteins found.</div>
             )}
             {!loadingProteins && proteins.map((p) => (
               <div key={p.accession} className="rounded-lg border bg-white shadow-sm overflow-hidden">
@@ -1075,7 +1075,7 @@ export default function PredictionSetDetailPage({ params }: { params: Promise<{ 
             {loadingProteins && Array.from({ length: 8 }).map((_, i) => <SkeletonTableRow key={i} cols={5} />)}
 
             {!loadingProteins && proteins.length === 0 && (
-              <div className="px-4 py-12 text-center text-sm text-slate-400">No proteins found.</div>
+              <div className="px-4 py-12 text-center text-sm text-slate-600">No proteins found.</div>
             )}
 
             {!loadingProteins && proteins.map((p) => (
@@ -1151,18 +1151,18 @@ export default function PredictionSetDetailPage({ params }: { params: Promise<{ 
       {/* ── GO Distribution ── */}
       {activeTab === "distribution" && (
         <div>
-          {loadingDist && <p className="text-sm text-slate-400">Loading…</p>}
+          {loadingDist && <p className="text-sm text-slate-600">Loading…</p>}
 
           {distribution && (
             <div className="space-y-6">
               <div className="grid grid-cols-3 gap-3">
                 {(["F", "P", "C"] as const).map((asp) => (
                   <div key={asp} className="rounded-lg border bg-white p-4 shadow-sm">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{ASPECT_LABELS[asp]}</p>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">{ASPECT_LABELS[asp]}</p>
                     <p className="mt-1 text-2xl font-bold text-slate-900">
                       {(distribution.aspect_totals[asp] ?? 0).toLocaleString()}
                     </p>
-                    <p className="text-xs text-slate-400 mt-0.5">predictions</p>
+                    <p className="text-xs text-slate-600 mt-0.5">predictions</p>
                   </div>
                 ))}
               </div>
@@ -1175,7 +1175,7 @@ export default function PredictionSetDetailPage({ params }: { params: Promise<{ 
                   <div key={asp}>
                     <p className="text-sm font-semibold text-slate-700 mb-3">
                       {ASPECT_LABELS[asp]}
-                      <span className="ml-2 text-xs font-normal text-slate-400">top {terms.length} terms</span>
+                      <span className="ml-2 text-xs font-normal text-slate-600">top {terms.length} terms</span>
                     </p>
                     <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
                       {terms.map((t) => (

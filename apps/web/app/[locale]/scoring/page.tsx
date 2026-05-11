@@ -137,7 +137,7 @@ function ConfigCard({
             </span>
           )}
           {config.description && (
-            <p className="mt-0.5 text-xs text-slate-400">{config.description}</p>
+            <p className="mt-0.5 text-xs text-slate-600">{config.description}</p>
           )}
         </div>
         <button
@@ -160,7 +160,7 @@ function ConfigCard({
       <div className="mt-3 border-t pt-2.5">
         <button
           onClick={() => setShowEvidenceWeights((v) => !v)}
-          className="text-xs text-slate-400 hover:text-slate-600"
+          className="text-xs text-slate-600 hover:text-slate-600"
         >
           {showEvidenceWeights ? t("configCard.collapse") : t("configCard.expand")} {t("configCard.evidenceCodeWeights")}{" "}
           {hasCustomEvidence ? t("configCard.custom") : t("configCard.systemDefaults")}
@@ -189,7 +189,7 @@ function ConfigCard({
                         >
                           {code}
                         </span>
-                        <span className="text-xs text-slate-400 w-52 shrink-0 truncate" title={label}>
+                        <span className="text-xs text-slate-600 w-52 shrink-0 truncate" title={label}>
                           {label}
                         </span>
                         <div className="flex-1 h-1.5 rounded-full bg-slate-100 overflow-hidden">
@@ -310,7 +310,7 @@ function NewConfigForm({
         <button
           type="button"
           onClick={() => { setOpen(false); reset(); }}
-          className="text-slate-400 hover:text-slate-600 text-lg leading-none"
+          className="text-slate-600 hover:text-slate-600 text-lg leading-none"
         >
           {t("newConfigForm.close")}
         </button>
@@ -353,7 +353,7 @@ function NewConfigForm({
 
       <div>
         <label className="block text-xs font-medium text-slate-600 mb-1">
-          {t("newConfigForm.descriptionLabel")} <span className="font-normal text-slate-400">{t("newConfigForm.descriptionHelper")}</span>
+          {t("newConfigForm.descriptionLabel")} <span className="font-normal text-slate-600">{t("newConfigForm.descriptionHelper")}</span>
         </label>
         <input
           type="text"
@@ -411,7 +411,7 @@ function NewConfigForm({
         </div>
 
         {!useCustomEvidence && (
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-slate-600">
             {t("newConfigForm.systemDefaultsNote")}
           </p>
         )}
@@ -423,7 +423,7 @@ function NewConfigForm({
                 <div className="flex items-center justify-between mb-1.5">
                   <div>
                     <p className="text-xs font-semibold text-slate-600">{group.label}</p>
-                    <p className="text-xs text-slate-400">{group.description}</p>
+                    <p className="text-xs text-slate-600">{group.description}</p>
                   </div>
                   {/* Group-level shortcuts */}
                   <div className="flex gap-1 shrink-0">
@@ -456,7 +456,7 @@ function NewConfigForm({
                         >
                           {code}
                         </span>
-                        <span className="text-xs text-slate-400 w-48 shrink-0 truncate" title={label}>
+                        <span className="text-xs text-slate-600 w-48 shrink-0 truncate" title={label}>
                           {label}
                         </span>
                         <input
@@ -490,7 +490,7 @@ function NewConfigForm({
             <button
               type="button"
               onClick={() => setEvidenceWeights({ ...SYSTEM_EVIDENCE_DEFAULTS })}
-              className="text-xs text-slate-400 hover:text-slate-600 underline"
+              className="text-xs text-slate-600 hover:text-slate-600 underline"
             >
               {t("newConfigForm.resetEvidenceWeights")}
             </button>
@@ -635,7 +635,7 @@ export default function ScoringPage() {
 
       {/* ── Reference card ── */}
       <div className="mb-6 rounded-lg border bg-white p-4 shadow-sm">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 mb-3">
           {t("availableSignals")}
         </p>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 mb-4">
@@ -661,7 +661,7 @@ export default function ScoringPage() {
         </div>
       </div>
 
-      {loading && <p className="text-sm text-slate-400">Loading…</p>}
+      {loading && <p className="text-sm text-slate-600">Loading…</p>}
 
       {!loading && (
         <div className="space-y-3">
@@ -672,7 +672,7 @@ export default function ScoringPage() {
           />
 
           {configs.length === 0 && (
-            <p className="text-sm text-slate-400 text-center py-8">
+            <p className="text-sm text-slate-600 text-center py-8">
               {t("noConfigs")}
             </p>
           )}

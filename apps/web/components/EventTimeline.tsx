@@ -25,7 +25,7 @@ function Fields({ fields }: { fields: Record<string, any> }) {
     <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs text-slate-500">
       {entries.map(([k, v]) => (
         <Fragment key={k}>
-          <dt className="font-medium text-slate-400">{k}</dt>
+          <dt className="font-medium text-slate-600">{k}</dt>
           <dd className="truncate">{typeof v === "object" ? JSON.stringify(v) : String(v)}</dd>
         </Fragment>
       ))}
@@ -36,7 +36,7 @@ function Fields({ fields }: { fields: Record<string, any> }) {
 export function EventTimeline({ events }: { events: JobEvent[] }) {
   const t = useTranslations("components.eventTimeline");
   if (events.length === 0) {
-    return <p className="text-sm text-slate-400">{t("noEvents")}</p>;
+    return <p className="text-sm text-slate-600">{t("noEvents")}</p>;
   }
 
   return (
@@ -54,7 +54,7 @@ export function EventTimeline({ events }: { events: JobEvent[] }) {
             <div className="pb-3 min-w-0 flex-1">
               <div className="flex items-baseline gap-2">
                 <span className="font-mono text-xs font-semibold text-slate-800">{e.event}</span>
-                <span className="text-xs text-slate-400">{formatTs(e.ts)}</span>
+                <span className="text-xs text-slate-600">{formatTs(e.ts)}</span>
               </div>
               {e.message && <p className="mt-0.5 text-sm text-slate-600">{e.message}</p>}
               <Fields fields={e.fields} />
