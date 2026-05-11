@@ -50,6 +50,9 @@ from protea.infrastructure.orm.models.annotation.ontology_snapshot import Ontolo
 from protea.infrastructure.orm.models.annotation.protein_go_annotation import ProteinGOAnnotation
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
+from protea.infrastructure.orm.models.embedding.go_prediction_features import (
+    build_feature_jsonb,
+)
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
 from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
@@ -226,6 +229,10 @@ def _row_from_prediction(
     }
     for key in _STORE_FLOAT_KEYS:
         row[key] = _clean_float(pred.get(key))
+    # T3.1a dual-write: mirror every feature value into the JSONB blob.
+    # Old typed columns stay authoritative for readers; T3.1b will cut
+    # the reader paths over.
+    row["features"] = build_feature_jsonb(row)
     return row
 
 
