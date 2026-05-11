@@ -226,7 +226,7 @@ export function CommandPalette() {
         className="relative w-full max-w-xl rounded-2xl border border-slate-200 bg-white shadow-2xl overflow-hidden"
       >
         <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-100">
-          <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg className="w-4 h-4 text-slate-600" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="7" cy="7" r="5" />
             <path d="M11 11l3 3" />
           </svg>
@@ -246,7 +246,7 @@ export function CommandPalette() {
 
         <div role="listbox" className="max-h-[60vh] overflow-y-auto py-2">
           {filtered.length === 0 ? (
-            <p className="px-4 py-6 text-center text-sm text-slate-400">
+            <p className="px-4 py-6 text-center text-sm text-slate-600">
               No matches. Try a UniProt accession or a job UUID.
             </p>
           ) : (
@@ -260,7 +260,7 @@ export function CommandPalette() {
               let cursor = -1;
               return Array.from(groups.entries()).map(([group, items]) => (
                 <div key={group} className="mb-1.5 last:mb-0">
-                  <div className="px-4 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                  <div className="px-4 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">
                     {group}
                   </div>
                   {items.map((it) => {
@@ -282,9 +282,9 @@ export function CommandPalette() {
                         <span className="truncate font-medium">{it.label}</span>
                         <span className="flex items-center gap-2 shrink-0">
                           {it.hint && (
-                            <span className="text-[11px] text-slate-400">{it.hint}</span>
+                            <span className="text-[11px] text-slate-600">{it.hint}</span>
                           )}
-                          <span className="text-[11px] font-mono text-slate-400">{it.href}</span>
+                          <span className="text-[11px] font-mono text-slate-600">{it.href}</span>
                         </span>
                       </button>
                     );

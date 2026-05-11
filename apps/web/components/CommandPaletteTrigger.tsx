@@ -32,7 +32,7 @@ export function CommandPaletteTrigger() {
       className="hidden sm:flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 text-[12px] text-slate-500 hover:border-slate-300 hover:text-slate-700 transition-colors shadow-sm"
     >
       <svg
-        className="w-3.5 h-3.5 text-slate-400"
+        className="w-3.5 h-3.5 text-slate-600"
         aria-hidden
         fill="none"
         viewBox="0 0 16 16"

@@ -48,7 +48,7 @@ export function UsagePolicyModal() {
               </li>
             ))}
           </ul>
-          <p className="text-xs text-slate-400 pt-1">{t("dataPublicNote")}</p>
+          <p className="text-xs text-slate-600 pt-1">{t("dataPublicNote")}</p>
         </div>
 
         {/* Footer */}

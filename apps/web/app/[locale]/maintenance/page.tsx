@@ -79,7 +79,7 @@ function VacuumCard({
 
       {orphanValue !== null && totalValue !== null && totalValue > 0 && (
         <div className="mb-3">
-          <div className="flex justify-between text-xs text-slate-400 mb-1">
+          <div className="flex justify-between text-xs text-slate-600 mb-1">
             <span>{orphanLabel}</span>
             <span>{pct}%</span>
           </div>

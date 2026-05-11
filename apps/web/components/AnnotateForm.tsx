@@ -282,7 +282,7 @@ export function AnnotateForm() {
           placeholder={t("annotatePlaceholder" as any)}
           rows={6}
           disabled={isRunning || isQueueBlocked}
-          className="w-full rounded-lg p-4 text-xs font-mono text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-300 resize-y disabled:opacity-50 disabled:cursor-not-allowed bg-transparent"
+          className="w-full rounded-lg p-4 text-xs font-mono text-slate-700 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-300 resize-y disabled:opacity-50 disabled:cursor-not-allowed bg-transparent"
         />
         {!fasta && !isRunning && !isQueueBlocked && (
           <div className="absolute bottom-3 right-3 flex gap-2">
@@ -390,7 +390,7 @@ export function AnnotateForm() {
               );
             })}
           </div>
-          <div className="flex justify-between mt-1 text-[10px] text-slate-400">
+          <div className="flex justify-between mt-1 text-[10px] text-slate-600">
             <span>{t("annotateStepUpload" as any)}</span>
             <span>{t("annotateStepEmbed" as any)}</span>
             <span>{t("annotateStepPredict" as any)}</span>

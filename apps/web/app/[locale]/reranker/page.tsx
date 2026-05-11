@@ -83,7 +83,7 @@ function FeatureImportanceChart({ importance }: { importance: Record<string, num
   const entries = Object.entries(importance)
     .sort(([, a], [, b]) => b - a)
     .filter(([, v]) => v > 0);
-  if (entries.length === 0) return <p className="text-xs text-slate-400">No feature importance data</p>;
+  if (entries.length === 0) return <p className="text-xs text-slate-600">No feature importance data</p>;
   const maxVal = entries[0][1];
 
   return (
@@ -115,7 +115,7 @@ function MetricsBadge({ label, value, suffix }: { label: string; value: number |
   const formatted = typeof value === "number" ? value.toFixed(4) : value;
   return (
     <div className="rounded-lg border bg-white p-3 shadow-sm text-center">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">{label}</p>
       <p className="text-lg font-bold text-slate-900 mt-0.5">{formatted}{suffix}</p>
     </div>
   );
@@ -196,7 +196,7 @@ function RerankerCard({
             )}
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-xs text-slate-400">{new Date(model.created_at).toLocaleDateString()}</span>
+            <span className="text-xs text-slate-600">{new Date(model.created_at).toLocaleDateString()}</span>
             <span className="text-slate-300 text-xs">{expanded ? "▲" : "▼"}</span>
           </div>
         </div>
@@ -225,7 +225,7 @@ function RerankerCard({
         <div className="border-t px-4 py-4 space-y-5">
           {/* Training-time metrics */}
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Training-time metrics</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 mb-2">Training-time metrics</p>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <MetricsBadge label="Test Fmax" value={m.test_fmax} />
               <MetricsBadge label="Best iteration" value={m.best_iteration} />
@@ -244,14 +244,14 @@ function RerankerCard({
 
           {/* Feature importance */}
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Feature importance (gain)</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 mb-2">Feature importance (gain)</p>
             <FeatureImportanceChart importance={model.feature_importance} />
           </div>
 
           {/* Download reranked TSV */}
           {model.prediction_set_id && (
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Download re-ranked predictions</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 mb-2">Download re-ranked predictions</p>
               <a
                 href={getRerankedTsvUrl(model.prediction_set_id, model.id)}
                 download={`reranked_${shortId(model.id)}.tsv`}
@@ -264,7 +264,7 @@ function RerankerCard({
 
           {/* Compute CAFA metrics */}
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Compute CAFA metrics</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 mb-2">Compute CAFA metrics</p>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-2">
               <div>
                 <label className="text-[13px] text-slate-500 mb-0.5 block">Prediction set</label>
@@ -291,7 +291,7 @@ function RerankerCard({
                   <option value="lk">LK (Limited Knowledge)</option>
                   <option value="pk">PK (Partial Knowledge)</option>
                 </select>
-                <p className="text-[10px] text-slate-400 mt-1 leading-snug">{CATEGORY_HINTS[metricsCategory]}</p>
+                <p className="text-[10px] text-slate-600 mt-1 leading-snug">{CATEGORY_HINTS[metricsCategory]}</p>
               </div>
             </div>
             <button
@@ -313,14 +313,14 @@ function RerankerCard({
                   <MetricsBadge label="Predictions" value={metrics.n_predictions} />
                 </div>
                 {metrics.curve && metrics.curve.length > 0 && (
-                  <p className="text-[10px] text-slate-400 mt-2">{metrics.curve.length} PR curve points computed</p>
+                  <p className="text-[10px] text-slate-600 mt-2">{metrics.curve.length} PR curve points computed</p>
                 )}
               </div>
             )}
           </div>
 
           {/* Source info */}
-          <div className="flex flex-wrap gap-4 text-xs text-slate-400 border-t pt-3">
+          <div className="flex flex-wrap gap-4 text-xs text-slate-600 border-t pt-3">
             <span>Prediction set: <span className="font-mono">{model.prediction_set_id ? shortId(model.prediction_set_id) : "—"}</span></span>
             <span>Evaluation set: <span className="font-mono">{model.evaluation_set_id ? shortId(model.evaluation_set_id) : "—"}</span></span>
             <span>ID: <span className="font-mono">{shortId(model.id)}</span></span>
@@ -468,7 +468,7 @@ export default function RerankerPage() {
               <option value="lk">LK (Limited Knowledge)</option>
               <option value="pk">PK (Partial Knowledge)</option>
             </select>
-            <p className="text-[10px] text-slate-400 mt-1 leading-snug">{CATEGORY_HINTS[trainCategory]}</p>
+            <p className="text-[10px] text-slate-600 mt-1 leading-snug">{CATEGORY_HINTS[trainCategory]}</p>
           </div>
           <div>
             <label className={labelClass}>Aspect</label>
@@ -534,7 +534,7 @@ export default function RerankerPage() {
             </div>
           ))}
           {extraPairs.length > 0 && (
-            <p className="text-[10px] text-slate-400 mt-1">
+            <p className="text-[10px] text-slate-600 mt-1">
               Data from all pairs will be concatenated before training a single model.
               {extraPairs.filter((p) => p.psId && p.esId).length > 0 &&
                 ` (${1 + extraPairs.filter((p) => p.psId && p.esId).length} pairs total)`}
@@ -564,11 +564,11 @@ export default function RerankerPage() {
       </div>
 
       {/* List of rerankers */}
-      {loading && <p className="text-sm text-slate-400">Loading...</p>}
+      {loading && <p className="text-sm text-slate-600">Loading...</p>}
       {error && <p className="text-sm text-red-500">{error}</p>}
 
       {!loading && rerankers.length === 0 && (
-        <div className="rounded-lg border bg-white px-4 py-12 text-center text-sm text-slate-400 shadow-sm">
+        <div className="rounded-lg border bg-white px-4 py-12 text-center text-sm text-slate-600 shadow-sm">
           No re-ranker models trained yet. Use the form above to train one.
         </div>
       )}

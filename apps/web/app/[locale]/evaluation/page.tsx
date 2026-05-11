@@ -158,7 +158,7 @@ const SETTING_COLORS: Record<string, string> = {
 function ResultsTable({ results }: { results: Record<string, SettingResults> }) {
   const t = useTranslations("evaluation");
   const settings = ["NK", "LK", "PK"].filter((s) => results[s] && Object.keys(results[s]).length > 0);
-  if (settings.length === 0) return <p className="text-sm text-slate-400">{t("evaluationSetCard.noEvaluations")}</p>;
+  if (settings.length === 0) return <p className="text-sm text-slate-600">{t("evaluationSetCard.noEvaluations")}</p>;
 
   const NS_LABELS: Record<string, string> = {
     BPO: t("resultMetrics.biologicalProcess"),
@@ -428,7 +428,7 @@ function EvaluationSetCard({
                 filename="known_terms.tsv"
               />
             </div>
-            <p className="text-xs text-slate-400 mt-1">
+            <p className="text-xs text-slate-600 mt-1">
               {t("evaluationSetCard.downloadKnownTerms")}
               <InfoTooltip text="All experimental annotations from the old snapshot for PK proteins in the relevant namespace. Passed to cafaeval with -known to exclude them from scoring — this penalises methods that simply repeat prior annotations." />
               : passed to cafaeval as <code className="font-mono">-known</code> for the PK pass only.
@@ -605,15 +605,15 @@ function EvaluationSetCard({
               <button
                 onClick={refreshResults}
                 disabled={loadingResults}
-                className="text-xs text-slate-400 hover:text-slate-700 border rounded px-2 py-0.5 disabled:opacity-40"
+                className="text-xs text-slate-600 hover:text-slate-700 border rounded px-2 py-0.5 disabled:opacity-40"
               >
                 {loadingResults ? t("evaluationSetCard.refreshing") : t("evaluationSetCard.refreshResults")}
               </button>
             </div>
             {loadingResults ? (
-              <p className="text-sm text-slate-400">Loading…</p>
+              <p className="text-sm text-slate-600">Loading…</p>
             ) : results.length === 0 ? (
-              <p className="text-sm text-slate-400">{t("evaluationSetCard.noEvaluations")}</p>
+              <p className="text-sm text-slate-600">{t("evaluationSetCard.noEvaluations")}</p>
             ) : (
               <div className="space-y-6">
                 {results.map((r) => {
@@ -637,23 +637,23 @@ function EvaluationSetCard({
                                 <div className="space-y-1.5">
                                   <div className="font-semibold text-slate-700 border-b border-slate-100 pb-1 mb-1">Prediction Set</div>
                                   <div className="flex justify-between gap-3">
-                                    <span className="text-slate-400">Config</span>
+                                    <span className="text-slate-600">Config</span>
                                     <span className="text-right">{pred.embedding_config_name ?? pred.embedding_config_id.slice(0, 8) + "…"}</span>
                                   </div>
                                   <div className="flex justify-between gap-3">
-                                    <span className="text-slate-400">Annotations</span>
+                                    <span className="text-slate-600">Annotations</span>
                                     <span className="text-right">{pred.annotation_set_label ?? pred.annotation_set_id.slice(0, 8) + "…"}</span>
                                   </div>
                                   <div className="flex justify-between gap-3">
-                                    <span className="text-slate-400">Ontology</span>
+                                    <span className="text-slate-600">Ontology</span>
                                     <span className="text-right">{pred.ontology_snapshot_version ?? pred.ontology_snapshot_id.slice(0, 8) + "…"}</span>
                                   </div>
                                   <div className="flex justify-between gap-3">
-                                    <span className="text-slate-400">Max dist.</span>
+                                    <span className="text-slate-600">Max dist.</span>
                                     <span>{pred.distance_threshold ?? "—"}</span>
                                   </div>
                                   <div className="flex justify-between gap-3">
-                                    <span className="text-slate-400">Limit/entry</span>
+                                    <span className="text-slate-600">Limit/entry</span>
                                     <span>{pred.limit_per_entry}</span>
                                   </div>
                                 </div>
@@ -676,19 +676,19 @@ function EvaluationSetCard({
                                 <span className="rounded-full bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">Re-ranker</span>
                                 {rr ? rr.name : "model"}
                               </span>
-                            ) : sc ? sc.name : <span className="italic text-slate-400">{t("evaluationSetCard.fallbackFormula")}</span>}
+                            ) : sc ? sc.name : <span className="italic text-slate-600">{t("evaluationSetCard.fallbackFormula")}</span>}
                             {sc && !hasReranker && (
                               <RichTooltip>
                                 <div className="space-y-1.5">
                                   <div className="font-semibold text-slate-700 border-b border-slate-100 pb-1 mb-1">{sc.name}</div>
                                   {sc.description && <div className="italic text-slate-500 mb-1">{sc.description}</div>}
                                   <div className="flex justify-between gap-3">
-                                    <span className="text-slate-400">Formula</span>
+                                    <span className="text-slate-600">Formula</span>
                                     <code className="text-blue-600 text-[10px]">{sc.formula}</code>
                                   </div>
                                   {Object.keys(sc.weights).length > 0 && (
                                     <div>
-                                      <div className="text-slate-400 mb-0.5">Weights</div>
+                                      <div className="text-slate-600 mb-0.5">Weights</div>
                                       {Object.entries(sc.weights).map(([k, v]) => (
                                         <div key={k} className="flex justify-between gap-3 pl-2">
                                           <span className="text-slate-500">{k}</span>
@@ -701,7 +701,7 @@ function EvaluationSetCard({
                               </RichTooltip>
                             )}
                           </div>
-                          <div className="text-slate-400">{new Date(r.created_at).toLocaleString()}</div>
+                          <div className="text-slate-600">{new Date(r.created_at).toLocaleString()}</div>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                           <a

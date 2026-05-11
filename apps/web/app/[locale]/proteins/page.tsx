@@ -34,7 +34,7 @@ function StatCard({ label, value, sub }: { label: string; value: number; sub?: s
     <div className="rounded-lg border bg-white p-4 shadow-sm">
       <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
       <p className="mt-1 text-2xl font-bold text-slate-900">{value.toLocaleString()}</p>
-      {sub && <p className="mt-0.5 text-xs text-slate-400">{sub}</p>}
+      {sub && <p className="mt-0.5 text-xs text-slate-600">{sub}</p>}
     </div>
   );
 }
@@ -240,7 +240,7 @@ export default function ProteinsPage() {
               {t("browseTab.canonicalOnly")}
             </label>
 
-            <span className="ml-auto text-sm text-slate-400">{t("browseTab.totalProteins", { count: total.toLocaleString() })}</span>
+            <span className="ml-auto text-sm text-slate-600">{t("browseTab.totalProteins", { count: total.toLocaleString() })}</span>
           </div>
 
           {/* Mobile card list */}
@@ -252,7 +252,7 @@ export default function ProteinsPage() {
               </div>
             ))}
             {!loadingBrowse && proteins.length === 0 && (
-              <div className="rounded-lg border bg-white px-4 py-12 text-center text-sm text-slate-400 shadow-sm">
+              <div className="rounded-lg border bg-white px-4 py-12 text-center text-sm text-slate-600 shadow-sm">
                 {t("browseTab.noProteinsCta")}
               </div>
             )}
@@ -268,7 +268,7 @@ export default function ProteinsPage() {
                 </div>
                 <p className="text-sm font-medium text-slate-800 truncate">{p.gene_name ?? "—"}</p>
                 <p className="text-xs text-slate-500 truncate">{p.organism ?? "—"}</p>
-                <div className="mt-1 flex gap-3 text-xs text-slate-400">
+                <div className="mt-1 flex gap-3 text-xs text-slate-600">
                   <span>{p.entry_name ?? "—"}</span>
                   {p.length != null && <span>{p.length.toLocaleString()} aa</span>}
                 </div>
@@ -291,7 +291,7 @@ export default function ProteinsPage() {
               {loadingBrowse && Array.from({ length: 8 }).map((_, i) => <SkeletonTableRow key={i} cols={6} />)}
 
               {!loadingBrowse && proteins.length === 0 && (
-                <div className="px-4 py-12 text-center text-sm text-slate-400">
+                <div className="px-4 py-12 text-center text-sm text-slate-600">
                   {t("browseTab.noProteinsCta")}
                 </div>
               )}
@@ -346,11 +346,11 @@ export default function ProteinsPage() {
               {t("statsTab.refresh")}
             </button>
           </div>
-          {loadingStats && <p className="text-sm text-slate-400">{t("statsTab.loading")}</p>}
+          {loadingStats && <p className="text-sm text-slate-600">{t("statsTab.loading")}</p>}
           {stats && (
             <div className="space-y-6">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">{t("statsTab.overview")}</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 mb-3">{t("statsTab.overview")}</p>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <StatCard label={t("statsTab.totalProteins")} value={stats.total} />
                   <StatCard label={t("statsTab.canonical")} value={stats.canonical} sub={t("statsTab.isoforms", { count: stats.isoforms.toLocaleString() })} />
@@ -359,7 +359,7 @@ export default function ProteinsPage() {
                 </div>
               </div>
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">{t("statsTab.coverage")}</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 mb-3">{t("statsTab.coverage")}</p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   <StatCard
                     label={t("statsTab.withMetadata")}
@@ -393,7 +393,7 @@ export default function ProteinsPage() {
               <div>
                 <label className={labelClass}>{t("insertTab.searchCriteriaLabel")}</label>
                 <input type="text" value={searchCriteria} onChange={(e) => setSearchCriteria(e.target.value)} required className={inputClass} placeholder="organism_id:9606 AND reviewed:true" />
-                <p className="mt-1 text-xs text-slate-400">{t("insertTab.searchCriteriaHelper")}</p>
+                <p className="mt-1 text-xs text-slate-600">{t("insertTab.searchCriteriaHelper")}</p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
@@ -401,7 +401,7 @@ export default function ProteinsPage() {
                   <input type="number" value={pageSize} onChange={(e) => setPageSize(parseInt(e.target.value, 10))} min={1} className={inputClass} />
                 </div>
                 <div>
-                  <label className={labelClass}>{t("insertTab.totalLimitLabel")} <span className="font-normal text-slate-400">{t("insertTab.totalLimitOptional")}</span></label>
+                  <label className={labelClass}>{t("insertTab.totalLimitLabel")} <span className="font-normal text-slate-600">{t("insertTab.totalLimitOptional")}</span></label>
                   <input type="number" value={totalLimit} onChange={(e) => setTotalLimit(e.target.value)} placeholder="all" className={inputClass} />
                 </div>
               </div>
@@ -435,7 +435,7 @@ export default function ProteinsPage() {
               <div>
                 <label className={labelClass}>{t("metadataTab.searchCriteriaLabel")}</label>
                 <input type="text" value={metaCriteria} onChange={(e) => setMetaCriteria(e.target.value)} required className={inputClass} placeholder="organism_id:9606 AND reviewed:true" />
-                <p className="mt-1 text-xs text-slate-400">{t("metadataTab.searchCriteriaHelper")}</p>
+                <p className="mt-1 text-xs text-slate-600">{t("metadataTab.searchCriteriaHelper")}</p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
@@ -443,7 +443,7 @@ export default function ProteinsPage() {
                   <input type="number" value={metaPageSize} onChange={(e) => setMetaPageSize(parseInt(e.target.value, 10))} min={1} className={inputClass} />
                 </div>
                 <div>
-                  <label className={labelClass}>{t("metadataTab.totalLimitLabel")} <span className="font-normal text-slate-400">{t("metadataTab.totalLimitOptional")}</span></label>
+                  <label className={labelClass}>{t("metadataTab.totalLimitLabel")} <span className="font-normal text-slate-600">{t("metadataTab.totalLimitOptional")}</span></label>
                   <input type="number" value={metaLimit} onChange={(e) => setMetaLimit(e.target.value)} placeholder="all" className={inputClass} />
                 </div>
               </div>

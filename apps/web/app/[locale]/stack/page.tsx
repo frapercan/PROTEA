@@ -155,7 +155,7 @@ export default function StackPage() {
               ))}
               {repos.length === 0 && !reposError && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-6 text-center text-slate-400">
+                  <td colSpan={5} className="px-4 py-6 text-center text-slate-600">
                     {t("loading")}
                   </td>
                 </tr>
@@ -242,14 +242,14 @@ export default function StackPage() {
               ))}
               {pulls.length === 0 && !pullsLoading && (
                 <tr>
-                  <td colSpan={4} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={4} className="px-4 py-8 text-center text-slate-600">
                     {t("noOpenPulls")}
                   </td>
                 </tr>
               )}
               {pullsLoading && pulls.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={4} className="px-4 py-8 text-center text-slate-600">
                     {t("loadingPulls")}
                   </td>
                 </tr>

@@ -367,7 +367,7 @@ export default function BenchmarkPage() {
               >
                 {s.label}
                 {s.is_baseline && (
-                  <span className="ml-1 text-[9px] text-slate-400 uppercase">base</span>
+                  <span className="ml-1 text-[9px] text-slate-600 uppercase">base</span>
                 )}
               </button>
             ))}
@@ -418,7 +418,7 @@ export default function BenchmarkPage() {
           </div>
         )}
 
-        <div className="text-xs text-slate-400 ml-auto self-end">
+        <div className="text-xs text-slate-600 ml-auto self-end">
           {matrix.total} cells · {matrix.embedding_config_ids.length} embeddings ·{" "}
           {matrix.evaluation_sets.length} eval set
           {matrix.evaluation_sets.length === 1 ? "" : "s"}
@@ -501,7 +501,7 @@ export default function BenchmarkPage() {
           <div className="flex items-baseline justify-between mb-3">
             <h2 className="text-sm font-semibold text-slate-800">
               Best Fmax per cell
-              <span className="ml-2 text-xs font-normal text-slate-400">
+              <span className="ml-2 text-xs font-normal text-slate-600">
                 in current selection
                 {stage ? ` · stage=${stageLabel(stageList, stage)}` : ""}
                 {selectedK ? ` · K=${selectedK}` : ""}
@@ -552,7 +552,7 @@ export default function BenchmarkPage() {
                           <div className="text-[10px] text-slate-500 truncate max-w-[120px] mx-auto">
                             {emb?.display_name ?? "—"}
                           </div>
-                          <div className="text-[9px] text-slate-400 truncate max-w-[120px] mx-auto">
+                          <div className="text-[9px] text-slate-600 truncate max-w-[120px] mx-auto">
                             {stageLabel(stageList, best.stage)}
                           </div>
                         </td>
@@ -605,7 +605,7 @@ export default function BenchmarkPage() {
             No evaluation results for{" "}
             <span className="font-semibold">{currentStageLabel}</span> yet.
           </p>
-          <p className="text-slate-400 text-xs mt-2">
+          <p className="text-slate-600 text-xs mt-2">
             Run <code>run_cafa_evaluation</code> for an embedding to populate
             this cell of the matrix.
           </p>
@@ -663,7 +663,7 @@ export default function BenchmarkPage() {
                       <div className="font-medium text-slate-900">
                         {emb.display_name}
                       </div>
-                      <div className="text-[10px] text-slate-400 font-mono">
+                      <div className="text-[10px] text-slate-600 font-mono">
                         {emb.family}
                         {emb.param_count != null
                           ? ` · ${formatParams(emb.param_count)}`
@@ -711,7 +711,7 @@ export default function BenchmarkPage() {
         </div>
       )}
 
-      <p className="text-xs text-slate-400">
+      <p className="text-xs text-slate-600">
         Display names and stage labels come from{" "}
         <code>embedding_config</code> (DB) and{" "}
         <code>protea/config/benchmark.yaml</code>. Edit the YAML to change

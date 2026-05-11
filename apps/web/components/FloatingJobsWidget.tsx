@@ -54,7 +54,7 @@ export function FloatingJobsWidget() {
             </div>
             <button
               onClick={() => setExpanded(false)}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100 hover:text-slate-700 transition-colors"
               aria-label="Close"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -91,7 +91,7 @@ export function FloatingJobsWidget() {
                       />
                     </div>
                   )}
-                  <div className="text-[11px] text-slate-400 mt-1 font-mono truncate">
+                  <div className="text-[11px] text-slate-600 mt-1 font-mono truncate">
                     {job.id.slice(0, 8)}…
                   </div>
                 </Link>

@@ -235,7 +235,7 @@ export default function AnnotationsPage() {
               </div>
             ))}
             {!loadingSets && sets.length === 0 && (
-              <div className="rounded-lg border bg-white px-4 py-8 text-center text-sm text-slate-400 shadow-sm">
+              <div className="rounded-lg border bg-white px-4 py-8 text-center text-sm text-slate-600 shadow-sm">
                 {t("setsTab.noSetsFound")}
               </div>
             )}
@@ -258,7 +258,7 @@ export default function AnnotationsPage() {
                     </span>
                   ))}
                 </div>
-                <div className="mt-1 flex items-center gap-2 text-xs text-slate-400">
+                <div className="mt-1 flex items-center gap-2 text-xs text-slate-600">
                   <span className="font-mono">{shortId(a.id)}</span>
                   <span>{formatDate(a.created_at)}</span>
                   {a.job_id && (
@@ -276,13 +276,13 @@ export default function AnnotationsPage() {
             </div>
             {loadingSets && Array.from({ length: 3 }).map((_, i) => <SkeletonTableRow key={i} cols={7} />)}
             {!loadingSets && sets.length === 0 && (
-              <div className="px-4 py-8 text-center text-sm text-slate-400">
+              <div className="px-4 py-8 text-center text-sm text-slate-600">
                 {t("setsTab.noSetsFound")}
               </div>
             )}
             {sets.map((a) => (
               <div key={a.id} className="grid grid-cols-[80px_100px_140px_100px_1fr_160px_60px] gap-2 border-b px-4 py-3 text-sm last:border-0 items-center">
-                <div className="font-mono text-xs text-slate-400" title={a.id}>{shortId(a.id)}</div>
+                <div className="font-mono text-xs text-slate-600" title={a.id}>{shortId(a.id)}</div>
                 <div className="font-medium text-slate-800">{a.source}</div>
                 <div className="text-[13px] text-slate-500">{a.source_version ?? "—"}</div>
                 <div className="text-slate-700">{(a.annotation_count ?? 0).toLocaleString()}</div>
@@ -293,7 +293,7 @@ export default function AnnotationsPage() {
                     </span>
                   ))}
                 </div>
-                <div className="flex items-center gap-2 text-xs text-slate-400">
+                <div className="flex items-center gap-2 text-xs text-slate-600">
                   {formatDate(a.created_at)}
                   {a.job_id && (
                     <Link href={`/jobs/${a.job_id}`} className="text-blue-400 hover:text-blue-600" title="View job">↗</Link>
@@ -331,7 +331,7 @@ export default function AnnotationsPage() {
               </div>
             ))}
             {!loadingSnaps && snapshots.length === 0 && (
-              <div className="rounded-lg border bg-white px-4 py-8 text-center text-sm text-slate-400 shadow-sm">
+              <div className="rounded-lg border bg-white px-4 py-8 text-center text-sm text-slate-600 shadow-sm">
                 {t("snapshotsTab.noSnapshotsFound")}
               </div>
             )}
@@ -339,7 +339,7 @@ export default function AnnotationsPage() {
               <div key={s.id} className="rounded-lg border bg-white p-4 shadow-sm space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="font-medium text-slate-800">{s.obo_version}</span>
-                  <span className="text-xs text-slate-400">{(s.go_term_count ?? 0).toLocaleString()} terms</span>
+                  <span className="text-xs text-slate-600">{(s.go_term_count ?? 0).toLocaleString()} terms</span>
                 </div>
                 <div className="min-w-0">
                   {iaEditId === s.id ? (
@@ -372,11 +372,11 @@ export default function AnnotationsPage() {
                       ) : (
                         <span className="text-xs text-amber-500 italic flex-1">{t("snapshotsTab.notSet")}</span>
                       )}
-                      <span className="shrink-0 text-slate-400 text-xs">✎</span>
+                      <span className="shrink-0 text-slate-600 text-xs">✎</span>
                     </button>
                   )}
                 </div>
-                <div className="flex items-center gap-2 text-xs text-slate-400">
+                <div className="flex items-center gap-2 text-xs text-slate-600">
                   <span className="font-mono">{shortId(s.id)}</span>
                   <span>{formatDate(s.loaded_at)}</span>
                 </div>
@@ -391,13 +391,13 @@ export default function AnnotationsPage() {
             </div>
             {loadingSnaps && Array.from({ length: 2 }).map((_, i) => <SkeletonTableRow key={i} cols={5} />)}
             {!loadingSnaps && snapshots.length === 0 && (
-              <div className="px-4 py-8 text-center text-sm text-slate-400">
+              <div className="px-4 py-8 text-center text-sm text-slate-600">
                 {t("snapshotsTab.noSnapshotsFound")}
               </div>
             )}
             {snapshots.map((s) => (
               <div key={s.id} className="grid grid-cols-[80px_160px_100px_minmax(160px,1fr)_160px] min-w-[700px] gap-2 border-b px-4 py-3 text-sm last:border-0 items-center">
-                <div className="font-mono text-xs text-slate-400" title={s.id}>{shortId(s.id)}</div>
+                <div className="font-mono text-xs text-slate-600" title={s.id}>{shortId(s.id)}</div>
                 <div className="font-medium text-slate-800">{s.obo_version}</div>
                 <div className="text-slate-700">{(s.go_term_count ?? 0).toLocaleString()}</div>
                 <div className="min-w-0">
@@ -440,11 +440,11 @@ export default function AnnotationsPage() {
                       ) : (
                         <span className="text-xs text-amber-500 italic flex-1">{t("snapshotsTab.notSet")}</span>
                       )}
-                      <span className="shrink-0 text-slate-400 text-xs">✎</span>
+                      <span className="shrink-0 text-slate-600 text-xs">✎</span>
                     </button>
                   )}
                 </div>
-                <div className="text-xs text-slate-400">{formatDate(s.loaded_at)}</div>
+                <div className="text-xs text-slate-600">{formatDate(s.loaded_at)}</div>
               </div>
             ))}
           </div>

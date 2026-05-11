@@ -192,7 +192,7 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
           <div className="flex items-center gap-3">
             <StatusBadge status={job.status} />
             <span className="font-semibold text-slate-800">{job.operation}</span>
-            <span className="font-mono text-xs text-slate-400">{jobId}</span>
+            <span className="font-mono text-xs text-slate-600">{jobId}</span>
           </div>
 
           {job.operation_description && (
@@ -242,7 +242,7 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
         <div className="mt-6">
           <div className="mb-3 flex items-center gap-4 flex-wrap">
             <h2 className="text-base font-semibold">
-              {t("jobDetail.childJobsTitle")} <span className="text-xs font-normal text-slate-400">{t("jobDetail.childJobsCount", { count: children.length })}</span>
+              {t("jobDetail.childJobsTitle")} <span className="text-xs font-normal text-slate-600">{t("jobDetail.childJobsCount", { count: children.length })}</span>
             </h2>
             {(["running", "queued", "succeeded", "failed", "cancelled"] as const).map((s) => {
               const n = children.filter((c) => c.status === s).length;
@@ -268,8 +268,8 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
                 className="grid grid-cols-[120px_1fr_160px] gap-2 border-b px-4 py-2.5 text-sm hover:bg-blue-50 transition-colors last:border-0"
               >
                 <div><StatusBadge status={c.status} /></div>
-                <div className="font-mono text-xs text-slate-400 truncate">{c.id}</div>
-                <div className="text-xs text-slate-400">{formatDate(c.finished_at)}</div>
+                <div className="font-mono text-xs text-slate-600 truncate">{c.id}</div>
+                <div className="text-xs text-slate-600">{formatDate(c.finished_at)}</div>
               </Link>
             ))}
           </div>
@@ -279,7 +279,7 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
       {/* Events */}
       <div className="mt-6">
         <h2 className="mb-3 text-base font-semibold">
-          {t("jobDetail.eventsTitle")} <span className="text-xs font-normal text-slate-400">{t("jobDetail.eventsCount", { count: events.length })}</span>
+          {t("jobDetail.eventsTitle")} <span className="text-xs font-normal text-slate-600">{t("jobDetail.eventsCount", { count: events.length })}</span>
         </h2>
         <EventTimeline events={events} />
       </div>

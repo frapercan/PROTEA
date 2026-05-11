@@ -65,7 +65,7 @@ function DropdownGroup({ group, pathname }: { group: NavGroup; pathname: string 
           className="absolute top-full left-0 mt-2 py-2 bg-white rounded-xl border border-slate-200 shadow-xl z-50 min-w-[220px] animate-[fadeIn_120ms_ease-out]"
         >
           <div className="px-3 pb-1.5 mb-1 border-b border-slate-100">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
               {group.title}
             </p>
           </div>
@@ -186,7 +186,7 @@ export function NavLinks({ mobileExtras }: { mobileExtras?: React.ReactNode }) {
           <nav className="px-4 py-4 flex flex-col gap-1">
             {NAV_GROUPS.map((group, gi) => (
               <div key={gi} className={gi > 0 ? "mt-3 pt-3 border-t border-slate-100" : ""}>
-                <div className="px-3 py-1.5 text-[10px] font-semibold text-slate-400 uppercase tracking-[0.14em]">
+                <div className="px-3 py-1.5 text-[10px] font-semibold text-slate-600 uppercase tracking-[0.14em]">
                   {group.title}
                 </div>
                 {group.items.map(({ href, label }) => {

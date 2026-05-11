@@ -263,7 +263,7 @@ export default function GoGraph({ subgraph, knownGoIds, predictedGoIds, height =
 
   if (subgraph.nodes.length === 0) {
     return (
-      <div className="flex items-center justify-center h-24 text-sm text-slate-400">
+      <div className="flex items-center justify-center h-24 text-sm text-slate-600">
         No graph data available.
       </div>
     );
@@ -281,7 +281,7 @@ export default function GoGraph({ subgraph, knownGoIds, predictedGoIds, height =
               className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
                 activeAspect === asp
                   ? (ASPECT_TAB_COLORS[asp] ?? "border-blue-600 text-blue-600")
-                  : "border-transparent text-slate-400 hover:text-slate-600"
+                  : "border-transparent text-slate-600 hover:text-slate-600"
               }`}
             >
               {ASPECT_LABELS[asp] ?? asp}
@@ -301,7 +301,7 @@ export default function GoGraph({ subgraph, knownGoIds, predictedGoIds, height =
           >
             <p className="font-mono font-semibold text-blue-600">{tooltip.goId}</p>
             {tooltip.name && <p className="text-slate-700 mt-0.5">{tooltip.name}</p>}
-            <p className="mt-1 text-slate-400 capitalize">{tooltip.kind.replace(/_/g, " ")}</p>
+            <p className="mt-1 text-slate-600 capitalize">{tooltip.kind.replace(/_/g, " ")}</p>
           </div>
         )}
       </div>
