@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { baseUrl } from "@/lib/api";
+import { Skeleton } from "@/components/Skeleton";
 import { useTranslations } from "next-intl";
 
 type Comment = { id: string; comment: string; created_at: string };
@@ -27,7 +28,27 @@ export default function SupportPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <div className="p-8 text-sm text-slate-600">Loading…</div>;
+  if (loading) {
+    return (
+      <div className="max-w-2xl space-y-10">
+        <div className="rounded-2xl border border-blue-100 bg-blue-50 px-8 py-10 text-center space-y-3">
+          <Skeleton className="h-14 w-14 mx-auto" />
+          <Skeleton className="h-12 w-32 mx-auto" />
+          <Skeleton className="h-4 w-48 mx-auto" />
+          <Skeleton className="h-3 w-40 mx-auto" />
+        </div>
+        <div className="space-y-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-sm space-y-2">
+              <Skeleton className="h-3 w-3/4" />
+              <Skeleton className="h-3 w-1/2" />
+              <Skeleton className="h-3 w-16" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
   if (!data) return <div className="p-8 text-sm text-red-500">Could not load support data.</div>;
 
   const withComments = data.comments.length;
