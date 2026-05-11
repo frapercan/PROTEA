@@ -44,6 +44,18 @@ def noop_emit():
     return lambda *_args, **_kwargs: None
 
 
+@pytest.fixture(autouse=True)
+def _disable_authn_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Disable the T5.6a API-key gate for the test session by default.
+
+    Routes wired with ``require_api_key`` (``POST /jobs``, ``/datasets``,
+    ``/reranker-models/import*``) would otherwise 401 every smoke-test.
+    Tests that want to exercise the gate explicitly re-enable it with
+    ``monkeypatch.setenv("PROTEA_AUTHN_REQUIRED", "true")``.
+    """
+    monkeypatch.setenv("PROTEA_AUTHN_REQUIRED", "false")
+
+
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--with-postgres",
