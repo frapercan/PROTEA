@@ -106,7 +106,7 @@ def _build_predict_config(
     contract) so ``pipeline.predict`` stamps it on every row without
     adding to its already-saturated kwarg signature.
     """
-    return PredictConfig(
+    cfg = PredictConfig(
         k=p.limit_per_entry,
         metric=p.metric,
         backend=p.search_backend,
@@ -115,8 +115,9 @@ def _build_predict_config(
         compute_v6_features=False,
         compute_taxonomy=False,
         pre_normalized=use_cos,
-        prediction_set_id=str(prediction_set_id),
+        extra={"prediction_set_id": str(prediction_set_id)},
     )
+    return cfg
 
 
 def _select_ref_embeddings(ref_data: dict[str, Any], *, use_cos: bool) -> np.ndarray:
