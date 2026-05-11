@@ -244,7 +244,7 @@ What to back up
    * - MinIO bucket ``protea``
      - ``mc mirror`` to a host directory
      - Object-level copy of every Dataset, RerankerModel, EvaluationResult
-       artefact. Not deduplicated — expect ~bucket-size on disk.
+       artefact. Not deduplicated (expect ~bucket-size on disk).
    * - ``protea-reranker-lab/{datasets,runs,experiments}``
      - ``tar -czf``
      - Pulled datasets, training runs, spec catalog. Re-pullable from

@@ -26,14 +26,14 @@ Recorded fields
 
 Each row stores:
 
-- ``ts`` — UTC timestamp of the request
-- ``visitor_hash`` — 16-byte hex digest derived from the client IP
+- ``ts``: UTC timestamp of the request
+- ``visitor_hash``: 16-byte hex digest derived from the client IP
   (see "Privacy design" below)
-- ``method`` — HTTP method (mostly ``GET``, sometimes ``POST``)
-- ``path`` — request path with the ASGI root prefix stripped
-- ``status_code`` — HTTP response status
-- ``duration_ms`` — wall-clock latency, populated by the middleware
-- ``user_agent_short`` — browser family only (no full UA string)
+- ``method``: HTTP method (mostly ``GET``, sometimes ``POST``)
+- ``path``: request path with the ASGI root prefix stripped
+- ``status_code``: HTTP response status
+- ``duration_ms``: wall-clock latency, populated by the middleware
+- ``user_agent_short``: browser family only (no full UA string)
 
 Privacy design
 ~~~~~~~~~~~~~~
@@ -70,7 +70,7 @@ The container reaches Postgres through the host gateway
 stack publishes its port (the default in ``docker-compose.yml``).
 ``protea-postgres-1`` does this, but a deployment using the
 ``docker-compose.prod.yml`` profile may keep Postgres on an internal
-network — in that case extend the monitoring stack with a shared
+network. In that case extend the monitoring stack with a shared
 network instead of relying on the host gateway.
 
 Stopping is symmetric:
@@ -105,7 +105,7 @@ Settings → JSON Model**, copy the JSON back into
 The visitor dashboard
 ---------------------
 
-``PROTEA — Visitor analytics`` ships with seven panels keyed off
+``PROTEA: Visitor analytics`` ships with seven panels keyed off
 ``visitor_event``:
 
 .. list-table::
@@ -139,7 +139,7 @@ JSON or fork the dashboard to add your own.
 Adding new metrics
 ------------------
 
-The visitor table is intentionally narrow — adding new metrics that
+The visitor table is intentionally narrow. Adding new metrics that
 fit the same shape is a Postgres-only change:
 
 1. Edit the panel SQL (or add a new panel) directly in the dashboard

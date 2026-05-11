@@ -116,7 +116,7 @@ migrations (existing schema):
    # Existing: bring schema up to head
    alembic upgrade head
 
-If you are restoring from a backup instead, skip both — see
+If you are restoring from a backup instead, skip both. See
 :doc:`runbook` "Disaster recovery" for the ``pg_restore`` procedure.
 
 Start the application stack

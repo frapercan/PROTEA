@@ -22,7 +22,7 @@ All contributions go through `develop` first. `develop` is merged into `main` fo
    git checkout develop
    git checkout -b feature/my-feature
    ```
-3. **Make your changes** — follow the code style (ruff + mypy enforced in CI)
+3. **Make your changes**: follow the code style (ruff + mypy enforced in CI)
 4. **Run checks locally** before pushing:
    ```bash
    poetry run task lint       # ruff (incl. flake8-bugbear B-rules)
