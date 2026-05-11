@@ -277,7 +277,7 @@ export default function ProteinsPage() {
           </div>
 
           {/* Desktop table */}
-          <div className="hidden lg:block overflow-x-auto protea-scroll-shadow rounded-lg border bg-white shadow-sm">
+          <div className="hidden lg:block rounded-lg border bg-white shadow-sm overflow-hidden">
             <div className="protea-thead-sticky grid grid-cols-[130px_140px_120px_1fr_80px_110px] gap-2 border-b bg-slate-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
               <div>{t("browseTab.tableHeaders.accession")}</div>
               <div>{t("browseTab.tableHeaders.entryName")}</div>
@@ -287,28 +287,30 @@ export default function ProteinsPage() {
               <div>{t("browseTab.tableHeaders.source")}</div>
             </div>
 
-            {loadingBrowse && Array.from({ length: 8 }).map((_, i) => <SkeletonTableRow key={i} cols={6} />)}
+            <div className="overflow-x-auto protea-scroll-shadow">
+              {loadingBrowse && Array.from({ length: 8 }).map((_, i) => <SkeletonTableRow key={i} cols={6} />)}
 
-            {!loadingBrowse && proteins.length === 0 && (
-              <div className="px-4 py-12 text-center text-sm text-slate-400">
-                {t("browseTab.noProteinsCta")}
-              </div>
-            )}
+              {!loadingBrowse && proteins.length === 0 && (
+                <div className="px-4 py-12 text-center text-sm text-slate-400">
+                  {t("browseTab.noProteinsCta")}
+                </div>
+              )}
 
-            {!loadingBrowse && proteins.map((p) => (
-              <Link
-                key={p.accession}
-                href={`/proteins/${p.accession}`}
-                className="grid grid-cols-[130px_140px_120px_1fr_80px_110px] gap-2 border-b px-4 py-3 text-sm hover:bg-blue-50 transition-colors last:border-0 items-center"
-              >
-                <div className="font-mono text-xs text-blue-600">{p.accession}</div>
-                <div className="text-slate-700 truncate text-xs">{p.entry_name ?? "—"}</div>
-                <div className="font-medium text-slate-800 truncate">{p.gene_name ?? "—"}</div>
-                <div className="text-xs text-slate-500 truncate">{p.organism ?? "—"}</div>
-                <div className="text-xs text-slate-600">{p.length?.toLocaleString() ?? "—"}</div>
-                <div><ReviewedBadge reviewed={p.reviewed} /></div>
-              </Link>
-            ))}
+              {!loadingBrowse && proteins.map((p) => (
+                <Link
+                  key={p.accession}
+                  href={`/proteins/${p.accession}`}
+                  className="grid grid-cols-[130px_140px_120px_1fr_80px_110px] gap-2 border-b px-4 py-3 text-sm hover:bg-blue-50 transition-colors last:border-0 items-center"
+                >
+                  <div className="font-mono text-xs text-blue-600">{p.accession}</div>
+                  <div className="text-slate-700 truncate text-xs">{p.entry_name ?? "—"}</div>
+                  <div className="font-medium text-slate-800 truncate">{p.gene_name ?? "—"}</div>
+                  <div className="text-xs text-slate-500 truncate">{p.organism ?? "—"}</div>
+                  <div className="text-xs text-slate-600">{p.length?.toLocaleString() ?? "—"}</div>
+                  <div><ReviewedBadge reviewed={p.reviewed} /></div>
+                </Link>
+              ))}
+            </div>
           </div>
 
           {/* Pagination */}

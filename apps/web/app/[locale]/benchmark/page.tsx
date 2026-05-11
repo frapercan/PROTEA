@@ -618,7 +618,7 @@ export default function BenchmarkPage() {
           aspects={aspects}
         />
       ) : (
-        <div className="overflow-x-auto protea-scroll-shadow rounded-lg border bg-white shadow-sm">
+        <div className="rounded-lg border bg-white shadow-sm">
           <table className="w-full text-sm">
             <thead className="protea-thead-sticky bg-slate-50">
               <tr>

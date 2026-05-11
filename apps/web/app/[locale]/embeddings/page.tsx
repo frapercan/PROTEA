@@ -532,7 +532,7 @@ export default function EmbeddingsPage() {
               </div>
 
               {/* Desktop table */}
-              <div className="hidden lg:block overflow-x-auto protea-scroll-shadow rounded-lg border bg-white shadow-sm">
+              <div className="hidden lg:block rounded-lg border bg-white shadow-sm overflow-hidden">
                 <div className="protea-thead-sticky grid grid-cols-[1fr_140px_80px_100px_80px_80px_60px_160px_60px] gap-2 border-b bg-slate-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
                   <div>{t("configsTab.tableHeaders.description")}</div>
                   <div>{t("configsTab.tableHeaders.model")}</div>
@@ -544,6 +544,7 @@ export default function EmbeddingsPage() {
                   <div>{t("configsTab.tableHeaders.created")}</div>
                   <div></div>
                 </div>
+                <div className="overflow-x-auto protea-scroll-shadow">
                 {configs.map((c) => (
                   <div
                     key={c.id}
@@ -578,6 +579,7 @@ export default function EmbeddingsPage() {
                     </button>
                   </div>
                 )}
+                </div>
               </div>
             </>
           )}
