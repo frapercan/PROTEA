@@ -187,6 +187,23 @@ fi
 echo "${C_BOLD}starting stack...${C_RESET}"
 bash scripts/manage.sh start
 
-sleep 3
+echo "${C_BOLD}waiting for API to be ready...${C_RESET}"
+health_ready=0
+for i in $(seq 1 20); do
+  if curl -fsS http://localhost:8000/jobs > /dev/null 2>&1; then
+    echo "  ${C_GREEN}health check OK${C_RESET} (attempt $i/20)"
+    health_ready=1
+    break
+  fi
+  if [[ $i -lt 20 ]]; then
+    sleep 1
+  fi
+done
+
+if [[ $health_ready -eq 0 ]]; then
+  echo "  ${C_RED}health check FAILED${C_RESET} after 20s — API did not become ready"
+  exit 1
+fi
+
 echo
 show_status
