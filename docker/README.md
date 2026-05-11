@@ -98,6 +98,21 @@ PROTEA_IMAGE_TAG=v1.2.3 PROTEA_FRONTEND_TAG=v1.2.3 \
   docker compose -f docker-compose.bundle.yml up -d
 ```
 
+Track `develop` (rolling, rebuilt on every push to the develop branch):
+
+```bash
+PROTEA_IMAGE_TAG=develop PROTEA_FRONTEND_TAG=develop \
+  docker compose -f docker-compose.bundle.yml up -d
+```
+
+Available tags published by `.github/workflows/docker.yml`:
+
+| Trigger | Tags |
+|---|---|
+| push to `main` | `latest`, `sha-<short>` |
+| push to `develop` | `develop`, `sha-<short>` |
+| release published | `<semver>`, `<major>.<minor>`, `latest`, `sha-<short>` |
+
 Override host ports if 8000 or 3000 are taken:
 
 ```bash
@@ -132,10 +147,10 @@ Grafana lands on `http://localhost:3001` (admin / admin).
   forever; check `docker compose logs migrate` first.
 - `api` exits immediately with `exec: "uvicorn": executable file not
   found in $PATH`: the `:latest` ghcr image predates PR #278 (uvicorn
-  pulled into the main dependency group). Pin a tag built after the fix
-  (e.g. `PROTEA_IMAGE_TAG=develop` once the develop image is republished),
-  or rebuild locally via `docker compose -f docker-compose.yml build api`
-  and use that file instead of the bundle.
+  pulled into the main dependency group). Pin `PROTEA_IMAGE_TAG=develop`
+  (rolling, rebuilt on every push to develop), or rebuild locally via
+  `docker compose -f docker-compose.yml build api` and use that file
+  instead of the bundle.
 - Image pull denied: `docker login ghcr.io` if the image visibility
   was flipped to private during a release.
 - Port already in use: override the `*_PORT` env vars (see `.env.bundle.example`).
