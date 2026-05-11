@@ -1,8 +1,8 @@
-# PROTEA Re-Ranker — Design and Rationale
+# PROTEA Re-Ranker: Design and Rationale
 
 **Status**: implemented (v3 shipped, v4 training in progress)
 **Location in code**: `protea/core/reranker.py`, `protea/core/operations/train_reranker.py`
-**Version**: 2.0 — 2026-04-10 (rewrite)
+**Version**: 2.0 (2026-04-10, rewrite)
 
 > This document describes **the re-ranker as it exists in PROTEA today**. An earlier version of this file proposed a PyTorch cross-attention architecture with WebDataset shards; that proposal was explored on paper but **never implemented**. The system converged on a simpler LightGBM design for the reasons documented in §3 ("Why LightGBM and not a neural cross-encoder"). The experiment log showing the evolution across versions lives in `EXPERIMENTS.md`; the forward-looking PLM benchmark plan that uses this re-ranker as a fixed downstream stage lives in `EXPERIMENTAL_DESIGN.md`.
 
@@ -12,9 +12,9 @@
 
 PROTEA predicts GO terms by transferring annotations from the $k$ nearest reference proteins in an embedding space. The raw retrieval score is a distance-based heuristic (e.g. `1 - cosine_distance / 2`) optionally combined with alignment identity and evidence weights. This heuristic is:
 
-- **Not optimised for F<sub>max</sub> with IA weighting** — the metric CAFA actually uses
-- **Not calibrated across tiers** — No-Knowledge, Limited-Knowledge and Previously-Known proteins behave very differently and benefit from different signal combinations
-- **Not able to use all available features** — sequence alignments, taxonomy, neighbour statistics, and evidence codes are either ignored or combined by hand with arbitrary weights
+- **Not optimised for F<sub>max</sub> with IA weighting** (the metric CAFA actually uses)
+- **Not calibrated across tiers**: No-Knowledge, Limited-Knowledge and Previously-Known proteins behave very differently and benefit from different signal combinations
+- **Not able to use all available features**: sequence alignments, taxonomy, neighbour statistics, and evidence codes are either ignored or combined by hand with arbitrary weights
 
 The re-ranker replaces this heuristic with a **learned function** that, for each candidate GO term, produces a probability score used to reorder the top-$k$ retrieval list:
 
@@ -73,7 +73,7 @@ The test split $(220 \to 229)$ is never seen during training and produces the F<
 
 ## 5. Feature set (implementation: `protea/core/reranker.py`)
 
-Each (query, candidate GO term, contributing neighbour) triple is characterised by **23 features** — 20 numeric and 3 categorical — computed at KNN time and persisted on `GOPrediction` rows.
+Each (query, candidate GO term, contributing neighbour) triple is characterised by **23 features** (20 numeric and 3 categorical), computed at KNN time and persisted on `GOPrediction` rows.
 
 ### 5.1 Numeric features (20)
 
@@ -122,9 +122,9 @@ Categoricals are passed to LightGBM via its native `categorical_feature` handlin
 
 ### 6.2 Split strategy
 
-- **Stratified train/val split** at `val_fraction=0.2`, stratified on the label (the positive rate is 0.17%–5% depending on tier × aspect — naive random splits would under-represent positives in the validation set).
-- **Negative subsampling** via `neg_pos_ratio=10`: after splitting, each of the train and val sets is independently subsampled so that `|negatives| ≤ 10 × |positives|`. Without this step, 6 of 9 per-(tier, aspect) models in v1 failed to learn at all — the positive rate was too low for gradient boosted trees to see a signal.
-- **IA sample weighting**: when an information accretion file is provided, each row's `sample_weight` is set to `IA(go_term)`. This makes the model focus on informative (rare, specific) GO terms — the same aspect of the term that CAFA evaluation rewards via IA-weighted F<sub>max</sub>.
+- **Stratified train/val split** at `val_fraction=0.2`, stratified on the label (the positive rate is 0.17%–5% depending on tier × aspect; naive random splits would under-represent positives in the validation set).
+- **Negative subsampling** via `neg_pos_ratio=10`: after splitting, each of the train and val sets is independently subsampled so that `|negatives| ≤ 10 × |positives|`. Without this step, 6 of 9 per-(tier, aspect) models in v1 failed to learn at all, because the positive rate was too low for gradient boosted trees to see a signal.
+- **IA sample weighting**: when an information accretion file is provided, each row's `sample_weight` is set to `IA(go_term)`. This makes the model focus on informative (rare, specific) GO terms, the same aspect of the term that CAFA evaluation rewards via IA-weighted F<sub>max</sub>.
 
 ### 6.3 Per-tier, not per-aspect
 
@@ -132,17 +132,17 @@ One model is trained **per tier** (`NK`, `LK`, `PK`), not per (tier × aspect). 
 
 ### 6.4 Temporal splits
 
-- **Training pairs**: 13 consecutive deltas from GOA 160 through GOA 220 — `[(160,165), (165,170), (170,175), (175,180), (180,185), (185,190), (190,195), (195,200), (200,205), (205,211), (211,215), (215,220)]`. The training rows from all pairs are concatenated and passed to LightGBM as a single dataset. Pair identity is not used as a feature.
-- **Test pair**: `(220, 229)` — never seen during training. The test set is passed through the trained reranker and fed to `run_cafa_evaluation` alongside the baseline to measure the lift.
+- **Training pairs**: 13 consecutive deltas from GOA 160 through GOA 220: `[(160,165), (165,170), (170,175), (175,180), (180,185), (185,190), (190,195), (195,200), (200,205), (205,211), (211,215), (215,220)]`. The training rows from all pairs are concatenated and passed to LightGBM as a single dataset. Pair identity is not used as a feature.
+- **Test pair**: `(220, 229)`, never seen during training. The test set is passed through the trained reranker and fed to `run_cafa_evaluation` alongside the baseline to measure the lift.
 
 ### 6.5 Budget
 
 | Version | `num_boost_round` | `early_stopping_rounds` | Comment |
 |---|---|---|---|
-| v1 | 300 | 50 | 6/9 models hit iter=1 (early stop on first round) — under-trained, unbalanced |
+| v1 | 300 | 50 | 6/9 models hit iter=1 (early stop on first round): under-trained, unbalanced |
 | v2 | 1000 | 50 | Stable; per-tier models; IA weighting introduced |
 | v3 | 1000 | 50 | Same budget; alignment + taxonomy features fully populated in training (were NULL in v2) |
-| v4 | **5000** | **100** | In progress 2026-04-10: all 6 v3 models hit `best_iteration ≈ 1000` — implying they never converged under the previous budget. v4 restores early stopping as a convergence criterion, not a time-out. |
+| v4 | **5000** | **100** | In progress 2026-04-10: all 6 v3 models hit `best_iteration ≈ 1000`, implying they never converged under the previous budget. v4 restores early stopping as a convergence criterion, not a time-out. |
 
 ---
 
@@ -150,14 +150,14 @@ One model is trained **per tier** (`NK`, `LK`, `PK`), not per (tier × aspect). 
 
 ### 7.1 ORM and persistence
 
-- **`Reranker` row** (table: `rerankers`) — stores the trained LightGBM booster serialised as bytes alongside training metadata (`feature_importance`, `val_auc`, `best_iteration`, `train_samples`, hyperparameters, parent `job_id`).
+- **`Reranker` row** (table: `rerankers`): stores the trained LightGBM booster serialised as bytes alongside training metadata (`feature_importance`, `val_auc`, `best_iteration`, `train_samples`, hyperparameters, parent `job_id`).
 - **`RerankerTrainingJob`** row captures the auto-pipeline metadata (splits used, features computed, per-tier model IDs).
 
 ### 7.2 Scoring router
 
 The `scoring` router exposes endpoints to list and inspect rerankers:
-- `GET /scoring/rerankers` — list trained rerankers
-- `GET /scoring/rerankers/{id}` — metadata + feature importance
+- `GET /scoring/rerankers`: list trained rerankers
+- `GET /scoring/rerankers/{id}`: metadata + feature importance
 
 ### 7.3 Applying the re-ranker at evaluation time
 
@@ -178,7 +178,7 @@ The evaluation operation:
 2. For each tier, loads the corresponding booster, applies it to the feature matrix, and overrides the original `score` with the re-ranked probability.
 3. Feeds the re-ranked predictions to `cafaeval` with IA weighting and emits per-cell F<sub>max</sub>.
 
-The raw `PredictionSet` is never mutated — the re-ranker only changes the `score` column as the rows pass through evaluation. This means a single prediction set can be evaluated under multiple re-rankers (ESMC, ProstT5, v3, v4, …) without duplicating storage.
+The raw `PredictionSet` is never mutated: the re-ranker only changes the `score` column as the rows pass through evaluation. This means a single prediction set can be evaluated under multiple re-rankers (ESMC, ProstT5, v3, v4, ...) without duplicating storage.
 
 ### 7.4 `train_reranker_auto` operation
 
@@ -191,7 +191,7 @@ The operation `train_reranker_auto` orchestrates the full pipeline end-to-end:
 5. Optionally runs a self-evaluation on the held-out test split (see warning in §8).
 6. **Cleans up the temporary parquet files** on exit (`shutil.rmtree(tmp_dir)` at `train_reranker.py:1480`).
 
-The cleanup in step 6 has an important consequence: **re-training only the LightGBM stage is not possible** after a pipeline run — a re-train requires re-executing the full KNN + feature engineering path. This is why each v-version re-train takes hours, not minutes.
+The cleanup in step 6 has an important consequence: **re-training only the LightGBM stage is not possible** after a pipeline run. A re-train requires re-executing the full KNN + feature engineering path. This is why each v-version re-train takes hours, not minutes.
 
 ---
 
@@ -204,7 +204,7 @@ The cleanup in step 6 has an important consequence: **re-training only the Light
 5. **No uncertainty output.** The re-ranker emits a point probability. Downstream evaluation is sensitive to calibration, but calibration is not currently measured. A reliability diagram per tier would help diagnose whether the probabilities are meaningful or only usable for ranking.
 6. **Under-training of v1–v3.** All six v3 models (ESMC and ProstT5, NK/LK/PK) hit `best_iteration ≈ 1000` at the previous budget, which indicates the models never satisfied the early stopping criterion. The F<sub>max</sub> deltas derived from v3 must be treated as provisional until v4 completes. See `project_reranker_benchmark.md` for the full story.
 7. **Temporal label noise.** Some annotations in $\Delta_{N \to N+1}$ are not genuinely "new biology"; they are curation catch-ups. There is no filter for this, so the training label includes noise. Evidence code filtering removes the worst offenders (IEA) but not all.
-8. **Single embedding at a time.** The re-ranker is trained on features derived from one embedding configuration. There is no multi-embedding ensemble; comparing ESMC, ProstT5 and Ankh means training three independent re-rankers — which is exactly what the benchmark in `EXPERIMENTAL_DESIGN.md` does.
+8. **Single embedding at a time.** The re-ranker is trained on features derived from one embedding configuration. There is no multi-embedding ensemble; comparing ESMC, ProstT5 and Ankh means training three independent re-rankers, which is exactly what the benchmark in `EXPERIMENTAL_DESIGN.md` does.
 
 ---
 
@@ -225,9 +225,9 @@ Concrete reranker UUIDs for the v3 and v4 runs live in `project_reranker_benchma
 
 ## 10. Forward pointers
 
-- **`EXPERIMENTS.md`** — per-experiment tables, external tool comparisons, day-to-day lab notebook.
-- **`EXPERIMENTAL_DESIGN.md`** — the prospective 8-model PLM comparison that uses this re-ranker as a fixed downstream stage.
-- **`project_reranker_benchmark.md`** (in auto-memory) — volatile working state for the ongoing benchmark.
+- **`EXPERIMENTS.md`**: per-experiment tables, external tool comparisons, day-to-day lab notebook.
+- **`EXPERIMENTAL_DESIGN.md`**: the prospective 8-model PLM comparison that uses this re-ranker as a fixed downstream stage.
+- **`project_reranker_benchmark.md`** (in auto-memory): volatile working state for the ongoing benchmark.
 - **Code**: `protea/core/reranker.py` (feature definitions, `train`, `predict_scores`), `protea/core/operations/train_reranker.py` (both `TrainRerankerPayload` and `TrainRerankerAutoPayload`, the full pipeline).
 
 ---

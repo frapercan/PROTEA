@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useToast } from "@/components/Toast";
 import { useTranslations } from "next-intl";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { Skeleton } from "@/components/Skeleton";
 import { getProtein, getProteinAnnotations, getGoSubgraph, listOntologySnapshots, ProteinDetail, ProteinAnnotation, GoSubgraph } from "@/lib/api";
 import dynamic from "next/dynamic";
 const GoGraph = dynamic(() => import("@/components/GoGraph"), { ssr: false });
@@ -68,7 +69,25 @@ export default function ProteinDetailPage({ params }: { params: Promise<{ access
     if (activeTab !== "annotations") { setShowGraph(false); setSubgraph(null); }
   }, [activeTab]);
 
-  if (loading) return <p className="text-sm text-slate-600 mt-8">Loading…</p>;
+  if (loading) {
+    return (
+      <div className="mt-8 space-y-6">
+        <div className="flex items-start gap-4">
+          <div className="space-y-2">
+            <Skeleton className="h-7 w-40" />
+            <Skeleton className="h-4 w-56" />
+          </div>
+        </div>
+        <Skeleton className="h-10 w-full" />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Skeleton className="h-24 w-full" />
+          <Skeleton className="h-24 w-full" />
+          <Skeleton className="h-24 w-full" />
+          <Skeleton className="h-24 w-full" />
+        </div>
+      </div>
+    );
+  }
   if (!protein) return <p className="text-sm text-red-500 mt-8">Protein not found.</p>;
 
   const meta = protein.metadata;

@@ -2,7 +2,7 @@
 
 **PROtein funcTional Embedding-based Annotation**. A distributed platform for large-scale GO term prediction, sequence embedding, and functional analysis.
 
-PROTEA provides a unified backend for ingesting protein data from UniProt, computing protein language model embeddings (ESMC, ProstT5, ESM2), and predicting Gene Ontology terms via KNN transfer plus a learned LightGBM re-ranker — with a full job queue, REST API, and web interface.
+PROTEA provides a unified backend for ingesting protein data from UniProt, computing protein language model embeddings (ESMC, ProstT5, ESM2), and predicting Gene Ontology terms via KNN transfer plus a learned LightGBM re-ranker, with a full job queue, REST API, and web interface.
 
 [![Lint](https://github.com/frapercan/PROTEA/actions/workflows/lint.yml/badge.svg)](https://github.com/frapercan/PROTEA/actions/workflows/lint.yml)
 [![Tests](https://github.com/frapercan/PROTEA/actions/workflows/test.yml/badge.svg)](https://github.com/frapercan/PROTEA/actions/workflows/test.yml)
@@ -17,7 +17,7 @@ PROTEA provides a unified backend for ingesting protein data from UniProt, compu
 
 > **https://protea.ngrok.app**
 >
-> Currently running on a personal research machine. Availability is best-effort — if it is unreachable, use the Docker setup below to run your own instance.
+> Currently running on a personal research machine. Availability is best-effort. If it is unreachable, use the Docker setup below to run your own instance.
 
 ---
 
@@ -25,9 +25,9 @@ PROTEA provides a unified backend for ingesting protein data from UniProt, compu
 
 PROTEA is the successor to [PIS](https://github.com/CBBIO/protein-information-system) and [FANTASIA](https://github.com/CBBIO/fantasia), rebuilt around three goals:
 
-1. **Clean architecture** — infrastructure, orchestration, and domain logic are explicitly decoupled. Operations are pure domain logic; workers own sessions and queue state; routers expose HTTP. No more God-classes that mix everything.
-2. **Learned re-ranking on top of KNN transfer** — beyond classical embedding-KNN annotation, PROTEA trains **LightGBM rerankers on temporal GOA splits** (LambdaRank + CAFA IA weighting, per-tier NK/LK/PK models). Candidates retrieved by KNN are re-scored with alignment, taxonomy, and retrieval features.
-3. **Honest temporal evaluation** — benchmarking uses **temporal holdout deltas** between historical GOA releases (e.g. 220→229), evaluated with the official `cafaeval` library and information-accretion weighting, avoiding the optimistic leakage of random splits.
+1. **Clean architecture**: infrastructure, orchestration, and domain logic are explicitly decoupled. Operations are pure domain logic; workers own sessions and queue state; routers expose HTTP. No more God-classes that mix everything.
+2. **Learned re-ranking on top of KNN transfer**: beyond classical embedding-KNN annotation, PROTEA trains **LightGBM rerankers on temporal GOA splits** (LambdaRank + CAFA IA weighting, per-tier NK/LK/PK models). Candidates retrieved by KNN are re-scored with alignment, taxonomy, and retrieval features.
+3. **Honest temporal evaluation**: benchmarking uses **temporal holdout deltas** between historical GOA releases (e.g. 220→229), evaluated with the official `cafaeval` library and information-accretion weighting, avoiding the optimistic leakage of random splits.
 
 ---
 
@@ -40,7 +40,7 @@ PROTEA is the successor to [PIS](https://github.com/CBBIO/protein-information-sy
 | **GO annotations** | Bulk import from GOA (GAF) and QuickGO (TSV) |
 | **Embeddings** | ESMC, ProstT5, and ESM2 backends via GPU workers; stored as pgvector `VECTOR` columns |
 | **GO prediction** | KNN transfer (FAISS IVFFlat / numpy) with optional NW/SW alignment and taxonomic features |
-| **Learning-to-rank** | LightGBM rerankers trained on temporal GOA splits — LambdaRank + IA weighting, per-tier NK/LK/PK models |
+| **Learning-to-rank** | LightGBM rerankers trained on temporal GOA splits (LambdaRank + IA weighting, per-tier NK/LK/PK models) |
 | **CAFA evaluation** | Benchmark pipeline with `cafaeval` integration, Fmax + IA-weighted scoring, per-aspect (BPO/MFO/CCO) results |
 | **Job queue** | RabbitMQ-backed, 8 queues (ingestion, embeddings, predictions, training), full audit trail per job |
 | **REST API** | FastAPI routers for jobs, proteins, embeddings, query sets, scoring, evaluation, and admin |
@@ -52,7 +52,7 @@ PROTEA is the successor to [PIS](https://github.com/CBBIO/protein-information-sy
 
 ### Docker
 
-> **Not yet validated.** The Docker configuration exists but has not been tested end-to-end. It will likely need adjustments before it works out of the box — contributions welcome.
+> **Not yet validated.** The Docker configuration exists but has not been tested end-to-end. It will likely need adjustments before it works out of the box (contributions welcome).
 
 ```bash
 git clone https://github.com/frapercan/PROTEA.git
@@ -205,10 +205,10 @@ Released into the public domain under the [Unlicense](LICENSE). You are free to 
 
 PROTEA is the natural evolution of two prior systems developed at **Ana Rojas' Lab (CBBIO)**, Andalusian Center for Developmental Biology (CSIC), in collaboration with **Rosa Fernández's Lab** (Metazoa Phylogenomics Lab, Institute of Evolutionary Biology, CSIC-UPF):
 
-- [**Protein Information System (PIS)**](https://github.com/CBBIO/protein-information-system) — Large-scale protein data extraction and management from UniProt, PDB, and GOA. PROTEA adopts and extends PIS's data model and ingestion pipelines with a clean architecture designed for scalability and collaborative development.
+- [**Protein Information System (PIS)**](https://github.com/CBBIO/protein-information-system): Large-scale protein data extraction and management from UniProt, PDB, and GOA. PROTEA adopts and extends PIS's data model and ingestion pipelines with a clean architecture designed for scalability and collaborative development.
 
-- [**FANTASIA**](https://github.com/CBBIO/fantasia) — Functional annotation via protein language model embeddings and KNN transfer. PROTEA consolidates FANTASIA's prediction capabilities into a unified platform with a web interface, job queue, and REST API.
+- [**FANTASIA**](https://github.com/CBBIO/fantasia): Functional annotation via protein language model embeddings and KNN transfer. PROTEA consolidates FANTASIA's prediction capabilities into a unified platform with a web interface, job queue, and REST API.
 
-PROTEA was designed to unify and supersede both systems under a single, maintainable codebase — removing the tight coupling between infrastructure, orchestration, and domain logic that accumulated across those projects.
+PROTEA was designed to unify and supersede both systems under a single, maintainable codebase, removing the tight coupling between infrastructure, orchestration, and domain logic that accumulated across those projects.
 
 The evaluation pipeline and scoring methodology are directly informed by following the **CAFA** (Critical Assessment of protein Function Annotation) competition series. This benchmarking framework shaped PROTEA's prediction and evaluation architecture, including the integration of [cafaeval](https://github.com/claradepaolis/CAFA-evaluator-PK) for standardised GO term prediction assessment.
