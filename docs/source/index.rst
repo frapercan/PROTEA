@@ -78,6 +78,7 @@ metadata enrichment, and job orchestration.
    results
    appendix/index
    runbooks/index
+   insights
    glossary
    references
 
