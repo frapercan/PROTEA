@@ -55,3 +55,6 @@ jobs:
 
       - name: em-dash check (no em-dashes in publishable prose)
         run: python scripts/check_no_em_dashes.py
+
+      - name: OpenAPI cross-reference check (DS.3)
+        run: python scripts/check_openapi_refs.py
