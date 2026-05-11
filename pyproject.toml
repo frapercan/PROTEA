@@ -45,6 +45,7 @@ storage = ["minio (>=7.2,<8.0)"]
 # does not exist``).
 torch = {source = "pytorch-cpu"}
 torchvision = {source = "pytorch-cpu"}
+uvicorn = ">=0.41.0,<0.42.0"
 
 [[tool.poetry.source]]
 name = "pytorch-cpu"
@@ -92,7 +93,6 @@ optional = true
 pytest = ">=9.0.2,<10.0.0"
 pytest-cov = ">=7.0.0,<8.0.0"
 coverage = {extras = ["toml"], version = ">=7.2.1"}
-uvicorn = ">=0.41.0,<0.42.0"
 protea-reranker-lab = {git = "https://github.com/frapercan/protea-reranker-lab.git", branch = "main"}
 
 
