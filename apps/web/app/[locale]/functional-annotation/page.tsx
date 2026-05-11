@@ -197,7 +197,7 @@ export default function FunctionalAnnotationPage() {
           <div className="rounded-lg border bg-white p-6 shadow-sm">
             <h2 className="text-base font-semibold mb-4">{t("predictTab.title")}</h2>
             {loading ? (
-              <p className="text-sm text-slate-400">{t("predictTab.loading")}</p>
+              <p className="text-sm text-slate-600">{t("predictTab.loading")}</p>
             ) : (
               <form onSubmit={handlePredictSubmit} className="space-y-4">
                 <div>
@@ -214,7 +214,7 @@ export default function FunctionalAnnotationPage() {
 
                 <div>
                   <label className={labelClass}>
-                    {t("predictTab.querySetLabel")} <span className="font-normal text-slate-400">{t("predictTab.querySetHelper")}</span>
+                    {t("predictTab.querySetLabel")} <span className="font-normal text-slate-600">{t("predictTab.querySetHelper")}</span>
                   </label>
                   <select value={predQuerySetId} onChange={(e) => setPredQuerySetId(e.target.value)} className={inputClass}>
                     <option value="">{t("predictTab.allSequences")}</option>
@@ -272,7 +272,7 @@ export default function FunctionalAnnotationPage() {
                     />
                   </div>
                   <div>
-                    <label className={labelClass}>{t("predictTab.distanceThresholdLabel")} <span className="font-normal text-slate-400">{t("predictTab.distanceThresholdHelper")}</span></label>
+                    <label className={labelClass}>{t("predictTab.distanceThresholdLabel")} <span className="font-normal text-slate-600">{t("predictTab.distanceThresholdHelper")}</span></label>
                     <input
                       type="number"
                       step="any"
@@ -297,13 +297,13 @@ export default function FunctionalAnnotationPage() {
                       />
                       <span className="text-sm text-slate-700">
                         {t("predictTab.aspectSeparatedKnn")}
-                        <span className="ml-1.5 text-xs text-slate-400">{t("predictTab.aspectSeparatedKnnHelper")}</span>
+                        <span className="ml-1.5 text-xs text-slate-600">{t("predictTab.aspectSeparatedKnnHelper")}</span>
                       </span>
                     </label>
                   </div>
 
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    {t("predictTab.featureEngineering")} <span className="font-normal normal-case text-slate-400">{t("predictTab.featureEngineeringHelper")}</span>
+                    {t("predictTab.featureEngineering")} <span className="font-normal normal-case text-slate-600">{t("predictTab.featureEngineeringHelper")}</span>
                   </p>
                   <div className="flex flex-col gap-2">
                     <label className="flex items-start gap-2 cursor-pointer">
@@ -315,7 +315,7 @@ export default function FunctionalAnnotationPage() {
                       />
                       <span className="text-sm text-slate-700">
                         {t("predictTab.sequenceAlignments")}
-                        <span className="ml-1.5 text-xs text-slate-400">{t("predictTab.sequenceAlignmentsHelper")}</span>
+                        <span className="ml-1.5 text-xs text-slate-600">{t("predictTab.sequenceAlignmentsHelper")}</span>
                       </span>
                     </label>
                     <label className="flex items-start gap-2 cursor-pointer">
@@ -327,7 +327,7 @@ export default function FunctionalAnnotationPage() {
                       />
                       <span className="text-sm text-slate-700">
                         {t("predictTab.taxonomicDistance")}
-                        <span className="ml-1.5 text-xs text-slate-400">{t("predictTab.taxonomicDistanceHelper")}</span>
+                        <span className="ml-1.5 text-xs text-slate-600">{t("predictTab.taxonomicDistanceHelper")}</span>
                       </span>
                     </label>
                   </div>
@@ -433,8 +433,89 @@ export default function FunctionalAnnotationPage() {
             </button>
           </div>
 
-          <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
-            <div className="grid grid-cols-[80px_100px_100px_100px_90px_80px_50px_160px_60px] gap-2 border-b bg-slate-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+          {/* Mobile card list */}
+          <div className="lg:hidden space-y-2">
+            {predictionSets.length === 0 && (
+              <div className="rounded-lg border bg-white px-4 py-8 text-center text-sm text-slate-600 shadow-sm">
+                {t("resultsTab.noResults")}
+              </div>
+            )}
+            {predictionSets.map((ps) => (
+              <div
+                key={ps.id}
+                className="rounded-lg border bg-white p-3 shadow-sm"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <Link
+                    href={`/functional-annotation/${ps.id}`}
+                    className="font-mono text-sm text-blue-600 hover:underline truncate"
+                    title={ps.id}
+                  >
+                    {shortId(ps.id)}…
+                  </Link>
+                  <span className="text-xs text-slate-600 shrink-0">{formatDate(ps.created_at)}</span>
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                  <div>
+                    <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-600">
+                      {t("resultsTab.tableHeaders.config")}
+                    </span>
+                    <span className="text-slate-700 truncate block" title={ps.embedding_config_id}>
+                      {ps.embedding_config_name ?? shortId(ps.embedding_config_id)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-600">
+                      {t("resultsTab.tableHeaders.annotationSet")}
+                    </span>
+                    <span className="text-slate-700 truncate block" title={ps.annotation_set_id}>
+                      {ps.annotation_set_label ?? shortId(ps.annotation_set_id)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-600">
+                      {t("resultsTab.tableHeaders.snapshot")}
+                    </span>
+                    <span className="text-slate-700 truncate block" title={ps.ontology_snapshot_id}>
+                      {ps.ontology_snapshot_version ?? shortId(ps.ontology_snapshot_id)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-600">
+                      {t("resultsTab.tableHeaders.goTerms")}
+                    </span>
+                    <span className="text-slate-700">{ps.prediction_count ?? 0}</span>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-600">
+                      {t("resultsTab.tableHeaders.distanceThreshold")}
+                    </span>
+                    <span className="text-slate-700">
+                      {ps.distance_threshold != null ? ps.distance_threshold : "—"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-600">
+                      {t("resultsTab.tableHeaders.k")}
+                    </span>
+                    <span className="text-slate-700">{ps.limit_per_entry}</span>
+                  </div>
+                </div>
+                <div className="mt-3 flex justify-end">
+                  <button
+                    onClick={() => handleDeleteResult(ps.id)}
+                    className="rounded border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 transition-colors"
+                  >
+                    {t("resultsTab.delete")}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop table */}
+          <div className="hidden lg:block rounded-lg border bg-white shadow-sm overflow-hidden">
+            <div className="grid grid-cols-[80px_100px_100px_100px_90px_80px_50px_160px_60px] gap-2 border-b bg-slate-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-600">
               <div>{t("resultsTab.tableHeaders.id")}</div>
               <div>{t("resultsTab.tableHeaders.config")}</div>
               <div>{t("resultsTab.tableHeaders.annotationSet")}</div>
@@ -446,41 +527,43 @@ export default function FunctionalAnnotationPage() {
               <div></div>
             </div>
 
-            {predictionSets.map((ps) => (
-              <div
-                key={ps.id}
-                className="grid grid-cols-[80px_100px_100px_100px_90px_80px_50px_160px_60px] gap-2 border-b px-4 py-3 text-sm last:border-0 items-center"
-              >
-                <div className="font-mono text-xs">
-                  <Link href={`/functional-annotation/${ps.id}`} className="text-blue-600 hover:underline" title={ps.id}>
-                    {shortId(ps.id)}…
-                  </Link>
+            <div className="overflow-x-auto">
+              {predictionSets.map((ps) => (
+                <div
+                  key={ps.id}
+                  className="grid grid-cols-[80px_100px_100px_100px_90px_80px_50px_160px_60px] gap-2 border-b px-4 py-3 text-sm last:border-0 items-center"
+                >
+                  <div className="font-mono text-xs">
+                    <Link href={`/functional-annotation/${ps.id}`} className="text-blue-600 hover:underline" title={ps.id}>
+                      {shortId(ps.id)}…
+                    </Link>
+                  </div>
+                  <div className="text-xs text-slate-700" title={ps.embedding_config_id}>{ps.embedding_config_name ?? shortId(ps.embedding_config_id)}</div>
+                  <div className="text-xs text-slate-700" title={ps.annotation_set_id}>{ps.annotation_set_label ?? shortId(ps.annotation_set_id)}</div>
+                  <div className="text-xs text-slate-700" title={ps.ontology_snapshot_id}>{ps.ontology_snapshot_version ?? shortId(ps.ontology_snapshot_id)}</div>
+                  <div className="text-slate-700">{ps.prediction_count ?? 0}</div>
+                  <div className="text-slate-600">
+                    {ps.distance_threshold != null ? ps.distance_threshold : <span className="text-slate-600">—</span>}
+                  </div>
+                  <div className="text-slate-600">{ps.limit_per_entry}</div>
+                  <div className="text-xs text-slate-600">{formatDate(ps.created_at)}</div>
+                  <div className="flex justify-end">
+                    <button
+                      onClick={() => handleDeleteResult(ps.id)}
+                      className="rounded border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 transition-colors"
+                    >
+                      {t("resultsTab.delete")}
+                    </button>
+                  </div>
                 </div>
-                <div className="text-xs text-slate-700" title={ps.embedding_config_id}>{ps.embedding_config_name ?? shortId(ps.embedding_config_id)}</div>
-                <div className="text-xs text-slate-700" title={ps.annotation_set_id}>{ps.annotation_set_label ?? shortId(ps.annotation_set_id)}</div>
-                <div className="text-xs text-slate-700" title={ps.ontology_snapshot_id}>{ps.ontology_snapshot_version ?? shortId(ps.ontology_snapshot_id)}</div>
-                <div className="text-slate-700">{ps.prediction_count ?? 0}</div>
-                <div className="text-slate-600">
-                  {ps.distance_threshold != null ? ps.distance_threshold : <span className="text-slate-400">—</span>}
-                </div>
-                <div className="text-slate-600">{ps.limit_per_entry}</div>
-                <div className="text-xs text-slate-400">{formatDate(ps.created_at)}</div>
-                <div className="flex justify-end">
-                  <button
-                    onClick={() => handleDeleteResult(ps.id)}
-                    className="rounded border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 transition-colors"
-                  >
-                    {t("resultsTab.delete")}
-                  </button>
-                </div>
-              </div>
-            ))}
+              ))}
 
-            {predictionSets.length === 0 && (
-              <div className="px-4 py-8 text-center text-sm text-slate-400">
-                {t("resultsTab.noResults")}
-              </div>
-            )}
+              {predictionSets.length === 0 && (
+                <div className="px-4 py-8 text-center text-sm text-slate-600">
+                  {t("resultsTab.noResults")}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
