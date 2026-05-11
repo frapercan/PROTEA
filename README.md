@@ -115,7 +115,7 @@ are submitted the same way; their payloads are documented at
 `/docs` (Swagger UI) and in the operation-catalog page of the
 Sphinx docs.
 
-Discovering the installed plugins (added in F2B turn 36):
+Discovering the installed plugins:
 
 ```bash
 curl -s http://localhost:8000/backends | jq '.plugins[].name'
