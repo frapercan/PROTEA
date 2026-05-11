@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { BenchmarkHeatmap } from "@/components/BenchmarkHeatmap";
 import { Skeleton } from "@/components/Skeleton";
@@ -166,50 +166,83 @@ export default function BenchmarkPage() {
     ks: number[];
   }>({ stages: [], evalSets: [], categories: [], aspects: [], ks: [] });
 
-  // Single effect that handles both the catalog probe (first mount) and
-  // filter-change re-fetches. On mount we issue the catalog probe and the
-  // embeddings list in parallel, derive the default stage from the catalog
-  // response, then dispatch the stage-filtered matrix. After that, this
-  // effect re-runs only when filter state changes, and it never re-probes
-  // the catalog. This collapses the previous two-wave cascade into a single
-  // Promise.all wave on initial load.
+  // Filter signature most recently used to fetch matrix data. The
+  // filter-change effect compares the current filter state against this
+  // ref and skips when they match — that swallows the programmatic
+  // ``setStage(default)`` / ``setSelectedK(default)`` calls the first
+  // effect issues right after applying the URL-pinned response.
+  const lastFetchedSig = useRef<string | null>(null);
+
+  function filterSig(s: string | null, esid: string, k: number | null): string {
+    return `${s ?? ""}|${esid}|${k ?? ""}`;
+  }
+
+  // First effect: runs ONCE on mount. Fires a SINGLE Promise.all that
+  // requests the matrix using whatever filters the URL provides
+  // (``stage`` / ``evaluation_set_id`` / ``k`` — any combination) and
+  // the embeddings list in parallel. Catalog (stages, evalSets, ks) is
+  // derived from the response, which always echoes the full observed
+  // catalog regardless of filter — see ``_aggregate_benchmark_matrix``
+  // in protea/api/routers/benchmark.py.
+  //
+  // When the URL is bare or partial, ``setStage(default)`` /
+  // ``setSelectedK(default)`` push derived defaults into URL state. The
+  // second effect compares the resulting filter signature against the
+  // one we just fetched and short-circuits when they match, so this
+  // first paint is always exactly ONE matrix call. UX trade-off on the
+  // bare/partial path: leaderboards reflect the request filters (which
+  // may be a superset of the resolved chip selection) until the user
+  // changes a chip; the global-champion banner stays correct either
+  // way, and the user's URL ``/en/benchmark/?k=3`` (the slow path that
+  // motivated this refactor) now resolves in one round-trip.
   useEffect(() => {
     setError(null);
-    if (catalog.stages.length === 0) {
-      // First mount: catalog + embeddings in parallel.
-      Promise.all([getBenchmarkMatrix(), getBenchmarkEmbeddings()])
-        .then(([m, e]) => {
-          setCatalog({
-            stages: m.stages,
-            evalSets: m.evaluation_sets,
-            categories: m.categories,
-            aspects: m.aspects,
-            ks: m.ks ?? [],
-          });
-          setEmbeddings(e.embeddings);
-          const resolvedStage = stage ?? pickDefaultStage(m.stages);
-          const resolvedK = selectedK ?? m.ks?.[0] ?? null;
-          if (stage == null) setStage(resolvedStage);
-          if (selectedK == null) setSelectedK(resolvedK);
-          // If no filters are pinned and the no-params response already
-          // covers the resolved view, reuse it; otherwise fire one filtered
-          // request. The no-params response is multi-stage, so when a stage
-          // is resolved we always need a stage-filtered fetch.
-          if (resolvedStage == null) {
-            setMatrix(m);
-            return;
-          }
-          return getBenchmarkMatrix({
-            stage: resolvedStage,
-            evaluation_set_id: evalSetId === "all" ? undefined : evalSetId,
-            k: resolvedK ?? undefined,
-          }).then(setMatrix);
-        })
-        .catch((e) => setError(e.message));
-      return;
-    }
-    // Subsequent runs: filter change only. Catalog and embeddings are stable.
+    const urlPinned = {
+      stage: stage ?? undefined,
+      evaluation_set_id: evalSetId === "all" ? undefined : evalSetId,
+      k: selectedK ?? undefined,
+    };
+    const hasAnyPin =
+      stage != null || evalSetId !== "all" || selectedK != null;
+    Promise.all([
+      getBenchmarkMatrix(hasAnyPin ? urlPinned : undefined),
+      getBenchmarkEmbeddings(),
+    ])
+      .then(([m, e]) => {
+        setCatalog({
+          stages: m.stages,
+          evalSets: m.evaluation_sets,
+          categories: m.categories,
+          aspects: m.aspects,
+          ks: m.ks ?? [],
+        });
+        setEmbeddings(e.embeddings);
+        setMatrix(m);
+        const resolvedStage = stage ?? pickDefaultStage(m.stages);
+        const resolvedK = selectedK ?? m.ks?.[0] ?? null;
+        // Record the resolved signature BEFORE pushing defaults to URL
+        // state, so the second effect's no-op pass on the same filter
+        // combo short-circuits and we don't issue a redundant call.
+        lastFetchedSig.current = filterSig(resolvedStage, evalSetId, resolvedK);
+        if (stage == null && resolvedStage != null) setStage(resolvedStage);
+        if (selectedK == null && resolvedK != null) setSelectedK(resolvedK);
+      })
+      .catch((e) => setError(e.message));
+    // Intentionally mount-only. URL state read once; subsequent changes
+    // go through the filter-change effect below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Second effect: fires when the user actively changes a filter chip.
+  // Skips runs whose filter signature already matches the data we hold,
+  // which absorbs both the initial defaults-application from the first
+  // effect and any no-op re-renders that don't change filters.
+  useEffect(() => {
     if (stage === null) return;
+    const sig = filterSig(stage, evalSetId, selectedK);
+    if (lastFetchedSig.current === sig) return;
+    setError(null);
+    lastFetchedSig.current = sig;
     getBenchmarkMatrix({
       stage,
       evaluation_set_id: evalSetId === "all" ? undefined : evalSetId,
