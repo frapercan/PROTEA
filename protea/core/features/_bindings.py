@@ -1,0 +1,222 @@
+"""Per-feature compute bindings for the canonical FeatureRegistry (T2B.2).
+
+T2B.1 populated :mod:`protea.core.features.registry` with placeholder
+``compute`` callables that raise :class:`NotImplementedError`. This
+module wires each feature in :data:`protea_contracts.ALL_FEATURES` to
+the legacy producer function it is filled by in the current code path
+and calls :meth:`CanonicalFeatureRegistry.bind_compute` once at
+import time to replace the placeholders.
+
+Mapping (family group -> producer):
+
+* KNN-derived columns (``distance``, ``vote_count``, ``k_position``,
+  ``go_term_frequency``, ``ref_annotation_density``,
+  ``neighbor_distance_std``, ``neighbor_vote_fraction``,
+  ``neighbor_min_distance``, ``neighbor_mean_distance``) come from
+  the per-aspect record builder driven by
+  :class:`protea.core._knn_transfer_runner._KnnTransferRunner`. They
+  are bound to :func:`_knn_record_producer`, a marker callable that
+  carries a reference to the runner on its ``__protea_producer__``
+  attribute.
+* NW / SW alignment columns and ``length_query`` / ``length_ref``
+  come from :func:`protea.core.feature_engineering.compute_alignment`
+  (called per (query, ref) pair in ``_knn_transfer_runner``).
+* Taxonomy pair columns (``taxonomic_distance``,
+  ``taxonomic_common_ancestors``, ``taxonomic_relation``) come from
+  :func:`protea.core.feature_engineering.compute_taxonomy`.
+* The v6 enrichment columns (``tax_voters_*``, ``go_term_frequency``
+  share, ``anc2vec_*``, ``emb_pca_query_*``) come from
+  :func:`protea.core.feature_enricher.enrich_v6_features`.
+* Categorical metadata (``qualifier``, ``evidence_code``, ``aspect``)
+  is sourced from annotation rows during record construction; the
+  marker :func:`_annotation_metadata_producer` carries that
+  intent.
+
+The bound compute callables are not invoked by ``parquet_export``
+(the exporter reads pre-computed shards from disk). They exist so
+that any downstream consumer of the registry can introspect which
+legacy function produces each column. The ``__protea_producer__``
+attribute makes that legacy reference machine-readable.
+
+Idempotency: :func:`apply_canonical_bindings` is safe to call more
+than once on the same registry. It walks every feature in
+:data:`protea_contracts.ALL_FEATURES` and rebinds, so a fresh
+registry (after :func:`reset_canonical_registry`) is restored to
+fully-bound state by re-importing this module's public function.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from typing import Any
+
+from protea_contracts import (
+    ALL_FEATURES,
+    CATEGORICAL_FEATURES,
+    EMBEDDING_PCA_DIM,
+)
+
+from protea.core.features.registry import CanonicalFeatureRegistry
+
+
+def _make_producer_marker(producer: Callable[..., Any], label: str) -> Callable[[Any, Any], None]:
+    """Build a no-op compute that records its legacy producer.
+
+    ``parquet_export`` does not call ``Feature.compute`` (features are
+    pre-computed upstream and read from parquet shards). The marker
+    is what downstream introspection consults to find the legacy
+    producer of each feature. Calling it is a no-op so any accidental
+    invocation does not raise but does not silently fabricate a value
+    either: the caller sees the unchanged predictions dict.
+    """
+
+    def _compute(_ctx: Any, _predictions: Any) -> None:
+        return None
+
+    _compute.__name__ = f"_produced_by_{label}"
+    _compute.__protea_producer__ = producer  # type: ignore[attr-defined]
+    _compute.__protea_producer_label__ = label  # type: ignore[attr-defined]
+    return _compute
+
+
+def _knn_record_producer() -> Callable[..., Any]:
+    """Lazy import shim for :class:`_KnnTransferRunner.run`.
+
+    Imported lazily so importing this module never pulls in the
+    heavy KNN runner (numpy / pyarrow / DB session deps).
+    """
+    from protea.core._knn_transfer_runner import _KnnTransferRunner
+
+    return _KnnTransferRunner.run
+
+
+def _compute_alignment_producer() -> Callable[..., Any]:
+    from protea.core.feature_engineering import compute_alignment
+
+    return compute_alignment
+
+
+def _compute_taxonomy_producer() -> Callable[..., Any]:
+    from protea.core.feature_engineering import compute_taxonomy
+
+    return compute_taxonomy
+
+
+def _enrich_v6_producer() -> Callable[..., Any]:
+    from protea.core.feature_enricher import enrich_v6_features
+
+    return enrich_v6_features
+
+
+def _annotation_metadata_producer() -> Callable[..., Any]:
+    """Reference for categorical metadata columns sourced from annotation rows.
+
+    These columns are not "computed"; they ride alongside each
+    candidate prediction from the annotation lookup in the per-aspect
+    record builder. The marker keeps the registry's coverage
+    complete so :meth:`FeatureRegistry.names` matches
+    :data:`ALL_FEATURES` even for non-compute columns.
+    """
+    from protea.core._knn_transfer_runner import _KnnTransferRunner
+
+    return _KnnTransferRunner._build_records  # type: ignore[attr-defined]
+
+
+# Static feature -> producer-label map. The label is used to name the
+# bound compute function (`_produced_by_<label>`) and to look up the
+# lazy producer callable below. Keep alphabetised within each group.
+_KNN_RECORD_FEATURES: tuple[str, ...] = (
+    "distance",
+    "vote_count",
+    "k_position",
+    "go_term_frequency",
+    "ref_annotation_density",
+    "neighbor_distance_std",
+    "neighbor_vote_fraction",
+    "neighbor_min_distance",
+    "neighbor_mean_distance",
+)
+
+_ALIGNMENT_FEATURES: tuple[str, ...] = (
+    "identity_nw",
+    "similarity_nw",
+    "alignment_score_nw",
+    "gaps_pct_nw",
+    "alignment_length_nw",
+    "identity_sw",
+    "similarity_sw",
+    "alignment_score_sw",
+    "gaps_pct_sw",
+    "alignment_length_sw",
+    "length_query",
+    "length_ref",
+)
+
+_TAXONOMY_PAIR_FEATURES: tuple[str, ...] = (
+    "taxonomic_distance",
+    "taxonomic_common_ancestors",
+    "taxonomic_relation",
+)
+
+_V6_ENRICHMENT_FEATURES: tuple[str, ...] = (
+    "tax_voters_same_frac",
+    "tax_voters_close_frac",
+    "tax_voters_mean_common_ancestors",
+    "anc2vec_neighbor_cos",
+    "anc2vec_neighbor_maxcos",
+    "anc2vec_has_emb",
+    "anc2vec_query_known_cos",
+    "anc2vec_query_known_maxcos",
+    "anc2vec_query_known_count",
+) + tuple(f"emb_pca_query_{i}" for i in range(EMBEDDING_PCA_DIM))
+
+_ANNOTATION_METADATA_FEATURES: tuple[str, ...] = tuple(
+    name for name in CATEGORICAL_FEATURES if name != "taxonomic_relation"
+)
+
+
+def _build_feature_to_producer() -> dict[str, tuple[Callable[..., Any], str]]:
+    """Return ``{feature_name: (lazy_producer_factory, label)}`` for every
+    feature in :data:`ALL_FEATURES`. Raises ``KeyError`` if any feature is
+    missing a binding, so adding a column to ``ALL_FEATURES`` without a
+    binding fails loudly here rather than silently shipping a placeholder.
+    """
+    mapping: dict[str, tuple[Callable[..., Any], str]] = {}
+    for name in _KNN_RECORD_FEATURES:
+        mapping[name] = (_knn_record_producer, "knn_transfer_runner")
+    for name in _ALIGNMENT_FEATURES:
+        mapping[name] = (_compute_alignment_producer, "compute_alignment")
+    for name in _TAXONOMY_PAIR_FEATURES:
+        mapping[name] = (_compute_taxonomy_producer, "compute_taxonomy")
+    for name in _V6_ENRICHMENT_FEATURES:
+        mapping[name] = (_enrich_v6_producer, "enrich_v6_features")
+    for name in _ANNOTATION_METADATA_FEATURES:
+        mapping[name] = (_annotation_metadata_producer, "annotation_metadata")
+    missing = [name for name in ALL_FEATURES if name not in mapping]
+    if missing:
+        raise KeyError(
+            "T2B.2 binding map missing producers for features: "
+            f"{missing!r}. Add an entry in protea.core.features._bindings."
+        )
+    return mapping
+
+
+def apply_canonical_bindings(registry: CanonicalFeatureRegistry) -> int:
+    """Bind every :data:`ALL_FEATURES` feature on ``registry`` to its legacy
+    producer reference. Returns the count of features bound.
+
+    Idempotent: rebinding an already-bound feature is a no-op (the
+    underlying :meth:`CanonicalFeatureRegistry.bind_compute` replaces
+    the callable without touching dtype / family).
+    """
+    feature_to_producer = _build_feature_to_producer()
+    count = 0
+    for name in ALL_FEATURES:
+        lazy_factory, label = feature_to_producer[name]
+        compute = _make_producer_marker(lazy_factory, label)
+        registry.bind_compute(name, compute)
+        count += 1
+    return count
+
+
+__all__ = ["apply_canonical_bindings"]

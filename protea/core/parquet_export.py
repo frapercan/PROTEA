@@ -29,10 +29,33 @@ from typing import Any, NamedTuple
 import pandas as pd
 from protea_contracts import compute_schema_sha as _canonical_schema_sha
 
-from protea.core.reranker import ALL_FEATURES, LABEL_COLUMN
+from protea.core.features import REGISTRY as _FEATURE_REGISTRY
+from protea.core.reranker import LABEL_COLUMN
 from protea.infrastructure.storage import ArtifactStore
 
 logger = logging.getLogger(__name__)
+
+# T2B.2: drive the schema off the FeatureRegistry singleton instead of
+# the legacy hardcoded ``ALL_FEATURES`` constant. Importing
+# :mod:`protea.core.features` triggers
+# :func:`protea.core.features._bindings.apply_canonical_bindings` so
+# every feature has a real compute reference bound (was placeholder
+# raiser in T2B.1).
+#
+# The canonical column list is queried lazily so a registry reset in
+# tests (:func:`reset_canonical_registry`) does not strand the
+# exporter against a stale tuple captured at import time.
+
+
+def _registry_feature_names() -> list[str]:
+    """Return the canonical feature names in registration order.
+
+    Wraps :meth:`FeatureRegistry.names` so the exporter has a single
+    seam to swap if T2B.3 makes the registry context-aware (per
+    active families).
+    """
+    return _FEATURE_REGISTRY.names()
+
 
 _ASPECT_NAMES = {"P": "bpo", "F": "mfo", "C": "cco"}
 _CATEGORIES = ("nk", "lk", "pk")
@@ -92,7 +115,7 @@ def resolve_protea_git_sha() -> str | None:
 def _reorder(df: pd.DataFrame, reserved: list[str]) -> pd.DataFrame:
     if df.empty:
         return df
-    feature_cols = [c for c in ALL_FEATURES if c in df.columns]
+    feature_cols = [c for c in _registry_feature_names() if c in df.columns]
     reserved_present = [c for c in reserved if c in df.columns]
     return df[reserved_present + feature_cols]
 
@@ -175,7 +198,7 @@ def _compute_schema_sha() -> str:
     v3 lands the schema_sha_v2 migration. The T1.8 invariant guarantees the
     column set is correct."""
     return hashlib.sha256(
-        json.dumps(list(ALL_FEATURES), sort_keys=True).encode()
+        json.dumps(_registry_feature_names(), sort_keys=True).encode()
     ).hexdigest()[:12]
 
 
@@ -205,9 +228,7 @@ def _build_and_write_manifest(
     manifest_path.write_text(json.dumps(manifest, indent=2))
 
 
-def _build_result(
-    ctx: ParquetExportContext, metrics: _ExportMetrics
-) -> dict[str, Any]:
+def _build_result(ctx: ParquetExportContext, metrics: _ExportMetrics) -> dict[str, Any]:
     """Compose the function's return payload (URIs are stamped later when the
     optional artefact-store upload runs)."""
     return {
@@ -269,22 +290,25 @@ def _assert_canonical_columns(
     train_df: pd.DataFrame, eval_df: pd.DataFrame, reserved: list[str]
 ) -> None:
     """T1.8 boundary check: every non-empty shard's feature columns must equal
-    ``ALL_FEATURES`` exactly under the canonical lab schema sha. Raises
-    ``ValueError`` with the missing/extras diff before any parquet is written.
+    the registry's canonical feature set exactly under the lab schema sha.
+    Raises ``ValueError`` with the missing/extras diff before any parquet is
+    written.
     """
-    canonical_features_sha = _canonical_schema_sha(list(ALL_FEATURES))
+    canonical_features = _registry_feature_names()
+    canonical_set = set(canonical_features)
+    canonical_features_sha = _canonical_schema_sha(canonical_features)
     for shard_name, shard in (("train", train_df), ("eval", eval_df)):
         if shard.empty:
             continue
-        present_features = [c for c in shard.columns if c in ALL_FEATURES]
+        present_features = [c for c in shard.columns if c in canonical_set]
         if _canonical_schema_sha(present_features) == canonical_features_sha:
             continue
-        missing = [c for c in ALL_FEATURES if c not in shard.columns]
-        extras = [c for c in shard.columns if c not in ALL_FEATURES and c not in reserved]
+        missing = [c for c in canonical_features if c not in shard.columns]
+        extras = [c for c in shard.columns if c not in canonical_set and c not in reserved]
         raise ValueError(
             f"{shard_name} shard fails the canonical column invariant. "
             f"missing={missing!r} extras={extras!r}. "
-            "All ALL_FEATURES columns must be present before write."
+            "All canonical feature columns must be present before write."
         )
 
 
