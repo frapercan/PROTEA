@@ -101,6 +101,7 @@
     "annotateTitle": "Annotate Your Proteins",
     "annotateDescription": "Paste your protein sequences in FASTA format and get functional annotations automatically using the best available method.",
     "annotatePlaceholder": ">sp|P04637|P53_HUMAN Cellular tumor antigen p53\nMEEPQSDPSVEPPLSQETFSDLWKLL...",
+    "annotateInputAriaLabel": "Sequence input in FASTA format",
     "annotateTryExample": "Try example",
     "annotateUploadFile": "Upload file",
     "annotateButton": "Annotate",

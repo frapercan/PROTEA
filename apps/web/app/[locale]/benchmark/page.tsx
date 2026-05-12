@@ -493,10 +493,11 @@ export default function BenchmarkPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr>
-                  <th className="px-2 py-1 text-left font-medium text-slate-500"></th>
+                  <th scope="col" className="px-2 py-1 text-left font-medium text-slate-500"></th>
                   {aspects.map((asp) => (
                     <th
                       key={asp}
+                      scope="col"
                       className="px-2 py-1 text-center text-[10px] font-medium text-slate-500 uppercase tracking-wide"
                     >
                       {asp}
@@ -507,7 +508,7 @@ export default function BenchmarkPage() {
               <tbody>
                 {categories.map((cat) => (
                   <tr key={cat} className="border-t border-slate-200/60">
-                    <td className="px-2 py-2.5 font-semibold text-slate-700">{cat}</td>
+                    <th scope="row" className="px-2 py-2.5 font-semibold text-slate-700 text-left">{cat}</th>
                     {aspects.map((asp) => {
                       const best = bestPerCellGlobal.get(`${cat}|${asp}`);
                       if (!best) {
@@ -563,10 +564,11 @@ export default function BenchmarkPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr>
-                  <th className="px-2 py-1 text-left font-medium text-slate-500"></th>
+                  <th scope="col" className="px-2 py-1 text-left font-medium text-slate-500"></th>
                   {aspects.map((asp) => (
                     <th
                       key={asp}
+                      scope="col"
                       className="px-2 py-1 text-center text-[10px] font-medium text-slate-500 uppercase tracking-wide"
                     >
                       {asp}
@@ -577,7 +579,7 @@ export default function BenchmarkPage() {
               <tbody>
                 {categories.map((cat) => (
                   <tr key={cat} className="border-t">
-                    <td className="px-2 py-2 font-semibold text-slate-700">{cat}</td>
+                    <th scope="row" className="px-2 py-2 font-semibold text-slate-700 text-left">{cat}</th>
                     {aspects.map((asp) => {
                       const best = bestPerCell.get(`${cat}|${asp}`);
                       if (!best) {
@@ -675,6 +677,7 @@ export default function BenchmarkPage() {
               <tr>
                 <th
                   rowSpan={2}
+                  scope="col"
                   className="px-4 py-2 text-left font-medium text-slate-600 border-b sticky left-0 bg-slate-50"
                 >
                   Embedding
@@ -683,6 +686,7 @@ export default function BenchmarkPage() {
                   <th
                     key={cat}
                     colSpan={aspects.length}
+                    scope="colgroup"
                     className="px-2 py-1.5 text-center font-semibold text-slate-700 border-b border-l"
                   >
                     {cat}
@@ -694,6 +698,7 @@ export default function BenchmarkPage() {
                   aspects.map((asp) => (
                     <th
                       key={`${cat}-${asp}`}
+                      scope="col"
                       className="px-2 py-1 text-center text-[10px] font-medium text-slate-500 uppercase tracking-wide border-b border-l"
                     >
                       {asp}

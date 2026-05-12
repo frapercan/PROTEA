@@ -1,13 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { useTranslations } from "next-intl";
+import { useFocusTrap } from "@/lib/useFocusTrap";
 
 const STORAGE_KEY = "protea_policy_accepted_v1";
 
 export function UsagePolicyModal() {
   const t = useTranslations("components.usagePolicyModal");
   const [visible, setVisible] = useState(false);
+  const titleId = useId();
 
   useEffect(() => {
     if (!localStorage.getItem(STORAGE_KEY)) {
@@ -15,19 +17,30 @@ export function UsagePolicyModal() {
     }
   }, []);
 
-  function accept() {
+  const accept = useCallback(() => {
     localStorage.setItem(STORAGE_KEY, "1");
     setVisible(false);
-  }
+  }, []);
+
+  // No Escape close: this is a forced-acceptance gate. Tab focus is
+  // still trapped inside the dialog so screen-reader users do not leak
+  // back into the inert page underneath.
+  const dialogRef = useFocusTrap<HTMLDivElement>(visible);
 
   if (!visible) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="relative mx-4 w-full max-w-lg rounded-xl bg-white shadow-2xl">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="relative mx-4 w-full max-w-lg rounded-xl bg-white shadow-2xl"
+      >
         {/* Header */}
         <div className="border-b px-6 py-4">
-          <h2 className="text-lg font-semibold text-slate-900">{t("title")}</h2>
+          <h2 id={titleId} className="text-lg font-semibold text-slate-900">{t("title")}</h2>
           <p className="mt-0.5 text-sm text-slate-500">{t("subtitle")}</p>
         </div>
 
@@ -64,4 +77,3 @@ export function UsagePolicyModal() {
     </div>
   );
 }
-

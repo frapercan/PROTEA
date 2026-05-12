@@ -102,6 +102,7 @@
     "annotateTitle": "注释您的蛋白质",
     "annotateDescription": "粘贴FASTA格式的蛋白质序列，使用最佳可用方法自动获取功能注释。",
     "annotatePlaceholder": ">sp|P04637|P53_HUMAN Cellular tumor antigen p53\nMEEPQSDPSVEPPLSQETFSDLWKLL...",
+    "annotateInputAriaLabel": "FASTA 格式的序列输入",
     "annotateTryExample": "试用示例",
     "annotateUploadFile": "上传文件",
     "annotateButton": "注释",

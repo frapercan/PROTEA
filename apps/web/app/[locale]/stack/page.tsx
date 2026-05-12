@@ -106,11 +106,11 @@ export default function StackPage() {
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left text-xs uppercase tracking-wider text-slate-500">
               <tr>
-                <th className="px-4 py-2.5">{t("colRepo")}</th>
-                <th className="px-4 py-2.5">{t("colRole")}</th>
-                <th className="px-4 py-2.5">{t("colStatus")}</th>
-                <th className="px-4 py-2.5">{t("colSummary")}</th>
-                <th className="px-4 py-2.5">{t("colLinks")}</th>
+                <th scope="col" className="px-4 py-2.5">{t("colRepo")}</th>
+                <th scope="col" className="px-4 py-2.5">{t("colRole")}</th>
+                <th scope="col" className="px-4 py-2.5">{t("colStatus")}</th>
+                <th scope="col" className="px-4 py-2.5">{t("colSummary")}</th>
+                <th scope="col" className="px-4 py-2.5">{t("colLinks")}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -201,10 +201,10 @@ export default function StackPage() {
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left text-xs uppercase tracking-wider text-slate-500">
               <tr>
-                <th className="px-4 py-2.5">{t("prRepo")}</th>
-                <th className="px-4 py-2.5">{t("prTitle")}</th>
-                <th className="px-4 py-2.5">{t("prAuthor")}</th>
-                <th className="px-4 py-2.5">{t("prUpdated")}</th>
+                <th scope="col" className="px-4 py-2.5">{t("prRepo")}</th>
+                <th scope="col" className="px-4 py-2.5">{t("prTitle")}</th>
+                <th scope="col" className="px-4 py-2.5">{t("prAuthor")}</th>
+                <th scope="col" className="px-4 py-2.5">{t("prUpdated")}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
