@@ -38,10 +38,20 @@ def main() -> None:
     args = parser.parse_args()
 
     from protea.infrastructure.logging import configure_logging
+    from protea.infrastructure.telemetry import configure_telemetry
 
     configure_logging(json=(args.log_format == "json"))
     # Suppress pika's verbose connection lifecycle messages
     logging.getLogger("pika").setLevel(logging.WARNING)
+
+    # T5.1b: boot the OTel SDK before building the session factory so
+    # the SQLAlchemy instrumentor in ``build_engine`` sees an active
+    # provider. ``default_service_name`` derives from the queue so
+    # workers show up as distinct resources (``protea-worker-<queue>``)
+    # in the OTel UI.
+    configure_telemetry(
+        default_service_name=f"protea-worker-{args.queue}",
+    )
 
     project_root = Path(__file__).resolve().parents[1]
     settings = load_settings(project_root)

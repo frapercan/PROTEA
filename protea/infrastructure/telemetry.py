@@ -1,20 +1,22 @@
 # protea/infrastructure/telemetry.py
-"""OpenTelemetry SDK boot for PROTEA (T5.1a).
+"""OpenTelemetry SDK boot for PROTEA (T5.1a + T5.1b).
 
 This module is the single entry point for tracing in PROTEA. It wires
 a global :class:`opentelemetry.sdk.trace.TracerProvider` configured
-from environment variables (per ADR D07) and instruments FastAPI.
+from environment variables (per ADR D07) and instruments FastAPI,
+SQLAlchemy engines, and pika.
 
 The OTel SDK is treated as optional at import time: if the libraries
 are not installed (e.g. minimal worker images), :func:`configure_telemetry`
-logs a single warning and returns ``None`` instead of raising. This
-keeps the existing developer workflow (``poetry install``) green until
-the F-OPS stack rolls out and is the pattern recommended by the OTel
-docs for SDK-optional applications.
+logs a single warning and returns the resolved config instead of
+raising. This keeps the existing developer workflow (``poetry install``)
+green until the F-OPS stack rolls out and is the pattern recommended
+by the OTel docs for SDK-optional applications.
 
 T5.1a scope: SDK boot + env-driven exporter URL + FastAPI instrumentation.
-T5.1b (next slice) adds SQLAlchemy + pika instrumentation and
-``traceparent`` propagation across HTTP -> queue -> worker boundaries.
+T5.1b scope: SQLAlchemy engine instrumentation + pika producer/consumer
+context propagation via the W3C ``traceparent`` header so spans stitch
+across HTTP -> queue -> worker boundaries.
 
 Environment variables consumed
 ------------------------------
@@ -255,3 +257,111 @@ def _instrument_fastapi(app: Any) -> None:
 
     FastAPIInstrumentor.instrument_app(app)
     _LOGGER.debug("FastAPI instrumentation installed")
+
+
+def instrument_sqlalchemy_engine(engine: Any) -> None:
+    """Wrap a SQLAlchemy :class:`Engine` with the OTel instrumentor.
+
+    Safe to call when telemetry is disabled or the instrumentor is not
+    installed: both cases log at DEBUG / WARNING and return. Workers and
+    the API boot call this from :func:`build_engine` so every engine
+    created in the process emits ``db.*`` spans without each call site
+    needing to know about OTel.
+    """
+    config = resolve_telemetry_config()
+    if not config.enabled:
+        _LOGGER.debug("telemetry disabled, skipping SQLAlchemy instrumentation")
+        return
+    try:
+        from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+    except ImportError as exc:
+        _LOGGER.warning(
+            "SQLAlchemy instrumentor not installed (%s); DB spans disabled. "
+            "Install `opentelemetry-instrumentation-sqlalchemy` to enable.",
+            exc,
+        )
+        return
+
+    try:
+        SQLAlchemyInstrumentor().instrument(engine=engine)
+        _LOGGER.debug("SQLAlchemy instrumentation installed")
+    except Exception as exc:  # pragma: no cover - defensive against double-instrument
+        _LOGGER.warning("SQLAlchemy instrumentation failed: %s", exc)
+
+
+def inject_trace_context(headers: dict[str, Any]) -> dict[str, Any]:
+    """Inject the current trace context into a mutable header mapping.
+
+    Used by the pika publisher to propagate ``traceparent`` (and
+    ``tracestate``) onto outbound AMQP messages so consumers can stitch
+    spans back to the producing HTTP span. Returns the same mapping for
+    convenience; mutates in place. When the OTel API is not installed
+    or no context is active this is a no-op.
+    """
+    try:
+        from opentelemetry.propagate import inject
+    except ImportError:
+        return headers
+    inject(headers)
+    return headers
+
+
+def extract_trace_context(headers: dict[str, Any] | None) -> Any:
+    """Return an OTel context extracted from inbound AMQP headers.
+
+    The returned object is opaque (``opentelemetry.context.Context``);
+    callers pass it to ``tracer.start_as_current_span(..., context=ctx)``.
+    Returns ``None`` when the OTel API is not installed so callers can
+    short-circuit to a no-op path.
+    """
+    try:
+        from opentelemetry.propagate import extract
+    except ImportError:
+        return None
+    return extract(headers or {})
+
+
+def get_tracer(name: str) -> Any:
+    """Return an OTel tracer for ``name`` or a no-op tracer when the API
+    is not installed.
+
+    Keeps call sites (queue consumer, etc.) free of optional-import
+    boilerplate: they unconditionally call ``get_tracer(__name__)`` and
+    use the resulting object via the standard tracer API.
+    """
+    try:
+        from opentelemetry import trace
+    except ImportError:
+        return _NoopTracer()
+    return trace.get_tracer(name)
+
+
+class _NoopTracer:
+    """Minimal tracer stand-in used when OpenTelemetry is not installed.
+
+    Implements just enough of the tracer surface
+    (:meth:`start_as_current_span`) for PROTEA's instrumentation call
+    sites; everything is a context manager that yields a do-nothing
+    span. Avoids spreading ``if trace is None`` branches through the
+    queue consumer.
+    """
+
+    class _NoopSpan:
+        def set_attribute(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        def record_exception(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        def set_status(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+    class _NoopCm:
+        def __enter__(self) -> _NoopTracer._NoopSpan:
+            return _NoopTracer._NoopSpan()
+
+        def __exit__(self, *_args: Any) -> None:
+            return None
+
+    def start_as_current_span(self, *_args: Any, **_kwargs: Any) -> _NoopTracer._NoopCm:
+        return _NoopTracer._NoopCm()
