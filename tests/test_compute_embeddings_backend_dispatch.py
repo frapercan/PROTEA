@@ -108,3 +108,165 @@ def test_reset_cache_forces_rediscovery() -> None:
     # bootstrap plugin set must still be present.
     assert "esm" in first
     assert "esm" in second
+
+
+# ---------------------------------------------------------------------------
+# T2A.1 — esm dispatch goes through plugin.embed_chunks
+# ---------------------------------------------------------------------------
+
+
+def test_dispatch_embed_routes_esm_to_plugin_embed_chunks() -> None:
+    """T2A.1: the esm branch in ``_dispatch_embed`` calls
+    ``plugin.embed_chunks`` instead of the local ``_embed_esm`` shim."""
+    _reset_plugin_cache()
+    fake_plugin = MagicMock()
+    fake_plugin.name = "esm"
+    fake_plugin.embed_chunks.return_value = [["chunk"]]
+
+    config = MagicMock()
+    config.model_backend = "esm"
+
+    with patch.object(
+        ce_module, "_get_backend_plugins", return_value={"esm": fake_plugin}
+    ), patch.object(ce_module, "_embed_esm") as legacy_shim:
+        out = ce_module._dispatch_embed("model", "tok", ["MSEQ"], config, "cpu")
+
+    assert out == [["chunk"]]
+    fake_plugin.embed_chunks.assert_called_once_with(
+        "model", "tok", ["MSEQ"], config, "cpu"
+    )
+    legacy_shim.assert_not_called()
+
+
+def test_dispatch_embed_auto_alias_routes_to_esm_plugin() -> None:
+    """``auto`` keeps mapping to the esm plugin's ``embed_chunks``."""
+    _reset_plugin_cache()
+    fake_plugin = MagicMock()
+    fake_plugin.name = "esm"
+    fake_plugin.embed_chunks.return_value = [[]]
+
+    config = MagicMock()
+    config.model_backend = "auto"
+
+    with patch.object(
+        ce_module, "_get_backend_plugins", return_value={"esm": fake_plugin}
+    ):
+        ce_module._dispatch_embed("model", "tok", ["MSEQ"], config, "cpu")
+
+    fake_plugin.embed_chunks.assert_called_once()
+
+
+def test_dispatch_embed_falls_back_to_local_shim_when_plugin_lacks_method() -> None:
+    """Backward-compat: if the installed plugin pre-dates T2A.1 and has
+    no ``embed_chunks`` attribute, ``_dispatch_embed`` falls through to
+    the local ``_embed_esm`` shim so PROTEA boots while the backends PR
+    cascade is still landing."""
+    _reset_plugin_cache()
+    legacy_plugin = MagicMock(spec=["name", "load_model", "embed_batch"])
+    legacy_plugin.name = "esm"
+
+    config = MagicMock()
+    config.model_backend = "esm"
+
+    with patch.object(
+        ce_module, "_get_backend_plugins", return_value={"esm": legacy_plugin}
+    ), patch.object(ce_module, "_embed_esm", return_value=[["fallback"]]) as shim:
+        out = ce_module._dispatch_embed("model", "tok", ["MSEQ"], config, "cpu")
+
+    assert out == [["fallback"]]
+    shim.assert_called_once_with("model", "tok", ["MSEQ"], config, "cpu")
+
+
+def test_plugin_embed_chunks_matches_legacy_embed_esm_bit_exact() -> None:
+    """T2A.1 acceptance: ``plugin.embed_chunks`` and the legacy
+    ``_embed_esm`` shim produce bit-exact ``ChunkEmbedding`` vectors.
+
+    The plugin's implementation is a literal port of the local function,
+    but this guard catches accidental drift during the T2A.2-T2A.4
+    sibling migrations (e.g. a shared helper changing one branch but
+    not the other). Uses a synthetic mock model + tokenizer so no
+    real PLM weights are downloaded.
+
+    Skipped when the installed ``protea-backends`` build pre-dates
+    T2A.1 (no ``embed_chunks`` attribute on the plugin); the dispatch
+    fall-back is already exercised in
+    ``test_dispatch_embed_falls_back_to_local_shim_when_plugin_lacks_method``.
+    """
+    from typing import Any
+
+    import numpy as np
+    import torch
+    from protea_backends.esm import plugin as esm_plugin
+
+    if not hasattr(esm_plugin, "embed_chunks"):
+        pytest.skip("installed protea-backends pre-dates T2A.1 (no embed_chunks)")
+
+    _reset_plugin_cache()
+
+    # Minimal config object compatible with both _embed_esm and embed_chunks.
+    cfg = MagicMock()
+    cfg.model_name = "facebook/esm2_t6_8M_UR50D"
+    cfg.model_backend = "esm"
+    cfg.layer_indices = [0]
+    cfg.layer_agg = "mean"
+    cfg.pooling = "mean"
+    cfg.normalize = False
+    cfg.normalize_residues = False
+    cfg.max_length = 1022
+    cfg.use_chunking = False
+    cfg.chunk_size = 512
+    cfg.chunk_overlap = 0
+
+    dim = 16
+    seq_len = 7  # CLS + 5 content + EOS
+
+    def _make_inputs() -> tuple[Any, Any]:
+        torch.manual_seed(0)
+        hidden = torch.randn(1, seq_len, dim)
+        tokens_dict = {
+            "input_ids": torch.zeros(1, seq_len, dtype=torch.long),
+            "attention_mask": torch.ones(1, seq_len, dtype=torch.long),
+        }
+        mock_outputs = MagicMock()
+        mock_outputs.hidden_states = [hidden]
+        mock_model = MagicMock()
+        mock_model.return_value = mock_outputs
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.return_value = tokens_dict
+        return mock_model, mock_tokenizer
+
+    # Reference: legacy _embed_esm shim.
+    model_a, tok_a = _make_inputs()
+    ref = ce_module._embed_esm(model_a, tok_a, ["ACDEF"], cfg, "cpu")
+
+    # Plugin port — fresh model so the random tensor matches via seed.
+    model_b, tok_b = _make_inputs()
+    got = esm_plugin.embed_chunks(model_b, tok_b, ["ACDEF"], cfg, "cpu")
+
+    assert len(ref) == 1 == len(got)
+    assert len(ref[0]) == 1 == len(got[0])
+    np.testing.assert_array_equal(ref[0][0].vector, got[0][0].vector)
+    assert ref[0][0].chunk_index_s == got[0][0].chunk_index_s
+    assert ref[0][0].chunk_index_e == got[0][0].chunk_index_e
+
+
+def test_dispatch_embed_non_esm_backends_still_use_local_shims() -> None:
+    """T2A.2-T2A.4 sibling slices will migrate these; until then the
+    other backends keep dispatching through the module-local
+    ``_embed_*`` functions so existing test seams remain stable."""
+    _reset_plugin_cache()
+    fake_plugin = MagicMock()
+    fake_plugin.name = "t5"
+    fake_plugin.embed_chunks = MagicMock(return_value=[["should-not-be-called"]])
+
+    config = MagicMock()
+    config.model_backend = "t5"
+
+    with patch.object(
+        ce_module, "_get_backend_plugins", return_value={"t5": fake_plugin}
+    ), patch.object(ce_module, "_embed_t5", return_value=[["legacy"]]) as legacy_t5:
+        out = ce_module._dispatch_embed("model", "tok", ["MSEQ"], config, "cpu")
+
+    assert out == [["legacy"]]
+    legacy_t5.assert_called_once()
+    fake_plugin.embed_chunks.assert_not_called()
