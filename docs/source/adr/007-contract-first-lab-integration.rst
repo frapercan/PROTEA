@@ -3,9 +3,10 @@ ADR-007: Contract-first integration with ``protea-reranker-lab``
 
 :Date: 2026-04-21
 :Author: frapercan
+:Status: Accepted
 
-The problem
------------
+Context
+-------
 
 Re-ranker development is iterative and research-shaped: we want to try
 out new feature families, different boosting objectives
@@ -29,8 +30,8 @@ Two natural but incorrect structures were considered and rejected:
   care about package boundaries at install time), and creates a single
   review/merge pipeline for two workflows with very different cadences.
 
-What we do
-----------
+Decision
+--------
 
 PROTEA and ``protea-reranker-lab`` live in **separate repositories**
 coupled only through a narrow contract:
@@ -83,8 +84,8 @@ model learned. Strict equality fails safe: the batch worker emits
 always a legitimate baseline. A missed re-ranking hit is preferable to
 silently miscalibrated scores.
 
-Trade-offs
-----------
+Consequences
+------------
 
 - **Two-repo friction.** Changing a feature family requires coordinated
   commits in both repos plus a dataset re-export. Mitigated by keeping
@@ -99,8 +100,8 @@ Trade-offs
   lab alongside PROTEA (single editable path dep) precisely so
   ``compute_feature_schema_sha`` is available.
 
-Rejected
---------
+Rejected alternatives
+---------------------
 
 - **Dynamic feature-family negotiation.** Letting the worker infer
   which columns the booster expects from ``booster.feature_name()``

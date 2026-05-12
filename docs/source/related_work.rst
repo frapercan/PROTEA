@@ -88,7 +88,7 @@ PROTEA falls into the embedding-based family but makes three deliberate
 choices that distinguish it from prior work. First, KNN search is performed
 in Python (numpy or FAISS :cite:`faiss2021`) rather than in the database, a
 design decision motivated by the observed latency and memory behaviour of
-pgvector on 500 000+ vectors (documented in ADR-001). Second, the reference
+pgvector on 500 000+ vectors (see :doc:`/adr/001-knn-without-pgvector`). Second, the reference
 set is *frozen at t0* by construction; the ingestion pipeline records the
 ``OntologySnapshot`` OBO version and the ``AnnotationSet`` source version of
 every reference annotation, so that a prediction produced today is exactly

@@ -3,10 +3,10 @@ ADR-008: PK coverage fix in cafaeval fork
 
 :Date: 2026-04-23
 :Author: frapercan
-:Status: applied
+:Status: Accepted
 
-The problem
------------
+Context
+-------
 
 Upstream ``cafaeval`` (pinned at ``claradepaolis/CAFA-evaluator-PK``) reports
 ``coverage`` values greater than ``1.0`` for the Partial-Knowledge (PK)
@@ -54,8 +54,8 @@ secondary effect is that ``precision`` under
 by the same factor. On the 220→230 PROTEA benchmark this drags PK Fmax
 from its true value down by 30–40 %.
 
-What we do
-----------
+Decision
+--------
 
 ``cafaeval-protea`` (fork commit ``cec8ccd``) applies a one-line semantic
 fix inside ``compute_confusion_matrix_exclude_sparse``:
@@ -107,8 +107,14 @@ in the test suite:
    the fact that the fork has deliberately diverged from upstream on
    PK semantics, not because of a numerical drift.
 
+Consequences
+------------
+
+The sections below document the measured impact and operational steps required
+after applying the fix.
+
 Effect on the PROTEA 220→230 benchmark
----------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 After re-running the 15 PK evaluations under the patched fork:
 
@@ -145,7 +151,7 @@ NK and LK cells are unchanged within float noise. The thesis PK metrics
 reported hereafter reflect the corrected computation.
 
 Operational implication
------------------------
+~~~~~~~~~~~~~~~~~~~~~~~
 
 - ``cafaeval-protea`` is installed in PROTEA via a ``file://`` path
   dependency. After pulling a new fork commit, the venv must be force-
@@ -170,7 +176,7 @@ Operational implication
   automatically for any ``prediction_set`` that loses its eval.
 
 We should push this fix upstream
---------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The bug exists verbatim in ``claradepaolis/CAFA-evaluator-PK`` and, as
 far as we can tell, has never been flagged in an issue. The fix is
