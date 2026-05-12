@@ -61,3 +61,6 @@ jobs:
 
       - name: autodoc coverage gate (DR.1)
         run: python scripts/check_autodoc_coverage.py
+
+      - name: OpenAPI cross-reference check (DS.3)
+        run: python scripts/check_openapi_refs.py

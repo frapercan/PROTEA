@@ -82,7 +82,7 @@ Agents are clients of the public API surface, not of the internals:
   ``run_cafa_evaluation``, ``export_research_dataset``, …)
 - ``GET /jobs/{id}`` and ``/events`` to poll progress and surface
   failures
-- ``GET /datasets/{id_or_name}`` and ``GET /reranker-models`` for the
+- ``GET /datasets/{id_or_name}`` and ``GET /scoring/rerankers`` for the
   artefact registry
 - ``protea/config/system.yaml`` and ``apps/web/.env.local`` to discover
   the local URLs
