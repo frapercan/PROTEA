@@ -4,6 +4,7 @@ from .annotation.evaluation_set import EvaluationSet  # noqa: F401
 from .annotation.go_term import GOTerm  # noqa: F401
 from .annotation.go_term_relationship import GOTermRelationship  # noqa: F401
 from .annotation.interpro_annotation import InterProAnnotation  # noqa: F401
+from .annotation.interpro_go_mapping import InterProGoMapping  # noqa: F401
 from .annotation.ontology_snapshot import OntologySnapshot  # noqa: F401
 from .annotation.protein_go_annotation import ProteinGOAnnotation  # noqa: F401
 from .api_key import ApiKey  # noqa: F401

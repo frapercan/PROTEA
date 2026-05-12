@@ -21,6 +21,9 @@ from protea.core.operations.fetch_uniprot_metadata import FetchUniProtMetadataOp
 from protea.core.operations.generate_evaluation_set import GenerateEvaluationSetOperation
 from protea.core.operations.insert_proteins import InsertProteinsOperation
 from protea.core.operations.load_goa_annotations import LoadGOAAnnotationsOperation
+from protea.core.operations.load_interpro_go_mapping import (
+    LoadInterProGoMappingOperation,
+)
 from protea.core.operations.load_ontology_snapshot import LoadOntologySnapshotOperation
 from protea.core.operations.load_quickgo_annotations import LoadQuickGOAnnotationsOperation
 from protea.core.operations.ping import PingOperation
@@ -41,6 +44,7 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(LoadOntologySnapshotOperation())
     registry.register(LoadQuickGOAnnotationsOperation())
     registry.register(LoadGOAAnnotationsOperation())
+    registry.register(LoadInterProGoMappingOperation())
     registry.register(RunInterProScanBatchOperation())
     registry.register(GenerateEvaluationSetOperation())
     registry.register(RunCafaEvaluationOperation())
