@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, String, func
+from sqlalchemy import DateTime, Index, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -36,6 +36,10 @@ class OntologySnapshot(Base):
     """
 
     __tablename__ = "ontology_snapshot"
+    __table_args__ = (
+        # T3.5: ``latest snapshot`` lookups order by ``loaded_at DESC``.
+        Index("ix_ontology_snapshot_loaded_at", "loaded_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     obo_url: Mapped[str] = mapped_column(String, nullable=False)

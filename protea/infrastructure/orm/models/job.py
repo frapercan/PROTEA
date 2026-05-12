@@ -103,6 +103,10 @@ class JobEvent(Base):
     __table_args__ = (
         Index("ix_job_event_job_id_ts_desc", "job_id", "ts"),
         Index("ix_job_event_event_ts_desc", "event", "ts"),
+        # T3.5: ``base_worker._on_retry_later`` counts events filtered
+        # by ``(job_id, event)``; composite index keeps the count
+        # index-only without scanning every event for that job.
+        Index("ix_job_event_job_id_event", "job_id", "event"),
     )
 
 
