@@ -30,6 +30,51 @@ limitations of its predecessors (PIS and FANTASIA):
    to submit sequences and retrieve predictions through a web interface or a
    REST API.
 
+Four-layer architecture
+-----------------------
+
+PROTEA is structured in four horizontal layers with strict downward dependency:
+
+.. code-block:: text
+
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │  PRESENTATION LAYER                                                      │
+   │  Next.js SPA (port 3000)   ·   REST clients   ·   LAFA containers       │
+   │  (lafa_knn_v1, lafa_knn_8plm, lafa_v18 — each wraps protea-predict)     │
+   └──────────────────────────────────────┬──────────────────────────────────┘
+                                          │  HTTP (port 8000)
+   ┌──────────────────────────────────────▼──────────────────────────────────┐
+   │  API LAYER                                                               │
+   │  FastAPI   /v1/jobs   /v1/datasets   /v1/reranker-models                 │
+   │  /v1/scoring   /v1/auth   /v1/stack   + 11 more routers (17 total)       │
+   │  Auth gate: ApiKey header (T5.6a) · Bearer JWT (T5.6b, pending)          │
+   │  Rate limiting: slowapi (T5.6b, pending)                                 │
+   └──────────────────────────────────────┬──────────────────────────────────┘
+                                          │  publishes job UUID to queue
+   ┌──────────────────────────────────────▼──────────────────────────────────┐
+   │  WORKER LAYER                                                            │
+   │  RabbitMQ queues                     Worker processes (one+ per queue)   │
+   │  ┌──────────────────────────┐        BaseWorker (QueueConsumer) or       │
+   │  │ protea.ping              │        OperationConsumer                   │
+   │  │ protea.jobs              │                                            │
+   │  │ protea.training          │ coord  predict_go_terms_batch delegates to │
+   │  │ protea.embeddings        │ coord  protea_method.pipeline.predict()    │
+   │  │ protea.embeddings.batch  │ eph.   (pure inference library, F2C.5b)    │
+   │  │ protea.embeddings.write  │ eph.                                       │
+   │  │ protea.predictions       │ coord  OperationRegistry (15 operations)   │
+   │  │ protea.predictions.batch │ eph.   11 job-backed + 4 ephemeral         │
+   │  │ protea.predictions.write │ eph.                                       │
+   │  │ protea.evaluations       │                                            │
+   │  └──────────────────────────┘                                            │
+   └──────────────────────────────────────┬──────────────────────────────────┘
+                                          │  SQLAlchemy 2.x ORM
+   ┌──────────────────────────────────────▼──────────────────────────────────┐
+   │  DATA LAYER                                                              │
+   │  PostgreSQL 16 + pgvector (embeddings storage only; KNN on CPU)          │
+   │  ArtifactStore: local FS (file://) or MinIO (s3://) for blobs            │
+   │  (train.parquet, eval.parquet, manifest.json, booster model.txt)         │
+   └─────────────────────────────────────────────────────────────────────────┘
+
 Runtime stack
 -------------
 
@@ -61,6 +106,9 @@ PROTEA runs as a set of cooperative processes managed by ``scripts/manage.sh``:
    │                                     │                               │
    │                             Worker processes                        │
    │                          (one or more per queue)                    │
+   │                          predict_go_terms_batch delegates           │
+   │                          KNN + feature compute to                   │
+   │                          protea_method.pipeline.predict() (F2C.5b)  │
    │                                     │                               │
    │                                     ▼                               │
    │                                PostgreSQL + pgvector                │

@@ -6,6 +6,52 @@ keys (T5.6a). Bearer JWT (T5.6b) and oauth2-proxy in front of the
 admin UI (T5.6c) are deferred to follow-up slices; this page only
 covers the first iteration.
 
+Auth gate overview
+------------------
+
+The authentication surface sits between the network edge and the
+FastAPI application layer. Each incoming request passes through the
+gate in order:
+
+.. code-block:: text
+
+                      HTTP request
+                           │
+   ┌───────────────────────▼───────────────────────────────────────────┐
+   │  EDGE  (T5.6c, pending: oauth2-proxy + Authentik for browser UI)  │
+   └───────────────────────┬───────────────────────────────────────────┘
+                           │
+   ┌───────────────────────▼───────────────────────────────────────────┐
+   │  RATE LIMITER  (T5.6b, pending: slowapi per-IP + per-key buckets) │
+   └───────────────────────┬───────────────────────────────────────────┘
+                           │
+   ┌───────────────────────▼───────────────────────────────────────────┐
+   │  API KEY GATE  (T5.6a, active)                                    │
+   │                                                                   │
+   │  require_api_key dependency on protected POST endpoints           │
+   │                                                                   │
+   │  Authorization: ApiKey <raw_key>       (preferred)                │
+   │  X-Api-Key: <raw_key>                  (alternative)              │
+   │  Bearer JWT   <token>                  (T5.6b, pending)           │
+   │                                                                   │
+   │  key check: sha256(raw_key) vs ApiKey.key_hash                    │
+   │  on mismatch: 401 + WWW-Authenticate: ApiKey                      │
+   │                                                                   │
+   │  dev override: PROTEA_AUTHN_REQUIRED=false skips gate             │
+   └───────────────────────┬───────────────────────────────────────────┘
+                           │
+   ┌───────────────────────▼───────────────────────────────────────────┐
+   │  FASTAPI ROUTER  (open GET / protected POST)                      │
+   │                                                                   │
+   │  Protected:  POST /v1/jobs                                        │
+   │              POST /v1/datasets                                    │
+   │              POST /v1/reranker-models/import                      │
+   │              POST /v1/reranker-models/import-by-reference         │
+   │                                                                   │
+   │  Open (T5.6b will restrict):  GET /v1/jobs,  GET /v1/proteins,   │
+   │                               GET /v1/scoring/*, GET /v1/stack    │
+   └───────────────────────────────────────────────────────────────────┘
+
 Protected routes
 ----------------
 
