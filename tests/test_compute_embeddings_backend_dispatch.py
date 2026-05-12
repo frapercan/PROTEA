@@ -250,28 +250,6 @@ def test_plugin_embed_chunks_matches_legacy_embed_esm_bit_exact() -> None:
     assert ref[0][0].chunk_index_e == got[0][0].chunk_index_e
 
 
-def test_dispatch_embed_non_migrated_backends_still_use_local_shims() -> None:
-    """T2A.4 sibling slice will migrate esm3c; until then it keeps
-    dispatching through the module-local ``_embed_esm3c`` function so
-    existing test seams remain stable."""
-    _reset_plugin_cache()
-    fake_plugin = MagicMock()
-    fake_plugin.name = "esm3c"
-    fake_plugin.embed_chunks = MagicMock(return_value=[["should-not-be-called"]])
-
-    config = MagicMock()
-    config.model_backend = "esm3c"
-
-    with patch.object(
-        ce_module, "_get_backend_plugins", return_value={"esm3c": fake_plugin}
-    ), patch.object(ce_module, "_embed_esm3c", return_value=[["legacy"]]) as legacy_esm3c:
-        out = ce_module._dispatch_embed("model", "tok", ["MSEQ"], config, "cpu")
-
-    assert out == [["legacy"]]
-    legacy_esm3c.assert_called_once()
-    fake_plugin.embed_chunks.assert_not_called()
-
-
 # ---------------------------------------------------------------------------
 # T2A.2 — t5 dispatch goes through plugin.embed_chunks
 # ---------------------------------------------------------------------------
@@ -507,6 +485,135 @@ def test_plugin_embed_chunks_matches_legacy_embed_ankh_bit_exact() -> None:
     # Plugin port — fresh model so the random tensor matches via seed.
     model_b, tok_b = _make_inputs()
     got = ankh_plugin.embed_chunks(model_b, tok_b, ["ACDEF"], cfg, "cpu")
+
+    assert len(ref) == 1 == len(got)
+    assert len(ref[0]) == 1 == len(got[0])
+    np.testing.assert_array_equal(ref[0][0].vector, got[0][0].vector)
+    assert ref[0][0].chunk_index_s == got[0][0].chunk_index_s
+    assert ref[0][0].chunk_index_e == got[0][0].chunk_index_e
+
+
+# ---------------------------------------------------------------------------
+# T2A.4 — esm3c dispatch goes through plugin.embed_chunks
+# ---------------------------------------------------------------------------
+
+
+def test_dispatch_embed_routes_esm3c_to_plugin_embed_chunks() -> None:
+    """T2A.4: the esm3c branch in ``_dispatch_embed`` calls
+    ``plugin.embed_chunks`` instead of the local ``_embed_esm3c`` shim."""
+    _reset_plugin_cache()
+    fake_plugin = MagicMock()
+    fake_plugin.name = "esm3c"
+    fake_plugin.embed_chunks.return_value = [["chunk"]]
+
+    config = MagicMock()
+    config.model_backend = "esm3c"
+
+    with patch.object(
+        ce_module, "_get_backend_plugins", return_value={"esm3c": fake_plugin}
+    ), patch.object(ce_module, "_embed_esm3c") as legacy_shim:
+        out = ce_module._dispatch_embed("model", "tok", ["MSEQ"], config, "cpu")
+
+    assert out == [["chunk"]]
+    fake_plugin.embed_chunks.assert_called_once_with(
+        "model", "tok", ["MSEQ"], config, "cpu"
+    )
+    legacy_shim.assert_not_called()
+
+
+def test_dispatch_embed_esm3c_falls_back_to_local_shim_when_plugin_lacks_method() -> None:
+    """Backward-compat: if the installed esm3c plugin pre-dates T2A.4 and
+    has no ``embed_chunks`` attribute, ``_dispatch_embed`` falls through
+    to the local ``_embed_esm3c`` shim so PROTEA boots while the backends
+    PR cascade is still landing.
+
+    The esm3c fall-through uses the 4-arg call signature (no tokenizer)
+    to match the legacy ``_embed_esm3c`` shape.
+    """
+    _reset_plugin_cache()
+    legacy_plugin = MagicMock(spec=["name", "load_model", "embed_batch"])
+    legacy_plugin.name = "esm3c"
+
+    config = MagicMock()
+    config.model_backend = "esm3c"
+
+    with patch.object(
+        ce_module, "_get_backend_plugins", return_value={"esm3c": legacy_plugin}
+    ), patch.object(ce_module, "_embed_esm3c", return_value=[["fallback"]]) as shim:
+        out = ce_module._dispatch_embed("model", "tok", ["MSEQ"], config, "cpu")
+
+    assert out == [["fallback"]]
+    shim.assert_called_once_with("model", ["MSEQ"], config, "cpu")
+
+
+def test_plugin_embed_chunks_matches_legacy_embed_esm3c_bit_exact() -> None:
+    """T2A.4 acceptance: ``EsmcBackend.embed_chunks`` and the legacy
+    ``_embed_esm3c`` shim produce bit-exact ``ChunkEmbedding`` vectors.
+
+    The plugin's implementation is a literal port of PROTEA's pre-plugin
+    ``_embed_esm3c_one`` (per-sequence SDK loop, max_length truncation,
+    BOS / EOS stripping, layer selection, residue / CLS pooling); this
+    guard catches accidental drift in either side. Uses a synthetic
+    stub for ``model.encode`` / ``model.logits`` so no real ESM-C
+    weights are downloaded.
+
+    Skipped when the installed ``protea-backends`` build pre-dates
+    T2A.4 (no ``embed_chunks`` attribute on the esm3c plugin); the
+    dispatch fall-back is already exercised in
+    ``test_dispatch_embed_esm3c_falls_back_to_local_shim_when_plugin_lacks_method``.
+    """
+    from typing import Any
+    from unittest.mock import MagicMock
+
+    import numpy as np
+    import torch
+    from protea_backends.esm3c import plugin as esm3c_plugin
+
+    if not hasattr(esm3c_plugin, "embed_chunks"):
+        pytest.skip("installed protea-backends pre-dates T2A.4 (no embed_chunks)")
+
+    _reset_plugin_cache()
+
+    cfg = MagicMock()
+    cfg.model_name = "esmc_300m"
+    cfg.model_backend = "esm3c"
+    cfg.layer_indices = [0]
+    cfg.layer_agg = "mean"
+    cfg.pooling = "mean"
+    cfg.normalize = False
+    cfg.normalize_residues = False
+    cfg.max_length = 1022
+    cfg.use_chunking = False
+    cfg.chunk_size = 512
+    cfg.chunk_overlap = 0
+
+    dim = 16
+    seq_len_with_special = 7  # 5 content + BOS + EOS
+
+    def _make_model() -> Any:
+        """Stub ESM-C model: ``logits`` returns a deterministic
+        ``hidden_states`` list shaped ``[(1, L, D)]``."""
+        torch.manual_seed(0)
+        hidden = torch.randn(1, seq_len_with_special, dim)
+        mock_logits_output = MagicMock()
+        mock_logits_output.hidden_states = [hidden]
+        mock_model = MagicMock()
+        # ``parameters`` is consulted by the plugin to read device_obj
+        # via ``next(model.parameters()).device``; PROTEA's shim does
+        # not need it (uses the ``device`` arg directly).
+        mock_param = torch.nn.Parameter(torch.zeros(1))
+        mock_model.parameters.return_value = iter([mock_param])
+        mock_model.encode.return_value = "encoded"
+        mock_model.logits.return_value = mock_logits_output
+        return mock_model
+
+    # Reference: legacy _embed_esm3c shim (4-arg signature: no tokenizer).
+    model_a = _make_model()
+    ref = ce_module._embed_esm3c(model_a, ["ACDEF"], cfg, "cpu")
+
+    # Plugin port: 5-arg signature (tokenizer slot accepted and ignored).
+    model_b = _make_model()
+    got = esm3c_plugin.embed_chunks(model_b, None, ["ACDEF"], cfg, "cpu")
 
     assert len(ref) == 1 == len(got)
     assert len(ref[0]) == 1 == len(got[0])
