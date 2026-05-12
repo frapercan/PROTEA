@@ -96,9 +96,7 @@ def _as_float(value: str | None, default: float) -> float:
     try:
         return float(value)
     except ValueError:
-        _LOGGER.warning(
-            "invalid PROTEA_OTEL_SAMPLE_RATIO=%r, falling back to %s", value, default
-        )
+        _LOGGER.warning("invalid PROTEA_OTEL_SAMPLE_RATIO=%r, falling back to %s", value, default)
         return default
 
 
@@ -365,3 +363,169 @@ class _NoopTracer:
 
     def start_as_current_span(self, *_args: Any, **_kwargs: Any) -> _NoopTracer._NoopCm:
         return _NoopTracer._NoopCm()
+
+
+# ---------------------------------------------------------------------------
+# T5.2: Prometheus metric registry
+# ---------------------------------------------------------------------------
+#
+# Sibling helper to the OpenTelemetry SDK boot above. The OTel side owns
+# distributed traces; this side owns the scrape-friendly counters and
+# histograms surfaced at ``GET /v1/metrics``. Keeping the two in the
+# same module is intentional: they share the same "optional dependency
+# with soft fallback" pattern and the same telemetry boundary, and
+# co-locating them avoids growing a third infrastructure shim file.
+#
+# A single :class:`prometheus_client.CollectorRegistry` instance owns
+# the five process-level metrics the platform exports. The registry is
+# deliberately isolated (i.e. NOT the default global one) so test runs
+# can rebuild it between cases without leaking samples, and so the
+# ``/v1/metrics`` router never accidentally surfaces metrics defined by
+# third-party libraries that auto-register on import.
+#
+# Metric inventory (T5.2 AC):
+#   * protea_jobs_total{operation,status} - Counter
+#   * protea_job_duration_seconds         - Histogram
+#   * protea_embeddings_batch_seconds     - Histogram
+#   * protea_predictions_batch_seconds    - Histogram
+#   * protea_db_pool_in_use               - Gauge
+#
+# Histogram buckets cover the realistic spread for PROTEA: jobs run
+# from sub-second (cheap ping ops) to several hours (full embeddings
+# batch). Embedding / prediction batches are scoped to a single chunk
+# and live in the seconds-to-minutes range.
+
+_JOB_DURATION_BUCKETS = (
+    0.05,
+    0.1,
+    0.25,
+    0.5,
+    1.0,
+    2.5,
+    5.0,
+    10.0,
+    30.0,
+    60.0,
+    120.0,
+    300.0,
+    600.0,
+    1800.0,
+    3600.0,
+)
+_BATCH_DURATION_BUCKETS = (
+    0.01,
+    0.05,
+    0.1,
+    0.25,
+    0.5,
+    1.0,
+    2.5,
+    5.0,
+    10.0,
+    30.0,
+    60.0,
+    120.0,
+)
+
+
+@dataclass(frozen=True)
+class MetricRegistry:
+    """Bag of the five Prometheus collectors exposed by ``/v1/metrics``.
+
+    The registry is intentionally a Parameter Object (not a module-level
+    set of globals) so tests can build a throwaway one and the API can
+    stash a single instance on ``app.state.metrics``.
+    """
+
+    registry: Any  # prometheus_client.CollectorRegistry
+    jobs_total: Any  # Counter
+    job_duration_seconds: Any  # Histogram
+    embeddings_batch_seconds: Any  # Histogram
+    predictions_batch_seconds: Any  # Histogram
+    db_pool_in_use: Any  # Gauge
+
+
+def build_metric_registry() -> MetricRegistry | None:
+    """Construct the five-metric registry, returning ``None`` when
+    ``prometheus_client`` is not installed.
+
+    Mirrors the soft-fail pattern of :func:`configure_telemetry`: a
+    minimal worker image that does not pull the observability extras
+    keeps booting; the ``/v1/metrics`` router degrades to a 503 instead
+    of crashing the whole API.
+    """
+    try:
+        from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram
+    except ImportError as exc:
+        _LOGGER.warning(
+            "prometheus_client not installed (%s); /v1/metrics will return 503. "
+            "Install the `telemetry` extra to enable Prometheus scraping.",
+            exc,
+        )
+        return None
+
+    registry = CollectorRegistry()
+    return MetricRegistry(
+        registry=registry,
+        jobs_total=Counter(
+            "protea_jobs_total",
+            "Total number of jobs processed, labelled by operation and terminal status.",
+            labelnames=("operation", "status"),
+            registry=registry,
+        ),
+        job_duration_seconds=Histogram(
+            "protea_job_duration_seconds",
+            "End-to-end job duration in seconds (claim to terminal status).",
+            labelnames=("operation", "status"),
+            buckets=_JOB_DURATION_BUCKETS,
+            registry=registry,
+        ),
+        embeddings_batch_seconds=Histogram(
+            "protea_embeddings_batch_seconds",
+            "Wall-clock duration of a single embeddings batch in seconds.",
+            labelnames=("backend",),
+            buckets=_BATCH_DURATION_BUCKETS,
+            registry=registry,
+        ),
+        predictions_batch_seconds=Histogram(
+            "protea_predictions_batch_seconds",
+            "Wall-clock duration of a single predictions batch in seconds.",
+            labelnames=("runner",),
+            buckets=_BATCH_DURATION_BUCKETS,
+            registry=registry,
+        ),
+        db_pool_in_use=Gauge(
+            "protea_db_pool_in_use",
+            "Connections currently checked out of the SQLAlchemy pool.",
+            registry=registry,
+        ),
+    )
+
+
+def refresh_db_pool_gauge(metrics: MetricRegistry, engine: Any) -> None:
+    """Read the SQLAlchemy pool's checked-out count and set the gauge.
+
+    Called from the ``/v1/metrics`` handler on every scrape so the
+    gauge reflects the live pool state without requiring event-listener
+    plumbing. ``engine`` is expected to be a SQLAlchemy ``Engine``; we
+    duck-type via ``engine.pool.checkedout()`` so tests can pass a
+    minimal stub. Any AttributeError is swallowed (the pool may not
+    expose the method on some dialects).
+    """
+    try:
+        in_use = engine.pool.checkedout()
+    except AttributeError:
+        return
+    metrics.db_pool_in_use.set(in_use)
+
+
+def render_metrics(metrics: MetricRegistry) -> tuple[bytes, str]:
+    """Generate the Prometheus exposition payload for ``metrics``.
+
+    Returns the body bytes + the canonical ``Content-Type`` header value
+    so the router can return a ``Response`` without re-importing
+    ``prometheus_client`` itself.
+    """
+    from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+
+    return generate_latest(metrics.registry), CONTENT_TYPE_LATEST

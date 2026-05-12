@@ -5063,6 +5063,34 @@
         ]
       }
     },
+    "/v1/metrics": {
+      "get": {
+        "description": "Render the live Prometheus exposition payload.\n\nReturns 503 when the API was booted without the ``prometheus_client``\ndependency (a minimal worker image, for example). This keeps the\nendpoint shape stable for Prometheus scrapers, which retry on 5xx,\ninstead of leaking an import error.",
+        "operationId": "get_metrics_v1_metrics_get",
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {}
+            },
+            "description": "Prometheus text exposition format (version 0.0.4)."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "prometheus_client not installed in this build."
+          }
+        },
+        "summary": "Get Metrics",
+        "tags": [
+          "metrics"
+        ]
+      }
+    },
     "/v1/proteins": {
       "get": {
         "description": "Paginated protein listing with optional full-text search across accession, entry name, gene name, and organism.",
@@ -6673,6 +6701,10 @@
     {
       "description": "API key lifecycle (T5.6a) \u2014 mint, list, revoke keys used to authenticate sensitive POSTs.",
       "name": "auth"
+    },
+    {
+      "description": "Prometheus scrape endpoint (T5.2). Returns process-level counters and histograms in the standard text exposition format for the platform Grafana and alerting stack.",
+      "name": "metrics"
     }
   ]
 }
