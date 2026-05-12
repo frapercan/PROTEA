@@ -4,13 +4,13 @@ import os
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any
 
 from pydantic import Field, field_validator
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
-from protea.core.evaluation import EvaluationData, load_evaluation_data_for_set
+from protea.core.evaluation import load_evaluation_data_for_set
 from protea.core.operations import _run_cafa_artifacts as _artifacts
 from protea.core.operations import _run_cafa_data_helpers as _data
 from protea.core.operations import _run_cafa_summary as _summary
@@ -33,86 +33,19 @@ from protea.core.operations._run_cafa_helpers import (  # noqa: F401
 from protea.core.operations._run_cafa_reranker_loader import (
     load_reranker_models_for_payload,
 )
+from protea.core.operations._run_cafa_setup import (  # noqa: F401
+    _emit_evaluation_setup_events,
+    _EvalInputs,
+    _load_terms_of_interest,
+    _PipelineCtx,
+)
 from protea.infrastructure.orm.models.annotation.evaluation_result import EvaluationResult
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
-from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
 from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
 from protea.infrastructure.settings import load_settings
 from protea.infrastructure.storage import ArtifactStore, get_artifact_store
-
-
-class _EvalInputs(NamedTuple):
-    """Validated entities + supporting data shared across the run pipeline."""
-
-    eval_set_id: uuid.UUID
-    pred_set_id: uuid.UUID
-    eval_set: EvaluationSet
-    pred_set: PredictionSet
-    data: EvaluationData
-    snapshot: OntologySnapshot
-    pivot_snapshot_id: uuid.UUID
-    toi_go_ids: list[str]
-
-
-class _PipelineCtx(NamedTuple):
-    """Bundle of run-pipeline inputs threaded through the tempdir block."""
-
-    inputs: _EvalInputs
-    scoring_snapshot: ScoringConfig | None
-    reranker_models: dict[str, Any]
-    result_id: uuid.UUID
-    artifact_store: ArtifactStore
-
-
-def _load_terms_of_interest(
-    session: Session, pivot_snapshot_id: uuid.UUID
-) -> list[str]:
-    """Return every GO id under the pivot snapshot (the term universe).
-
-    Result feeds straight into cafaeval as the ``-toi`` argument so the
-    scorer evaluates against exactly the terms present in the resolved
-    snapshot, not the full ontology.
-    """
-    return [
-        gid
-        for (gid,) in session.query(GOTerm.go_id)
-        .filter(GOTerm.ontology_snapshot_id == pivot_snapshot_id)
-        .all()
-    ]
-
-
-def _emit_evaluation_setup_events(emit: EmitFn, inputs: _EvalInputs) -> None:
-    """Fire the ``start`` + ``delta_done`` events the UI gates on.
-
-    Pulled out of :meth:`RunCafaEvaluationOperation._load_evaluation_inputs`
-    to keep that method under the §3 60-LOC ceiling. Order matters:
-    ``start`` first (so the UI can flip to running) then
-    ``delta_done`` once the per-category counts are computed.
-    """
-    emit(
-        "run_cafa_evaluation.start",
-        None,
-        {
-            "evaluation_set_id": str(inputs.eval_set_id),
-            "prediction_set_id": str(inputs.pred_set_id),
-            "pivot_ontology_snapshot_id": str(inputs.pivot_snapshot_id),
-            "mode": (inputs.eval_set.stats or {}).get("mode", "same_snapshot"),
-            "obo_url": inputs.snapshot.obo_url,
-        },
-        "info",
-    )
-    emit(
-        "run_cafa_evaluation.delta_done",
-        None,
-        {
-            "nk_proteins": inputs.data.nk_proteins,
-            "lk_proteins": inputs.data.lk_proteins,
-            "pk_proteins": inputs.data.pk_proteins,
-        },
-        "info",
-    )
 
 
 class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
@@ -190,9 +123,7 @@ class RunCafaEvaluationOperation:
         "PredictionSet, optionally weighted by Information Accretion."
     )
 
-    def summarize_payload(
-        self, payload: dict[str, Any], *, session: Session | None = None
-    ) -> str:
+    def summarize_payload(self, payload: dict[str, Any], *, session: Session | None = None) -> str:
         return _summary.summarize_payload(payload or {}, session)
 
     def execute(
@@ -245,9 +176,7 @@ class RunCafaEvaluationOperation:
             },
             "info",
         )
-        return OperationResult(
-            result={"evaluation_result_id": str(result_id), "results": results}
-        )
+        return OperationResult(result={"evaluation_result_id": str(result_id), "results": results})
 
     @staticmethod
     def _load_evaluation_inputs(
@@ -310,9 +239,7 @@ class RunCafaEvaluationOperation:
         with tempfile.TemporaryDirectory(prefix="protea_cafa_") as tmpdir:
             artifacts_root = Path(tmpdir) / "artifacts"
             artifacts_root.mkdir(parents=True, exist_ok=True)
-            run_data = self._stage_evaluator_inputs(
-                session, p, ctx, artifacts_root, emit
-            )
+            run_data = self._stage_evaluator_inputs(session, p, ctx, artifacts_root, emit)
             # No-op commit: releases the DB connection back to the pool before
             # cafaeval forks worker processes via multiprocessing.Pool. Forked
             # children would otherwise inherit SQLAlchemy connection-pool
@@ -356,13 +283,13 @@ class RunCafaEvaluationOperation:
         delta_proteins = set(data.nk) | set(data.lk) | set(data.pk)
         emit(
             "run_cafa_evaluation.writing_predictions",
-            None, {"delta_proteins": len(delta_proteins)}, "info",
+            None,
+            {"delta_proteins": len(delta_proteins)},
+            "info",
         )
         has_rerankers = bool(ctx.reranker_models)
         if not has_rerankers:
-            self._write_shared_prediction_file(
-                session, p, ctx, artifacts_root, delta_proteins
-            )
+            self._write_shared_prediction_file(session, p, ctx, artifacts_root, delta_proteins)
         return CafaEvalRunContext(
             pred_set_id=inputs.pred_set_id,
             delta_proteins=delta_proteins,
