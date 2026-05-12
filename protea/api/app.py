@@ -7,11 +7,13 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from protea.api.bearer import assert_bearer_config
 from protea.api.middleware import VisitorCounterMiddleware
 from protea.api.problem_details import (
     install_problem_openapi_schema,
     register_problem_handlers,
 )
+from protea.api.rate_limit import install_rate_limiter
 from protea.api.routers import admin as admin_router
 from protea.api.routers import annotate as annotate_router
 from protea.api.routers import annotations as annotations_router
@@ -262,6 +264,11 @@ def create_app(project_root: Path | None = None) -> FastAPI:
     settings = load_settings(project_root)
     factory = build_session_factory(settings.db_url)
 
+    # T5.6b: fail loudly when the bearer secret is missing in a
+    # production-ish configuration so a misconfigured deployment cannot
+    # silently 401 every authenticated request.
+    assert_bearer_config()
+
     app = FastAPI(
         title="PROTEA API",
         version="0.1.0",
@@ -276,6 +283,10 @@ def create_app(project_root: Path | None = None) -> FastAPI:
     app.state.benchmark_config = load_benchmark_config(project_root)
 
     _register_middlewares(app, settings.allowed_origins)
+    # T5.6b: install the slowapi limiter BEFORE the router exception
+    # handlers so the 429 handler resolves through the same RFC 7807
+    # plumbing as the rest of the API.
+    install_rate_limiter(app)
     register_problem_handlers(app)
     install_problem_openapi_schema(app)
     _register_health_endpoints(app, factory, settings)

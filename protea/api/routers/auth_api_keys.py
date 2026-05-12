@@ -23,12 +23,13 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.auth import generate_raw_key, hash_key, prefix_of
 from protea.api.deps import get_session_factory
+from protea.api.rate_limit import api_keys_limit, limiter
 from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.api_key import ApiKey
 from protea.infrastructure.session import session_scope
@@ -87,7 +88,10 @@ def _to_summary(row: ApiKey) -> dict[str, Any]:
 
 
 @router.post("", status_code=201, summary="Mint a new API key")
+@limiter.limit(api_keys_limit)
 def create_api_key(
+    request: Request,
+    response: Response,
     body: CreateApiKeyRequest,
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:

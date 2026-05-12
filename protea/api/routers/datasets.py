@@ -16,12 +16,13 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session, sessionmaker
 
-from protea.api.auth import require_api_key
+from protea.api.auth import require_api_key_or_bearer
 from protea.api.deps import get_amqp_url, get_session_factory
+from protea.api.rate_limit import datasets_limit, limiter
 from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.embedding.dataset import Dataset
 from protea.infrastructure.orm.models.job import Job, JobEvent
@@ -188,9 +189,12 @@ def _dataset_to_dict(d: Dataset) -> dict[str, Any]:
 @router.post(
     "",
     summary="Enqueue a dataset export job",
-    dependencies=[Depends(require_api_key)],
+    dependencies=[Depends(require_api_key_or_bearer)],
 )
+@limiter.limit(datasets_limit)
 def create_dataset(
+    request: Request,
+    response: Response,
     body: CreateDatasetRequest,
     factory: sessionmaker[Session] = Depends(get_session_factory),
     amqp_url: str = Depends(get_amqp_url),

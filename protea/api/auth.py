@@ -46,9 +46,14 @@ import secrets
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import BackgroundTasks, Depends, Header, Request
+from fastapi import BackgroundTasks, Depends, Header, HTTPException, Request
 from sqlalchemy.orm import Session, sessionmaker
 
+from protea.api.bearer import (
+    BearerPrincipal,
+    decode_bearer_token,
+    extract_bearer_token,
+)
 from protea.api.deps import get_session_factory
 from protea.infrastructure.orm.models.api_key import ApiKey
 from protea.infrastructure.session import session_scope
@@ -115,10 +120,10 @@ def _extract_raw_key(authorization: str | None, x_api_key: str | None) -> str | 
     """Return the raw API key from either header, or ``None``.
 
     Header precedence: ``Authorization: ApiKey <key>`` wins over
-    ``X-Api-Key: <key>``. The bearer-token scheme (``Bearer <jwt>``) is
-    not handled here; it lands in T5.6b. Anything else on
-    ``Authorization`` is ignored so that other middlewares can layer
-    their own schemes without colliding with ours.
+    ``X-Api-Key: <key>``. The bearer-token scheme (``Bearer <jwt>``,
+    T5.6b) is handled separately in :mod:`protea.api.bearer`; anything
+    else on ``Authorization`` is ignored so that other middlewares can
+    layer their own schemes without colliding with ours.
     """
     if authorization:
         token = authorization.strip()
@@ -258,10 +263,65 @@ def require_api_key(
     return snapshot
 
 
+def require_api_key_or_bearer(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+    authorization: str | None = Header(
+        default=None,
+        description=(
+            "Combined challenge: ``Authorization: ApiKey <key>`` "
+            "(T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). "
+            "``X-Api-Key`` is also honoured for ApiKey clients."
+        ),
+    ),
+    x_api_key: str | None = Header(default=None, alias="X-Api-Key"),
+) -> ApiKey | BearerPrincipal | None:
+    """Accept either an API key or a Bearer JWT on the same route.
+
+    Resolution order:
+
+    1. ``PROTEA_AUTHN_REQUIRED`` falsy → short-circuit, return ``None``.
+    2. ``Authorization: Bearer <jwt>`` → validate JWT, return
+       :class:`BearerPrincipal`.
+    3. Otherwise fall back to the T5.6a ApiKey flow.
+
+    Bearer wins when both happen to be present so a misconfigured
+    client cannot downgrade to the weaker scheme by sending both
+    headers. Failure modes return 401 with the matching
+    ``WWW-Authenticate`` header.
+    """
+    if not _authn_required():
+        return None
+
+    bearer = extract_bearer_token(authorization)
+    if bearer is not None:
+        return decode_bearer_token(bearer)
+
+    raw = _extract_raw_key(authorization, x_api_key)
+    if not raw:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing API key or bearer token",
+            headers={"WWW-Authenticate": f"{_AUTHN_SCHEME}, Bearer"},
+        )
+
+    snapshot, error = _lookup_and_validate(factory, raw)
+    if snapshot is None:
+        raise HTTPException(
+            status_code=401,
+            detail=error or "Invalid API key",
+            headers={"WWW-Authenticate": f"{_AUTHN_SCHEME}, Bearer"},
+        )
+    background_tasks.add_task(_stamp_last_used, factory, snapshot.id)
+    return snapshot
+
+
 __all__ = [
     "PREFIX_LEN",
     "generate_raw_key",
     "hash_key",
     "prefix_of",
     "require_api_key",
+    "require_api_key_or_bearer",
 ]
