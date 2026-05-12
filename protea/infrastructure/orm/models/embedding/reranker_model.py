@@ -31,6 +31,11 @@ class RerankerModel(Base):
     __table_args__ = (
         # T3.5: ``latest reranker`` lookups order by ``created_at DESC``.
         Index("ix_reranker_model_created_at", "created_at"),
+        # T1.6 (ADR D10): parallel ``schema_sha_v2`` for booster-side
+        # schema fingerprint. Inference compares the live family-aware
+        # SHA against this column when present; legacy rows fall back
+        # to ``feature_schema_sha``.
+        Index("ix_reranker_model_schema_sha_v2", "schema_sha_v2"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -60,6 +65,14 @@ class RerankerModel(Base):
     # Feature-family-aware schema fingerprint (12 hex chars) from
     # ``protea_reranker_lab.contracts.compute_feature_schema_sha``.
     feature_schema_sha: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # T1.6 (ADR D10): parallel column carrying the canonical
+    # ``protea_contracts.compute_schema_sha`` digest computed against the
+    # booster's feature set. Nullable until backfill completes; the
+    # backfill script derives it from the dataset's ``schema_sha_v2``
+    # for rows linked to a ``Dataset``, or from
+    # ``protea_contracts.compute_schema_sha`` applied to the legacy
+    # column when the booster is detached.
+    schema_sha_v2: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     embedding_config_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
