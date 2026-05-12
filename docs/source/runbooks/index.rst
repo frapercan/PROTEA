@@ -15,3 +15,4 @@ fix sequence that an operator can execute without prior context.
    embedding-worker-oom
    schema-sha-v2-backfill
    observability
+   loki
