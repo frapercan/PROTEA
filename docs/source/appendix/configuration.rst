@@ -77,6 +77,26 @@ Environment variable overrides
      - Overrides ``storage.minio.secret_key``.
    * - ``PROTEA_MINIO_SECURE``
      - Overrides ``storage.minio.secure``: truthy enables HTTPS.
+   * - ``PROTEA_AUTHN_REQUIRED``
+     - When ``false``, the authentication gate is disabled (useful for local
+       development without minted API keys). Default is ``true``, so
+       production deployments stay safe by accident. Accepted truthy values:
+       ``1``, ``true``, ``yes``, ``on`` (case-insensitive).
+   * - ``PROTEA_JWT_SECRET``
+     - Shared HS256 secret used to sign and verify ``Authorization: Bearer
+       <jwt>`` tokens (T5.6b). Must be set when ``PROTEA_AUTHN_REQUIRED=true``;
+       the API process will refuse to start if the secret is absent and
+       authentication is enabled. Minimum length: 32 bytes of randomness.
+   * - ``PROTEA_RATELIMIT_JOBS``
+     - slowapi rate-limit rule for ``POST /v1/jobs``. Default ``10/minute``.
+       Accepts any slowapi syntax, e.g. ``"100/minute"`` or
+       ``"1000/hour;200/minute"`` (T5.6b).
+   * - ``PROTEA_RATELIMIT_DATASETS``
+     - slowapi rate-limit rule for ``POST /v1/datasets``. Default
+       ``5/minute`` (T5.6b).
+   * - ``PROTEA_RATELIMIT_API_KEYS``
+     - slowapi rate-limit rule for ``POST /v1/auth/api-keys``. Default
+       ``5/hour`` (T5.6b).
    * - ``PROTEA_ADMIN_TOKEN``
      - Overrides ``admin.token``.
    * - ``PROTEA_REF_CACHE_DIR``

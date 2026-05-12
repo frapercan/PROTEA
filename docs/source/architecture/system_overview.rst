@@ -47,8 +47,8 @@ PROTEA is structured in four horizontal layers with strict downward dependency:
    │  API LAYER                                                               │
    │  FastAPI   /v1/jobs   /v1/datasets   /v1/reranker-models                 │
    │  /v1/scoring   /v1/auth   /v1/stack   + 11 more routers (17 total)       │
-   │  Auth gate: ApiKey header (T5.6a) · Bearer JWT (T5.6b, pending)          │
-   │  Rate limiting: slowapi (T5.6b, pending)                                 │
+   │  Auth gate: ApiKey header (T5.6a) · Bearer JWT (T5.6b, active)           │
+   │  Rate limiting: slowapi per-principal (T5.6b, active)                    │
    └──────────────────────────────────────┬──────────────────────────────────┘
                                           │  publishes job UUID to queue
    ┌──────────────────────────────────────▼──────────────────────────────────┐

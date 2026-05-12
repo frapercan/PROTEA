@@ -23,20 +23,21 @@ gate in order:
    └───────────────────────┬───────────────────────────────────────────┘
                            │
    ┌───────────────────────▼───────────────────────────────────────────┐
-   │  RATE LIMITER  (T5.6b, pending: slowapi per-IP + per-key buckets) │
+   │  RATE LIMITER  (T5.6b, active: slowapi per-principal buckets)     │
    └───────────────────────┬───────────────────────────────────────────┘
                            │
    ┌───────────────────────▼───────────────────────────────────────────┐
-   │  API KEY GATE  (T5.6a, active)                                    │
+   │  AUTH GATE  (T5.6a + T5.6b, active)                               │
    │                                                                   │
-   │  require_api_key dependency on protected POST endpoints           │
+   │  require_api_key_or_bearer dependency on protected POST endpoints │
    │                                                                   │
-   │  Authorization: ApiKey <raw_key>       (preferred)                │
-   │  X-Api-Key: <raw_key>                  (alternative)              │
-   │  Bearer JWT   <token>                  (T5.6b, pending)           │
+   │  Authorization: ApiKey <raw_key>       (API-key form)             │
+   │  X-Api-Key: <raw_key>                  (alternative carrier)      │
+   │  Authorization: Bearer <jwt>           (JWT form, HS256)          │
    │                                                                   │
    │  key check: sha256(raw_key) vs ApiKey.key_hash                    │
-   │  on mismatch: 401 + WWW-Authenticate: ApiKey                      │
+   │  JWT check: HS256 via PROTEA_JWT_SECRET; sub+iat+exp required     │
+   │  on failure: 401 + WWW-Authenticate: ApiKey, Bearer               │
    │                                                                   │
    │  dev override: PROTEA_AUTHN_REQUIRED=false skips gate             │
    └───────────────────────┬───────────────────────────────────────────┘
@@ -49,7 +50,7 @@ gate in order:
    │              POST /v1/reranker-models/import                      │
    │              POST /v1/reranker-models/import-by-reference         │
    │                                                                   │
-   │  Open (T5.6b will restrict):  GET /v1/jobs,  GET /v1/proteins,   │
+   │  Open (T5.6c may restrict):  GET /v1/jobs,  GET /v1/proteins,    │
    │                               GET /v1/scoring/*, GET /v1/stack    │
    └───────────────────────────────────────────────────────────────────┘
 
