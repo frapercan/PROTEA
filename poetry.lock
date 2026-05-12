@@ -2789,6 +2789,28 @@ opentelemetry-util-http = "0.62b1"
 instruments = ["fastapi (>=0.92,<1.0)"]
 
 [[package]]
+name = "opentelemetry-instrumentation-sqlalchemy"
+version = "0.62b1"
+description = "OpenTelemetry SQLAlchemy instrumentation"
+optional = false
+python-versions = ">=3.9"
+groups = ["telemetry"]
+files = [
+    {file = "opentelemetry_instrumentation_sqlalchemy-0.62b1-py3-none-any.whl", hash = "sha256:613542ecd52aabeec83d8813b5c287a3fb6c9ac3cd660694c94c0571f066e972"},
+    {file = "opentelemetry_instrumentation_sqlalchemy-0.62b1.tar.gz", hash = "sha256:bdeac015351a1de057e8ea39f1fe26c9e60ea6bedbf1d5ad6a8262a516b3dc7d"},
+]
+
+[package.dependencies]
+opentelemetry-api = ">=1.12,<2.0"
+opentelemetry-instrumentation = "0.62b1"
+opentelemetry-semantic-conventions = "0.62b1"
+packaging = ">=21.0"
+wrapt = ">=1.11.2"
+
+[package.extras]
+instruments = ["sqlalchemy (>=1.0.0,<2.1.0)"]
+
+[[package]]
 name = "opentelemetry-proto"
 version = "1.41.1"
 description = "OpenTelemetry Python Proto"
@@ -6016,4 +6038,4 @@ storage = ["minio"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "20deec40f9367babe30dc2c0265eb5fab3759a15f360623d98863590586528e2"
+content-hash = "98677166918d4fd0c2e70948e73639b35bddb496f32d420dad2c5308424bfa06"
