@@ -30,6 +30,7 @@ from protea.core.operations.predict_go_terms import (
     StorePredictionsOperation,
 )
 from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationOperation
+from protea.core.operations.run_interproscan_batch import RunInterProScanBatchOperation
 
 
 def build_operation_registry() -> OperationRegistry:
@@ -40,6 +41,7 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(LoadOntologySnapshotOperation())
     registry.register(LoadQuickGOAnnotationsOperation())
     registry.register(LoadGOAAnnotationsOperation())
+    registry.register(RunInterProScanBatchOperation())
     registry.register(GenerateEvaluationSetOperation())
     registry.register(RunCafaEvaluationOperation())
     registry.register(ComputeEmbeddingsOperation())
