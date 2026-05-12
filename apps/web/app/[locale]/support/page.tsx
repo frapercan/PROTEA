@@ -31,6 +31,7 @@ export default function SupportPage() {
   if (loading) {
     return (
       <div className="max-w-2xl space-y-10">
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900">{t("title")}</h1>
         <div className="rounded-2xl border border-blue-100 bg-blue-50 px-8 py-10 text-center space-y-3">
           <Skeleton className="h-14 w-14 mx-auto" />
           <Skeleton className="h-12 w-32 mx-auto" />
@@ -56,6 +57,7 @@ export default function SupportPage() {
 
   return (
     <div className="max-w-2xl space-y-10">
+      <h1 className="text-2xl font-bold tracking-tight text-slate-900">{t("title")}</h1>
 
       {/* Hero */}
       <div className="rounded-2xl border border-blue-100 bg-blue-50 px-8 py-10 text-center space-y-3">
