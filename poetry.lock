@@ -3047,7 +3047,7 @@ requests = ">=2.31"
 type = "git"
 url = "https://github.com/frapercan/protea-sources.git"
 reference = "master"
-resolved_reference = "1a8a139f443eb7566acb896af6af70860a7ed619"
+resolved_reference = "3cc34ab5bfa06d6db9e4c8f2eebc0a6662545101"
 
 [[package]]
 name = "protobuf"
