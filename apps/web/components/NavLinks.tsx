@@ -96,7 +96,7 @@ function GroupTrigger({
       aria-expanded={open}
       aria-controls={menuId}
       aria-current={groupActive ? "page" : undefined}
-      className={`relative flex items-center gap-1.5 px-3 h-10 rounded-lg text-[14px] font-medium transition-colors ${
+      className={`relative flex items-center gap-1.5 px-3 h-10 rounded-lg text-[14px] font-medium whitespace-nowrap transition-colors ${
         groupActive
           ? "text-blue-700 bg-blue-50/70"
           : open
