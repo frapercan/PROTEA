@@ -250,23 +250,144 @@ def test_plugin_embed_chunks_matches_legacy_embed_esm_bit_exact() -> None:
     assert ref[0][0].chunk_index_e == got[0][0].chunk_index_e
 
 
-def test_dispatch_embed_non_esm_backends_still_use_local_shims() -> None:
-    """T2A.2-T2A.4 sibling slices will migrate these; until then the
-    other backends keep dispatching through the module-local
-    ``_embed_*`` functions so existing test seams remain stable."""
+def test_dispatch_embed_non_migrated_backends_still_use_local_shims() -> None:
+    """T2A.3-T2A.4 sibling slices will migrate these; until then ankh +
+    esm3c keep dispatching through the module-local ``_embed_*``
+    functions so existing test seams remain stable."""
+    _reset_plugin_cache()
+    fake_plugin = MagicMock()
+    fake_plugin.name = "ankh"
+    fake_plugin.embed_chunks = MagicMock(return_value=[["should-not-be-called"]])
+
+    config = MagicMock()
+    config.model_backend = "ankh"
+
+    with patch.object(
+        ce_module, "_get_backend_plugins", return_value={"ankh": fake_plugin}
+    ), patch.object(ce_module, "_embed_ankh", return_value=[["legacy"]]) as legacy_ankh:
+        out = ce_module._dispatch_embed("model", "tok", ["MSEQ"], config, "cpu")
+
+    assert out == [["legacy"]]
+    legacy_ankh.assert_called_once()
+    fake_plugin.embed_chunks.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# T2A.2 — t5 dispatch goes through plugin.embed_chunks
+# ---------------------------------------------------------------------------
+
+
+def test_dispatch_embed_routes_t5_to_plugin_embed_chunks() -> None:
+    """T2A.2: the t5 branch in ``_dispatch_embed`` calls
+    ``plugin.embed_chunks`` instead of the local ``_embed_t5`` shim."""
     _reset_plugin_cache()
     fake_plugin = MagicMock()
     fake_plugin.name = "t5"
-    fake_plugin.embed_chunks = MagicMock(return_value=[["should-not-be-called"]])
+    fake_plugin.embed_chunks.return_value = [["chunk"]]
 
     config = MagicMock()
     config.model_backend = "t5"
 
     with patch.object(
         ce_module, "_get_backend_plugins", return_value={"t5": fake_plugin}
-    ), patch.object(ce_module, "_embed_t5", return_value=[["legacy"]]) as legacy_t5:
+    ), patch.object(ce_module, "_embed_t5") as legacy_shim:
         out = ce_module._dispatch_embed("model", "tok", ["MSEQ"], config, "cpu")
 
-    assert out == [["legacy"]]
-    legacy_t5.assert_called_once()
-    fake_plugin.embed_chunks.assert_not_called()
+    assert out == [["chunk"]]
+    fake_plugin.embed_chunks.assert_called_once_with(
+        "model", "tok", ["MSEQ"], config, "cpu"
+    )
+    legacy_shim.assert_not_called()
+
+
+def test_dispatch_embed_t5_falls_back_to_local_shim_when_plugin_lacks_method() -> None:
+    """Backward-compat: if the installed t5 plugin pre-dates T2A.2 and
+    has no ``embed_chunks`` attribute, ``_dispatch_embed`` falls through
+    to the local ``_embed_t5`` shim so PROTEA boots while the backends
+    PR cascade is still landing."""
+    _reset_plugin_cache()
+    legacy_plugin = MagicMock(spec=["name", "load_model", "embed_batch"])
+    legacy_plugin.name = "t5"
+
+    config = MagicMock()
+    config.model_backend = "t5"
+
+    with patch.object(
+        ce_module, "_get_backend_plugins", return_value={"t5": legacy_plugin}
+    ), patch.object(ce_module, "_embed_t5", return_value=[["fallback"]]) as shim:
+        out = ce_module._dispatch_embed("model", "tok", ["MSEQ"], config, "cpu")
+
+    assert out == [["fallback"]]
+    shim.assert_called_once_with("model", "tok", ["MSEQ"], config, "cpu")
+
+
+def test_plugin_embed_chunks_matches_legacy_embed_t5_bit_exact() -> None:
+    """T2A.2 acceptance: ``T5Backend.embed_chunks`` and the legacy
+    ``_embed_t5`` shim produce bit-exact ``ChunkEmbedding`` vectors.
+
+    The plugin's implementation is a literal port of the local function,
+    but this guard catches accidental drift during the T2A.3-T2A.4
+    sibling migrations (e.g. a shared helper changing one branch but
+    not the other). Uses a synthetic mock model + tokenizer so no real
+    PLM weights are downloaded.
+
+    Skipped when the installed ``protea-backends`` build pre-dates
+    T2A.2 (no ``embed_chunks`` attribute on the t5 plugin); the dispatch
+    fall-back is already exercised in
+    ``test_dispatch_embed_t5_falls_back_to_local_shim_when_plugin_lacks_method``.
+    """
+    from typing import Any
+
+    import numpy as np
+    import torch
+    from protea_backends.t5 import plugin as t5_plugin
+
+    if not hasattr(t5_plugin, "embed_chunks"):
+        pytest.skip("installed protea-backends pre-dates T2A.2 (no embed_chunks)")
+
+    _reset_plugin_cache()
+
+    cfg = MagicMock()
+    cfg.model_name = "Rostlab/prot_t5_xl_uniref50"
+    cfg.model_backend = "t5"
+    cfg.layer_indices = [0]
+    cfg.layer_agg = "mean"
+    cfg.pooling = "mean"
+    cfg.normalize = False
+    cfg.normalize_residues = False
+    cfg.max_length = 1022
+    cfg.use_chunking = False
+    cfg.chunk_size = 512
+    cfg.chunk_overlap = 0
+
+    dim = 16
+    seq_len = 6  # 5 content + EOS (no AA2fold on prot_t5)
+
+    def _make_inputs() -> tuple[Any, Any]:
+        torch.manual_seed(0)
+        hidden = torch.randn(1, seq_len, dim)
+        tokens_dict = {
+            "input_ids": torch.zeros(1, seq_len, dtype=torch.long),
+            "attention_mask": torch.ones(1, seq_len, dtype=torch.long),
+        }
+        mock_outputs = MagicMock()
+        mock_outputs.hidden_states = [hidden]
+        mock_model = MagicMock()
+        mock_model.return_value = mock_outputs
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.batch_encode_plus.return_value = tokens_dict
+        return mock_model, mock_tokenizer
+
+    # Reference: legacy _embed_t5 shim.
+    model_a, tok_a = _make_inputs()
+    ref = ce_module._embed_t5(model_a, tok_a, ["ACDEF"], cfg, "cpu")
+
+    # Plugin port — fresh model so the random tensor matches via seed.
+    model_b, tok_b = _make_inputs()
+    got = t5_plugin.embed_chunks(model_b, tok_b, ["ACDEF"], cfg, "cpu")
+
+    assert len(ref) == 1 == len(got)
+    assert len(ref[0]) == 1 == len(got[0])
+    np.testing.assert_array_equal(ref[0][0].vector, got[0][0].vector)
+    assert ref[0][0].chunk_index_s == got[0][0].chunk_index_s
+    assert ref[0][0].chunk_index_e == got[0][0].chunk_index_e
