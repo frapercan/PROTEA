@@ -622,10 +622,17 @@ Stored as function names rather than direct references so
 behaves correctly: the dispatcher resolves the name via ``getattr`` on
 this module each call, so monkey-patching the symbol routes through.
 
-Once ``protea-backends`` exposes its plugin entry_points (T2A.1-T2A.4),
-this dict can be replaced with an ``importlib.metadata.entry_points``
-lookup without touching any caller.
+Sibling slices T2A.2 (t5), T2A.3 (ankh), T2A.4 (esm3c) port the
+remaining branches onto the plugin and T2A.5b will collapse this dict
+into a pure ``_resolve_backend().embed_chunks(...)`` call.
 """
+
+#: ``model_backend`` values routed to ``plugin.embed_chunks`` instead of
+#: the local ``_embed_*`` shims. T2A.1 lands ``esm``; T2A.2-T2A.4 will
+#: extend this set so the legacy ``_BACKEND_FN_NAMES`` table empties out
+#: backend-by-backend without breaking the test seams that mock the
+#: ``_embed_*`` symbols on this module.
+_PLUGIN_DISPATCH_BACKENDS: frozenset[str] = frozenset({"esm", "auto"})
 
 
 def _dispatch_embed(
@@ -635,16 +642,29 @@ def _dispatch_embed(
     config: EmbeddingConfig,
     device: str,
 ) -> list[list[ChunkEmbedding]]:
-    """Look up the per-backend embed function in ``_BACKEND_FN_NAMES`` and call it.
+    """Route the batch to the right backend implementation.
 
-    Defaults to ``_embed_esm`` (HuggingFace ``EsmModel``) when
-    ``config.model_backend`` is missing from the registry. ESM3c is
-    special-cased because the ESMC SDK exposes a tokenizer-free interface
-    via ``model.encode``; every other backend takes a HuggingFace tokenizer.
+    ``esm`` / ``auto`` go through ``plugin.embed_chunks`` from the
+    ``protea.backends`` entry_points group (T2A.1 migration). The
+    remaining backends still resolve to module-local ``_embed_*`` shims
+    via ``_BACKEND_FN_NAMES``; ``_resolve_backend`` raises ``ValueError``
+    for unknown identifiers so the dispatch never silently falls back
+    on a wrong backend.
+
+    The plugin path falls back to the legacy ``_embed_esm`` shim if the
+    installed ``protea-backends`` build pre-dates T2A.1 (no
+    ``embed_chunks`` attribute on the plugin), which keeps the platform
+    bootable while the plugin PR cascade lands.
     """
     import sys
 
     backend = config.model_backend
+    if backend in _PLUGIN_DISPATCH_BACKENDS:
+        plugin = _resolve_backend(backend)
+        embed_chunks = getattr(plugin, "embed_chunks", None)
+        if embed_chunks is not None:
+            return embed_chunks(model, tokenizer, sequences, config, device)  # type: ignore[no-any-return]
+
     fn_name = _BACKEND_FN_NAMES.get(backend, "_embed_esm")
     fn = getattr(sys.modules[__name__], fn_name)
     if backend == "esm3c":
