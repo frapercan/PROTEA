@@ -57,6 +57,12 @@ var/
 secrets/secrets.dev.yaml
 secrets/secrets.prod.yaml
 
+# Age private keys must never reach the repo. Public keys go in
+# .sops.yaml; private keys live in ~/.config/sops/age/keys.txt only.
+**/age/keys.txt
+*.age.key
+sops_age_key.txt
+
 # LibreOffice lock files
 .~lock.*
 

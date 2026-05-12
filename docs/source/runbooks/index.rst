@@ -9,6 +9,7 @@ fix sequence that an operator can execute without prior context.
    :maxdepth: 1
 
    deployment
+   secrets-management
    stale-job-reaper
    dlq-triage
    ngrok-deploy-recovery

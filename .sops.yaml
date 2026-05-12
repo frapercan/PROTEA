@@ -20,12 +20,20 @@
 # CI: GitHub Actions reads the private key from secret SOPS_AGE_KEY
 # (entire keys.txt body) and writes it to a temp file before invoking
 # sops --decrypt.
+#
+# Onboarding: see docs/source/runbooks/secrets-management.rst for the
+# full workflow (install age + sops, generate keypair, request your
+# pubkey to be added here in a PR).
 
 creation_rules:
+  - path_regex: secrets/example\.enc\.yaml$
+    age: >-
+      age1thpwhp8ggprkcnrczehsfmcmetmekjhf08dz6x6qslp777l934ss460dw0
+
   - path_regex: secrets/secrets\.dev(\.enc)?\.yaml$
     age: >-
-      AGE_RECIPIENT_DEV_PLACEHOLDER
+      age1thpwhp8ggprkcnrczehsfmcmetmekjhf08dz6x6qslp777l934ss460dw0
 
   - path_regex: secrets/secrets\.prod(\.enc)?\.yaml$
     age: >-
-      AGE_RECIPIENT_PROD_PLACEHOLDER
+      age1thpwhp8ggprkcnrczehsfmcmetmekjhf08dz6x6qslp777l934ss460dw0
