@@ -11,6 +11,8 @@ PROTEA provides a unified backend for ingesting protein data from UniProt, compu
 [![codecov](https://codecov.io/gh/frapercan/PROTEA/branch/main/graph/badge.svg)](https://codecov.io/gh/frapercan/PROTEA)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
 
+**Status:** v0.8.0 (experimental, pre-1.0; the platform is production-capable but the public API is not yet stable across minor releases).
+
 ---
 
 ## Live demo
@@ -45,6 +47,7 @@ PROTEA is the successor to [PIS](https://github.com/CBBIO/protein-information-sy
 | **Job queue** | RabbitMQ-backed, 8 queues (ingestion, embeddings, predictions, training), full audit trail per job |
 | **REST API** | FastAPI routers for jobs, proteins, embeddings, query sets, scoring, evaluation, and admin |
 | **Web UI** | Next.js frontend with protein explorer, annotation viewer, prediction browser, and live job widget |
+| **Observability** | OpenTelemetry SDK (OTLP traces/metrics), SQLAlchemy + pika instrumentation, Grafana dashboards for API latency, queues, workers, DB, and embeddings |
 
 ---
 
@@ -170,7 +173,8 @@ poetry run mypy protea                # type checking
 | KNN search | FAISS IVFFlat / numpy (chunked brute-force) |
 | Re-ranker | LightGBM (LambdaRank, IA-weighted samples) |
 | Frontend | Next.js 19 + Tailwind v4 |
-| Deployment | Docker Compose, `scripts/manage.sh` process supervisor |
+| Deployment | Docker Compose, Docker Swarm (stack file), Helm chart skeleton, `scripts/manage.sh` process supervisor |
+| Observability | OpenTelemetry SDK, OTLP export, Grafana dashboards |
 
 ---
 
