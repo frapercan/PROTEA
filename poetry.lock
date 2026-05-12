@@ -2995,7 +2995,7 @@ t5 = ["sentencepiece (>=0.2)", "torch (>=2.1)", "transformers (>=4.40)"]
 type = "git"
 url = "https://github.com/frapercan/protea-backends.git"
 reference = "master"
-resolved_reference = "8376d3c105b3060109a0203efdb64e2320d3c07e"
+resolved_reference = "7f6b9e69ab984321fbac244cce6689dd162bf70f"
 
 [[package]]
 name = "protea-contracts"

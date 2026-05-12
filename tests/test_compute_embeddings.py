@@ -404,10 +404,10 @@ class TestSpecialTokenStripping:
         actual_len = 5  # 4 content + EOS
 
         hidden = torch.zeros(1, batch_len, dim)
-        hidden[0, 0, :] = 1.0   # A
-        hidden[0, 1, :] = 2.0   # C
-        hidden[0, 2, :] = 3.0   # D
-        hidden[0, 3, :] = 4.0   # E
+        hidden[0, 0, :] = 1.0  # A
+        hidden[0, 1, :] = 2.0  # C
+        hidden[0, 2, :] = 3.0  # D
+        hidden[0, 3, :] = 4.0  # E
         hidden[0, 4, :] = 99.0  # EOS — must be excluded
         # padding positions (5..7) remain 0.0
 
@@ -553,20 +553,28 @@ class TestAnkhBackend:
         assert processed == [["A", "C", "D", "E"]]
 
     def test_embed_batch_dispatches_ankh(self) -> None:
-        """ComputeEmbeddingsBatchOperation._embed_batch routes 'ankh' to _embed_ankh."""
+        """ComputeEmbeddingsBatchOperation._embed_batch routes 'ankh' to the
+        ankh plugin's ``embed_chunks`` (T2A.5b plugin-only path)."""
         from protea.core.operations.compute_embeddings import ComputeEmbeddingsBatchOperation
+        from protea.core.plugins import reset_plugin_cache
+
+        reset_plugin_cache("protea.backends")
 
         op = ComputeEmbeddingsBatchOperation()
         cfg = _mock_config(backend="ankh")
         cfg.model_name = "ElnaggarLab/ankh-base"
 
+        fake_plugin = MagicMock()
+        fake_plugin.name = "ankh"
+        fake_plugin.embed_chunks.return_value = [[]]
+
         with patch(
-            "protea.core.operations.compute_embeddings._embed_ankh",
-            return_value=[[]],
-        ) as mock_ankh:
+            "protea.core.operations.compute_embeddings._get_backend_plugins",
+            return_value={"ankh": fake_plugin},
+        ):
             op._embed_batch(MagicMock(), MagicMock(), ["ACDE"], cfg, "cpu")
 
-        mock_ankh.assert_called_once()
+        fake_plugin.embed_chunks.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

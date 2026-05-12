@@ -317,8 +317,8 @@ class ComputeEmbeddingsOperation:
     ) -> list[list[ChunkEmbedding]]:
         """Embed a list of sequences, returning per-chunk results for each.
 
-        Dispatches to the per-backend embed function via ``_EMBED_BACKENDS``
-        (T2A.5). Falls back to ``_embed_esm`` for unknown backends.
+        Delegates to ``_dispatch_embed``, which routes through the
+        backend plugin's ``embed_chunks`` (T2A.5b plugin-only path).
         """
         return _dispatch_embed(model, tokenizer, sequences, config, device)
 
@@ -426,7 +426,7 @@ class ComputeEmbeddingsBatchOperation:
         config: EmbeddingConfig,
         device: str,
     ) -> list[list[ChunkEmbedding]]:
-        """Per-batch dispatch shim; delegates to ``_dispatch_embed`` (T2A.5)."""
+        """Per-batch dispatch shim; delegates to ``_dispatch_embed`` (T2A.5b)."""
         return _dispatch_embed(model, tokenizer, sequences, config, device)
 
 
@@ -571,10 +571,7 @@ def _resolve_backend(backend_name: str) -> Any:
     plugins = _get_backend_plugins()
     key = "esm" if backend_name == "auto" else backend_name
     if key not in plugins:
-        raise ValueError(
-            f"Unknown model_backend: {backend_name!r}. "
-            f"Discovered: {sorted(plugins)}"
-        )
+        raise ValueError(f"Unknown model_backend: {backend_name!r}. Discovered: {sorted(plugins)}")
     return plugins[key]
 
 
@@ -601,45 +598,8 @@ def _load_model(config: EmbeddingConfig, device: str, emit: EmitFn) -> tuple[Any
 
 
 # ---------------------------------------------------------------------------
-# Backend dispatch registry (T2A.5 of master plan v3.2)
+# Backend dispatch (T2A.5b: pure plugin path)
 # ---------------------------------------------------------------------------
-
-_BACKEND_FN_NAMES: dict[str, str] = {
-    "esm3c": "_embed_esm3c",
-    "t5": "_embed_t5",
-    "ankh": "_embed_ankh",
-    "esm": "_embed_esm",
-}
-"""Per-``model_backend`` lookup replacing the duplicated
-``if model_backend ==`` chains in ``ComputeEmbeddings(Batch)Operation._embed_batch``.
-
-When ``model_backend`` is unset or unknown the dispatch falls back to
-``_embed_esm`` (HuggingFace ``EsmModel``), matching the legacy
-``# esm / auto`` branch.
-
-Stored as function names rather than direct references so
-``unittest.mock.patch("protea.core.operations.compute_embeddings._embed_ankh", ...)``
-behaves correctly: the dispatcher resolves the name via ``getattr`` on
-this module each call, so monkey-patching the symbol routes through.
-
-After T2A.3 (ankh) and T2A.4 (esm3c) ported the remaining branches
-onto the plugin, all four bootstrap backends route through
-``plugin.embed_chunks``. T2A.5b will collapse this dict into a pure
-``_resolve_backend().embed_chunks(...)`` call once every supported
-``protea-backends`` pin ships ``embed_chunks`` for every backend.
-"""
-
-#: ``model_backend`` values routed to ``plugin.embed_chunks`` instead of
-#: the local ``_embed_*`` shims. T2A.1 landed ``esm`` / ``auto``; T2A.2
-#: added ``t5``; T2A.3 added ``ankh``; T2A.4 adds ``esm3c``, which
-#: completes the plugin migration for all four bootstrap backends. The
-#: legacy ``_BACKEND_FN_NAMES`` table stays in place as the
-#: backward-compat fall-through while consumers upgrade their
-#: ``protea-backends`` pin; T2A.5b will collapse it once every supported
-#: pin ships ``embed_chunks`` for every backend.
-_PLUGIN_DISPATCH_BACKENDS: frozenset[str] = frozenset(
-    {"esm", "auto", "t5", "ankh", "esm3c"}
-)
 
 
 def _dispatch_embed(
@@ -649,34 +609,16 @@ def _dispatch_embed(
     config: EmbeddingConfig,
     device: str,
 ) -> list[list[ChunkEmbedding]]:
-    """Route the batch to the right backend implementation.
+    """Route the batch to the resolved backend plugin's ``embed_chunks``.
 
-    ``esm`` / ``auto`` (T2A.1), ``t5`` (T2A.2), ``ankh`` (T2A.3) and
-    ``esm3c`` (T2A.4) all go through ``plugin.embed_chunks`` from the
-    ``protea.backends`` entry_points group. ``_resolve_backend`` raises
-    ``ValueError`` for unknown identifiers so the dispatch never
-    silently falls back on a wrong backend.
-
-    The plugin path falls back to the matching legacy ``_embed_*`` shim
-    if the installed ``protea-backends`` build pre-dates the slice that
-    introduced ``embed_chunks`` for that backend, which keeps the
-    platform bootable while the plugin PR cascade lands. The esm3c
-    fall-through uses the 4-arg call signature (no tokenizer) to match
-    the legacy ``_embed_esm3c`` shape.
+    T2A.5b collapsed the legacy ``_BACKEND_FN_NAMES`` fall-back into a
+    single line: every ``model_backend`` PROTEA supports out of the box
+    (``esm``, ``auto``, ``t5``, ``ankh``, ``esm3c``) is now served by the
+    matching ``protea-backends`` plugin via ``plugin.embed_chunks``.
+    ``_resolve_backend`` raises ``ValueError`` for unknown identifiers,
+    so the dispatch never silently falls back on a wrong backend. The
+    legacy ``_embed_*`` shims in ``_compute_embeddings_backends`` are
+    retained as the bit-exact regression reference for the parity tests.
     """
-    import sys
-
-    backend = config.model_backend
-    if backend in _PLUGIN_DISPATCH_BACKENDS:
-        plugin = _resolve_backend(backend)
-        embed_chunks = getattr(plugin, "embed_chunks", None)
-        if embed_chunks is not None:
-            return embed_chunks(model, tokenizer, sequences, config, device)  # type: ignore[no-any-return]
-
-    fn_name = _BACKEND_FN_NAMES.get(backend, "_embed_esm")
-    fn = getattr(sys.modules[__name__], fn_name)
-    if backend == "esm3c":
-        return fn(model, sequences, config, device)
-    return fn(model, tokenizer, sequences, config, device)
-
-
+    plugin = _resolve_backend(config.model_backend)
+    return plugin.embed_chunks(model, tokenizer, sequences, config, device)  # type: ignore[no-any-return]

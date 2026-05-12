@@ -1,49 +1,48 @@
 """Per-PLM backend implementations extracted from ``compute_embeddings``.
 
 This sibling module hosts the four embed-function families (ESM,
-T5, Ankh, ESM3c), the shared layer / pooling / chunking helpers
-they all build on, and the ``ChunkEmbedding`` data container that
-every backend returns. The dispatch registry + plugin loader stay
-in ``compute_embeddings.py``; this file only contains pure
-forward-pass + pooling code.
+T5, Ankh, ESM3c) and the shared layer / pooling / chunking helpers
+they all build on. The dispatch registry + plugin loader stay in
+``compute_embeddings.py``; this file only contains pure forward-pass
++ pooling code.
 
-Pulling them out trims ``compute_embeddings.py`` below the §3 file
-ceiling and isolates the torch / SDK heavy lifting from the
-operation orchestrators.
+The ``ChunkEmbedding`` data container is now sourced from
+``protea_backends._chunk_helpers`` (T2A.5b consolidation) so the
+plugin-returned value (``list[ChunkEmbedding]`` produced by
+``plugin.embed_chunks``) and any PROTEA-local construction share a
+single class identity. PROTEA re-exports it from here and from
+``compute_embeddings`` for backwards-compatible imports.
 
-The four ``_embed_*`` functions are re-exported from
-``compute_embeddings`` (``from ._compute_embeddings_backends
-import _embed_esm, _embed_t5, _embed_ankh, _embed_esm3c``) so the
-``getattr(sys.modules["protea.core.operations.compute_embeddings"],
-fn_name)`` dispatch + the documented
+The four ``_embed_*`` functions are retained as the bit-exact
+parity reference for the plugin ports (see
+``tests/test_compute_embeddings_backend_dispatch.py``) and are
+re-exported from ``compute_embeddings`` so the documented
 ``unittest.mock.patch("protea.core.operations.compute_embeddings._embed_*")``
-test pattern keep working unchanged.
+test pattern keeps working unchanged.
 """
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from typing import Any, NamedTuple
 
-import numpy as np
+from protea_backends._chunk_helpers import ChunkEmbedding
 
 from protea.core.operations._compute_embeddings_helpers import t5_forward_pass
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 
-
-@dataclass
-class ChunkEmbedding:
-    """One pooled embedding for a contiguous residue span of a sequence.
-
-    ``chunk_index_s`` and ``chunk_index_e`` use the same convention as the
-    DB columns: start is 0-based inclusive, end is exclusive.  When chunking
-    is disabled, ``chunk_index_s=0`` and ``chunk_index_e=None`` (full sequence).
-    """
-
-    chunk_index_s: int
-    chunk_index_e: int | None
-    vector: np.ndarray  # 1-D float32
+__all__ = [
+    "ChunkEmbedding",
+    "_aggregate_1d",
+    "_aggregate_residue_layers",
+    "_chunk_and_pool",
+    "_compute_chunk_spans",
+    "_embed_ankh",
+    "_embed_esm",
+    "_embed_esm3c",
+    "_embed_t5",
+    "_validate_layers",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -207,9 +206,7 @@ def _embed_esm_one(
     hidden_states = outputs.hidden_states
     valid_layers = _validate_layers(config.layer_indices, hidden_states, "ESM", seq_str[:20])
     if config.pooling == "cls":
-        layer_tensors_1d = [
-            hidden_states[-(li + 1)][0, 0, :].float() for li in valid_layers
-        ]
+        layer_tensors_1d = [hidden_states[-(li + 1)][0, 0, :].float() for li in valid_layers]
         pooled = _aggregate_1d(layer_tensors_1d, config.layer_agg)
         if config.normalize:
             pooled = F.normalize(pooled.unsqueeze(0), p=2, dim=1).squeeze(0)
@@ -319,9 +316,7 @@ def _t5_pool_one(
 
     actual_len = int(attention_mask[seq_idx].sum().item())
     if config.pooling == "cls":
-        layer_tensors_1d = [
-            hidden_states[-(li + 1)][seq_idx, 0, :].float() for li in valid_layers
-        ]
+        layer_tensors_1d = [hidden_states[-(li + 1)][seq_idx, 0, :].float() for li in valid_layers]
         pooled = _aggregate_1d(layer_tensors_1d, config.layer_agg)
         if config.normalize:
             pooled = F.normalize(pooled.unsqueeze(0), p=2, dim=1).squeeze(0)
@@ -364,24 +359,18 @@ def _embed_t5(
     import torch
 
     use_aa2fold = (
-        mode.use_aa2fold
-        if mode.use_aa2fold is not None
-        else "prostt5" in config.model_name.lower()
+        mode.use_aa2fold if mode.use_aa2fold is not None else "prostt5" in config.model_name.lower()
     )
     cleaned = [re.sub(r"[UZOB]", "X", seq_str) for seq_str in sequences]
     inputs = _t5_tokenise(tokenizer, cleaned, config, mode, use_aa2fold)
     inputs = {k: v.to(device) for k, v in inputs.items()}
 
-    hidden_states = t5_forward_pass(
-        model, inputs["input_ids"], inputs["attention_mask"]
-    )
+    hidden_states = t5_forward_pass(model, inputs["input_ids"], inputs["attention_mask"])
 
     valid_layers = _validate_layers(config.layer_indices, hidden_states, "T5", "batch")
     start_idx = 1 if use_aa2fold else 0  # skip <AA2fold> on ProstT5
     results: list[list[ChunkEmbedding]] = [
-        _t5_pool_one(
-            i, hidden_states, inputs["attention_mask"], valid_layers, start_idx, config
-        )
+        _t5_pool_one(i, hidden_states, inputs["attention_mask"], valid_layers, start_idx, config)
         for i in range(len(sequences))
     ]
 

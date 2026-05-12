@@ -74,16 +74,12 @@ def test_load_model_delegates_to_resolved_plugin() -> None:
     def emit(event: str, payload: object, fields: dict[str, object] | None, level: str) -> None:
         emit_calls.append((event, payload, fields, level))
 
-    with patch.object(
-        ce_module, "_get_backend_plugins", return_value={"esm": fake_plugin}
-    ):
+    with patch.object(ce_module, "_get_backend_plugins", return_value={"esm": fake_plugin}):
         model, tokenizer = ce_module._load_model(config, "cpu", emit)
 
     assert model == "fake_model"
     assert tokenizer == "fake_tokenizer"
-    fake_plugin.load_model.assert_called_once_with(
-        "facebook/esm2_t6_8M_UR50D", "cpu", emit
-    )
+    fake_plugin.load_model.assert_called_once_with("facebook/esm2_t6_8M_UR50D", "cpu", emit)
     event_names = {call[0] for call in emit_calls}
     assert "compute_embeddings.model_load_start" in event_names
     assert "compute_embeddings.model_load_done" in event_names
@@ -126,15 +122,14 @@ def test_dispatch_embed_routes_esm_to_plugin_embed_chunks() -> None:
     config = MagicMock()
     config.model_backend = "esm"
 
-    with patch.object(
-        ce_module, "_get_backend_plugins", return_value={"esm": fake_plugin}
-    ), patch.object(ce_module, "_embed_esm") as legacy_shim:
+    with (
+        patch.object(ce_module, "_get_backend_plugins", return_value={"esm": fake_plugin}),
+        patch.object(ce_module, "_embed_esm") as legacy_shim,
+    ):
         out = ce_module._dispatch_embed("model", "tok", ["MSEQ"], config, "cpu")
 
     assert out == [["chunk"]]
-    fake_plugin.embed_chunks.assert_called_once_with(
-        "model", "tok", ["MSEQ"], config, "cpu"
-    )
+    fake_plugin.embed_chunks.assert_called_once_with("model", "tok", ["MSEQ"], config, "cpu")
     legacy_shim.assert_not_called()
 
 
@@ -148,58 +143,29 @@ def test_dispatch_embed_auto_alias_routes_to_esm_plugin() -> None:
     config = MagicMock()
     config.model_backend = "auto"
 
-    with patch.object(
-        ce_module, "_get_backend_plugins", return_value={"esm": fake_plugin}
-    ):
+    with patch.object(ce_module, "_get_backend_plugins", return_value={"esm": fake_plugin}):
         ce_module._dispatch_embed("model", "tok", ["MSEQ"], config, "cpu")
 
     fake_plugin.embed_chunks.assert_called_once()
-
-
-def test_dispatch_embed_falls_back_to_local_shim_when_plugin_lacks_method() -> None:
-    """Backward-compat: if the installed plugin pre-dates T2A.1 and has
-    no ``embed_chunks`` attribute, ``_dispatch_embed`` falls through to
-    the local ``_embed_esm`` shim so PROTEA boots while the backends PR
-    cascade is still landing."""
-    _reset_plugin_cache()
-    legacy_plugin = MagicMock(spec=["name", "load_model", "embed_batch"])
-    legacy_plugin.name = "esm"
-
-    config = MagicMock()
-    config.model_backend = "esm"
-
-    with patch.object(
-        ce_module, "_get_backend_plugins", return_value={"esm": legacy_plugin}
-    ), patch.object(ce_module, "_embed_esm", return_value=[["fallback"]]) as shim:
-        out = ce_module._dispatch_embed("model", "tok", ["MSEQ"], config, "cpu")
-
-    assert out == [["fallback"]]
-    shim.assert_called_once_with("model", "tok", ["MSEQ"], config, "cpu")
 
 
 def test_plugin_embed_chunks_matches_legacy_embed_esm_bit_exact() -> None:
     """T2A.1 acceptance: ``plugin.embed_chunks`` and the legacy
     ``_embed_esm`` shim produce bit-exact ``ChunkEmbedding`` vectors.
 
-    The plugin's implementation is a literal port of the local function,
-    but this guard catches accidental drift during the T2A.2-T2A.4
-    sibling migrations (e.g. a shared helper changing one branch but
-    not the other). Uses a synthetic mock model + tokenizer so no
-    real PLM weights are downloaded.
-
-    Skipped when the installed ``protea-backends`` build pre-dates
-    T2A.1 (no ``embed_chunks`` attribute on the plugin); the dispatch
-    fall-back is already exercised in
-    ``test_dispatch_embed_falls_back_to_local_shim_when_plugin_lacks_method``.
+    The plugin's implementation is a literal port of the local function;
+    this guard catches accidental drift during the T2A.2-T2A.4 sibling
+    migrations (e.g. a shared helper changing one branch but not the
+    other). Uses a synthetic mock model + tokenizer so no real PLM
+    weights are downloaded. Activated by T2A.5b after the
+    protea-backends pin advanced past #9 (every plugin now exposes
+    ``embed_chunks``).
     """
     from typing import Any
 
     import numpy as np
     import torch
     from protea_backends.esm import plugin as esm_plugin
-
-    if not hasattr(esm_plugin, "embed_chunks"):
-        pytest.skip("installed protea-backends pre-dates T2A.1 (no embed_chunks)")
 
     _reset_plugin_cache()
 
@@ -266,62 +232,32 @@ def test_dispatch_embed_routes_t5_to_plugin_embed_chunks() -> None:
     config = MagicMock()
     config.model_backend = "t5"
 
-    with patch.object(
-        ce_module, "_get_backend_plugins", return_value={"t5": fake_plugin}
-    ), patch.object(ce_module, "_embed_t5") as legacy_shim:
+    with (
+        patch.object(ce_module, "_get_backend_plugins", return_value={"t5": fake_plugin}),
+        patch.object(ce_module, "_embed_t5") as legacy_shim,
+    ):
         out = ce_module._dispatch_embed("model", "tok", ["MSEQ"], config, "cpu")
 
     assert out == [["chunk"]]
-    fake_plugin.embed_chunks.assert_called_once_with(
-        "model", "tok", ["MSEQ"], config, "cpu"
-    )
+    fake_plugin.embed_chunks.assert_called_once_with("model", "tok", ["MSEQ"], config, "cpu")
     legacy_shim.assert_not_called()
-
-
-def test_dispatch_embed_t5_falls_back_to_local_shim_when_plugin_lacks_method() -> None:
-    """Backward-compat: if the installed t5 plugin pre-dates T2A.2 and
-    has no ``embed_chunks`` attribute, ``_dispatch_embed`` falls through
-    to the local ``_embed_t5`` shim so PROTEA boots while the backends
-    PR cascade is still landing."""
-    _reset_plugin_cache()
-    legacy_plugin = MagicMock(spec=["name", "load_model", "embed_batch"])
-    legacy_plugin.name = "t5"
-
-    config = MagicMock()
-    config.model_backend = "t5"
-
-    with patch.object(
-        ce_module, "_get_backend_plugins", return_value={"t5": legacy_plugin}
-    ), patch.object(ce_module, "_embed_t5", return_value=[["fallback"]]) as shim:
-        out = ce_module._dispatch_embed("model", "tok", ["MSEQ"], config, "cpu")
-
-    assert out == [["fallback"]]
-    shim.assert_called_once_with("model", "tok", ["MSEQ"], config, "cpu")
 
 
 def test_plugin_embed_chunks_matches_legacy_embed_t5_bit_exact() -> None:
     """T2A.2 acceptance: ``T5Backend.embed_chunks`` and the legacy
     ``_embed_t5`` shim produce bit-exact ``ChunkEmbedding`` vectors.
 
-    The plugin's implementation is a literal port of the local function,
-    but this guard catches accidental drift during the T2A.3-T2A.4
-    sibling migrations (e.g. a shared helper changing one branch but
-    not the other). Uses a synthetic mock model + tokenizer so no real
-    PLM weights are downloaded.
-
-    Skipped when the installed ``protea-backends`` build pre-dates
-    T2A.2 (no ``embed_chunks`` attribute on the t5 plugin); the dispatch
-    fall-back is already exercised in
-    ``test_dispatch_embed_t5_falls_back_to_local_shim_when_plugin_lacks_method``.
+    The plugin's implementation is a literal port of the local function;
+    this guard catches accidental drift during the T2A.3-T2A.4 sibling
+    migrations (e.g. a shared helper changing one branch but not the
+    other). Uses a synthetic mock model + tokenizer so no real PLM
+    weights are downloaded. Activated by T2A.5b.
     """
     from typing import Any
 
     import numpy as np
     import torch
     from protea_backends.t5 import plugin as t5_plugin
-
-    if not hasattr(t5_plugin, "embed_chunks"):
-        pytest.skip("installed protea-backends pre-dates T2A.2 (no embed_chunks)")
 
     _reset_plugin_cache()
 
@@ -387,63 +323,32 @@ def test_dispatch_embed_routes_ankh_to_plugin_embed_chunks() -> None:
     config = MagicMock()
     config.model_backend = "ankh"
 
-    with patch.object(
-        ce_module, "_get_backend_plugins", return_value={"ankh": fake_plugin}
-    ), patch.object(ce_module, "_embed_ankh") as legacy_shim:
+    with (
+        patch.object(ce_module, "_get_backend_plugins", return_value={"ankh": fake_plugin}),
+        patch.object(ce_module, "_embed_ankh") as legacy_shim,
+    ):
         out = ce_module._dispatch_embed("model", "tok", ["MSEQ"], config, "cpu")
 
     assert out == [["chunk"]]
-    fake_plugin.embed_chunks.assert_called_once_with(
-        "model", "tok", ["MSEQ"], config, "cpu"
-    )
+    fake_plugin.embed_chunks.assert_called_once_with("model", "tok", ["MSEQ"], config, "cpu")
     legacy_shim.assert_not_called()
-
-
-def test_dispatch_embed_ankh_falls_back_to_local_shim_when_plugin_lacks_method() -> None:
-    """Backward-compat: if the installed ankh plugin pre-dates T2A.3 and
-    has no ``embed_chunks`` attribute, ``_dispatch_embed`` falls through
-    to the local ``_embed_ankh`` shim so PROTEA boots while the backends
-    PR cascade is still landing."""
-    _reset_plugin_cache()
-    legacy_plugin = MagicMock(spec=["name", "load_model", "embed_batch"])
-    legacy_plugin.name = "ankh"
-
-    config = MagicMock()
-    config.model_backend = "ankh"
-
-    with patch.object(
-        ce_module, "_get_backend_plugins", return_value={"ankh": legacy_plugin}
-    ), patch.object(ce_module, "_embed_ankh", return_value=[["fallback"]]) as shim:
-        out = ce_module._dispatch_embed("model", "tok", ["MSEQ"], config, "cpu")
-
-    assert out == [["fallback"]]
-    shim.assert_called_once_with("model", "tok", ["MSEQ"], config, "cpu")
 
 
 def test_plugin_embed_chunks_matches_legacy_embed_ankh_bit_exact() -> None:
     """T2A.3 acceptance: ``AnkhBackend.embed_chunks`` and the legacy
     ``_embed_ankh`` shim produce bit-exact ``ChunkEmbedding`` vectors.
 
-    The plugin's implementation delegates to
-    ``protea_backends.t5.embed_chunks_with_mode`` with the same Ankh
-    mode flags PROTEA's ``_embed_ankh`` shim used, so this guard catches
-    accidental drift if either side changes one branch but not the
-    other. Uses a synthetic mock model + tokenizer so no real PLM
-    weights are downloaded.
-
-    Skipped when the installed ``protea-backends`` build pre-dates
-    T2A.3 (no ``embed_chunks`` attribute on the ankh plugin); the
-    dispatch fall-back is already exercised in
-    ``test_dispatch_embed_ankh_falls_back_to_local_shim_when_plugin_lacks_method``.
+    The plugin delegates to ``protea_backends.t5.embed_chunks_with_mode``
+    with the same Ankh mode flags PROTEA's ``_embed_ankh`` shim used, so
+    this guard catches accidental drift if either side changes one
+    branch but not the other. Uses a synthetic mock model + tokenizer
+    so no real PLM weights are downloaded. Activated by T2A.5b.
     """
     from typing import Any
 
     import numpy as np
     import torch
     from protea_backends.ankh import plugin as ankh_plugin
-
-    if not hasattr(ankh_plugin, "embed_chunks"):
-        pytest.skip("installed protea-backends pre-dates T2A.3 (no embed_chunks)")
 
     _reset_plugin_cache()
 
@@ -509,41 +414,15 @@ def test_dispatch_embed_routes_esm3c_to_plugin_embed_chunks() -> None:
     config = MagicMock()
     config.model_backend = "esm3c"
 
-    with patch.object(
-        ce_module, "_get_backend_plugins", return_value={"esm3c": fake_plugin}
-    ), patch.object(ce_module, "_embed_esm3c") as legacy_shim:
+    with (
+        patch.object(ce_module, "_get_backend_plugins", return_value={"esm3c": fake_plugin}),
+        patch.object(ce_module, "_embed_esm3c") as legacy_shim,
+    ):
         out = ce_module._dispatch_embed("model", "tok", ["MSEQ"], config, "cpu")
 
     assert out == [["chunk"]]
-    fake_plugin.embed_chunks.assert_called_once_with(
-        "model", "tok", ["MSEQ"], config, "cpu"
-    )
+    fake_plugin.embed_chunks.assert_called_once_with("model", "tok", ["MSEQ"], config, "cpu")
     legacy_shim.assert_not_called()
-
-
-def test_dispatch_embed_esm3c_falls_back_to_local_shim_when_plugin_lacks_method() -> None:
-    """Backward-compat: if the installed esm3c plugin pre-dates T2A.4 and
-    has no ``embed_chunks`` attribute, ``_dispatch_embed`` falls through
-    to the local ``_embed_esm3c`` shim so PROTEA boots while the backends
-    PR cascade is still landing.
-
-    The esm3c fall-through uses the 4-arg call signature (no tokenizer)
-    to match the legacy ``_embed_esm3c`` shape.
-    """
-    _reset_plugin_cache()
-    legacy_plugin = MagicMock(spec=["name", "load_model", "embed_batch"])
-    legacy_plugin.name = "esm3c"
-
-    config = MagicMock()
-    config.model_backend = "esm3c"
-
-    with patch.object(
-        ce_module, "_get_backend_plugins", return_value={"esm3c": legacy_plugin}
-    ), patch.object(ce_module, "_embed_esm3c", return_value=[["fallback"]]) as shim:
-        out = ce_module._dispatch_embed("model", "tok", ["MSEQ"], config, "cpu")
-
-    assert out == [["fallback"]]
-    shim.assert_called_once_with("model", ["MSEQ"], config, "cpu")
 
 
 def test_plugin_embed_chunks_matches_legacy_embed_esm3c_bit_exact() -> None:
@@ -555,12 +434,7 @@ def test_plugin_embed_chunks_matches_legacy_embed_esm3c_bit_exact() -> None:
     BOS / EOS stripping, layer selection, residue / CLS pooling); this
     guard catches accidental drift in either side. Uses a synthetic
     stub for ``model.encode`` / ``model.logits`` so no real ESM-C
-    weights are downloaded.
-
-    Skipped when the installed ``protea-backends`` build pre-dates
-    T2A.4 (no ``embed_chunks`` attribute on the esm3c plugin); the
-    dispatch fall-back is already exercised in
-    ``test_dispatch_embed_esm3c_falls_back_to_local_shim_when_plugin_lacks_method``.
+    weights are downloaded. Activated by T2A.5b.
     """
     from typing import Any
     from unittest.mock import MagicMock
@@ -568,9 +442,6 @@ def test_plugin_embed_chunks_matches_legacy_embed_esm3c_bit_exact() -> None:
     import numpy as np
     import torch
     from protea_backends.esm3c import plugin as esm3c_plugin
-
-    if not hasattr(esm3c_plugin, "embed_chunks"):
-        pytest.skip("installed protea-backends pre-dates T2A.4 (no embed_chunks)")
 
     _reset_plugin_cache()
 
