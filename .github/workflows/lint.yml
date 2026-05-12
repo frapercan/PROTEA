@@ -44,6 +44,9 @@ jobs:
       - name: Install main + lint dependencies
         run: poetry install --with lint
 
+      - name: poetry lock consistency
+        run: poetry check --lock
+
       - name: ruff check
         run: poetry run ruff check protea scripts
 
