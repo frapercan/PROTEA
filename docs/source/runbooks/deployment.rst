@@ -509,3 +509,5 @@ See also
 - :doc:`observability` for telemetry environment variables (``PROTEA_OTEL_*``)
   that apply across all deployment modes.
 - :doc:`ngrok-deploy-recovery` if the public demo endpoint becomes unreachable.
+- :doc:`disaster-recovery` for the postgres dump and restore procedure
+  (drill and real recovery paths).

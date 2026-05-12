@@ -10,6 +10,7 @@ fix sequence that an operator can execute without prior context.
 
    deployment
    secrets-management
+   disaster-recovery
    stale-job-reaper
    dlq-triage
    ngrok-deploy-recovery
