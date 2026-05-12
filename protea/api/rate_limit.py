@@ -8,6 +8,14 @@ Three POSTs are throttled out of the box:
 * ``POST /datasets``            — 5/min, env
   ``PROTEA_RATELIMIT_DATASETS``
 
+Environment aware rate limiting
+--------------------------------
+
+In test/dev environments (``PROTEA_ENVIRONMENT=test|dev``), rate limits are
+effectively disabled (set to 9999/hour) to allow integration tests and local
+iteration without hitting quota walls. Production deployments should leave
+``PROTEA_ENVIRONMENT`` unset or explicitly set it to "production".
+
 Key function
 ------------
 
@@ -53,14 +61,29 @@ logger = logging.getLogger(__name__)
 ENV_JOBS: Final = "PROTEA_RATELIMIT_JOBS"
 ENV_API_KEYS: Final = "PROTEA_RATELIMIT_API_KEYS"
 ENV_DATASETS: Final = "PROTEA_RATELIMIT_DATASETS"
+ENV_ENVIRONMENT: Final = "PROTEA_ENVIRONMENT"
 
 DEFAULT_JOBS: Final = "10/minute"
 DEFAULT_API_KEYS: Final = "5/hour"
 DEFAULT_DATASETS: Final = "5/minute"
+# Test/dev disabled limit: high enough not to interfere with tests.
+TEST_DISABLED_LIMIT: Final = "9999/hour"
+
+
+def _is_test_env() -> bool:
+    """Return True if running in test or dev environment."""
+    env = os.getenv(ENV_ENVIRONMENT, "").strip().lower()
+    return env in ("test", "dev")
 
 
 def _resolve(env_var: str, default: str) -> str:
-    """Return the operator override if set, else the slice default."""
+    """Return the operator override if set, else the slice default.
+
+    If PROTEA_ENVIRONMENT is test or dev, return the disabled limit
+    instead of the operator override or default.
+    """
+    if _is_test_env():
+        return TEST_DISABLED_LIMIT
     value = os.getenv(env_var)
     return value.strip() if value and value.strip() else default
 
@@ -151,7 +174,9 @@ __all__ = [
     "DEFAULT_JOBS",
     "ENV_API_KEYS",
     "ENV_DATASETS",
+    "ENV_ENVIRONMENT",
     "ENV_JOBS",
+    "TEST_DISABLED_LIMIT",
     "api_keys_limit",
     "datasets_limit",
     "install_rate_limiter",

@@ -16,13 +16,13 @@ from protea.api.rate_limit import (
     DEFAULT_API_KEYS,
     DEFAULT_DATASETS,
     DEFAULT_JOBS,
+    TEST_DISABLED_LIMIT,
     api_keys_limit,
     datasets_limit,
     install_rate_limiter,
     jobs_limit,
     limiter,
 )
-
 
 # ---------------------------------------------------------------------------
 # Env knob resolution
@@ -32,18 +32,46 @@ from protea.api.rate_limit import (
 class TestLimitEnvOverrides:
     def test_jobs_default(self, monkeypatch):
         monkeypatch.delenv("PROTEA_RATELIMIT_JOBS", raising=False)
+        monkeypatch.delenv("PROTEA_ENVIRONMENT", raising=False)
         assert jobs_limit() == DEFAULT_JOBS
 
     def test_jobs_override(self, monkeypatch):
+        monkeypatch.delenv("PROTEA_ENVIRONMENT", raising=False)
         monkeypatch.setenv("PROTEA_RATELIMIT_JOBS", "100/minute")
         assert jobs_limit() == "100/minute"
 
     def test_api_keys_default(self, monkeypatch):
         monkeypatch.delenv("PROTEA_RATELIMIT_API_KEYS", raising=False)
+        monkeypatch.delenv("PROTEA_ENVIRONMENT", raising=False)
         assert api_keys_limit() == DEFAULT_API_KEYS
 
     def test_datasets_default(self, monkeypatch):
         monkeypatch.delenv("PROTEA_RATELIMIT_DATASETS", raising=False)
+        monkeypatch.delenv("PROTEA_ENVIRONMENT", raising=False)
+        assert datasets_limit() == DEFAULT_DATASETS
+
+    def test_test_env_disables_all_limits(self, monkeypatch):
+        monkeypatch.setenv("PROTEA_ENVIRONMENT", "test")
+        monkeypatch.delenv("PROTEA_RATELIMIT_JOBS", raising=False)
+        monkeypatch.delenv("PROTEA_RATELIMIT_API_KEYS", raising=False)
+        monkeypatch.delenv("PROTEA_RATELIMIT_DATASETS", raising=False)
+        assert jobs_limit() == TEST_DISABLED_LIMIT
+        assert api_keys_limit() == TEST_DISABLED_LIMIT
+        assert datasets_limit() == TEST_DISABLED_LIMIT
+
+    def test_dev_env_disables_all_limits(self, monkeypatch):
+        monkeypatch.setenv("PROTEA_ENVIRONMENT", "dev")
+        assert jobs_limit() == TEST_DISABLED_LIMIT
+        assert api_keys_limit() == TEST_DISABLED_LIMIT
+        assert datasets_limit() == TEST_DISABLED_LIMIT
+
+    def test_production_env_respects_defaults(self, monkeypatch):
+        monkeypatch.setenv("PROTEA_ENVIRONMENT", "production")
+        monkeypatch.delenv("PROTEA_RATELIMIT_JOBS", raising=False)
+        monkeypatch.delenv("PROTEA_RATELIMIT_API_KEYS", raising=False)
+        monkeypatch.delenv("PROTEA_RATELIMIT_DATASETS", raising=False)
+        assert jobs_limit() == DEFAULT_JOBS
+        assert api_keys_limit() == DEFAULT_API_KEYS
         assert datasets_limit() == DEFAULT_DATASETS
 
 
