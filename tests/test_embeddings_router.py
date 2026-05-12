@@ -76,7 +76,7 @@ def client(session):
     with patch(
         "protea.api.routers.embeddings.session_scope", side_effect=lambda _: _mock_scope(session)
     ), patch(
-        "protea.services.embeddings_service.session_scope",
+        "protea.services._embeddings_cafa_helpers.session_scope",
         side_effect=lambda _: _mock_scope(session),
     ), patch(
         "protea.services._embeddings_predictions_helpers.session_scope",
