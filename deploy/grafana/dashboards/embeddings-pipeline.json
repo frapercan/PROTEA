@@ -1,0 +1,274 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Embeddings pipeline health: compute_embeddings coordinator -> compute_embeddings_batch (GPU) -> store_embeddings. Tracks per-sequence throughput, GPU inference time, batch sizes and writer backlog. Metric names live under the protea_embeddings_* family that T5.2 will export from the batch and write operations.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "protea-prometheus" },
+      "description": "Sequences embedded per second, broken down by EmbeddingConfig (PLM model + pooling).",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never"
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "protea-prometheus" },
+          "editorMode": "code",
+          "expr": "sum by (embedding_config) (rate(protea_embeddings_sequences_total[$__rate_interval]))",
+          "legendFormat": "{{embedding_config}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Sequence throughput",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "protea-prometheus" },
+      "description": "p50 / p95 of GPU inference time per batch.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never"
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "protea-prometheus" },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.50, sum by (le, embedding_config) (rate(protea_embeddings_batch_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "p50 {{embedding_config}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "protea-prometheus" },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (le, embedding_config) (rate(protea_embeddings_batch_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "p95 {{embedding_config}}",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "GPU batch duration",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "protea-prometheus" },
+      "description": "Distribution of batch sizes (sequences per inference call).",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 3,
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "protea-prometheus" },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(protea_embeddings_batch_size_bucket[$__rate_interval])))",
+          "legendFormat": "p50",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "protea-prometheus" },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(protea_embeddings_batch_size_bucket[$__rate_interval])))",
+          "legendFormat": "p95",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Batch size quantiles",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "protea-prometheus" },
+      "description": "Writer queue: ratio of sequences inferred to sequences persisted. Sustained values below 1 mean the writer is the bottleneck.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.8 },
+              { "color": "green", "value": 0.95 }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "id": 4,
+      "options": {
+        "minVizHeight": 200,
+        "minVizWidth": 200,
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "pluginVersion": "11.3.0",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "protea-prometheus" },
+          "editorMode": "code",
+          "expr": "sum(rate(protea_embeddings_stored_total[$__rate_interval])) / clamp_min(sum(rate(protea_embeddings_sequences_total[$__rate_interval])), 0.001)",
+          "legendFormat": "stored / computed",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Writer keepup",
+      "type": "gauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "protea-prometheus" },
+      "description": "Embedding failures (timeouts, OOM, GPU errors) per second.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "lineWidth": 1
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "id": 5,
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "protea-prometheus" },
+          "editorMode": "code",
+          "expr": "sum by (reason) (rate(protea_embeddings_failures_total[$__rate_interval]))",
+          "legendFormat": "{{reason}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Failures by reason",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "protea-prometheus" },
+      "description": "Total sequences embedded since process start, per backend (esm, prott5, ankh, ...).",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "align": "auto",
+            "cellOptions": { "type": "color-text" },
+            "inspect": false
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "id": 6,
+      "options": {
+        "cellHeight": "sm",
+        "footer": { "countRows": false, "fields": "", "reducer": ["sum"], "show": true },
+        "showHeader": true
+      },
+      "pluginVersion": "11.3.0",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "protea-prometheus" },
+          "editorMode": "code",
+          "expr": "sum by (backend) (protea_embeddings_sequences_total)",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "{{backend}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Cumulative sequences by backend",
+      "type": "table"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["protea", "embeddings", "gpu"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "PROTEA / Embeddings pipeline",
+  "uid": "protea-embeddings-pipeline",
+  "version": 1,
+  "weekStart": ""
+}

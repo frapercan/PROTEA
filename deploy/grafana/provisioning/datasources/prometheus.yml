@@ -1,0 +1,30 @@
+# Prometheus datasource provisioning for the PROTEA Grafana stack.
+#
+# The dashboards under deploy/grafana/dashboards/ (api-latency, queue-depth,
+# worker-throughput, db-connections, embeddings-pipeline) query metrics from
+# this datasource using the protea_* naming convention. T5.2 will expose a
+# /metrics endpoint on the PROTEA API; once a Prometheus server is scraping
+# it (and the rabbitmq / postgres / cadvisor exporters), the dashboards
+# render real data without further changes.
+#
+# Until then the dashboards load and their panels show "No data", which is
+# the intended acceptance state for this slice (queries compile, metric
+# names are reserved). Override `url` with PROMETHEUS_URL or by editing the
+# datasource in the Grafana UI if your Prometheus is reachable at a
+# different address.
+
+apiVersion: 1
+
+datasources:
+  - name: PROTEA Prometheus
+    uid: protea-prometheus
+    type: prometheus
+    access: proxy
+    url: http://host.docker.internal:9090
+    jsonData:
+      httpMethod: POST
+      manageAlerts: false
+      prometheusType: Prometheus
+      timeInterval: 15s
+    editable: true
+    isDefault: false
