@@ -24,6 +24,7 @@ from protea.api.routers import embeddings as embeddings_router
 from protea.api.routers import experiment_runs as experiment_runs_router
 from protea.api.routers import jobs as jobs_router
 from protea.api.routers import maintenance as maintenance_router
+from protea.api.routers import metrics as metrics_router
 from protea.api.routers import proteins as proteins_router
 from protea.api.routers import query_sets as query_sets_router
 from protea.api.routers import registry as registry_router
@@ -36,7 +37,7 @@ from protea.core.operation_catalog import build_operation_registry
 from protea.infrastructure.benchmark_config import load_benchmark_config
 from protea.infrastructure.session import build_session_factory
 from protea.infrastructure.settings import load_settings
-from protea.infrastructure.telemetry import configure_telemetry
+from protea.infrastructure.telemetry import build_metric_registry, configure_telemetry
 
 _API_DESCRIPTION = (
     "**PROTEA** — Protein Representation and Ontology-Term Enrichment Analysis.\n\n"
@@ -122,6 +123,14 @@ _OPENAPI_TAGS: list[dict[str, str]] = [
             "used to authenticate sensitive POSTs."
         ),
     },
+    {
+        "name": "metrics",
+        "description": (
+            "Prometheus scrape endpoint (T5.2). Returns process-level "
+            "counters and histograms in the standard text exposition "
+            "format for the platform Grafana and alerting stack."
+        ),
+    },
 ]
 
 _ROUTER_MODULES = (
@@ -143,6 +152,7 @@ _ROUTER_MODULES = (
     registry_router,
     stack_router,
     experiment_runs_router,
+    metrics_router,
 )
 
 # T4.1 (D4 accepted 2026-05-06): version prefix for the public API.
@@ -288,6 +298,12 @@ def create_app(project_root: Path | None = None) -> FastAPI:
     # default; opt in with PROTEA_OTEL_ENABLED=1. See
     # protea/infrastructure/telemetry.py for the env contract.
     app.state.telemetry = configure_telemetry(app)
+
+    # T5.2: build the Prometheus collector registry so /v1/metrics
+    # surfaces the five baseline metrics (jobs counter, job/embeddings/
+    # predictions histograms, db pool gauge). Returns None when the
+    # prometheus_client dependency is absent; the router degrades to 503.
+    app.state.metrics = build_metric_registry()
 
     _register_middlewares(app, settings.allowed_origins)
     # T5.6b: install the slowapi limiter BEFORE the router exception
