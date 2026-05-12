@@ -408,6 +408,36 @@ exercised from CLI tools or batch scripts without importing FastAPI.
    :undoc-members:
    :show-inheritance:
 
+Authentication and rate limits
+------------------------------
+
+Four POST routes require a credential (T5.6a + T5.6b):
+
+* ``POST /v1/jobs``
+* ``POST /v1/datasets``
+* ``POST /v1/reranker-models/import``
+* ``POST /v1/reranker-models/import-by-reference``
+
+Three header forms are accepted, any one of which satisfies the gate:
+
+.. code-block:: text
+
+   Authorization: ApiKey <raw_key>
+   X-Api-Key: <raw_key>
+   Authorization: Bearer <jwt>
+
+The API key path uses :func:`protea.api.auth.require_api_key_or_bearer`
+(sha256 hash verification). The Bearer path uses HS256 with the
+``PROTEA_JWT_SECRET`` env var; minimum token claims are ``sub``,
+``iat``, and ``exp``. A missing or invalid credential returns 401 with
+``WWW-Authenticate: ApiKey, Bearer``. Rate limits on these routes are
+enforced by ``slowapi`` per principal (API-key prefix or JWT ``sub``);
+exceeding the limit returns 429 with a ``Retry-After`` header.
+See :doc:`/architecture/auth` for the complete auth and rate-limit
+reference, and :doc:`/appendix/configuration` for the
+``PROTEA_AUTHN_REQUIRED``, ``PROTEA_JWT_SECRET``, and
+``PROTEA_RATELIMIT_*`` knobs.
+
 Endpoints summary
 -----------------
 
