@@ -16,9 +16,27 @@ from protea.core.contracts.operation import EmitFn, RetryLaterError, make_safe_e
 from protea.core.contracts.registry import OperationRegistry
 from protea.infrastructure.orm.models.job import JobEvent
 from protea.infrastructure.queue.publisher import publish_operation
+from protea.infrastructure.telemetry import extract_trace_context, get_tracer
 from protea.workers.base_worker import BaseWorker
 
 logger = logging.getLogger(__name__)
+_TRACER = get_tracer(__name__)
+
+
+def _consumer_span(
+    queue_name: str,
+    properties: BasicProperties,
+    operation: str | None = None,
+) -> Any:
+    """Start a CONSUMER span linked to the producer via ``traceparent``.
+
+    Returns a context manager whose span is the current span for the
+    duration of message handling. When OTel is not installed the
+    underlying tracer is a no-op stand-in (see telemetry.get_tracer).
+    """
+    ctx = extract_trace_context(properties.headers)
+    span_name = f"amqp.process {operation}" if operation else f"amqp.process {queue_name}"
+    return _TRACER.start_as_current_span(span_name, context=ctx)
 
 _DLX_NAME = "protea.dlx"
 _DLQ_NAME = "protea.dead-letter"
@@ -159,27 +177,41 @@ class QueueConsumer:
 
         logger.info("Dispatching job. job_id=%s queue=%s", job_id, self._queue_name)
 
-        # ACK before execution so long-running jobs don't hit RabbitMQ's
-        # consumer_timeout. The job is already recorded as RUNNING in the DB,
-        # so a worker crash can be detected and recovered externally.
-        channel.basic_ack(delivery_tag=method.delivery_tag)
-        logger.info("Job acked. job_id=%s", job_id)
+        # T5.1b: open a CONSUMER span linked to the producer via the
+        # ``traceparent`` header so the job span stitches under the
+        # originating HTTP request.
+        with _consumer_span(self._queue_name, properties) as span:
+            span.set_attribute("messaging.system", "rabbitmq")
+            span.set_attribute("messaging.destination", self._queue_name)
+            span.set_attribute("messaging.operation", "process")
+            span.set_attribute("protea.job_id", str(job_id))
 
-        try:
-            self._worker.handle_job(job_id)
-        except RetryLaterError as exc:
-            delay = exc.delay_seconds
-            logger.info("Job will retry in %ss. job_id=%s reason=%s", delay, job_id, exc)
-            channel.connection.sleep(delay)
-            channel.basic_publish(
-                exchange="",
-                routing_key=self._queue_name,
-                body=json.dumps({"job_id": str(job_id)}).encode(),
-                properties=pika.BasicProperties(delivery_mode=2),
-            )
-            logger.info("Job re-published. job_id=%s queue=%s", job_id, self._queue_name)
-        except Exception as exc:
-            logger.error("Job failed. job_id=%s error=%s", job_id, exc)
+            # ACK before execution so long-running jobs don't hit RabbitMQ's
+            # consumer_timeout. The job is already recorded as RUNNING in the DB,
+            # so a worker crash can be detected and recovered externally.
+            channel.basic_ack(delivery_tag=method.delivery_tag)
+            logger.info("Job acked. job_id=%s", job_id)
+
+            try:
+                self._worker.handle_job(job_id)
+            except RetryLaterError as exc:
+                delay = exc.delay_seconds
+                logger.info(
+                    "Job will retry in %ss. job_id=%s reason=%s", delay, job_id, exc
+                )
+                channel.connection.sleep(delay)
+                channel.basic_publish(
+                    exchange="",
+                    routing_key=self._queue_name,
+                    body=json.dumps({"job_id": str(job_id)}).encode(),
+                    properties=pika.BasicProperties(delivery_mode=2),
+                )
+                logger.info(
+                    "Job re-published. job_id=%s queue=%s", job_id, self._queue_name
+                )
+            except Exception as exc:
+                span.record_exception(exc)
+                logger.error("Job failed. job_id=%s error=%s", job_id, exc)
 
 
 class OperationConsumer:
@@ -280,28 +312,43 @@ class OperationConsumer:
             self._queue_name,
         )
 
-        op = self._registry.get(decoded.operation_name)
-        session = self._factory()
-        try:
-            emit = make_safe_emit(self._make_raw_emit(decoded.parent_job_id))
-            result = op.execute(session, decoded.payload, emit=emit)
-            session.commit()
-            # Forward any downstream operation messages (e.g. GPU→write worker).
-            for queue_name, op_payload in result.publish_operations or []:
-                publish_operation(self._amqp_url, queue_name, op_payload)
-            channel.basic_ack(delivery_tag=method.delivery_tag)
-            logger.info("Operation acked. operation=%s", decoded.operation_name)
-        except Exception as exc:
+        # T5.1b: open a CONSUMER span using the inbound traceparent so
+        # the operation span chains under the dispatching HTTP/worker
+        # span. ``decoded.operation_name`` is part of the span name so
+        # OTel UIs can filter directly by op.
+        with _consumer_span(
+            self._queue_name, properties, operation=decoded.operation_name
+        ) as span:
+            span.set_attribute("messaging.system", "rabbitmq")
+            span.set_attribute("messaging.destination", self._queue_name)
+            span.set_attribute("messaging.operation", "process")
+            span.set_attribute("protea.operation", decoded.operation_name)
+            if decoded.parent_job_id is not None:
+                span.set_attribute("protea.parent_job_id", str(decoded.parent_job_id))
+
+            op = self._registry.get(decoded.operation_name)
+            session = self._factory()
             try:
-                session.rollback()
-            except Exception:
-                pass
-            if "CUDA out of memory" in str(exc):
-                self._handle_cuda_oom(channel, method, body, decoded, exc)
-            else:
-                self._handle_general_failure(channel, method, decoded, exc)
-        finally:
-            session.close()
+                emit = make_safe_emit(self._make_raw_emit(decoded.parent_job_id))
+                result = op.execute(session, decoded.payload, emit=emit)
+                session.commit()
+                # Forward any downstream operation messages (e.g. GPU→write worker).
+                for queue_name, op_payload in result.publish_operations or []:
+                    publish_operation(self._amqp_url, queue_name, op_payload)
+                channel.basic_ack(delivery_tag=method.delivery_tag)
+                logger.info("Operation acked. operation=%s", decoded.operation_name)
+            except Exception as exc:
+                span.record_exception(exc)
+                try:
+                    session.rollback()
+                except Exception:
+                    pass
+                if "CUDA out of memory" in str(exc):
+                    self._handle_cuda_oom(channel, method, body, decoded, exc)
+                else:
+                    self._handle_general_failure(channel, method, decoded, exc)
+            finally:
+                session.close()
 
     @staticmethod
     def _decode_message(

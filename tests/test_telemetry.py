@@ -21,7 +21,12 @@ from protea.infrastructure.telemetry import (
     _as_bool,
     _as_float,
     _build_provider,
+    _NoopTracer,
     configure_telemetry,
+    extract_trace_context,
+    get_tracer,
+    inject_trace_context,
+    instrument_sqlalchemy_engine,
     resolve_telemetry_config,
 )
 
@@ -293,3 +298,84 @@ class TestBuildProvider:
             captured["exporter_kwargs"]["endpoint"]
             == "http://collector:4318/v1/traces"
         )
+
+
+# ---------------------------------------------------------------------------
+# T5.1b: SQLAlchemy + pika instrumentation helpers
+# ---------------------------------------------------------------------------
+
+
+class TestInstrumentSqlalchemyEngine:
+    """``instrument_sqlalchemy_engine`` must be safe under the three
+    states the worker boot can find itself in: telemetry disabled, OTel
+    enabled but instrumentor missing, or fully configured."""
+
+    def test_skips_when_disabled(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monkeypatch.delenv("PROTEA_OTEL_ENABLED", raising=False)
+        engine = MagicMock()
+        with caplog.at_level(logging.DEBUG):
+            instrument_sqlalchemy_engine(engine)
+        # Engine is never touched when telemetry is disabled.
+        assert engine.method_calls == []
+
+    def test_logs_warning_when_instrumentor_missing(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monkeypatch.setenv("PROTEA_OTEL_ENABLED", "1")
+        monkeypatch.setitem(
+            sys.modules, "opentelemetry.instrumentation.sqlalchemy", None
+        )
+        with caplog.at_level(logging.WARNING):
+            instrument_sqlalchemy_engine(MagicMock())
+        assert "SQLAlchemy instrumentor not installed" in caplog.text
+
+
+class TestPropagationHelpers:
+    """The pika producer/consumer flow goes through these helpers; when
+    OTel is not installed they must degrade to a clean no-op."""
+
+    def test_inject_returns_headers_when_otel_absent(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setitem(sys.modules, "opentelemetry.propagate", None)
+        headers: dict[str, Any] = {}
+        result = inject_trace_context(headers)
+        # Same mapping back, untouched, when propagator is unavailable.
+        assert result is headers
+        assert result == {}
+
+    def test_extract_returns_none_when_otel_absent(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setitem(sys.modules, "opentelemetry.propagate", None)
+        assert extract_trace_context({"traceparent": "00-x-y-01"}) is None
+
+    def test_extract_handles_none_headers(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setitem(sys.modules, "opentelemetry.propagate", None)
+        assert extract_trace_context(None) is None
+
+
+class TestGetTracer:
+    """``get_tracer`` returns a no-op tracer when the API is missing so
+    publishers/consumers can call ``start_as_current_span`` without
+    branching on import success."""
+
+    def test_returns_noop_when_otel_absent(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setitem(sys.modules, "opentelemetry", None)
+        tracer = get_tracer("protea.test")
+        assert isinstance(tracer, _NoopTracer)
+
+    def test_noop_span_supports_context_manager_and_api(self) -> None:
+        tracer = _NoopTracer()
+        with tracer.start_as_current_span("op", context=None) as span:
+            span.set_attribute("k", "v")
+            span.record_exception(RuntimeError("boom"))
+            span.set_status("ok")
+        # Reaching this line proves the CM exits cleanly.
+        assert True

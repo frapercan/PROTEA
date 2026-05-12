@@ -293,6 +293,68 @@ class TestPublishJob:
         # Exponential up to attempt 5 (16s); capped at 30s for the rest.
         assert sleep_calls == [1, 2, 4, 8, 16, 30, 30, 30, 30, 30, 30]
 
+    def test_publish_injects_traceparent_header(self):
+        """T5.1b: ``inject_trace_context`` runs inside ``_publish``; even
+        without an active OTel context the publisher must still hand a
+        usable ``headers=`` value (None or {}) so AMQP delivery succeeds.
+        Here we stub the injector so the test exercises the real call
+        path and asserts that whatever the injector wrote ends up on
+        ``BasicProperties``."""
+        conn = MagicMock()
+        channel = MagicMock()
+        conn.channel.return_value = channel
+        conn.is_open = True
+
+        def fake_inject(headers):
+            headers["traceparent"] = "00-trace-span-01"
+
+        with (
+            patch(
+                "protea.infrastructure.queue.publisher.pika.BlockingConnection",
+                return_value=conn,
+            ),
+            patch(
+                "protea.infrastructure.queue.publisher.inject_trace_context",
+                side_effect=fake_inject,
+            ),
+            patch(
+                "protea.infrastructure.queue.publisher._local", threading.local()
+            ),
+        ):
+            publish_job("amqp://localhost/", "q", uuid4())
+
+        channel.basic_publish.assert_called_once()
+        props = channel.basic_publish.call_args.kwargs["properties"]
+        assert props.headers == {"traceparent": "00-trace-span-01"}
+
+    def test_publish_omits_headers_when_injector_writes_nothing(self):
+        """When OTel is disabled the injector leaves the header dict
+        empty; the publisher should pass ``headers=None`` so pika emits
+        a header-less AMQP frame (existing wire-compatible behaviour)."""
+        conn = MagicMock()
+        channel = MagicMock()
+        conn.channel.return_value = channel
+        conn.is_open = True
+
+        with (
+            patch(
+                "protea.infrastructure.queue.publisher.pika.BlockingConnection",
+                return_value=conn,
+            ),
+            patch(
+                "protea.infrastructure.queue.publisher.inject_trace_context",
+                side_effect=lambda h: h,
+            ),
+            patch(
+                "protea.infrastructure.queue.publisher._local", threading.local()
+            ),
+        ):
+            publish_job("amqp://localhost/", "q", uuid4())
+
+        channel.basic_publish.assert_called_once()
+        props = channel.basic_publish.call_args.kwargs["properties"]
+        assert props.headers is None
+
 
 # ---------------------------------------------------------------------------
 # OperationConsumer — emit writes to parent job

@@ -10,8 +10,10 @@ from uuid import UUID
 import pika
 
 from protea.config.tuning import get_tuning
+from protea.infrastructure.telemetry import get_tracer, inject_trace_context
 
 logger = logging.getLogger(__name__)
+_TRACER = get_tracer(__name__)
 
 # Thread-local persistent connection to avoid opening/closing per publish.
 _local = threading.local()
@@ -36,8 +38,37 @@ def _close_cached_connection() -> None:
     _local.connection = None
 
 
+def _publish_with_span(channel: Any, queue_name: str, body: bytes) -> None:
+    """Wrap a single ``basic_publish`` in an OTel CLIENT span and inject
+    the ``traceparent`` header so consumers can stitch the trace.
+
+    Extracted from :func:`_publish` to keep that function under the §3
+    60-LOC method ceiling without losing the retry loop's clarity.
+    """
+    with _TRACER.start_as_current_span(f"amqp.publish {queue_name}") as span:
+        span.set_attribute("messaging.system", "rabbitmq")
+        span.set_attribute("messaging.destination", queue_name)
+        span.set_attribute("messaging.destination_kind", "queue")
+        headers: dict[str, Any] = {}
+        inject_trace_context(headers)
+        channel.basic_publish(
+            exchange="",
+            routing_key=queue_name,
+            body=body,
+            properties=pika.BasicProperties(
+                delivery_mode=pika.DeliveryMode.Persistent,
+                headers=headers or None,
+            ),
+        )
+
+
 def _publish(amqp_url: str, queue_name: str, body: bytes) -> None:
-    """Core publish logic with retries and connection reuse."""
+    """Core publish logic with retries and connection reuse.
+
+    T5.1b: each attempt is wrapped in a CLIENT span via
+    :func:`_publish_with_span` so the W3C ``traceparent`` flows onto the
+    outbound AMQP message.
+    """
     settings = get_tuning().queue
     max_attempts = settings.publisher_max_attempts
     base_delay = settings.publisher_base_delay
@@ -52,14 +83,7 @@ def _publish(amqp_url: str, queue_name: str, body: bytes) -> None:
                 durable=True,
                 arguments={"x-dead-letter-exchange": "protea.dlx"},
             )
-            channel.basic_publish(
-                exchange="",
-                routing_key=queue_name,
-                body=body,
-                properties=pika.BasicProperties(
-                    delivery_mode=pika.DeliveryMode.Persistent,
-                ),
-            )
+            _publish_with_span(channel, queue_name, body)
             return
         except Exception as exc:
             last_exc = exc
