@@ -231,7 +231,11 @@ section summarises the key operational steps.
 **Create Swarm secrets (once per cluster)**
 
 The stack reads credentials from Docker Swarm secrets, not from plaintext
-environment variables. Create the six secrets before the first deploy:
+environment variables. The canonical source of those credentials is the
+sops + age encrypted ``secrets/secrets.prod.enc.yaml`` in the repo;
+see :doc:`secrets-management` for how to obtain a private key, decrypt
+the file, and pipe values into ``docker secret create``. Create the six
+secrets before the first deploy:
 
 .. code-block:: bash
 
