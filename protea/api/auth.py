@@ -275,7 +275,14 @@ def require_api_key_or_bearer(
             "``X-Api-Key`` is also honoured for ApiKey clients."
         ),
     ),
-    x_api_key: str | None = Header(default=None, alias="X-Api-Key"),
+    x_api_key: str | None = Header(
+        default=None,
+        alias="X-Api-Key",
+        description=(
+            "Alternative API-key carrier (``X-Api-Key: <key>``). "
+            "Equivalent to the ``Authorization: ApiKey`` header form."
+        ),
+    ),
 ) -> ApiKey | BearerPrincipal | None:
     """Accept either an API key or a Bearer JWT on the same route.
 

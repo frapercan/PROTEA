@@ -37,6 +37,7 @@ def _generate_spec() -> dict[str, Any]:
             "protea.api.app.build_operation_registry",
             return_value=MagicMock(),
         ),
+        patch("protea.api.app.assert_bearer_config"),
     ):
         from protea.api.app import create_app
 

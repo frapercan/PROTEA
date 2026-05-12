@@ -3183,6 +3183,7 @@
             }
           },
           {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
             "in": "header",
             "name": "X-Api-Key",
             "required": false,
@@ -3195,6 +3196,7 @@
                   "type": "null"
                 }
               ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
               "title": "X-Api-Key"
             }
           }
@@ -4518,6 +4520,7 @@
             }
           },
           {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
             "in": "header",
             "name": "X-Api-Key",
             "required": false,
@@ -4530,6 +4533,7 @@
                   "type": "null"
                 }
               ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
               "title": "X-Api-Key"
             }
           }
@@ -5517,6 +5521,7 @@
             }
           },
           {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
             "in": "header",
             "name": "X-Api-Key",
             "required": false,
@@ -5529,6 +5534,7 @@
                   "type": "null"
                 }
               ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
               "title": "X-Api-Key"
             }
           }
@@ -5602,6 +5608,7 @@
             }
           },
           {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
             "in": "header",
             "name": "X-Api-Key",
             "required": false,
@@ -5614,6 +5621,7 @@
                   "type": "null"
                 }
               ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
               "title": "X-Api-Key"
             }
           }
