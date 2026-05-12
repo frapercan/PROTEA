@@ -195,9 +195,7 @@ def delete_evaluation_set_collect_keys(
         raise EntityNotFoundError("EvaluationSet", eval_id)
     result_keys: list[str] = []
     for r in (
-        session.query(EvaluationResult)
-        .filter(EvaluationResult.evaluation_set_id == eval_id)
-        .all()
+        session.query(EvaluationResult).filter(EvaluationResult.evaluation_set_id == eval_id).all()
     ):
         result_keys.extend((r.results or {}).get("artifacts", {}).get("keys") or [])
     session.delete(e)

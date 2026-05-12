@@ -96,9 +96,9 @@ def iter_predictions_cafa_tsv(
             GOPrediction.protein_accession, GOPrediction.go_term_id
         ).subquery()
 
-        q = session.query(
-            min_dist.c.protein_accession, GOTerm.go_id, min_dist.c.min_distance
-        ).join(GOTerm, min_dist.c.go_term_id == GOTerm.id)
+        q = session.query(min_dist.c.protein_accession, GOTerm.go_id, min_dist.c.min_distance).join(
+            GOTerm, min_dist.c.go_term_id == GOTerm.id
+        )
         if aspect:
             q = q.filter(GOTerm.aspect == aspect.upper())
         if delta_proteins is not None:
