@@ -276,10 +276,15 @@ export function AnnotateForm() {
         onDragLeave={() => setDragOver(false)}
         onDrop={handleDrop}
       >
+        <label htmlFor="annotate-fasta-input" className="sr-only">
+          {t("annotateInputAriaLabel" as any)}
+        </label>
         <textarea
+          id="annotate-fasta-input"
           value={fasta}
           onChange={(e) => setFasta(e.target.value)}
           placeholder={t("annotatePlaceholder" as any)}
+          aria-label={t("annotateInputAriaLabel" as any)}
           rows={6}
           disabled={isRunning || isQueueBlocked}
           className="w-full rounded-lg p-4 text-xs font-mono text-slate-700 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-300 resize-y disabled:opacity-50 disabled:cursor-not-allowed bg-transparent"

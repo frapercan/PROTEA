@@ -101,6 +101,7 @@
     "annotateTitle": "Anota tus proteinas",
     "annotateDescription": "Pega tus secuencias de proteinas en formato FASTA y obtiene anotaciones funcionales automaticamente con el mejor metodo disponible.",
     "annotatePlaceholder": ">sp|P04637|P53_HUMAN Cellular tumor antigen p53\nMEEPQSDPSVEPPLSQETFSDLWKLL...",
+    "annotateInputAriaLabel": "Entrada de secuencia en formato FASTA",
     "annotateTryExample": "Probar ejemplo",
     "annotateUploadFile": "Subir archivo",
     "annotateButton": "Anotar",

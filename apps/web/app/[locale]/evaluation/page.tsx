@@ -504,16 +504,16 @@ function EvaluationSetCard({
                   <table className="w-full text-xs border-collapse">
                     <thead>
                       <tr>
-                        <th className="px-2 py-1 text-left text-slate-500 font-medium"></th>
-                        <th className="px-2 py-1 text-center text-slate-600 font-semibold">BPO</th>
-                        <th className="px-2 py-1 text-center text-slate-600 font-semibold">MFO</th>
-                        <th className="px-2 py-1 text-center text-slate-600 font-semibold">CCO</th>
+                        <th scope="col" className="px-2 py-1 text-left text-slate-500 font-medium"></th>
+                        <th scope="col" className="px-2 py-1 text-center text-slate-600 font-semibold">BPO</th>
+                        <th scope="col" className="px-2 py-1 text-center text-slate-600 font-semibold">MFO</th>
+                        <th scope="col" className="px-2 py-1 text-center text-slate-600 font-semibold">CCO</th>
                       </tr>
                     </thead>
                     <tbody>
                       {(["nk", "lk", "pk"] as const).map((cat) => (
                         <tr key={cat}>
-                          <td className="px-2 py-1.5 font-semibold text-slate-700 uppercase">{cat}</td>
+                          <th scope="row" className="px-2 py-1.5 font-semibold text-slate-700 uppercase text-left">{cat}</th>
                           {(["bpo", "mfo", "cco"] as const).map((asp) => {
                             // Show models matching this category+aspect, or category+null (all-aspect models)
                             const candidates = initialRerankers.filter(

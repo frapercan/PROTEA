@@ -452,9 +452,9 @@ function PredictionTable({ preds, knownByGoId, scoringConfig }: {
                     <table className="w-full text-xs">
                       <thead>
                         <tr className="text-slate-600">
-                          <th className="text-left font-medium pr-4 pb-1">Metric</th>
-                          <th className="text-right font-medium pr-4 pb-1">NW (global)</th>
-                          <th className="text-right font-medium pb-1">SW (local)</th>
+                          <th scope="col" className="text-left font-medium pr-4 pb-1">Metric</th>
+                          <th scope="col" className="text-right font-medium pr-4 pb-1">NW (global)</th>
+                          <th scope="col" className="text-right font-medium pb-1">SW (local)</th>
                         </tr>
                       </thead>
                       <tbody className="font-mono">

@@ -62,9 +62,12 @@ export function SupportButton() {
       <div className="group relative inline-block">
         <button
           onClick={() => { setOpen((v) => !v); setSubmitted(false); }}
+          aria-label={t("support")}
+          aria-haspopup="dialog"
+          aria-expanded={open}
           className="flex h-9 items-center justify-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 text-[13px] text-slate-700 hover:border-blue-300 hover:text-blue-700 hover:shadow-sm transition-all shadow-sm"
         >
-          <span className="text-[15px] leading-none">👍</span>
+          <span aria-hidden="true" className="text-[15px] leading-none">👍</span>
           <span className="font-semibold hidden sm:inline">{t("support")}</span>
           {count !== null && (
             <span className="rounded-full bg-blue-50 px-1.5 py-0.5 text-[11px] font-bold text-blue-700 tabular-nums">

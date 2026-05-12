@@ -12,7 +12,8 @@
   --primary-strong: #1d4ed8;
   --primary-soft: #eff6ff;
   --accent: #6366f1;
-  --ring: rgba(37, 99, 235, 0.35);
+  --ring: #2563eb;
+  --ring-offset: #ffffff;
   --shadow-sm: 0 1px 2px 0 rgba(15, 23, 42, 0.05);
   --shadow-md: 0 4px 12px -2px rgba(15, 23, 42, 0.08), 0 2px 4px -2px rgba(15, 23, 42, 0.04);
   --shadow-lg: 0 12px 32px -8px rgba(15, 23, 42, 0.12), 0 4px 12px -4px rgba(15, 23, 42, 0.08);
@@ -46,10 +47,13 @@ h1, h2, h3, h4 {
   letter-spacing: -0.02em;
 }
 
-/* Focus ring */
+/* Focus ring — WCAG 2.2 SC 2.4.11 requires >=3:1 contrast against the
+   adjacent color. Solid 2px outline with a contrasting offset gives a
+   well-above-3:1 indicator on every surface tone we use. Scoped to
+   :focus-visible so mouse clicks do not draw the ring. */
 *:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px var(--ring);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
   border-radius: 6px;
 }
 
