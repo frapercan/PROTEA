@@ -1351,7 +1351,11 @@ class PredictGOTermsBatchOperation:
         Pre-allocates a float16 numpy array sized to the row count so
         peak Python-object memory stays bounded by the cursor chunk;
         without pre-allocation a ``.all()`` on 400k rows materialises
-        ~14 GB of Python float objects.
+        ~14 GB of Python float objects. The count is taken over a
+        lightweight accession-only projection: including
+        ``SequenceEmbedding.embedding`` in the SELECT list forced
+        ``.count()`` to wrap the projection in a subquery that
+        materialised the halfvec column (~2 GB) per call (T-RES.1 hang).
         """
         annotated_sq = (
             session.query(ProteinGOAnnotation.protein_accession)
@@ -1359,8 +1363,8 @@ class PredictGOTermsBatchOperation:
             .distinct()
             .subquery()
         )
-        base_q = (
-            session.query(Protein.accession, SequenceEmbedding.embedding)
+        accession_q = (
+            session.query(Protein.accession)
             .join(
                 SequenceEmbedding,
                 (SequenceEmbedding.sequence_id == Protein.sequence_id)
@@ -1368,9 +1372,10 @@ class PredictGOTermsBatchOperation:
             )
             .join(annotated_sq, Protein.accession == annotated_sq.c.protein_accession)
         )
-        total = base_q.count()
+        total = accession_q.count()
         if total == 0:
             return [], np.empty((0,), dtype=np.float16)
+        base_q = accession_q.add_columns(SequenceEmbedding.embedding)
         # pgvector HalfVector exposes .dimensions() / .to_numpy() after the
         # 2026-04-11 halfvec migration; pull dimension from the first row.
         dim = base_q.limit(1).one()[1].dimensions()
