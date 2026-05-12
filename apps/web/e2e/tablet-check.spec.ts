@@ -13,7 +13,9 @@ const PAGES = [
 
 test("shows hamburger on tablet (desktop nav at lg, not md)", async ({ page }) => {
   await page.goto("/jobs");
-  await expect(page.locator('button[aria-label="Toggle menu"]')).toBeVisible();
+  await expect(
+    page.locator('button[aria-label="Open navigation menu"], button[aria-label="Close navigation menu"]')
+  ).toBeVisible();
   await expect(page.locator("nav.hidden").first()).toBeHidden();
 });
 

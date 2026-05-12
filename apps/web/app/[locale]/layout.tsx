@@ -10,8 +10,10 @@ import { UsagePolicyModal } from "@/components/UsagePolicyModal";
 import { FloatingJobsWidget } from "@/components/FloatingJobsWidget";
 import { CommandPalette } from "@/components/CommandPalette";
 import { CommandPaletteTrigger } from "@/components/CommandPaletteTrigger";
+import { SystemStatusPill } from "@/components/SystemStatusPill";
+import { AuthChip } from "@/components/AuthChip";
 import { NextIntlClientProvider } from "next-intl";
-import { getMessages } from "next-intl/server";
+import { getMessages, getTranslations } from "next-intl/server";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -31,6 +33,7 @@ export default async function LocaleLayout({
 }) {
   const { locale } = await params;
   const messages = await getMessages();
+  const t = await getTranslations({ locale, namespace: "nav" });
   return (
     <html lang={locale} suppressHydrationWarning>
       <body
@@ -46,12 +49,12 @@ export default async function LocaleLayout({
               href="#main"
               className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[110] focus:rounded-lg focus:bg-blue-600 focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-white focus:shadow-lg"
             >
-              Skip to main content
+              {t("skipToContent")}
             </a>
             <header className="sticky top-0 z-40 border-b border-slate-200/70 bg-white/85 backdrop-blur-md supports-[backdrop-filter]:bg-white/70">
               <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4 sm:px-6 lg:px-8">
                 <a
-                  href="/"
+                  href={`/${locale}`}
                   className="group flex items-center gap-2.5 shrink-0"
                   aria-label="PROTEA home"
                 >
@@ -74,7 +77,7 @@ export default async function LocaleLayout({
                       PROTEA
                     </span>
                     <span className="hidden sm:block text-[10px] uppercase tracking-[0.14em] text-slate-600 font-medium">
-                      Functional Annotation
+                      {t("subtitleShort")}
                     </span>
                   </span>
                 </a>
@@ -91,6 +94,8 @@ export default async function LocaleLayout({
                 />
 
                 <div className="ml-auto flex items-center gap-2 sm:gap-3">
+                  <SystemStatusPill />
+                  <AuthChip />
                   <CommandPaletteTrigger />
                   <div className="hidden lg:flex items-center gap-2">
                     <LanguageSwitcher />
