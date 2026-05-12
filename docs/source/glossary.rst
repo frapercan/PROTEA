@@ -493,3 +493,150 @@ any entry from another page.
       runs the operation and transitions to ``SUCCEEDED`` or ``FAILED``. This
       ensures that a crash during execution cannot roll back the claim, and
       the audit trail is always consistent.
+
+   AMQP
+      **Advanced Message Queuing Protocol.** The wire protocol used by
+      RabbitMQ. PROTEA workers connect to the broker via the ``aio_pika``
+      async client. The broker URL is configured through
+      ``PROTEA_AMQP_URL`` (e.g. ``amqp://user:pass@localhost:5672/``).
+
+   anc2vec
+      A graph-embedding approach that represents :term:`GO` terms as dense
+      vectors by training on the ontology graph structure (ancestor
+      relationships). Provides an alternative to pure sequence-based
+      representations for GO-term similarity; referenced in
+      :doc:`/related_work` as a graph-based baseline.
+
+   async job queue
+      The combination of RabbitMQ (message broker) and PostgreSQL (job-state
+      store) that PROTEA uses to schedule and track long-running operations.
+      A client submits work via ``POST /jobs``; a :term:`QueueConsumer` worker
+      picks the message off the queue, claims the :term:`Job` row, and
+      transitions it through the state machine.
+
+   AuPRC
+      **Area under the Precision-Recall Curve.** A secondary evaluation metric
+      reported by ``cafaeval`` alongside :term:`Fmax`. AuPRC summarises
+      classifier performance across all decision thresholds; higher values
+      indicate better calibration as well as peak performance.
+
+   BLASTP
+      The protein-vs-protein variant of the BLAST sequence-alignment suite.
+      Used as a homology-transfer baseline in CAFA benchmarks and in related
+      works that annotate query sequences by copying GO terms from
+      high-scoring database hits. PROTEA does not invoke BLASTP directly;
+      it serves as a comparison point in :doc:`/related_work`.
+
+   chunk pooling
+      The strategy used to aggregate per-residue embeddings produced by a
+      :term:`PLM` into a single fixed-length vector for each protein. PROTEA
+      supports mean pooling over all residue tokens; the pooling strategy is
+      recorded in :term:`EmbeddingConfig` and must be consistent between
+      index construction and query time.
+
+   DIAMOND
+      A fast protein-sequence aligner that achieves BLASTP-level sensitivity
+      at orders-of-magnitude higher throughput. Referenced in
+      :doc:`/related_work` as a homology-transfer baseline; not invoked
+      directly by PROTEA.
+
+   embedding backend
+      A plugin (from the ``protea-backends`` repo) that encapsulates the
+      connection to a specific :term:`PLM` inference service and returns
+      per-residue or per-protein vectors. Backends are selected by model
+      name at job submission time and are hot-swappable without changing the
+      prediction pipeline. Current backends include :term:`ESM-2`,
+      :term:`ESM-C`, :term:`ProtT5`, :term:`ProstT5`, and :term:`Ankh`.
+
+   ESM-3
+      The third-generation ESM model family from EvolutionaryScale. ESM-3
+      is a multi-modal model that jointly reasons over sequence, structure,
+      and function. Noted in :doc:`/related_work` as a frontier PLM;
+      PROTEA targets its compact variant :term:`ESM-3c` as a future backend.
+
+   ESM-3c
+      The compact (300M-parameter) variant of :term:`ESM-3`. Produces
+      sequence-level embeddings compatible with the PROTEA KNN pipeline.
+      Supported as an embedding backend via ``protea-backends``.
+
+   EvaluationResult
+      An ORM row that stores the per-aspect and combined Fmax,
+      :term:`AuPRC`, and coverage metrics produced by
+      ``run_cafa_evaluation`` for a given :term:`PredictionSet` against a
+      frozen :term:`EvaluationSet`. Multiple runs against the same
+      prediction set (e.g. with different thresholds) create separate rows.
+
+   evaluation runner
+      A runner plugin (from ``protea-runners``) that submits a
+      ``run_cafa_evaluation`` job and waits for the :term:`EvaluationResult`
+      rows to be available. Used by the experiment automation layer to
+      benchmark a :term:`PredictionSet` without manual API calls.
+
+   EvidenceFilter
+      A configuration that restricts which GO annotations are used as the
+      reference set for KNN transfer. Typically expressed as a set of
+      allowed evidence codes (e.g. excluding :term:`IEA`). Applied during
+      annotation loading or at KNN scoring time to control annotation quality.
+
+   IC
+      **Information Content.** A measure of the specificity of a :term:`GO
+      term`, computed as the negative log-frequency of that term in a
+      reference annotation corpus. High-IC terms are rare and specific; the
+      IC of a term is used to weight predictions in :term:`IA`-weighted
+      evaluation and to compute :term:`Smin`.
+
+   IEA
+      **Inferred from Electronic Annotation.** A GO evidence code assigned
+      when annotation was derived computationally (e.g. from sequence
+      similarity or keyword mapping) rather than from manual experiment.
+      IEA annotations are typically excluded from CAFA benchmark ground
+      truth because they may reflect the method being evaluated.
+
+   integration runner
+      A runner plugin (from ``protea-runners``) that chains multiple
+      PROTEA operations in a single experiment pass: protein ingestion,
+      embedding computation, KNN prediction, and optionally re-ranker
+      scoring. Used by experiment automation scripts to drive end-to-end
+      runs without manual job submission.
+
+   NetGO
+      A network-based protein function prediction method that integrates
+      sequence features with protein-protein interaction networks. Cited
+      in :doc:`/related_work` as a strong baseline that PROTEA is compared
+      against in CAFA 6 evaluation results.
+
+   plugin registry dispatch
+      The mechanism by which PROTEA resolves an operation name (a string
+      from the job payload) to a concrete :term:`Operation` implementation
+      at runtime via :term:`OperationRegistry`. The registry is populated
+      through Python ``entry_points`` declared in each plugin
+      ``pyproject.toml``, allowing new operations to be added without
+      modifying the core package.
+
+   RabbitMQ
+      The open-source message broker that carries all PROTEA operation
+      messages between the API and the queue workers. Each pipeline stage
+      has a dedicated queue (e.g. ``protea.embeddings``,
+      ``protea.predictions``). Supports :term:`DLQ` / :term:`DLX` for
+      failed-message routing and consumer acknowledgements for
+      at-least-once delivery.
+
+   Redis
+      An in-memory data structure store. PROTEA uses Redis as the backing
+      store for the FastAPI rate-limiter (via ``slowapi``) and as an
+      optional cache layer for frequent read-heavy endpoints. Not used for
+      the primary job queue (see :term:`RabbitMQ`).
+
+   reranker_cache
+      The local directory (``~/Thesis2/storage/reranker_cache/``) that
+      stores downloaded re-ranker datasets and booster artefacts pulled
+      from the :term:`artifact store`. Used by ``protea-reranker-lab``
+      scripts so that large files are not re-downloaded between training
+      runs.
+
+   Smin
+      The minimum semantic distance metric used in some CAFA evaluation
+      variants as a complement to :term:`Fmax`. Smin is derived from the
+      :term:`IC`-weighted Hamming distance between the predicted and
+      true annotation vectors across the ontology graph; lower Smin
+      indicates better performance.
