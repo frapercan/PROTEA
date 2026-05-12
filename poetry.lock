@@ -2956,7 +2956,7 @@ pydantic = ">=2.5"
 type = "git"
 url = "https://github.com/frapercan/protea-contracts.git"
 reference = "master"
-resolved_reference = "3429aa3bbb374050ba1b01a6da39bf5a5d1f32a4"
+resolved_reference = "c268488a031f46a4f3fc3dbbc830cf24bdd175e2"
 
 [[package]]
 name = "protea-method"
@@ -3032,7 +3032,7 @@ resolved_reference = "3a6619c3d561e2218f9a91ee359e5673ab0d0d1f"
 [[package]]
 name = "protea-sources"
 version = "0.0.1"
-description = "Annotation source plugins for the PROTEA stack: GOA, QuickGO, UniProt, future InterProScan."
+description = "Annotation source plugins for the PROTEA stack: GOA, QuickGO, UniProt, InterProScan."
 optional = false
 python-versions = ">=3.12,<4.0"
 groups = ["plugins"]
@@ -3047,7 +3047,7 @@ requests = ">=2.31"
 type = "git"
 url = "https://github.com/frapercan/protea-sources.git"
 reference = "master"
-resolved_reference = "3cc34ab5bfa06d6db9e4c8f2eebc0a6662545101"
+resolved_reference = "c0e00d868dce9ac50bda3b990ec33de2db916e7b"
 
 [[package]]
 name = "protobuf"
