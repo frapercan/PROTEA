@@ -8,6 +8,7 @@ fix sequence that an operator can execute without prior context.
 .. toctree::
    :maxdepth: 1
 
+   deployment
    stale-job-reaper
    dlq-triage
    ngrok-deploy-recovery
