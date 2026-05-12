@@ -622,18 +622,24 @@ Stored as function names rather than direct references so
 behaves correctly: the dispatcher resolves the name via ``getattr`` on
 this module each call, so monkey-patching the symbol routes through.
 
-Sibling slices T2A.3 (ankh), T2A.4 (esm3c) port the remaining branches
-onto the plugin and T2A.5b will collapse this dict into a pure
-``_resolve_backend().embed_chunks(...)`` call.
+After T2A.3 (ankh) and T2A.4 (esm3c) ported the remaining branches
+onto the plugin, all four bootstrap backends route through
+``plugin.embed_chunks``. T2A.5b will collapse this dict into a pure
+``_resolve_backend().embed_chunks(...)`` call once every supported
+``protea-backends`` pin ships ``embed_chunks`` for every backend.
 """
 
 #: ``model_backend`` values routed to ``plugin.embed_chunks`` instead of
 #: the local ``_embed_*`` shims. T2A.1 landed ``esm`` / ``auto``; T2A.2
-#: added ``t5``; T2A.3 adds ``ankh``; T2A.4 will extend this set so the
-#: legacy ``_BACKEND_FN_NAMES`` table empties out backend-by-backend
-#: without breaking the test seams that mock the ``_embed_*`` symbols
-#: on this module.
-_PLUGIN_DISPATCH_BACKENDS: frozenset[str] = frozenset({"esm", "auto", "t5", "ankh"})
+#: added ``t5``; T2A.3 added ``ankh``; T2A.4 adds ``esm3c``, which
+#: completes the plugin migration for all four bootstrap backends. The
+#: legacy ``_BACKEND_FN_NAMES`` table stays in place as the
+#: backward-compat fall-through while consumers upgrade their
+#: ``protea-backends`` pin; T2A.5b will collapse it once every supported
+#: pin ships ``embed_chunks`` for every backend.
+_PLUGIN_DISPATCH_BACKENDS: frozenset[str] = frozenset(
+    {"esm", "auto", "t5", "ankh", "esm3c"}
+)
 
 
 def _dispatch_embed(
@@ -645,17 +651,18 @@ def _dispatch_embed(
 ) -> list[list[ChunkEmbedding]]:
     """Route the batch to the right backend implementation.
 
-    ``esm`` / ``auto`` (T2A.1), ``t5`` (T2A.2) and ``ankh`` (T2A.3) go
-    through ``plugin.embed_chunks`` from the ``protea.backends``
-    entry_points group. The remaining backends still resolve to
-    module-local ``_embed_*`` shims via ``_BACKEND_FN_NAMES``;
-    ``_resolve_backend`` raises ``ValueError`` for unknown identifiers
-    so the dispatch never silently falls back on a wrong backend.
+    ``esm`` / ``auto`` (T2A.1), ``t5`` (T2A.2), ``ankh`` (T2A.3) and
+    ``esm3c`` (T2A.4) all go through ``plugin.embed_chunks`` from the
+    ``protea.backends`` entry_points group. ``_resolve_backend`` raises
+    ``ValueError`` for unknown identifiers so the dispatch never
+    silently falls back on a wrong backend.
 
     The plugin path falls back to the matching legacy ``_embed_*`` shim
     if the installed ``protea-backends`` build pre-dates the slice that
     introduced ``embed_chunks`` for that backend, which keeps the
-    platform bootable while the plugin PR cascade lands.
+    platform bootable while the plugin PR cascade lands. The esm3c
+    fall-through uses the 4-arg call signature (no tokenizer) to match
+    the legacy ``_embed_esm3c`` shape.
     """
     import sys
 
