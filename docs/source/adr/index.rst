@@ -12,7 +12,7 @@ ADRs come in two layers:
   PROTEA. They explain trade-offs of concrete code paths (KNN
   algorithm choice, queue topology, deduplication strategy, retries,
   etc.).
-- **Strategic decisions** (``D1``-``D30``): plan-level decisions
+- **Strategic decisions** (``D1``-``D31``): plan-level decisions
   taken in the master plan v3 (2026-05-05). They drive the structure
   of the project, the deployment story, and the thesis writing
   cadence.
@@ -20,35 +20,49 @@ ADRs come in two layers:
 Implementation decisions
 ------------------------
 
+All implementation ADRs (001-008) follow the MADR template (Status / Context /
+Decision / Consequences sections). They are numbered in discovery order, not
+superseded by the D-series, and remain the authoritative record for the
+runtime, data model, and operational choices described.
+
 .. list-table::
    :header-rows: 1
-   :widths: 8 50 42
+   :widths: 6 10 46 38
 
    * - ADR
+     - Status
      - Decision
      - Problem it solves
    * - 001
+     - Accepted
      - :doc:`KNN on CPU, not pgvector or GPU <001-knn-without-pgvector>`
      - pgvector does not scale to 500K+ vectors; GPU must be reserved for inference
    * - 002
+     - Accepted
      - :doc:`Two-session worker pattern <002-two-session-worker-pattern>`
      - A mid-operation crash left the job invisible to monitoring
    * - 003
+     - Accepted
      - :doc:`Two types of consumer <003-queue-consumer-vs-operation-consumer>`
      - Thousands of batch jobs per pipeline flooded the jobs table
    * - 004
+     - Accepted
      - :doc:`Dead letter queue and retries <004-dead-letter-queue-and-retry-strategy>`
      - Failed messages were lost; retries without backoff amplified failures
    * - 005
+     - Accepted
      - :doc:`Reusable RabbitMQ connections <005-thread-local-rabbitmq-connections>`
      - A coordinator dispatching 500 batches opened 500 TCP connections
    * - 006
+     - Accepted
      - :doc:`Sequence deduplication by MD5 <006-sequence-deduplication-by-md5>`
      - 30K duplicate sequences in Swiss-Prot waste hours of GPU time
    * - 007
+     - Accepted
      - :doc:`Contract-first integration with protea-reranker-lab <007-contract-first-lab-integration>`
      - Re-ranker iteration cadence would contaminate the production dependency tree
    * - 008
+     - Accepted
      - :doc:`PK coverage fix in cafaeval fork <008-cafaeval-pk-coverage-fix>`
      - Upstream cafaeval reports coverage > 1 in PK; precision is under-divided
 

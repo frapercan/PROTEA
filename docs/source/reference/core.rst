@@ -555,7 +555,7 @@ engineering layer; they are documented here for completeness but are
 not part of the public API.
 
 - ``protea.core.anc2vec_embeddings``: anc2vec ancestry embeddings for
-  GO terms, used as features by the re-ranker (see ADR D19 for the
+  GO terms, used as features by the re-ranker (see :doc:`D19 </adr/D19-fresearch-targets>` for the
   GeOKG replacement candidate).
 - ``protea.core.annotation_intern``: string interning helper for
   reducing memory pressure when loading large annotation sets.

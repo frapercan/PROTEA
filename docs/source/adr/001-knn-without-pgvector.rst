@@ -3,9 +3,10 @@ ADR-001: KNN on CPU, not pgvector or GPU
 
 :Date: 2025-12-15
 :Author: frapercan
+:Status: Accepted
 
-The problem
------------
+Context
+-------
 
 GO term prediction requires K-nearest-neighbor search over 500K+ embeddings
 of 1280 dimensions.  The natural options were ``pgvector`` (we already store
@@ -19,8 +20,8 @@ Both failed:
   Loading the distance matrix competes with model forward passes and
   causes CUDA OOM.
 
-What we do
-----------
+Decision
+--------
 
 KNN runs **on CPU**, entirely in Python:
 
@@ -34,16 +35,16 @@ cache (``_REF_CACHE``, float16, ~4 GB for 500K vectors).  ``pgvector``
 remains as storage only: the ``VECTOR`` type is there, but we never
 search with ``<=>``.
 
-Trade-offs
-----------
+Consequences
+------------
 
 - The cache consumes worker RAM (~4 GB).  If the worker restarts, the
   first prediction takes ~15s extra to reload from DB.
 - KNN and inference run in parallel without contention: CPU computes
   distances while GPU computes embeddings.
 
-Rejected
---------
+Rejected alternatives
+---------------------
 
 - **Dedicated vector database** (Milvus, Qdrant): one more infra
   dependency for something NumPy/FAISS solves in-process.

@@ -3,9 +3,10 @@ ADR-004: Dead letter queue and retries
 
 :Date: 2026-03-18
 :Author: frapercan
+:Status: Accepted
 
-The problem
------------
+Context
+-------
 
 Two related messaging problems:
 
@@ -17,8 +18,8 @@ Two related messaging problems:
    were retried immediately, amplifying load on the service that was
    already struggling.
 
-What we do
-----------
+Decision
+--------
 
 **Dead letter queue.** All queues are declared with
 ``x-dead-letter-exchange: protea.dlx``.  Rejected messages
@@ -35,15 +36,15 @@ adaptive backoff based on how many previous retries have occurred:
 ``delay = min(base * 2^retries, 600s)``.  The job goes back to ``QUEUED``
 and is republished after the wait.
 
-Trade-offs
-----------
+Consequences
+------------
 
 - The DLQ grows if nobody inspects it; it must be monitored (see runbook).
 - Adaptive backoff makes one DB query per retry to count previous
   ``job.retry_later`` events.  Negligible cost.
 
-Rejected
---------
+Rejected alternatives
+---------------------
 
 - **TTL + delay queue in RabbitMQ**: more complex to set up and debug than
   an application-level ``sleep()``.

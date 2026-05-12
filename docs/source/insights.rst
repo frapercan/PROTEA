@@ -58,7 +58,7 @@ an unexplained gap. Tracing the scoring path surfaced the
 surfaced to the developer's attention.
 
 **The fix.**
-ADR-D10 introduced a parallel ``schema_sha_v2`` column on both ``Dataset``
+:doc:`D10 </adr/D10-schema-sha-v2>` introduced a parallel ``schema_sha_v2`` column on both ``Dataset``
 and ``RerankerModel``. The ``v2`` value is computed exclusively from
 ``protea_contracts.compute_schema_sha``, which is the shared, versioned
 implementation in the contracts package (see :doc:`/adr/D10-schema-sha-v2`).
@@ -168,7 +168,7 @@ symptom was coverage greater than one. The silent secondary effect was that
 ``precision`` used ``metrics['n']`` as its denominator, so precision was
 under-divided. On the 220 to 230 benchmark this dragged PK Fmax by 30-40%.
 
-.. list-table:: Effect on the 220 to 230 PK cells (from ADR-008)
+.. list-table:: Effect on the 220 to 230 PK cells (from :doc:`/adr/008-cafaeval-pk-coverage-fix`)
    :header-rows: 1
    :widths: 20 25 25 25
 
