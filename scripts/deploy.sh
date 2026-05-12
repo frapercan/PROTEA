@@ -137,8 +137,13 @@ if [[ "$DO_DEPS" == "1" ]]; then
   # sphinx mount at /sphinx/ activates after redeploy (FastAPI factory only
   # mounts the static dir if docs/build/html/ exists at app creation time,
   # which in turn requires sphinx to be importable for `poetry run task docs`).
+  # Install the protea project itself (editable) so scripts/worker.py can
+  # `import protea.*` regardless of cwd. Without --no-root drop, `python
+  # scripts/worker.py` only gets `scripts/` on sys.path[0] and every worker
+  # crashes with ModuleNotFoundError. The API survives because uvicorn does
+  # its own sys.path setup before the factory import.
   echo "${C_BOLD}poetry install...${C_RESET}"
-  poetry install --quiet --with docs --no-root || poetry install --with docs --no-root
+  poetry install --quiet --with docs || poetry install --with docs
 
   # pyproject pins torch to the pytorch-cpu source so CI runners and the
   # slim Docker image do not pull the ~6 GB NVIDIA / triton stack. Hosts
