@@ -52,8 +52,13 @@ def _disable_authn_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     ``/reranker-models/import*``) would otherwise 401 every smoke-test.
     Tests that want to exercise the gate explicitly re-enable it with
     ``monkeypatch.setenv("PROTEA_AUTHN_REQUIRED", "true")``.
+
+    Also sets the environment to "test" so that slowapi rate limits are
+    effectively disabled (9999/hour) to avoid hitting quota walls during
+    integration test setup and assertions.
     """
     monkeypatch.setenv("PROTEA_AUTHN_REQUIRED", "false")
+    monkeypatch.setenv("PROTEA_ENVIRONMENT", "test")
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:

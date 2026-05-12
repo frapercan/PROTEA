@@ -23,10 +23,8 @@ from __future__ import annotations
 
 import importlib
 
-import pytest
-
 import protea_contracts
-
+import pytest
 
 # ---------------------------------------------------------------------------
 # Re-export identity (active)
