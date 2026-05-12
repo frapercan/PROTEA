@@ -78,6 +78,7 @@ _PRIMARY_FAMILY_ORDER: tuple[str, ...] = (
     "anc2vec_neighbor",
     "anc2vec_query",
     "emb_pca",
+    "lineage",
     "annotation_meta",
     "knn",
 )

@@ -27,6 +27,12 @@ Mapping (family group -> producer):
 * The v6 enrichment columns (``tax_voters_*``, ``go_term_frequency``
   share, ``anc2vec_*``, ``emb_pca_query_*``) come from
   :func:`protea.core.feature_enricher.enrich_v6_features`.
+* Lineage columns (``lineage_is_ancestor_of_known``,
+  ``lineage_is_descendant_of_known``,
+  ``lineage_ancestor_of_count``, ``lineage_descendant_of_count``)
+  come from :func:`protea_method.lineage.compute_lineage_features`.
+  Added in T-RES.1 to consume the lineage feature family registered
+  by ``protea-contracts`` v0.3.0.
 * Categorical metadata (``qualifier``, ``evidence_code``, ``aspect``)
   is sourced from annotation rows during record construction; the
   marker :func:`_annotation_metadata_producer` carries that
@@ -108,6 +114,18 @@ def _enrich_v6_producer() -> Callable[..., Any]:
     return enrich_v6_features
 
 
+def _compute_lineage_producer() -> Callable[..., Any]:
+    """Lazy import shim for the lineage producer in ``protea-method``.
+
+    Imported lazily so importing this module never pulls in the
+    GO-DAG closure helpers when the lineage feature family is not
+    requested. Registered in T-RES.1 alongside contracts v0.3.0.
+    """
+    from protea_method.lineage import compute_lineage_features
+
+    return compute_lineage_features
+
+
 def _annotation_metadata_producer() -> Callable[..., Any]:
     """Reference for categorical metadata columns sourced from annotation rows.
 
@@ -170,6 +188,13 @@ _V6_ENRICHMENT_FEATURES: tuple[str, ...] = (
     "anc2vec_query_known_count",
 ) + tuple(f"emb_pca_query_{i}" for i in range(EMBEDDING_PCA_DIM))
 
+_LINEAGE_FEATURES: tuple[str, ...] = (
+    "lineage_is_ancestor_of_known",
+    "lineage_is_descendant_of_known",
+    "lineage_ancestor_of_count",
+    "lineage_descendant_of_count",
+)
+
 _ANNOTATION_METADATA_FEATURES: tuple[str, ...] = tuple(
     name for name in CATEGORICAL_FEATURES if name != "taxonomic_relation"
 )
@@ -190,6 +215,8 @@ def _build_feature_to_producer() -> dict[str, tuple[Callable[..., Any], str]]:
         mapping[name] = (_compute_taxonomy_producer, "compute_taxonomy")
     for name in _V6_ENRICHMENT_FEATURES:
         mapping[name] = (_enrich_v6_producer, "enrich_v6_features")
+    for name in _LINEAGE_FEATURES:
+        mapping[name] = (_compute_lineage_producer, "compute_lineage_features")
     for name in _ANNOTATION_METADATA_FEATURES:
         mapping[name] = (_annotation_metadata_producer, "annotation_metadata")
     missing = [name for name in ALL_FEATURES if name not in mapping]

@@ -19,6 +19,12 @@ is anchored to the canonical pre-T2B.2 implementation. Re-generate
 only when the canonical column set or fixture row intentionally
 changes (which forces a SemVer bump on ``protea-contracts``).
 
+The fixtures were regenerated in T-RES.1b when ``protea-contracts``
+v0.3.0 added the four ``lineage`` columns to ``ALL_FEATURES``. The
+legacy code path still produces the bytes (it reads the column set
+from contracts at write time), so the eef6cf4 anchor remains valid;
+only the on-disk reference rolls forward with the schema.
+
 The input row factory mirrors :mod:`tests.test_parquet_export_boundary`
 so the same fixture exercises both the boundary invariant and the
 golden gate.
@@ -43,8 +49,10 @@ EVAL_FIXTURE = FIXTURE_DIR / "parquet_export_golden_eval.parquet"
 # The schema_sha that the legacy fixture pins. Recorded so the test
 # fails loudly if the registry's column order ever drifts away from
 # the contracts ``ALL_FEATURES`` order under which the golden was
-# captured.
-_LEGACY_FIXTURE_SHA = "0d9b7219433f"
+# captured. Rolled forward in T-RES.1b: the prior
+# ``"0d9b7219433f"`` (52 columns) is superseded by the value below
+# after ``protea-contracts`` v0.3.0 added the lineage family.
+_LEGACY_FIXTURE_SHA = "6d97a624b8a7"
 
 
 def _full_feature_row() -> dict[str, object]:
@@ -130,7 +138,8 @@ class TestGoldenParquetBitExact:
         produced = (tmp_path / "train.parquet").read_bytes()
         reference = TRAIN_FIXTURE.read_bytes()
         assert produced == reference, (
-            "train.parquet bytes diverged from the eef6cf4 golden. "
+            "train.parquet bytes diverged from the T-RES.1b golden "
+            f"(sha256[:12]=7c93f376b7bd, schema_sha={_LEGACY_FIXTURE_SHA}). "
             f"produced_size={len(produced)} reference_size={len(reference)}. "
             "Either the FeatureRegistry column order drifted from "
             "protea_contracts.ALL_FEATURES, or parquet writer flags changed. "
@@ -143,7 +152,8 @@ class TestGoldenParquetBitExact:
         produced = (tmp_path / "eval.parquet").read_bytes()
         reference = EVAL_FIXTURE.read_bytes()
         assert produced == reference, (
-            "eval.parquet bytes diverged from the eef6cf4 golden. "
+            "eval.parquet bytes diverged from the T-RES.1b golden "
+            f"(sha256[:12]=a5085fd1814b, schema_sha={_LEGACY_FIXTURE_SHA}). "
             f"produced_size={len(produced)} reference_size={len(reference)}. "
             "Same root causes as the train check; see that test for context."
         )
