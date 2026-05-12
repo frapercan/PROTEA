@@ -5,12 +5,13 @@ from datetime import datetime
 from typing import Any, NamedTuple
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session, sessionmaker
 
-from protea.api.auth import require_api_key
+from protea.api.auth import require_api_key_or_bearer
 from protea.api.deps import get_amqp_url, get_operation_registry, get_session_factory
+from protea.api.rate_limit import jobs_limit, limiter
 from protea.core.contracts.registry import OperationRegistry
 from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.job import Job, JobComment, JobEvent, JobStatus
@@ -200,9 +201,12 @@ class CreateJobRequest(BaseModel):
 @router.post(
     "",
     summary="Create and enqueue a job",
-    dependencies=[Depends(require_api_key)],
+    dependencies=[Depends(require_api_key_or_bearer)],
 )
+@limiter.limit(jobs_limit)
 def create_job(
+    request: Request,
+    response: Response,
     body: CreateJobRequest,
     factory: sessionmaker[Session] = Depends(get_session_factory),
     amqp_url: str = Depends(get_amqp_url),

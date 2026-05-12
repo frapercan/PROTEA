@@ -3165,7 +3165,7 @@
         "operationId": "create_dataset_v1_datasets_post",
         "parameters": [
           {
-            "description": "API-key challenge in the ``Authorization: ApiKey <key>`` form (T5.6a). Mutually exclusive with ``X-Api-Key``; whichever arrives first wins.",
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
             "in": "header",
             "name": "authorization",
             "required": false,
@@ -3178,7 +3178,7 @@
                   "type": "null"
                 }
               ],
-              "description": "API-key challenge in the ``Authorization: ApiKey <key>`` form (T5.6a). Mutually exclusive with ``X-Api-Key``; whichever arrives first wins.",
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
               "title": "Authorization"
             }
           },
@@ -4502,7 +4502,7 @@
         "operationId": "create_job_v1_jobs_post",
         "parameters": [
           {
-            "description": "API-key challenge in the ``Authorization: ApiKey <key>`` form (T5.6a). Mutually exclusive with ``X-Api-Key``; whichever arrives first wins.",
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
             "in": "header",
             "name": "authorization",
             "required": false,
@@ -4515,7 +4515,7 @@
                   "type": "null"
                 }
               ],
-              "description": "API-key challenge in the ``Authorization: ApiKey <key>`` form (T5.6a). Mutually exclusive with ``X-Api-Key``; whichever arrives first wins.",
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
               "title": "Authorization"
             }
           },
@@ -5503,7 +5503,7 @@
         "operationId": "import_reranker_model_multipart_v1_reranker_models_import_post",
         "parameters": [
           {
-            "description": "API-key challenge in the ``Authorization: ApiKey <key>`` form (T5.6a). Mutually exclusive with ``X-Api-Key``; whichever arrives first wins.",
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
             "in": "header",
             "name": "authorization",
             "required": false,
@@ -5516,7 +5516,7 @@
                   "type": "null"
                 }
               ],
-              "description": "API-key challenge in the ``Authorization: ApiKey <key>`` form (T5.6a). Mutually exclusive with ``X-Api-Key``; whichever arrives first wins.",
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
               "title": "Authorization"
             }
           },
@@ -5590,7 +5590,7 @@
         "operationId": "import_reranker_model_by_reference_v1_reranker_models_import_by_reference_post",
         "parameters": [
           {
-            "description": "API-key challenge in the ``Authorization: ApiKey <key>`` form (T5.6a). Mutually exclusive with ``X-Api-Key``; whichever arrives first wins.",
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
             "in": "header",
             "name": "authorization",
             "required": false,
@@ -5603,7 +5603,7 @@
                   "type": "null"
                 }
               ],
-              "description": "API-key challenge in the ``Authorization: ApiKey <key>`` form (T5.6a). Mutually exclusive with ``X-Api-Key``; whichever arrives first wins.",
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
               "title": "Authorization"
             }
           },
