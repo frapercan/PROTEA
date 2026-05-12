@@ -36,6 +36,7 @@ from protea.core.operation_catalog import build_operation_registry
 from protea.infrastructure.benchmark_config import load_benchmark_config
 from protea.infrastructure.session import build_session_factory
 from protea.infrastructure.settings import load_settings
+from protea.infrastructure.telemetry import configure_telemetry
 
 _API_DESCRIPTION = (
     "**PROTEA** — Protein Representation and Ontology-Term Enrichment Analysis.\n\n"
@@ -281,6 +282,12 @@ def create_app(project_root: Path | None = None) -> FastAPI:
     app.state.artifacts_dir = settings.artifacts_dir
     app.state.operation_registry = build_operation_registry()
     app.state.benchmark_config = load_benchmark_config(project_root)
+
+    # T5.1a: boot OpenTelemetry before middlewares so FastAPI
+    # instrumentation wraps the full middleware chain. Disabled by
+    # default; opt in with PROTEA_OTEL_ENABLED=1. See
+    # protea/infrastructure/telemetry.py for the env contract.
+    app.state.telemetry = configure_telemetry(app)
 
     _register_middlewares(app, settings.allowed_origins)
     # T5.6b: install the slowapi limiter BEFORE the router exception

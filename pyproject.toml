@@ -86,6 +86,20 @@ types-pyyaml = "^6.0.12.20250915"
 taskipy = ">=1.10.3"
 
 
+# T5.1a (D7 accepted 2026-05-06): OpenTelemetry SDK + OTLP HTTP exporter
+# + FastAPI instrumentor. Kept in its own optional poetry group so
+# developer / CI installs stay slim while deploy targets opt in with
+# ``poetry install --with telemetry``. T5.1b extends this group with
+# the SQLAlchemy + pika instrumentors.
+[tool.poetry.group.telemetry]
+optional = true
+[tool.poetry.group.telemetry.dependencies]
+opentelemetry-api = ">=1.27.0,<2.0.0"
+opentelemetry-sdk = ">=1.27.0,<2.0.0"
+opentelemetry-exporter-otlp-proto-http = ">=1.27.0,<2.0.0"
+opentelemetry-instrumentation-fastapi = ">=0.48b0,<1.0.0"
+
+
 [tool.poetry.group.test]
 optional = true
 [tool.poetry.group.test.dependencies]
