@@ -36,7 +36,7 @@ import { baseUrl } from "@/lib/api";
  * is rendered by the layout itself; this component only owns the
  * left/centre navigation.
  *
- * Mobile (< 1024px) renders a single drawer with the same groupings.
+ * Mobile (< 1280px) renders a single drawer with the same groupings.
  */
 
 type NavItem = {
@@ -252,6 +252,8 @@ export function NavLinks({ mobileExtras }: { mobileExtras?: React.ReactNode }) {
   const locale = useLocale();
   const [open, setOpen] = useState(false);
   const [openGroupId, setOpenGroupId] = useState<string | null>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   // Build groups. `t` is stable across renders for the same locale, so a
   // memo would only pay off if we passed it down to many leaves — we don't.
@@ -333,6 +335,29 @@ export function NavLinks({ mobileExtras }: { mobileExtras?: React.ReactNode }) {
     };
   }, [open]);
 
+  // Close mobile drawer on Escape.
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [open]);
+
+  // Close mobile drawer on click/tap outside the drawer and trigger.
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (drawerRef.current?.contains(target)) return;
+      if (triggerRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
   // Group-state coordinator: only one dropdown open at a time.
   const handleGroupChange = useCallback((id: string | null) => {
     setOpenGroupId(id);
@@ -346,7 +371,7 @@ export function NavLinks({ mobileExtras }: { mobileExtras?: React.ReactNode }) {
       {/* ── Desktop ──────────────────────────────────────────────── */}
       <nav
         aria-label={t("ariaPrimary")}
-        className="hidden lg:flex items-center gap-1"
+        className="hidden xl:flex items-center gap-1"
       >
         {/* Primary CTA: Annotate. Domain-fluent label, blue pill, lives left
             of the dropdown groups so it always reads first. */}
@@ -391,7 +416,8 @@ export function NavLinks({ mobileExtras }: { mobileExtras?: React.ReactNode }) {
 
       {/* ── Mobile trigger ───────────────────────────────────────── */}
       <button
-        className="lg:hidden ml-auto flex flex-col justify-center items-center w-11 h-11 gap-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
+        ref={triggerRef}
+        className="xl:hidden flex flex-col justify-center items-center w-11 h-11 gap-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
         onClick={() => setOpen((v) => !v)}
         aria-label={open ? t("closeMenu") : t("openMenu")}
         aria-expanded={open}
@@ -405,8 +431,9 @@ export function NavLinks({ mobileExtras }: { mobileExtras?: React.ReactNode }) {
       {/* ── Mobile drawer ────────────────────────────────────────── */}
       {open && (
         <div
+          ref={drawerRef}
           id="protea-mobile-nav"
-          className="lg:hidden absolute left-0 right-0 top-full z-50 border-b border-slate-200 bg-white shadow-xl max-h-[calc(100vh-4rem)] overflow-y-auto"
+          className="xl:hidden absolute left-0 right-0 top-full z-50 border-b border-slate-200 bg-white shadow-xl max-h-[calc(100vh-4rem)] overflow-y-auto"
         >
           <nav className="px-4 py-4 flex flex-col gap-1" aria-label={t("ariaPrimary")}>
             {/* Primary CTA always at the very top */}
