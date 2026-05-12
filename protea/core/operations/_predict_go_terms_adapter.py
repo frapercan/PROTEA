@@ -115,7 +115,7 @@ def _build_predict_config(
         compute_v6_features=False,
         compute_taxonomy=False,
         pre_normalized=use_cos,
-        prediction_set_id=str(prediction_set_id),
+        extra={"prediction_set_id": str(prediction_set_id)},
     )
 
 
