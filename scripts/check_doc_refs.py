@@ -68,6 +68,13 @@ ALLOWLIST: set[tuple[str, str]] = {
     # the concrete classes (LocalFsArtifactStore, MinioArtifactStore) not the
     # base.  Suppress until DR.1 adds a proper autoclass directive.
     ("class", "protea.infrastructure.storage.ArtifactStore"),
+    # TelemetryConfig is a real, importable dataclass in
+    # protea.infrastructure.telemetry.  The false positive arises because
+    # this checker is run as `python3 scripts/check_doc_refs.py`, which
+    # prepends the scripts/ directory to sys.path[0] rather than the project
+    # root, so `importlib.import_module` cannot find the protea package.
+    # The class is valid public API used in the observability runbook.
+    ("class", "protea.infrastructure.telemetry.TelemetryConfig"),
 }
 
 # ---------------------------------------------------------------------------

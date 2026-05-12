@@ -100,8 +100,13 @@ in the UI to see the visitor dashboard.
 
     deploy/grafana/
     ├── dashboards/
-    │   ├── visitors.json                 # exported dashboard JSON
-    │   └── logs.json                     # Loki-backed log stream + rates
+    │   ├── visitors.json                 # visitor analytics (SQL against visitor_event)
+    │   ├── logs.json                     # Loki-backed log stream + rates
+    │   ├── api-latency.json              # request rate, p50/p95/p99 by route (T5.3)
+    │   ├── queue-depth.json              # RabbitMQ ready + unacked counts (T5.3)
+    │   ├── worker-throughput.json        # job completions and error rate (T5.3)
+    │   ├── db-connections.json           # Postgres connection pool utilisation (T5.3)
+    │   └── embeddings-pipeline.json      # embedding batch throughput + GPU memory (T5.3)
     └── provisioning/
         ├── dashboards/dashboards.yml      # registers the dashboards/ folder
         └── datasources/
