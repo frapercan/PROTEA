@@ -82,7 +82,7 @@ export default async function LocaleLayout({
                   </span>
                 </a>
 
-                <div className="hidden lg:block h-7 w-px bg-slate-200 mx-1" />
+                <div className="hidden xl:block h-7 w-px bg-slate-200 mx-1" />
 
                 <NavLinks
                   mobileExtras={
@@ -97,11 +97,11 @@ export default async function LocaleLayout({
                   <SystemStatusPill />
                   <AuthChip />
                   <CommandPaletteTrigger />
-                  <div className="hidden lg:flex items-center gap-2">
+                  <div className="hidden xl:flex items-center gap-2">
                     <LanguageSwitcher />
                   </div>
                   <SupportButton />
-                  <div className="hidden lg:block">
+                  <div className="hidden xl:block">
                     <ResetDbButton />
                   </div>
                 </div>
