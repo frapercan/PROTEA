@@ -629,11 +629,11 @@ onto the plugin and T2A.5b will collapse this dict into a pure
 
 #: ``model_backend`` values routed to ``plugin.embed_chunks`` instead of
 #: the local ``_embed_*`` shims. T2A.1 landed ``esm`` / ``auto``; T2A.2
-#: adds ``t5``; T2A.3-T2A.4 will extend this set so the legacy
-#: ``_BACKEND_FN_NAMES`` table empties out backend-by-backend without
-#: breaking the test seams that mock the ``_embed_*`` symbols on this
-#: module.
-_PLUGIN_DISPATCH_BACKENDS: frozenset[str] = frozenset({"esm", "auto", "t5"})
+#: added ``t5``; T2A.3 adds ``ankh``; T2A.4 will extend this set so the
+#: legacy ``_BACKEND_FN_NAMES`` table empties out backend-by-backend
+#: without breaking the test seams that mock the ``_embed_*`` symbols
+#: on this module.
+_PLUGIN_DISPATCH_BACKENDS: frozenset[str] = frozenset({"esm", "auto", "t5", "ankh"})
 
 
 def _dispatch_embed(
@@ -645,12 +645,12 @@ def _dispatch_embed(
 ) -> list[list[ChunkEmbedding]]:
     """Route the batch to the right backend implementation.
 
-    ``esm`` / ``auto`` (T2A.1) and ``t5`` (T2A.2) go through
-    ``plugin.embed_chunks`` from the ``protea.backends`` entry_points
-    group. The remaining backends still resolve to module-local
-    ``_embed_*`` shims via ``_BACKEND_FN_NAMES``; ``_resolve_backend``
-    raises ``ValueError`` for unknown identifiers so the dispatch never
-    silently falls back on a wrong backend.
+    ``esm`` / ``auto`` (T2A.1), ``t5`` (T2A.2) and ``ankh`` (T2A.3) go
+    through ``plugin.embed_chunks`` from the ``protea.backends``
+    entry_points group. The remaining backends still resolve to
+    module-local ``_embed_*`` shims via ``_BACKEND_FN_NAMES``;
+    ``_resolve_backend`` raises ``ValueError`` for unknown identifiers
+    so the dispatch never silently falls back on a wrong backend.
 
     The plugin path falls back to the matching legacy ``_embed_*`` shim
     if the installed ``protea-backends`` build pre-dates the slice that
