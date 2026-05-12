@@ -10,23 +10,26 @@ const PAGES = [
 ];
 
 const NAV_LABELS = [
-  "Proteins", "Annotations", "Query Sets",
-  "Embeddings", "Functional Annotation", "Scoring", "Evaluation",
+  "Proteins", "GO Annotations", "Query Sets",
+  "Embeddings", "KNN Search", "Scoring", "CAFA Evaluation",
   "Jobs", "Maintenance",
 ];
+
+// Aria label is now locale-driven; the English label is "Open navigation menu".
+const MENU_BTN = 'button[aria-label="Open navigation menu"], button[aria-label="Close navigation menu"]';
 
 // ── Navigation ─────────────────────────────────────────────────────────────
 
 test("header shows hamburger and hides desktop nav", async ({ page }) => {
   await page.goto("/jobs");
-  await expect(page.locator('button[aria-label="Toggle menu"]')).toBeVisible();
+  await expect(page.locator(MENU_BTN)).toBeVisible();
   // Desktop nav (lg:flex) is hidden on mobile — it has display:none from 'hidden' class
   await expect(page.locator("nav.hidden").first()).toBeHidden();
 });
 
 test("hamburger opens dropdown with all nav links", async ({ page }) => {
   await page.goto("/jobs");
-  await page.locator('button[aria-label="Toggle menu"]').click();
+  await page.locator(MENU_BTN).click();
   // After opening, desktop nav links remain display:none, dropdown links become visible.
   // getByRole('link') only returns non-hidden elements.
   for (const label of NAV_LABELS) {
@@ -36,7 +39,7 @@ test("hamburger opens dropdown with all nav links", async ({ page }) => {
 
 test("hamburger closes dropdown on second click", async ({ page }) => {
   await page.goto("/jobs");
-  const btn = page.locator('button[aria-label="Toggle menu"]');
+  const btn = page.locator(MENU_BTN);
   // Dropdown div has class lg:hidden — target it specifically
   const dropdown = page.locator("div.lg\\:hidden.absolute");
   await btn.click();
@@ -47,7 +50,7 @@ test("hamburger closes dropdown on second click", async ({ page }) => {
 
 test("menu closes automatically after navigating", async ({ page }) => {
   await page.goto("/jobs");
-  await page.locator('button[aria-label="Toggle menu"]').click();
+  await page.locator(MENU_BTN).click();
   const dropdown = page.locator("div.lg\\:hidden.absolute");
   await expect(dropdown).toBeVisible();
   // Click "Proteins" link in the dropdown (only this one is visible; desktop nav is display:none)
@@ -95,7 +98,7 @@ for (const { path, name } of PAGES) {
 test("screenshot — jobs menu open", async ({ page }) => {
   await page.goto("/jobs");
   await page.waitForLoadState("networkidle");
-  await page.locator('button[aria-label="Toggle menu"]').click();
+  await page.locator(MENU_BTN).click();
   await page.waitForTimeout(300);
   await page.screenshot({ path: "e2e/screenshots/mobile-menu-open.png" });
 });
