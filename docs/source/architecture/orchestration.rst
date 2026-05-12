@@ -154,3 +154,101 @@ orchestration agent imports numbers from ``EvaluationResult`` rows and
 figure scripts from ``protea-reranker-lab/runs/`` but does so by
 reading exported artefacts (CSV, parquet, PNG), never the live DB,
 so a thesis build is reproducible from a frozen snapshot.
+
+
+Plugin contract surface
+-----------------------
+
+PROTEA discovers runtime capabilities through four distinct plugin
+layers, all mediated by Python ``entry_points`` so the platform code
+never hardcodes backend or source names.
+
+.. code-block:: text
+
+   ┌───────────────────────────────────────────────────────────────────────┐
+   │  PROTEA platform (this repo)                                          │
+   │                                                                       │
+   │  OperationRegistry  ←  15 operations wired at worker startup          │
+   │  PluginLoader       ←  entry_points discovery at import time          │
+   │                                                                       │
+   │  entry_points group       discovered from       example keys          │
+   │  ─────────────────────    ────────────────────  ─────────────────     │
+   │  protea.backends      ←   protea-backends        esm, t5, ankh,       │
+   │                           (PLM embedding)        esm3c                │
+   │                                                                       │
+   │  protea.sources       ←   protea-sources         goa, quickgo,        │
+   │                           (annotation source)    uniprot              │
+   │                                                                       │
+   │  protea.runners       ←   protea-runners         lightgbm, knn,       │
+   │                           (experiment runner)    baseline             │
+   │                                                                       │
+   │  (method delegation)  ←   protea-method          protea_method        │
+   │                           (pure inference lib)   .pipeline.predict()  │
+   │                                                                       │
+   └───────────────────────────────────────────────────────────────────────┘
+
+   ┌─────────────────────┐    ┌─────────────────────┐    ┌──────────────────────┐
+   │  protea-contracts   │    │  protea-backends     │    │  protea-sources      │
+   │  (shared ABCs +     │◀───│  ESM / T5 / Ankh /  │    │  GOA / QuickGO /     │
+   │   payloads +        │    │  ESM3-C wrappers     │    │  UniProt plugins     │
+   │   feature schema +  │◀───│                      │◀───│                      │
+   │   schema_sha)       │    └─────────────────────┘    └──────────────────────┘
+   └──────────┬──────────┘
+              │  imported by all four plugin repos + PROTEA platform
+              ▼
+   ┌─────────────────────┐    ┌─────────────────────┐
+   │  protea-method      │    │  protea-runners      │
+   │  pure inference:    │    │  experiment runners: │
+   │  KNN, feature       │◀───│  LightGBM, KNN       │
+   │  compute, reranker  │    │  baseline            │
+   │  apply              │    └─────────────────────┘
+   └─────────────────────┘
+
+``protea-contracts`` is the only cross-cutting import. Every other
+repo is a leaf: it imports ``protea-contracts`` but nothing else from
+the PROTEA tree. This keeps CI matrices small and prevents circular
+dependencies.
+
+
+F-LAFA container deployment topology
+-------------------------------------
+
+Three containers were submitted to the LAFA benchmark, all built on
+top of the ``protea-method-runtime`` base image (ADR-D15). Each
+container is self-contained: embeddings, reference annotations, and
+optionally a LightGBM booster are frozen into a bundle at build time.
+
+.. code-block:: text
+
+   ┌───────────────────────────────────────────────────────────────────────┐
+   │  protea-method-runtime  (base image)                                  │
+   │  python + protea-method + protea-contracts + PLM weights              │
+   │  entrypoint: protea_predict.py                                        │
+   └──────────────────────┬────────────────────────────────────────────────┘
+                          │  FROM protea-method-runtime
+          ┌───────────────┼───────────────┐
+          ▼               ▼               ▼
+   ┌─────────────┐ ┌─────────────┐ ┌─────────────┐
+   │ lafa_knn_v1 │ │lafa_knn_8plm│ │  lafa_v18   │
+   │             │ │             │ │             │
+   │ 1 PLM       │ │ 8 PLMs      │ │ 1 PLM       │
+   │ KNN only    │ │ ensemble    │ │ KNN + v6    │
+   │ no reranker │ │ mean agg.   │ │ + reranker  │
+   │ no v6 feats │ │ no v6 feats │ │ (full pipe) │
+   │ aspect-sep  │ │ aspect-sep  │ │ aspect-sep  │
+   └──────┬──────┘ └──────┬──────┘ └──────┬──────┘
+          │               │               │
+          └───────────────┴───────────────┘
+                          │  bind-mount at container run time
+   ┌───────────────────────▼──────────────────────────────────────────────┐
+   │  /bundle         frozen reference (embeddings .parquet + GO map)     │
+   │  /input/         queries.fasta  (LAFA evaluator supplies)            │
+   │  /output/        predictions.tsv  (written by entrypoint)            │
+   │  /hf-cache       HuggingFace model weight cache                      │
+   └──────────────────────────────────────────────────────────────────────┘
+
+Container source directories:
+
+- ``apps/lafa_knn_v1/`` (single-PLM KNN baseline)
+- ``apps/lafa_knn_8plm/`` (8-PLM ensemble via ``ensemble_driver.py``)
+- ``apps/lafa_v18/`` (full PROTEA v18 pipeline with reranker)
