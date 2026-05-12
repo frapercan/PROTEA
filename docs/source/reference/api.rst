@@ -122,6 +122,28 @@ It provides:
    :undoc-members:
    :show-inheritance:
 
+The annotations router is split into four sub-modules, each handling one endpoint group.
+
+.. automodule:: protea.api.routers.annotations.snapshots
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.api.routers.annotations.sets
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.api.routers.annotations.evaluation_sets
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.api.routers.annotations.evaluation_results
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Embeddings router
 -----------------
 
@@ -353,6 +375,35 @@ transitions stamp ``started_at`` (on ``planned → running``) and
 idempotently: re-entering a state never resets its timestamp.
 
 .. automodule:: protea.api.routers.experiment_runs
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Services layer
+--------------
+
+Each router delegates non-trivial business logic to a service module.
+Services are pure Python: they accept a SQLAlchemy session and return
+domain objects or raise domain exceptions. Routers map those exceptions
+to HTTP status codes. This separation allows the same logic to be
+exercised from CLI tools or batch scripts without importing FastAPI.
+
+.. automodule:: protea.services.jobs_service
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.services.annotations_service
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.services.embeddings_service
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.services.scoring_service
    :members:
    :undoc-members:
    :show-inheritance:

@@ -9,6 +9,12 @@ class to implement, where the implementation lives, how the platform
 discovers it, and where to find the per-repo guides with concrete
 templates.
 
+.. seealso::
+
+   The detailed per-layer guides with worked toy-plugin examples live
+   under :doc:`guides/plugin-authoring/index`. Start there if you want
+   a runnable code template to copy.
+
 The canonical source of truth for the contracts themselves is the
 `protea-contracts <https://github.com/frapercan/protea-contracts>`_
 package and its Sphinx documentation; this page links to it

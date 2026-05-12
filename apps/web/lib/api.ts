@@ -30,10 +30,17 @@ export function baseUrl(): string {
   return u.replace(/\/+$/, "");
 }
 
-async function http<T>(path: string, init?: RequestInit): Promise<T> {
+// Opt-in cache convention: pass `cacheable: true` to use Next.js fetch
+// revalidation (60s) instead of the default `cache: "no-store"`. Reserved
+// for stable reference endpoints (configs/snapshots/embeddings lists).
+async function http<T>(path: string, init?: RequestInit & { cacheable?: boolean }): Promise<T> {
+  const { cacheable, ...rest } = init ?? {};
+  const fetchInit: RequestInit = cacheable
+    ? { next: { revalidate: 60 }, ...rest }
+    : { cache: "no-store", ...rest };
   let res: Response;
   try {
-    res = await fetch(`${baseUrl()}${path}`, { cache: "no-store", ...init });
+    res = await fetch(`${baseUrl()}${path}`, fetchInit);
   } catch (e: any) {
     throw new Error(e?.message ?? "Network error");
   }
@@ -209,7 +216,7 @@ export function getProtein(accession: string) {
 }
 
 export function listEmbeddingConfigs() {
-  return http<EmbeddingConfig[]>(`/embeddings/configs`);
+  return http<EmbeddingConfig[]>(`/embeddings/configs/`, { cacheable: true });
 }
 
 export function createEmbeddingConfig(body: Omit<EmbeddingConfig, "id" | "created_at" | "embedding_count" | "use_chunking" | "chunk_size" | "chunk_overlap" | "normalize_residues"> & {
@@ -260,7 +267,7 @@ export function launchPredictGoTerms(body: {
 }
 
 export function listPredictionSets() {
-  return http<PredictionSet[]>(`/embeddings/prediction-sets`);
+  return http<PredictionSet[]>(`/embeddings/prediction-sets/`);
 }
 
 export function getPredictionSet(id: string) {
@@ -362,7 +369,7 @@ export function getGoSubgraph(snapshotId: string, goIds: string[], depth = 3) {
 }
 
 export function listAnnotationSets() {
-  return http<AnnotationSet[]>(`/annotations/sets`);
+  return http<AnnotationSet[]>(`/annotations/sets/`);
 }
 
 export function deleteAnnotationSet(id: string) {
@@ -370,7 +377,7 @@ export function deleteAnnotationSet(id: string) {
 }
 
 export function listOntologySnapshots() {
-  return http<OntologySnapshot[]>(`/annotations/snapshots`);
+  return http<OntologySnapshot[]>(`/annotations/snapshots/`, { cacheable: true });
 }
 
 export function setSnapshotIaUrl(snapshotId: string, iaUrl: string | null) {
@@ -390,7 +397,7 @@ export type QuerySet = {
 };
 
 export function listQuerySets() {
-  return http<QuerySet[]>(`/query-sets`);
+  return http<QuerySet[]>(`/query-sets/`);
 }
 
 export function getQuerySet(id: string) {
@@ -414,7 +421,7 @@ export type VacuumEmbeddingsPreview = {
 };
 
 export function previewVacuumSequences() {
-  return http<VacuumSequencesPreview>(`/maintenance/vacuum-sequences/preview`);
+  return http<VacuumSequencesPreview>(`/maintenance/vacuum-sequences/preview/`);
 }
 
 export function runVacuumSequences() {
@@ -422,7 +429,7 @@ export function runVacuumSequences() {
 }
 
 export function previewVacuumEmbeddings() {
-  return http<VacuumEmbeddingsPreview>(`/maintenance/vacuum-embeddings/preview`);
+  return http<VacuumEmbeddingsPreview>(`/maintenance/vacuum-embeddings/preview/`);
 }
 
 export function runVacuumEmbeddings() {
@@ -451,7 +458,7 @@ export type ScoringConfig = {
 };
 
 export function listScoringConfigs() {
-  return http<ScoringConfig[]>(`/scoring/configs`);
+  return http<ScoringConfig[]>(`/scoring/configs/`, { cacheable: true });
 }
 
 export function createScoringConfig(body: {
@@ -518,7 +525,7 @@ export type RerankerModel = {
 };
 
 export function listRerankers() {
-  return http<RerankerModel[]>(`/scoring/rerankers`);
+  return http<RerankerModel[]>(`/scoring/rerankers/`);
 }
 
 export function getReranker(id: string) {
@@ -787,7 +794,7 @@ export type BenchmarkMatrixResponse = {
 };
 
 export function getBenchmarkEmbeddings() {
-  return http<BenchmarkEmbeddingsResponse>("/benchmark/embeddings");
+  return http<BenchmarkEmbeddingsResponse>("/benchmark/embeddings/", { cacheable: true });
 }
 
 export function getBenchmarkMatrix(params?: {
@@ -800,7 +807,7 @@ export function getBenchmarkMatrix(params?: {
   if (params?.stage) qs.set("stage", params.stage);
   if (params?.k !== undefined) qs.set("k", String(params.k));
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
-  return http<BenchmarkMatrixResponse>(`/benchmark/matrix${suffix}`);
+  return http<BenchmarkMatrixResponse>(`/benchmark/matrix/${suffix}`);
 }
 
 export type StackRepo = {

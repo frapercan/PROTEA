@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session, sessionmaker
 
+from protea.api.auth import require_api_key
 from protea.api.deps import get_amqp_url, get_operation_registry, get_session_factory
 from protea.core.contracts.registry import OperationRegistry
 from protea.core.utils import utcnow
@@ -196,7 +197,11 @@ class CreateJobRequest(BaseModel):
         return v.strip()
 
 
-@router.post("", summary="Create and enqueue a job")
+@router.post(
+    "",
+    summary="Create and enqueue a job",
+    dependencies=[Depends(require_api_key)],
+)
 def create_job(
     body: CreateJobRequest,
     factory: sessionmaker[Session] = Depends(get_session_factory),
