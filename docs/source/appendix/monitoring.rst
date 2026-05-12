@@ -57,21 +57,30 @@ data.
 Bringing the stack up
 ---------------------
 
-Grafana lives in its own Compose file so that bringing it up does not
-disturb the application stack:
+Grafana and Loki live in their own Compose file so that bringing them
+up does not disturb the application stack:
 
 .. code-block:: bash
 
    docker compose -f docker-compose.monitoring.yml up -d
    open http://localhost:3001    # admin / admin on first login
 
-The container reaches Postgres through the host gateway
+The Grafana container reaches Postgres through the host gateway
 (``host.docker.internal:5432``), which works as long as the application
 stack publishes its port (the default in ``docker-compose.yml``).
 ``protea-postgres-1`` does this, but a deployment using the
 ``docker-compose.prod.yml`` profile may keep Postgres on an internal
 network. In that case extend the monitoring stack with a shared
 network instead of relying on the host gateway.
+
+The compose file also provisions a Loki container on the same
+``protea_monitoring`` bridge network. Grafana reaches it at
+``http://loki:3100``; the host port 3100 is published so the
+``loki-docker-driver`` plugin (which runs in the docker daemon, not in
+any compose project) can push from the application containers. See
+:doc:`/runbooks/loki` for the plugin install and the per-service
+``logging:`` block that opts api / worker containers into shipping
+their structured JSON log lines.
 
 Stopping is symmetric:
 
@@ -91,10 +100,14 @@ in the UI to see the visitor dashboard.
 
     deploy/grafana/
     ├── dashboards/
-    │   └── visitors.json                 # exported dashboard JSON
+    │   ├── visitors.json                 # exported dashboard JSON
+    │   └── logs.json                     # Loki-backed log stream + rates
     └── provisioning/
         ├── dashboards/dashboards.yml      # registers the dashboards/ folder
-        └── datasources/postgres.yml       # registers the protea Postgres source
+        └── datasources/
+            ├── postgres.yml               # registers the protea Postgres source
+            ├── prometheus.yml             # registers the protea Prometheus source
+            └── loki.yml                   # registers the protea Loki source
 
 Editing a panel in the UI is fine for exploration but is not
 persisted. To make a change permanent: edit the panel, **Dashboard
@@ -153,8 +166,10 @@ fit the same shape is a Postgres-only change:
 3. Commit the dashboard JSON to the PROTEA repo.
 
 For metrics that go beyond visitor traffic (queue depth, prediction
-throughput, embedding GPU memory) the long-term plan is OpenTelemetry +
-Prometheus + Grafana via the F5 observability decision (see
-:doc:`/adr/D07-observability-stack`). Until that lands, ad-hoc panels
-in the visitor dashboard are the simplest way to surface a SQL-based
-metric.
+throughput, embedding GPU memory) the canonical stack is OpenTelemetry
+for traces, Prometheus for metrics, and Loki for logs, all surfaced in
+the same Grafana instance (ADR-D7, see
+:doc:`/adr/D07-observability-stack`). The Loki side is set up in
+:doc:`/runbooks/loki`; the OpenTelemetry side in :doc:`/runbooks/observability`.
+Ad-hoc panels against ``visitor_event`` remain the simplest way to
+surface a SQL-based metric.

@@ -1,16 +1,28 @@
-# Grafana sidecar for PROTEA — Level A (visitor analytics only).
+# Grafana + Loki sidecar for PROTEA (Level A, visitor analytics + logs).
 #
-# Runs Grafana in a bridge network and publishes 3001 on the host. Postgres
-# lives in the `pgvectorsql` bridge container which publishes 5432 on the
-# host, so Grafana reaches it via the docker0 gateway (host.docker.internal).
+# Runs Grafana and Loki on the same `protea_monitoring` bridge network so
+# Grafana reaches Loki at http://loki:3100 by container name. Grafana
+# publishes 3001 on the host; Loki publishes 3100 on the host so the
+# loki-docker-driver running on the application stack can push logs to
+# it without a shared compose network (the driver lives outside any
+# compose context, so it has to talk to a host-published port).
 #
-# `network_mode: host` was tried first but this host's Docker puts "host"
-# containers in a netns that's not actually the real init netns, so the
-# listener was invisible from the outside. Bridge + published port works.
+# Postgres still lives in the `pgvectorsql` bridge container which
+# publishes 5432 on the host, so Grafana reaches it via the docker0
+# gateway (host.docker.internal). `network_mode: host` was tried first
+# but this host's Docker puts "host" containers in a netns that's not
+# actually the real init netns, so the listener was invisible from the
+# outside. Bridge + published port works.
 #
 # Usage:
 #   docker compose -f docker-compose.monitoring.yml up -d
 #   open http://localhost:3001   (admin / admin on first login)
+#
+# Configuring the application stack to ship logs to Loki is a separate
+# step that involves installing the `loki-docker-driver` plugin and
+# adding a `logging:` block to the api / worker services in
+# docker-compose.yml. See docs/source/runbooks/loki.rst for the
+# step-by-step procedure.
 
 services:
   grafana:
@@ -31,7 +43,38 @@ services:
       - grafana_data:/var/lib/grafana
       - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - protea_monitoring
+    depends_on:
+      - loki
     restart: unless-stopped
+
+  loki:
+    image: grafana/loki:3.2.1
+    container_name: protea-loki
+    command: -config.file=/etc/loki/loki-config.yml
+    ports:
+      # Published so the loki-docker-driver plugin (which runs in the
+      # host's docker daemon namespace, not in this compose project) can
+      # push to http://localhost:3100.
+      - "3100:3100"
+    volumes:
+      - ./deploy/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki_data:/loki
+    networks:
+      - protea_monitoring
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider --quiet http://localhost:3100/ready || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+networks:
+  protea_monitoring:
+    driver: bridge
 
 volumes:
   grafana_data:
+  loki_data:
