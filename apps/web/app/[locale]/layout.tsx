@@ -15,12 +15,16 @@ import { AuthChip } from "@/components/AuthChip";
 import { NextIntlClientProvider } from "next-intl";
 import { getMessages, getTranslations } from "next-intl/server";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "PROTEA — Functional Annotation",
+  title: {
+    template: "%s | PROTEA",
+    default: "PROTEA — Functional Annotation",
+  },
   description: "Protein Functional Embedding-based Annotation — job queue and pipeline management",
 };
 
@@ -107,6 +111,8 @@ export default async function LocaleLayout({
                 </div>
               </div>
             </header>
+
+            <Breadcrumbs />
 
             <main
               id="main"

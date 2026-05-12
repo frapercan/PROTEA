@@ -431,6 +431,13 @@ export function NavLinks({ mobileExtras }: { mobileExtras?: React.ReactNode }) {
       {/* ── Mobile drawer ────────────────────────────────────────── */}
       {open && (
         <div
+          className="xl:hidden fixed inset-0 bg-black/40 z-40"
+          onClick={() => setOpen(false)}
+          aria-hidden
+        />
+      )}
+      {open && (
+        <div
           ref={drawerRef}
           id="protea-mobile-nav"
           className="xl:hidden absolute left-0 right-0 top-full z-50 border-b border-slate-200 bg-white shadow-xl max-h-[calc(100vh-4rem)] overflow-y-auto"
