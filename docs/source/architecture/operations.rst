@@ -1339,11 +1339,15 @@ converts to float32, and publishes a ``StoreEmbeddings`` message to
 
 Backends are selected via ``EmbeddingConfig.model_backend``:
 
-* ``esm``:   HuggingFace ``EsmModel`` (ESM-2 family); single-sequence forward.
+* ``esm``:   ESM-2 family. Dispatched through the ``protea-backends`` plugin
+  (``protea.backends`` entry_points group, T2A.1). The plugin calls
+  ``plugin.embed_chunks``; the legacy ``_embed_esm`` shim is used only as
+  a fallback when the installed plugin predates T2A.1.
 * ``esm3c``: ESM SDK ``ESMC`` (ESM3c family); FP16 on GPU, no external tokenizer.
 * ``t5``:    HuggingFace ``T5EncoderModel`` (ProstT5, ``prot_t5_xl_uniref50``…);
   the ``<AA2fold>`` prefix is auto-injected when the model name contains
-  ``prostt5``.
+  ``prostt5``. Runs through the local ``_embed_t5`` shim (plugin migration
+  pending T2A.2).
 * ``ankh``:  HuggingFace ``T5EncoderModel`` loaded via ``AutoTokenizer``
   (``ElnaggarLab/ankh-base``, ``ElnaggarLab/ankh-large``). Shares the batched
   T5 pipeline but with two mandatory deviations from the ProstT5 path,
@@ -1359,7 +1363,9 @@ Backends are selected via ``EmbeddingConfig.model_backend``:
      destroys the embedding. ``_embed_ankh`` instead passes
      ``[list(seq) for seq in batch]`` with ``is_split_into_words=True``
      (verified 0 ``<unk>``). The ``<AA2fold>`` prefix is never injected.
-* ``auto``:  falls back to ``esm``.
+* ``auto``:  Dispatched through the ``protea-backends`` plugin (same path as
+  ``esm``, T2A.1). Falls back to the ``_embed_esm`` shim when the plugin
+  is absent.
 
 Residue-tensor convention
 ^^^^^^^^^^^^^^^^^^^^^^^^^
