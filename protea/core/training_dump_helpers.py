@@ -57,6 +57,7 @@ from protea.core._training_dump_loaders import (
     _TrainSplitOutcome,
 )
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
+from protea.core.disk_cache import _load_reference_pool_cached
 from protea.core.domain.aspect import ASPECT_CODES as _ASPECTS
 from protea.core.domain.aspect import Aspect
 from protea.core.evaluation import load_evaluation_data_for_set
@@ -186,35 +187,35 @@ def _load_parent_map(session: Session, snapshot_id: uuid.UUID) -> dict[str, set[
 
 # ── bulk embedding preload (used by dump_helper) ─────────────
 
+# Nil UUID: the dump preload spans every annotation set for a config.
+_DUMP_ANN_SET_SENTINEL = uuid.UUID(int=0)
+
 
 def _preload_all_embeddings(
     session: Session,
     emb_config_id: uuid.UUID,
     emit: EmitFn,
 ) -> tuple[np.ndarray, list[str], dict[str, int]]:
-    """Load ALL embeddings once into memory.
-
-    Returns (embeddings_f16, accessions, acc_to_idx).
-    This avoids reloading 527K vectors from PostgreSQL on every split.
-    """
+    """Load ALL embeddings once (disk-cached) and return (embs, accs, idx)."""
     from protea.config.tuning import get_tuning
 
     conn = session.connection()
     total, dim = _count_embeddings_with_dim(conn, emb_config_id)
+    emit("dump_helper.preloading_embeddings", None, {"total": total, "dim": dim}, "info")
 
-    emit(
-        "dump_helper.preloading_embeddings",
-        None,
-        {"total": total, "dim": dim},
-        "info",
-    )
+    def _db_loader() -> tuple[list[str], np.ndarray]:
+        stream_chunk = get_tuning().operation.stream_chunk_size
+        embs, accs = _stream_embeddings(conn, emb_config_id, total, dim, stream_chunk)
+        return accs, embs
 
-    stream_chunk = get_tuning().operation.stream_chunk_size
-    embeddings, accessions = _stream_embeddings(
-        conn, emb_config_id, total, dim, stream_chunk
+    accessions, embeddings = _load_reference_pool_cached(
+        emb_config_id,
+        _DUMP_ANN_SET_SENTINEL,
+        _db_loader,
+        expected_count=total,
+        emit=lambda ev, fields: emit(f"dump_helper.{ev}", None, fields, "info"),
     )
     acc_to_idx = {acc: i for i, acc in enumerate(accessions)}
-
     emit(
         "dump_helper.embeddings_preloaded",
         None,
@@ -225,7 +226,6 @@ def _preload_all_embeddings(
         },
         "info",
     )
-
     return embeddings, accessions, acc_to_idx
 
 

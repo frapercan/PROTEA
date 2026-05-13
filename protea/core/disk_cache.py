@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -218,16 +219,27 @@ def _derive_reference_views(
 def _load_from_disk_cache(
     embedding_config_id: uuid.UUID,
     annotation_set_id: uuid.UUID,
+    expected_count: int | None = None,
 ) -> dict[str, Any] | None:
+    """Load the cached reference pool, optionally validating its row count.
+
+    When ``expected_count`` is supplied (e.g. a fresh ``COUNT(*)`` from
+    the DB), the cached row count must match exactly or the cache is
+    treated as stale and ``None`` is returned. This lets callers detect
+    drift after a reference re-ingest without needing to delete the
+    cache files by hand.
+    """
     emb_path, acc_path = _disk_cache_paths(embedding_config_id, annotation_set_id)
     if not emb_path.exists() or not acc_path.exists():
         return None
     try:
         embeddings = np.load(emb_path)
         accessions = list(np.load(acc_path))
-        return {"accessions": accessions, "embeddings": embeddings}
     except Exception:
         return None
+    if expected_count is not None and len(accessions) != expected_count:
+        return None
+    return {"accessions": accessions, "embeddings": embeddings}
 
 
 def _save_to_disk_cache(
@@ -242,6 +254,53 @@ def _save_to_disk_cache(
     np.save(acc_path, np.array(accessions))
 
 
+def _load_reference_pool_cached(
+    embedding_config_id: uuid.UUID,
+    annotation_set_id: uuid.UUID,
+    db_loader: Callable[[], tuple[list[str], np.ndarray]],
+    *,
+    expected_count: int | None = None,
+    emit: Callable[[str, dict[str, Any]], None] | None = None,
+) -> tuple[list[str], np.ndarray]:
+    """Return ``(accessions, embeddings)`` for the reference pool with disk-cache.
+
+    Cache layout matches :func:`_load_from_disk_cache` / :func:`_save_to_disk_cache`
+    so the same npy pair is shared between the predict path and the dump
+    pipeline. ``db_loader`` is invoked only on miss or when the cached row
+    count diverges from ``expected_count`` (light invalidation: a single
+    cheap ``COUNT(*)`` on the caller side is enough to detect a reference
+    re-ingest). ``emit`` receives ``refpool.cache_hit`` /
+    ``refpool.cache_stale`` / ``refpool.cache_write`` audit events with
+    sizes and paths; pass ``None`` to stay quiet.
+    """
+    emb_path, _ = _disk_cache_paths(embedding_config_id, annotation_set_id)
+    cached = _load_from_disk_cache(
+        embedding_config_id, annotation_set_id, expected_count=expected_count
+    )
+    if cached is not None:
+        if emit is not None:
+            emit(
+                "refpool.cache_hit",
+                {
+                    "path": str(emb_path),
+                    "rows": len(cached["accessions"]),
+                    "bytes": int(cached["embeddings"].nbytes),
+                },
+            )
+        return cached["accessions"], cached["embeddings"]
+    if emit is not None and emb_path.exists():
+        emit("refpool.cache_stale", {"path": str(emb_path)})
+    accessions, embeddings = db_loader()
+    _save_to_disk_cache(embedding_config_id, annotation_set_id, accessions, embeddings)
+    if emit is not None:
+        size_bytes = emb_path.stat().st_size if emb_path.exists() else int(embeddings.nbytes)
+        emit(
+            "refpool.cache_write",
+            {"path": str(emb_path), "rows": len(accessions), "bytes": int(size_bytes)},
+        )
+    return accessions, embeddings
+
+
 __all__ = [
     "_DISK_CACHE_DIR",
     "_anno_disk_cache_paths",
@@ -252,6 +311,7 @@ __all__ = [
     "_disk_cache_paths",
     "_load_anno_csr_from_disk",
     "_load_from_disk_cache",
+    "_load_reference_pool_cached",
     "_save_anno_csr_to_disk",
     "_save_to_disk_cache",
 ]
