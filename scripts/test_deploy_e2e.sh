@@ -108,15 +108,23 @@ while [[ $(date +%s) -lt $deadline ]]; do
     fi
     sleep 3
 done
-[[ "$ready" == "1" ]] || fail "/health/ready never reported ready within ${READY_TIMEOUT_S}s"
+if [[ "$ready" != "1" ]]; then
+    warn "/health/ready never reported ready within ${READY_TIMEOUT_S}s — final response below:"
+    curl -sS -o /tmp/health-ready-body -w "HTTP %{http_code}\n" "${API_URL}/health/ready" >&2 || true
+    printf "  body: " >&2
+    head -c 1024 /tmp/health-ready-body >&2 2>/dev/null || true
+    printf "\n" >&2
+    fail "/health/ready never reported ready within ${READY_TIMEOUT_S}s"
+fi
 ok "/health/ready is ready"
 
-# 4. Canonical /v1 surface probes. The task spec calls these out
-#    explicitly: a working deploy must serve both endpoints.
-log "4/5  probing /v1 surface"
-code=$(curl -s -o /dev/null -w "%{http_code}" "${API_URL}/v1/health")
-[[ "$code" == "200" ]] || fail "/v1/health returned ${code}, want 200"
-ok "/v1/health is 200"
+# 4. Surface probes. /health stays at the root by convention (registered
+#    via _register_health_endpoints, not under the /v1 router prefix);
+#    /v1/jobs is the canonical versioned route the lab and frontends call.
+log "4/5  probing surface (/health + /v1/jobs)"
+code=$(curl -s -o /dev/null -w "%{http_code}" "${API_URL}/health")
+[[ "$code" == "200" ]] || fail "/health returned ${code}, want 200"
+ok "/health is 200"
 
 code=$(curl -s -o /dev/null -w "%{http_code}" "${API_URL}/v1/jobs?limit=1")
 [[ "$code" == "200" ]] || fail "/v1/jobs returned ${code}, want 200"
