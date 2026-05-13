@@ -112,12 +112,14 @@ class QueueConsumer:
         signal.signal(signal.SIGINT, self._handle_stop)
         signal.signal(signal.SIGTERM, self._handle_stop)
 
-        # Use a long heartbeat so RabbitMQ does not close the connection
-        # while the worker is blocked inside a long operation (QuickGO, embeddings…).
-        # BlockingConnection cannot send heartbeats during op.execute(), so we
-        # give the broker up to 1 hour before it considers this consumer dead.
+        # Pika's default heartbeat (60s) is too short for ops that hold
+        # the AMQP connection through long compute without yielding to
+        # the select() loop (QuickGO crawl, embeddings, KNN). 600s gives
+        # a 10x safety margin while still detecting genuinely dead peers
+        # within minutes. Tunable via PROTEA_AMQP_HEARTBEAT or
+        # PROTEA_TUNING__queue__amqp_heartbeat (see config/tuning.py).
         params = pika.URLParameters(self._amqp_url)
-        params.heartbeat = 3600
+        params.heartbeat = get_tuning().queue.amqp_heartbeat
         connection = pika.BlockingConnection(params)
         channel = connection.channel()
 
@@ -253,8 +255,10 @@ class OperationConsumer:
         signal.signal(signal.SIGINT, self._handle_stop)
         signal.signal(signal.SIGTERM, self._handle_stop)
 
+        # See QueueConsumer.run for the heartbeat rationale: default 600s
+        # tolerates long blocking ops without losing dead-peer detection.
         params = pika.URLParameters(self._amqp_url)
-        params.heartbeat = 3600
+        params.heartbeat = get_tuning().queue.amqp_heartbeat
         connection = pika.BlockingConnection(params)
         channel = connection.channel()
 

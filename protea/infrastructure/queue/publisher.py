@@ -20,11 +20,19 @@ _local = threading.local()
 
 
 def _get_connection(amqp_url: str) -> pika.BlockingConnection:
-    """Return a reusable connection, creating one if needed."""
+    """Return a reusable connection, creating one if needed.
+
+    Applies the configured AMQP heartbeat (default 600s, see
+    ``QueueTuning.amqp_heartbeat``) so the publisher side does not get
+    closed mid-publish after a long idle window between batches. Pika's
+    60s default is too short for jobs that publish bursts hours apart.
+    """
     conn: pika.BlockingConnection | None = getattr(_local, "connection", None)
     if conn is not None and conn.is_open:
         return conn
-    _local.connection = pika.BlockingConnection(pika.URLParameters(amqp_url))
+    params = pika.URLParameters(amqp_url)
+    params.heartbeat = get_tuning().queue.amqp_heartbeat
+    _local.connection = pika.BlockingConnection(params)
     return _local.connection
 
 

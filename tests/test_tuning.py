@@ -31,6 +31,20 @@ class TestQueueTuningDefaults:
         assert q.oom_base_delay == 5
         assert q.oom_max_delay == 300
 
+    def test_amqp_heartbeat_default(self) -> None:
+        """Default 600s tolerates the longest blocking ops in PROTEA
+        while still detecting genuinely dead peers within ~20 min
+        (pika closes after 2 missed heartbeats)."""
+        q = QueueTuning()
+        assert q.amqp_heartbeat == 600
+
+    def test_amqp_heartbeat_accepts_zero(self) -> None:
+        """0 is a valid pika value (disables heartbeats entirely);
+        we expose it for ops on networks where the broker handles
+        keepalives at the TCP layer."""
+        q = QueueTuning(amqp_heartbeat=0)
+        assert q.amqp_heartbeat == 0
+
     def test_validates_non_negative(self) -> None:
         with pytest.raises(Exception):
             QueueTuning(publisher_max_attempts=0)
@@ -80,6 +94,33 @@ class TestApplyEnvOverrides:
         out = _apply_env_overrides(merged)
         assert out["queue"]["publisher_max_attempts"] == 30
         assert out["queue"]["oom_max_retries"] == 8
+
+    def test_short_alias_amqp_heartbeat(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """PROTEA_AMQP_HEARTBEAT is a short alias for the canonical
+        PROTEA_TUNING__queue__amqp_heartbeat path. Operators tuning
+        a single broker knob shouldn't have to type the full path."""
+        for key in list(__import__("os").environ):
+            if key.startswith("PROTEA_TUNING__") or key == "PROTEA_AMQP_HEARTBEAT":
+                monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("PROTEA_AMQP_HEARTBEAT", "900")
+        out = _apply_env_overrides({})
+        assert out["queue"]["amqp_heartbeat"] == 900
+
+    def test_canonical_path_wins_over_short_alias(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When both forms are set, the canonical nested path wins so
+        a forgotten alias in a shell rc file can't override an explicit
+        deploy-time tuning."""
+        for key in list(__import__("os").environ):
+            if key.startswith("PROTEA_TUNING__") or key == "PROTEA_AMQP_HEARTBEAT":
+                monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("PROTEA_AMQP_HEARTBEAT", "120")
+        monkeypatch.setenv("PROTEA_TUNING__QUEUE__AMQP_HEARTBEAT", "1800")
+        out = _apply_env_overrides({})
+        assert out["queue"]["amqp_heartbeat"] == 1800
 
 
 class TestGetTuning:

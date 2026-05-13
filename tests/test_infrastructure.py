@@ -100,6 +100,49 @@ class TestBuildEngine:
         )
         assert engine is mock_create.return_value
 
+    def test_passes_pool_pre_ping_true(self):
+        """SQLA pre-ping is mandatory to detect server-side idle
+        connection drops before checkout (Postgres
+        idle_in_transaction_session_timeout, broker-level firewalls)."""
+        from protea.infrastructure.database.engine import build_engine
+
+        with patch("protea.infrastructure.database.engine.create_engine") as mock_create:
+            mock_create.return_value = MagicMock()
+            build_engine("sqlite:///:memory:")
+
+        kwargs = mock_create.call_args.kwargs
+        assert kwargs["pool_pre_ping"] is True
+
+    def test_passes_pool_recycle(self):
+        """pool_recycle forces SQLA to drop connections older than the
+        configured window so Postgres-side idle kills don't surface to
+        callers."""
+        from protea.infrastructure.database.engine import build_engine
+
+        with patch("protea.infrastructure.database.engine.create_engine") as mock_create:
+            mock_create.return_value = MagicMock()
+            build_engine("sqlite:///:memory:")
+
+        kwargs = mock_create.call_args.kwargs
+        assert kwargs["pool_recycle"] == 3600
+
+
+class TestBuildSessionFactoryPrePing:
+    """End-to-end check that ``build_session_factory`` ends up calling
+    ``create_engine`` with ``pool_pre_ping=True``. Covers the PR-B
+    invariant directly at the public entry point."""
+
+    def test_session_factory_routes_pre_ping_to_create_engine(self):
+        from protea.infrastructure.session import build_session_factory
+
+        with patch("protea.infrastructure.database.engine.create_engine") as mock_create:
+            mock_create.return_value = MagicMock()
+            build_session_factory("sqlite:///:memory:")
+
+        kwargs = mock_create.call_args.kwargs
+        assert kwargs["pool_pre_ping"] is True
+        assert kwargs["pool_recycle"] == 3600
+
 
 # ---------------------------------------------------------------------------
 # create_app
