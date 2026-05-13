@@ -563,7 +563,7 @@ def _stream_test_predictions(
             aspect_map=ctx.aspect_map,
             gt_pairs=set(),
             query_known_gos=ctx.test_eval_data.known,
-            parent_map_str=ctx.parent_map if p.expand_votes_to_ancestors else None,
+            parent_map_str=ctx.parent_map,  # unconditional: lineage producer needs it
             ia_weights=ctx.ia_weights,
             pca_state=ctx.pca_state,
             pivot_go_ids=ctx.pivot_go_ids,
@@ -805,7 +805,7 @@ def _knn_and_filter_to_pivot(
             aspect_map=ctx.aspect_map,
             gt_pairs=set(),
             query_known_gos=eval_data.known,
-            parent_map_str=ctx.parent_map if p.expand_votes_to_ancestors else None,
+            parent_map_str=ctx.parent_map,  # unconditional: lineage producer needs it
             ia_weights=ctx.ia_weights,
             pca_state=ctx.pca_state,
             embedding_pool=ctx.embedding_pool,

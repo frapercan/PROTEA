@@ -242,6 +242,15 @@ class _KnnTransferRunner:
             self.parent_map_str
         )
         self.ancestor_closure: dict[str, set[str]] = {}
+        # Lineage producer inputs: convert the set-valued parent map to
+        # the producer's list-typed shape once at init and capture the
+        # known-GO map (or an empty fallback) for per-query lookup.
+        self._lineage_parents: dict[str, list[str]] = (
+            {gid: list(ps) for gid, ps in self.parent_map_str.items()}
+            if self.parent_map_str
+            else {}
+        )
+        self._lineage_known: dict[str, set[str]] = self.query_known_gos or {}
 
     def run(self) -> list[dict[str, Any]] | dict[str, Any]:
         """Drive the full KNN-transfer-label pipeline."""
@@ -514,6 +523,11 @@ class _KnnTransferRunner:
             )
             leaf_by_gid = builder.build_leaves_for_aspect(leaf_ctx)
             synth = builder.expand_ancestors(q_acc, leaf_by_gid)
+            # Lineage producer: mutate every record in place with the 4
+            # canonical ``lineage_*`` columns before emit. Covers both
+            # leaves and synthesised ancestor rows under the same known
+            # set; the parquet boundary invariant requires them present.
+            self._apply_lineage_features(q_acc, leaf_by_gid, synth)
             for rec in leaf_by_gid.values():
                 self._emit(rec)
             for rec in synth.values():
@@ -523,6 +537,32 @@ class _KnnTransferRunner:
             self.neighbor_info.pop((q_acc, aspect), None)
             if q_idx < len(nbs):
                 nbs[q_idx] = []
+
+    def _apply_lineage_features(
+        self,
+        q_acc: str,
+        leaf_by_gid: dict[str, dict[str, Any]],
+        synth: dict[str, dict[str, Any]],
+    ) -> None:
+        """Invoke ``compute_lineage_features`` on this group's records.
+
+        Mutates each record in place with the 4 ``lineage_*`` columns.
+        Lazy import keeps the GO-DAG dependency out of the runner's
+        import graph for unrelated unit tests.
+        """
+        from protea_method.lineage import compute_lineage_features
+
+        combined: list[dict[str, Any]] = [
+            *leaf_by_gid.values(),
+            *synth.values(),
+        ]
+        if not combined:
+            return
+        compute_lineage_features(
+            combined,
+            parents=self._lineage_parents,
+            known_by_protein={q_acc: self._lineage_known.get(q_acc, set())},
+        )
 
     # ── phase 10: streaming buffer + per-query state cleanup ──────────
 
