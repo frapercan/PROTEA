@@ -235,6 +235,43 @@ When a recipient (human or CI) should no longer have access:
    access keys, admin token, GitHub PAT, etc.) and re-encrypt the new
    values.
 
+Bundled artefacts: Anc2Vec npz path resolution
+-----------------------------------------------
+
+The Anc2Vec GO-embedding artefact (``anc2vec_2020-10.npz``, roughly
+50 MB) is not itself a secret, but its on-disk location is treated
+like deploy configuration because the file lives outside git
+(``artifacts/`` is gitignored) and any fresh deploy worktree starts
+without it. The shim ``protea.core.anc2vec_embeddings`` resolves the
+path through three mechanisms, in priority order:
+
+1. ``PROTEA_ANC2VEC_PATH`` (env var). When set and pointing at a
+   readable file, it wins outright. This is the recommended deploy
+   configuration: the compose / Swarm / Helm manifest sets the
+   variable to a host-mounted path so every container resolves the
+   same artefact without each replica needing a baked-in copy.
+2. Artifact store (``PROTEA_STORAGE_BACKEND=minio``). Reserved branch
+   for pulling the npz out of MinIO via a ``Dataset`` row tagged
+   ``kind=anc2vec``; the row's ``manifest_uri`` is downloaded into
+   ``~/.cache/protea/anc2vec/<sha>.npz`` on first use. The Dataset
+   ORM model is not yet on develop, so this branch is currently a
+   no-op that falls through.
+3. Repo-relative fallback. The historical path
+   ``artifacts/anc2vec/anc2vec_2020-10.npz``. The first time a
+   process resolves through this branch it logs a warning at WARNING
+   level pointing at ``PROTEA_ANC2VEC_PATH``.
+
+When all three mechanisms miss the artefact, ``get_index()`` raises
+``FileNotFoundError`` whose message lists every mechanism. Typical
+fix: copy the npz from a known-good location (e.g.
+``~/Thesis.archive/repositories/PROTEA/artifacts/anc2vec/``) into the
+deploy slot and either drop it at the repo-relative location or set
+``PROTEA_ANC2VEC_PATH`` to its absolute path.
+
+The npz itself is never encrypted with sops (it is not credential
+material); restrict access to it via filesystem permissions on the
+host mount.
+
 Troubleshooting
 ----------------
 

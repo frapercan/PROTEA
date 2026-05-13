@@ -454,6 +454,16 @@ value (e.g. ``PROTEA_DB_URL``) or a file-path variant (e.g.
    * - ``PROTEA_STORAGE_BACKEND``
      - ``local``
      - Storage backend: ``local`` (filesystem) or ``minio``.
+   * - ``PROTEA_ANC2VEC_PATH``
+     - (none)
+     - Absolute path to the Anc2Vec npz artefact
+       (``anc2vec_2020-10.npz``). When unset, the API/worker process
+       falls back to the repo-relative
+       ``artifacts/anc2vec/anc2vec_2020-10.npz`` (gitignored, so absent
+       on fresh deploy worktrees). On a deploy without the file in
+       either location the process logs the resolution chain and
+       raises ``FileNotFoundError``. See
+       :doc:`secrets-management` for the resolution order.
    * - ``PROTEA_OTEL_ENABLED``
      - ``false``
      - Enable OpenTelemetry distributed tracing. See :doc:`observability`.
