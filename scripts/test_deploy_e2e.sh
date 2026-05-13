@@ -108,7 +108,14 @@ while [[ $(date +%s) -lt $deadline ]]; do
     fi
     sleep 3
 done
-[[ "$ready" == "1" ]] || fail "/health/ready never reported ready within ${READY_TIMEOUT_S}s"
+if [[ "$ready" != "1" ]]; then
+    warn "/health/ready never reported ready within ${READY_TIMEOUT_S}s — final response below:"
+    curl -sS -o /tmp/health-ready-body -w "HTTP %{http_code}\n" "${API_URL}/health/ready" >&2 || true
+    printf "  body: " >&2
+    head -c 1024 /tmp/health-ready-body >&2 2>/dev/null || true
+    printf "\n" >&2
+    fail "/health/ready never reported ready within ${READY_TIMEOUT_S}s"
+fi
 ok "/health/ready is ready"
 
 # 4. Canonical /v1 surface probes. The task spec calls these out
