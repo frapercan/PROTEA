@@ -68,3 +68,6 @@ sops_age_key.txt
 
 # Coverage XML reports (CI artifacts, not source)
 .baseline/
+
+# Local deploy overrides (host-specific secrets, never commit)
+.env.local
