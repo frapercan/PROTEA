@@ -33,7 +33,7 @@ dependencies = [
     "uvicorn (>=0.41.0,<0.42.0)",
     "pydantic-settings (>=2.0,<3.0)",
     "prometheus-client (>=0.20.0,<1.0.0)",
-    "protea-contracts @ git+https://github.com/frapercan/protea-contracts.git@master",
+    "protea-contracts @ git+https://github.com/frapercan/protea-contracts.git@main",
 ]
 
 [project.optional-dependencies]
@@ -69,10 +69,10 @@ priority = "explicit"
 # NOTE: protea-contracts is a MAIN dependency (imported at runtime by
 # protea.core.contracts.operation); the remaining four are optional
 # plugin extras installed via --with plugins.
-protea-method = { git = "https://github.com/frapercan/protea-method.git", branch = "master" }
-protea-sources = { git = "https://github.com/frapercan/protea-sources.git", branch = "master" }
-protea-runners = { git = "https://github.com/frapercan/protea-runners.git", branch = "master" }
-protea-backends = { git = "https://github.com/frapercan/protea-backends.git", branch = "master" }
+protea-method = { git = "https://github.com/frapercan/protea-method.git", branch = "main" }
+protea-sources = { git = "https://github.com/frapercan/protea-sources.git", branch = "main" }
+protea-runners = { git = "https://github.com/frapercan/protea-runners.git", branch = "main" }
+protea-backends = { git = "https://github.com/frapercan/protea-backends.git", branch = "main" }
 
 
 [build-system]
