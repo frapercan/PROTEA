@@ -55,7 +55,14 @@ jobs:
           # Generous on a cold GitHub runner: image build + pull
           # (postgres / rabbitmq) plus migrate run.
           PROTEA_E2E_READY_TIMEOUT_S: "300"
-          PROTEA_E2E_JOB_TIMEOUT_S: "90"
+          # worker.py eagerly imports the operations catalog, which in
+          # turn instantiates ete3.NCBITaxa() at module load and parses
+          # ~2.8M taxonomy nodes on a fresh image (no cache between CI
+          # runs). The ping job stays queued until that finishes, so the
+          # job-completion window has to absorb that startup tax.
+          # TODO: move NCBI init behind a lazy-load so worker boot is
+          # cheap and ping completes in seconds.
+          PROTEA_E2E_JOB_TIMEOUT_S: "300"
 
       - name: Dump compose state on failure
         if: failure()

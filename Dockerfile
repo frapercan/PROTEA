@@ -13,16 +13,18 @@ RUN pip install --no-cache-dir poetry==2.1.0
 
 COPY pyproject.toml poetry.lock ./
 RUN poetry config virtualenvs.create false \
-    && poetry install --only main --with plugins --no-root --no-interaction --no-ansi
+    && poetry install --only=main,plugins --no-root --no-interaction --no-ansi
 
 COPY protea/ ./protea/
-RUN poetry install --only main --with plugins --no-interaction --no-ansi
+RUN poetry install --only=main,plugins --no-interaction --no-ansi \
+    && python -c "import protea_method, protea_backends, protea_sources, protea_runners; print('plugins importable in builder')"
 
 # ── Stage 2: runtime ────────────────────────────────────────────────────────
 FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y \
     libpq5 \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
