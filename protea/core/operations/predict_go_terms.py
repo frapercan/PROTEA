@@ -21,9 +21,8 @@ from protea.core.disk_cache import (
     _csr_lookup,
     _derive_reference_views,
     _load_anno_csr_from_disk,
-    _load_from_disk_cache,
+    _load_reference_pool_cached,
     _save_anno_csr_to_disk,
-    _save_to_disk_cache,
 )
 from protea.core.domain.aspect import ASPECT_CODES as _ASPECTS
 from protea.core.feature_enricher import NEW_V6_FEATURE_KEYS as _NEW_V6_FEATURE_KEYS
@@ -1304,66 +1303,57 @@ class PredictGOTermsBatchOperation:
     ) -> dict[str, Any]:
         """Load reference accessions and embeddings (float16) into the process cache.
 
-        Checks the disk cache first (survives worker restarts). On miss,
-        fetches from PostgreSQL and writes the result to disk for future
-        restarts. GO annotations are NOT loaded here; they are fetched
-        lazily per batch for only the unique neighbours found by KNN,
-        saving several GB of RAM.
+        Disk cache first (survives worker restarts); falls back to a
+        streamed DB load on miss / count-mismatch. A cheap accession-only
+        ``COUNT(*)`` runs every call to detect drift after a reference
+        re-ingest. GO annotations are loaded lazily per batch elsewhere.
         """
         emit("predict_go_terms_batch.load_references_start", None, {}, "info")
-        cached = _load_from_disk_cache(embedding_config_id, annotation_set_id)
-        if cached is not None:
-            emit(
-                "predict_go_terms_batch.load_references_done",
-                None,
-                {
-                    "references": len(cached["accessions"]),
-                    "embeddings_mb": round(cached["embeddings"].nbytes / 1024 / 1024),
-                    "source": "disk_cache",
-                },
-                "info",
-            )
-            return _derive_reference_views(cached["accessions"], cached["embeddings"])
-        accessions, embeddings = self._stream_reference_pool(
+        source = "disk_cache"
+        accession_q = self._reference_pool_query(
             session, embedding_config_id, annotation_set_id
         )
-        _save_to_disk_cache(embedding_config_id, annotation_set_id, accessions, embeddings)
+
+        def _db_loader() -> tuple[list[str], np.ndarray]:
+            nonlocal source
+            source = "database"
+            return self._stream_reference_pool(accession_q)
+
+        accessions, embeddings = _load_reference_pool_cached(
+            embedding_config_id,
+            annotation_set_id,
+            _db_loader,
+            expected_count=accession_q.count(),
+            emit=lambda ev, fields: emit(
+                f"predict_go_terms_batch.{ev}", None, fields, "info"
+            ),
+        )
         emit(
             "predict_go_terms_batch.load_references_done",
             None,
             {
                 "references": len(accessions),
                 "embeddings_mb": round(embeddings.nbytes / 1024 / 1024),
-                "source": "database",
+                "source": source,
             },
             "info",
         )
         return _derive_reference_views(accessions, embeddings)
 
-    def _stream_reference_pool(
+    def _reference_pool_query(
         self,
         session: Session,
         embedding_config_id: uuid.UUID,
         annotation_set_id: uuid.UUID,
-    ) -> tuple[list[str], np.ndarray]:
-        """Stream the ``(accession, embedding)`` rows for all annotated proteins.
-
-        Pre-allocates a float16 numpy array sized to the row count so
-        peak Python-object memory stays bounded by the cursor chunk;
-        without pre-allocation a ``.all()`` on 400k rows materialises
-        ~14 GB of Python float objects. The count is taken over a
-        lightweight accession-only projection: including
-        ``SequenceEmbedding.embedding`` in the SELECT list forced
-        ``.count()`` to wrap the projection in a subquery that
-        materialised the halfvec column (~2 GB) per call (T-RES.1 hang).
-        """
+    ) -> Any:
+        """Return the accession-only query for the reference pool (see PR #354)."""
         annotated_sq = (
             session.query(ProteinGOAnnotation.protein_accession)
             .filter(ProteinGOAnnotation.annotation_set_id == annotation_set_id)
             .distinct()
             .subquery()
         )
-        accession_q = (
+        return (
             session.query(Protein.accession)
             .join(
                 SequenceEmbedding,
@@ -1372,6 +1362,12 @@ class PredictGOTermsBatchOperation:
             )
             .join(annotated_sq, Protein.accession == annotated_sq.c.protein_accession)
         )
+
+    def _stream_reference_pool(
+        self,
+        accession_q: Any,
+    ) -> tuple[list[str], np.ndarray]:
+        """Stream ``(accession, embedding)`` rows into a pre-allocated f16 matrix."""
         total = accession_q.count()
         if total == 0:
             return [], np.empty((0,), dtype=np.float16)
