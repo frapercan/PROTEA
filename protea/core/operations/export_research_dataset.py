@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.training_dump_helpers import TrainRerankerAutoOperation
 from protea.infrastructure.orm.models.embedding.dataset import Dataset
+from protea.infrastructure.session import build_session_factory, session_scope
 from protea.infrastructure.settings import load_settings
 from protea.infrastructure.storage import get_artifact_store
 
@@ -121,6 +122,33 @@ class ExportResearchDatasetOperation:
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
+        """Run the export in three short session windows.
+
+        The compute phase (KNN search + parquet staging + upload) can
+        take 3-4 hours. Holding a single SQLAlchemy session open across
+        that span ends in tears: pool recycle / idle timeouts / pika
+        reconnects all conspire to detach the session by the time we
+        try to insert the Dataset row, which then raises
+        ``DetachedInstanceError`` and loses the work.
+
+        Layout:
+
+        * Window 1 (uniqueness check) uses the session handed in by
+          BaseWorker. We touch it just long enough to verify the name
+          is free, then release it.
+        * Window 2 (compute) opens its own short-lived session for the
+          dump helper, since its SQL is structured as many small reads
+          rather than one long transaction.
+        * Window 3 (register) opens a fresh ``session_scope`` to insert
+          the Dataset row. That session is born after the long compute
+          phase, so its connection is guaranteed healthy.
+
+        The BaseWorker-supplied session is left untouched after window 1
+        so the success/failure commit at the end of the worker loop
+        runs against a fresh-enough connection (``_rebind_job`` in
+        BaseWorker handles the residual detachment risk for the Job
+        ORM itself).
+        """
         p = ExportResearchDatasetPayload.model_validate(payload)
         raw_job_id = payload.get("_job_id") if isinstance(payload, dict) else None
         job_uuid = uuid.UUID(raw_job_id) if raw_job_id else None
@@ -129,14 +157,27 @@ class ExportResearchDatasetOperation:
         store = get_artifact_store(settings)
         key_prefix = f"datasets/{p.output_name}/"
 
-        # Reject duplicate names up-front so a half-succeeded run doesn't
-        # silently leave orphan blobs in the store.
+        # Window 1: reject duplicate names up-front so a half-succeeded
+        # run doesn't silently leave orphan blobs in the store. Use the
+        # passed session for this single read; expire so the result is
+        # not cached on a soon-to-be-stale identity map.
         if session.query(Dataset.id).filter(Dataset.name == p.output_name).first() is not None:
             raise ValueError(f"Dataset {p.output_name!r} already exists")
+        session.expire_all()
 
+        # Build a separate session factory for windows 2 and 3 so the
+        # long-running compute and the final insert each get a fresh
+        # connection from the pool (``pool_pre_ping=True`` revives stale
+        # connections on checkout).
+        factory = build_session_factory(settings.db_url)
+
+        # Window 2: compute. The dump helper opens many short reads on
+        # its own session_scope; the parquet writers + upload do not
+        # touch the DB at all. Failures here roll back automatically.
         with tempfile.TemporaryDirectory(prefix="protea_export_") as tmp:
             stage_dir = Path(tmp)
-            auto_result = self._dump_to_stage(session, p, stage_dir, emit)
+            with session_scope(factory) as compute_session:
+                auto_result = self._dump_to_stage(compute_session, p, stage_dir, emit)
             uploaded, manifest_data, manifest_sha = self._upload_outputs(
                 stage_dir, store, key_prefix
             )
@@ -159,7 +200,14 @@ class ExportResearchDatasetOperation:
             manifest_data=manifest_data,
             manifest_sha=manifest_sha,
         )
-        dataset_id = self._register_dataset(session, p, outcome, job_uuid, emit)
+
+        # Window 3: register. Fresh session, born after the long compute
+        # phase, so the connection is healthy and the Dataset insert
+        # cannot fall victim to a recycled pool entry.
+        with session_scope(factory) as register_session:
+            dataset_id = self._register_dataset(
+                register_session, p, outcome, job_uuid, emit
+            )
 
         merged: dict[str, Any] = dict(auto_result.result)
         merged.update(
