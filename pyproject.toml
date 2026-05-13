@@ -24,7 +24,7 @@ dependencies = [
     "faiss-cpu (>=1.7.0)",
     "parasail (>=1.3.4)",
     "ete3 (>=3.1.3)",
-    "cafaeval-protea @ git+https://github.com/frapercan/cafaeval-protea.git@main",
+    "cafaeval-protea @ git+https://github.com/frapercan/cafaeval-protea.git@88ab9da641419e5a78e76572eabcfd0389d80d9e",
     "lightgbm (>=4.6.0,<5.0.0)",
     "pyarrow (>=23.0.1,<24.0.0)",
     "httpx (>=0.28.1,<0.29.0)",
@@ -33,6 +33,11 @@ dependencies = [
     "uvicorn (>=0.41.0,<0.42.0)",
     "pydantic-settings (>=2.0,<3.0)",
     "prometheus-client (>=0.20.0,<1.0.0)",
+    "protea-contracts @ git+https://github.com/frapercan/protea-contracts.git@c268488a031f46a4f3fc3dbbc830cf24bdd175e2",
+    "protea-method @ git+https://github.com/frapercan/protea-method.git@b5a353992082402984f26d9391836ad18c449301",
+    "protea-sources @ git+https://github.com/frapercan/protea-sources.git@e030a897daa56ff5284f488dfa40c53fb0409238",
+    "protea-runners @ git+https://github.com/frapercan/protea-runners.git@8ff8d78ac03bce2932b3fd58d5fda08f4b259a07",
+    "protea-backends @ git+https://github.com/frapercan/protea-backends.git@79cd4ae5246a6a65134e73524f8818e49413455a",
 ]
 
 [project.optional-dependencies]
@@ -56,55 +61,6 @@ uvicorn = ">=0.41.0,<0.42.0"
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 priority = "explicit"
-
-
-[tool.poetry.group.plugins.dependencies]
-# F0 T0.15 of master plan v3: protea-core references the C-stack repos
-# as a poetry group so contributors can install with
-# ``poetry install --with plugins`` once the bootstrap repos exist on
-# disk. Real ABCs / payloads land in F1 (T1.1-T1.5); during F0 these
-# packages export only their version sentinel and entry_point stubs,
-# which is enough to validate the multi-repo layout.
-protea-contracts = { git = "https://github.com/frapercan/protea-contracts.git", branch = "master" }
-protea-method = { git = "https://github.com/frapercan/protea-method.git", branch = "master" }
-protea-sources = { git = "https://github.com/frapercan/protea-sources.git", branch = "master" }
-protea-runners = { git = "https://github.com/frapercan/protea-runners.git", branch = "master" }
-protea-backends = { git = "https://github.com/frapercan/protea-backends.git", branch = "master" }
-
-
-[build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
-
-
-[tool.poetry.group.lint]
-optional = true
-[tool.poetry.group.lint.dependencies]
-# Static analysis only. Lint CI installs ``--with lint`` (main + lint).
-ruff = ">=0.15.5,<0.16.0"
-mypy = ">=1.19.1,<2.0.0"
-types-requests = "^2.32.4.20260107"
-types-pyyaml = "^6.0.12.20250915"
-taskipy = ">=1.10.3"
-
-
-# T5.1a (D7 accepted 2026-05-06): OpenTelemetry SDK + OTLP HTTP exporter
-# + FastAPI instrumentor. Kept in its own optional poetry group so
-# developer / CI installs stay slim while deploy targets opt in with
-# ``poetry install --with telemetry``. T5.1b extends this group with
-# the SQLAlchemy + pika instrumentors.
-[tool.poetry.group.telemetry]
-optional = true
-[tool.poetry.group.telemetry.dependencies]
-opentelemetry-api = ">=1.27.0,<2.0.0"
-opentelemetry-sdk = ">=1.27.0,<2.0.0"
-opentelemetry-exporter-otlp-proto-http = ">=1.27.0,<2.0.0"
-opentelemetry-instrumentation-fastapi = ">=0.48b0,<1.0.0"
-# T5.1b: SQLAlchemy engine spans + W3C traceparent propagation through
-# pika. The pika library does not have an OTel instrumentor of its own;
-# producer/consumer spans are wired by hand in publisher.py + consumer.py
-# using opentelemetry.propagate (shipped with opentelemetry-api).
-opentelemetry-instrumentation-sqlalchemy = ">=0.48b0,<1.0.0"
 
 
 [tool.poetry.group.test]
