@@ -209,6 +209,15 @@ class BaseWorker:
     def _on_operation_success(
         self, session: Session, job: Job, job_id: UUID, result: OperationResult
     ) -> None:
+        # Long-running operations (multi-hour exports, training jobs) can
+        # outlive the underlying DB connection: pika reconnects, idle pools
+        # recycle, and the original Job ORM instance becomes detached. A
+        # plain attribute access then triggers a refresh on a dead session
+        # and raises "Instance ... is not bound to a Session". Re-fetch via
+        # ``session.get`` so we either get a bound instance back or surface
+        # a clean None to handle gracefully. ``pool_pre_ping=True`` on the
+        # engine already revives the connection on the SELECT below.
+        job = self._rebind_job(session, job, job_id)
         if result.progress_current is not None:
             job.progress_current = int(result.progress_current)
         if result.progress_total is not None:
@@ -269,6 +278,10 @@ class BaseWorker:
     def _on_operation_failure(
         self, session: Session, job: Job, job_id: UUID, exc: Exception
     ) -> None:
+        # Same rebind dance as _on_operation_success: an op that took hours
+        # may have left the Job ORM instance detached from a recycled
+        # connection. Pull a fresh copy before mutating it.
+        job = self._rebind_job(session, job, job_id)
         job.status = JobStatus.FAILED
         job.finished_at = utcnow()
         job.error_code = exc.__class__.__name__
@@ -360,6 +373,29 @@ class BaseWorker:
             {"reason": "all_children_failed"},
             level="error",
         )
+
+    @staticmethod
+    def _rebind_job(session: Session, job: Job, job_id: UUID) -> Job:
+        """Return a Job ORM instance guaranteed bound to ``session``.
+
+        Long operations (multi-hour exports, retrains) may outlive the
+        original DB connection. When that happens the cached ``job``
+        instance is detached and any attribute read raises
+        ``DetachedInstanceError``. ``session.get`` issues a fresh SELECT
+        (revived by ``pool_pre_ping=True``) and returns a bound row. If
+        the row has somehow disappeared we fall back to the original
+        instance and merge it back into the session so callers can still
+        record a terminal state.
+        """
+        fresh = session.get(Job, job_id)
+        if fresh is not None:
+            return fresh
+        # Row genuinely missing (rare). Re-attach the in-memory copy so
+        # subsequent attribute writes do not explode the session.
+        try:
+            return session.merge(job)
+        except Exception:
+            return job
 
     @staticmethod
     def _emit(

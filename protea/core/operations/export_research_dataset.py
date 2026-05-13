@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.training_dump_helpers import TrainRerankerAutoOperation
 from protea.infrastructure.orm.models.embedding.dataset import Dataset
+from protea.infrastructure.session import build_session_factory, session_scope
 from protea.infrastructure.settings import load_settings
 from protea.infrastructure.storage import get_artifact_store
 
@@ -121,22 +122,82 @@ class ExportResearchDatasetOperation:
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
+        """Run the export in three short session windows.
+
+        The compute phase (KNN search + parquet staging + upload) can
+        take 3-4 hours. Holding a single SQLAlchemy session open across
+        that span ends in tears: pool recycle / idle timeouts / pika
+        reconnects all conspire to detach the session by the time we
+        try to insert the Dataset row, which then raises
+        ``DetachedInstanceError`` and loses the work.
+
+        Layout:
+
+        * Window 1 (uniqueness check) uses the session handed in by
+          BaseWorker. We touch it just long enough to verify the name
+          is free, then release it.
+        * Window 2 (compute) opens its own short-lived session for the
+          dump helper, since its SQL is structured as many small reads
+          rather than one long transaction.
+        * Window 3 (register) opens a fresh ``session_scope`` to insert
+          the Dataset row. That session is born after the long compute
+          phase, so its connection is guaranteed healthy.
+
+        The BaseWorker-supplied session is left untouched after window 1
+        so the success/failure commit at the end of the worker loop
+        runs against a fresh-enough connection (``_rebind_job`` in
+        BaseWorker handles the residual detachment risk for the Job
+        ORM itself).
+        """
         p = ExportResearchDatasetPayload.model_validate(payload)
         raw_job_id = payload.get("_job_id") if isinstance(payload, dict) else None
         job_uuid = uuid.UUID(raw_job_id) if raw_job_id else None
 
         settings = load_settings(_resolve_project_root())
+
+        self._reject_duplicate_name(session, p.output_name)
+        factory = build_session_factory(settings.db_url)
+
+        outcome, auto_result = self._compute_and_upload(p, factory, settings, emit)
+        with session_scope(factory) as register_session:
+            dataset_id = self._register_dataset(
+                register_session, p, outcome, job_uuid, emit
+            )
+
+        return OperationResult(
+            result=self._merge_result(auto_result, p, outcome, dataset_id)
+        )
+
+    @staticmethod
+    def _reject_duplicate_name(session: Session, output_name: str) -> None:
+        """Window 1: pre-flight uniqueness check on the passed session.
+
+        Touches the session only for one read so the long compute phase
+        does not hold it open across pool-recycle / idle-timeout windows.
+        """
+        if session.query(Dataset.id).filter(Dataset.name == output_name).first() is not None:
+            raise ValueError(f"Dataset {output_name!r} already exists")
+        session.expire_all()
+
+    def _compute_and_upload(
+        self,
+        p: ExportResearchDatasetPayload,
+        factory: Any,
+        settings: Any,
+        emit: EmitFn,
+    ) -> tuple[_DumpOutcome, OperationResult]:
+        """Window 2: KNN dump + parquet upload.
+
+        Dump helper opens its own short session_scope; the parquet
+        writers and the upload do not touch the DB. Returns the dump
+        outcome plus the inner ``OperationResult`` for merging.
+        """
         store = get_artifact_store(settings)
         key_prefix = f"datasets/{p.output_name}/"
-
-        # Reject duplicate names up-front so a half-succeeded run doesn't
-        # silently leave orphan blobs in the store.
-        if session.query(Dataset.id).filter(Dataset.name == p.output_name).first() is not None:
-            raise ValueError(f"Dataset {p.output_name!r} already exists")
-
         with tempfile.TemporaryDirectory(prefix="protea_export_") as tmp:
             stage_dir = Path(tmp)
-            auto_result = self._dump_to_stage(session, p, stage_dir, emit)
+            with session_scope(factory) as compute_session:
+                auto_result = self._dump_to_stage(compute_session, p, stage_dir, emit)
             uploaded, manifest_data, manifest_sha = self._upload_outputs(
                 stage_dir, store, key_prefix
             )
@@ -159,22 +220,30 @@ class ExportResearchDatasetOperation:
             manifest_data=manifest_data,
             manifest_sha=manifest_sha,
         )
-        dataset_id = self._register_dataset(session, p, outcome, job_uuid, emit)
+        return outcome, auto_result
 
+    @staticmethod
+    def _merge_result(
+        auto_result: OperationResult,
+        p: ExportResearchDatasetPayload,
+        outcome: _DumpOutcome,
+        dataset_id: uuid.UUID,
+    ) -> dict[str, Any]:
+        """Compose the final OperationResult dict from the dump output."""
         merged: dict[str, Any] = dict(auto_result.result)
         merged.update(
             {
                 "dataset_id": str(dataset_id),
                 "output_name": p.output_name,
-                "key_prefix": key_prefix,
-                "storage_backend": settings.storage_backend,
-                "train_uri": uploaded.get("train.parquet"),
-                "eval_uri": uploaded.get("eval.parquet"),
-                "manifest_uri": uploaded.get("manifest.json"),
-                "manifest_sha": manifest_sha,
+                "key_prefix": outcome.key_prefix,
+                "storage_backend": outcome.settings.storage_backend,
+                "train_uri": outcome.uploaded.get("train.parquet"),
+                "eval_uri": outcome.uploaded.get("eval.parquet"),
+                "manifest_uri": outcome.uploaded.get("manifest.json"),
+                "manifest_sha": outcome.manifest_sha,
             }
         )
-        return OperationResult(result=merged)
+        return merged
 
     def _dump_to_stage(
         self,

@@ -971,3 +971,215 @@ class TestBaseWorkerMaybeFailParent:
 
         # session.execute should NOT have been called for parent update
         session.execute.assert_not_called()
+
+
+class TestBaseWorkerRebindJob:
+    """Cover ``_rebind_job`` (long-running op session-detach fix)."""
+
+    def test_rebind_returns_fresh_instance_from_session_get(self):
+        """The rebind helper prefers a freshly fetched Job over the cached one."""
+        job_id = uuid4()
+        stale = MagicMock(spec=Job)
+        stale.id = job_id
+        fresh = MagicMock(spec=Job)
+        fresh.id = job_id
+        session = MagicMock()
+        session.get.return_value = fresh
+
+        result = BaseWorker._rebind_job(session, stale, job_id)
+
+        assert result is fresh
+        session.get.assert_called_once_with(Job, job_id)
+
+    def test_rebind_falls_back_to_merge_when_row_missing(self):
+        """If ``session.get`` returns None we merge the in-memory copy back in."""
+        job_id = uuid4()
+        stale = MagicMock(spec=Job)
+        stale.id = job_id
+        merged = MagicMock(spec=Job)
+        merged.id = job_id
+        session = MagicMock()
+        session.get.return_value = None
+        session.merge.return_value = merged
+
+        result = BaseWorker._rebind_job(session, stale, job_id)
+
+        assert result is merged
+        session.merge.assert_called_once_with(stale)
+
+    def test_rebind_falls_back_to_original_when_merge_explodes(self):
+        """If even ``merge`` fails we return the original so callers can still write."""
+        job_id = uuid4()
+        stale = MagicMock(spec=Job)
+        stale.id = job_id
+        session = MagicMock()
+        session.get.return_value = None
+        session.merge.side_effect = RuntimeError("session is wrecked")
+
+        result = BaseWorker._rebind_job(session, stale, job_id)
+
+        assert result is stale
+
+    def test_success_path_rebinds_detached_job(self):
+        """Regression: a detached Job at success time must be re-fetched, not used as-is.
+
+        Simulates the LB.1 v226 production crash: the op took hours, the
+        pool recycled, and the cached ``job`` instance is detached. The
+        old code accessed ``job.progress_current = ...`` first and blew
+        up with ``DetachedInstanceError``. After the fix, ``_rebind_job``
+        replaces it with a freshly fetched row before any attribute
+        write, so the final commit succeeds.
+
+        We model the detachment with a ``Job``-shaped stand-in that
+        raises ``DetachedInstanceError`` on any non-id attribute access
+        (the SQLAlchemy real behaviour). ``session.get`` returns a
+        fresh, healthy stand-in on the rebind. Without the fix the
+        worker would touch the detached instance first and crash.
+        """
+        from sqlalchemy.orm.exc import DetachedInstanceError
+
+        stale_id = uuid4()
+
+        class _DetachedJob:
+            id = stale_id
+            # Required for claim_job and execute pre-rebind reads; we
+            # have to expose status/operation/payload/parent_job_id
+            # because the worker reads those during the claim and
+            # pre-execute phases, well before the rebind happens.
+            status = JobStatus.QUEUED
+            operation = "ping"
+            payload: dict = {}
+            parent_job_id = None
+            started_at = None
+            progress_current = None
+            progress_total = None
+
+            def __setattr__(self, name, value):
+                # The rebind happens BEFORE any write in
+                # ``_on_operation_success``. So writes here would only
+                # occur if the fix were missing. Make them blow up so
+                # the test fails loudly in that case.
+                if name in {
+                    "status",
+                    "finished_at",
+                    "progress_current",
+                    "progress_total",
+                    "error_code",
+                    "error_message",
+                }:
+                    raise DetachedInstanceError(
+                        f"write to detached Job.{name} not allowed"
+                    )
+                object.__setattr__(self, name, value)
+
+        stale_job = _DetachedJob()
+        fresh_job = MagicMock(spec=Job)
+        fresh_job.id = stale_id
+
+        call_count = [0]
+
+        def make_session():
+            s = MagicMock()
+            call_count[0] += 1
+            if call_count[0] == 1:
+                # Claim session: returns the (still QUEUED) detached
+                # job. Claim mutates status + started_at, which
+                # ``_DetachedJob.__setattr__`` would refuse, so swap in
+                # a plain mock here just for the claim phase.
+                claim_job = MagicMock(spec=Job)
+                claim_job.id = stale_id
+                claim_job.status = JobStatus.QUEUED
+                claim_job.parent_job_id = None
+                s.get.return_value = claim_job
+            else:
+                # Execute session: first ``get`` returns the detached
+                # instance (modelling SQLA returning a row whose
+                # connection is dead); subsequent ``get`` (the rebind)
+                # returns the fresh instance.
+                get_results = [stale_job, fresh_job]
+                get_idx = [0]
+
+                def _get(model, _id):
+                    i = get_idx[0]
+                    get_idx[0] = min(i + 1, len(get_results) - 1)
+                    return get_results[i]
+
+                s.get.side_effect = _get
+            return s
+
+        factory = MagicMock(side_effect=make_session)
+        registry, _ = _make_registry(
+            result=OperationResult(result={"ok": True}, progress_current=3)
+        )
+
+        worker = BaseWorker(factory, registry, WorkerConfig(worker_name="test"))
+        # Must not raise: the rebind swaps stale_job for fresh_job
+        # before any attribute write.
+        worker.handle_job(stale_id)
+
+        assert fresh_job.status == JobStatus.SUCCEEDED
+        assert fresh_job.progress_current == 3
+
+    def test_failure_path_rebinds_detached_job(self):
+        """Same regression on the failure branch: re-fetch before writing FAILED."""
+        from sqlalchemy.orm.exc import DetachedInstanceError
+
+        stale_id = uuid4()
+
+        class _DetachedJob:
+            id = stale_id
+            status = JobStatus.QUEUED
+            operation = "ping"
+            payload: dict = {}
+            parent_job_id = None
+            started_at = None
+
+            def __setattr__(self, name, value):
+                if name in {
+                    "status",
+                    "finished_at",
+                    "error_code",
+                    "error_message",
+                }:
+                    raise DetachedInstanceError(
+                        f"write to detached Job.{name} not allowed"
+                    )
+                object.__setattr__(self, name, value)
+
+        stale_job = _DetachedJob()
+        fresh_job = MagicMock(spec=Job)
+        fresh_job.id = stale_id
+        fresh_job.parent_job_id = None
+
+        call_count = [0]
+
+        def make_session():
+            s = MagicMock()
+            call_count[0] += 1
+            if call_count[0] == 1:
+                claim_job = MagicMock(spec=Job)
+                claim_job.id = stale_id
+                claim_job.status = JobStatus.QUEUED
+                claim_job.parent_job_id = None
+                s.get.return_value = claim_job
+            else:
+                get_results = [stale_job, fresh_job]
+                get_idx = [0]
+
+                def _get(model, _id):
+                    i = get_idx[0]
+                    get_idx[0] = min(i + 1, len(get_results) - 1)
+                    return get_results[i]
+
+                s.get.side_effect = _get
+            return s
+
+        factory = MagicMock(side_effect=make_session)
+        registry, _ = _make_registry(raises=ValueError("op failed at the end"))
+
+        worker = BaseWorker(factory, registry, WorkerConfig(worker_name="test"))
+        with pytest.raises(ValueError, match="op failed"):
+            worker.handle_job(stale_id)
+
+        assert fresh_job.status == JobStatus.FAILED
+        assert fresh_job.error_code == "ValueError"
