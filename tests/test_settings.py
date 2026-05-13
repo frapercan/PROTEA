@@ -168,6 +168,28 @@ class TestSourcePriority:
         s = load_settings(tmp_path)
         assert s.minio_secure is True
 
+    def test_anc2vec_path_default_is_none(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("PROTEA_ANC2VEC_PATH", raising=False)
+        s = load_settings(tmp_path)
+        assert s.anc2vec_path is None
+
+    def test_anc2vec_path_env_overrides_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("PROTEA_ANC2VEC_PATH", "/srv/protea/anc2vec.npz")
+        s = load_settings(tmp_path)
+        assert s.anc2vec_path == "/srv/protea/anc2vec.npz"
+
+    def test_anc2vec_path_yaml_fallback(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("PROTEA_ANC2VEC_PATH", raising=False)
+        self._write_yaml(tmp_path, "anc2vec:\n  path: /yaml/anc2vec.npz\n")
+        s = load_settings(tmp_path)
+        assert s.anc2vec_path == "/yaml/anc2vec.npz"
+
 
 class TestLegacyEnvAliases:
     """T-OPS.6 deprecation: unprefixed env aliases (DATABASE_URL, AMQP_URL)

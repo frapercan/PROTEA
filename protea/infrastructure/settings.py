@@ -91,6 +91,11 @@ class Settings:
     minio_secret_key: str | None = None
     minio_secure: bool = False
     allowed_origins: tuple[str, ...] = _DEFAULT_ALLOWED_ORIGINS
+    # Optional absolute path to the Anc2Vec npz artefact. When set, the
+    # ``protea.core.anc2vec_embeddings`` shim uses this path instead of
+    # its repo-relative fallback. See the deployment runbook for the
+    # full resolution chain (env > artifact store > repo fallback).
+    anc2vec_path: str | None = None
 
 
 class _YamlConfigSource(PydanticBaseSettingsSource):
@@ -148,6 +153,9 @@ class _YamlConfigSource(PydanticBaseSettingsSource):
         cors = raw.get("cors") or {}
         if "allowed_origins" in cors:
             flat["allowed_origins"] = cors["allowed_origins"]
+        anc2vec = raw.get("anc2vec") or {}
+        if "path" in anc2vec:
+            flat["anc2vec_path"] = anc2vec["path"]
 
         self._data = flat
         return self._data
@@ -194,6 +202,7 @@ def _make_settings_cls(env_prefix: str, env_file: Path | None) -> type[BaseSetti
         minio_access_key: str | None = None
         minio_secret_key: str | None = None
         minio_secure: bool = False
+        anc2vec_path: str | None = None
         # ``allowed_origins`` is stored as a list internally so pydantic's
         # JSON-mode env parsing does not try to JSON-decode the raw
         # comma-separated env value. The field validator below normalises
@@ -317,6 +326,7 @@ def _materialise(raw: Any, project_root: Path) -> Settings:
         minio_secret_key=raw.minio_secret_key,
         minio_secure=raw.minio_secure,
         allowed_origins=allowed,
+        anc2vec_path=raw.anc2vec_path,
     )
 
 
