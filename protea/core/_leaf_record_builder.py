@@ -130,7 +130,30 @@ class _LeafRecordBuilder:
         rec.update(
             {f"emb_pca_query_{i}": inputs.q_pca_row[i] for i in range(EMBEDDING_PCA_DIM)}
         )
+        rec.update(self._lineage_default_fields())
         return rec
+
+    @staticmethod
+    def _lineage_default_fields() -> dict[str, Any]:
+        """Zero-filled defaults for the 4 lineage columns.
+
+        T-RES.1b added ``lineage_*`` to the canonical ``ALL_FEATURES``
+        set so the parquet_export boundary invariant
+        (:func:`protea.core.parquet_export._assert_canonical_columns`)
+        requires every non-empty shard to carry them. The live
+        compute path (``protea_method.lineage.compute_lineage_features``)
+        is opt-in at predict time and the offline dump pipeline does
+        not invoke it, so without these defaults the eval shard write
+        fails the canonical-column gate. Defaults match the
+        convention used by the lineage producer for proteins with no
+        known terms: well-defined zero, not NaN.
+        """
+        return {
+            "lineage_is_ancestor_of_known": 0.0,
+            "lineage_is_descendant_of_known": 0.0,
+            "lineage_ancestor_of_count": 0.0,
+            "lineage_descendant_of_count": 0.0,
+        }
 
     @staticmethod
     def _alignment_fields(pf: dict[str, Any]) -> dict[str, Any]:
