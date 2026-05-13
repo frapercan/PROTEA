@@ -91,6 +91,10 @@ class GenerateEvaluationSetOperation:
         )
         mode = "same_snapshot" if same_snapshot else "reconciled"
 
+        reuse = self._maybe_reuse_existing(session, old_set_id, new_set_id, emit)
+        if reuse is not None:
+            return reuse
+
         emit(
             "generate_evaluation_set.start",
             None,
@@ -128,6 +132,51 @@ class GenerateEvaluationSetOperation:
         uri = self._persist_groundtruth(eval_set, data, emit)
         result = {"evaluation_set_id": str(eval_set.id), "groundtruth_uri": uri, **stats}
         emit("generate_evaluation_set.done", None, result, "info")
+        return OperationResult(result=result)
+
+    def _maybe_reuse_existing(
+        self,
+        session: Session,
+        old_set_id: uuid.UUID,
+        new_set_id: uuid.UUID,
+        emit: EmitFn,
+    ) -> OperationResult | None:
+        """Return the existing EvaluationSet's result, or None if absent.
+
+        Idempotency: if an EvaluationSet already exists for this
+        ``(old, new)`` pair, return its summary instead of computing and
+        inserting a duplicate. The DB-level UNIQUE constraint enforces
+        this at the schema layer (alembic
+        ``b8e3f1a7c2d9_evaluation_set_pair_unique``); this short-circuit
+        avoids paying the delta compute cost on a re-submission and keeps
+        the operation idempotent from the caller's perspective.
+        """
+        existing = (
+            session.query(EvaluationSet)
+            .filter_by(
+                old_annotation_set_id=old_set_id,
+                new_annotation_set_id=new_set_id,
+            )
+            .one_or_none()
+        )
+        if existing is None:
+            return None
+        stats = dict(existing.stats or {})
+        result = {
+            "evaluation_set_id": str(existing.id),
+            "groundtruth_uri": existing.groundtruth_uri,
+            **stats,
+        }
+        emit(
+            "generate_evaluation_set.idempotent_reuse",
+            None,
+            {
+                "evaluation_set_id": str(existing.id),
+                "old_annotation_set_id": str(old_set_id),
+                "new_annotation_set_id": str(new_set_id),
+            },
+            "info",
+        )
         return OperationResult(result=result)
 
     def _resolve_eval_inputs(
