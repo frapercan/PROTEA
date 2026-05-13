@@ -16,5 +16,6 @@ fix sequence that an operator can execute without prior context.
    ngrok-deploy-recovery
    embedding-worker-oom
    schema-sha-v2-backfill
+   schema-sha-v2-rollout
    observability
    loki
