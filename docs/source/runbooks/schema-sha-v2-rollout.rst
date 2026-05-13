@@ -40,7 +40,8 @@ Pre-flight checklist
 
 3. **Quiesce writes to the affected tables.** Pause the experiment
    worker and any pipeline that issues ``export_research_dataset``,
-   ``register_reranker``, or ``POST /reranker-models/import*`` calls
+   ``register_reranker``, or ``POST /v1/reranker-models/import`` and
+   ``POST /v1/reranker-models/import-by-reference`` calls
    until the backfill finishes. The migration itself is additive and
    non-blocking, but the backfill needs a consistent view of every
    row.
