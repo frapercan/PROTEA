@@ -193,6 +193,11 @@ if [[ "$DO_BUILD" == "1" ]]; then
   ( cd apps/web && npm ci --silent && npm run build ) | tail -5
 fi
 
+if [[ -f .env.local ]]; then
+  echo "${C_BOLD}sourcing .env.local${C_RESET} (non-tracked overrides)"
+  set -a; source .env.local; set +a
+fi
+
 echo "${C_BOLD}starting stack...${C_RESET}"
 bash scripts/manage.sh start
 
