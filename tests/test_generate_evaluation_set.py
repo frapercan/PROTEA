@@ -116,6 +116,8 @@ class TestGenerateEvaluationSetExecute:
         old_set = _make_annotation_set(uuid.uuid4())
         new_set = _make_annotation_set(uuid.uuid4())  # different snapshot
         session.get.side_effect = [old_set, new_set]
+        # No pre-existing EvaluationSet — force the compute path.
+        session.query.return_value.filter_by.return_value.one_or_none.return_value = None
 
         def add_side(obj):
             obj.id = uuid.uuid4()
@@ -147,6 +149,8 @@ class TestGenerateEvaluationSetExecute:
         pivot_snap = MagicMock()
         # session.get is called for old, new, and the pivot lookup.
         session.get.side_effect = [old_set, new_set, pivot_snap]
+        # No pre-existing EvaluationSet — force the compute path.
+        session.query.return_value.filter_by.return_value.one_or_none.return_value = None
 
         def add_side(obj):
             obj.id = uuid.uuid4()
@@ -172,6 +176,8 @@ class TestGenerateEvaluationSetExecute:
         old_set = _make_annotation_set(snap_id)
         new_set = _make_annotation_set(snap_id)
         session.get.side_effect = [old_set, new_set]
+        # No pre-existing EvaluationSet — force the compute path.
+        session.query.return_value.filter_by.return_value.one_or_none.return_value = None
 
         eval_set = MagicMock()
         eval_set.id = uuid.uuid4()
@@ -201,6 +207,8 @@ class TestGenerateEvaluationSetExecute:
         old_set = _make_annotation_set(snap_id)
         new_set = _make_annotation_set(snap_id)
         session.get.side_effect = [old_set, new_set]
+        # No pre-existing EvaluationSet — force the compute path.
+        session.query.return_value.filter_by.return_value.one_or_none.return_value = None
 
         MagicMock()
 

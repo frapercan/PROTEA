@@ -732,8 +732,8 @@ def _resolve_train_split_eval(
 ) -> Any:
     """Look up the EvaluationSet for a train pair and load its delta.
 
-    Raises ``RuntimeError`` if the eval set is missing because the
-    dump pipeline assumes the deltas were materialized beforehand.
+    Raises ``RuntimeError`` if the eval set is missing because the dump
+    pipeline assumes the deltas were materialized beforehand.
     """
     old_set_id = ctx.version_to_set[v_old]
     new_set_id = ctx.version_to_set[v_new]
