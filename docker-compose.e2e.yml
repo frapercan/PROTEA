@@ -1,9 +1,11 @@
 # docker-compose.e2e.yml
 #
 # CI overlay for scripts/test_deploy_e2e.sh. Pairs with docker-compose.yml
-# (-f docker-compose.yml -f docker-compose.e2e.yml). Only purpose is to
-# flip authentication off on the api service so the smoke probe can POST
-# /v1/jobs without provisioning an API key in a freshly migrated DB.
+# (-f docker-compose.yml -f docker-compose.e2e.yml). Flips authentication
+# off on the api service so the smoke probe can POST /v1/jobs without
+# provisioning an API key, and pins the artifact store to local so
+# /health/ready does not try to reach a MinIO container the e2e slice
+# deliberately excludes (the slice is postgres+rabbitmq+migrate+api+worker-jobs).
 #
 # Not intended for any other deployment shape; do not reuse outside CI.
 
@@ -11,3 +13,4 @@ services:
   api:
     environment:
       PROTEA_AUTHN_REQUIRED: "false"
+      PROTEA_STORAGE_BACKEND: local
