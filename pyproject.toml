@@ -24,7 +24,7 @@ dependencies = [
     "faiss-cpu (>=1.7.0)",
     "parasail (>=1.3.4)",
     "ete3 (>=3.1.3)",
-    "cafaeval-protea @ git+https://github.com/frapercan/cafaeval-protea.git@main",
+    "cafaeval-protea @ git+https://github.com/frapercan/cafaeval-protea.git@88ab9da641419e5a78e76572eabcfd0389d80d9e",
     "lightgbm (>=4.6.0,<5.0.0)",
     "pyarrow (>=23.0.1,<24.0.0)",
     "httpx (>=0.28.1,<0.29.0)",
@@ -33,11 +33,11 @@ dependencies = [
     "uvicorn (>=0.41.0,<0.42.0)",
     "pydantic-settings (>=2.0,<3.0)",
     "prometheus-client (>=0.20.0,<1.0.0)",
-    "protea-contracts @ git+https://github.com/frapercan/protea-contracts.git@master",
-    "protea-method @ git+https://github.com/frapercan/protea-method.git@master",
-    "protea-sources @ git+https://github.com/frapercan/protea-sources.git@master",
-    "protea-runners @ git+https://github.com/frapercan/protea-runners.git@master",
-    "protea-backends @ git+https://github.com/frapercan/protea-backends.git@master",
+    "protea-contracts @ git+https://github.com/frapercan/protea-contracts.git@c268488a031f46a4f3fc3dbbc830cf24bdd175e2",
+    "protea-method @ git+https://github.com/frapercan/protea-method.git@b5a353992082402984f26d9391836ad18c449301",
+    "protea-sources @ git+https://github.com/frapercan/protea-sources.git@e030a897daa56ff5284f488dfa40c53fb0409238",
+    "protea-runners @ git+https://github.com/frapercan/protea-runners.git@8ff8d78ac03bce2932b3fd58d5fda08f4b259a07",
+    "protea-backends @ git+https://github.com/frapercan/protea-backends.git@79cd4ae5246a6a65134e73524f8818e49413455a",
 ]
 
 [project.optional-dependencies]

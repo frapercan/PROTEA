@@ -488,8 +488,8 @@ fast = ["pyarrow (>=12)"]
 [package.source]
 type = "git"
 url = "https://github.com/frapercan/cafaeval-protea.git"
-reference = "main"
-resolved_reference = "75fd013834be4dc47de3363db30e9f40df477a00"
+reference = "88ab9da641419e5a78e76572eabcfd0389d80d9e"
+resolved_reference = "88ab9da641419e5a78e76572eabcfd0389d80d9e"
 
 [[package]]
 name = "certifi"
@@ -3258,7 +3258,7 @@ develop = false
 
 [package.dependencies]
 numpy = ">=1.24"
-protea-contracts = {git = "https://github.com/frapercan/protea-contracts.git", branch = "master"}
+protea-contracts = {git = "https://github.com/frapercan/protea-contracts.git", branch = "main"}
 
 [package.extras]
 all = ["esm (>=3.1)", "sentencepiece (>=0.2)", "torch (>=2.1)", "transformers (>=4.40)"]
@@ -3270,8 +3270,8 @@ t5 = ["sentencepiece (>=0.2)", "torch (>=2.1)", "transformers (>=4.40)"]
 [package.source]
 type = "git"
 url = "https://github.com/frapercan/protea-backends.git"
-reference = "master"
-resolved_reference = "7f6b9e69ab984321fbac244cce6689dd162bf70f"
+reference = "79cd4ae5246a6a65134e73524f8818e49413455a"
+resolved_reference = "79cd4ae5246a6a65134e73524f8818e49413455a"
 
 [[package]]
 name = "protea-contracts"
@@ -3309,13 +3309,13 @@ faiss-cpu = ">=1.7"
 lightgbm = ">=4.0"
 numpy = ">=1.24"
 pandas = ">=2.0"
-protea-contracts = {git = "https://github.com/frapercan/protea-contracts.git", branch = "master"}
+protea-contracts = {git = "https://github.com/frapercan/protea-contracts.git", branch = "main"}
 
 [package.source]
 type = "git"
 url = "https://github.com/frapercan/protea-method.git"
-reference = "master"
-resolved_reference = "3a05fd80aa8bf38ced8f3c45ee4844bf0030dfc8"
+reference = "b5a353992082402984f26d9391836ad18c449301"
+resolved_reference = "b5a353992082402984f26d9391836ad18c449301"
 
 [[package]]
 name = "protea-reranker-lab"
@@ -3356,14 +3356,14 @@ develop = false
 [package.dependencies]
 lightgbm = ">=4.0"
 numpy = ">=1.24"
-protea-contracts = {git = "https://github.com/frapercan/protea-contracts.git", branch = "master"}
+protea-contracts = {git = "https://github.com/frapercan/protea-contracts.git", branch = "main"}
 pyarrow = ">=14"
 
 [package.source]
 type = "git"
 url = "https://github.com/frapercan/protea-runners.git"
-reference = "master"
-resolved_reference = "2d9e47ea81438255d5e30aa34f25a580e746ead1"
+reference = "8ff8d78ac03bce2932b3fd58d5fda08f4b259a07"
+resolved_reference = "8ff8d78ac03bce2932b3fd58d5fda08f4b259a07"
 
 [[package]]
 name = "protea-sources"
@@ -3376,14 +3376,14 @@ files = []
 develop = false
 
 [package.dependencies]
-protea-contracts = {git = "https://github.com/frapercan/protea-contracts.git", branch = "master"}
+protea-contracts = {git = "https://github.com/frapercan/protea-contracts.git", branch = "main"}
 requests = ">=2.31"
 
 [package.source]
 type = "git"
 url = "https://github.com/frapercan/protea-sources.git"
-reference = "master"
-resolved_reference = "c0e00d868dce9ac50bda3b990ec33de2db916e7b"
+reference = "e030a897daa56ff5284f488dfa40c53fb0409238"
+resolved_reference = "e030a897daa56ff5284f488dfa40c53fb0409238"
 
 [[package]]
 name = "protobuf"
@@ -6094,4 +6094,4 @@ storage = ["minio"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "5d22318dce28210aa95c83b009845cf62bd4c4ca4ea6d9b669bde12227756780"
+content-hash = "b4e3e59b985cc6bc6ee8197f4035e1f43cf0bd4ced649fa01726a4503379692e"
