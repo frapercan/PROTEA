@@ -3248,7 +3248,7 @@ wcwidth = "*"
 
 [[package]]
 name = "protea-backends"
-version = "0.0.1"
+version = "0.1.0"
 description = "Protein language model embedding backends for the PROTEA stack: ESM family, T5/ProtT5, Ankh, ESM-C."
 optional = false
 python-versions = ">=3.12,<4.0"
@@ -3258,7 +3258,7 @@ develop = false
 
 [package.dependencies]
 numpy = ">=1.24"
-protea-contracts = {git = "https://github.com/frapercan/protea-contracts.git", branch = "master"}
+protea-contracts = {git = "https://github.com/frapercan/protea-contracts.git", branch = "main"}
 
 [package.extras]
 all = ["esm (>=3.1)", "sentencepiece (>=0.2)", "torch (>=2.1)", "transformers (>=4.40)"]
@@ -3270,8 +3270,8 @@ t5 = ["sentencepiece (>=0.2)", "torch (>=2.1)", "transformers (>=4.40)"]
 [package.source]
 type = "git"
 url = "https://github.com/frapercan/protea-backends.git"
-reference = "master"
-resolved_reference = "7f6b9e69ab984321fbac244cce6689dd162bf70f"
+reference = "main"
+resolved_reference = "5b454e810ef38487b68394b444e4914b5dd6a539"
 
 [[package]]
 name = "protea-contracts"
@@ -3309,13 +3309,13 @@ faiss-cpu = ">=1.7"
 lightgbm = ">=4.0"
 numpy = ">=1.24"
 pandas = ">=2.0"
-protea-contracts = {git = "https://github.com/frapercan/protea-contracts.git", branch = "master"}
+protea-contracts = {git = "https://github.com/frapercan/protea-contracts.git", branch = "main"}
 
 [package.source]
 type = "git"
 url = "https://github.com/frapercan/protea-method.git"
-reference = "master"
-resolved_reference = "3a05fd80aa8bf38ced8f3c45ee4844bf0030dfc8"
+reference = "main"
+resolved_reference = "8cc7f64e2bede97e95e3593e37cf6249e5852310"
 
 [[package]]
 name = "protea-reranker-lab"
@@ -3345,7 +3345,7 @@ resolved_reference = "2311c67edf6c6da045dffc9cf1a40dce9b0af1e3"
 
 [[package]]
 name = "protea-runners"
-version = "0.0.1"
+version = "0.1.0"
 description = "Experiment runner plugins for the PROTEA stack: LightGBM training, KNN baseline, future GNN and retrieval-neural runners."
 optional = false
 python-versions = ">=3.12,<4.0"
@@ -3356,18 +3356,18 @@ develop = false
 [package.dependencies]
 lightgbm = ">=4.0"
 numpy = ">=1.24"
-protea-contracts = {git = "https://github.com/frapercan/protea-contracts.git", branch = "master"}
+protea-contracts = {git = "https://github.com/frapercan/protea-contracts.git", branch = "main"}
 pyarrow = ">=14"
 
 [package.source]
 type = "git"
 url = "https://github.com/frapercan/protea-runners.git"
-reference = "master"
-resolved_reference = "2d9e47ea81438255d5e30aa34f25a580e746ead1"
+reference = "main"
+resolved_reference = "cdae65b12eb95fc8e3a358dc72ab97908ee3c530"
 
 [[package]]
 name = "protea-sources"
-version = "0.0.1"
+version = "0.2.1"
 description = "Annotation source plugins for the PROTEA stack: GOA, QuickGO, UniProt, InterProScan."
 optional = false
 python-versions = ">=3.12,<4.0"
@@ -3376,14 +3376,14 @@ files = []
 develop = false
 
 [package.dependencies]
-protea-contracts = {git = "https://github.com/frapercan/protea-contracts.git", branch = "master"}
+protea-contracts = {git = "https://github.com/frapercan/protea-contracts.git", branch = "main"}
 requests = ">=2.31"
 
 [package.source]
 type = "git"
 url = "https://github.com/frapercan/protea-sources.git"
-reference = "master"
-resolved_reference = "c0e00d868dce9ac50bda3b990ec33de2db916e7b"
+reference = "main"
+resolved_reference = "77e4a49fded7e0e7f0017ea6ed4dfbfe5b06bf1b"
 
 [[package]]
 name = "protobuf"
@@ -6094,4 +6094,4 @@ storage = ["minio"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "1295b2246ae6a0e3822a72a06dc306e309373ca3009455b18c8e867d7e83289b"
+content-hash = "cf0012d95cf41db598bdcec0bd9809864d24da44fd5b9242f12eed08f19ab852"
