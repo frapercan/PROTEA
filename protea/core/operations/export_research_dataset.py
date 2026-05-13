@@ -154,8 +154,6 @@ class ExportResearchDatasetOperation:
         job_uuid = uuid.UUID(raw_job_id) if raw_job_id else None
 
         settings = load_settings(_resolve_project_root())
-        store = get_artifact_store(settings)
-        key_prefix = f"datasets/{p.output_name}/"
 
         self._reject_duplicate_name(session, p.output_name)
         factory = build_session_factory(settings.db_url)
