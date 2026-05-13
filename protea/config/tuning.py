@@ -77,6 +77,19 @@ class QueueTuning(BaseModel):
         ge=1,
         description="Cap del backoff OOM en segundos (5 min default).",
     )
+    amqp_heartbeat: int = Field(
+        default=600,
+        ge=0,
+        description=(
+            "Heartbeat AMQP en segundos para BlockingConnection (consumer "
+            "y publisher). Pika usa I/O bloqueante; durante un cómputo "
+            "largo el worker no cede al loop select() y el broker cierra "
+            "la conexión con el default de 60s. 600s da un margen 10x "
+            "manteniendo detección de peers muertos en pocos minutos. "
+            "0 desactiva heartbeats. Override por env: "
+            "PROTEA_AMQP_HEARTBEAT o PROTEA_TUNING__queue__amqp_heartbeat."
+        ),
+    )
 
 
 class WorkerTuning(BaseModel):
@@ -248,6 +261,14 @@ def _load_yaml_tuning(project_root: Path) -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
+_SHORT_ALIASES: dict[str, tuple[str, str]] = {
+    # Short alias -> (group, field). Kept for high-traffic ops knobs
+    # that deserve a one-liner env var instead of the full
+    # PROTEA_TUNING__group__field path.
+    "PROTEA_AMQP_HEARTBEAT": ("queue", "amqp_heartbeat"),
+}
+
+
 def _apply_env_overrides(merged: dict[str, Any]) -> dict[str, Any]:
     """Merge env vars of the form PROTEA_TUNING__<group>__<field>=<value>.
 
@@ -255,6 +276,10 @@ def _apply_env_overrides(merged: dict[str, Any]) -> dict[str, Any]:
     pydantic-settings env_nested_delimiter) so we don't collide with
     legitimate single underscores inside field names like
     ``publisher_max_attempts``.
+
+    Also honours a small set of short aliases in :data:`_SHORT_ALIASES`
+    so high-traffic knobs (heartbeat, pool sizes) can be tuned with a
+    one-liner env var instead of the full nested path.
     """
     for key, value in os.environ.items():
         if not key.startswith(ENV_PREFIX):
@@ -264,6 +289,15 @@ def _apply_env_overrides(merged: dict[str, Any]) -> dict[str, Any]:
             continue
         group, field = path[0].lower(), "__".join(path[1:]).lower()
         merged.setdefault(group, {})[field] = _coerce(value)
+    for alias, (group, field) in _SHORT_ALIASES.items():
+        raw = os.environ.get(alias)
+        if raw is None:
+            continue
+        # Nested path wins over short alias when both are set so the
+        # canonical form remains authoritative.
+        if field in merged.get(group, {}):
+            continue
+        merged.setdefault(group, {})[field] = _coerce(raw)
     return merged
 
 

@@ -184,6 +184,59 @@ class TestConsumerRun:
         consumer._handle_stop()
         assert consumer._stop is True
 
+    def test_run_sets_amqp_heartbeat_from_tuning(self):
+        """ConnectionParameters must carry heartbeat=600 by default so
+        pika does not close the channel during long blocking ops."""
+        from protea.config.tuning import get_tuning
+
+        consumer = _consumer()
+        conn = MagicMock()
+        channel = MagicMock()
+        conn.channel.return_value = channel
+        conn.is_open = False
+
+        with patch(
+            "protea.infrastructure.queue.consumer.pika.BlockingConnection",
+            return_value=conn,
+        ) as mock_conn_cls:
+            consumer.run()
+
+        # First positional arg is the URLParameters object configured
+        # with the tuning-provided heartbeat (default 600).
+        params = mock_conn_cls.call_args.args[0]
+        assert params.heartbeat == get_tuning().queue.amqp_heartbeat
+        assert params.heartbeat == 600
+
+    def test_run_honours_env_override_for_heartbeat(self):
+        """PROTEA_AMQP_HEARTBEAT must override the default at load time."""
+        import os
+
+        from protea.config.tuning import get_tuning
+
+        consumer = _consumer()
+        conn = MagicMock()
+        channel = MagicMock()
+        conn.channel.return_value = channel
+        conn.is_open = False
+
+        prev = os.environ.get("PROTEA_AMQP_HEARTBEAT")
+        os.environ["PROTEA_AMQP_HEARTBEAT"] = "1800"
+        try:
+            get_tuning.cache_clear()
+            with patch(
+                "protea.infrastructure.queue.consumer.pika.BlockingConnection",
+                return_value=conn,
+            ) as mock_conn_cls:
+                consumer.run()
+            params = mock_conn_cls.call_args.args[0]
+            assert params.heartbeat == 1800
+        finally:
+            if prev is None:
+                os.environ.pop("PROTEA_AMQP_HEARTBEAT", None)
+            else:
+                os.environ["PROTEA_AMQP_HEARTBEAT"] = prev
+            get_tuning.cache_clear()
+
 
 # ---------------------------------------------------------------------------
 # publish_job
@@ -326,6 +379,29 @@ class TestPublishJob:
         channel.basic_publish.assert_called_once()
         props = channel.basic_publish.call_args.kwargs["properties"]
         assert props.headers == {"traceparent": "00-trace-span-01"}
+
+    def test_publish_applies_amqp_heartbeat_on_connection(self):
+        """The publisher's reused connection must be opened with the
+        configured heartbeat so long idle windows don't drop the channel."""
+        from protea.config.tuning import get_tuning
+
+        conn = MagicMock()
+        channel = MagicMock()
+        conn.channel.return_value = channel
+        conn.is_open = True
+
+        with (
+            patch(
+                "protea.infrastructure.queue.publisher.pika.BlockingConnection",
+                return_value=conn,
+            ) as mock_conn_cls,
+            patch("protea.infrastructure.queue.publisher._local", threading.local()),
+        ):
+            publish_job("amqp://localhost/", "q", uuid4())
+
+        params = mock_conn_cls.call_args.args[0]
+        assert params.heartbeat == get_tuning().queue.amqp_heartbeat
+        assert params.heartbeat == 600
 
     def test_publish_omits_headers_when_injector_writes_nothing(self):
         """When OTel is disabled the injector leaves the header dict
