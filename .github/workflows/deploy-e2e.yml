@@ -24,6 +24,8 @@ on:
       - protea/**
       - scripts/worker.py
       - scripts/test_deploy_e2e.sh
+      - scripts/deploy.sh
+      - scripts/manage.sh
       - alembic/**
       - alembic.ini
       - .github/workflows/deploy-e2e.yml
