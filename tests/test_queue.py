@@ -914,7 +914,7 @@ class TestOperationConsumerOnMessage:
 class TestQueueConsumerRetryLater:
     """Cover RetryLaterError handling in QueueConsumer._on_message (lines 142-151)."""
 
-    def test_retry_later_sleeps_and_republishes(self):
+    def test_retry_later_delays_and_republishes(self):
         from protea.core.contracts.operation import RetryLaterError
 
         job_id = uuid4()

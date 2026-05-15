@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import os
 import subprocess
-import time
 import uuid
 
 import pytest
+
+from tests.helpers.wait import wait_until
 
 
 def _run(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -21,21 +22,26 @@ def _docker_exists() -> bool:
 
 
 def _wait_ready(container: str, user: str, db: str, timeout_s: int = 60) -> None:
-    start = time.time()
-    while True:
-        proc = subprocess.run(
+    last_proc: subprocess.CompletedProcess[str] | None = None
+
+    def _ready() -> bool:
+        nonlocal last_proc
+        last_proc = subprocess.run(
             ["docker", "exec", container, "pg_isready", "-U", user, "-d", db],
             text=True,
             capture_output=True,
         )
-        if proc.returncode == 0:
-            return
-        if time.time() - start > timeout_s:
-            logs = subprocess.run(["docker", "logs", container], text=True, capture_output=True)
-            raise RuntimeError(
-                f"Postgres not ready after {timeout_s}s.\n\npg_isready:\n{proc.stdout}\n{proc.stderr}\n\nlogs:\n{logs.stdout}\n{logs.stderr}"
-            )
-        time.sleep(1)
+        return last_proc.returncode == 0
+
+    try:
+        wait_until(_ready, timeout=float(timeout_s), interval=0.25, msg=f"pg_isready {container}")
+    except AssertionError as err:
+        logs = subprocess.run(["docker", "logs", container], text=True, capture_output=True)
+        stdout = last_proc.stdout if last_proc else ""
+        stderr = last_proc.stderr if last_proc else ""
+        raise RuntimeError(
+            f"Postgres not ready after {timeout_s}s.\n\npg_isready:\n{stdout}\n{stderr}\n\nlogs:\n{logs.stdout}\n{logs.stderr}"
+        ) from err
 
 
 @pytest.fixture()
