@@ -160,7 +160,7 @@ class TestWithRetry:
         # 1, 2, 4, 5 (capped), 5, 5, 5
         assert sleeps == [1.0, 2.0, 4.0, 5.0, 5.0, 5.0, 5.0]
 
-    def test_jitter_keeps_sleep_within_band(self) -> None:
+    def test_jitter_keeps_backoff_within_band(self) -> None:
         fn = MagicMock(side_effect=_make_op_error("40P01"))
         captured: list[float] = []
 
