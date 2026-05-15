@@ -1,7 +1,18 @@
 # Codecov configuration for PROTEA.
 #
-# Coverage signal is informational, never gating. Required CI checks
-# (lint, test, docs) own the merge gate; codecov is a dashboard.
+# The repository-wide default ``project`` gate stays informational so
+# infra noise never blocks merges; required CI checks (lint, test,
+# docs) own the merge gate.
+#
+# Two path-scoped gates are enforced (F6.6):
+#
+#   * ``core`` (protea/core/) at >=85%
+#   * ``api``  (protea/api/)  at >=75%
+#
+# These cover the most security/safety relevant subtrees (operation
+# orchestrators + HTTP boundary). A 1pp threshold accommodates minor
+# refactors that move statements between covered branches without
+# regressing real behaviour.
 #
 # Reference: https://docs.codecov.com/docs/codecov-yaml
 
@@ -11,6 +22,16 @@ coverage:
       default:
         informational: true
         target: auto
+        threshold: 1%
+      core:
+        paths:
+          - "protea/core/"
+        target: 85%
+        threshold: 1%
+      api:
+        paths:
+          - "protea/api/"
+        target: 75%
         threshold: 1%
     patch:
       default:

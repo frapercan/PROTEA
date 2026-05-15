@@ -55,17 +55,56 @@ class TestCaptureProvenance:
         # When ``importlib.metadata.version("protea")`` raises (editable
         # install without metadata, broken environment) the field falls
         # back to None instead of propagating the exception.
-        with patch(
-            "protea.core.provenance._resolve_protea_version", return_value=None
-        ):
+        with patch("protea.core.provenance._resolve_protea_version", return_value=None):
             payload = capture_provenance()
         assert payload["protea_version"] is None
 
     def test_resilient_to_non_git_checkout(self) -> None:
         # Outside a git checkout (or when ``git`` isn't on PATH) the
-        # resolver returns None — the helper must surface that, never raise.
-        with patch(
-            "protea.core.provenance.resolve_protea_git_sha", return_value=None
-        ):
+        # resolver returns None; the helper must surface that, never raise.
+        with patch("protea.core.provenance.resolve_protea_git_sha", return_value=None):
             payload = capture_provenance()
         assert payload["protea_git_sha"] is None
+
+    def test_resilient_to_socket_failure(self) -> None:
+        # ``socket.gethostname`` raising must fall through to None
+        # instead of breaking the whole provenance snapshot.
+        from protea.core import provenance
+
+        with patch.object(provenance.socket, "gethostname", side_effect=OSError):
+            assert provenance._safe_hostname() is None
+
+    def test_socket_returning_empty_string_yields_none(self) -> None:
+        # Some containers return "" from gethostname(); the helper
+        # normalises that to None so the field is "missing" not "blank".
+        from protea.core import provenance
+
+        with patch.object(provenance.socket, "gethostname", return_value=""):
+            assert provenance._safe_hostname() is None
+
+    def test_resilient_to_platform_failure(self) -> None:
+        from protea.core import provenance
+
+        with patch.object(provenance._platform, "platform", side_effect=RuntimeError):
+            assert provenance._safe_platform() is None
+
+    def test_resolve_protea_version_propagates_real_version(self) -> None:
+        # Happy path: the version is whatever importlib.metadata returns.
+        from protea.core import provenance
+
+        with patch("importlib.metadata.version", return_value="9.9.9"):
+            assert provenance._resolve_protea_version() == "9.9.9"
+
+    def test_resolve_protea_version_handles_package_not_found(self) -> None:
+        from importlib.metadata import PackageNotFoundError
+
+        from protea.core import provenance
+
+        with patch("importlib.metadata.version", side_effect=PackageNotFoundError):
+            assert provenance._resolve_protea_version() is None
+
+    def test_resolve_protea_version_handles_unexpected_error(self) -> None:
+        from protea.core import provenance
+
+        with patch("importlib.metadata.version", side_effect=RuntimeError("boom")):
+            assert provenance._resolve_protea_version() is None
