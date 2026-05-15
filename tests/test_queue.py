@@ -724,9 +724,9 @@ class TestOperationConsumerOnMessage:
 
         consumer._on_message(channel, method, MagicMock(), self._body(job_id=parent_id))
 
-        # sessions: [0]=execution session, [1]=emit event session
-        assert len(sessions) >= 2
-        emit_session = sessions[1]
+        # sessions: [0]=cancellation check, [1]=execution session, [2]=emit event session
+        assert len(sessions) >= 3
+        emit_session = sessions[2]
         emit_session.add.assert_called_once()
         emit_session.commit.assert_called_once()
         emit_session.close.assert_called_once()
@@ -771,8 +771,9 @@ class TestOperationConsumerOnMessage:
         def make_session():
             s = MagicMock()
             sessions_created.append(s)
-            # Make the second session (emit session) fail on commit
-            if len(sessions_created) == 2:
+            # Sessions are: [1]=cancellation check, [2]=execution, [3]=emit.
+            # Make the emit-event session fail on commit.
+            if len(sessions_created) == 3:
                 s.commit.side_effect = RuntimeError("DB down")
             return s
 
@@ -874,8 +875,9 @@ class TestOperationConsumerOnMessage:
         def make_session():
             s = MagicMock()
             sessions_created.append(s)
-            # Make the error event session (3rd: exec + err_event) fail
-            if len(sessions_created) == 2:
+            # Sessions are: [1]=cancellation check, [2]=execution, [3]=error
+            # event. Trigger commit failure on the error-event session.
+            if len(sessions_created) == 3:
                 s.commit.side_effect = RuntimeError("DB gone")
             return s
 
@@ -899,7 +901,7 @@ class TestOperationConsumerOnMessage:
         consumer._on_message(channel, method, MagicMock(), self._body(job_id=parent_id))
 
         # Error event session should have rollback called
-        err_session = sessions_created[1]
+        err_session = sessions_created[2]
         err_session.rollback.assert_called_once()
         err_session.close.assert_called_once()
 
@@ -971,8 +973,173 @@ class TestOperationConsumerHandleStop:
 
 
 # ---------------------------------------------------------------------------
-# OperationConsumer.run (pika fully mocked)
+# T-INFRA.NACK: cancellation + RetryLaterError regression tests
 # ---------------------------------------------------------------------------
+
+
+class TestQueueConsumerCancellationNack:
+    """Regression for T-INFRA.NACK on QueueConsumer.
+
+    Reproduces the queue-deadlock bug: a CANCELLED Job arriving on the
+    queue must be nack'd with requeue=False so prefetch=1 cannot wedge
+    on a backlog of cancellations awaiting the 30 min consumer_timeout.
+    """
+
+    def _make_consumer_with_status(self, status):
+        from protea.infrastructure.orm.models.job import JobStatus
+
+        worker = MagicMock()
+        fake_job = MagicMock()
+        # JobStatus.CANCELLED is a StrEnum so equality to the real enum works.
+        fake_job.status = JobStatus.CANCELLED if status == "cancelled" else JobStatus.QUEUED
+        session = MagicMock()
+        session.get.return_value = fake_job
+        worker._factory.return_value = session
+        return _consumer(worker), worker, session
+
+    def test_cancelled_job_is_nacked_without_requeue_and_not_dispatched(self):
+        """Acceptance: CANCELLED → basic_nack(requeue=False); basic_ack not called.
+
+        Mirrors the integration assertion 'queue depth returns to zero
+        within 5 s without manual purge' — the message exits the queue
+        immediately without a worker pull-cycle.
+        """
+        consumer, worker, _ = self._make_consumer_with_status("cancelled")
+        channel = MagicMock()
+        method = _make_method(123)
+
+        consumer._on_message(channel, method, MagicMock(), _encode(uuid4()))
+
+        channel.basic_nack.assert_called_once_with(delivery_tag=123, requeue=False)
+        channel.basic_ack.assert_not_called()
+        # Worker.handle_job MUST NOT be called for cancelled jobs.
+        worker.handle_job.assert_not_called()
+
+    def test_queued_job_passes_cancellation_check_and_dispatches(self):
+        """Sanity: a QUEUED job still acks and dispatches normally."""
+        consumer, worker, _ = self._make_consumer_with_status("queued")
+        channel = MagicMock()
+        method = _make_method(124)
+
+        consumer._on_message(channel, method, MagicMock(), _encode(uuid4()))
+
+        channel.basic_ack.assert_called_once_with(delivery_tag=124)
+        worker.handle_job.assert_called_once()
+
+    def test_cancellation_check_db_failure_falls_through_to_dispatch(self):
+        """A transient DB error must not block dispatch; the worker's own
+        claim path is the authoritative gate."""
+        worker = MagicMock()
+        session = MagicMock()
+        session.get.side_effect = RuntimeError("postgres unreachable")
+        worker._factory.return_value = session
+        consumer = _consumer(worker)
+        channel = MagicMock()
+        method = _make_method(125)
+
+        consumer._on_message(channel, method, MagicMock(), _encode(uuid4()))
+
+        # Pre-ack pattern preserved; handle_job still called.
+        channel.basic_ack.assert_called_once_with(delivery_tag=125)
+        worker.handle_job.assert_called_once()
+        session.close.assert_called_once()
+
+
+class TestOperationConsumerCancellationAndRetryNack:
+    """Regression for T-INFRA.NACK on OperationConsumer.
+
+    Cancelled parent-job: nack(requeue=False) and skip dispatch.
+    RetryLaterError: nack(requeue=True) so the broker reschedules.
+    """
+
+    def _make_consumer_with_parent_status(self, status, op=None):
+        from protea.core.contracts.operation import OperationResult
+        from protea.infrastructure.orm.models.job import JobStatus
+        from protea.infrastructure.queue.consumer import OperationConsumer
+
+        if op is None:
+            op = MagicMock()
+            op.execute.return_value = OperationResult()
+        registry = MagicMock()
+        registry.get.return_value = op
+
+        fake_parent = MagicMock()
+        fake_parent.status = (
+            JobStatus.CANCELLED if status == "cancelled" else JobStatus.RUNNING
+        )
+
+        sessions = []
+
+        def make_session():
+            s = MagicMock()
+            # The first session is the cancellation check; subsequent
+            # sessions are execution + emit/error sessions.
+            if not sessions:
+                s.get.return_value = fake_parent
+            sessions.append(s)
+            return s
+
+        factory = MagicMock(side_effect=make_session)
+
+        consumer = OperationConsumer(
+            amqp_url="amqp://localhost/",
+            queue_name="test.ops",
+            registry=registry,
+            session_factory=factory,
+        )
+        return consumer, sessions, op
+
+    def _body(self, job_id):
+        return json.dumps(
+            {"operation": "test_op", "job_id": str(job_id), "payload": {}}
+        ).encode()
+
+    def test_cancelled_parent_nacks_without_requeue_and_skips_execute(self):
+        """Acceptance: CANCELLED parent → basic_nack(requeue=False); op not run."""
+        consumer, sessions, op = self._make_consumer_with_parent_status("cancelled")
+        channel = MagicMock()
+        method = _make_method(200)
+
+        consumer._on_message(channel, method, MagicMock(), self._body(uuid4()))
+
+        channel.basic_nack.assert_called_once_with(delivery_tag=200, requeue=False)
+        channel.basic_ack.assert_not_called()
+        op.execute.assert_not_called()
+        # Only the cancellation-check session was opened.
+        assert len(sessions) == 1
+        sessions[0].close.assert_called_once()
+
+    def test_running_parent_proceeds_to_execute(self):
+        """Sanity: a non-cancelled parent dispatches normally and acks."""
+        consumer, sessions, op = self._make_consumer_with_parent_status("running")
+        channel = MagicMock()
+        method = _make_method(201)
+
+        consumer._on_message(channel, method, MagicMock(), self._body(uuid4()))
+
+        op.execute.assert_called_once()
+        channel.basic_ack.assert_called_once_with(delivery_tag=201)
+        channel.basic_nack.assert_not_called()
+
+    def test_retry_later_nacks_with_requeue_true(self):
+        """RetryLaterError is an explicit retry signal: nack(requeue=True),
+        no manual republish, no dead-letter."""
+        from protea.core.contracts.operation import RetryLaterError
+
+        op = MagicMock()
+        op.execute.side_effect = RetryLaterError("GPU busy", delay_seconds=10)
+        consumer, sessions, _ = self._make_consumer_with_parent_status(
+            "running", op=op
+        )
+        channel = MagicMock()
+        method = _make_method(202)
+
+        consumer._on_message(channel, method, MagicMock(), self._body(uuid4()))
+
+        channel.basic_nack.assert_called_once_with(delivery_tag=202, requeue=True)
+        channel.basic_ack.assert_not_called()
+        # No republish on RetryLaterError — the broker handles redelivery.
+        channel.basic_publish.assert_not_called()
 
 
 class TestOperationConsumerRun:
