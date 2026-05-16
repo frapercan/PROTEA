@@ -40,7 +40,9 @@ try:  # pragma: no cover -- exercised once contracts ships the helper
     # release is still pending.
     from protea_contracts import CANONICAL_AXIS_KEYS as _UPSTREAM_KEYS  # type: ignore[attr-defined]
     from protea_contracts import SHORTID_HEX_LEN as _UPSTREAM_HEX_LEN  # type: ignore[attr-defined]
-    from protea_contracts import axis_tuple_shortid as _UPSTREAM_SHORTID  # type: ignore[attr-defined]
+    from protea_contracts import (
+        axis_tuple_shortid as _UPSTREAM_SHORTID,  # type: ignore[attr-defined]
+    )
 except ImportError:  # contracts pin not yet bumped past FARM-EXP.1 release
     _UPSTREAM_KEYS = None
     _UPSTREAM_HEX_LEN = None
