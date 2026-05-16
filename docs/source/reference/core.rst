@@ -542,6 +542,12 @@ LightGBM training itself lives in
 which consumes the published ``Dataset`` rows produced by
 ``export_research_dataset``.
 
+As of T-RES.1 (PR #368), ``parent_map_str`` is always passed to the KNN
+transfer runner unconditionally, regardless of the ``expand_votes_to_ancestors``
+flag. The lineage producer (``protea_method.lineage.compute_lineage_features``)
+requires the parent map for its ``lineage_*`` column computation; the flag only
+controls ancestor-vote expansion, not the availability of the map itself.
+
 .. automodule:: protea.core.training_dump_helpers
    :members:
    :undoc-members:
