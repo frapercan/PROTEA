@@ -124,6 +124,13 @@ coverage = {extras = ["toml"], version = ">=7.2.1"}
 # via PROTEA_HYPOTHESIS_PROFILE=ci (registered in tests/conftest.py),
 # so every run picks the same seed and example count.
 hypothesis = ">=6.100,<7"
+# F6.3: cosmic-ray mutation testing. Kept in the test group so a
+# ``poetry install --with test`` provisioning is sufficient for the
+# mutation CI job (see .github/workflows/mutation.yml). pytest-timeout
+# is pulled in explicitly because the cosmic-ray test command relies
+# on ``--timeout=<seconds>`` to cap runaway mutants.
+cosmic-ray = ">=8.4.6,<9.0.0"
+pytest-timeout = ">=2.3,<3"
 protea-reranker-lab = {git = "https://github.com/frapercan/protea-reranker-lab.git", branch = "main"}
 
 
