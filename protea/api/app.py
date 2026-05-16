@@ -171,8 +171,32 @@ def _register_middlewares(app: FastAPI, allowed_origins: tuple[str, ...]) -> Non
     env ``PROTEA_ALLOWED_ORIGINS`` > YAML ``cors.allowed_origins`` >
     built-in dev default. An empty tuple disables the CORS middleware
     entirely so a fronting proxy can own the policy.
+
+    Wildcard handling: when the resolved list contains ``"*"`` the
+    middleware is wired with ``allow_origins=["*"]`` and
+    ``allow_credentials=False``. The CORS spec (Fetch §3.2.5) forbids
+    credentials + wildcard, and Starlette already refuses to echo the
+    wildcard when credentials are on, so we coerce explicitly to make
+    the contract visible at registration time instead of at request time.
     """
-    if allowed_origins:
+    if not allowed_origins:
+        # Anonymous visitor counter — writes one row per GET into visitor_event
+        # with a daily-rotated-salt hash instead of the IP. Powers the Grafana
+        # "unique visitors" dashboard.
+        app.add_middleware(VisitorCounterMiddleware)
+        return
+
+    if "*" in allowed_origins:
+        # Spec disallows credentials with wildcard; collapse to the
+        # canonical permissive policy and turn cookies off.
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=False,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+    else:
         app.add_middleware(
             CORSMiddleware,
             allow_origins=list(allowed_origins),
@@ -180,9 +204,6 @@ def _register_middlewares(app: FastAPI, allowed_origins: tuple[str, ...]) -> Non
             allow_methods=["*"],
             allow_headers=["*"],
         )
-    # Anonymous visitor counter — writes one row per GET into visitor_event
-    # with a daily-rotated-salt hash instead of the IP. Powers the Grafana
-    # "unique visitors" dashboard.
     app.add_middleware(VisitorCounterMiddleware)
 
 
