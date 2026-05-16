@@ -1,0 +1,148 @@
+name: Mutation Testing
+
+# F6.3: incremental mutation testing with cosmic-ray. The job
+# scans only the protea/core/ modules that changed in the PR (or
+# the head commit on push), so wall-clock time stays under the
+# CI minutes budget. A full sweep over protea/core/ generates
+# thousands of mutants and takes several hours, which is why this
+# workflow:
+#
+#   * triggers only when protea/core/** files change;
+#   * mutates exactly the touched module(s), not the whole package;
+#   * runs the F6.2 property suite (tests/property/) as the kill
+#     criterion (high invariant coverage per execution);
+#   * is informational (continue-on-error: true) - mutation regressions
+#     are surfaced for review but do not block merge. Promote to a
+#     required check once the baseline is stable and contributors
+#     are familiar with the workflow.
+
+on:
+  pull_request:
+    paths:
+      - "protea/core/**"
+      - "tests/property/**"
+      - "cosmic-ray.toml"
+      - ".github/workflows/mutation.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  mutation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12"]
+        poetry-version: ["2.1.0"]
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Need full history so the PR base SHA is reachable for the
+          # ``git diff`` that selects touched modules.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: abatilo/actions-poetry@v3
+        with:
+          poetry-version: ${{ matrix.poetry-version }}
+
+      - name: Add poetry to PATH
+        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Use in-project virtualenv
+        run: poetry config virtualenvs.in-project true
+
+      - name: Restore venv cache
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py${{ matrix.python-version }}-poetry${{ matrix.poetry-version }}-mutation-${{ hashFiles('**/poetry.lock') }}
+
+      - name: Install main + test (cosmic-ray lives in the test group)
+        run: poetry install --with test
+
+      - name: Resolve touched modules under protea/core/
+        id: touched
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if [ -n "${BASE_SHA:-}" ]; then
+            range="${BASE_SHA}...HEAD"
+          else
+            # workflow_dispatch / direct push: fall back to the single head commit.
+            range="HEAD~1...HEAD"
+          fi
+          mapfile -t changed < <(git diff --name-only "${range}" \
+            | grep -E '^protea/core/[^/]+\.py$' \
+            | grep -v '^protea/core/__init__.py$' \
+            || true)
+          if [ "${#changed[@]}" -eq 0 ]; then
+            echo "No protea/core/ modules touched; skipping mutation pass."
+            echo "modules=" >> "$GITHUB_OUTPUT"
+          else
+            printf 'Touched modules:\n'
+            printf '  %s\n' "${changed[@]}"
+            # Emit a comma-separated list for the next step.
+            joined=$(IFS=,; echo "${changed[*]}")
+            echo "modules=${joined}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run cosmic-ray per touched module
+        if: steps.touched.outputs.modules != ''
+        env:
+          PROTEA_HYPOTHESIS_PROFILE: ci
+          MODULES: ${{ steps.touched.outputs.modules }}
+        run: |
+          set -euo pipefail
+          mkdir -p mutation-reports
+          IFS=',' read -ra paths <<< "${MODULES}"
+          for path in "${paths[@]}"; do
+            slug=$(echo "${path}" | tr '/.' '_')
+            cfg="mutation-reports/${slug}.toml"
+            db="mutation-reports/${slug}.sqlite"
+            report="mutation-reports/${slug}.txt"
+            echo "::group::cosmic-ray ${path}"
+            # Render a per-module config by rewriting ``module-path`` in
+            # the committed cosmic-ray.toml. Everything else (timeout,
+            # test-command, distributor) is inherited from the template.
+            python - "${path}" "${cfg}" <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+          target, dest = sys.argv[1], sys.argv[2]
+          src = Path("cosmic-ray.toml").read_text(encoding="utf-8")
+          rewritten = re.sub(
+              r'^(module-path\s*=\s*)"[^"]*"',
+              lambda m: f'{m.group(1)}"{target}"',
+              src,
+              count=1,
+              flags=re.MULTILINE,
+          )
+          Path(dest).write_text(rewritten, encoding="utf-8")
+          PY
+            poetry run cosmic-ray init "${cfg}" "${db}"
+            poetry run cosmic-ray baseline "${cfg}"
+            poetry run cosmic-ray exec "${cfg}" "${db}"
+            poetry run cr-report "${db}" --show-output > "${report}" || true
+            echo "::endgroup::"
+            echo "--- ${path} ---"
+            tail -n 40 "${report}"
+          done
+
+      - name: Upload mutation reports
+        if: steps.touched.outputs.modules != '' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-reports
+          path: mutation-reports/
+          if-no-files-found: ignore
