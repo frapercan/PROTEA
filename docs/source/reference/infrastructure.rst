@@ -158,9 +158,13 @@ annotation date.
 
 ``EvaluationSet`` stores the CAFA-style temporal holdout delta between two
 annotation sets (old → new). Contains summary statistics (NK/LK/PK protein and
-annotation counts) in a JSONB ``stats`` column. ``EvaluationResult`` stores the
-output of running ``cafaeval`` against a prediction set: per-namespace Fmax,
-precision, recall, τ, and coverage for NK, LK, and PK settings.
+annotation counts) in a JSONB ``stats`` column. A DB-level
+``UNIQUE(old_annotation_set_id, new_annotation_set_id)`` constraint (alembic
+revision ``b8e3f1a7c2d9``) enforces that each (old, new) pair can have at most
+one ``EvaluationSet``, making ``generate_evaluation_set`` idempotent at the
+schema layer. ``EvaluationResult`` stores the output of running ``cafaeval``
+against a prediction set: per-namespace Fmax, precision, recall, τ, and
+coverage for NK, LK, and PK settings.
 
 .. automodule:: protea.infrastructure.orm.models.annotation.evaluation_set
    :members:
@@ -418,7 +422,11 @@ The queue layer provides two classes: ``QueueConsumer`` and
 ``QueueConsumer`` reads a job UUID from a RabbitMQ queue and delegates to
 ``BaseWorker.handle_job()``. It is used for queues where every message
 corresponds to a tracked ``Job`` row: ``protea.ping``, ``protea.jobs``, and
-``protea.embeddings``.
+``protea.embeddings``. Before dispatching, ``QueueConsumer`` checks whether the
+``Job`` row is already in ``CANCELLED`` state and, if so, nacks the delivery
+with ``requeue=False``. This prevents pointless worker execution on stale
+pre-queued messages and avoids a prefetch=1 deadlock on queues full of orphaned
+cancellations (T-INFRA.NACK, PR #373).
 
 ``OperationConsumer`` reads a raw serialised operation payload from the
 queue and executes it directly, without creating a ``Job`` row. It is used

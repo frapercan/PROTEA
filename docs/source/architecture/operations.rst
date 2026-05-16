@@ -762,7 +762,12 @@ Execution flow
 
 .. code-block:: text
 
-   1. validate payload; load AnnotationSet rows; assert same ontology snapshot
+   0. validate payload; load AnnotationSet rows; assert same ontology snapshot
+   1. idempotency check: if an EvaluationSet already exists for the
+      (old, new) pair, return its summary immediately (no recompute).
+      The DB-level UNIQUE constraint (alembic b8e3f1a7c2d9) enforces the
+      same invariant at the schema layer; the short-circuit avoids paying
+      the delta compute cost on re-submission.
    2. call compute_evaluation_data(); see protea.core.evaluation:
       a. load GO DAG children map (is_a / part_of only)
       b. build NOT-propagation exclusion set (negated terms + GO descendants)
