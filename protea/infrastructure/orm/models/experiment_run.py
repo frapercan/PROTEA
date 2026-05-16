@@ -53,7 +53,20 @@ class ExperimentRun(Base):
     findings: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     status: Mapped[ExperimentRunStatus] = mapped_column(
-        Enum(ExperimentRunStatus, name="experiment_run_status"),
+        # ``values_callable`` makes SQLAlchemy persist + load the
+        # *member values* (``"planned"``, ``"running"``, ...) instead of
+        # the default member *names* (``"PLANNED"``, ...). The Postgres
+        # enum type ``experiment_run_status`` is created by the
+        # ``1e4aee32e677_add_experiment_run_table`` migration with the
+        # lowercase labels, so without this hint inserts raise
+        # ``InvalidTextRepresentation`` and reads raise ``LookupError``
+        # (the bug FARM-EXP.1's backfill script worked around with raw
+        # ``sqlalchemy.text``).
+        Enum(
+            ExperimentRunStatus,
+            name="experiment_run_status",
+            values_callable=lambda e: [m.value for m in e],
+        ),
         nullable=False,
         default=ExperimentRunStatus.PLANNED,
     )
