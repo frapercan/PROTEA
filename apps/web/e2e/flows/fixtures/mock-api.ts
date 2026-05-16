@@ -16,6 +16,17 @@ import { test as base, expect, type Page, type Route } from "@playwright/test";
 
 type Json = Record<string, unknown> | unknown[];
 
+// Context passed to a function-body override so callers can vary the
+// response per call. F6.5b uses this for the embedding/prediction
+// polling lifecycle (call 1 returns "running", call 2 returns
+// "succeeded") without leaking state into the fixture defaults.
+export interface OverrideContext {
+  call: number;
+  method: string;
+  url: URL;
+}
+export type OverrideBody = Json | ((ctx: OverrideContext) => Json | { body: Json; status?: number });
+
 // The web app reads NEXT_PUBLIC_API_URL at page-load time and issues
 // raw fetch() calls to that origin (see lib/api.ts). Route matchers
 // must be origin-scoped so they do not accidentally intercept the
@@ -27,7 +38,7 @@ type Json = Record<string, unknown> | unknown[];
 const API_ORIGIN = process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, "") ?? "http://localhost:8000";
 
 export interface MockApi {
-  override(suffix: string, body: Json, status?: number): void;
+  override(suffix: string, body: OverrideBody, status?: number): void;
   page: Page;
 }
 
@@ -179,7 +190,8 @@ export const test = base.extend<{ mockApi: MockApi }>({
       }
     });
 
-    const overrides = new Map<string, { body: Json; status: number }>();
+    const overrides = new Map<string, { body: OverrideBody; status: number }>();
+    const callCounts = new Map<string, number>();
 
     const handle = async (route: Route) => {
       const url = new URL(route.request().url());
@@ -189,10 +201,35 @@ export const test = base.extend<{ mockApi: MockApi }>({
       // either "/jobs" or the fully-qualified path.
       for (const [suffix, payload] of overrides) {
         if (path === suffix || path.endsWith(suffix)) {
+          const nextCall = (callCounts.get(suffix) ?? 0) + 1;
+          callCounts.set(suffix, nextCall);
+          let body: Json;
+          let status = payload.status;
+          if (typeof payload.body === "function") {
+            const result = payload.body({
+              call: nextCall,
+              method: route.request().method(),
+              url,
+            });
+            if (
+              result &&
+              typeof result === "object" &&
+              !Array.isArray(result) &&
+              "body" in (result as Record<string, unknown>)
+            ) {
+              const wrapped = result as { body: Json; status?: number };
+              body = wrapped.body;
+              if (typeof wrapped.status === "number") status = wrapped.status;
+            } else {
+              body = result as Json;
+            }
+          } else {
+            body = payload.body;
+          }
           return route.fulfill({
-            status: payload.status,
+            status,
             contentType: "application/json",
-            body: JSON.stringify(payload.body),
+            body: JSON.stringify(body),
           });
         }
       }
