@@ -11,8 +11,8 @@
       "kind": "class",
       "path": "protea/core/operations/predict_go_terms/_batch_op.py",
       "name": "PredictGOTermsBatchOperation",
-      "line": 75,
-      "metric": 544,
+      "line": 76,
+      "metric": 551,
       "threshold": 500
     }
   ]

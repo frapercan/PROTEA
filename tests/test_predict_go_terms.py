@@ -276,7 +276,6 @@ class TestSearchKnn:
             search_knn(Q, R, accs, k=3, backend="faiss", faiss_index_type="BadIndex")
 
 
-
 # ---------------------------------------------------------------------------
 # execute() — mocked session
 # ---------------------------------------------------------------------------
@@ -843,7 +842,7 @@ class TestPredictGOTermsBatchReranker:
         dicts = [{"protein_accession": "Q1", "go_term_id": 1, "distance": 0.1}]
         emit, events = self._emit_capture()
 
-        stats = op._apply_reranker_if_aligned(MagicMock(), dicts, p, emit)
+        stats = op._reranker_scorer.apply_if_aligned(MagicMock(), dicts, p, emit)
 
         assert stats is None
         assert any(name == "reranker.skipped" for name, _ in events)
@@ -862,7 +861,7 @@ class TestPredictGOTermsBatchReranker:
         dicts = [{"protein_accession": "Q1", "go_term_id": 1, "distance": 0.1}]
         emit, events = self._emit_capture()
 
-        stats = op._apply_reranker_if_aligned(MagicMock(), dicts, p, emit)
+        stats = op._reranker_scorer.apply_if_aligned(MagicMock(), dicts, p, emit)
 
         assert stats is not None
         assert stats["applied"] is False
@@ -892,25 +891,31 @@ class TestPredictGOTermsBatchReranker:
         session = MagicMock()
         # GOTerm aspect lookup returns (id, aspect) tuples.
         session.query.return_value.filter.return_value.all.return_value = [
-            (10, "P"), (11, "F"),
+            (10, "P"),
+            (11, "F"),
         ]
         emit, events = self._emit_capture()
 
         fake_scores = np.array([0.8, 0.2], dtype=np.float32)
-        with patch(
-            "protea.core.operations.predict_go_terms._batch_op_reranker.load_reranker",
-            return_value=MagicMock(name="booster"),
-        ), patch(
-            "protea.core.operations.predict_go_terms._batch_op_reranker.apply_reranker",
-            return_value=fake_scores,
-        ), patch(
-            "protea.core.operations.predict_go_terms._batch_op_reranker.get_artifact_store",
-            return_value=MagicMock(),
-        ), patch(
-            "protea.core.operations.predict_go_terms._batch_op_reranker.load_settings",
-            return_value=MagicMock(),
+        with (
+            patch(
+                "protea.core.operations.predict_go_terms._batch_op_reranker.load_reranker",
+                return_value=MagicMock(name="booster"),
+            ),
+            patch(
+                "protea.core.operations.predict_go_terms._batch_op_reranker.apply_reranker",
+                return_value=fake_scores,
+            ),
+            patch(
+                "protea.core.operations.predict_go_terms._batch_op_reranker.get_artifact_store",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "protea.core.operations.predict_go_terms._batch_op_reranker.load_settings",
+                return_value=MagicMock(),
+            ),
         ):
-            stats = op._apply_reranker_if_aligned(session, dicts, p, emit)
+            stats = op._reranker_scorer.apply_if_aligned(session, dicts, p, emit)
 
         assert stats is not None
         assert stats["applied"] is True
@@ -958,10 +963,10 @@ def _toy_aspect_separated_fixture() -> dict[str, object]:
     )
     re_ = np.array(
         [
-            [0.99, 0.01, 0.0, 0.0],   # R1 close to Q1
-            [0.95, 0.05, 0.0, 0.0],   # R2 close to Q1
-            [0.0, 0.0, 0.99, 0.01],   # R3 close to Q2
-            [0.5, 0.0, 0.5, 0.0],     # R4 mid
+            [0.99, 0.01, 0.0, 0.0],  # R1 close to Q1
+            [0.95, 0.05, 0.0, 0.0],  # R2 close to Q1
+            [0.0, 0.0, 0.99, 0.01],  # R3 close to Q2
+            [0.5, 0.0, 0.5, 0.0],  # R4 mid
         ],
         dtype=np.float32,
     )
@@ -1157,13 +1162,25 @@ class TestAspectSeparatedDelegation:
         direct_sorted = sorted(direct, key=_row_key)
         assert [_row_key(r) for r in pred_sorted] == [_row_key(r) for r in direct_sorted]
         shared_keys = (
-            "protein_accession", "go_term_id", "vote_count", "min_distance",
-            "mean_distance", "distance", "aspect", "ref_protein_accession",
-            "qualifier", "evidence_code", "k_position",
-            "go_term_frequency", "ref_annotation_density",
-            "neighbor_distance_std", "neighbor_vote_fraction",
-            "neighbor_min_distance", "neighbor_mean_distance",
-            "prediction_set_id", "go_id",
+            "protein_accession",
+            "go_term_id",
+            "vote_count",
+            "min_distance",
+            "mean_distance",
+            "distance",
+            "aspect",
+            "ref_protein_accession",
+            "qualifier",
+            "evidence_code",
+            "k_position",
+            "go_term_frequency",
+            "ref_annotation_density",
+            "neighbor_distance_std",
+            "neighbor_vote_fraction",
+            "neighbor_min_distance",
+            "neighbor_mean_distance",
+            "prediction_set_id",
+            "go_id",
         )
         for left, right in zip(pred_sorted, direct_sorted, strict=True):
             for key in shared_keys:
