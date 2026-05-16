@@ -7,31 +7,13 @@
   },
   "offenders": [
     {
-      "key": "class::protea/core/operations/predict_go_terms.py::PredictGOTermsBatchOperation",
+      "key": "class::protea/core/operations/predict_go_terms/_batch_op.py::PredictGOTermsBatchOperation",
       "kind": "class",
-      "path": "protea/core/operations/predict_go_terms.py",
+      "path": "protea/core/operations/predict_go_terms/_batch_op.py",
       "name": "PredictGOTermsBatchOperation",
-      "line": 577,
-      "metric": 1287,
+      "line": 75,
+      "metric": 544,
       "threshold": 500
-    },
-    {
-      "key": "file::protea/core/operations/predict_go_terms.py::",
-      "kind": "file",
-      "path": "protea/core/operations/predict_go_terms.py",
-      "name": "",
-      "line": 0,
-      "metric": 2100,
-      "threshold": 800
-    },
-    {
-      "key": "file::protea/core/training_dump_helpers.py::",
-      "kind": "file",
-      "path": "protea/core/training_dump_helpers.py",
-      "name": "",
-      "line": 0,
-      "metric": 1214,
-      "threshold": 800
     }
   ]
 }

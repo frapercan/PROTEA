@@ -150,10 +150,10 @@ class TestLoadTestSequencesAndTaxonomy:
             "C": {"accessions": []},
         }
         with patch(
-            "protea.core.training_dump_helpers._load_sequences",
+            "protea.core.training_dump._test_split._load_sequences",
             side_effect=[{"P1": "M"}, {"R1": "AA", "R2": "BB", "R3": "CC"}],
         ) as mock_seq, patch(
-            "protea.core.training_dump_helpers._load_taxonomy_ids"
+            "protea.core.training_dump._test_split._load_taxonomy_ids"
         ) as mock_tax:
             out = _load_test_sequences_and_taxonomy(
                 MagicMock(), payload, ["P1"], test_ref
@@ -169,9 +169,9 @@ class TestLoadTestSequencesAndTaxonomy:
         payload = MagicMock(compute_alignments=False, compute_taxonomy=True)
         test_ref = {a: {"accessions": []} for a in ("P", "F", "C")}
         with patch(
-            "protea.core.training_dump_helpers._load_sequences"
+            "protea.core.training_dump._test_split._load_sequences"
         ) as mock_seq, patch(
-            "protea.core.training_dump_helpers._load_taxonomy_ids",
+            "protea.core.training_dump._test_split._load_taxonomy_ids",
             side_effect=[{"P1": 9606}, {}],
         ) as mock_tax:
             out = _load_test_sequences_and_taxonomy(
@@ -236,7 +236,7 @@ class TestPrepareTestQueryInputs:
         )
         ref_stub = {a: {"accessions": []} for a in ("P", "F", "C")}
         with patch(
-            "protea.core.training_dump_helpers._build_reference_from_cache",
+            "protea.core.training_dump._test_split._build_reference_from_cache",
             return_value=ref_stub,
         ):
             out = _prepare_test_query_inputs(MagicMock(), ctx, MagicMock())
@@ -256,7 +256,7 @@ class TestPrepareTestQueryInputs:
         )
         ref_stub = {a: {"accessions": []} for a in ("P", "F", "C")}
         with patch(
-            "protea.core.training_dump_helpers._build_reference_from_cache",
+            "protea.core.training_dump._test_split._build_reference_from_cache",
             return_value=ref_stub,
         ):
             out = _prepare_test_query_inputs(MagicMock(), ctx, MagicMock())
@@ -289,10 +289,10 @@ class TestRunTestSplit:
         )
         ref_stub = {a: {"accessions": []} for a in ("P", "F", "C")}
         with patch(
-            "protea.core.training_dump_helpers._build_reference_from_cache",
+            "protea.core.training_dump._test_split._build_reference_from_cache",
             return_value=ref_stub,
         ), patch(
-            "protea.core.training_dump_helpers._knn_transfer_and_label"
+            "protea.core.training_dump._test_split._knn_transfer_and_label"
         ) as mock_knn:
             out = _run_test_split(MagicMock(), ctx, MagicMock())
         assert out == {"nk": None, "lk": None, "pk": None}
@@ -307,13 +307,13 @@ class TestRunTestSplit:
         )
         ref_stub = {a: {"accessions": []} for a in ("P", "F", "C")}
         with patch(
-            "protea.core.training_dump_helpers._build_reference_from_cache",
+            "protea.core.training_dump._test_split._build_reference_from_cache",
             return_value=ref_stub,
         ), patch(
-            "protea.core.training_dump_helpers._knn_transfer_and_label",
+            "protea.core.training_dump._test_split._knn_transfer_and_label",
             return_value={"n_rows": 0},
         ), patch(
-            "protea.core.training_dump_helpers._label_test_split_per_category"
+            "protea.core.training_dump._test_split._label_test_split_per_category"
         ) as mock_label:
             out = _run_test_split(MagicMock(), ctx, MagicMock())
         assert out == {"nk": None, "lk": None, "pk": None}
@@ -493,7 +493,7 @@ class TestResolveTrainSplitEval:
         session = MagicMock()
         session.query.return_value.filter_by.return_value.one_or_none.return_value = eset
         with patch(
-            "protea.core.training_dump_helpers.load_evaluation_data_for_set",
+            "protea.core.training_dump._train_split.load_evaluation_data_for_set",
             return_value=(eval_data, "pivot"),
         ):
             out = _resolve_train_split_eval(session, ctx, 170, 200)
@@ -516,7 +516,7 @@ class TestPrepareSplitQueryInputs:
         ctx = _make_train_split_context(acc_to_idx=acc_to_idx, embedding_pool=pool)
         ref_stub: dict[str, dict[str, list]] = {a: {"accessions": []} for a in ("P", "F", "C")}
         with patch(
-            "protea.core.training_dump_helpers._build_reference_from_cache",
+            "protea.core.training_dump._train_split._build_reference_from_cache",
             return_value=ref_stub,
         ):
             out = _prepare_split_query_inputs(
@@ -534,7 +534,7 @@ class TestPrepareSplitQueryInputs:
         )
         ref_stub: dict[str, dict[str, list]] = {a: {"accessions": []} for a in ("P", "F", "C")}
         with patch(
-            "protea.core.training_dump_helpers._build_reference_from_cache",
+            "protea.core.training_dump._train_split._build_reference_from_cache",
             return_value=ref_stub,
         ):
             out = _prepare_split_query_inputs(
@@ -560,7 +560,7 @@ class TestKnnAndFilterToPivot:
             {"protein_accession": "P1", "go_id": "GO:0002", "aspect": "C"},
         ]
         with patch(
-            "protea.core.training_dump_helpers._knn_transfer_and_label",
+            "protea.core.training_dump._train_split._knn_transfer_and_label",
             return_value=raw_preds,
         ):
             out = _knn_and_filter_to_pivot(MagicMock(), ctx, q_inputs, eval_data, sequences)
@@ -605,11 +605,11 @@ class TestLabelAndWriteTrainSplitShards:
 class TestRunTrainSplit:
     def _patch_targets(self):
         return {
-            "_resolve_train_split_eval": "protea.core.training_dump_helpers._resolve_train_split_eval",
-            "_prepare_split_query_inputs": "protea.core.training_dump_helpers._prepare_split_query_inputs",
-            "_load_test_sequences_and_taxonomy": "protea.core.training_dump_helpers._load_test_sequences_and_taxonomy",
-            "_knn_and_filter_to_pivot": "protea.core.training_dump_helpers._knn_and_filter_to_pivot",
-            "_label_and_write_train_split_shards": "protea.core.training_dump_helpers._label_and_write_train_split_shards",
+            "_resolve_train_split_eval": "protea.core.training_dump._train_split._resolve_train_split_eval",
+            "_prepare_split_query_inputs": "protea.core.training_dump._train_split._prepare_split_query_inputs",
+            "_load_test_sequences_and_taxonomy": "protea.core.training_dump._train_split._load_test_sequences_and_taxonomy",
+            "_knn_and_filter_to_pivot": "protea.core.training_dump._train_split._knn_and_filter_to_pivot",
+            "_label_and_write_train_split_shards": "protea.core.training_dump._train_split._label_and_write_train_split_shards",
         }
 
     def test_skipped_when_no_ground_truth(self) -> None:

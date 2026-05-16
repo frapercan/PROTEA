@@ -556,16 +556,16 @@ class TestApplyRerankerEmptyScores:
         emit, _events = _emit_capture()
         empty_scores = np.array([], dtype=np.float32)
         with patch(
-            "protea.core.operations.predict_go_terms.load_reranker",
+            "protea.core.operations.predict_go_terms._batch_op_reranker.load_reranker",
             return_value=MagicMock(),
         ), patch(
-            "protea.core.operations.predict_go_terms.apply_reranker",
+            "protea.core.operations.predict_go_terms._batch_op_reranker.apply_reranker",
             return_value=empty_scores,
         ), patch(
-            "protea.core.operations.predict_go_terms.get_artifact_store",
+            "protea.core.operations.predict_go_terms._batch_op_reranker.get_artifact_store",
             return_value=MagicMock(),
         ), patch(
-            "protea.core.operations.predict_go_terms.load_settings",
+            "protea.core.operations.predict_go_terms._batch_op_reranker.load_settings",
             return_value=MagicMock(),
         ):
             # Pass an empty list so the strict zip in ``_score_with_reranker``
@@ -1449,6 +1449,8 @@ class TestEnsureReferenceCacheMode:
         """Second invocation with the same key short-circuits both
         loaders — covers the ``if cache_key not in _REF_CACHE`` False
         branch."""
+        from protea.core.operations.predict_go_terms import _batch_op_reference
+
         op = PredictGOTermsBatchOperation()
         ctx = pgt._BatchExecCtx(
             p=_payload(aspect_separated_knn=False),
@@ -1463,7 +1465,7 @@ class TestEnsureReferenceCacheMode:
             ctx.p.annotation_set_id,
             ctx.p.aspect_separated_knn,
         )
-        monkeypatch.setattr(pgt, "_REF_CACHE", {key: sentinel})
+        monkeypatch.setattr(_batch_op_reference, "_REF_CACHE", {key: sentinel})
         with patch.object(
             op, "_load_reference_data"
         ) as unified, patch.object(
@@ -1479,6 +1481,7 @@ class TestEnsureReferenceCacheMode:
         full and a new key comes in — covers the LRU branch (lines
         713-715)."""
         from protea.config import tuning
+        from protea.core.operations.predict_go_terms import _batch_op_reference
 
         cur = tuning.get_tuning()
         smaller_worker = cur.worker.model_copy(update={"ref_cache_max": 1})
@@ -1491,7 +1494,9 @@ class TestEnsureReferenceCacheMode:
 
         # Seed the cache with an old entry so the eviction branch triggers.
         old_key = ("old_cfg", "old_ann", False)
-        monkeypatch.setattr(pgt, "_REF_CACHE", {old_key: {"placeholder": True}})
+        monkeypatch.setattr(
+            _batch_op_reference, "_REF_CACHE", {old_key: {"placeholder": True}}
+        )
 
         op = PredictGOTermsBatchOperation()
         ctx = pgt._BatchExecCtx(
@@ -1506,7 +1511,7 @@ class TestEnsureReferenceCacheMode:
             out = op._ensure_reference_cache(MagicMock(), ctx, _noop_emit)
         assert out is sentinel
         # Old entry got evicted, new one took its place.
-        assert old_key not in pgt._REF_CACHE
+        assert old_key not in _batch_op_reference._REF_CACHE
 
 
 # ---------------------------------------------------------------------------
@@ -1612,7 +1617,7 @@ class TestUnifiedPredictViaPipelineWiring:
             "_load_go_term_metadata",
             return_value=({}, {}),
         ), patch(
-            "protea.core.operations.predict_go_terms.call_pipeline_predict",
+            "protea.core.operations.predict_go_terms._batch_op.call_pipeline_predict",
             return_value=fake_result,
         ) as adapter:
             out = op._unified_predict_via_pipeline(MagicMock(), ctx)
@@ -1784,10 +1789,10 @@ class TestApplyV6Features:
             query_batch=self._make_query_batch(),
         )
         with patch(
-            "protea.core.operations.predict_go_terms._load_or_fit_pca_state",
+            "protea.core.operations.predict_go_terms._batch_op._load_or_fit_pca_state",
             return_value=("dummy_pca",),
         ), patch(
-            "protea.core.operations.predict_go_terms.enrich_v6_features"
+            "protea.core.operations.predict_go_terms._batch_op.enrich_v6_features"
         ) as enrich:
             op._apply_v6_features(MagicMock(), ctx, knn_result, ref_data, _noop_emit)
         enrich.assert_called_once()
@@ -1812,10 +1817,10 @@ class TestApplyV6Features:
             query_batch=self._make_query_batch(),
         )
         with patch(
-            "protea.core.operations.predict_go_terms._load_or_fit_pca_state",
+            "protea.core.operations.predict_go_terms._batch_op._load_or_fit_pca_state",
             return_value=None,
         ), patch(
-            "protea.core.operations.predict_go_terms.enrich_v6_features"
+            "protea.core.operations.predict_go_terms._batch_op.enrich_v6_features"
         ) as enrich:
             op._apply_v6_features(MagicMock(), ctx, knn_result, ref_data, _noop_emit)
         enrich.assert_called_once()
