@@ -65,6 +65,10 @@ runtime, data model, and operational choices described.
      - Accepted
      - :doc:`PK coverage fix in cafaeval fork <008-cafaeval-pk-coverage-fix>`
      - Upstream cafaeval reports coverage > 1 in PK; precision is under-divided
+   * - 009
+     - Accepted
+     - :doc:`Pre-dispatch cancellation nack in QueueConsumer <009-cancellation-nack-before-dispatch>`
+     - Cancelled messages held a prefetch slot and could deadlock the predictions queue
 
 Strategic decisions
 -------------------
@@ -219,6 +223,7 @@ later revision).
    006-sequence-deduplication-by-md5
    007-contract-first-lab-integration
    008-cafaeval-pk-coverage-fix
+   009-cancellation-nack-before-dispatch
    D01-project-structure
    D02-export-research-dataset-location
    D03-goprediction-features-jsonb
