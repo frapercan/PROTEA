@@ -211,8 +211,8 @@ later revision).
      - Accepted
      - F2C / §24
    * - D34
-     - :doc:`Selective rerank resurrection - recompute, not archaeology <D34-selective-rerank-resurrection>`
-     - Proposed
+     - :doc:`Selective rerank resurrection, recompute not archaeology <D34-selective-rerank-resurrection>`
+     - Accepted
      - F-EXP-RESET
 
 .. toctree::
