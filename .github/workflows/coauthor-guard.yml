@@ -1,0 +1,13 @@
+name: Co-author guard
+
+# Server-side guard against Claude / Anthropic / AI-attribution
+# commit-message trailers. Invokes the reusable workflow in
+# frapercan/agent-farm. See FARM-1.1a in the farm-platform plan.
+
+on:
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  coauthor-guard:
+    uses: frapercan/agent-farm/.github/workflows/coauthor-guard.yml@main
