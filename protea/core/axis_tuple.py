@@ -31,19 +31,20 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+# The helper lives in protea-contracts on branch
+# ``feat/farm-exp-1-shortid-helper`` (PR #12). PROTEA pins
+# ``protea-contracts@main`` in pyproject.toml, so the imports below
+# resolve only once that PR merges + a release ships. While that is
+# in flight, the symbols are looked up via :func:`getattr` so mypy
+# stays quiet without needing per-line ``type: ignore[attr-defined]``
+# (which ruff I001 reflows away).
 try:  # pragma: no cover -- exercised once contracts ships the helper
-    # The helper lives in protea-contracts on branch
-    # ``feat/farm-exp-1-shortid-helper`` (PR #12). PROTEA pins
-    # ``protea-contracts@main`` in pyproject.toml, so the attributes
-    # below resolve only once that PR merges + a release ships. The
-    # type-ignores avoid a mypy ``attr-defined`` while the upstream
-    # release is still pending.
-    from protea_contracts import CANONICAL_AXIS_KEYS as _UPSTREAM_KEYS  # type: ignore[attr-defined]
-    from protea_contracts import SHORTID_HEX_LEN as _UPSTREAM_HEX_LEN  # type: ignore[attr-defined]
-    from protea_contracts import (
-        axis_tuple_shortid as _UPSTREAM_SHORTID,  # type: ignore[attr-defined]
-    )
-except ImportError:  # contracts pin not yet bumped past FARM-EXP.1 release
+    import protea_contracts as _pc
+
+    _UPSTREAM_KEYS = getattr(_pc, "CANONICAL_AXIS_KEYS", None)
+    _UPSTREAM_HEX_LEN = getattr(_pc, "SHORTID_HEX_LEN", None)
+    _UPSTREAM_SHORTID = getattr(_pc, "axis_tuple_shortid", None)
+except ImportError:  # protea_contracts not installed at all
     _UPSTREAM_KEYS = None
     _UPSTREAM_HEX_LEN = None
     _UPSTREAM_SHORTID = None
