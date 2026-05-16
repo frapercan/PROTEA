@@ -120,6 +120,10 @@ optional = true
 pytest = ">=9.0.2,<10.0.0"
 pytest-cov = ">=7.0.0,<8.0.0"
 coverage = {extras = ["toml"], version = ">=7.2.1"}
+# Property-based tests (F6.2). CI activates the deterministic profile
+# via PROTEA_HYPOTHESIS_PROFILE=ci (registered in tests/conftest.py),
+# so every run picks the same seed and example count.
+hypothesis = ">=6.100,<7"
 protea-reranker-lab = {git = "https://github.com/frapercan/protea-reranker-lab.git", branch = "main"}
 
 
