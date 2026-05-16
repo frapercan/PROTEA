@@ -88,11 +88,17 @@ from protea.infrastructure.session import build_session_factory, session_scope  
 from protea.infrastructure.settings import load_settings  # noqa: E402
 
 DEFAULT_PROPAGATION = "none"
-# Backfill operates on JSONB + the 9 FARM-EXP.1 columns only; we never
-# touch ``status`` so we bypass the ORM (which trips on a pre-existing
-# enum-name vs enum-value mismatch on the ``experiment_run_status``
-# Postgres enum). Using ``text()`` keeps the script narrow and avoids
-# pulling unrelated bugs into FARM-EXP.1's surface.
+# Backfill operates on JSONB + the 9 FARM-EXP.1 columns only; the
+# original draft used raw ``text()`` here to sidestep an
+# enum-name vs enum-value mismatch on ``experiment_run_status`` (rows
+# loaded through the ORM raised ``LookupError`` because SQLAlchemy
+# defaulted to member *names* while the Postgres enum stores lowercase
+# *values*). That bug is fixed in FIX-EXP-RUN-ENUM via
+# ``values_callable`` on the ``ExperimentRun.status`` mapping, so a
+# follow-up cleanup may swap this script onto the ORM. The raw SQL
+# stays for now because it is independently a fine fit for a one-shot
+# backfill (narrow projection, no relationship hydration, predictable
+# UPDATE batches).
 
 
 def _first_present(payload: dict[str, Any], *paths: tuple[str, ...]) -> Any:
