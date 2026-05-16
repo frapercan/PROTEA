@@ -898,16 +898,16 @@ class TestPredictGOTermsBatchReranker:
 
         fake_scores = np.array([0.8, 0.2], dtype=np.float32)
         with patch(
-            "protea.core.operations.predict_go_terms.load_reranker",
+            "protea.core.operations.predict_go_terms._batch_op_reranker.load_reranker",
             return_value=MagicMock(name="booster"),
         ), patch(
-            "protea.core.operations.predict_go_terms.apply_reranker",
+            "protea.core.operations.predict_go_terms._batch_op_reranker.apply_reranker",
             return_value=fake_scores,
         ), patch(
-            "protea.core.operations.predict_go_terms.get_artifact_store",
+            "protea.core.operations.predict_go_terms._batch_op_reranker.get_artifact_store",
             return_value=MagicMock(),
         ), patch(
-            "protea.core.operations.predict_go_terms.load_settings",
+            "protea.core.operations.predict_go_terms._batch_op_reranker.load_settings",
             return_value=MagicMock(),
         ):
             stats = op._apply_reranker_if_aligned(session, dicts, p, emit)
