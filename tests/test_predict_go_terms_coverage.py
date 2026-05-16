@@ -219,9 +219,7 @@ class TestSummarizePayload:
 
     def test_faiss_backend_appends_index_type(self) -> None:
         op = PredictGOTermsOperation()
-        summary = op.summarize_payload(
-            {"search_backend": "faiss", "faiss_index_type": "IVFFlat"}
-        )
+        summary = op.summarize_payload({"search_backend": "faiss", "faiss_index_type": "IVFFlat"})
         assert "faiss/IVFFlat" in summary
 
 
@@ -362,9 +360,7 @@ class TestShouldSkipForParent:
         session = MagicMock()
         session.get.return_value = None
         assert (
-            PredictGOTermsBatchOperation._should_skip_for_parent(
-                session, uuid.uuid4(), _noop_emit
-            )
+            PredictGOTermsBatchOperation._should_skip_for_parent(session, uuid.uuid4(), _noop_emit)
             is False
         )
 
@@ -376,9 +372,7 @@ class TestShouldSkipForParent:
         parent.status = JobStatus.RUNNING
         session.get.return_value = parent
         assert (
-            PredictGOTermsBatchOperation._should_skip_for_parent(
-                session, uuid.uuid4(), _noop_emit
-            )
+            PredictGOTermsBatchOperation._should_skip_for_parent(session, uuid.uuid4(), _noop_emit)
             is False
         )
 
@@ -505,12 +499,10 @@ class TestResolveLiveSchemaSha:
             compute_v6_features=False,
         )
         emit, _events = _emit_capture()
-        sha = op._resolve_live_schema_sha(p, emit)
+        sha = op._reranker_scorer.resolve_live_schema_sha(p, emit)
         assert isinstance(sha, str) and len(sha) > 0
 
-    def test_returns_none_when_contracts_unavailable(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_returns_none_when_contracts_unavailable(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Emit a warning and return ``None`` when ``protea_contracts``
         ImportError fires inside the helper."""
         op = PredictGOTermsBatchOperation()
@@ -523,11 +515,12 @@ class TestResolveLiveSchemaSha:
         # Inject an ImportError when the helper tries to import the
         # contracts SHA function.
         import sys
+
         sentinel = "protea_contracts"
         real = sys.modules.get(sentinel)
         sys.modules[sentinel] = None  # forces ImportError on next import
         try:
-            sha = op._resolve_live_schema_sha(p, emit)
+            sha = op._reranker_scorer.resolve_live_schema_sha(p, emit)
         finally:
             if real is not None:
                 sys.modules[sentinel] = real
@@ -555,23 +548,28 @@ class TestApplyRerankerEmptyScores:
         session.query.return_value.filter.return_value.all.return_value = []
         emit, _events = _emit_capture()
         empty_scores = np.array([], dtype=np.float32)
-        with patch(
-            "protea.core.operations.predict_go_terms._batch_op_reranker.load_reranker",
-            return_value=MagicMock(),
-        ), patch(
-            "protea.core.operations.predict_go_terms._batch_op_reranker.apply_reranker",
-            return_value=empty_scores,
-        ), patch(
-            "protea.core.operations.predict_go_terms._batch_op_reranker.get_artifact_store",
-            return_value=MagicMock(),
-        ), patch(
-            "protea.core.operations.predict_go_terms._batch_op_reranker.load_settings",
-            return_value=MagicMock(),
+        with (
+            patch(
+                "protea.core.operations.predict_go_terms._batch_op_reranker.load_reranker",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "protea.core.operations.predict_go_terms._batch_op_reranker.apply_reranker",
+                return_value=empty_scores,
+            ),
+            patch(
+                "protea.core.operations.predict_go_terms._batch_op_reranker.get_artifact_store",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "protea.core.operations.predict_go_terms._batch_op_reranker.load_settings",
+                return_value=MagicMock(),
+            ),
         ):
-            # Pass an empty list so the strict zip in ``_score_with_reranker``
+            # Pass an empty list so the strict zip in ``RerankerScorer.score``
             # short-circuits cleanly; scores.size == 0 then returns the
             # ``rows: 0`` summary.
-            stats = op._apply_reranker_if_aligned(session, [], p, emit)
+            stats = op._reranker_scorer.apply_if_aligned(session, [], p, emit)
         assert stats == {"applied": True, "rows": 0}
 
 
@@ -581,9 +579,7 @@ class TestApplyRerankerEmptyScores:
 
 
 class TestFindMissingAspects:
-    def test_all_missing_when_dir_empty(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path
-    ) -> None:
+    def test_all_missing_when_dir_empty(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
         from protea.core.domain.aspect import ASPECT_CODES
 
         monkeypatch.setattr(disk_cache_module, "_DISK_CACHE_DIR", tmp_path)
@@ -594,9 +590,7 @@ class TestFindMissingAspects:
 
 
 class TestLoadReferenceData:
-    def test_zero_rows_returns_empty_view(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path
-    ) -> None:
+    def test_zero_rows_returns_empty_view(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
         """When the accession query returns 0 rows the streamer should
         emit empty arrays — and the derived view should have empty f32
         slices."""
@@ -605,28 +599,27 @@ class TestLoadReferenceData:
         session = MagicMock()
         # _reference_pool_query just returns the chained query object;
         # patch the streamer + count separately.
-        with patch.object(
-            op,
-            "_reference_pool_query",
-            return_value=MagicMock(count=lambda: 0),
-        ), patch.object(
-            op,
-            "_stream_reference_pool",
-            return_value=([], np.empty((0,), dtype=np.float16)),
+        with (
+            patch.object(
+                op,
+                "_reference_pool_query",
+                return_value=MagicMock(count=lambda: 0),
+            ),
+            patch.object(
+                op,
+                "_stream_reference_pool",
+                return_value=([], np.empty((0,), dtype=np.float16)),
+            ),
         ):
             emit, events = _emit_capture()
-            ref = op._load_reference_data(
-                session, uuid.uuid4(), uuid.uuid4(), emit
-            )
+            ref = op._load_reference_data(session, uuid.uuid4(), uuid.uuid4(), emit)
         assert ref["accessions"] == []
         assert ref["embeddings"].size == 0
         names = [n for n, _ in events]
         assert "predict_go_terms_batch.load_references_start" in names
         assert "predict_go_terms_batch.load_references_done" in names
 
-    def test_loads_and_caches_db_rows(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path
-    ) -> None:
+    def test_loads_and_caches_db_rows(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
         """First call streams from DB and writes the cache; second call
         reads back from disk without invoking the streamer again."""
         monkeypatch.setattr(disk_cache_module, "_DISK_CACHE_DIR", tmp_path)
@@ -642,11 +635,14 @@ class TestLoadReferenceData:
             stream_calls["n"] += 1
             return list(accs), emb
 
-        with patch.object(
-            op,
-            "_reference_pool_query",
-            return_value=MagicMock(count=lambda: len(accs)),
-        ), patch.object(op, "_stream_reference_pool", side_effect=_stream):
+        with (
+            patch.object(
+                op,
+                "_reference_pool_query",
+                return_value=MagicMock(count=lambda: len(accs)),
+            ),
+            patch.object(op, "_stream_reference_pool", side_effect=_stream),
+        ):
             ref1 = op._load_reference_data(session, ec_id, as_id, _noop_emit)
             ref2 = op._load_reference_data(session, ec_id, as_id, _noop_emit)
         assert ref1["accessions"] == accs
@@ -728,23 +724,26 @@ class TestLoadReferenceDataPerAspect:
         ec_id = uuid.uuid4()
         as_id = uuid.uuid4()
 
-        with patch.object(op, "_load_reference_data", return_value=unified), patch.object(
-            PredictGOTermsBatchOperation,
-            "_collect_aspect_annotations",
-            return_value=(
-                {"P": {"R1", "R4"}, "F": {"R2"}, "C": {"R3"}},
-                {
-                    "P": {
-                        "R1": [{"go_term_id": 101, "qualifier": "", "evidence_code": "IEA"}],
-                        "R4": [{"go_term_id": 102, "qualifier": "", "evidence_code": "IEA"}],
+        with (
+            patch.object(op, "_load_reference_data", return_value=unified),
+            patch.object(
+                PredictGOTermsBatchOperation,
+                "_collect_aspect_annotations",
+                return_value=(
+                    {"P": {"R1", "R4"}, "F": {"R2"}, "C": {"R3"}},
+                    {
+                        "P": {
+                            "R1": [{"go_term_id": 101, "qualifier": "", "evidence_code": "IEA"}],
+                            "R4": [{"go_term_id": 102, "qualifier": "", "evidence_code": "IEA"}],
+                        },
+                        "F": {
+                            "R2": [{"go_term_id": 201, "qualifier": "", "evidence_code": "IEA"}],
+                        },
+                        "C": {
+                            "R3": [{"go_term_id": 301, "qualifier": "", "evidence_code": "IEA"}],
+                        },
                     },
-                    "F": {
-                        "R2": [{"go_term_id": 201, "qualifier": "", "evidence_code": "IEA"}],
-                    },
-                    "C": {
-                        "R3": [{"go_term_id": 301, "qualifier": "", "evidence_code": "IEA"}],
-                    },
-                },
+                ),
             ),
         ):
             emit, events = _emit_capture()
@@ -754,9 +753,10 @@ class TestLoadReferenceDataPerAspect:
             assert isinstance(view["embeddings_f32"], np.ndarray)
             assert "anno_gtids" in view
             assert "acc_to_anno_idx" in view
-        assert result["P"]["accessions"] == ["R1", "R4"] or sorted(
-            result["P"]["accessions"]
-        ) == ["R1", "R4"]
+        assert result["P"]["accessions"] == ["R1", "R4"] or sorted(result["P"]["accessions"]) == [
+            "R1",
+            "R4",
+        ]
         # The aspect index file got written.
         from protea.core.disk_cache import _aspect_index_path
 
@@ -784,9 +784,7 @@ class TestAssembleAspectView:
         ec_id = uuid.uuid4()
         as_id = uuid.uuid4()
         unified_accs = ["R1", "R2", "R3"]
-        unified_emb16 = np.array(
-            [[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]], dtype=np.float16
-        )
+        unified_emb16 = np.array([[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]], dtype=np.float16)
         unified = _derive_reference_views(unified_accs, unified_emb16)
         idx_path = _aspect_index_path(ec_id, as_id, "P")
         idx_path.parent.mkdir(parents=True, exist_ok=True)
@@ -799,9 +797,7 @@ class TestAssembleAspectView:
             },
         )
         _save_anno_csr_to_disk(ec_id, as_id, "P", csr)
-        view, n = PredictGOTermsBatchOperation._assemble_aspect_view(
-            "P", unified, ec_id, as_id
-        )
+        view, n = PredictGOTermsBatchOperation._assemble_aspect_view("P", unified, ec_id, as_id)
         assert n == 2
         assert view["accessions"] == ["R1", "R3"]
         assert view["embeddings_f32"].shape == (2, 2)
@@ -837,12 +833,8 @@ class TestLoadAnnotationsFor:
             # Return one row per accession in the chunk.
             return [(acc, 10 + i, None, "IEA") for i, acc in enumerate(chunk)]
 
-        monkeypatch.setattr(
-            PredictGOTermsBatchOperation, "_fetch_annotation_chunk", fake_fetch
-        )
-        result = op._load_annotations_for(
-            MagicMock(), uuid.uuid4(), {"A", "B", "C"}
-        )
+        monkeypatch.setattr(PredictGOTermsBatchOperation, "_fetch_annotation_chunk", fake_fetch)
+        result = op._load_annotations_for(MagicMock(), uuid.uuid4(), {"A", "B", "C"})
         assert set(result.keys()) == {"A", "B", "C"}
         for v in result.values():
             assert len(v) == 1
@@ -862,9 +854,7 @@ class TestFetchAnnotationChunk:
         filtered.join.return_value.filter.return_value.all.return_value = [
             ("R1", 10, None, "IEA"),
         ]
-        rows = op._fetch_annotation_chunk(
-            session, uuid.uuid4(), ["R1"], aspect="P"
-        )
+        rows = op._fetch_annotation_chunk(session, uuid.uuid4(), ["R1"], aspect="P")
         assert rows == [("R1", 10, None, "IEA")]
         # Without aspect: same query, no extra join.
         filtered.all.return_value = [("R2", 11, None, "IEA")]
@@ -876,13 +866,9 @@ class TestLoadQueryEmbeddings:
     def test_no_rows_returns_empty(self) -> None:
         op = PredictGOTermsBatchOperation()
         session = MagicMock()
-        session.query.return_value.join.return_value.join.return_value.filter.return_value.all.return_value = (
-            []
-        )
+        session.query.return_value.join.return_value.join.return_value.filter.return_value.all.return_value = []
         p = _payload(query_accessions=["Q1"])
-        emb, accs = op._load_query_embeddings(
-            session, ["Q1"], uuid.uuid4(), p, _noop_emit
-        )
+        emb, accs = op._load_query_embeddings(session, ["Q1"], uuid.uuid4(), p, _noop_emit)
         assert accs == []
         assert emb.shape == (0,)
 
@@ -891,13 +877,9 @@ class TestLoadQueryEmbeddings:
         session = MagicMock()
         hv = _halfvec([0.1, 0.2, 0.3])
         rows = [("Q1", hv), ("Q2", hv)]
-        session.query.return_value.join.return_value.join.return_value.filter.return_value.all.return_value = (
-            rows
-        )
+        session.query.return_value.join.return_value.join.return_value.filter.return_value.all.return_value = rows
         p = _payload(query_accessions=["Q1", "Q2"])
-        emb, accs = op._load_query_embeddings(
-            session, ["Q1", "Q2"], uuid.uuid4(), p, _noop_emit
-        )
+        emb, accs = op._load_query_embeddings(session, ["Q1", "Q2"], uuid.uuid4(), p, _noop_emit)
         assert accs == ["Q1", "Q2"]
         assert emb.shape == (2, 3)
         assert emb.dtype == np.float32
@@ -911,9 +893,7 @@ class TestLoadQueryEmbeddings:
             ("Q1", hv)
         ]
         p = _payload(query_set_id=str(qs_id), query_accessions=["Q1"])
-        emb, accs = op._load_query_embeddings(
-            session, ["Q1"], uuid.uuid4(), p, _noop_emit
-        )
+        emb, accs = op._load_query_embeddings(session, ["Q1"], uuid.uuid4(), p, _noop_emit)
         assert accs == ["Q1"]
         assert emb.shape == (1, 2)
 
@@ -976,9 +956,7 @@ class TestSequenceAndTaxonomyLoaders:
         out = op._load_sequences_for_queries(session, p, ["Q1", "Q2"])
         assert out == {"Q1": "MGS", "Q2": "PPP"}
 
-    def test_load_taxonomy_ids_for_proteins(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_load_taxonomy_ids_for_proteins(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self._stub_tuning(monkeypatch)
         op = PredictGOTermsBatchOperation()
         session = MagicMock()
@@ -992,15 +970,11 @@ class TestSequenceAndTaxonomyLoaders:
         assert result["R2"] is None
         assert result["R3"] is None
 
-    def test_load_taxonomy_ids_for_queries(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_load_taxonomy_ids_for_queries(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self._stub_tuning(monkeypatch, chunk=10)
         op = PredictGOTermsBatchOperation()
         session = MagicMock()
-        session.query.return_value.filter.return_value.all.return_value = [
-            ("Q1", 9606)
-        ]
+        session.query.return_value.filter.return_value.all.return_value = [("Q1", 9606)]
         p = _payload(query_accessions=["Q1", "Q2"])
         result = op._load_taxonomy_ids_for_queries(session, p, ["Q1", "Q2"])
         # Q2 was not in returned rows → stays None.
@@ -1012,20 +986,15 @@ class TestLoadFeatureEngineeringData:
     def test_both_flags_off_returns_empty_dicts(self) -> None:
         op = PredictGOTermsBatchOperation()
         p = _payload(compute_alignments=False, compute_taxonomy=False)
-        out = op._load_feature_engineering_data(
-            MagicMock(), p, ["Q1"], {"R1"}
-        )
+        out = op._load_feature_engineering_data(MagicMock(), p, ["Q1"], {"R1"})
         assert out == ({}, {}, {}, {})
 
-    def test_alignment_flag_loads_sequences(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_alignment_flag_loads_sequences(self, monkeypatch: pytest.MonkeyPatch) -> None:
         op = PredictGOTermsBatchOperation()
         p = _payload(compute_alignments=True, compute_taxonomy=False)
-        with patch.object(
-            op, "_load_sequences_for_proteins", return_value={"R1": "MGS"}
-        ), patch.object(
-            op, "_load_sequences_for_queries", return_value={"Q1": "MAA"}
+        with (
+            patch.object(op, "_load_sequences_for_proteins", return_value={"R1": "MGS"}),
+            patch.object(op, "_load_sequences_for_queries", return_value={"Q1": "MAA"}),
         ):
             out = op._load_feature_engineering_data(MagicMock(), p, ["Q1"], {"R1"})
         assert out == ({"R1": "MGS"}, {"Q1": "MAA"}, {}, {})
@@ -1033,10 +1002,9 @@ class TestLoadFeatureEngineeringData:
     def test_taxonomy_flag_loads_tax_ids(self) -> None:
         op = PredictGOTermsBatchOperation()
         p = _payload(compute_alignments=False, compute_taxonomy=True)
-        with patch.object(
-            op, "_load_taxonomy_ids_for_proteins", return_value={"R1": 9606}
-        ), patch.object(
-            op, "_load_taxonomy_ids_for_queries", return_value={"Q1": 9606}
+        with (
+            patch.object(op, "_load_taxonomy_ids_for_proteins", return_value={"R1": 9606}),
+            patch.object(op, "_load_taxonomy_ids_for_queries", return_value={"Q1": 9606}),
         ):
             out = op._load_feature_engineering_data(MagicMock(), p, ["Q1"], {"R1"})
         assert out == ({}, {}, {"R1": 9606}, {"Q1": 9606})
@@ -1086,7 +1054,7 @@ class TestResolveSyntheticFks:
         session.execute.return_value.all.return_value = [(20, "GO:0000020")]
         dicts = [
             {"go_term_id": 10, "go_id": "GO:0000010"},  # leaf
-            {"go_id": "GO:0000020"},                    # ancestor (no go_term_id yet)
+            {"go_id": "GO:0000020"},  # ancestor (no go_term_id yet)
         ]
         int_to_str = {10: "GO:0000010"}
         out = op._resolve_synthetic_fks(session, dicts, int_to_str, uuid.uuid4())
@@ -1117,10 +1085,13 @@ class TestExpandToAncestors:
         # before the helper does its local ``from … import …``.
         from protea.core import feature_enricher as fe
 
-        with patch.object(fe, "load_parent_map", return_value={}), patch.object(
-            fe,
-            "expand_predictions_to_ancestors",
-            side_effect=lambda preds, **_kw: preds + [{"go_id": "GO:0010"}],
+        with (
+            patch.object(fe, "load_parent_map", return_value={}),
+            patch.object(
+                fe,
+                "expand_predictions_to_ancestors",
+                side_effect=lambda preds, **_kw: preds + [{"go_id": "GO:0010"}],
+            ),
         ):
             out = op._expand_to_ancestors(
                 session,
@@ -1128,9 +1099,7 @@ class TestExpandToAncestors:
                 [{"go_term_id": 10, "distance": 0.1}],
                 emit,
             )
-        assert any(
-            name == "predict_go_terms_batch.expanded_to_ancestors" for name, _ in events
-        )
+        assert any(name == "predict_go_terms_batch.expanded_to_ancestors" for name, _ in events)
         # The leaf stays plus the synthetic ancestor (which collapses to the
         # same leaf in our toy fixture).
         assert len(out) == 2
@@ -1201,12 +1170,15 @@ class TestExecuteBatchHappyPath:
                 query_embeddings=np.array([[0.1]], dtype=np.float32),
             ),
         )
-        with patch.object(op, "_ensure_reference_cache", return_value=ref_data), patch.object(
-            op,
-            "_load_query_embeddings",
-            return_value=(np.array([[0.1]], dtype=np.float32), ["Q1"]),
-        ), patch.object(op, "_run_knn_path", return_value=knn), patch.object(
-            op, "_run_post_knn_pipeline", return_value=([prediction], None)
+        with (
+            patch.object(op, "_ensure_reference_cache", return_value=ref_data),
+            patch.object(
+                op,
+                "_load_query_embeddings",
+                return_value=(np.array([[0.1]], dtype=np.float32), ["Q1"]),
+            ),
+            patch.object(op, "_run_knn_path", return_value=knn),
+            patch.object(op, "_run_post_knn_pipeline", return_value=([prediction], None)),
         ):
             result = op.execute(session, payload_dict, emit=_noop_emit)
         assert result.result["predictions"] == 1
@@ -1229,12 +1201,15 @@ class TestExecuteBatchHappyPath:
             "query_accessions": ["Q1"],
             "aspect_separated_knn": False,
         }
-        with patch.object(
-            op, "_ensure_reference_cache", return_value={"embeddings": np.empty((0,))}
-        ), patch.object(
-            op,
-            "_load_query_embeddings",
-            return_value=(np.empty((0,)), []),
+        with (
+            patch.object(
+                op, "_ensure_reference_cache", return_value={"embeddings": np.empty((0,))}
+            ),
+            patch.object(
+                op,
+                "_load_query_embeddings",
+                return_value=(np.empty((0,)), []),
+            ),
         ):
             result = op.execute(session, payload_dict, emit=_noop_emit)
         assert result.result["predictions"] == 0
@@ -1256,11 +1231,15 @@ class TestExecuteBatchHappyPath:
             "query_accessions": ["Q1"],
             "aspect_separated_knn": False,
         }
-        with patch.object(op, "_ensure_reference_cache", return_value={}), patch.object(
-            op,
-            "_load_query_embeddings",
-            return_value=(np.array([[0.1]], dtype=np.float32), ["Q1"]),
-        ), patch.object(op, "_run_knn_path", return_value=None):
+        with (
+            patch.object(op, "_ensure_reference_cache", return_value={}),
+            patch.object(
+                op,
+                "_load_query_embeddings",
+                return_value=(np.array([[0.1]], dtype=np.float32), ["Q1"]),
+            ),
+            patch.object(op, "_run_knn_path", return_value=None),
+        ):
             result = op.execute(session, payload_dict, emit=_noop_emit)
         assert result.result["predictions"] == 0
 
@@ -1287,16 +1266,20 @@ class TestRunPostKnnPipeline:
                 query_embeddings=np.array([[0.1]], dtype=np.float32),
             ),
         )
-        with patch.object(op, "_apply_v6_features") as v6, patch.object(
-            op,
-            "_expand_to_ancestors",
-            side_effect=lambda _s, _p, d, _e: d + [{"go_term_id": 2}],
-        ) as expand, patch.object(
-            op, "_apply_reranker_if_aligned", return_value={"applied": True, "rows": 2}
-        ) as rerank:
-            preds, stats = op._run_post_knn_pipeline(
-                MagicMock(), ctx, knn, {}, _noop_emit
-            )
+        with (
+            patch.object(op, "_apply_v6_features") as v6,
+            patch.object(
+                op,
+                "_expand_to_ancestors",
+                side_effect=lambda _s, _p, d, _e: d + [{"go_term_id": 2}],
+            ) as expand,
+            patch.object(
+                op._reranker_scorer,
+                "apply_if_aligned",
+                return_value={"applied": True, "rows": 2},
+            ) as rerank,
+        ):
+            preds, stats = op._run_post_knn_pipeline(MagicMock(), ctx, knn, {}, _noop_emit)
         v6.assert_called_once()
         expand.assert_called_once()
         rerank.assert_called_once()
@@ -1324,9 +1307,7 @@ class TestRunPostKnnPipeline:
                 query_embeddings=np.array([[0.1]], dtype=np.float32),
             ),
         )
-        preds, stats = op._run_post_knn_pipeline(
-            MagicMock(), ctx, knn, {}, _noop_emit
-        )
+        preds, stats = op._run_post_knn_pipeline(MagicMock(), ctx, knn, {}, _noop_emit)
         assert preds == [{"go_term_id": 1}]
         assert stats is None
 
@@ -1387,9 +1368,7 @@ class TestUnifiedLoadPairInputs:
             query_embeddings=np.array([[0.1]], dtype=np.float32),
             ref_data={},
         )
-        rs, qs, rt, qt = op._unified_load_pair_inputs(
-            MagicMock(), ctx, {"R1"}
-        )
+        rs, qs, rt, qt = op._unified_load_pair_inputs(MagicMock(), ctx, {"R1"})
         assert rs == {} and qs == {} and rt == {} and qt == {}
 
     def test_both_flags_on_invokes_loaders(self) -> None:
@@ -1403,13 +1382,13 @@ class TestUnifiedLoadPairInputs:
             query_embeddings=np.array([[0.1]], dtype=np.float32),
             ref_data={},
         )
-        with patch.object(op, "_load_sequences_for_proteins", return_value={"R1": "MGS"}) as rs_m, \
-             patch.object(op, "_load_sequences_for_queries", return_value={"Q1": "MGS"}) as qs_m, \
-             patch.object(op, "_load_taxonomy_ids_for_proteins", return_value={"R1": 9606}) as rt_m, \
-             patch.object(op, "_load_taxonomy_ids_for_queries", return_value={"Q1": 9606}) as qt_m:
-            rs, qs, rt, qt = op._unified_load_pair_inputs(
-                MagicMock(), ctx, {"R1"}
-            )
+        with (
+            patch.object(op, "_load_sequences_for_proteins", return_value={"R1": "MGS"}) as rs_m,
+            patch.object(op, "_load_sequences_for_queries", return_value={"Q1": "MGS"}) as qs_m,
+            patch.object(op, "_load_taxonomy_ids_for_proteins", return_value={"R1": 9606}) as rt_m,
+            patch.object(op, "_load_taxonomy_ids_for_queries", return_value={"Q1": 9606}) as qt_m,
+        ):
+            rs, qs, rt, qt = op._unified_load_pair_inputs(MagicMock(), ctx, {"R1"})
         assert rs == {"R1": "MGS"} and qs == {"Q1": "MGS"}
         assert rt == {"R1": 9606} and qt == {"Q1": 9606}
         rs_m.assert_called_once()
@@ -1419,9 +1398,7 @@ class TestUnifiedLoadPairInputs:
 
 
 class TestEnsureReferenceCacheMode:
-    def test_aspect_separated_dispatches_per_aspect(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_aspect_separated_dispatches_per_aspect(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Hit the cache miss branch with aspect_separated=True so the
         per-aspect loader is the one invoked."""
         # Wipe the module-level cache so the helper takes the miss branch.
@@ -1435,11 +1412,12 @@ class TestEnsureReferenceCacheMode:
             annotation_set_id=uuid.uuid4(),
         )
         sentinel = {"sentinel": True}
-        with patch.object(
-            op, "_load_reference_data_per_aspect", return_value=sentinel
-        ) as per_aspect, patch.object(
-            op, "_load_reference_data"
-        ) as unified:
+        with (
+            patch.object(
+                op, "_load_reference_data_per_aspect", return_value=sentinel
+            ) as per_aspect,
+            patch.object(op, "_load_reference_data") as unified,
+        ):
             out = op._ensure_reference_cache(MagicMock(), ctx, _noop_emit)
         per_aspect.assert_called_once()
         unified.assert_not_called()
@@ -1466,11 +1444,10 @@ class TestEnsureReferenceCacheMode:
             ctx.p.aspect_separated_knn,
         )
         monkeypatch.setattr(_batch_op_reference, "_REF_CACHE", {key: sentinel})
-        with patch.object(
-            op, "_load_reference_data"
-        ) as unified, patch.object(
-            op, "_load_reference_data_per_aspect"
-        ) as per_aspect:
+        with (
+            patch.object(op, "_load_reference_data") as unified,
+            patch.object(op, "_load_reference_data_per_aspect") as per_aspect,
+        ):
             out = op._ensure_reference_cache(MagicMock(), ctx, _noop_emit)
         unified.assert_not_called()
         per_aspect.assert_not_called()
@@ -1494,9 +1471,7 @@ class TestEnsureReferenceCacheMode:
 
         # Seed the cache with an old entry so the eviction branch triggers.
         old_key = ("old_cfg", "old_ann", False)
-        monkeypatch.setattr(
-            _batch_op_reference, "_REF_CACHE", {old_key: {"placeholder": True}}
-        )
+        monkeypatch.setattr(_batch_op_reference, "_REF_CACHE", {old_key: {"placeholder": True}})
 
         op = PredictGOTermsBatchOperation()
         ctx = pgt._BatchExecCtx(
@@ -1537,22 +1512,21 @@ class TestUnifiedLoadAnnotations:
             query_embeddings=np.array([[1.0, 0.0]], dtype=np.float32),
             ref_data={
                 "accessions": ["R1", "R2"],
-                "embeddings_f32": np.array(
-                    [[1.0, 0.0], [0.0, 1.0]], dtype=np.float32
-                ),
-                "embeddings_f32_cos": np.array(
-                    [[1.0, 0.0], [0.0, 1.0]], dtype=np.float32
-                ),
+                "embeddings_f32": np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32),
+                "embeddings_f32_cos": np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32),
             },
         )
         # Patch search_knn (re-imported inside the helper).
-        with patch(
-            "protea.core.knn_search.search_knn",
-            return_value=[[("R1", 0.0)]],
-        ), patch.object(
-            op,
-            "_load_annotations_for",
-            return_value={"R1": [{"go_term_id": 1, "qualifier": "", "evidence_code": "IEA"}]},
+        with (
+            patch(
+                "protea.core.knn_search.search_knn",
+                return_value=[[("R1", 0.0)]],
+            ),
+            patch.object(
+                op,
+                "_load_annotations_for",
+                return_value={"R1": [{"go_term_id": 1, "qualifier": "", "evidence_code": "IEA"}]},
+            ),
         ):
             anns, neighbors = op._unified_load_annotations(MagicMock(), ctx)
         assert neighbors == {"R1"}
@@ -1579,9 +1553,10 @@ class TestUnifiedLoadAnnotations:
             captured["refs"] = refs
             return [[("R1", 0.0)]]
 
-        with patch(
-            "protea.core.knn_search.search_knn", side_effect=fake_search
-        ), patch.object(op, "_load_annotations_for", return_value={}):
+        with (
+            patch("protea.core.knn_search.search_knn", side_effect=fake_search),
+            patch.object(op, "_load_annotations_for", return_value={}),
+        ):
             op._unified_load_annotations(MagicMock(), ctx)
         assert "refs" in captured
 
@@ -1604,22 +1579,27 @@ class TestUnifiedPredictViaPipelineWiring:
             neighbors_by_aspect={"P": [], "F": [], "C": []},
             go_map_by_aspect={"P": {}, "F": {}, "C": {}},
         )
-        with patch.object(
-            op,
-            "_unified_load_annotations",
-            return_value=({}, set()),
-        ), patch.object(
-            op,
-            "_unified_load_pair_inputs",
-            return_value=({}, {}, {}, {}),
-        ), patch.object(
-            op,
-            "_load_go_term_metadata",
-            return_value=({}, {}),
-        ), patch(
-            "protea.core.operations.predict_go_terms._batch_op.call_pipeline_predict",
-            return_value=fake_result,
-        ) as adapter:
+        with (
+            patch.object(
+                op,
+                "_unified_load_annotations",
+                return_value=({}, set()),
+            ),
+            patch.object(
+                op,
+                "_unified_load_pair_inputs",
+                return_value=({}, {}, {}, {}),
+            ),
+            patch.object(
+                op,
+                "_load_go_term_metadata",
+                return_value=({}, {}),
+            ),
+            patch(
+                "protea.core.operations.predict_go_terms._batch_op.call_pipeline_predict",
+                return_value=fake_result,
+            ) as adapter,
+        ):
             out = op._unified_predict_via_pipeline(MagicMock(), ctx)
         adapter.assert_called_once()
         assert out is fake_result
@@ -1651,9 +1631,7 @@ class TestRunUnifiedPathHappyAndV6:
             neighbors_by_aspect={"P": [[("R1", 0.1)]], "F": [[]], "C": [[]]},
             go_map_by_aspect={"P": {}, "F": {}, "C": {}},
         )
-        with patch.object(
-            op, "_unified_predict_via_pipeline", return_value=adapter_out
-        ):
+        with patch.object(op, "_unified_predict_via_pipeline", return_value=adapter_out):
             out = op._run_unified_path(MagicMock(), ctx, query_batch, ref_data, _noop_emit)
         assert out is not None
         assert out.v6_ctx is not None
@@ -1679,9 +1657,7 @@ class TestRunUnifiedPathHappyAndV6:
             neighbors_by_aspect={},
             go_map_by_aspect={},
         )
-        with patch.object(
-            op, "_unified_predict_via_pipeline", return_value=adapter_out
-        ):
+        with patch.object(op, "_unified_predict_via_pipeline", return_value=adapter_out):
             out = op._run_unified_path(MagicMock(), ctx, query_batch, ref_data, _noop_emit)
         assert out.v6_ctx is None
 
@@ -1701,8 +1677,10 @@ class TestRunKnnPath:
             query_embeddings=np.array([[0.1]], dtype=np.float32),
         )
         sentinel = MagicMock()
-        with patch.object(op, "_run_aspect_separated_path", return_value=sentinel) as asp, \
-             patch.object(op, "_run_unified_path") as uni:
+        with (
+            patch.object(op, "_run_aspect_separated_path", return_value=sentinel) as asp,
+            patch.object(op, "_run_unified_path") as uni,
+        ):
             out = op._run_knn_path(MagicMock(), ctx, query_batch, {}, _noop_emit)
         asp.assert_called_once()
         uni.assert_not_called()
@@ -1763,9 +1741,7 @@ class TestApplyV6Features:
             query_embeddings=np.array([[0.1, 0.2]], dtype=np.float32),
         )
 
-    def test_aspect_separated_pca_pool_concat(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_aspect_separated_pca_pool_concat(self, monkeypatch: pytest.MonkeyPatch) -> None:
         op = PredictGOTermsBatchOperation()
         ctx = pgt._BatchExecCtx(
             p=_payload(
@@ -1788,12 +1764,13 @@ class TestApplyV6Features:
             v6_ctx={"neighbors_by_aspect": {}, "go_map_by_aspect": {}, "pair_features": {}},
             query_batch=self._make_query_batch(),
         )
-        with patch(
-            "protea.core.operations.predict_go_terms._batch_op._load_or_fit_pca_state",
-            return_value=("dummy_pca",),
-        ), patch(
-            "protea.core.operations.predict_go_terms._batch_op.enrich_v6_features"
-        ) as enrich:
+        with (
+            patch(
+                "protea.core.operations.predict_go_terms._batch_op._load_or_fit_pca_state",
+                return_value=("dummy_pca",),
+            ),
+            patch("protea.core.operations.predict_go_terms._batch_op.enrich_v6_features") as enrich,
+        ):
             op._apply_v6_features(MagicMock(), ctx, knn_result, ref_data, _noop_emit)
         enrich.assert_called_once()
 
@@ -1816,12 +1793,13 @@ class TestApplyV6Features:
             v6_ctx={"neighbors_by_aspect": {}, "go_map_by_aspect": {}, "pair_features": {}},
             query_batch=self._make_query_batch(),
         )
-        with patch(
-            "protea.core.operations.predict_go_terms._batch_op._load_or_fit_pca_state",
-            return_value=None,
-        ), patch(
-            "protea.core.operations.predict_go_terms._batch_op.enrich_v6_features"
-        ) as enrich:
+        with (
+            patch(
+                "protea.core.operations.predict_go_terms._batch_op._load_or_fit_pca_state",
+                return_value=None,
+            ),
+            patch("protea.core.operations.predict_go_terms._batch_op.enrich_v6_features") as enrich,
+        ):
             op._apply_v6_features(MagicMock(), ctx, knn_result, ref_data, _noop_emit)
         enrich.assert_called_once()
 
@@ -1867,16 +1845,27 @@ class TestAspectKnnPreSearchEmptyBank:
 
         p = _payload()
         ref_data = {
-            "P": {"accessions": [], "embeddings_f32": np.empty((0, 2), dtype=np.float32),
-                  "embeddings_f32_cos": np.empty((0, 2), dtype=np.float32)},
-            "F": {"accessions": [], "embeddings_f32": np.empty((0, 2), dtype=np.float32),
-                  "embeddings_f32_cos": np.empty((0, 2), dtype=np.float32)},
-            "C": {"accessions": [], "embeddings_f32": np.empty((0, 2), dtype=np.float32),
-                  "embeddings_f32_cos": np.empty((0, 2), dtype=np.float32)},
+            "P": {
+                "accessions": [],
+                "embeddings_f32": np.empty((0, 2), dtype=np.float32),
+                "embeddings_f32_cos": np.empty((0, 2), dtype=np.float32),
+            },
+            "F": {
+                "accessions": [],
+                "embeddings_f32": np.empty((0, 2), dtype=np.float32),
+                "embeddings_f32_cos": np.empty((0, 2), dtype=np.float32),
+            },
+            "C": {
+                "accessions": [],
+                "embeddings_f32": np.empty((0, 2), dtype=np.float32),
+                "embeddings_f32_cos": np.empty((0, 2), dtype=np.float32),
+            },
         }
         nbya, hits = _AspectKnnPreSearch.run(
-            ["Q1", "Q2"], np.array([[0.0, 1.0], [1.0, 0.0]], dtype=np.float32),
-            ref_data, p,
+            ["Q1", "Q2"],
+            np.array([[0.0, 1.0], [1.0, 0.0]], dtype=np.float32),
+            ref_data,
+            p,
         )
         assert hits == set()
         for asp in ("P", "F", "C"):

@@ -1,9 +1,11 @@
 """``PredictGOTermsBatchOperation`` and its execute-time helper context types.
 
 Extracted from the monolithic ``predict_go_terms.py`` as part of T2B.6.
-The class itself is still > 500 LOC (T2B.4 territory, blocked behind
-human review for the reranker path), but the file LOC budget is met
-via the reference / feature / reranker mixins in the sibling modules.
+T2B.4 then lifted the reranker scoring path out of the ``_RerankerMixin``
+hierarchy and into the compositive
+:class:`protea.core.operations.predict_go_terms._reranker_scorer.RerankerScorer`,
+so the orchestrator now collaborates with the scorer through a
+constructor-injected instance instead of through MRO.
 """
 
 from __future__ import annotations
@@ -29,13 +31,13 @@ from protea.core.operations.predict_go_terms._aspect_helpers import (
 )
 from protea.core.operations.predict_go_terms._batch_op_feature import _FeatureLoadingMixin
 from protea.core.operations.predict_go_terms._batch_op_reference import _ReferenceMixin
-from protea.core.operations.predict_go_terms._batch_op_reranker import _RerankerMixin
 from protea.core.operations.predict_go_terms._common import (
     _WRITE_QUEUE,
     AspectSeparatedKnnContext,
     PredictGOTermsBatchPayload,
     _UnifiedPredictContext,
 )
+from protea.core.operations.predict_go_terms._reranker_scorer import RerankerScorer
 from protea.core.pca_cache import _load_or_fit_pca_state
 from protea.core.reranker import EMBEDDING_PCA_DIM
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
@@ -74,7 +76,6 @@ class _KnnResult(NamedTuple):
 class PredictGOTermsBatchOperation(
     _ReferenceMixin,
     _FeatureLoadingMixin,
-    _RerankerMixin,
 ):
     """CPU batch worker: KNN search + GO annotation transfer for one query chunk.
 
@@ -83,6 +84,8 @@ class PredictGOTermsBatchOperation(
     messages reuse the cached reference without any DB round-trip.
 
     Result is published to protea.predictions.write for bulk DB insertion.
+    The reranker scoring path is delegated to an injected
+    :class:`RerankerScorer` collaborator (T2B.4).
     """
 
     name = "predict_go_terms_batch"
@@ -90,6 +93,11 @@ class PredictGOTermsBatchOperation(
         "CPU child job: KNN search and GO annotation transfer for one query "
         "chunk; result is forwarded to store_predictions."
     )
+
+    def __init__(self, reranker_scorer: RerankerScorer | None = None) -> None:
+        self._reranker_scorer = reranker_scorer or RerankerScorer(
+            attach_aspect=self._attach_go_term_aspect,
+        )
 
     def summarize_payload(self, payload: dict[str, Any]) -> str:
         p = payload or {}
@@ -166,24 +174,19 @@ class PredictGOTermsBatchOperation(
         distribution it never trained on.
         """
         p = ctx.p
-        if (
-            p.compute_v6_features
-            and knn_result.v6_ctx is not None
-            and knn_result.prediction_dicts
-        ):
+        if p.compute_v6_features and knn_result.v6_ctx is not None and knn_result.prediction_dicts:
             self._apply_v6_features(session, ctx, knn_result, ref_data, emit)
         prediction_dicts = knn_result.prediction_dicts
         if p.expand_votes_to_ancestors and prediction_dicts:
             prediction_dicts = self._expand_to_ancestors(session, p, prediction_dicts, emit)
         reranker_stats: dict[str, Any] | None = None
         if p.reranker_model_id and prediction_dicts:
-            reranker_stats = self._apply_reranker_if_aligned(session, prediction_dicts, p, emit)
+            scorer = self._reranker_scorer
+            reranker_stats = scorer.apply_if_aligned(session, prediction_dicts, p, emit)
         return prediction_dicts, reranker_stats
 
     @staticmethod
-    def _should_skip_for_parent(
-        session: Session, parent_job_id: UUID, emit: EmitFn
-    ) -> bool:
+    def _should_skip_for_parent(session: Session, parent_job_id: UUID, emit: EmitFn) -> bool:
         """Skip the batch if its parent Job was cancelled or failed in flight."""
         parent = session.get(Job, parent_job_id)
         if parent is not None and parent.status in (JobStatus.CANCELLED, JobStatus.FAILED):
@@ -245,9 +248,7 @@ class PredictGOTermsBatchOperation(
                 "go_map_by_aspect": go_map_by_aspect,
                 "pair_features": pair_features,
             }
-        return _KnnResult(
-            prediction_dicts=prediction_dicts, v6_ctx=v6_ctx, query_batch=query_batch
-        )
+        return _KnnResult(prediction_dicts=prediction_dicts, v6_ctx=v6_ctx, query_batch=query_batch)
 
     def _run_unified_path(
         self,
@@ -310,9 +311,7 @@ class PredictGOTermsBatchOperation(
                 if ref_data[a].get("embeddings_f32") is not None
                 and ref_data[a]["embeddings_f32"].size
             ]
-            pca_pool = (
-                np.concatenate(pools, axis=0) if pools else np.empty((0,), dtype=np.float32)
-            )
+            pca_pool = np.concatenate(pools, axis=0) if pools else np.empty((0,), dtype=np.float32)
         else:
             pca_pool = ref_data.get("embeddings_f32", np.empty((0,), dtype=np.float32))
 
@@ -356,8 +355,8 @@ class PredictGOTermsBatchOperation(
         ``pair_features`` and aspect maps the v6 enricher needs.
         """
         annotations, unique_neighbors = self._unified_load_annotations(session, ctx)
-        ref_sequences, query_sequences, ref_tax_ids, query_tax_ids = (
-            self._unified_load_pair_inputs(session, ctx, unique_neighbors)
+        ref_sequences, query_sequences, ref_tax_ids, query_tax_ids = self._unified_load_pair_inputs(
+            session, ctx, unique_neighbors
         )
         go_id_map, go_aspect_map = self._load_go_term_metadata(session, annotations)
         return call_pipeline_predict(
@@ -406,9 +405,7 @@ class PredictGOTermsBatchOperation(
             faiss_hnsw_m=p.faiss_hnsw_m,
             faiss_hnsw_ef_search=p.faiss_hnsw_ef_search,
         )
-        unique_neighbors: set[str] = {
-            ref_acc for top_refs in neighbors for ref_acc, _ in top_refs
-        }
+        unique_neighbors: set[str] = {ref_acc for top_refs in neighbors for ref_acc, _ in top_refs}
         annotations = self._load_annotations_for(session, ctx.annotation_set_id, unique_neighbors)
         return annotations, unique_neighbors
 
@@ -491,9 +488,7 @@ class PredictGOTermsBatchOperation(
         """
         from sqlalchemy import select
 
-        unique_int_ids = {
-            rec["go_term_id"] for rec in prediction_dicts if rec.get("go_term_id")
-        }
+        unique_int_ids = {rec["go_term_id"] for rec in prediction_dicts if rec.get("go_term_id")}
         id_pairs = session.execute(
             select(GOTerm.id, GOTerm.go_id).where(GOTerm.id.in_(unique_int_ids))
         ).all()
@@ -595,7 +590,9 @@ class PredictGOTermsBatchOperation(
         ]
 
     def _run_aspect_separated_knn(
-        self, session: Session, ctx: AspectSeparatedKnnContext,
+        self,
+        session: Session,
+        ctx: AspectSeparatedKnnContext,
     ) -> tuple[
         list[dict[str, Any]],
         dict[str, list[list[tuple[str, float]]]],
@@ -607,7 +604,8 @@ class PredictGOTermsBatchOperation(
         ancestor / reranker consumers still expect. See F2C.5b notes."""
         neighbors_by_aspect, inputs = _build_aspect_adapter_inputs(self, session, ctx)
         result = call_pipeline_predict_aspect_separated(
-            inputs, neighbors_by_aspect=neighbors_by_aspect,
+            inputs,
+            neighbors_by_aspect=neighbors_by_aspect,
         )
         return (
             result.predictions,
