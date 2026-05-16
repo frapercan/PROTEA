@@ -848,7 +848,15 @@ class TestPredictGOTermsBatchReranker:
         assert any(name == "reranker.skipped" for name, _ in events)
         assert "reranker_score" not in dicts[0]
 
-    def test_schema_mismatch_falls_back(self) -> None:
+    def test_schema_mismatch_raises_hard_failure(self) -> None:
+        """FARM-EXP.5: a stale recorded sha must NOT silently fall
+        back. The scorer raises :class:`SchemaShaMismatchError`
+        which the base worker translates into ``Job.status=failed``.
+        The legacy soft-skip return shape is gone."""
+        from protea.core.operations.predict_go_terms._reranker_scorer import (
+            SchemaShaMismatchError,
+        )
+
         op = self._op()
         p = self._payload(
             reranker_model_id=str(uuid.uuid4()),
@@ -861,11 +869,11 @@ class TestPredictGOTermsBatchReranker:
         dicts = [{"protein_accession": "Q1", "go_term_id": 1, "distance": 0.1}]
         emit, events = self._emit_capture()
 
-        stats = op._reranker_scorer.apply_if_aligned(MagicMock(), dicts, p, emit)
+        with pytest.raises(SchemaShaMismatchError) as excinfo:
+            op._reranker_scorer.apply_if_aligned(MagicMock(), dicts, p, emit)
 
-        assert stats is not None
-        assert stats["applied"] is False
-        assert stats["skipped_reason"] == "schema_mismatch"
+        assert excinfo.value.reason == "schema_sha_mismatch"
+        assert excinfo.value.expected_sha == "not_matching"
         assert any(name == "reranker.schema_mismatch" for name, _ in events)
         assert "reranker_score" not in dicts[0]
 

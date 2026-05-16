@@ -31,7 +31,10 @@ import pytest
 
 from protea.core.operations.predict_go_terms import PredictGOTermsBatchOperation
 from protea.core.operations.predict_go_terms._common import PredictGOTermsBatchPayload
-from protea.core.operations.predict_go_terms._reranker_scorer import RerankerScorer
+from protea.core.operations.predict_go_terms._reranker_scorer import (
+    RerankerScorer,
+    SchemaShaMismatchError,
+)
 
 _ANN_SET_ID = str(uuid.uuid4())
 _SNAPSHOT_ID = str(uuid.uuid4())
@@ -102,10 +105,19 @@ class TestApplyIfAlignedBranches:
         assert any(name == "reranker.skipped" for name, _ in events)
         assert "reranker_score" not in dicts[0]
 
-    def test_schema_mismatch_returns_stats_and_emits(self) -> None:
+    def test_schema_mismatch_raises_and_emits(self, caplog: pytest.LogCaptureFixture) -> None:
+        """FARM-EXP.5 acceptance: a stale recorded feature_schema_sha
+        must NEVER be allowed to silently fall through; the booster
+        load is refused, the audit event lands at error level with the
+        canonical ``reason='schema_sha_mismatch'`` literal, and a
+        :class:`SchemaShaMismatchError` propagates so the base worker
+        transitions the parent Job to ``status=failed`` with
+        ``error_code='SchemaShaMismatchError'``.
+        """
         scorer = RerankerScorer(attach_aspect=_noop_attach_aspect)
+        reranker_id = str(uuid.uuid4())
         p = _payload(
-            reranker_model_id=str(uuid.uuid4()),
+            reranker_model_id=reranker_id,
             reranker_artifact_uri="file:///tmp/x.txt",
             reranker_feature_schema_sha="not_matching",
             compute_alignments=False,
@@ -115,15 +127,42 @@ class TestApplyIfAlignedBranches:
         emit, events = _emit_capture()
         dicts = [{"protein_accession": "Q1", "go_term_id": 1, "distance": 0.1}]
 
-        stats = scorer.apply_if_aligned(MagicMock(), dicts, p, emit)
+        caplog.set_level(
+            "ERROR",
+            logger="protea.core.operations.predict_go_terms._reranker_scorer",
+        )
+        with pytest.raises(SchemaShaMismatchError) as excinfo:
+            scorer.apply_if_aligned(MagicMock(), dicts, p, emit)
 
-        assert stats == {
-            "applied": False,
-            "skipped_reason": "schema_mismatch",
-            "expected_sha": "not_matching",
-            "live_sha": stats["live_sha"],
-        }
-        assert any(name == "reranker.schema_mismatch" for name, _ in events)
+        exc = excinfo.value
+        assert exc.reason == "schema_sha_mismatch"
+        assert exc.expected_sha == "not_matching"
+        assert exc.live_sha and exc.live_sha != "not_matching"
+        assert exc.reranker_model_id == reranker_id
+        # The human message MUST include the structured reason token so
+        # operators reading Job.error_message in the UI see the literal.
+        assert "schema_sha_mismatch" in str(exc)
+
+        # Exactly one structured audit event, error-level, carrying the
+        # canonical reason literal and both shas.
+        mismatch_events = [
+            (name, fields) for name, fields in events if name == "reranker.schema_mismatch"
+        ]
+        assert len(mismatch_events) == 1
+        _, fields = mismatch_events[0]
+        assert fields["reason"] == "schema_sha_mismatch"
+        assert fields["expected_sha"] == "not_matching"
+        assert fields["live_sha"] == exc.live_sha
+        assert fields["reranker_model_id"] == reranker_id
+
+        # Error-level stdlib log produced (degrade target for the
+        # FARM-2.1 events table once it lands).
+        assert any(
+            rec.levelname == "ERROR" and "schema_sha mismatch" in rec.getMessage()
+            for rec in caplog.records
+        )
+
+        # Booster was never loaded; no score landed on the dicts.
         assert "reranker_score" not in dicts[0]
 
     def test_contracts_unavailable_skips_silently(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -148,6 +187,44 @@ class TestApplyIfAlignedBranches:
                 sys.modules.pop(sentinel, None)
         assert sha is None
         assert any(name == "reranker.skipped" for name, _ in events)
+
+
+class TestSchemaShaMismatchError:
+    """Pin the public contract of the FARM-EXP.5 guard exception.
+
+    External consumers (operators reading the UI, future events-table
+    integrators, retry policies) rely on the ``reason`` literal and
+    the three structured kwargs. Locking them down here means a
+    rename / re-shape requires a deliberate test edit.
+    """
+
+    def test_class_attribute_reason_is_canonical_literal(self) -> None:
+        assert SchemaShaMismatchError.reason == "schema_sha_mismatch"
+
+    def test_instance_carries_structured_fields(self) -> None:
+        exc = SchemaShaMismatchError(
+            reranker_model_id="rmid-123",
+            expected_sha="abc123",
+            live_sha="def456",
+        )
+        assert exc.reason == "schema_sha_mismatch"
+        assert exc.reranker_model_id == "rmid-123"
+        assert exc.expected_sha == "abc123"
+        assert exc.live_sha == "def456"
+        # ``str(exc)`` becomes ``Job.error_message`` via base_worker;
+        # the reason literal and both shas MUST be human-visible there.
+        message = str(exc)
+        assert "schema_sha_mismatch" in message
+        assert "abc123" in message
+        assert "def456" in message
+        assert "rmid-123" in message
+
+    def test_is_plain_exception_subclass(self) -> None:
+        """Base worker catches ``Exception`` (not a tighter base) when
+        transitioning the job to FAILED; subclassing ``Exception``
+        keeps the propagation path identical to every other
+        operation-level error."""
+        assert issubclass(SchemaShaMismatchError, Exception)
 
 
 class TestBitExactRegression:
