@@ -1,0 +1,103 @@
+name: Playwright
+
+# Critical user-flow regressions for the Next.js frontend (apps/web/).
+# Scope (F6.5a):
+#   - landing + jobs flows, fully hermetic via per-test API mocks
+#     (e2e/flows/fixtures/mock-api.ts). No bundle / backend required.
+# Future slices (F6.5b annotate submission + result polling, F6.5c admin /
+# settings) will graduate to the protea-bundle stack from T-OPS.11 once
+# they need a live API.
+
+on:
+  pull_request:
+    paths:
+      - apps/web/**
+      - .github/workflows/playwright.yml
+  push:
+    branches: [develop, main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  flows:
+    name: critical user flows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: apps/web
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install web dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Restore Playwright browser cache
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('apps/web/package-lock.json') }}
+
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright system deps
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      - name: Build Next app
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:8000
+        run: npm run build
+
+      - name: Start Next server in background
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:8000
+          PORT: "3000"
+        run: |
+          npm run start &
+          echo $! > /tmp/next.pid
+          # Wait until the server starts answering on /en/.
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:3000/en/ -o /dev/null; then
+              echo "next is up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "next did not start within 60s"
+          exit 1
+
+      - name: Run Playwright flows
+        env:
+          PLAYWRIGHT_BASE_URL: http://localhost:3000
+          NEXT_PUBLIC_API_URL: http://localhost:8000
+        run: npx playwright test --project=flows --reporter=line
+
+      - name: Stop Next server
+        if: always()
+        run: |
+          if [ -f /tmp/next.pid ]; then
+            kill "$(cat /tmp/next.pid)" 2>/dev/null || true
+          fi
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report
+          retention-days: 7

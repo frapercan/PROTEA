@@ -1,13 +1,29 @@
 import { defineConfig, devices } from "@playwright/test";
 
+// Playwright projects:
+//   mobile  / tablet  : viewport regression (existing)
+//   flows             : critical user-flow suite (F6.5). Desktop viewport,
+//                       hermetic via per-test page.route() API mocks so
+//                       specs do not require the backend bundle. The CI
+//                       workflow may later swap baseURL to the bundle.
+//
+// baseURL prefers PLAYWRIGHT_BASE_URL (CI sets it when pointing at a
+// real bundle), falls back to the local dev server on port 3000.
+
+const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
+
 export default defineConfig({
   testDir: "./e2e",
   use: {
-    baseURL: "http://localhost:3000",
+    baseURL: BASE_URL,
     browserName: "chromium",
+    trace: "retain-on-failure",
   },
-  workers: 1,
-  reporter: "list",
+  workers: process.env.CI ? 1 : undefined,
+  retries: process.env.CI ? 2 : 0,
+  reporter: process.env.CI
+    ? [["list"], ["html", { open: "never" }], ["github"]]
+    : "list",
   projects: [
     {
       name: "mobile",
@@ -31,6 +47,14 @@ export default defineConfig({
         hasTouch: true,
       },
       testMatch: "**/tablet*.spec.ts",
+    },
+    {
+      name: "flows",
+      use: {
+        browserName: "chromium",
+        viewport: { width: 1280, height: 800 },
+      },
+      testMatch: "**/flows/**/*.spec.ts",
     },
   ],
 });
