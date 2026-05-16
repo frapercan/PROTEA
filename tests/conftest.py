@@ -8,6 +8,44 @@ import pytest
 
 from tests.helpers.wait import wait_until
 
+# ---------------------------------------------------------------------------
+# Hypothesis profiles (F6.2)
+# ---------------------------------------------------------------------------
+# Property-based tests live under tests/property/. The profile picked here
+# applies to every Hypothesis run in this pytest session.
+#
+#   default : interactive runs (small example count, randomized seed).
+#   ci      : CI runs (derandomize=True, fixed seed, deadline disabled so
+#             slow integration boxes do not flake on a Hypothesis timeout).
+#
+# The CI profile activates when either PROTEA_HYPOTHESIS_PROFILE=ci or the
+# generic CI=true env var is set, so GitHub Actions and any local
+# ``CI=1 pytest`` invocation get bit-stable property tests.
+try:
+    from hypothesis import HealthCheck, settings
+except ImportError:  # pragma: no cover - hypothesis is a test-only dep
+    settings = None  # type: ignore[assignment]
+
+if settings is not None:
+    settings.register_profile(
+        "ci",
+        max_examples=200,
+        derandomize=True,
+        deadline=None,
+        print_blob=True,
+        suppress_health_check=[HealthCheck.too_slow],
+    )
+    settings.register_profile(
+        "dev",
+        max_examples=50,
+        deadline=None,
+        suppress_health_check=[HealthCheck.too_slow],
+    )
+    _profile = os.getenv("PROTEA_HYPOTHESIS_PROFILE")
+    if _profile is None and os.getenv("CI", "").lower() in {"1", "true", "yes"}:
+        _profile = "ci"
+    settings.load_profile(_profile or "dev")
+
 
 def _run(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, check=check, text=True, capture_output=True)
