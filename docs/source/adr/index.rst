@@ -210,6 +210,10 @@ later revision).
      - :doc:`T2B.5 Method Object reframe (sub-cluster granularity) <D31-t2b5-method-object-reframe>`
      - Accepted
      - F2C / §24
+   * - D34
+     - :doc:`Selective rerank resurrection - recompute, not archaeology <D34-selective-rerank-resurrection>`
+     - Proposed
+     - F-EXP-RESET
 
 .. toctree::
    :maxdepth: 1
@@ -255,3 +259,4 @@ later revision).
    D29-release-pipeline
    D30-insights-appendix
    D31-t2b5-method-object-reframe
+   D34-selective-rerank-resurrection
