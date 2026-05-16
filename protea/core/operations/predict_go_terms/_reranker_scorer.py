@@ -25,6 +25,7 @@ Design notes:
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -37,7 +38,53 @@ from protea.core.operations.predict_go_terms._common import (
     PredictGOTermsBatchPayload,
 )
 
+logger = logging.getLogger(__name__)
+
 AttachAspectFn = Callable[[Session, list[dict[str, Any]]], None]
+
+
+class SchemaShaMismatchError(Exception):
+    """A booster's recorded ``feature_schema_sha`` does not match the live schema.
+
+    Raised by :class:`RerankerScorer` before booster load when the
+    payload's ``reranker_feature_schema_sha`` (the value persisted on
+    the :class:`RerankerModel` row at registration time) disagrees
+    with what :func:`protea_contracts.compute_feature_schema_sha`
+    returns for the currently active feature families.
+
+    The base worker translates this into ``Job.status=FAILED`` with
+    ``Job.error_code="SchemaShaMismatchError"``; the structured
+    machine token ``reason="schema_sha_mismatch"`` is carried on both
+    the emitted ``reranker.schema_mismatch`` event and the
+    :attr:`reason` class attribute so downstream consumers can branch
+    on a stable literal.
+
+    FARM-EXP.5 guard: silent prediction with a stale booster layout
+    is exactly the failure mode this exception exists to prevent.
+    """
+
+    #: Canonical machine-readable reason literal. Carried on every
+    #: instance so callers can `getattr(exc, 'reason', None)` without
+    #: hardcoding the class name.
+    reason: str = "schema_sha_mismatch"
+
+    def __init__(
+        self,
+        *,
+        reranker_model_id: str | None,
+        expected_sha: str,
+        live_sha: str,
+    ) -> None:
+        self.reranker_model_id = reranker_model_id
+        self.expected_sha = expected_sha
+        self.live_sha = live_sha
+        super().__init__(
+            f"feature_schema_sha mismatch (reason={self.reason}): "
+            f"recorded={expected_sha} live={live_sha} "
+            f"reranker_model_id={reranker_model_id}. Booster trained "
+            "on a different feature layout; refusing to score "
+            "(FARM-EXP.5 guard)."
+        )
 
 
 class RerankerScorer:
@@ -109,6 +156,52 @@ class RerankerScorer:
             rec["reranker_score"] = float(score)
         return scores
 
+    @staticmethod
+    def _raise_schema_sha_mismatch(
+        p: PredictGOTermsBatchPayload,
+        live_sha: str,
+        emit: EmitFn,
+    ) -> None:
+        """Emit + log + raise on a feature_schema_sha mismatch.
+
+        FARM-EXP.5 guard: silent skip is unacceptable here. A
+        stale-sha booster means the layout it trained on no longer
+        matches what inference would compute; running it would
+        produce numerically plausible but semantically wrong scores.
+        We emit the structured audit event, log to the stdlib
+        logger at error level, and raise so the parent Job lands in
+        FAILED with ``error_code='SchemaShaMismatchError'`` and the
+        canonical ``reason='schema_sha_mismatch'`` token visible on
+        the event payload + the exception attribute.
+        """
+        emit(
+            "reranker.schema_mismatch",
+            None,
+            {
+                "reason": SchemaShaMismatchError.reason,
+                "reranker_model_id": p.reranker_model_id,
+                "expected_sha": p.reranker_feature_schema_sha,
+                "live_sha": live_sha,
+            },
+            "error",
+        )
+        logger.error(
+            "reranker schema_sha mismatch: "
+            "reranker_model_id=%s expected_sha=%s live_sha=%s reason=%s",
+            p.reranker_model_id,
+            p.reranker_feature_schema_sha,
+            live_sha,
+            SchemaShaMismatchError.reason,
+        )
+        # TODO(FARM-2.1): once the canonical events table lands,
+        # mirror this error into it with the structured fields above
+        # instead of (or in addition to) the existing emit channel.
+        raise SchemaShaMismatchError(
+            reranker_model_id=p.reranker_model_id,
+            expected_sha=p.reranker_feature_schema_sha,
+            live_sha=live_sha,
+        )
+
     def apply_if_aligned(
         self,
         session: Session,
@@ -118,11 +211,23 @@ class RerankerScorer:
     ) -> dict[str, Any] | None:
         """Score ``prediction_dicts`` with the configured reranker.
 
-        The booster is skipped (never crashed) whenever any precondition
-        fails: missing artifact context, contracts module unavailable,
-        or live schema SHA != expected. On success ``reranker_score``
-        lands on every prediction dict in memory (not persisted) and
-        the method returns per-batch summary stats.
+        The booster is skipped silently (returns ``None``) only when a
+        precondition makes scoring undefined rather than wrong: the
+        operation was dispatched without artifact context, or the
+        ``protea_contracts`` module is not importable in this image.
+
+        Schema-sha drift, in contrast, is a HARD failure: when the
+        live ``compute_feature_schema_sha(...)`` disagrees with the
+        booster's recorded ``feature_schema_sha`` the method emits the
+        ``reranker.schema_mismatch`` event at error level, logs to
+        the stdlib logger, and raises
+        :class:`SchemaShaMismatchError`. The base worker translates
+        that exception into ``Job.status=failed`` with
+        ``Job.error_code='SchemaShaMismatchError'`` (FARM-EXP.5).
+
+        On success ``reranker_score`` lands on every prediction dict
+        in memory (not persisted) and the method returns per-batch
+        summary stats.
         """
         if not (p.reranker_artifact_uri and p.reranker_feature_schema_sha):
             emit(
@@ -136,22 +241,7 @@ class RerankerScorer:
         if live_sha is None:
             return None
         if live_sha != p.reranker_feature_schema_sha:
-            emit(
-                "reranker.schema_mismatch",
-                None,
-                {
-                    "reranker_model_id": p.reranker_model_id,
-                    "expected_sha": p.reranker_feature_schema_sha,
-                    "live_sha": live_sha,
-                },
-                "error",
-            )
-            return {
-                "applied": False,
-                "skipped_reason": "schema_mismatch",
-                "expected_sha": p.reranker_feature_schema_sha,
-                "live_sha": live_sha,
-            }
+            self._raise_schema_sha_mismatch(p, live_sha, emit)
         scores = self.score(session, prediction_dicts, p)
         if scores.size == 0:
             return {"applied": True, "rows": 0}
@@ -165,4 +255,4 @@ class RerankerScorer:
         }
 
 
-__all__ = ["RerankerScorer", "AttachAspectFn"]
+__all__ = ["AttachAspectFn", "RerankerScorer", "SchemaShaMismatchError"]
