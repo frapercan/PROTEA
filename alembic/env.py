@@ -1,3 +1,4 @@
+import logging
 from logging.config import fileConfig
 from pathlib import Path
 
@@ -11,8 +12,30 @@ config = context.config
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+#
+# Only run ``fileConfig`` when no logging has been set up yet (CLI invocation
+# from a fresh ``alembic`` shell). When alembic is driven from inside a
+# pytest session (T1.6 added an integration test that calls
+# ``command.upgrade(...)`` directly), ``fileConfig`` does two harmful
+# things:
+#
+# 1. It defaults to ``disable_existing_loggers=True``, which flips
+#    ``logger.disabled = True`` on every logger created before alembic
+#    runs, including PROTEA module loggers. caplog only tracks the
+#    global ``logging.disable()`` switch, not the per-logger ``.disabled``
+#    attribute, so the logger stays muted for the rest of the session.
+# 2. It REPLACES the root logger's handlers with the ``[handler_console]``
+#    config from alembic.ini, removing pytest's ``LogCaptureHandler`` and
+#    any other handlers already attached.
+#
+# Either symptom alone is enough to give downstream caplog tests
+# (``tests/test_telemetry.py::TestAsFloat::test_falls_back_on_invalid``,
+# ``tests/test_storage.py::TestFactory::test_minio_with_missing_config_falls_back``,
+# etc.) an empty ``caplog.text``. The "no handlers on root" check is the
+# standard pattern for env.py snippets that need to coexist with a host
+# application's logging (FastAPI, pytest, structlog, etc.).
+if config.config_file_name is not None and not logging.getLogger().handlers:
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # Wire PROTEA's ORM metadata so autogenerate works.
 # All model modules must be imported before Base.metadata is used.
