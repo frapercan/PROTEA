@@ -114,6 +114,16 @@ class GOPrediction(Base):
     # the column is nullable because legacy rows predate the dual-write.
     features: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
+    # --- T3.1 dual-write target: the prediction tuple itself
+    # (``go_term_id``, score, evidence) mirrored into a compact JSONB
+    # blob via ``protea.core.jsonb_dual_write.maybe_jsonb``. Gated by
+    # ``PROTEA_GO_PREDICTION_JSONB_WRITE_ENABLED``; off by default so
+    # the scaffolding lands without touching production writers.
+    # Readers stay on the typed columns until T3.3. The column is
+    # nullable because legacy rows predate the dual-write; a GIN
+    # index (``ix_go_prediction_jsonb_gin``) supports JSONB lookups.
+    predictions_jsonb: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
     # --- Sequence-embedding PCA: per-query projection (16 components) ---
     emb_pca_query_0: Mapped[float | None] = mapped_column(Float, nullable=True)
     emb_pca_query_1: Mapped[float | None] = mapped_column(Float, nullable=True)
