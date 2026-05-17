@@ -67,8 +67,12 @@ class TestFactory:
         self, base_settings: Settings, caplog: pytest.LogCaptureFixture
     ):
         s = replace(base_settings, storage_backend="minio")
-        with caplog.at_level(logging.WARNING):
-            store = get_artifact_store(s)
+        # Pin the level on the specific logger so prior tests cannot
+        # raise its effective threshold and swallow this warning.
+        caplog.set_level(
+            logging.WARNING, logger="protea.infrastructure.storage.factory"
+        )
+        store = get_artifact_store(s)
         assert isinstance(store, LocalFsArtifactStore)
         assert any("minio" in r.message.lower() for r in caplog.records)
 
