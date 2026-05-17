@@ -5,15 +5,5 @@
     "method_loc": 60,
     "param_count": 6
   },
-  "offenders": [
-    {
-      "key": "class::protea/core/operations/predict_go_terms/_batch_op.py::PredictGOTermsBatchOperation",
-      "kind": "class",
-      "path": "protea/core/operations/predict_go_terms/_batch_op.py",
-      "name": "PredictGOTermsBatchOperation",
-      "line": 76,
-      "metric": 551,
-      "threshold": 500
-    }
-  ]
+  "offenders": []
 }
