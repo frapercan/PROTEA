@@ -193,6 +193,73 @@ def _build_aspect_adapter_inputs(
     )
 
 
+def run_aspect_separated_knn(
+    op: PredictGOTermsBatchOperation,
+    session: Session,
+    ctx: AspectSeparatedKnnContext,
+) -> tuple[
+    list[dict[str, Any]],
+    dict[str, list[list[tuple[str, float]]]],
+    dict[str, dict[str, list[dict[str, Any]]]],
+    dict[tuple[str, str], dict[str, Any]],
+]:
+    """Delegate aspect-separated KNN + vote tally to ``pipeline.predict``
+    (``aspect_separated=True``). Returns the legacy 4-tuple shape v6 /
+    ancestor / reranker consumers still expect. See F2C.5b notes."""
+    neighbors_by_aspect, inputs = _build_aspect_adapter_inputs(op, session, ctx)
+    result = call_pipeline_predict_aspect_separated(
+        inputs,
+        neighbors_by_aspect=neighbors_by_aspect,
+    )
+    return (
+        result.predictions,
+        result.neighbors_by_aspect,
+        result.go_map_by_aspect,
+        result.pair_features,
+    )
+
+
+def run_aspect_separated_path(
+    op: PredictGOTermsBatchOperation,
+    session: Session,
+    ctx: Any,
+    query_batch: Any,
+    ref_data: Any,
+) -> Any:
+    """Aspect-separated KNN dispatch; one pass per GO aspect.
+
+    Returns ``_KnnResult`` shaped output (imported lazily to avoid a
+    circular import with ``_batch_op``).
+    """
+    from protea.core.operations.predict_go_terms._batch_op import _KnnResult
+
+    p = ctx.p
+    (
+        prediction_dicts,
+        neighbors_by_aspect,
+        go_map_by_aspect,
+        pair_features,
+    ) = op._run_aspect_separated_knn(
+        session,
+        AspectSeparatedKnnContext(
+            valid_accessions=query_batch.valid_accessions,
+            query_embeddings=query_batch.query_embeddings,
+            ref_data_by_aspect=ref_data,
+            annotation_set_id=ctx.annotation_set_id,
+            prediction_set_id=ctx.prediction_set_id,
+            payload=p,
+        ),
+    )
+    v6_ctx: dict[str, Any] | None = None
+    if p.compute_v6_features:
+        v6_ctx = {
+            "neighbors_by_aspect": neighbors_by_aspect,
+            "go_map_by_aspect": go_map_by_aspect,
+            "pair_features": pair_features,
+        }
+    return _KnnResult(prediction_dicts=prediction_dicts, v6_ctx=v6_ctx, query_batch=query_batch)
+
+
 # Re-export ``call_pipeline_predict_aspect_separated`` so the batch op's
 # ``_run_aspect_separated_knn`` can import a single name from this module.
 __all__ = (
@@ -201,4 +268,6 @@ __all__ = (
     "_load_aspect_go_map_for_hits",
     "_load_aspect_separated_annotations",
     "call_pipeline_predict_aspect_separated",
+    "run_aspect_separated_knn",
+    "run_aspect_separated_path",
 )
