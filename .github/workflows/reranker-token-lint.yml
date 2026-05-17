@@ -15,4 +15,4 @@ jobs:
   lint:
     uses: frapercan/agent-farm/.github/workflows/reranker-token-lint.yml@main
     with:
-      paths: "docs README.md CHANGELOG.md"
+      paths: "docs README.md"
