@@ -49,8 +49,11 @@ class TestAsFloat:
         assert _as_float("0.25", default=1.0) == 0.25
 
     def test_falls_back_on_invalid(self, caplog: pytest.LogCaptureFixture) -> None:
-        with caplog.at_level(logging.WARNING):
-            value = _as_float("not-a-number", default=0.5)
+        # Pin the level on the specific logger so an earlier test that
+        # raises a parent logger's threshold (or sets ``propagate=False``
+        # on the package logger) cannot silently swallow the warning.
+        caplog.set_level(logging.WARNING, logger="protea.infrastructure.telemetry")
+        value = _as_float("not-a-number", default=0.5)
         assert value == 0.5
         assert "invalid PROTEA_OTEL_SAMPLE_RATIO" in caplog.text
 
@@ -134,15 +137,17 @@ class TestConfigureTelemetrySdkMissing:
         # sys.modules; the import statement inside configure_telemetry
         # will then raise ImportError.
         monkeypatch.setitem(sys.modules, "opentelemetry", None)
-        with caplog.at_level(logging.WARNING):
-            cfg = configure_telemetry(
-                config=TelemetryConfig(
-                    enabled=True,
-                    endpoint=None,
-                    service_name="protea-test",
-                    sample_ratio=1.0,
-                )
+        # Pin the level on the specific logger so prior tests cannot
+        # raise its effective threshold and swallow this warning.
+        caplog.set_level(logging.WARNING, logger="protea.infrastructure.telemetry")
+        cfg = configure_telemetry(
+            config=TelemetryConfig(
+                enabled=True,
+                endpoint=None,
+                service_name="protea-test",
+                sample_ratio=1.0,
             )
+        )
         assert cfg.enabled is True
         assert "opentelemetry SDK not installed" in caplog.text
 
@@ -327,8 +332,10 @@ class TestInstrumentSqlalchemyEngine:
         monkeypatch.setitem(
             sys.modules, "opentelemetry.instrumentation.sqlalchemy", None
         )
-        with caplog.at_level(logging.WARNING):
-            instrument_sqlalchemy_engine(MagicMock())
+        # Pin the level on the specific logger so prior tests cannot
+        # raise its effective threshold and swallow this warning.
+        caplog.set_level(logging.WARNING, logger="protea.infrastructure.telemetry")
+        instrument_sqlalchemy_engine(MagicMock())
         assert "SQLAlchemy instrumentor not installed" in caplog.text
 
 
