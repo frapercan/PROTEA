@@ -751,7 +751,9 @@
       "running": "EJECUTANDO",
       "succeeded": "COMPLETADO",
       "failed": "FALLIDO",
-      "cancelled": "CANCELADO"
+      "cancelled": "CANCELADO",
+      "killed": "TERMINADO",
+      "crashed": "CAÍDO"
     },
     "eventTimeline": {
       "noEvents": "Sin eventos aún."
@@ -786,5 +788,61 @@
     "thesisHeading": "Tesis PROTEA",
     "thesisDescription": "El PDF compilado de la tesis se sirve desde este despliegue.",
     "thesisOpen": "Abrir PDF"
+  },
+  "farm": {
+    "title": "Granja de agentes",
+    "subtitle": "Tareas del orquestador agent-farm",
+    "refresh": "Actualizar",
+    "emptyState": "Ninguna tarea coincide con los filtros actuales.",
+    "rowCount": "{count} tarea{count, plural, one {} other {s}} mostrada{count, plural, one {} other {s}}",
+    "filters": {
+      "statusLabel": "Estado",
+      "statusAll": "Todos",
+      "agentLabel": "Agente",
+      "agentPlaceholder": "nombre exacto del agente",
+      "windowLabel": "Ventana"
+    },
+    "windows": {
+      "24h": "Últimas 24h",
+      "7d": "Últimos 7d"
+    },
+    "status": {
+      "queued": "En cola",
+      "running": "Ejecutando",
+      "succeeded": "Completado",
+      "failed": "Fallido",
+      "cancelled": "Cancelado",
+      "killed": "Terminado",
+      "crashed": "Caído"
+    },
+    "table": {
+      "taskId": "ID de tarea",
+      "agent": "Agente",
+      "status": "Estado",
+      "started": "Iniciado",
+      "duration": "Duración",
+      "model": "Modelo"
+    },
+    "detail": {
+      "title": "Detalle de tarea",
+      "backLink": "← Volver a tareas",
+      "created": "Creado",
+      "started": "Iniciado",
+      "ended": "Finalizado",
+      "model": "Modelo",
+      "exitCode": "Código de salida",
+      "pid": "PID",
+      "worktree": "Worktree",
+      "ownerRepo": "Propietario / repositorio",
+      "spawnArgs": "Argumentos de spawn",
+      "diffRange": "Rango de commits",
+      "shaBefore": "Antes",
+      "shaAfter": "Después",
+      "heartbeatsTitle": "Heartbeats",
+      "heartbeatsCount": "({count} mostrados)",
+      "summaryTitle": "Resumen del resultado",
+      "summaryEmpty": "Existe la fila de resultado pero el resumen está vacío.",
+      "summaryMissing": "Aún no hay fila de resultado. La tarea no ha alcanzado finalize."
+    }
   }
 }

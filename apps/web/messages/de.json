@@ -748,7 +748,9 @@
       "running": "AKTIV",
       "succeeded": "FERTIG",
       "failed": "FEHLER",
-      "cancelled": "ABBRUCH"
+      "cancelled": "ABBRUCH",
+      "killed": "BEENDET",
+      "crashed": "ABGESTÜRZT"
     },
     "eventTimeline": {
       "noEvents": "Noch keine Ereignisse."
@@ -783,5 +785,61 @@
     "thesisHeading": "PROTEA Dissertation",
     "thesisDescription": "Das kompilierte PDF der Dissertation wird von diesem Deployment ausgeliefert.",
     "thesisOpen": "PDF öffnen"
+  },
+  "farm": {
+    "title": "Agent-Farm",
+    "subtitle": "Aufgaben des agent-farm Orchestrators",
+    "refresh": "Aktualisieren",
+    "emptyState": "Keine Aufgaben entsprechen den aktuellen Filtern.",
+    "rowCount": "{count} Aufgabe{count, plural, one {} other {n}} angezeigt",
+    "filters": {
+      "statusLabel": "Status",
+      "statusAll": "Alle",
+      "agentLabel": "Agent",
+      "agentPlaceholder": "exakter Agentenname",
+      "windowLabel": "Zeitraum"
+    },
+    "windows": {
+      "24h": "Letzte 24h",
+      "7d": "Letzte 7d"
+    },
+    "status": {
+      "queued": "Wartend",
+      "running": "Aktiv",
+      "succeeded": "Fertig",
+      "failed": "Fehler",
+      "cancelled": "Abbruch",
+      "killed": "Beendet",
+      "crashed": "Abgestürzt"
+    },
+    "table": {
+      "taskId": "Aufgaben-ID",
+      "agent": "Agent",
+      "status": "Status",
+      "started": "Gestartet",
+      "duration": "Dauer",
+      "model": "Modell"
+    },
+    "detail": {
+      "title": "Aufgabendetails",
+      "backLink": "← Zurück zu den Aufgaben",
+      "created": "Erstellt",
+      "started": "Gestartet",
+      "ended": "Beendet",
+      "model": "Modell",
+      "exitCode": "Exit-Code",
+      "pid": "PID",
+      "worktree": "Worktree",
+      "ownerRepo": "Besitzer / Repository",
+      "spawnArgs": "Spawn-Argumente",
+      "diffRange": "Commit-Bereich",
+      "shaBefore": "Vorher",
+      "shaAfter": "Nachher",
+      "heartbeatsTitle": "Heartbeats",
+      "heartbeatsCount": "({count} angezeigt)",
+      "summaryTitle": "Ergebniszusammenfassung",
+      "summaryEmpty": "Ergebniszeile vorhanden, aber die Zusammenfassung ist leer.",
+      "summaryMissing": "Noch keine Ergebniszeile. Die Aufgabe hat finalize nicht erreicht."
+    }
   }
 }

@@ -751,7 +751,9 @@
       "running": "RUNNING",
       "succeeded": "SUCCEEDED",
       "failed": "FAILED",
-      "cancelled": "CANCELLED"
+      "cancelled": "CANCELLED",
+      "killed": "KILLED",
+      "crashed": "CRASHED"
     },
     "eventTimeline": {
       "noEvents": "No events yet."
@@ -786,5 +788,61 @@
     "thesisHeading": "PROTEA thesis",
     "thesisDescription": "The compiled thesis PDF is being served from this deploy.",
     "thesisOpen": "Open PDF"
+  },
+  "farm": {
+    "title": "Agent farm",
+    "subtitle": "Tasks from the agent-farm orchestrator",
+    "refresh": "Refresh",
+    "emptyState": "No tasks match the current filters.",
+    "rowCount": "{count} task{count, plural, one {} other {s}} shown",
+    "filters": {
+      "statusLabel": "Status",
+      "statusAll": "All",
+      "agentLabel": "Agent",
+      "agentPlaceholder": "exact agent name",
+      "windowLabel": "Window"
+    },
+    "windows": {
+      "24h": "Last 24h",
+      "7d": "Last 7d"
+    },
+    "status": {
+      "queued": "Queued",
+      "running": "Running",
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "cancelled": "Cancelled",
+      "killed": "Killed",
+      "crashed": "Crashed"
+    },
+    "table": {
+      "taskId": "Task ID",
+      "agent": "Agent",
+      "status": "Status",
+      "started": "Started",
+      "duration": "Duration",
+      "model": "Model"
+    },
+    "detail": {
+      "title": "Task detail",
+      "backLink": "← Back to tasks",
+      "created": "Created",
+      "started": "Started",
+      "ended": "Ended",
+      "model": "Model",
+      "exitCode": "Exit code",
+      "pid": "PID",
+      "worktree": "Worktree",
+      "ownerRepo": "Owner / repo",
+      "spawnArgs": "Spawn args",
+      "diffRange": "Commit range",
+      "shaBefore": "Before",
+      "shaAfter": "After",
+      "heartbeatsTitle": "Heartbeats",
+      "heartbeatsCount": "({count} shown)",
+      "summaryTitle": "Result summary",
+      "summaryEmpty": "Result row exists but the summary is empty.",
+      "summaryMissing": "No result row yet. The task has not reached finalize."
+    }
   }
 }

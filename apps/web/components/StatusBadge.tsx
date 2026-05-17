@@ -2,7 +2,15 @@
 
 import { useTranslations } from "next-intl";
 
-type Status = "queued" | "running" | "succeeded" | "failed" | "cancelled" | string;
+type Status =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "killed"
+  | "crashed"
+  | string;
 
 const STYLES: Record<string, string> = {
   queued: "bg-yellow-100 text-yellow-800 border-yellow-200",
@@ -10,9 +18,25 @@ const STYLES: Record<string, string> = {
   succeeded: "bg-green-100 text-green-800 border-green-200",
   failed: "bg-red-100 text-red-800 border-red-200",
   cancelled: "bg-slate-100 text-slate-600 border-slate-200",
+  // killed: operator-initiated termination (kill.sh). Same red family
+  // as failed but slightly darker so the operator can tell at a glance
+  // whether a task died on its own or got pulled.
+  killed: "bg-red-200 text-red-900 border-red-300",
+  // crashed: process died without a clean finalize. Darkest red since
+  // it is the only state that is a "surprise" (the supervisor did not
+  // record an exit_code path).
+  crashed: "bg-red-300 text-red-950 border-red-400",
 };
 
-const KNOWN_STATUSES = ["queued", "running", "succeeded", "failed", "cancelled"] as const;
+const KNOWN_STATUSES = [
+  "queued",
+  "running",
+  "succeeded",
+  "failed",
+  "cancelled",
+  "killed",
+  "crashed",
+] as const;
 type KnownStatus = typeof KNOWN_STATUSES[number];
 
 /**
@@ -50,6 +74,18 @@ function StatusGlyph({ status }: { status: string }) {
         <svg className="h-3 w-3" aria-hidden fill="none" viewBox="0 0 12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <circle cx="6" cy="6" r="4.5" />
           <path d="M3 9L9 3" />
+        </svg>
+      );
+    case "killed":
+      return (
+        <svg className="h-3 w-3" aria-hidden fill="none" viewBox="0 0 12 12" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="3" width="6" height="6" rx="0.5" />
+        </svg>
+      );
+    case "crashed":
+      return (
+        <svg className="h-3 w-3" aria-hidden fill="none" viewBox="0 0 12 12" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M6 2v3M6 6.5v.5M3 8.5l3-1.5 3 1.5" />
         </svg>
       );
     default:
