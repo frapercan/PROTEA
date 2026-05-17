@@ -45,8 +45,8 @@ PROTEA is structured in four horizontal layers with strict downward dependency:
                                           │  HTTP (port 8000)
    ┌──────────────────────────────────────▼──────────────────────────────────┐
    │  API LAYER                                                               │
-   │  FastAPI   /api_v1/jobs   /api_v1/datasets   /api_v1/reranker-models     │
-   │  /api_v1/scoring   /api_v1/auth   /api_v1/stack   + 11 more routers      │
+   │  FastAPI   /v1/jobs   /v1/datasets   /v1/reranker-models     │
+   │  /v1/scoring   /v1/auth   /v1/stack   + 11 more routers      │
    │  Auth gate: ApiKey header (T5.6a) · Bearer JWT (T5.6b, active)           │
    │  Rate limiting: slowapi per-principal (T5.6b, active)                    │
    └──────────────────────────────────────┬──────────────────────────────────┘

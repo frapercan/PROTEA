@@ -41,7 +41,7 @@ Pre-flight checklist
    worker and any pipeline that issues ``export_research_dataset``,
    ``register_reranker``, or the ``reranker-models/import`` and
    ``reranker-models/import-by-reference`` endpoints (under the
-   ``api_v1`` prefix) until the backfill finishes. The migration itself
+   ``/v1/`` prefix) until the backfill finishes. The migration itself
    is additive and
    non-blocking, but the backfill needs a consistent view of every
    row.

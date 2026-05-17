@@ -36,13 +36,13 @@ contract covers every documented request body
 models are not constrained because they are server-built and never
 parse client input.
 
-Versioning under the api_v1 prefix
-----------------------------------
+Versioning under the /v1/ prefix
+--------------------------------
 
 Every router is mounted twice (T4.1, decision D4):
 
-- **Canonical** under the ``api_v1`` prefix (the first major URL
-  segment, expanded literally by the router): surfaced in OpenAPI /
+- **Canonical** under the ``/v1/`` prefix (the first major URL
+  segment): surfaced in OpenAPI /
   Swagger and the only path schema exporters and codegen tools see.
   All new clients should target this form.
 - **Legacy alias** at the root path: the same handler reachable
@@ -414,10 +414,10 @@ Authentication and rate limits
 
 Four POST routes require a credential (T5.6a + T5.6b):
 
-* ``POST /api_v1/jobs``
-* ``POST /api_v1/datasets``
-* ``POST /api_v1/reranker-models/import``
-* ``POST /api_v1/reranker-models/import-by-reference``
+* ``POST /v1/jobs``
+* ``POST /v1/datasets``
+* ``POST /v1/reranker-models/import``
+* ``POST /v1/reranker-models/import-by-reference``
 
 Three header forms are accepted, any one of which satisfies the gate:
 

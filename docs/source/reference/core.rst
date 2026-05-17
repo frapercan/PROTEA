@@ -120,7 +120,7 @@ interface; unknown names raise ``ValueError`` listing the discovered
 set. PROTEA does not yet dispatch to runners at inference time (the
 active KNN + reranker path stays in ``PredictGOTermsBatchOperation``
 until F2C of master plan revision 3 hoists the inference core into a
-shared package). The adapter exists so ``GET /api_v1/runners`` has a
+shared package). The adapter exists so ``GET /v1/runners`` has a
 stable resolver and future code has a one-line entry. Closes T2A.8
 (PR #240).
 
