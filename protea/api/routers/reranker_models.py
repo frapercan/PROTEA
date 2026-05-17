@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.auth import require_api_key_or_bearer
 from protea.api.deps import get_session_factory
+from protea.core.schema_sha_v2 import maybe_v2
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.orm.models.embedding.dataset import Dataset
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
@@ -109,9 +110,9 @@ def _compute_feature_schema_sha(run: dict[str, Any]) -> str | None:
          didn't record ``families_enabled``.
     """
     features = run.get("features", {}) or {}
-    families: list[str] | None = features.get("families_enabled") or run.get(
-        "dataset", {}
-    ).get("feature_families")
+    families: list[str] | None = features.get("families_enabled") or run.get("dataset", {}).get(
+        "feature_families"
+    )
     drop_features: list[str] = features.get("drop_features") or []
     if families and compute_feature_schema_sha is not None:
         return compute_feature_schema_sha(families, drop_features or None)
@@ -195,6 +196,10 @@ def _register_model(
         model_data=None,
         artifact_uri=reg.artifact_uri,
         feature_schema_sha=feature_schema_sha,
+        # T1.6 (ADR D10) dual-write gated by
+        # ``PROTEA_SCHEMA_SHA_V2_WRITE_ENABLED``; off by default until
+        # the backfill + read-path flip ships in a later slice.
+        schema_sha_v2=maybe_v2(feature_schema_sha),
         embedding_config_id=embedding_config_id,
         ontology_snapshot_id=ontology_snapshot_id,
         producer_version=dataset.get("producer_version"),
@@ -236,9 +241,7 @@ def _reranker_import_files_dep(
     run_json: UploadFile = File(..., description="Lab run.json with metrics + provenance"),
 ) -> _RerankerImportFiles:
     """FastAPI dep collecting the three multipart files."""
-    return _RerankerImportFiles(
-        model_file=model_file, spec_yaml=spec_yaml, run_json=run_json
-    )
+    return _RerankerImportFiles(model_file=model_file, spec_yaml=spec_yaml, run_json=run_json)
 
 
 class _RerankerImportFields(NamedTuple):

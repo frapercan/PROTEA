@@ -10,6 +10,7 @@ Linkage to those sibling rows (Job FK array, EvaluationResult join,
 etc.) lives in follow-up tasks T4.7-T4.9 + the F-EXP campaign work
 so this slice stays a clean additive ORM bring-up.
 """
+
 from __future__ import annotations
 
 import enum
@@ -89,6 +90,15 @@ class ExperimentRun(Base):
     k: Mapped[int | None] = mapped_column(Integer, nullable=True)
     reranker_spec_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     feature_schema_sha: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # T1.6 (ADR D10) parallel column carrying the canonical
+    # ``protea_contracts.compute_schema_sha`` digest. Nullable until
+    # backfill completes; writes are gated on the
+    # ``PROTEA_SCHEMA_SHA_V2_WRITE_ENABLED`` env flag (see
+    # :mod:`protea.core.schema_sha_v2`). When the flag is on, new rows
+    # dual-write ``feature_schema_sha`` and ``schema_sha_v2``; when it
+    # is off (the default until production cutover), only the legacy
+    # column is written.
+    schema_sha_v2: Mapped[str | None] = mapped_column(Text, nullable=True)
     eval_set_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     eval_set_manifest_sha: Mapped[str | None] = mapped_column(Text, nullable=True)
     propagation: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -113,6 +123,10 @@ class ExperimentRun(Base):
             unique=True,
             postgresql_where=text("axis_tuple_shortid IS NOT NULL"),
         ),
+        # T1.6 (ADR D10): cell-catalog and inference paths look rows up
+        # by canonical schema_sha_v2 once the flag is flipped; the
+        # b-tree index keeps that query cheap.
+        Index("ix_experiment_run_schema_sha_v2", "schema_sha_v2"),
     )
 
 
