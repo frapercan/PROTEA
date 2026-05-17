@@ -31,6 +31,7 @@ from pydantic import Field, field_validator
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
+from protea.core.schema_sha_v2 import maybe_v2
 from protea.core.training_dump_helpers import TrainRerankerAutoOperation
 from protea.infrastructure.orm.models.embedding.dataset import Dataset
 from protea.infrastructure.session import build_session_factory, session_scope
@@ -102,9 +103,7 @@ class ExportResearchDatasetOperation:
 
     _auto = TrainRerankerAutoOperation()
 
-    def summarize_payload(
-        self, payload: dict[str, Any], *, session: Session | None = None
-    ) -> str:
+    def summarize_payload(self, payload: dict[str, Any], *, session: Session | None = None) -> str:
         p = payload or {}
         bits: list[str] = []
         if p.get("output_name"):
@@ -160,13 +159,9 @@ class ExportResearchDatasetOperation:
 
         outcome, auto_result = self._compute_and_upload(p, factory, settings, emit)
         with session_scope(factory) as register_session:
-            dataset_id = self._register_dataset(
-                register_session, p, outcome, job_uuid, emit
-            )
+            dataset_id = self._register_dataset(register_session, p, outcome, job_uuid, emit)
 
-        return OperationResult(
-            result=self._merge_result(auto_result, p, outcome, dataset_id)
-        )
+        return OperationResult(result=self._merge_result(auto_result, p, outcome, dataset_id))
 
     @staticmethod
     def _reject_duplicate_name(session: Session, output_name: str) -> None:
@@ -318,6 +313,7 @@ class ExportResearchDatasetOperation:
     ) -> uuid.UUID:
         """Insert the ``Dataset`` row + emit ``registered``; returns its UUID."""
         manifest_data = outcome.manifest_data
+        legacy_schema_sha = manifest_data.get("schema_sha", "")
         dataset = Dataset(
             name=p.output_name,
             operation=self.name,
@@ -327,7 +323,12 @@ class ExportResearchDatasetOperation:
             train_uri=outcome.uploaded.get("train.parquet"),
             eval_uri=outcome.uploaded.get("eval.parquet"),
             manifest_uri=outcome.uploaded["manifest.json"],
-            schema_sha=manifest_data.get("schema_sha", ""),
+            schema_sha=legacy_schema_sha,
+            # T1.6 (ADR D10) dual-write gated by
+            # ``PROTEA_SCHEMA_SHA_V2_WRITE_ENABLED``; when off the
+            # column stays NULL and the existing read paths keep using
+            # ``schema_sha`` unchanged.
+            schema_sha_v2=maybe_v2(legacy_schema_sha or None),
             manifest_sha=outcome.manifest_sha,
             n_train_rows=int(manifest_data.get("n_train_rows", 0)),
             n_eval_rows=int(manifest_data.get("n_eval_rows", 0)),
