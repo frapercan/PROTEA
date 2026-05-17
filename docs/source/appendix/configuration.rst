@@ -232,7 +232,7 @@ underscore is the path separator (matches pydantic-settings'
 underscores inside field names.
 
 Categories are derived from ``docs/CONFIG_INVENTORY.md`` (T-CONF.1
-of master plan v3) and migrated incrementally in T-CONF.2.
+of master plan revision 3) and migrated incrementally in T-CONF.2.
 
 QueueTuning
 ~~~~~~~~~~~

@@ -96,4 +96,4 @@ T-CONF.2: crear `protea_core.config` con sub-modelos `QueueTuning`, `WorkerTunin
 
 T-CONF.3: autogenerar `docs/source/appendix/configuration.rst` desde el modelo pydantic con docstrings + rangos del inventario. Test CI que parsea cada env yaml y confirma schema válido.
 
-**AC final** (definido en master plan v3 §5 T-CONF.2): `grep -rE "^_?[A-Z][A-Z_]+\s*=\s*[0-9]" protea-core/` solo devuelve constantes con `# config-exempt: <razón>` (los 12 estructurales / research knobs documentados aquí).
+**AC final** (definido en master plan revision 3 §5 T-CONF.2): `grep -rE "^_?[A-Z][A-Z_]+\s*=\s*[0-9]" protea-core/` solo devuelve constantes con `# config-exempt: <razón>` (los 12 estructurales / research knobs documentados aquí).

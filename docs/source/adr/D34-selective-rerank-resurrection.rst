@@ -15,7 +15,8 @@ range distinction and was not generated with explicit ``eval_set_name``
 tracking.
 
 Lab memory showed the legacy record as leakage-contaminated and of
-unknown range provenance. The ``SUMMARY_v23-v26.md`` lab summary does
+unknown range provenance. The lab summary file under the leakage-fixed
+bench runs directory does
 not contain 0.4562 for ``bench-v1-K5-v226-lineage`` or any other current
 validation band. The record was therefore not reproducible or
 comparable to current champion runs.
@@ -28,7 +29,7 @@ on the leakage-fixed feature set against the current bench.
 On 2026-05-17 the LB.2 multi-seed sweep landed (lab branch
 ``task/bioinfo-quick-1778972872-6d9a``, commit ``77c3b33``):
 6 NK+LK cells (nk-mfo, nk-bpo, nk-cco, lk-mfo, lk-bpo, lk-cco) trained
-for 3 seeds each (42, 7, 137) on the v23 leakage-fixed configuration
+for 3 seeds each (42, 7, 137) on the leakage-fixed bench-v1-K5-v226-lineage configuration
 (no anc2vec, no PCA features; lambdarank; LR=0.05, leaves=63,
 num_boost_round=10000, early_stop=100). The 9-cell selective policy
 applies the reranker on NK+LK cells and falls back to KNN baseline on
@@ -47,9 +48,10 @@ Decision
    is the live PROTEA inference policy for ``bench-v1-K5-v226-lineage``
    pending the next champion sweep.
 
-3. **Configuration:** v23 leakage-fixed bundle (v6 + lineage features
-   minus all ``anc2vec_*`` and ``emb_pca_*`` columns), per-cell
-   lambdarank LightGBM booster.
+3. **Configuration:** leakage-fixed ``bench-v1-K5-v226-lineage`` bundle
+   (the ``v6_features`` bundle with lineage features enabled, minus all
+   ``anc2vec_*`` and ``emb_pca_*`` columns), per-cell lambdarank
+   LightGBM booster.
 
 4. **Champion numbers (multi-seed, 2026-05-17):**
 
@@ -122,7 +124,7 @@ Decision
    comparable to the new champion: different feature set, different
    range, leakage-contaminated.
 
-6. **Deployment.** The v23 leakage-fixed config becomes the PROTEA
+6. **Deployment.** The leakage-fixed bench-v1-K5-v226-lineage config becomes the PROTEA
    inference default for ``bench-v1-K5-v226-lineage`` on NK+LK cells.
    Older ``RerankerModel`` rows from pre-leakage-fix sweeps are
    considered stale; they remain in the registry for traceability but
@@ -154,8 +156,8 @@ Consequences
   cell is incorrect.
 - Requires regeneration of the cell, not mere documentation of an
   existing artefact.
-- The catalog cell ``axis.features`` value for the v23 bundle is
-  not yet a named entry in the FARM-EXP.2 transversal catalog
+- The catalog cell ``axis.features`` value for this leakage-fixed
+  bundle is not yet a named entry in the FARM-EXP.2 transversal catalog
   (see ``project_farm_exp_2_placeholder_digests``); a follow-up
   slice will add the leakage-fixed bundle as a first-class axis
   value once the digest backfill clears.
@@ -192,4 +194,5 @@ References
 - Memory entry ``project_farm_exp_2_placeholder_digests`` (catalog
   shortid tentativeness).
 - FARM-EXP.10 slice definition.
-- Lab summary: ``SUMMARY_v23-v26.md`` (current bench results).
+- Lab summary file under the leakage-fixed bench runs directory
+  (current bench results).

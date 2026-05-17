@@ -7,9 +7,10 @@ ADR-D3: ``GOPrediction.features`` stored as JSONB
 
 Context
 -------
-The re-ranker feature set grew from 22 features (v1) through 52 features
-(v18-selective) and is expected to keep evolving (lineage, GeOKG,
-ensembles). Adding a column to ``GOPrediction`` for every new feature
+The re-ranker feature set grew from the initial 22-feature schema
+through the 52-feature selective-rerank schema, and is expected to keep
+evolving (lineage, GeOKG, ensembles). Adding a column to
+``GOPrediction`` for every new feature
 required an Alembic migration per iteration and bound feature engineering
 to DB schema cadence.
 

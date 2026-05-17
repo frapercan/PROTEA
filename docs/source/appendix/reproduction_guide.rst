@@ -17,10 +17,11 @@ Reproduction guide
    :class: warning
 
    The expected Fmax values cited throughout this guide (baseline
-   0.412 / 0.590 / 0.668, the +1.5–4 % ``alignment_weighted`` gain, the v2/v3
-   re-ranker targets) are the pre-2026-04-10 numbers and will be refreshed
-   for the Zenodo deposit. See :doc:`/results` for the full provisional
-   notice and the reason behind the recompute.
+   0.412 / 0.590 / 0.668, the +1.5-4 % ``alignment_weighted`` gain, the
+   second and third re-ranker iteration targets) are the pre-2026-04-10
+   numbers and will be refreshed for the Zenodo deposit. See
+   :doc:`/results` for the full provisional notice and the reason
+   behind the recompute.
 
 .. admonition:: API drift across Stages 1.3 – 4
    :class: caution
@@ -78,19 +79,20 @@ Reproduction guide
    in :ref:`Register a reranker from protea-reranker-lab
    <howto-register-reranker>`.
 
-   The historical experiments below produced the v1 / v2 / v3 boosters
-   that still back the numbers in :doc:`/results`; the *commands* must
-   be translated against the contracts in
-   :doc:`/architecture/operations` before they can be re-run. A
-   staged rewrite of this guide is on the doc-writer roadmap.
+   The historical experiments below produced the
+   ``lgbm_v1`` / ``lgbm_v2`` / ``lgbm_v3`` boosters that still back the
+   numbers in :doc:`/results`; the *commands* must be translated
+   against the contracts in :doc:`/architecture/operations` before
+   they can be re-run. A staged rewrite of this guide is on the
+   doc-writer roadmap.
 
 This appendix documents the exact sequence of steps required to reproduce the
 experimental results reported in :doc:`../results`. The target is a fresh
 PROTEA installation against the GOA 220 → 229 temporal holdout, covering all
 nine experiments: the ``k`` sweep, the aspect-separated KNN ablation, the five
 heuristic scoring configurations, the three re-ranker iterations
-(``v1``, ``v2``, ``v3``), and the external benchmark against eggNOG-mapper,
-Pannzer2, and InterProScan 6.
+(``lgbm_v1``, ``lgbm_v2``, ``lgbm_v3``), and the external benchmark against
+eggNOG-mapper, Pannzer2, and InterProScan 6.
 
 Every command is expressed against the public HTTP API. The API runs at
 ``http://127.0.0.1:8000`` after ``bash scripts/manage.sh start``; environment
@@ -372,10 +374,11 @@ IA-weighted CAFA evaluation.
 Stage 4: Re-ranker training
 ----------------------------
 
-Experiment 4: Re-ranker v1 (per-aspect LightGBM)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Experiment 4: Re-ranker iteration 1 (per-aspect LightGBM)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Version ``v1`` trains nine LightGBM binary classifiers (one per NK/LK/PK ×
+The first iteration (``lgbm_v1``) trains nine LightGBM binary
+classifiers (one per NK/LK/PK ×
 BPO/MFO/CCO cell) on 12 temporal splits (GOA 160 → 165, 165 → 170, …,
 215 → 220). Train first without class balancing and then with
 ``neg_pos_ratio = 10`` to observe the effect on the BPO cells, which otherwise
@@ -414,11 +417,12 @@ In the unbalanced run six of the nine models early-stop at iteration 1 due to
 extreme class imbalance (≈0.17 % positives in BPO). The balanced run recovers
 BPO (+0.124 AUC for LK-BPO) but does not outperform ``alignment_weighted``.
 
-Experiment 5: Re-ranker v2 (per-category + IA weighting)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Experiment 5: Re-ranker iteration 2 (per-category + IA weighting)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Version ``v2`` collapses the nine per-aspect models into three per-category
-models (NK, LK, PK) and passes the per-term Information Accretion values as
+The second iteration (``lgbm_v2``) collapses the nine per-aspect
+models into three per-category models (NK, LK, PK) and passes the
+per-term Information Accretion values as
 ``sample_weight`` to LightGBM, so that rare terms contribute more to the
 training loss. Hyperparameters move to ``learning_rate = 0.01`` and
 ``num_boost_round = 1000`` with ``early_stopping_rounds = 50``.
@@ -443,18 +447,20 @@ training loss. Hyperparameters move to ``learning_rate = 0.01`` and
        \"embedding_config_id\": \"$EMB_CONFIG\"
      }"
 
-The expected ``v2 full`` Fmax matches or exceeds ``v1`` in every cell but does
-not yet overtake ``alignment_weighted`` globally.
+The expected ``lgbm_v2_full`` Fmax matches or exceeds the
+``lgbm_v1`` numbers in every cell but does not yet overtake
+``alignment_weighted`` globally.
 
-Experiment 6: Re-ranker v3 (full alignment and taxonomy features)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Experiment 6: Re-ranker iteration 3 (full alignment and taxonomy features)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Version ``v3`` is identical to ``v2`` except that the training-data generator
-calls ``compute_alignment()`` and ``compute_taxonomy()`` for every
-(query, reference) pair in the historical splits, so that the alignment and
-taxonomy feature columns are populated throughout training (in ``v1`` and
-``v2`` those columns were hardcoded to ``NULL`` because the features were only
-computed at prediction time).
+The third iteration (``lgbm_v3``) is identical to ``lgbm_v2`` except
+that the training-data generator calls ``compute_alignment()`` and
+``compute_taxonomy()`` for every (query, reference) pair in the
+historical splits, so that the alignment and taxonomy feature columns
+are populated throughout training (in ``lgbm_v1`` and ``lgbm_v2``
+those columns were hardcoded to ``NULL`` because the features were
+only computed at prediction time).
 
 .. code-block:: bash
 
@@ -480,10 +486,10 @@ computed at prediction time).
 
 Training wall-clock time is approximately 2 h 45 min on a single CPU machine.
 The alignment overhead during training data generation is marginal (~15 min
-over ``v2``). Three models are produced: ``lgbm_v3_full-nk``,
+over ``lgbm_v2``). Three models are produced: ``lgbm_v3_full-nk``,
 ``lgbm_v3_full-lk``, ``lgbm_v3_full-pk``.
 
-Score and evaluate the enriched prediction set with each ``v3`` model:
+Score and evaluate the enriched prediction set with each ``lgbm_v3`` model:
 
 .. code-block:: bash
 
@@ -496,9 +502,9 @@ Score and evaluate the enriched prediction set with each ``v3`` model:
        }"
    done
 
-Expected result: ``v3`` outperforms the ``alignment_weighted`` heuristic in 7
-of the 9 evaluation cells and is the best global configuration reported in
-:doc:`../results`.
+Expected result: ``lgbm_v3`` outperforms the ``alignment_weighted``
+heuristic in 7 of the 9 evaluation cells and is the best global
+configuration reported in :doc:`../results`.
 
 Stage 5: External tool benchmarks
 ----------------------------------
@@ -524,8 +530,9 @@ Experiment 7: eggNOG-mapper
      --predictions data/eggnog_out.emapper.annotations \
      --evaluation-set $EVAL_SET
 
-PROTEA reranker v3 is expected to outperform eggNOG-mapper in 9 of 9 cells
-(differences up to +0.306 Fmax in NK-CCO).
+The PROTEA reranker third iteration (``lgbm_v3``) is expected to
+outperform eggNOG-mapper in 9 of 9 cells (differences up to +0.306
+Fmax in NK-CCO).
 
 Experiment 8: Pannzer2 and the data-leakage analysis
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -565,7 +572,8 @@ Experiment 9: InterProScan 6
      --predictions data/interproscan_out/query.fasta.tsv \
      --evaluation-set $EVAL_SET
 
-PROTEA reranker v3 is expected to outperform InterProScan 6 in 8 of 9 cells.
+The PROTEA reranker third iteration (``lgbm_v3``) is expected to
+outperform InterProScan 6 in 8 of 9 cells.
 
 Checklist
 ---------
@@ -576,9 +584,9 @@ The nine experiments above fully reproduce the figures and tables in
 1. Experiment 1: ``k`` sweep (``k ∈ {5, 10, 20, 50}``)
 2. Experiment 2: ``aspect_separated_knn`` ablation
 3. Experiment 3: Heuristic scoring (five presets)
-4. Experiment 4: Re-ranker ``v1`` (per-aspect, unbalanced and balanced)
-5. Experiment 5: Re-ranker ``v2`` (per-category, IA-weighted)
-6. Experiment 6: Re-ranker ``v3`` (per-category, full alignment and
+4. Experiment 4: Re-ranker ``lgbm_v1`` (per-aspect, unbalanced and balanced)
+5. Experiment 5: Re-ranker ``lgbm_v2`` (per-category, IA-weighted)
+6. Experiment 6: Re-ranker ``lgbm_v3`` (per-category, full alignment and
    taxonomy features), best global configuration
 7. Experiment 7: eggNOG-mapper benchmark
 8. Experiment 8: Pannzer2 benchmark plus data-leakage analysis

@@ -12,7 +12,7 @@ of every iteration (archaeology, no narrative), or a clean
 post-rationalised systematisation (loses the reasoning that justifies
 the canonical pipeline). The journey itself (KNN baseline -> 22
 features -> 52 features -> trazabilidad crisis -> leakage discovery
--> v18-selective canonical) is part of the contribution.
+-> selective-rerank canonical) is part of the contribution.
 
 Decision
 --------

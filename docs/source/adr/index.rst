@@ -13,7 +13,7 @@ ADRs come in two layers:
   algorithm choice, queue topology, deduplication strategy, retries,
   etc.).
 - **Strategic decisions** (``D1``-``D31``): plan-level decisions
-  taken in the master plan v3 (2026-05-05). They drive the structure
+  taken in the master plan revision 3 (2026-05-05). They drive the structure
   of the project, the deployment story, and the thesis writing
   cadence.
 
@@ -73,7 +73,7 @@ runtime, data model, and operational choices described.
 Strategic decisions
 -------------------
 
-Decisions taken in the master plan v3 (2026-05-05). Statuses:
+Decisions taken in the master plan revision 3 (2026-05-05). Statuses:
 *Accepted*, *Pending* (gate opens at the indicated phase), *Deferred*
 (scheduled later in the timeline) or *Obsolete* (superseded by a
 later revision).
@@ -123,7 +123,7 @@ later revision).
      - Obsolete
      - superseded by D1
    * - D10
-     - :doc:`schema_sha v2 migration <D10-schema-sha-v2>`
+     - :doc:`schema_sha_v2 migration <D10-schema-sha-parallel-migration>`
      - Pending
      - T1.6 (requires_human)
    * - D11
@@ -237,7 +237,7 @@ later revision).
    D07-observability-stack
    D08-ui-components
    D09-obsolete-lab-runtime-dep
-   D10-schema-sha-v2
+   D10-schema-sha-parallel-migration
    D11-job-narrative-model
    D12-fexp-qa-reproduction
    D13-early-ui-track

@@ -58,13 +58,16 @@ an unexplained gap. Tracing the scoring path surfaced the
 surfaced to the developer's attention.
 
 **The fix.**
-:doc:`D10 </adr/D10-schema-sha-v2>` introduced a parallel ``schema_sha_v2`` column on both ``Dataset``
-and ``RerankerModel``. The ``v2`` value is computed exclusively from
+:doc:`D10 </adr/D10-schema-sha-parallel-migration>` introduced a parallel
+``schema_sha_v2`` column on both ``Dataset`` and ``RerankerModel``. The
+``schema_sha_v2`` value is computed exclusively from
 ``protea_contracts.compute_schema_sha``, which is the shared, versioned
-implementation in the contracts package (see :doc:`/adr/D10-schema-sha-v2`).
-A backfill script recomputed ``v2`` from historical rows; a regression test
-asserted that any ``v1/v2`` discrepancy on historical rows is expected and
-documented rather than silently fixed. Production inference reads ``v2``.
+implementation in the contracts package
+(see :doc:`/adr/D10-schema-sha-parallel-migration`). A backfill script
+recomputed ``schema_sha_v2`` from historical rows; a regression test
+asserted that any divergence between ``schema_sha`` and ``schema_sha_v2``
+on historical rows is expected and documented rather than silently fixed.
+Production inference reads ``schema_sha_v2``.
 
 **Prevention.**
 The single source of truth rule: anything that both sides of the

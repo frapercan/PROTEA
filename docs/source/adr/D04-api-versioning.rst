@@ -16,8 +16,9 @@ strand existing consumers.
 
 Decision (recommended)
 ----------------------
-Universal ``/v1/`` path prefix on all endpoints. Future ``/v2/`` branches
-without breaking ``/v1/`` consumers. ``Accept`` header negotiation only
+Universal ``/v1/`` (first major) path prefix on all endpoints. Future
+major bumps branch into a parallel ``/v2/`` mount without breaking
+existing ``/v1/`` consumers. ``Accept`` header negotiation only
 considered if a real need surfaces.
 
 Consequences

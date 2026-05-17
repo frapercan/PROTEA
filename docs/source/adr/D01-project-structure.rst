@@ -4,7 +4,7 @@ ADR-D1: Project structure (7 code repositories plus thesis)
 :Status: Accepted
 :Date: 2026-05-05
 :Phase: F0 (closed); enacted across F0-F2
-:Supersedes: earlier monolith assumption in plan v1
+:Supersedes: earlier monolith assumption in plan revision 1
 
 Context
 -------
@@ -35,4 +35,4 @@ Consequences
 
 Resolution
 ----------
-Closed in master plan v3, 2026-05-05.
+Closed in master plan revision 3, 2026-05-05.

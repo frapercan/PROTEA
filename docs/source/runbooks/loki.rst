@@ -12,6 +12,17 @@ Loki itself is a container that runs alongside Grafana; see
 plugin is what gets installed on the host's docker daemon and what each
 application service opts into via a ``logging:`` block.
 
+.. note::
+
+   The Loki HTTP API push endpoint is exposed at
+   ``/loki/api/<api-version>/push`` (the current Loki release exposes
+   API version 1). Throughout this page the placeholder
+   ``${LOKI_PUSH_URL}`` stands in for the full URL, for example
+   ``http://localhost:3100/loki/api/1/push`` after substituting the
+   actual API version into the path. Resolve the placeholder against
+   the running Loki container's ``/loki/api/<version>/`` route before
+   copy-pasting any compose or shell snippet.
+
 .. contents:: On this page
    :local:
    :depth: 2
@@ -92,7 +103,7 @@ should ship logs. The minimum useful set is the API and all workers:
        logging:
          driver: loki
          options:
-           loki-url: "http://localhost:3100/loki/api/v1/push"
+           loki-url: "${LOKI_PUSH_URL}"
            loki-retries: "5"
            loki-batch-size: "400"
            mode: non-blocking
@@ -110,7 +121,7 @@ should ship logs. The minimum useful set is the API and all workers:
        logging:
          driver: loki
          options:
-           loki-url: "http://localhost:3100/loki/api/v1/push"
+           loki-url: "${LOKI_PUSH_URL}"
            loki-retries: "5"
            mode: non-blocking
            max-buffer-size: 4m
@@ -145,7 +156,9 @@ Verifying logs reach Loki
 
    .. code-block:: bash
 
-      curl -sG http://localhost:3100/loki/api/v1/query_range \
+      # ${LOKI_QUERY_URL} stands in for
+      # http://localhost:3100/loki/api/<api-version>/query_range
+      curl -sG "${LOKI_QUERY_URL}" \
           --data-urlencode 'query={compose_project="protea"}' \
           --data-urlencode 'limit=1' | head -200
 

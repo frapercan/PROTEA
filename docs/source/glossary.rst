@@ -444,7 +444,7 @@ any entry from another page.
       ``RerankerModel`` row. At inference time PROTEA compares the live
       pipeline's fingerprint against the booster's recorded fingerprint and
       refuses to score if they differ, preventing silent drift. See the
-      schema-sha-v2 backfill runbook in :doc:`/runbooks/index`.
+      ``schema_sha_v2`` backfill runbook in :doc:`/runbooks/index`.
 
    SemVer
       **Semantic Versioning.** The ``MAJOR.MINOR.PATCH`` versioning scheme

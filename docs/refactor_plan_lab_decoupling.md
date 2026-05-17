@@ -133,7 +133,7 @@ La definición está unificada (fase 1). El cómputo sigue disperso. Aquí el co
 
 - **2.2** Mover el cómputo actual en bloques:
   - `feature_engineering.py` (alignment NW/SW, taxonomy pair) → `alignment.py`, `taxonomy.py`.
-  - `feature_enricher.py` (las 25 v6 features) → repartir entre `taxonomy.py` (tax_voters_*), `anc2vec.py`, `emb_pca.py`.
+  - `feature_enricher.py` (las 25 features de la familia `v6_features`) → repartir entre `taxonomy.py` (tax_voters_*), `anc2vec.py`, `emb_pca.py`.
   - `predict_go_terms.py:_load_*` que carga datos de soporte → no tocar la **carga**, solo el cálculo de la columna.
 
 - **2.3** En `parquet_export.py` y en `predict_go_terms._predict_batch`, usar el registry:

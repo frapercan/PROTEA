@@ -207,17 +207,20 @@ PROTEA includes a LightGBM-based re-ranker trained on temporal splits of GOA
 releases (GOA 160 through 220, 13 splits). Each split provides ground truth for
 supervised training. The re-ranker was developed iteratively:
 
-**v1.** 9 models (one per category × namespace). Class imbalance caused 6 of 9
-models to early-stop at iteration 1. Balancing with ``neg_pos_ratio=10`` fixed
-training but MFO degraded (0.577 vs 0.611 heuristic).
+**Iteration 1 (``lgbm_v1``).** 9 models (one per category × namespace).
+Class imbalance caused 6 of 9 models to early-stop at iteration 1.
+Balancing with ``neg_pos_ratio=10`` fixed training but MFO degraded
+(0.577 vs 0.611 heuristic).
 
-**v2.** 3 models (one per category: NK, LK, PK). IA values used as sample
-weights during training. Learning rate reduced to 0.01, rounds increased to
-1 000. MFO stabilised (0.607) but did not surpass the heuristic globally.
+**Iteration 2 (``lgbm_v2``).** 3 models (one per category: NK, LK, PK).
+IA values used as sample weights during training. Learning rate reduced
+to 0.01, rounds increased to 1 000. MFO stabilised (0.607) but did not
+surpass the heuristic globally.
 
-**v3.** Same architecture as v2 but with full alignment (NW/SW) and taxonomy
-features computed during training data generation (previously hardcoded to NULL).
-22 input features total.
+**Iteration 3 (``lgbm_v3``).** Same architecture as the previous
+iteration but with full alignment (NW/SW) and taxonomy features
+computed during training data generation (previously hardcoded to
+NULL). 22 input features total.
 
 .. list-table:: Re-ranker progression: Fmax
    :header-rows: 1
@@ -253,7 +256,7 @@ features computed during training data generation (previously hardcoded to NULL)
      - 0.201
      - 0.285
      - 0.337
-   * - re-ranker v1 (balanced)
+   * - re-ranker iteration 1 (balanced)
      - 0.408
      - 0.577
      - 0.687
@@ -263,7 +266,7 @@ features computed during training data generation (previously hardcoded to NULL)
      - 0.201
      - 0.298
      - 0.332
-   * - re-ranker v2 (13 splits)
+   * - re-ranker iteration 2 (13 splits)
      - 0.425
      - 0.607
      - 0.689
@@ -273,7 +276,7 @@ features computed during training data generation (previously hardcoded to NULL)
      - 0.199
      - 0.297
      - 0.335
-   * - **re-ranker v3 (full features)**
+   * - **re-ranker iteration 3 (full features)**
      - **0.431**
      - **0.620**
      - **0.692**
@@ -284,16 +287,17 @@ features computed during training data generation (previously hardcoded to NULL)
      - **0.297**
      - **0.339**
 
-The v3 re-ranker surpasses the ``alignment_weighted`` heuristic in 7 of 9 cells,
-with the largest gains in MFO (+0.009 NK, +0.009 LK) and CCO (+0.009 NK). It
-loses only in LK-BPO (0.478 vs 0.500) and LK-CCO (0.697 vs 0.699). The key
-insight is that alignment features were critical; v2 had access to the same
-model architecture but trained without them.
+The third-iteration re-ranker surpasses the ``alignment_weighted``
+heuristic in 7 of 9 cells, with the largest gains in MFO (+0.009 NK,
++0.009 LK) and CCO (+0.009 NK). It loses only in LK-BPO (0.478 vs 0.500)
+and LK-CCO (0.697 vs 0.699). The key insight is that alignment features
+were critical; the second iteration had access to the same model
+architecture but trained without them.
 
 Benchmark against external tools
 ---------------------------------
 
-PROTEA (re-ranker v3) was benchmarked against three widely used GO annotation
+PROTEA (third-iteration re-ranker) was benchmarked against three widely used GO annotation
 tools using the same temporal holdout (GOA 220 → 229). All evaluations use
 ``cafaeval`` with IA weighting.
 
@@ -321,7 +325,7 @@ tools using the same temporal holdout (GOA 220 → 229). All evaluations use
      - 0.391
      - 0.574
      - 0.618
-   * - **PROTEA (re-ranker v3)**
+   * - **PROTEA (re-ranker iteration 3, full features)**
      - **0.431**
      - **0.620**
      - **0.692**
@@ -359,7 +363,7 @@ tools using the same temporal holdout (GOA 220 → 229). All evaluations use
 - **Pannzer2**: Helsinki web server (March 2026), ARGOT method, PPV-calibrated scores. Coverage: 98.4 % of delta proteins.
 - **InterProScan 6**: Nextflow pipeline (v6.0.0, Docker profile), March 2026. Binary predictions (score = 1.0).
 - **eggNOG-mapper 2.1.13**: Diamond mode, eggNOG v5.0.2. Coverage: 85.5 %. Binary predictions.
-- **PROTEA**: ESM-C embeddings frozen at GOA 220, LightGBM re-ranker v3, k = 5. Coverage: 100 %.
+- **PROTEA**: ESM-C embeddings frozen at GOA 220, LightGBM re-ranker third iteration, k = 5. Coverage: 100 %.
 
 Temporal data leakage
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -423,7 +427,7 @@ at t0), PROTEA's embedding-based approach with a learned re-ranker achieves
 the highest Fmax across all 9 evaluation cells.
 
 **Alignment features are the key enabler for the re-ranker.** The progression
-from v1 to v3 shows that the model architecture (LightGBM, per-category, IA
+from iteration 1 to iteration 3 shows that the model architecture (LightGBM, per-category, IA
 sample weights) was necessary but not sufficient. The decisive improvement came
 from computing Needleman-Wunsch and Smith-Waterman alignment features during
 training; without them, the re-ranker could not consistently outperform the
