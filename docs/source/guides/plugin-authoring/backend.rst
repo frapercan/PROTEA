@@ -162,7 +162,7 @@ any environment. It is useful as a template and as a CI speed check
        pip install -e .
 
    Use in protea-core (after pip install so the entry-point registers):
-       EmbeddingConfig(model_backend="toy", model_name="toy-v0", ...)
+       EmbeddingConfig(model_backend="toy", model_name="toy_v0", ...)
    """
 
    from __future__ import annotations
@@ -253,7 +253,7 @@ Verify the output directly:
    from protea_backends_toy import plugin
 
    noop = lambda *a, **k: None
-   model, tok = plugin.load_model("toy-v0", "cpu", emit=noop)
+   model, tok = plugin.load_model("toy_v0", "cpu", emit=noop)
    emb = plugin.embed_batch(model, tok, ["MKTII", "ACDEF"], emit=noop)
 
    print(emb.shape)   # Expected output: (2, 64)

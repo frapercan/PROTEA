@@ -7,6 +7,15 @@ keys (T5.6a) and Bearer JWT (T5.6b), throttled per principal by
 deferred to a post-defensa slice; this page covers the first two
 iterations.
 
+.. note::
+
+   Every route on this page lives under the ``api_v1`` path prefix
+   defined by :doc:`/adr/D04-api-versioning` (the major-1 URL segment,
+   expanded literally by the router). Throughout this page the leading
+   ``api_v1`` token is used in prose and code-blocks as a placeholder
+   for that prefix; resolve it to the corresponding HTTP path segment
+   when constructing actual requests.
+
 Auth gate overview
 ------------------
 
@@ -45,13 +54,13 @@ gate in order:
    ┌───────────────────────▼───────────────────────────────────────────┐
    │  FASTAPI ROUTER  (open GET / protected POST)                      │
    │                                                                   │
-   │  Protected:  POST /v1/jobs                                        │
-   │              POST /v1/datasets                                    │
-   │              POST /v1/reranker-models/import                      │
-   │              POST /v1/reranker-models/import-by-reference         │
+   │  Protected:  POST /api_v1/jobs                                        │
+   │              POST /api_v1/datasets                                    │
+   │              POST /api_v1/reranker-models/import                      │
+   │              POST /api_v1/reranker-models/import-by-reference         │
    │                                                                   │
-   │  Open (T5.6c may restrict):  GET /v1/jobs,  GET /v1/proteins,    │
-   │                               GET /v1/scoring/*, GET /v1/stack    │
+   │  Open (T5.6c may restrict):  GET /api_v1/jobs,  GET /api_v1/proteins,    │
+   │                               GET /api_v1/scoring/*, GET /api_v1/stack    │
    └───────────────────────────────────────────────────────────────────┘
 
 Protected routes
@@ -59,10 +68,10 @@ Protected routes
 
 The following endpoints reject unauthenticated requests with a 401:
 
-* ``POST /v1/jobs``
-* ``POST /v1/datasets``
-* ``POST /v1/reranker-models/import``
-* ``POST /v1/reranker-models/import-by-reference``
+* ``POST /api_v1/jobs``
+* ``POST /api_v1/datasets``
+* ``POST /api_v1/reranker-models/import``
+* ``POST /api_v1/reranker-models/import-by-reference``
 
 GET endpoints stay open for now (researcher UX). Full lockdown is
 post T5.6c.
@@ -116,13 +125,13 @@ Every protected POST is throttled per principal by :mod:`slowapi`. The
 bucket key is the API-key prefix, the JWT ``sub``, or the remote IP if
 neither auth header is present.
 
-============================  ===========  ====================================
-Route                         Default      Env override
-============================  ===========  ====================================
-``POST /v1/jobs``             10/minute    ``PROTEA_RATELIMIT_JOBS``
-``POST /v1/datasets``         5/minute     ``PROTEA_RATELIMIT_DATASETS``
-``POST /v1/auth/api-keys``    5/hour       ``PROTEA_RATELIMIT_API_KEYS``
-============================  ===========  ====================================
+================================  ===========  ====================================
+Route                             Default      Env override
+================================  ===========  ====================================
+``POST /api_v1/jobs``             10/minute    ``PROTEA_RATELIMIT_JOBS``
+``POST /api_v1/datasets``         5/minute     ``PROTEA_RATELIMIT_DATASETS``
+``POST /api_v1/auth/api-keys``    5/hour       ``PROTEA_RATELIMIT_API_KEYS``
+================================  ===========  ====================================
 
 Exceeding the limit returns a 429 problem response with a
 ``Retry-After`` header. Overrides accept any slowapi syntax
@@ -135,7 +144,7 @@ Mint a new key with the operator endpoint:
 
 .. code-block:: bash
 
-   curl -X POST http://localhost:8000/v1/auth/api-keys \
+   curl -X POST http://localhost:8000/api_v1/auth/api-keys \
      -H 'Content-Type: application/json' \
      -d '{"name": "lab-runner-2026-05"}'
 
@@ -162,7 +171,7 @@ Revoking a key
 
 .. code-block:: bash
 
-   curl -X DELETE http://localhost:8000/v1/auth/api-keys/<id>
+   curl -X DELETE http://localhost:8000/api_v1/auth/api-keys/<id>
 
 The row is preserved with ``revoked_at`` set; subsequent uses of the
 key are rejected by :func:`require_api_key`.
@@ -186,7 +195,7 @@ This iteration is a forward-defence layer, not a full identity story:
   group. T5.6c will revisit RBAC together with the OIDC layer.
 * No OIDC / human SSO. T5.6c (post-defensa) wires
   ``oauth2-proxy`` in front of the admin UI; until then the
-  ``/v1/auth/api-keys`` endpoints themselves are intentionally
+  ``api_v1/auth/api-keys`` endpoints themselves are intentionally
   unauthenticated and should be reachable only from a trusted
   network.
 * Bearer signing is symmetric (HS256). A leaked secret invalidates

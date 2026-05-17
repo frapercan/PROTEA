@@ -208,7 +208,7 @@ Then the plugin itself:
        """In-memory annotation source for tests and templates."""
 
        name = "toy"
-       version = "toy-v0"
+       version = "toy_v0"
 
        def stream(
            self,
@@ -263,4 +263,4 @@ Verify end-to-end:
    print(records[0].accession)    # Expected output: P12345
    print(records[0].go_id)        # Expected output: GO:0005737
    print(plugin.name)             # Expected output: toy
-   print(plugin.version)          # Expected output: toy-v0
+   print(plugin.version)          # Expected output: toy_v0

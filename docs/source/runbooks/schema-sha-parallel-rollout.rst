@@ -1,12 +1,11 @@
-Schema SHA v2 Rollout (T1.6)
+schema_sha_v2 rollout (T1.6)
 ============================
 
 This runbook walks the operator through applying the T1.6 (ADR D10)
 ``schema_sha_v2`` migration in production: pre-flight backup, schema
 upgrade, idempotent backfill, verification, and rollback. It is the
-production counterpart of the dry-run validated by
-``feat/t1-6-schema-sha-v2-dry-run`` against a clone of the live
-database.
+production counterpart of the dry-run validated by the T1.6
+``schema_sha_v2`` dry-run branch against a clone of the live database.
 
 Pre-flight checklist
 --------------------
@@ -40,9 +39,10 @@ Pre-flight checklist
 
 3. **Quiesce writes to the affected tables.** Pause the experiment
    worker and any pipeline that issues ``export_research_dataset``,
-   ``register_reranker``, or ``POST /v1/reranker-models/import`` and
-   ``POST /v1/reranker-models/import-by-reference`` calls
-   until the backfill finishes. The migration itself is additive and
+   ``register_reranker``, or the ``reranker-models/import`` and
+   ``reranker-models/import-by-reference`` endpoints (under the
+   ``api_v1`` prefix) until the backfill finishes. The migration itself
+   is additive and
    non-blocking, but the backfill needs a consistent view of every
    row.
 
@@ -79,7 +79,7 @@ in the index list.
 Backfill
 --------
 
-The backfill script computes the canonical v2 SHA via
+The backfill script computes the canonical ``schema_sha_v2`` value via
 ``protea_contracts.compute_schema_sha`` applied to the running feature
 registry, writes it to every row, and commits every ``--batch-size``
 rows for resumability. Idempotent: rows where ``schema_sha_v2`` is
@@ -108,7 +108,7 @@ per row.
 Verification
 ------------
 
-The backfill is complete when every row has a populated v2 column.
+The backfill is complete when every row has a populated ``schema_sha_v2`` column.
 
 .. code-block:: bash
 
@@ -120,8 +120,9 @@ The backfill is complete when every row has a populated v2 column.
         "SELECT count(*) FROM reranker_model WHERE schema_sha_v2 IS NULL"
     # expected: 0
 
-Spot-check that v1 and v2 SHAs agree for fresh exports (rows where the
-two should match because they were produced after the parity fix):
+Spot-check that the original and parallel SHAs agree for fresh exports
+(rows where the two should match because they were produced after the
+parity fix):
 
 .. code-block:: bash
 
@@ -131,9 +132,9 @@ two should match because they were produced after the parity fix):
          FROM dataset ORDER BY created_at DESC LIMIT 10;"
 
 Rows produced before the parity fix will show ``matches = false``;
-this is expected, and inference will pick up the v2 column. Drift in
-rows where both algorithms should have agreed is a regression and
-must be investigated before the next export.
+this is expected, and inference will pick up the ``schema_sha_v2``
+column. Drift in rows where both algorithms should have agreed is a
+regression and must be investigated before the next export.
 
 Rollback
 --------

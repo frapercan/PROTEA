@@ -43,7 +43,7 @@ coupled only through a narrow contract:
    - ``train.parquet``: all training shards concatenated with
      ``category`` and ``snapshot_pair`` columns;
    - ``eval.parquet``: held-out evaluation shards;
-   - ``manifest.json``: schema version ``v2``, producer version and
+   - ``manifest.json``: schema version 2, producer version and
      git sha, snapshot pair list, ``schema_sha`` fingerprint.
 
 2. **A code contract.** The lab's ``protea_reranker_lab.contracts``

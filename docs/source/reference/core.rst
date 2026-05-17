@@ -70,7 +70,7 @@ argument (T-CONTEXTS, PR #237). ``BaseWorker`` instantiates a fixed
 policy at call site (``RetryPolicy(max_attempts=3, base_delay=1.0,
 max_delay=10.0, jitter_ratio=0.3)``); there is no global
 ``TuningSettings`` field for these values. Added as part of F0
-(T0.3) of the master plan v3.
+(T0.3) of the master plan revision 3.
 
 .. automodule:: protea.core.retry
    :members:
@@ -119,8 +119,8 @@ instance implementing the ``protea_contracts.ExperimentRunner``
 interface; unknown names raise ``ValueError`` listing the discovered
 set. PROTEA does not yet dispatch to runners at inference time (the
 active KNN + reranker path stays in ``PredictGOTermsBatchOperation``
-until F2C of master plan v3 hoists the inference core into a shared
-package). The adapter exists so ``GET /v1/runners`` has a
+until F2C of master plan revision 3 hoists the inference core into a
+shared package). The adapter exists so ``GET /api_v1/runners`` has a
 stable resolver and future code has a one-line entry. Closes T2A.8
 (PR #240).
 
@@ -256,7 +256,7 @@ Parquet export (``protea.core.parquet_export``)
 parquet shards produced by the KNN + feature pipeline into the frozen
 dataset layout consumed by ``protea-reranker-lab``: exactly
 ``train.parquet``, ``eval.parquet`` and ``manifest.json`` under a single
-directory. The manifest follows ``ManifestV1`` (schema version ``v2``)
+directory. The manifest follows ``ManifestV1`` (schema version 2)
 and records PROTEA's ``producer_version`` + ``producer_git_sha``.
 
 The single public function ``export_reranker_parquets(...)`` is shared

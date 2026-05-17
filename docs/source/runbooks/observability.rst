@@ -41,7 +41,8 @@ All four variables default to a safe "opt-in" state so a plain
      - (none)
      - OTLP HTTP exporter endpoint, e.g. ``http://otel-collector:4318``.
        When unset, the OTel SDK falls back to its compiled default
-       (``http://localhost:4318``). The module appends ``/v1/traces`` to
+       (``http://localhost:4318``). The module appends the OTLP traces
+       path (``/<api-version>/traces`` per the OTLP/HTTP spec) to
        whatever value is supplied so the bare collector root is the
        expected input.
    * - ``PROTEA_OTEL_SERVICE_NAME``
@@ -207,8 +208,10 @@ feature is off.
 
 .. code-block:: bash
 
-   # Replace with the value of PROTEA_OTEL_ENDPOINT.
-   curl -v http://otel-collector:4318/v1/traces \
+   # Replace ${OTEL_TRACES_URL} with the value of PROTEA_OTEL_ENDPOINT
+   # plus the OTLP traces path (see the OTLP/HTTP spec for the current
+   # API version), e.g. http://otel-collector:4318/<api-version>/traces.
+   curl -v "${OTEL_TRACES_URL}" \
        -H "Content-Type: application/json" \
        -d '{}' 2>&1 | grep -E "^< HTTP|Connection refused|Could not resolve"
 
@@ -231,10 +234,11 @@ misconfigured ``PROTEA_OTEL_ENDPOINT`` or a collector that is not running.
 
       echo ${PROTEA_OTEL_SAMPLE_RATIO:-"(unset, default 1.0)"}
 
-3. Confirm the exporter endpoint includes the ``/v1/traces`` suffix.
-   The module appends it automatically, so the variable should be set
-   to the bare collector root (e.g. ``http://otel-collector:4318``), not
-   ``http://otel-collector:4318/v1/traces``.
+3. Confirm the exporter endpoint includes the OTLP traces suffix
+   (``/<api-version>/traces`` per the OTLP/HTTP spec). The module
+   appends it automatically, so the variable should be set to the bare
+   collector root (e.g. ``http://otel-collector:4318``), not the full
+   path with the traces suffix already attached.
 
 Operational notes
 ------------------

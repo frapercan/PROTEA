@@ -361,7 +361,7 @@ Accretion (IA) weighting from the CAFA6 benchmark.
      - 0.391
      - 0.574
      - 0.618
-   * - **PROTEA (re-ranker v3)**
+   * - **PROTEA (re-ranker iteration 3, full features)**
      - **0.431**
      - **0.620**
      - **0.692**

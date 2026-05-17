@@ -36,12 +36,13 @@ contract covers every documented request body
 models are not constrained because they are server-built and never
 parse client input.
 
-Versioning and the ``/v1/`` prefix
+Versioning under the api_v1 prefix
 ----------------------------------
 
 Every router is mounted twice (T4.1, decision D4):
 
-- **Canonical** under ``/v1/``: the prefix surfaced in OpenAPI /
+- **Canonical** under the ``api_v1`` prefix (the first major URL
+  segment, expanded literally by the router): surfaced in OpenAPI /
   Swagger and the only path schema exporters and codegen tools see.
   All new clients should target this form.
 - **Legacy alias** at the root path: the same handler reachable
@@ -51,8 +52,8 @@ Every router is mounted twice (T4.1, decision D4):
   cutover.
 
 The endpoint paths in the per-router sections and the *Endpoints
-summary* below are listed without the prefix for terseness; both
-``/jobs`` and ``/v1/jobs`` resolve to the same handler today. Health
+summary* below are listed without the prefix for terseness; both the
+bare and the prefixed paths resolve to the same handler today. Health
 endpoints (``/health``, ``/health/ready``) stay at the root by
 convention. When the legacy aliases are retired the second
 ``include_router`` call in
@@ -413,10 +414,10 @@ Authentication and rate limits
 
 Four POST routes require a credential (T5.6a + T5.6b):
 
-* ``POST /v1/jobs``
-* ``POST /v1/datasets``
-* ``POST /v1/reranker-models/import``
-* ``POST /v1/reranker-models/import-by-reference``
+* ``POST /api_v1/jobs``
+* ``POST /api_v1/datasets``
+* ``POST /api_v1/reranker-models/import``
+* ``POST /api_v1/reranker-models/import-by-reference``
 
 Three header forms are accepted, any one of which satisfies the gate:
 
@@ -835,8 +836,8 @@ without round-tripping through a separate metadata endpoint.
        "search_criteria": "reviewed:true AND organism_id:9606"
      },
      "meta": {},
-     "description": "Backfill reviewed Swiss-Prot for benchmark-v1",
-     "tags": ["ablation", "benchmark-v1"]
+     "description": "Backfill reviewed Swiss-Prot for benchmark_v1",
+     "tags": ["ablation", "benchmark_v1"]
    }
 
 Common payload examples by operation:

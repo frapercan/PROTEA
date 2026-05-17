@@ -1,14 +1,14 @@
-Schema SHA v2 Backfill
+schema_sha_v2 backfill
 ======================
 
 ``schema_sha`` is the feature-set fingerprint that prevents inference from
 running with a re-ranker booster trained against a different feature
 schema. Two definitions of ``compute_schema_sha`` coexisted (lab and
 PROTEA) and caused silent drift before parity was fixed (see
-:doc:`../adr/D10-schema-sha-v2`). ADR D10 decided to add a parallel
-``schema_sha_v2`` column to ``Dataset`` and ``RerankerModel``, backfill
-it from ``protea_contracts.compute_schema_sha``, and switch inference to
-read ``v2``.
+:doc:`../adr/D10-schema-sha-parallel-migration`). ADR D10 decided to add
+a parallel ``schema_sha_v2`` column to ``Dataset`` and ``RerankerModel``,
+backfill it from ``protea_contracts.compute_schema_sha``, and switch
+inference to read the new ``schema_sha_v2`` column.
 
 As of the time this runbook was written, the T1.6 Alembic migration and
 backfill script described in ADR D10 have **not yet shipped**. This
@@ -16,7 +16,7 @@ runbook documents the expected fix sequence for when T1.6 lands.
 Until then, escalate to the T1.6 owner if you observe the symptoms
 below.
 
-The current (v1) ``schema_sha`` column is a 12-hex SHA-256 of the
+The current ``schema_sha`` column is a 12-hex SHA-256 of the
 registry feature list computed by
 ``protea.core.parquet_export._compute_schema_sha`` and stored in both
 the ``dataset`` and ``reranker_model`` tables. The scoring router in
@@ -98,7 +98,7 @@ Diagnosis
    present, the T1.6 migration has not run yet. Escalate to the T1.6
    owner.
 
-5. **For each dataset, compare v1 and v2 SHAs** (after T1.6 ships):
+5. **For each dataset, compare the original and parallel SHAs** (after T1.6 ships):
 
    .. code-block:: sql
 
@@ -167,7 +167,7 @@ Fix
              "name": "<booster-name>",
              "artifact_uri": "<existing-uri>",
              "run": {
-               "dataset": {"schema_sha": "<new-v2-sha>"},
+               "dataset": {"schema_sha": "<new-schema_sha_v2-value>"},
                "families": ["<family1>", "<family2>"]
              }
            }' | python3 -m json.tool
@@ -198,19 +198,19 @@ Prevention
 ADR D10 mandates that once T1.6 ships, ``export_research_dataset``
 (``protea/core/operations/export_research_dataset.py``) and the
 ``ParquetExportContext`` helper (``protea/core/parquet_export.py``)
-must write both ``schema_sha`` (v1, kept until F3) and
+must write both the original ``schema_sha`` column (kept until F3) and
 ``schema_sha_v2`` on every new ``Dataset`` row. The inference path in
-``predict_go_terms.py`` reads the v2 column. No new Dataset should be
-created without both fields populated.
+``predict_go_terms.py`` reads the ``schema_sha_v2`` column. No new
+Dataset should be created without both fields populated.
 
 **CI gate on schema_sha drift**
 
 A regression test (to be added as part of T1.6) will:
 
 1. Load a synthetic golden parquet produced by the current exporter.
-2. Assert that ``_compute_schema_sha()`` (v1) equals
-   ``protea_contracts.compute_schema_sha(feature_names)`` (v2) for the
-   same feature set.
+2. Assert that ``_compute_schema_sha()`` (original) equals
+   ``protea_contracts.compute_schema_sha(feature_names)`` (parallel
+   column) for the same feature set.
 
 The test will be run as part of ``poetry run pytest`` with no special
 flags. It fails loudly when the two hash functions diverge, surfacing

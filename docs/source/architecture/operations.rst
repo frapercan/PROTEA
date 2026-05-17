@@ -67,7 +67,7 @@ Every operation defines a **payload** class that extends ``ProteaPayload``:
    class ProteaPayload(BaseModel, frozen=True):
        model_config = ConfigDict(strict=True)
 
-``ProteaPayload`` is an immutable, strictly-typed Pydantic v2 base. Strict
+``ProteaPayload`` is an immutable, strictly-typed Pydantic (2.x) base. Strict
 mode prevents silent coercions (``"yes"`` is not a valid ``bool``). Each
 operation calls ``MyPayload.model_validate(payload)`` at the top of
 ``execute()``; validation errors surface as ``FAILED`` jobs with a clear
@@ -642,7 +642,7 @@ Payload fields
        ``neighbor_distance_std``.
    * - ``compute_v6_features``
      - ``false``
-     - Compute the 25-column v6 feature family: 6 anc2vec ancestry signals,
+     - Compute the 25-column ``v6_features`` family: 6 anc2vec ancestry signals,
        3 taxonomic-voter aggregates, 16 PCA-projected embedding columns. PCA
        state is fit once per ``EmbeddingConfig`` and persisted; enabling this
        flag adds those 25 columns to every ``GOPrediction`` row.
@@ -1171,8 +1171,8 @@ written to ``RerankerModel.metrics`` as a JSONB dict:
 In addition, the training step returns a
 gain-based feature-importance dictionary (``feature_name → total gain``),
 which is persisted in ``RerankerModel.feature_importance``. This is the
-signal used in :doc:`../results` to drive the v1 → v2 → v3 iterations of the
-re-ranker.
+signal used in :doc:`../results` to drive the three documented
+iterations of the re-ranker.
 
 .. note::
    Cross-validation is **not** performed inside the training operation.
@@ -1219,7 +1219,7 @@ configured :class:`~protea.infrastructure.storage.ArtifactStore`. The
 produced dataset is the canonical input consumed by
 ``protea-reranker-lab`` for offline re-ranker training.
 
-The manifest embeds ``schema_version="v2"``, the PROTEA
+The manifest embeds ``schema_version=2``, the PROTEA
 ``producer_version`` (``protea.__version__``) and ``producer_git_sha`` so
 any lab run can be traced back to the exact PROTEA HEAD that produced
 its training data.
@@ -1274,7 +1274,7 @@ Payload fields
        materialisation.
    * - ``use_embedding_pca``
      - ``false``
-     - Include embedding PCA and v6-era feature families (enables
+     - Include embedding PCA and ``v6_features`` family (enables
        ``anc2vec_*``, ``emb_pca``, ``taxonomy_voters``, ``go_context``).
 
 Execution flow
@@ -1282,7 +1282,7 @@ Execution flow
 
 .. code-block:: text
 
-   1. validate payload (Pydantic v2, strict mode)
+   1. validate payload (Pydantic 2.x, strict mode)
    2. load Settings; resolve ArtifactStore via get_artifact_store(settings)
    3. run train_reranker_auto in dump-only mode against a temp dir
       (per_cell training_scope, no booster trained)
@@ -1458,7 +1458,7 @@ unified path returns.
    ``ref_annotation_density``, ``neighbor_distance_std``,
    ``neighbor_vote_fraction``). Optional alignment features (NW/SW via
    ``parasail``) and taxonomic features (``ete3`` NCBITaxa) are
-   computed on top, plus the v6 feature shim
+   computed on top, plus the ``v6_features`` shim
    (``enrich_v6_features``) when ``compute_v6_features=true``.
 5. Publishes a ``StorePredictions`` message to ``protea.predictions.write``.
 

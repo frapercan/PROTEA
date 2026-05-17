@@ -13,7 +13,7 @@ accessibility AA, dark mode, and rapid composition of dashboards
 
 Decision
 --------
-``shadcn/ui`` on top of Tailwind v4. Components are copy-paste owned
+``shadcn/ui`` on top of Tailwind 4.x. Components are copy-paste owned
 under ``apps/web/components/ui/``, not imported from a versioned
 library.
 

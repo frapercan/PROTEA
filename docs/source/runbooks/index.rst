@@ -15,7 +15,7 @@ fix sequence that an operator can execute without prior context.
    dlq-triage
    ngrok-deploy-recovery
    embedding-worker-oom
-   schema-sha-v2-backfill
-   schema-sha-v2-rollout
+   schema-sha-parallel-backfill
+   schema-sha-parallel-rollout
    observability
    loki

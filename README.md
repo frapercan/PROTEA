@@ -172,7 +172,7 @@ poetry run mypy protea                # type checking
 | Embeddings | ESMC (ESM SDK), ProstT5 / prot_t5_xl (T5Encoder), ESM2 (Hugging Face Transformers) |
 | KNN search | FAISS IVFFlat / numpy (chunked brute-force) |
 | Re-ranker | LightGBM (LambdaRank, IA-weighted samples) |
-| Frontend | Next.js 19 + Tailwind v4 |
+| Frontend | Next.js 19 + Tailwind 4.x |
 | Deployment | Docker Compose, Docker Swarm (stack file), Helm chart skeleton, `scripts/manage.sh` process supervisor |
 | Observability | OpenTelemetry SDK, OTLP export, Grafana dashboards |
 

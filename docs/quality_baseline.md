@@ -26,6 +26,6 @@ Initial code quality assessment. Objective: track improvement over time.
 | 3 | CORS wildcard (`*`) | API |
 | 4 | 16 nullable columns in `GOPrediction` — feature engineering coupled to ORM model | Database |
 | 5 | Missing indexes on `ProteinGOAnnotation(protein_id, go_term_id)` — slow queries at scale | Database |
-| 6 | No API versioning (`/v1/`) — breaking changes would affect external integrations | API |
+| 6 | No API versioning (no `api_v1` prefix yet), so breaking changes would affect external integrations | API |
 | 7 | Duplicate validation in embeddings router (manual checks + Pydantic) | API |
 | 8 | No pagination on endpoints that can return thousands of results | API |

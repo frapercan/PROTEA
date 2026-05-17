@@ -11,7 +11,7 @@ Several lessons learned during the project deserve a written record
 that is neither a peer-reviewed publication nor a reluctant footnote
 inside an unrelated chapter. Examples: the ``anc2vec`` feature
 leakage discovery (2026-05-05), the ``schema_sha`` drift incident,
-the v18 selective re-ranking discovery, the PK coverage cafaeval
+the selective re-ranking discovery, the PK coverage cafaeval
 upstream bug. None of these belong in the canonical evaluation; all
 of them taught something.
 

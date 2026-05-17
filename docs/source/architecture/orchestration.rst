@@ -232,9 +232,9 @@ optionally a LightGBM booster are frozen into a bundle at build time.
    │ lafa_knn_v1 │ │lafa_knn_8plm│ │  lafa_v18   │
    │             │ │             │ │             │
    │ 1 PLM       │ │ 8 PLMs      │ │ 1 PLM       │
-   │ KNN only    │ │ ensemble    │ │ KNN + v6    │
+   │ KNN only    │ │ ensemble    │ │ KNN + v6_x  │
    │ no reranker │ │ mean agg.   │ │ + reranker  │
-   │ no v6 feats │ │ no v6 feats │ │ (full pipe) │
+   │ no v6_feats │ │ no v6_feats │ │ (full pipe) │
    │ aspect-sep  │ │ aspect-sep  │ │ aspect-sep  │
    └──────┬──────┘ └──────┬──────┘ └──────┬──────┘
           │               │               │
@@ -251,4 +251,4 @@ Container source directories:
 
 - ``apps/lafa_knn_v1/`` (single-PLM KNN baseline)
 - ``apps/lafa_knn_8plm/`` (8-PLM ensemble via ``ensemble_driver.py``)
-- ``apps/lafa_v18/`` (full PROTEA v18 pipeline with reranker)
+- ``apps/lafa_v18/`` (full PROTEA ``lafa_v18`` pipeline with reranker)

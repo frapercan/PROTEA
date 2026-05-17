@@ -86,7 +86,7 @@ Register a :class:`protea_contracts.Feature` in
 and does not use ``entry_points``: the registry is gathered at import
 time from a fixed list of family modules. The feature's ``family``
 field decides where it appears in the dataset schema and feeds into
-``compute_schema_sha`` (see :doc:`adr/D10-schema-sha-v2`).
+``compute_schema_sha`` (see :doc:`adr/D10-schema-sha-parallel-migration`).
 
 If your idea fits none of these layers, it probably belongs in
 ``protea-core`` itself. Open an issue describing what you want to
@@ -175,7 +175,7 @@ specific places this matters:
   feature changes the digest, which is correct: existing re-ranker
   boosters trained against the old digest will refuse to load
   against the new one. Bump the package minor and re-train.
-  See :doc:`adr/D10-schema-sha-v2` for the parallel-column migration
+  See :doc:`adr/D10-schema-sha-parallel-migration` for the parallel-column migration
   that brings every consumer onto a single source of truth.
 - **Embedding backends** must return float16 embeddings of shape
   ``(batch_size, hidden_dim)``. Special tokens (``CLS``, ``EOS``,
@@ -190,7 +190,7 @@ plan). Breaking either is loud, not silent.
 Roadmap
 -------
 
-Several phases of the master plan v3 directly affect plugin authors:
+Several phases of the master plan revision 3 directly affect plugin authors:
 
 - **F2A.7**: ``protea-runners.lightgbm`` absorbs the standalone
   ``protea-reranker-lab`` repository as the canonical LightGBM

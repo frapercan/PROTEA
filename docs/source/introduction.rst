@@ -150,7 +150,8 @@ the full numbers and discusses the interpretation.
 
 **C3.** A temporal-holdout re-ranking pipeline trained on 13 historical GOA
 splits (releases 160 through 220) using alignment and taxonomy features on
-top of ESM-C 300M KNN results. The final re-ranker (``v3``) is shown to
+top of ESM-C 300M KNN results. The final re-ranker (the iteration with
+full alignment and taxonomy features) is shown to
 improve Fmax over the embedding-only baseline across all 9 evaluation cells
 of the NK/LK/PK × BPO/MFO/CCO grid, while keeping the training signal
 interpretable (per-feature importances are reported in :doc:`results`).

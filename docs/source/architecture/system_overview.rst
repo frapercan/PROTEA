@@ -45,8 +45,8 @@ PROTEA is structured in four horizontal layers with strict downward dependency:
                                           │  HTTP (port 8000)
    ┌──────────────────────────────────────▼──────────────────────────────────┐
    │  API LAYER                                                               │
-   │  FastAPI   /v1/jobs   /v1/datasets   /v1/reranker-models                 │
-   │  /v1/scoring   /v1/auth   /v1/stack   + 11 more routers (17 total)       │
+   │  FastAPI   /api_v1/jobs   /api_v1/datasets   /api_v1/reranker-models     │
+   │  /api_v1/scoring   /api_v1/auth   /api_v1/stack   + 11 more routers      │
    │  Auth gate: ApiKey header (T5.6a) · Bearer JWT (T5.6b, active)           │
    │  Rate limiting: slowapi per-principal (T5.6b, active)                    │
    └──────────────────────────────────────┬──────────────────────────────────┘
@@ -229,7 +229,7 @@ Services and data stores
 
    Single-page application for job management. Displays job list with status filtering,
    live auto-refresh (2 s polling while a job is active), progress bar, and structured
-   event timeline. Built with React 19 and Tailwind CSS v4.
+   event timeline. Built with React 19 and Tailwind CSS 4.x.
 
 Stack management
 ----------------
@@ -309,7 +309,7 @@ Technology stack
      - RabbitMQ + aio-pika
      - 3.x / 9.x
    * - Data validation
-     - Pydantic v2
+     - Pydantic (2.x line)
      - 2.x
    * - Protein LM inference
      - Hugging Face Transformers
@@ -344,7 +344,7 @@ code at runtime, and the lab does not import PROTEA session or queue
 code. The coupling is mediated by three files:
 
 - **Frozen dataset**: PROTEA writes ``train.parquet``, ``eval.parquet``,
-  and ``manifest.json`` (schema version ``v2``) to the configured
+  and ``manifest.json`` (schema version 2) to the configured
   ``ArtifactStore`` via the ``export_research_dataset`` operation.
 - **Booster artefact**: the lab produces ``runs/<name>/model.txt``
   (LightGBM ``Booster``) together with ``run.json`` and ``spec.yaml``.
@@ -359,7 +359,7 @@ code. The coupling is mediated by three files:
    ┌──────────────────────┐        export_research_dataset        ┌────────────────────────┐
    │       PROTEA         │───────────────────────────────────────▶│       Artifact          │
    │ (KNN + features)     │     train.parquet / eval.parquet        │       Store             │
-   │                      │     manifest.json (schema_version=v2)   │  (local FS or MinIO)    │
+   │                      │     manifest.json (schema_version=2)    │  (local FS or MinIO)    │
    └──────────┬───────────┘                                         └──────────┬──────────────┘
               │                                                                 │
               │                                                                 ▼

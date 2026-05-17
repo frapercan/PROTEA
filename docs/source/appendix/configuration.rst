@@ -88,14 +88,14 @@ Environment variable overrides
        the API process will refuse to start if the secret is absent and
        authentication is enabled. Minimum length: 32 bytes of randomness.
    * - ``PROTEA_RATELIMIT_JOBS``
-     - slowapi rate-limit rule for ``POST /v1/jobs``. Default ``10/minute``.
+     - slowapi rate-limit rule for ``POST /api_v1/jobs``. Default ``10/minute``.
        Accepts any slowapi syntax, e.g. ``"100/minute"`` or
        ``"1000/hour;200/minute"`` (T5.6b).
    * - ``PROTEA_RATELIMIT_DATASETS``
-     - slowapi rate-limit rule for ``POST /v1/datasets``. Default
+     - slowapi rate-limit rule for ``POST /api_v1/datasets``. Default
        ``5/minute`` (T5.6b).
    * - ``PROTEA_RATELIMIT_API_KEYS``
-     - slowapi rate-limit rule for ``POST /v1/auth/api-keys``. Default
+     - slowapi rate-limit rule for ``POST /api_v1/auth/api-keys``. Default
        ``5/hour`` (T5.6b).
    * - ``PROTEA_ADMIN_TOKEN``
      - Overrides ``admin.token``.
@@ -232,7 +232,7 @@ underscore is the path separator (matches pydantic-settings'
 underscores inside field names.
 
 Categories are derived from ``docs/CONFIG_INVENTORY.md`` (T-CONF.1
-of master plan v3) and migrated incrementally in T-CONF.2.
+of master plan revision 3) and migrated incrementally in T-CONF.2.
 
 QueueTuning
 ~~~~~~~~~~~

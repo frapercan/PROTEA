@@ -245,8 +245,8 @@ Predictions
    ``neighbor_min_distance``, ``neighbor_mean_distance``: eight fields in
    total.
 
-   When ``compute_v6_features=true`` (opt-in, default ``False``) the v6
-   feature family is materialised on top: 6 anc2vec columns
+   When ``compute_v6_features=true`` (opt-in, default ``False``) the
+   ``v6_features`` family is materialised on top: 6 anc2vec columns
    (``anc2vec_neighbor_cos`` / ``anc2vec_neighbor_maxcos`` /
    ``anc2vec_has_emb`` / ``anc2vec_query_known_cos`` /
    ``anc2vec_query_known_maxcos`` / ``anc2vec_query_known_count``), 3
