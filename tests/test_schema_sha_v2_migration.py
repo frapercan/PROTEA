@@ -60,7 +60,7 @@ def test_migration_module_loads_and_pins_revisions() -> None:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     assert module.revision == "cf16788285f4"
-    assert module.down_revision == "e1c4a7b2d8f3"
+    assert module.down_revision == "ccc0494d22f5"
     assert callable(module.upgrade)
     assert callable(module.downgrade)
 
@@ -298,7 +298,7 @@ def test_migration_applies_against_postgres(_alembic_config: Any, postgres_url: 
         # UPDATE. The downgrade drops the column (data loss on
         # experiment_run is acceptable: this is a test DB) and the
         # subsequent upgrade rebuilds + re-fills it.
-        command.downgrade(_alembic_config, "e1c4a7b2d8f3")
+        command.downgrade(_alembic_config, "ccc0494d22f5")
         insp2 = inspect(engine)
         er_cols2 = {c["name"] for c in insp2.get_columns("experiment_run")}
         assert "schema_sha_v2" not in er_cols2
