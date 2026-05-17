@@ -13,6 +13,7 @@ from typing import Any
 import numpy as np
 
 from protea.core.feature_enricher import NEW_V6_FEATURE_KEYS as _NEW_V6_FEATURE_KEYS
+from protea.core.jsonb_dual_write import maybe_jsonb
 from protea.infrastructure.orm.models.embedding.go_prediction_features import (
     build_feature_jsonb,
 )
@@ -203,4 +204,12 @@ def _row_from_prediction(
     # Old typed columns stay authoritative for readers; T3.1b will cut
     # the reader paths over.
     row["features"] = build_feature_jsonb(row)
+    # T3.1 dual-write: mirror the prediction tuple (go_term_id, score,
+    # evidence) into the ``predictions_jsonb`` blob. Gated by
+    # ``PROTEA_GO_PREDICTION_JSONB_WRITE_ENABLED``; when the flag is
+    # off (default) ``maybe_jsonb`` returns ``None`` and the column
+    # stays NULL.
+    row["predictions_jsonb"] = maybe_jsonb(
+        [(row["go_term_id"], row["distance"], row.get("evidence_code"))]
+    )
     return row
