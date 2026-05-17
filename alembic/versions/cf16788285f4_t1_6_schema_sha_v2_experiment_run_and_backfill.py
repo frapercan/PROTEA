@@ -1,7 +1,7 @@
 """t1_6_schema_sha_v2_experiment_run_and_backfill
 
 Revision ID: cf16788285f4
-Revises: e1c4a7b2d8f3
+Revises: ccc0494d22f5
 Create Date: 2026-05-17 09:00:00.000000
 
 T1.6 follow-up of master plan v3 (ADR D10). The first slice
@@ -51,7 +51,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "cf16788285f4"
-down_revision: str | Sequence[str] | None = "e1c4a7b2d8f3"
+down_revision: str | Sequence[str] | None = "ccc0494d22f5"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
