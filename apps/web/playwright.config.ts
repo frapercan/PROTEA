@@ -56,5 +56,16 @@ export default defineConfig({
       },
       testMatch: "**/flows/**/*.spec.ts",
     },
+    {
+      // FARM-UI.2 smoke. The spec ships its own per-describe viewport
+      // override (375x667 + 1280x800) so the project-level viewport
+      // here is only the bootstrap default.
+      name: "farm",
+      use: {
+        browserName: "chromium",
+        viewport: { width: 1280, height: 800 },
+      },
+      testMatch: "**/farm-*.spec.ts",
+    },
   ],
 });

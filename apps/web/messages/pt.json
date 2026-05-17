@@ -748,7 +748,9 @@
       "running": "ATIVO",
       "succeeded": "CONCLUÍDO",
       "failed": "FALHOU",
-      "cancelled": "CANCELADO"
+      "cancelled": "CANCELADO",
+      "killed": "TERMINADO",
+      "crashed": "QUEBROU"
     },
     "eventTimeline": {
       "noEvents": "Nenhum evento ainda."
@@ -783,5 +785,61 @@
     "thesisHeading": "Tese PROTEA",
     "thesisDescription": "O PDF compilado da tese está sendo servido a partir deste deploy.",
     "thesisOpen": "Abrir PDF"
+  },
+  "farm": {
+    "title": "Fazenda de agentes",
+    "subtitle": "Tarefas do orquestrador agent-farm",
+    "refresh": "Atualizar",
+    "emptyState": "Nenhuma tarefa corresponde aos filtros atuais.",
+    "rowCount": "{count} tarefa{count, plural, one {} other {s}} exibida{count, plural, one {} other {s}}",
+    "filters": {
+      "statusLabel": "Estado",
+      "statusAll": "Todos",
+      "agentLabel": "Agente",
+      "agentPlaceholder": "nome exato do agente",
+      "windowLabel": "Janela"
+    },
+    "windows": {
+      "24h": "Últimas 24h",
+      "7d": "Últimos 7d"
+    },
+    "status": {
+      "queued": "Na fila",
+      "running": "Ativo",
+      "succeeded": "Concluído",
+      "failed": "Falhou",
+      "cancelled": "Cancelado",
+      "killed": "Terminado",
+      "crashed": "Quebrou"
+    },
+    "table": {
+      "taskId": "ID da tarefa",
+      "agent": "Agente",
+      "status": "Estado",
+      "started": "Iniciado",
+      "duration": "Duração",
+      "model": "Modelo"
+    },
+    "detail": {
+      "title": "Detalhe da tarefa",
+      "backLink": "← Voltar para tarefas",
+      "created": "Criado",
+      "started": "Iniciado",
+      "ended": "Finalizado",
+      "model": "Modelo",
+      "exitCode": "Código de saída",
+      "pid": "PID",
+      "worktree": "Worktree",
+      "ownerRepo": "Dono / repositório",
+      "spawnArgs": "Argumentos do spawn",
+      "diffRange": "Intervalo de commits",
+      "shaBefore": "Antes",
+      "shaAfter": "Depois",
+      "heartbeatsTitle": "Heartbeats",
+      "heartbeatsCount": "({count} exibidos)",
+      "summaryTitle": "Resumo do resultado",
+      "summaryEmpty": "A linha de resultado existe mas o resumo está vazio.",
+      "summaryMissing": "Ainda não há linha de resultado. A tarefa não chegou ao finalize."
+    }
   }
 }

@@ -747,7 +747,9 @@
       "running": "RUNNING",
       "succeeded": "SUCCEEDED",
       "failed": "FAILED",
-      "cancelled": "CANCELLED"
+      "cancelled": "CANCELLED",
+      "killed": "KILLED",
+      "crashed": "CRASHED"
     },
     "eventTimeline": {
       "noEvents": "暂无事件。"
@@ -782,5 +784,61 @@
     "thesisHeading": "PROTEA 学位论文",
     "thesisDescription": "已编译的论文 PDF 由该部署提供。",
     "thesisOpen": "打开 PDF"
+  },
+  "farm": {
+    "title": "智能体农场",
+    "subtitle": "agent-farm 编排器中的任务",
+    "refresh": "刷新",
+    "emptyState": "没有任务符合当前筛选条件。",
+    "rowCount": "显示 {count} 个任务",
+    "filters": {
+      "statusLabel": "状态",
+      "statusAll": "全部",
+      "agentLabel": "智能体",
+      "agentPlaceholder": "精确的智能体名称",
+      "windowLabel": "时间窗口"
+    },
+    "windows": {
+      "24h": "过去 24 小时",
+      "7d": "过去 7 天"
+    },
+    "status": {
+      "queued": "排队中",
+      "running": "运行中",
+      "succeeded": "已完成",
+      "failed": "失败",
+      "cancelled": "已取消",
+      "killed": "已终止",
+      "crashed": "已崩溃"
+    },
+    "table": {
+      "taskId": "任务 ID",
+      "agent": "智能体",
+      "status": "状态",
+      "started": "开始时间",
+      "duration": "持续时长",
+      "model": "模型"
+    },
+    "detail": {
+      "title": "任务详情",
+      "backLink": "← 返回任务列表",
+      "created": "创建时间",
+      "started": "开始时间",
+      "ended": "结束时间",
+      "model": "模型",
+      "exitCode": "退出码",
+      "pid": "PID",
+      "worktree": "工作树",
+      "ownerRepo": "所有者 / 仓库",
+      "spawnArgs": "Spawn 参数",
+      "diffRange": "提交范围",
+      "shaBefore": "之前",
+      "shaAfter": "之后",
+      "heartbeatsTitle": "心跳",
+      "heartbeatsCount": "（显示 {count} 条）",
+      "summaryTitle": "结果摘要",
+      "summaryEmpty": "结果行存在但摘要为空。",
+      "summaryMissing": "尚无结果行。任务未达到 finalize 阶段。"
+    }
   }
 }
