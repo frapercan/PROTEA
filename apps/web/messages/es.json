@@ -823,6 +823,12 @@
       "duration": "Duración",
       "model": "Modelo"
     },
+    "pill": {
+      "running": "{count} farm",
+      "error": "{count} err",
+      "unknown": "Farm sin conexión",
+      "recentErrorsAria": "{count} errores de farm en la última hora"
+    },
     "detail": {
       "title": "Detalle de tarea",
       "backLink": "← Volver a tareas",

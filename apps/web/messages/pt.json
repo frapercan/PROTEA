@@ -820,6 +820,12 @@
       "duration": "Duração",
       "model": "Modelo"
     },
+    "pill": {
+      "running": "{count} farm",
+      "error": "{count} err",
+      "unknown": "Farm offline",
+      "recentErrorsAria": "{count} erros de farm na última hora"
+    },
     "detail": {
       "title": "Detalhe da tarefa",
       "backLink": "← Voltar para tarefas",

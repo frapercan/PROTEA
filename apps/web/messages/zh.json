@@ -819,6 +819,12 @@
       "duration": "持续时长",
       "model": "模型"
     },
+    "pill": {
+      "running": "{count} 农场",
+      "error": "{count} 错误",
+      "unknown": "农场离线",
+      "recentErrorsAria": "过去一小时内 {count} 个农场错误"
+    },
     "detail": {
       "title": "任务详情",
       "backLink": "← 返回任务列表",

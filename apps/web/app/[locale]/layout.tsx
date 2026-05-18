@@ -11,6 +11,7 @@ import { FloatingJobsWidget } from "@/components/FloatingJobsWidget";
 import { CommandPalette } from "@/components/CommandPalette";
 import { CommandPaletteTrigger } from "@/components/CommandPaletteTrigger";
 import { SystemStatusPill } from "@/components/SystemStatusPill";
+import { FarmChrome } from "@/components/FarmChrome";
 import { AuthChip } from "@/components/AuthChip";
 import { NextIntlClientProvider } from "next-intl";
 import { getMessages, getTranslations } from "next-intl/server";
@@ -99,6 +100,7 @@ export default async function LocaleLayout({
 
                 <div className="ml-auto flex items-center gap-2 sm:gap-3">
                   <SystemStatusPill />
+                  <FarmChrome slot="pill" />
                   <AuthChip />
                   <CommandPaletteTrigger />
                   <div className="hidden xl:flex items-center gap-2">
@@ -123,6 +125,7 @@ export default async function LocaleLayout({
             </main>
 
             <FloatingJobsWidget />
+            <FarmChrome slot="widget" />
             <CommandPalette />
           </ToastProvider>
         </NextIntlClientProvider>
