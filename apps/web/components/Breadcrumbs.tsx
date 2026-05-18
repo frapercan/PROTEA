@@ -18,10 +18,15 @@ type NavKey =
   | "maintenance"
   | "benchmark"
   | "stack"
-  | "support";
+  | "support"
+  | "farmSection"
+  | "farmPlan"
+  | "farmCost";
 
 // Map URL segments to `nav` translation keys. Segments without an entry here
 // are rendered verbatim (typically dynamic ids like /jobs/<uuid>).
+// FARM-UI.9 P1.2 added farm/plan/cost so the agent-farm section displays
+// translated breadcrumb labels instead of the raw URL segment.
 const SEGMENT_TO_NAV_KEY: Record<string, NavKey> = {
   "functional-annotation": "functionalAnnotation",
   proteins: "proteins",
@@ -36,6 +41,9 @@ const SEGMENT_TO_NAV_KEY: Record<string, NavKey> = {
   benchmark: "benchmark",
   stack: "stack",
   support: "support",
+  farm: "farmSection",
+  plan: "farmPlan",
+  cost: "farmCost",
 };
 
 export function Breadcrumbs() {

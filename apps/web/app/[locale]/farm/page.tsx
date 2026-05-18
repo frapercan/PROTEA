@@ -140,7 +140,7 @@ export default function FarmListPage() {
           </span>
           <button
             onClick={() => setStatusFilter("")}
-            className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${
+            className={`inline-flex items-center min-h-[44px] sm:min-h-0 rounded-full border px-3 py-1.5 sm:py-0.5 text-sm sm:text-xs font-medium transition-colors ${
               statusFilter === ""
                 ? "bg-slate-800 text-white border-slate-800"
                 : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
@@ -152,12 +152,13 @@ export default function FarmListPage() {
             <button
               key={s}
               onClick={() => setStatusFilter(s)}
-              className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${
+              className={`inline-flex items-center min-h-[44px] sm:min-h-0 rounded-full border px-3 py-1.5 sm:py-0.5 text-sm sm:text-xs font-medium transition-colors ${
                 statusFilter === s
                   ? "bg-blue-600 text-white border-blue-600"
                   : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
               }`}
               aria-pressed={statusFilter === s}
+              data-testid={`farm-status-chip-${s}`}
             >
               {t(`status.${s}`)}
             </button>
@@ -184,7 +185,7 @@ export default function FarmListPage() {
               <button
                 key={w.key}
                 onClick={() => setWindow(w.key)}
-                className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${
+                className={`inline-flex items-center min-h-[44px] sm:min-h-0 rounded-full border px-3 py-1.5 sm:py-0.5 text-sm sm:text-xs font-medium transition-colors ${
                   windowKey === w.key
                     ? "bg-blue-600 text-white border-blue-600"
                     : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
@@ -207,8 +208,14 @@ export default function FarmListPage() {
         </pre>
       )}
 
-      {/* Mobile card list */}
-      <div className="mt-4 lg:hidden space-y-2" data-testid="farm-list-mobile">
+      {/* Mobile card list. P1.7 reserve min-height matching ~5 skeleton
+          rows so async data load does not shift the page (CLS). The
+          desktop table reserves space via its own skeleton table-row
+          structure. */}
+      <div
+        className="mt-4 lg:hidden space-y-2 min-h-[420px]"
+        data-testid="farm-list-mobile"
+      >
         {loading &&
           Array.from({ length: 5 }).map((_, i) => (
             <div
@@ -253,9 +260,10 @@ export default function FarmListPage() {
           ))}
       </div>
 
-      {/* Desktop table */}
+      {/* Desktop table. P1.7 reserve min-height to hold header + ~5
+          rows so skeleton-to-data swap does not shift content below. */}
       <div
-        className="mt-4 hidden lg:block overflow-hidden rounded-lg border bg-white shadow-sm"
+        className="mt-4 hidden lg:block overflow-hidden rounded-lg border bg-white shadow-sm min-h-[320px]"
         data-testid="farm-list-desktop"
       >
         <div className="grid grid-cols-[1fr_180px_140px_140px_140px_180px] gap-2 border-b bg-slate-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-600">

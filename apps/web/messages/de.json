@@ -32,6 +32,9 @@
     "thesisHint": "PROTEA-Doktorarbeit",
     "support": "Unterstützung",
     "supportHint": "Öffentliche Kommentare, Dank senden",
+    "farmSection": "Agent-Farm",
+    "farmPlan": "Plan",
+    "farmCost": "Kosten",
     "pipelineHint": "Von Sequenz zu GO-Term",
     "dataHint": "Referenzproteom, Ground Truth, Query-Sets",
     "resultsHint": "Benchmark-Matrix und CAFA-Evaluierung",
@@ -791,6 +794,12 @@
     "subtitle": "Aufgaben des agent-farm Orchestrators",
     "refresh": "Aktualisieren",
     "emptyState": "Keine Aufgaben entsprechen den aktuellen Filtern.",
+    "subnav": {
+      "ariaLabel": "Agent-Farm-Bereichsnavigation",
+      "tasks": "Aufgaben",
+      "plan": "Plan",
+      "cost": "Kosten"
+    },
     "rowCount": "{count} Aufgabe{count, plural, one {} other {n}} angezeigt",
     "filters": {
       "statusLabel": "Status",

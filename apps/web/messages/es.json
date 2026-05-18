@@ -32,6 +32,9 @@
     "thesisHint": "Manuscrito doctoral de PROTEA",
     "support": "Apoyo",
     "supportHint": "Comentarios públicos, dar las gracias",
+    "farmSection": "Granja de agentes",
+    "farmPlan": "Plan",
+    "farmCost": "Coste",
     "pipelineHint": "De secuencia a término GO",
     "dataHint": "Proteoma de referencia, ground truth, query sets",
     "resultsHint": "Matriz de benchmark y evaluación CAFA",
@@ -794,6 +797,12 @@
     "subtitle": "Tareas del orquestador agent-farm",
     "refresh": "Actualizar",
     "emptyState": "Ninguna tarea coincide con los filtros actuales.",
+    "subnav": {
+      "ariaLabel": "Navegación de la sección de la granja de agentes",
+      "tasks": "Tareas",
+      "plan": "Plan",
+      "cost": "Coste"
+    },
     "rowCount": "{count} tarea{count, plural, one {} other {s}} mostrada{count, plural, one {} other {s}}",
     "filters": {
       "statusLabel": "Estado",

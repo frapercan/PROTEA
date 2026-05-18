@@ -229,6 +229,14 @@ test.describe("FARM-UI.8 tablet (768x1024) — /en/farm/ surfaces", () => {
     await expect(page.getByTestId("farm-list-mobile")).toBeVisible();
     await expect(page.getByTestId("farm-status-pill")).toBeVisible();
 
+    // FARM-UI.9 P1.1 the sub-nav is part of the farm layout and shows
+    // Tasks as the active tab on the list root.
+    await expect(page.getByTestId("farm-subnav")).toBeVisible();
+    await expect(page.getByTestId("farm-subnav-tasks")).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+
     await page.waitForLoadState("networkidle");
     await page.screenshot({
       path: "e2e/screenshots/farm-tablet-list.png",

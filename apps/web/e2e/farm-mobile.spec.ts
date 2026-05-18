@@ -242,6 +242,34 @@ test.describe("FARM-UI.8 mobile (390x844) — /en/farm/ surfaces", () => {
     // FarmChrome status pill mounts on /farm/*.
     await expect(page.getByTestId("farm-status-pill")).toBeVisible();
 
+    // FARM-UI.9 P1.1 intra-farm sub-nav is mounted with Tasks active.
+    await expect(page.getByTestId("farm-subnav")).toBeVisible();
+    await expect(page.getByTestId("farm-subnav-tasks")).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    // Next.js normalises trailing slashes at the rendered href; match
+    // both forms so the assertion is independent of the trailing-slash
+    // config flag.
+    await expect(page.getByTestId("farm-subnav-plan")).toHaveAttribute(
+      "href",
+      /^\/en\/farm\/plan\/?$/,
+    );
+    await expect(page.getByTestId("farm-subnav-cost")).toHaveAttribute(
+      "href",
+      /^\/en\/farm\/cost\/?$/,
+    );
+
+    // FARM-UI.9 P1.3 status filter chips have a >= 44 px touch target on
+    // mobile. The "All" chip uses the same size class so we measure the
+    // running status chip which is always rendered.
+    const runningChip = page.getByTestId("farm-status-chip-running");
+    await expect(runningChip).toBeVisible();
+    const chipHeight = await runningChip.evaluate(
+      (el) => (el as HTMLElement).getBoundingClientRect().height,
+    );
+    expect(chipHeight).toBeGreaterThanOrEqual(44);
+
     await page.waitForLoadState("networkidle");
     await page.screenshot({
       path: "e2e/screenshots/farm-mobile-list.png",
@@ -257,6 +285,20 @@ test.describe("FARM-UI.8 mobile (390x844) — /en/farm/ surfaces", () => {
     await expect(page.getByTestId("farm-summary")).toBeVisible();
     // Chrome from FARM-UI.3 stays mounted on the detail page.
     await expect(page.getByTestId("farm-status-pill")).toBeVisible();
+
+    // FARM-UI.9 P1.6 back link is locale-aware (/<locale>/farm, not
+    // bare /farm which depends on Next.js middleware to redirect).
+    await expect(page.getByTestId("farm-detail-back-link")).toHaveAttribute(
+      "href",
+      /^\/en\/farm\/?$/,
+    );
+
+    // FARM-UI.9 P1.1 sub-nav stays mounted on detail and shows Tasks as
+    // the active tab (detail pages belong to the tasks namespace).
+    await expect(page.getByTestId("farm-subnav-tasks")).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
 
     await page.waitForLoadState("networkidle");
     await page.screenshot({
@@ -283,6 +325,12 @@ test.describe("FARM-UI.8 mobile (390x844) — /en/farm/ surfaces", () => {
       /Slice dependency graph/,
     );
     await expect(page.getByTestId("slice-dag-sr-summary")).toBeAttached();
+
+    // FARM-UI.9 P1.1 sub-nav shows Plan as the active tab.
+    await expect(page.getByTestId("farm-subnav-plan")).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
 
     await page.waitForLoadState("networkidle");
     await page.screenshot({
@@ -321,11 +369,92 @@ test.describe("FARM-UI.8 mobile (390x844) — /en/farm/ surfaces", () => {
     });
     expect(measured.effective).toBeGreaterThanOrEqual(12);
 
+    // FARM-UI.9 P1.1 sub-nav shows Cost as the active tab.
+    await expect(page.getByTestId("farm-subnav-cost")).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+
     await page.waitForLoadState("networkidle");
     await page.screenshot({
       path: "e2e/screenshots/farm-mobile-cost.png",
       fullPage: true,
     });
+  });
+
+  // FARM-UI.9 P1.2 — breadcrumb segments under /farm/* are translated
+  // via the nav namespace instead of rendering the raw URL segment.
+  test("breadcrumbs translate farm/plan/cost segments", async ({ page }) => {
+    await mockFarmApi(page);
+    await page.goto("/en/farm/plan");
+    const crumbs = page.getByRole("navigation", { name: "Breadcrumb" });
+    await expect(crumbs).toBeVisible();
+    // "Agent farm" comes from nav.farmSection, "Plan" from nav.farmPlan.
+    // Asserting on innerText covers the full breadcrumb trail; the i18n
+    // keys must be exactly those translated labels (not the raw URL
+    // segments). The raw URL segments would show as the lowercase words
+    // "farm" or "plan" standing alone; we sample each crumb-link text
+    // to make sure no link reads as the raw segment.
+    const text = await crumbs.innerText();
+    expect(text).toContain("Agent farm");
+    expect(text).toContain("Plan");
+    const linkTexts = await crumbs
+      .locator("a, span.text-slate-900")
+      .allInnerTexts();
+    // Each crumb label must be the human label, not a bare URL segment.
+    expect(linkTexts).not.toContain("farm");
+    expect(linkTexts).not.toContain("plan");
+  });
+
+  // FARM-UI.9 P1.5 — tap on a DAG node now surfaces the tooltip in
+  // addition to the existing neighborhood-fade interaction.
+  //
+  // Cytoscape renders into a <canvas>, so its node hit-testing is not
+  // reachable through Playwright DOM locators. To exercise the wiring
+  // the component publishes the live cytoscape instance on
+  // window.__sliceDagCy (test-only seam) and we emit a `tap` event on
+  // the first node from inside the page, which is the exact path the
+  // production runtime takes when a user taps with a finger on a real
+  // device.
+  test("plan DAG tooltip surfaces on tap", async ({ page }) => {
+    await mockFarmApi(page);
+    await page.goto("/en/farm/plan");
+    await expect(page.getByTestId("slice-dag-canvas")).toBeVisible();
+    await expect(
+      page.getByTestId("slice-dag-canvas").locator("canvas").first(),
+    ).toBeVisible();
+    // Wait for the cytoscape instance to be attached.
+    await page.waitForFunction(() => {
+      const w = window as unknown as { __sliceDagCy?: { nodes(): unknown } };
+      return Boolean(w.__sliceDagCy);
+    });
+    // Emit a tap on the first node from inside the page. The real tap
+    // event path on touch devices reaches the same cy.on("tap","node")
+    // handler we wired in P1.5.
+    await page.evaluate(() => {
+      const w = window as unknown as {
+        __sliceDagCy?: {
+          nodes(): {
+            length: number;
+            first(): {
+              emit: (
+                event: string,
+                payload?: { renderedPosition?: { x: number; y: number } },
+              ) => void;
+              renderedPosition: () => { x: number; y: number };
+            };
+          };
+        };
+      };
+      const cy = w.__sliceDagCy;
+      if (!cy) throw new Error("cytoscape instance not attached");
+      const nodes = cy.nodes();
+      if (nodes.length === 0) throw new Error("no nodes laid out");
+      const first = nodes.first();
+      const pos = first.renderedPosition();
+      first.emit("tap", { renderedPosition: pos });
+    });
+    await expect(page.getByTestId("slice-dag-tooltip")).toBeVisible();
   });
 
   // ── No horizontal overflow ────────────────────────────────────────────

@@ -32,6 +32,9 @@
     "thesisHint": "PROTEA 博士论文手稿",
     "support": "支持",
     "supportHint": "公开留言、表达感谢",
+    "farmSection": "智能体农场",
+    "farmPlan": "计划",
+    "farmCost": "费用",
     "pipelineHint": "从序列到 GO 术语",
     "dataHint": "参考蛋白质组、ground truth、查询集",
     "resultsHint": "基准矩阵与 CAFA 评估",
@@ -790,6 +793,12 @@
     "subtitle": "agent-farm 编排器中的任务",
     "refresh": "刷新",
     "emptyState": "没有任务符合当前筛选条件。",
+    "subnav": {
+      "ariaLabel": "智能体农场区段导航",
+      "tasks": "任务",
+      "plan": "计划",
+      "cost": "费用"
+    },
     "rowCount": "显示 {count} 个任务",
     "filters": {
       "statusLabel": "状态",
