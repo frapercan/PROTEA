@@ -301,8 +301,8 @@ Pool sizes, in-process caches, reaper timeouts, HTTP cache TTL.
      - 1
      - Reference data sets en cache por proceso predict.
    * - ``reaper_main_timeout_seconds``
-     - 86400
-     - Timeout duro antes de marcar jobs FAILED en producción (24h).
+     - 21600
+     - Timeout duro antes de marcar jobs FAILED en producción (6h).
    * - ``reaper_default_timeout_seconds``
      - 3600
      - Default constructor de StaleJobReaper.
