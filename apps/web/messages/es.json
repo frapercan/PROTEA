@@ -890,6 +890,11 @@
         "toggleOff": "Clear highlight",
         "noneFound": "No pending-only chain found.",
         "summary": "{count} slice{count, plural, one {} other {s}} on the longest pending chain ({hours}h budget)."
+      },
+      "a11y": {
+        "dagLabel": "Slice dependency graph, {count} slice{count, plural, one {} other {s}}",
+        "dagSummary": "{count} slice{count, plural, one {} other {s}} in this graph.",
+        "dagListTitle": "Slices grouped by status"
       }
     },
     "cost": {

@@ -272,6 +272,18 @@ test.describe("FARM-UI.8 mobile (390x844) — /en/farm/ surfaces", () => {
     await expect(page.getByRole("heading", { name: "Slice DAG" })).toBeVisible();
     await expect(page.getByTestId("slice-dag-canvas")).toBeVisible();
 
+    // FARM-UI.9 P0.2: cytoscape canvas now carries role=img + aria-label
+    // and a visually-hidden slice list summary for screen readers.
+    await expect(page.getByTestId("slice-dag-canvas")).toHaveAttribute(
+      "role",
+      "img",
+    );
+    await expect(page.getByTestId("slice-dag-canvas")).toHaveAttribute(
+      "aria-label",
+      /Slice dependency graph/,
+    );
+    await expect(page.getByTestId("slice-dag-sr-summary")).toBeAttached();
+
     await page.waitForLoadState("networkidle");
     await page.screenshot({
       path: "e2e/screenshots/farm-mobile-plan.png",
@@ -285,6 +297,29 @@ test.describe("FARM-UI.8 mobile (390x844) — /en/farm/ surfaces", () => {
 
     await expect(page.getByTestId("cost-summary-total")).toBeVisible();
     await expect(page.getByTestId("cost-chart-agent")).toBeVisible();
+
+    // FARM-UI.9 P0.1: at 390 px viewport the agent chart SVG must render
+    // labels at >= 12 px effective size. The compact viewBox is 360 wide,
+    // so an 11-12 px SVG fontSize renders close to 1:1 against a ~358 px
+    // chart container after gutters.
+    const chart = page.getByTestId("cost-chart-agent");
+    const measured = await chart.evaluate((svg) => {
+      const el = svg as SVGSVGElement;
+      const vb = el.viewBox.baseVal;
+      const rect = el.getBoundingClientRect();
+      const text = el.querySelector("text");
+      const declared = text
+        ? Number((text as SVGTextElement).getAttribute("font-size") ?? "11")
+        : 0;
+      const scale = vb.width > 0 ? rect.width / vb.width : 1;
+      return {
+        viewBoxW: vb.width,
+        renderedW: rect.width,
+        declared,
+        effective: declared * scale,
+      };
+    });
+    expect(measured.effective).toBeGreaterThanOrEqual(12);
 
     await page.waitForLoadState("networkidle");
     await page.screenshot({

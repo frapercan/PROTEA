@@ -21,6 +21,24 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
+
+// Sub-640px viewports (Tailwind's `sm` breakpoint) need a narrower
+// viewBox so SVG text is not down-scaled below the WCAG-legible
+// threshold. We watch matchMedia once and treat the boolean as a
+// render-time switch in the chart sub-components below. SSR safe: the
+// hook returns false until after mount.
+function useIsCompactViewport(): boolean {
+  const [isCompact, setIsCompact] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia("(max-width: 639px)");
+    const sync = () => setIsCompact(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+  return isCompact;
+}
 import {
   listFarmAgentBudgets,
   listFarmCost,
@@ -78,14 +96,60 @@ function shortDate(iso: string): string {
 // Chart components (SVG, no third-party lib)
 // ────────────────────────────────────────────────────────────────────
 
-const CHART_W = 720;
-const CHART_H = 280;
-const CHART_PAD = { top: 16, right: 16, bottom: 36, left: 56 };
+// Desktop viewBox (wide aspect for landscape charts) and a compact
+// variant for sub-640px viewports. The compact viewBox is sized so
+// that, when rendered at 1:1 against a 358-px chart container (390-px
+// viewport minus 16-px gutter on each side), an 11-12 px SVG font
+// renders at its nominal size. Without this, the desktop 720-wide
+// viewBox would scale down to ~50% on mobile and the labels would
+// render at ~6 px (below WCAG-legible threshold).
+const CHART_W_DESKTOP = 720;
+// 320 wide so a 12-px SVG font renders at ≥ 12 px effective against the
+// ~334-px chart container at 390-px viewport (390 minus 32-px page
+// gutter minus 24-px card padding). Audit acceptance: every label ≥ 12
+// px effective at 390x844.
+const CHART_W_COMPACT = 320;
+const CHART_H_DESKTOP = 280;
+const CHART_H_COMPACT = 220;
+const CHART_PAD_DESKTOP = { top: 16, right: 16, bottom: 36, left: 56 };
+const CHART_PAD_COMPACT = { top: 10, right: 8, bottom: 28, left: 40 };
+// Larger SVG font on compact viewports keeps labels above the 12 px
+// effective threshold called out in the FARM-UI.9 P0 audit.
+const FONT_SM_DESKTOP = 11;
+const FONT_SM_COMPACT = 12;
+const FONT_MD_DESKTOP = 12;
+const FONT_MD_COMPACT = 13;
 
-function chartInner() {
+type ChartDims = {
+  w: number;
+  h: number;
+  pad: { top: number; right: number; bottom: number; left: number };
+  fontSm: number;
+  fontMd: number;
+};
+
+function chartDims(compact: boolean): ChartDims {
+  return compact
+    ? {
+        w: CHART_W_COMPACT,
+        h: CHART_H_COMPACT,
+        pad: CHART_PAD_COMPACT,
+        fontSm: FONT_SM_COMPACT,
+        fontMd: FONT_MD_COMPACT,
+      }
+    : {
+        w: CHART_W_DESKTOP,
+        h: CHART_H_DESKTOP,
+        pad: CHART_PAD_DESKTOP,
+        fontSm: FONT_SM_DESKTOP,
+        fontMd: FONT_MD_DESKTOP,
+      };
+}
+
+function chartInner(dims: ChartDims) {
   return {
-    width: CHART_W - CHART_PAD.left - CHART_PAD.right,
-    height: CHART_H - CHART_PAD.top - CHART_PAD.bottom,
+    width: dims.w - dims.pad.left - dims.pad.right,
+    height: dims.h - dims.pad.top - dims.pad.bottom,
   };
 }
 
@@ -96,6 +160,7 @@ function AgentBarChart({
   budgetLabel,
   overBudgetLabel,
   daysLabel,
+  compact,
 }: {
   totals: AgentTotal[];
   windowDays: number;
@@ -103,6 +168,7 @@ function AgentBarChart({
   budgetLabel: string;
   overBudgetLabel: string;
   daysLabel: string;
+  compact: boolean;
 }) {
   if (totals.length === 0) {
     return (
@@ -114,7 +180,8 @@ function AgentBarChart({
       </div>
     );
   }
-  const inner = chartInner();
+  const dims = chartDims(compact);
+  const inner = chartInner(dims);
   // Bar chart is horizontal: one row per agent, length proportional to
   // the row's window-average daily spend. Budget is rendered as a tick
   // mark at the matching x-position so over-budget agents extend past
@@ -122,14 +189,14 @@ function AgentBarChart({
   const dailyAvgs = totals.map((t) => (windowDays > 0 ? t.usd / windowDays : t.usd));
   const dailyCaps = totals.map((t) => t.budget ?? 0);
   const maxValue = Math.max(0.001, ...dailyAvgs, ...dailyCaps);
-  const rowH = 26;
-  const rowGap = 6;
-  const fullH = totals.length * (rowH + rowGap) + CHART_PAD.top + CHART_PAD.bottom;
+  const rowH = compact ? 22 : 26;
+  const rowGap = compact ? 5 : 6;
+  const fullH = totals.length * (rowH + rowGap) + dims.pad.top + dims.pad.bottom;
 
   return (
-    <div className="rounded-lg border bg-white p-3 shadow-sm overflow-x-auto">
+    <div className="rounded-lg border bg-white p-3 shadow-sm">
       <svg
-        viewBox={`0 0 ${CHART_W} ${fullH}`}
+        viewBox={`0 0 ${dims.w} ${fullH}`}
         className="w-full h-auto"
         role="img"
         aria-label={daysLabel}
@@ -137,29 +204,29 @@ function AgentBarChart({
       >
         {/* X-axis baseline */}
         <line
-          x1={CHART_PAD.left}
-          x2={CHART_PAD.left + inner.width}
-          y1={fullH - CHART_PAD.bottom}
-          y2={fullH - CHART_PAD.bottom}
+          x1={dims.pad.left}
+          x2={dims.pad.left + inner.width}
+          y1={fullH - dims.pad.bottom}
+          y2={fullH - dims.pad.bottom}
           stroke="#cbd5e1"
         />
         {/* X-axis ticks: 0, mid, max */}
         {[0, 0.5, 1].map((p) => {
-          const x = CHART_PAD.left + p * inner.width;
+          const x = dims.pad.left + p * inner.width;
           return (
             <g key={p}>
               <line
                 x1={x}
                 x2={x}
-                y1={fullH - CHART_PAD.bottom}
-                y2={fullH - CHART_PAD.bottom + 4}
+                y1={fullH - dims.pad.bottom}
+                y2={fullH - dims.pad.bottom + 4}
                 stroke="#94a3b8"
               />
               <text
                 x={x}
-                y={fullH - CHART_PAD.bottom + 18}
+                y={fullH - dims.pad.bottom + 18}
                 textAnchor="middle"
-                fontSize={11}
+                fontSize={dims.fontSm}
                 fill="#64748b"
               >
                 {formatUsd(p * maxValue)}
@@ -168,25 +235,25 @@ function AgentBarChart({
           );
         })}
         {totals.map((t, i) => {
-          const y = CHART_PAD.top + i * (rowH + rowGap);
+          const y = dims.pad.top + i * (rowH + rowGap);
           const w = (dailyAvgs[i] / maxValue) * inner.width;
           const capX = t.budget != null
-            ? CHART_PAD.left + (t.budget / maxValue) * inner.width
+            ? dims.pad.left + (t.budget / maxValue) * inner.width
             : null;
           const fill = t.overBudget ? "#dc2626" : "#6366f1";
           return (
             <g key={t.agent} data-testid={`cost-bar-${t.agent}`}>
               <text
-                x={CHART_PAD.left - 8}
+                x={dims.pad.left - 6}
                 y={y + rowH / 2 + 4}
                 textAnchor="end"
-                fontSize={12}
+                fontSize={dims.fontMd}
                 fill="#334155"
               >
                 {t.agent}
               </text>
               <rect
-                x={CHART_PAD.left}
+                x={dims.pad.left}
                 y={y}
                 width={Math.max(0, w)}
                 height={rowH}
@@ -202,9 +269,9 @@ function AgentBarChart({
                 </title>
               </rect>
               <text
-                x={CHART_PAD.left + Math.max(0, w) + 6}
+                x={dims.pad.left + Math.max(0, w) + 6}
                 y={y + rowH / 2 + 4}
-                fontSize={11}
+                fontSize={dims.fontSm}
                 fill="#475569"
               >
                 {formatUsd(dailyAvgs[i])}/day
@@ -235,10 +302,14 @@ function ModelStackedAreaChart({
   axis,
   models,
   emptyLabel,
+  ariaLabel,
+  compact,
 }: {
   axis: ModelDailyPoint[];
   models: string[];
   emptyLabel: string;
+  ariaLabel: string;
+  compact: boolean;
 }) {
   const hasData = axis.some((p) => p.total > 0);
   if (!hasData || models.length === 0) {
@@ -251,13 +322,14 @@ function ModelStackedAreaChart({
       </div>
     );
   }
-  const inner = chartInner();
+  const dims = chartDims(compact);
+  const inner = chartInner(dims);
   const maxTotal = Math.max(0.001, ...axis.map((p) => p.total));
   const xStep = axis.length > 1 ? inner.width / (axis.length - 1) : 0;
   const xAt = (i: number) =>
-    axis.length === 1 ? CHART_PAD.left + inner.width / 2 : CHART_PAD.left + i * xStep;
+    axis.length === 1 ? dims.pad.left + inner.width / 2 : dims.pad.left + i * xStep;
   const yAt = (v: number) =>
-    CHART_PAD.top + inner.height - (v / maxTotal) * inner.height;
+    dims.pad.top + inner.height - (v / maxTotal) * inner.height;
 
   // Build stacked polygons: each model's band is bounded above by the
   // cumulative total *including* the band and below by the cumulative
@@ -293,30 +365,31 @@ function ModelStackedAreaChart({
     : [0, Math.floor(axis.length / 2), axis.length - 1];
 
   return (
-    <div className="rounded-lg border bg-white p-3 shadow-sm overflow-x-auto">
+    <div className="rounded-lg border bg-white p-3 shadow-sm">
       <svg
-        viewBox={`0 0 ${CHART_W} ${CHART_H}`}
+        viewBox={`0 0 ${dims.w} ${dims.h}`}
         className="w-full h-auto"
         role="img"
+        aria-label={ariaLabel}
         data-testid="cost-chart-model"
       >
         {/* Y-axis grid + labels */}
         {[0, 0.25, 0.5, 0.75, 1].map((p) => {
-          const y = CHART_PAD.top + (1 - p) * inner.height;
+          const y = dims.pad.top + (1 - p) * inner.height;
           return (
             <g key={p}>
               <line
-                x1={CHART_PAD.left}
-                x2={CHART_PAD.left + inner.width}
+                x1={dims.pad.left}
+                x2={dims.pad.left + inner.width}
                 y1={y}
                 y2={y}
                 stroke="#e2e8f0"
               />
               <text
-                x={CHART_PAD.left - 6}
+                x={dims.pad.left - 6}
                 y={y + 4}
                 textAnchor="end"
-                fontSize={11}
+                fontSize={dims.fontSm}
                 fill="#64748b"
               >
                 {formatUsd(p * maxTotal)}
@@ -339,9 +412,9 @@ function ModelStackedAreaChart({
           <text
             key={i}
             x={xAt(i)}
-            y={CHART_PAD.top + inner.height + 18}
+            y={dims.pad.top + inner.height + 18}
             textAnchor="middle"
-            fontSize={11}
+            fontSize={dims.fontSm}
             fill="#64748b"
           >
             {shortDate(axis[i].date)}
@@ -370,9 +443,13 @@ function ModelStackedAreaChart({
 function DayLineChart({
   series,
   emptyLabel,
+  ariaLabel,
+  compact,
 }: {
   series: DailyTotal[];
   emptyLabel: string;
+  ariaLabel: string;
+  compact: boolean;
 }) {
   const hasData = series.some((d) => d.usd > 0);
   if (!hasData) {
@@ -385,46 +462,52 @@ function DayLineChart({
       </div>
     );
   }
-  const inner = chartInner();
+  const dims = chartDims(compact);
+  const inner = chartInner(dims);
   const maxValue = Math.max(0.001, ...series.map((d) => d.usd));
   const xStep = series.length > 1 ? inner.width / (series.length - 1) : 0;
   const xAt = (i: number) =>
-    series.length === 1 ? CHART_PAD.left + inner.width / 2 : CHART_PAD.left + i * xStep;
+    series.length === 1 ? dims.pad.left + inner.width / 2 : dims.pad.left + i * xStep;
   const yAt = (v: number) =>
-    CHART_PAD.top + inner.height - (v / maxValue) * inner.height;
+    dims.pad.top + inner.height - (v / maxValue) * inner.height;
   const path = series
     .map((d, i) => `${i === 0 ? "M" : "L"}${xAt(i)},${yAt(d.usd)}`)
     .join(" ");
+  // On compact viewports the dense 60-day series can crowd labels;
+  // drop the quarter-points so first / middle / last remain legible.
   const tickIdxs = series.length <= 1
     ? [0]
     : series.length < 4
     ? [0, series.length - 1]
+    : compact
+    ? [0, Math.floor(series.length / 2), series.length - 1]
     : [0, Math.floor(series.length / 4), Math.floor(series.length / 2), Math.floor((3 * series.length) / 4), series.length - 1];
 
   return (
-    <div className="rounded-lg border bg-white p-3 shadow-sm overflow-x-auto">
+    <div className="rounded-lg border bg-white p-3 shadow-sm">
       <svg
-        viewBox={`0 0 ${CHART_W} ${CHART_H}`}
+        viewBox={`0 0 ${dims.w} ${dims.h}`}
         className="w-full h-auto"
         role="img"
+        aria-label={ariaLabel}
         data-testid="cost-chart-day"
       >
         {[0, 0.25, 0.5, 0.75, 1].map((p) => {
-          const y = CHART_PAD.top + (1 - p) * inner.height;
+          const y = dims.pad.top + (1 - p) * inner.height;
           return (
             <g key={p}>
               <line
-                x1={CHART_PAD.left}
-                x2={CHART_PAD.left + inner.width}
+                x1={dims.pad.left}
+                x2={dims.pad.left + inner.width}
                 y1={y}
                 y2={y}
                 stroke="#e2e8f0"
               />
               <text
-                x={CHART_PAD.left - 6}
+                x={dims.pad.left - 6}
                 y={y + 4}
                 textAnchor="end"
-                fontSize={11}
+                fontSize={dims.fontSm}
                 fill="#64748b"
               >
                 {formatUsd(p * maxValue)}
@@ -456,9 +539,9 @@ function DayLineChart({
           <text
             key={i}
             x={xAt(i)}
-            y={CHART_PAD.top + inner.height + 18}
+            y={dims.pad.top + inner.height + 18}
             textAnchor="middle"
-            fontSize={11}
+            fontSize={dims.fontSm}
             fill="#64748b"
           >
             {shortDate(series[i].date)}
@@ -476,6 +559,7 @@ function DayLineChart({
 export default function FarmCostPage() {
   const t = useTranslations("farm.cost");
   const toast = useToast();
+  const compact = useIsCompactViewport();
   const [buckets, setBuckets] = useState<FarmCostBucket[]>([]);
   const [budgets, setBudgets] = useState<FarmAgentBudget[]>([]);
   const [loading, setLoading] = useState(true);
@@ -556,7 +640,7 @@ export default function FarmCostPage() {
     <>
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-semibold">{t("title")}</h1>
-        <span className="text-xs text-slate-500">{t("subtitle")}</span>
+        <span className="text-xs text-slate-600">{t("subtitle")}</span>
         <button
           type="button"
           onClick={() => void refresh()}
@@ -568,7 +652,7 @@ export default function FarmCostPage() {
 
       <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="rounded-lg border bg-white p-3 shadow-sm">
-          <p className="text-xs uppercase tracking-wide text-slate-500">
+          <p className="text-xs uppercase tracking-wide text-slate-600">
             {t("summary.total")}
           </p>
           <p
@@ -579,7 +663,7 @@ export default function FarmCostPage() {
           </p>
         </div>
         <div className="rounded-lg border bg-white p-3 shadow-sm">
-          <p className="text-xs uppercase tracking-wide text-slate-500">
+          <p className="text-xs uppercase tracking-wide text-slate-600">
             {t("summary.tasks")}
           </p>
           <p
@@ -590,7 +674,7 @@ export default function FarmCostPage() {
           </p>
         </div>
         <div className="rounded-lg border bg-white p-3 shadow-sm">
-          <p className="text-xs uppercase tracking-wide text-slate-500">
+          <p className="text-xs uppercase tracking-wide text-slate-600">
             {t("summary.window")}
           </p>
           <p className="mt-1 text-xl font-semibold text-slate-800 tabular-nums">
@@ -604,7 +688,7 @@ export default function FarmCostPage() {
         data-testid="cost-controls"
       >
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-xs font-medium text-slate-500 mr-1">
+          <span className="text-xs font-medium text-slate-600 mr-1">
             {t("controls.viewLabel")}:
           </span>
           {VIEWS.map((v) => (
@@ -626,7 +710,7 @@ export default function FarmCostPage() {
         </div>
         {view === "agent" && (
           <div className="flex flex-wrap items-center gap-1.5" data-testid="cost-window-controls">
-            <span className="text-xs font-medium text-slate-500 mr-1">
+            <span className="text-xs font-medium text-slate-600 mr-1">
               {t("controls.windowLabel")}:
             </span>
             {WINDOW_OPTIONS.map((w) => (
@@ -672,7 +756,7 @@ export default function FarmCostPage() {
           <>
             {view === "agent" && (
               <div className="space-y-3">
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-slate-600">
                   {t("captions.agent", { days: windowDays })}
                 </p>
                 <AgentBarChart
@@ -682,6 +766,7 @@ export default function FarmCostPage() {
                   budgetLabel={t("legend.budget")}
                   overBudgetLabel={t("legend.overBudget")}
                   daysLabel={t("captions.agent", { days: windowDays })}
+                  compact={compact}
                 />
                 <div
                   className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border bg-slate-50 px-4 py-2 text-xs text-slate-600"
@@ -707,22 +792,29 @@ export default function FarmCostPage() {
             )}
             {view === "model" && (
               <div className="space-y-3">
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-slate-600">
                   {t("captions.model", { days: MODEL_VIEW_DAYS })}
                 </p>
                 <ModelStackedAreaChart
                   axis={modelDay.axis}
                   models={modelDay.models}
                   emptyLabel={t("emptyState")}
+                  ariaLabel={t("captions.model", { days: MODEL_VIEW_DAYS })}
+                  compact={compact}
                 />
               </div>
             )}
             {view === "day" && (
               <div className="space-y-3">
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-slate-600">
                   {t("captions.day", { days: DAY_VIEW_DAYS })}
                 </p>
-                <DayLineChart series={dayTotals} emptyLabel={t("emptyState")} />
+                <DayLineChart
+                  series={dayTotals}
+                  emptyLabel={t("emptyState")}
+                  ariaLabel={t("captions.day", { days: DAY_VIEW_DAYS })}
+                  compact={compact}
+                />
               </div>
             )}
           </>

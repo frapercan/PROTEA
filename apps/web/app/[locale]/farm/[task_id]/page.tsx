@@ -188,43 +188,43 @@ export default function FarmTaskDetail({
           <div className="flex flex-wrap items-center gap-3">
             <StatusBadge status={task.status} />
             <span className="font-mono text-xs text-slate-600">{task.id}</span>
-            <span className="text-sm text-slate-500">
+            <span className="text-sm text-slate-600">
               {task.agent_name} · {task.kind}
             </span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1 text-sm">
             <div>
-              <span className="text-slate-500">{t("detail.created")}:</span>{" "}
+              <span className="text-slate-600">{t("detail.created")}:</span>{" "}
               {formatDate(task.created_at)}
             </div>
             <div>
-              <span className="text-slate-500">{t("detail.started")}:</span>{" "}
+              <span className="text-slate-600">{t("detail.started")}:</span>{" "}
               {formatDate(task.started_at)}
             </div>
             <div>
-              <span className="text-slate-500">{t("detail.ended")}:</span>{" "}
+              <span className="text-slate-600">{t("detail.ended")}:</span>{" "}
               {formatDate(task.ended_at)}
             </div>
             <div>
-              <span className="text-slate-500">{t("detail.model")}:</span>{" "}
+              <span className="text-slate-600">{t("detail.model")}:</span>{" "}
               {task.model ?? "-"}
             </div>
             {task.exit_code != null && (
               <div>
-                <span className="text-slate-500">{t("detail.exitCode")}:</span>{" "}
+                <span className="text-slate-600">{t("detail.exitCode")}:</span>{" "}
                 <span className="font-mono">{task.exit_code}</span>
               </div>
             )}
             {task.pid != null && (
               <div>
-                <span className="text-slate-500">{t("detail.pid")}:</span>{" "}
+                <span className="text-slate-600">{t("detail.pid")}:</span>{" "}
                 <span className="font-mono">{task.pid}</span>
               </div>
             )}
             {task.worktree && (
               <div className="md:col-span-2">
-                <span className="text-slate-500">{t("detail.worktree")}:</span>{" "}
+                <span className="text-slate-600">{t("detail.worktree")}:</span>{" "}
                 <span className="font-mono text-xs text-slate-700 break-all">
                   {task.worktree}
                 </span>
@@ -232,7 +232,7 @@ export default function FarmTaskDetail({
             )}
             {task.worktree_owner_repo && (
               <div className="md:col-span-2">
-                <span className="text-slate-500">{t("detail.ownerRepo")}:</span>{" "}
+                <span className="text-slate-600">{t("detail.ownerRepo")}:</span>{" "}
                 <span className="font-mono text-xs text-slate-700">
                   {task.worktree_owner_repo}
                 </span>
@@ -242,7 +242,7 @@ export default function FarmTaskDetail({
 
           {task.spawn_args && (
             <details className="text-sm">
-              <summary className="cursor-pointer text-slate-500 hover:text-slate-700">
+              <summary className="cursor-pointer text-slate-600 hover:text-slate-700">
                 {t("detail.spawnArgs")}
               </summary>
               <pre className="mt-1 rounded bg-slate-50 p-2 text-xs overflow-auto whitespace-pre-wrap break-words">
@@ -260,7 +260,7 @@ export default function FarmTaskDetail({
             {t("detail.diffRange")}
           </h2>
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="text-slate-500">{t("detail.shaBefore")}:</span>
+            <span className="text-slate-600">{t("detail.shaBefore")}:</span>
             {ghBeforeUrl ? (
               <a
                 href={ghBeforeUrl}
@@ -274,7 +274,7 @@ export default function FarmTaskDetail({
               <span className="font-mono">{shortSha(result.sha_before)}</span>
             )}
             <span className="text-slate-400">→</span>
-            <span className="text-slate-500">{t("detail.shaAfter")}:</span>
+            <span className="text-slate-600">{t("detail.shaAfter")}:</span>
             {ghAfterUrl ? (
               <a
                 href={ghAfterUrl}

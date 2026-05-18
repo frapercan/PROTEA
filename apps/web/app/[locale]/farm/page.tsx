@@ -122,7 +122,7 @@ export default function FarmListPage() {
     <>
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-semibold">{t("title")}</h1>
-        <span className="text-xs text-slate-500">{t("subtitle")}</span>
+        <span className="text-xs text-slate-600">{t("subtitle")}</span>
         <button
           onClick={refresh}
           className="ml-auto rounded-md border bg-white px-3 py-1.5 text-sm hover:bg-slate-50"
@@ -135,7 +135,7 @@ export default function FarmListPage() {
       <div className="mt-4 space-y-3 rounded-lg border bg-white p-3 shadow-sm">
         {/* Status chips */}
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-xs font-medium text-slate-500 mr-1">
+          <span className="text-xs font-medium text-slate-600 mr-1">
             {t("filters.statusLabel")}:
           </span>
           <button
@@ -166,7 +166,7 @@ export default function FarmListPage() {
 
         {/* Agent input + window radio */}
         <div className="flex flex-wrap items-center gap-3">
-          <label className="flex items-center gap-2 text-xs text-slate-500">
+          <label className="flex items-center gap-2 text-xs text-slate-600">
             {t("filters.agentLabel")}:
             <input
               type="text"
@@ -177,7 +177,7 @@ export default function FarmListPage() {
             />
           </label>
           <div className="flex items-center gap-1.5">
-            <span className="text-xs font-medium text-slate-500 mr-1">
+            <span className="text-xs font-medium text-slate-600 mr-1">
               {t("filters.windowLabel")}:
             </span>
             {WINDOWS.map((w) => (
@@ -241,11 +241,11 @@ export default function FarmListPage() {
               <p className="mt-1.5 text-sm font-medium text-slate-800 truncate">
                 {task.id}
               </p>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-slate-600">
                 {task.agent_name}
                 {task.model ? ` · ${task.model}` : ""}
               </p>
-              <p className="mt-0.5 text-xs text-slate-500">
+              <p className="mt-0.5 text-xs text-slate-600">
                 {t("table.duration")}:{" "}
                 {formatDuration(task.started_at, task.ended_at)}
               </p>
@@ -258,7 +258,7 @@ export default function FarmListPage() {
         className="mt-4 hidden lg:block overflow-hidden rounded-lg border bg-white shadow-sm"
         data-testid="farm-list-desktop"
       >
-        <div className="grid grid-cols-[1fr_180px_140px_140px_140px_180px] gap-2 border-b bg-slate-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+        <div className="grid grid-cols-[1fr_180px_140px_140px_140px_180px] gap-2 border-b bg-slate-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-600">
           <div>{t("table.taskId")}</div>
           <div>{t("table.agent")}</div>
           <div>{t("table.status")}</div>
@@ -287,13 +287,13 @@ export default function FarmListPage() {
               <div>
                 <StatusBadge status={task.status} />
               </div>
-              <div className="text-slate-500 text-xs">
+              <div className="text-slate-600 text-xs">
                 {formatRelative(task.started_at ?? task.created_at)}
               </div>
-              <div className="text-slate-500 text-xs">
+              <div className="text-slate-600 text-xs">
                 {formatDuration(task.started_at, task.ended_at)}
               </div>
-              <div className="text-slate-500 text-xs truncate">
+              <div className="text-slate-600 text-xs truncate">
                 {task.model ?? "-"}
               </div>
             </Link>
