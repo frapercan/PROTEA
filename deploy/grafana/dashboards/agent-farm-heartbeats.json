@@ -1,0 +1,251 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Structured heartbeat / lifecycle events emitted by the agent-farm tmux session, shipped to Loki via the tail-events-to-loki sidecar (or the loki-docker-driver when the farm runs inside compose). Each line carries task_id and agent_name labels plus a JSON payload field for filtering. Panels group by agent_name; the bottom row exposes a per-task drill-down used by the alert rule (see provisioning/alerting/rules.yml).",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [],
+      "targetBlank": true,
+      "title": "Farm dashboard (Next.js)",
+      "tooltip": "Open the /en/farm view in the PROTEA frontend",
+      "type": "link",
+      "url": "https://protea.ngrok.app/en/farm/"
+    }
+  ],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": { "type": "loki", "uid": "protea-loki" },
+      "description": "Live tail of heartbeat lines from all agent-farm tasks. Filter with the agent and level variables above; click a line to see the JSON payload (task_id, kind, message).",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "prettifyLogMessage": true,
+        "showCommonLabels": false,
+        "showLabels": false,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "pluginVersion": "11.3.0",
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "protea-loki" },
+          "editorMode": "code",
+          "expr": "{compose_project=\"agent-farm\", agent_name=~\"$agent\"} | json | level=~\"$level\"",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Heartbeat stream",
+      "type": "logs"
+    },
+    {
+      "datasource": { "type": "loki", "uid": "protea-loki" },
+      "description": "Count of heartbeat lines per agent over time, all levels. Useful for spotting an agent that has gone silent (the heartbeat cadence stops well before the tmux pane crashes).",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "stacking": { "group": "A", "mode": "normal" }
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 12 },
+      "id": 2,
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "protea-loki" },
+          "editorMode": "code",
+          "expr": "sum by (agent_name) (count_over_time({compose_project=\"agent-farm\", agent_name=~\"$agent\"}[$__interval]))",
+          "legendFormat": "{{agent_name}}",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Heartbeats per agent",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "loki", "uid": "protea-loki" },
+      "description": "Count of error-level heartbeats per agent over time. The unified alert rule (3 in 5 minutes) fires on this same query, so any persistent spike above zero will produce a Slack message.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 12 },
+      "id": 3,
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "protea-loki" },
+          "editorMode": "code",
+          "expr": "sum by (agent_name) (count_over_time({compose_project=\"agent-farm\", agent_name=~\"$agent\"} | json | level=\"error\" [$__interval]))",
+          "legendFormat": "{{agent_name}}",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Error heartbeats per agent",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "loki", "uid": "protea-loki" },
+      "description": "Per-task error rollup over the last 5 minutes, matching the alert rule window. A row at value >= 3 means the alert will (or just did) fire for that task; the task_id column links into the Next.js /en/farm/<task_id> detail view via the dashboard data-link.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": { "align": "auto", "displayMode": "auto" },
+          "links": [
+            {
+              "title": "Open task in farm dashboard",
+              "url": "https://protea.ngrok.app/en/farm/${__data.fields.task_id}/",
+              "targetBlank": true
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red", "value": 3 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 21 },
+      "id": 4,
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "errors_5m", "desc": true }]
+      },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "protea-loki" },
+          "editorMode": "code",
+          "expr": "sum by (task_id, agent_name) (count_over_time({compose_project=\"agent-farm\", agent_name=~\"$agent\"} | json | level=\"error\" [5m]))",
+          "instant": true,
+          "legendFormat": "{{task_id}}",
+          "queryType": "instant",
+          "refId": "A"
+        }
+      ],
+      "title": "Error count by task (last 5 minutes)",
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": { "valueLabel": "errors_5m" }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true },
+            "indexByName": { "task_id": 0, "agent_name": 1, "Value": 2 },
+            "renameByName": { "Value": "errors_5m" }
+          }
+        }
+      ],
+      "type": "table"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["agent-farm", "loki", "heartbeats", "alerts"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": true, "text": ["All"], "value": ["$__all"] },
+        "datasource": { "type": "loki", "uid": "protea-loki" },
+        "definition": "label_values({compose_project=\"agent-farm\"}, agent_name)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "agent",
+        "multi": true,
+        "name": "agent",
+        "options": [],
+        "query": {
+          "label": "agent_name",
+          "refId": "LokiVariableQueryEditor-VariableQuery",
+          "stream": "{compose_project=\"agent-farm\"}",
+          "type": 1
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": { "selected": false, "text": "All", "value": "$__all" },
+        "hide": 0,
+        "includeAll": true,
+        "label": "level",
+        "multi": true,
+        "name": "level",
+        "options": [
+          { "selected": true, "text": "All", "value": "$__all" },
+          { "selected": false, "text": "info", "value": "info" },
+          { "selected": false, "text": "warn", "value": "warn" },
+          { "selected": false, "text": "error", "value": "error" }
+        ],
+        "query": "info,warn,error",
+        "queryValue": "",
+        "skipUrlSync": false,
+        "type": "custom"
+      }
+    ]
+  },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "agent-farm / Heartbeats",
+  "uid": "agent-farm-heartbeats",
+  "version": 1,
+  "weekStart": ""
+}
