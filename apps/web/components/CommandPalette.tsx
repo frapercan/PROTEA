@@ -3,6 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { useToast } from "@/components/Toast";
+import {
+  cleanupFarm,
+  killFarmTask,
+  readFarmToken,
+  spawnFarmTask,
+} from "@/lib/farmApi";
 
 /**
  * Global cmd+k / ctrl+k command palette.
@@ -13,14 +20,27 @@ import { useTranslations } from "next-intl";
  * parametric jumps when the query looks like a UUID or a UniProt
  * accession (open job / open protein).
  *
+ * FARM-UI.6 adds a ``farm:`` namespace with action verbs that hit the
+ * agent-farm sidecar (see lib/farmApi.ts):
+ *   farm: spawn next pickable     POST /spawn  {next_pickable: true}
+ *   farm: kill <task_id>          POST /tasks/<id>/kill
+ *   farm: cleanup                 POST /cleanup {apply: true}
+ *   farm: view <task_id>          navigation only, not a write
+ *
+ * Write verbs require an authenticated session (the AuthChip is not in
+ * "anonymous" mode). The same protea.bearer / protea.apiKey value
+ * doubles as the X-Farm-Token shared secret; the deployment runbook
+ * provisions the sidecar with the same value.
+ *
  * Keyboard:
- *   ⌘K / Ctrl+K   open
- *   Esc            close
- *   ↑ / ↓          move selection
- *   Enter          activate
+ *   Cmd+K / Ctrl+K   open
+ *   Esc              close
+ *   ArrowUp/Down     move selection
+ *   Enter            activate
  */
 
-type Item = {
+type NavItem = {
+  kind: "nav";
   id: string;
   label: string;
   href: string;
@@ -28,8 +48,27 @@ type Item = {
   hint?: string;
 };
 
+type ActionItem = {
+  kind: "action";
+  id: string;
+  label: string;
+  group: string;
+  hint?: string;
+  action: () => Promise<void> | void;
+  requiresAuth: boolean;
+  authDisabledReason?: string;
+};
+
+type Item = NavItem | ActionItem;
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ACC_RE = /^[A-NR-Z][0-9][A-Z0-9]{3}[0-9](-\d+)?$/i; // UniProt accession
+
+// A task_id from agent-farm: ``<agent>-<unix-ts>-<hex4>`` (lowercase
+// alpha + digits + dash). Liberal enough to accept agents with mixed
+// case and longer hex suffixes; rejects shell metachars so a stray
+// paste cannot exfiltrate beyond the route param.
+const TASK_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{2,127}$/;
 
 function isInputElement(el: EventTarget | null): boolean {
   if (!(el instanceof HTMLElement)) return false;
@@ -72,12 +111,17 @@ export function CommandPalette() {
   const router = useRouter();
   const pathname = usePathname();
   const t = useTranslations("nav");
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIdx, setActiveIdx] = useState(0);
+  const [busy, setBusy] = useState(false);
+  // Re-evaluated whenever the palette opens so a sign-in in another
+  // tab flips the verb state without a manual refresh.
+  const [authToken, setAuthToken] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const baseItems: Item[] = useMemo(() => {
+  const baseItems: NavItem[] = useMemo(() => {
     const tk = (k: string, fallback: string): string => {
       try {
         // Type-narrow `as any` because next-intl types only ship known keys.
@@ -86,30 +130,156 @@ export function CommandPalette() {
         return fallback;
       }
     };
+    const k = (
+      id: string,
+      label: string,
+      href: string,
+      group: string,
+    ): NavItem => ({ kind: "nav", id, label, href, group });
     return [
-      { id: "home",         label: tk("home", "Home"),                            href: "/",                       group: "Navigate" },
-      { id: "benchmark",    label: tk("benchmark", "Benchmark"),                  href: "/benchmark",              group: "Navigate" },
-      { id: "proteins",     label: tk("proteins", "Proteins"),                    href: "/proteins",               group: "Data" },
-      { id: "annotations",  label: tk("annotations", "Annotations"),              href: "/annotations",            group: "Data" },
-      { id: "querySets",    label: tk("querySets", "Query Sets"),                 href: "/query-sets",             group: "Data" },
-      { id: "embeddings",   label: tk("embeddings", "Embeddings"),                href: "/embeddings",             group: "Pipeline" },
-      { id: "fa",           label: tk("functionalAnnotation", "Functional Annotation"), href: "/functional-annotation", group: "Pipeline" },
-      { id: "reranker",     label: tk("reranker", "Re-ranker"),                   href: "/reranker",               group: "Pipeline" },
-      { id: "scoring",      label: tk("scoring", "Scoring"),                      href: "/scoring",                group: "Results" },
-      { id: "evaluation",   label: tk("evaluation", "Evaluation"),                href: "/evaluation",             group: "Results" },
-      { id: "jobs",         label: tk("jobs", "Jobs"),                            href: "/jobs",                   group: "System" },
-      { id: "maintenance",  label: tk("maintenance", "Maintenance"),              href: "/maintenance",            group: "System" },
-      { id: "stack",        label: "Stack",                                       href: "/stack",                  group: "System" },
-      { id: "support",      label: "Support",                                     href: "/support",                group: "System" },
+      k("home",        tk("home", "Home"),                                   "/",                       "Navigate"),
+      k("benchmark",   tk("benchmark", "Benchmark"),                         "/benchmark",              "Navigate"),
+      k("proteins",    tk("proteins", "Proteins"),                           "/proteins",               "Data"),
+      k("annotations", tk("annotations", "Annotations"),                     "/annotations",            "Data"),
+      k("querySets",   tk("querySets", "Query Sets"),                        "/query-sets",             "Data"),
+      k("embeddings",  tk("embeddings", "Embeddings"),                       "/embeddings",             "Pipeline"),
+      k("fa",          tk("functionalAnnotation", "Functional Annotation"),  "/functional-annotation",  "Pipeline"),
+      k("reranker",    tk("reranker", "Re-ranker"),                          "/reranker",               "Pipeline"),
+      k("scoring",     tk("scoring", "Scoring"),                             "/scoring",                "Results"),
+      k("evaluation",  tk("evaluation", "Evaluation"),                       "/evaluation",             "Results"),
+      k("jobs",        tk("jobs", "Jobs"),                                   "/jobs",                   "System"),
+      k("maintenance", tk("maintenance", "Maintenance"),                     "/maintenance",            "System"),
+      k("stack",       "Stack",                                              "/stack",                  "System"),
+      k("support",     "Support",                                            "/support",                "System"),
+      k("farm",        "Agent farm",                                         "/farm",                   "System"),
     ];
   }, [t]);
 
-  // Parametric items: only show when the query matches a known shape.
-  const parametricItems: Item[] = useMemo(() => {
+  const close = useCallback(() => {
+    setOpen(false);
+    setQuery("");
+    setActiveIdx(0);
+  }, []);
+
+  const navigate = useCallback(
+    (href: string) => {
+      const prefix = localePrefix(pathname);
+      router.push(`${prefix}${href}`);
+      close();
+    },
+    [router, pathname, close],
+  );
+
+  // Farm verbs. Only appear when the query starts with "farm" (or
+  // its substring) so the namespace is opt-in and does not clutter
+  // the default catalog. Authenticated check uses readFarmToken();
+  // the disabled-tooltip path keeps the verb visible but unclickable.
+  const farmItems: ActionItem[] = useMemo(() => {
     const q = query.trim();
-    const out: Item[] = [];
+    if (!q || !/^f|^farm/i.test(q)) return [];
+
+    const authed = authToken !== null;
+    const tokenOrThrow = (): string => {
+      const token = readFarmToken();
+      if (!token) {
+        throw new Error("auth required");
+      }
+      return token;
+    };
+
+    const spawnNext: ActionItem = {
+      kind: "action",
+      id: "farm-spawn-next",
+      label: "farm: spawn next pickable",
+      group: "Farm",
+      hint: "POST /spawn",
+      requiresAuth: true,
+      authDisabledReason: "Sign in to spawn farm tasks",
+      action: async () => {
+        const token = tokenOrThrow();
+        const res = await spawnFarmTask({ next_pickable: true }, token);
+        toast(
+          res.slice_id
+            ? `spawned ${res.task_id} (${res.slice_id})`
+            : `spawned ${res.task_id}`,
+          "success",
+        );
+        navigate(`/farm/${res.task_id}`);
+      },
+    };
+
+    const cleanup: ActionItem = {
+      kind: "action",
+      id: "farm-cleanup",
+      label: "farm: cleanup --apply",
+      group: "Farm",
+      hint: "POST /cleanup",
+      requiresAuth: true,
+      authDisabledReason: "Sign in to run cleanup",
+      action: async () => {
+        const token = tokenOrThrow();
+        const res = await cleanupFarm(true, token);
+        toast(`cleanup done${res.apply ? " (applied)" : " (dry-run)"}`, "success");
+        close();
+      },
+    };
+
+    const verbs: ActionItem[] = [spawnNext, cleanup];
+
+    // Parametric kill / view: only when the query already includes
+    // a plausible task_id token after "farm: kill" / "farm: view".
+    const killMatch = q.match(/^farm:?\s*kill\s+(\S+)/i);
+    if (killMatch && TASK_ID_RE.test(killMatch[1])) {
+      const taskId = killMatch[1];
+      verbs.push({
+        kind: "action",
+        id: "farm-kill",
+        label: `farm: kill ${taskId}`,
+        group: "Farm",
+        hint: "POST /tasks/<id>/kill",
+        requiresAuth: true,
+        authDisabledReason: "Sign in to kill farm tasks",
+        action: async () => {
+          const token = tokenOrThrow();
+          const res = await killFarmTask(taskId, token);
+          toast(`killed ${res.task_id}`, "success");
+          close();
+        },
+      });
+    }
+
+    const viewMatch = q.match(/^farm:?\s*view\s+(\S+)/i);
+    if (viewMatch && TASK_ID_RE.test(viewMatch[1])) {
+      const taskId = viewMatch[1];
+      verbs.push({
+        kind: "action",
+        id: "farm-view",
+        label: `farm: view ${taskId}`,
+        group: "Farm",
+        hint: "navigate",
+        // Pure navigation; never gated.
+        requiresAuth: false,
+        action: () => {
+          navigate(`/farm/${taskId}`);
+        },
+      });
+    }
+
+    // Surface the disabled state for un-authed users: the verbs stay
+    // visible (so the operator learns they exist) but tooltip + the
+    // dimmed style communicate the gate. We do NOT filter them out
+    // here; the renderer reads requiresAuth + authed to decide.
+    void authed;
+    return verbs;
+  }, [query, authToken, toast, navigate, close]);
+
+  // Parametric nav items: only show when the query matches a known shape.
+  const parametricNavItems: NavItem[] = useMemo(() => {
+    const q = query.trim();
+    const out: NavItem[] = [];
     if (UUID_RE.test(q)) {
       out.push({
+        kind: "nav",
         id: "open-job",
         label: `Open job ${q.slice(0, 8)}…`,
         href: `/jobs/${q}`,
@@ -119,6 +289,7 @@ export function CommandPalette() {
     }
     if (ACC_RE.test(q)) {
       out.push({
+        kind: "nav",
         id: "open-protein",
         label: `Open protein ${q.toUpperCase()}`,
         href: `/proteins/${q.toUpperCase()}`,
@@ -132,32 +303,42 @@ export function CommandPalette() {
   const filtered: Item[] = useMemo(() => {
     if (!query.trim()) return baseItems;
     const q = query.trim();
-    const scored = baseItems
+    const scoredNav = baseItems
       .map((it) => ({ it, s: Math.max(fuzzyScore(it.label, q), fuzzyScore(it.id, q)) }))
       .filter((x) => x.s > 0)
       .sort((a, b) => b.s - a.s)
       .map((x) => x.it);
-    return [...parametricItems, ...scored];
-  }, [baseItems, parametricItems, query]);
+    // Farm verbs first so the operator's most likely action floats.
+    return [...farmItems, ...parametricNavItems, ...scoredNav];
+  }, [baseItems, parametricNavItems, farmItems, query]);
 
-  const close = useCallback(() => {
-    setOpen(false);
-    setQuery("");
-    setActiveIdx(0);
-  }, []);
-
-  const activate = useCallback(
-    (item: Item) => {
-      const prefix = localePrefix(pathname);
-      router.push(`${prefix}${item.href}`);
-      close();
+  const runItem = useCallback(
+    async (item: Item) => {
+      if (item.kind === "nav") {
+        navigate(item.href);
+        return;
+      }
+      // ActionItem
+      if (item.requiresAuth && authToken === null) {
+        toast(item.authDisabledReason ?? "Sign in required", "error");
+        return;
+      }
+      setBusy(true);
+      try {
+        await item.action();
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        toast(msg, "error");
+      } finally {
+        setBusy(false);
+      }
     },
-    [router, pathname, close],
+    [navigate, toast, authToken],
   );
 
   // Global open shortcut: cmd+k / ctrl+k. Ignored when typing in inputs.
   // Mouse / mobile users open via the trigger button, which dispatches a
-  // ``protea:cmdk:toggle`` window event — same effect, no shared state.
+  // ``protea:cmdk:toggle`` window event - same effect, no shared state.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
@@ -182,6 +363,22 @@ export function CommandPalette() {
     setActiveIdx(0);
   }, [query]);
 
+  // Refresh the cached auth token whenever the palette opens. We also
+  // listen for storage events so signing in inside another tab updates
+  // the verb state while the palette is open.
+  useEffect(() => {
+    if (open) {
+      setAuthToken(readFarmToken());
+    }
+    const onStorage = (e: StorageEvent) => {
+      if (!e.key || e.key.startsWith("protea.")) {
+        setAuthToken(readFarmToken());
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [open]);
+
   // Focus input when opened.
   useEffect(() => {
     if (open) {
@@ -205,7 +402,7 @@ export function CommandPalette() {
     } else if (e.key === "Enter") {
       e.preventDefault();
       const item = filtered[activeIdx];
-      if (item) activate(item);
+      if (item) void runItem(item);
     }
   }
 
@@ -235,10 +432,19 @@ export function CommandPalette() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="Search pages, jobs, proteins…"
+            placeholder="Search pages, jobs, proteins… try farm:"
             aria-label="Search"
             className="flex-1 bg-transparent text-[15px] text-slate-800 placeholder-slate-400 focus:outline-none"
           />
+          {busy && (
+            <span
+              className="text-[10px] font-medium text-blue-600"
+              data-testid="cmdk-busy"
+              aria-live="polite"
+            >
+              working…
+            </span>
+          )}
           <kbd className="rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">
             esc
           </kbd>
@@ -247,7 +453,7 @@ export function CommandPalette() {
         <div role="listbox" className="max-h-[60vh] overflow-y-auto py-2">
           {filtered.length === 0 ? (
             <p className="px-4 py-6 text-center text-sm text-slate-600">
-              No matches. Try a UniProt accession or a job UUID.
+              No matches. Try a UniProt accession, a job UUID, or farm:
             </p>
           ) : (
             (() => {
@@ -266,25 +472,55 @@ export function CommandPalette() {
                   {items.map((it) => {
                     cursor++;
                     const isActive = cursor === activeIdx;
+                    const isDisabled =
+                      it.kind === "action" && it.requiresAuth && authToken === null;
+                    const tooltip =
+                      isDisabled && it.kind === "action"
+                        ? it.authDisabledReason ?? "Sign in required"
+                        : undefined;
                     return (
                       <button
                         key={it.id}
                         role="option"
                         aria-selected={isActive}
+                        aria-disabled={isDisabled || undefined}
+                        title={tooltip}
+                        data-testid={
+                          it.kind === "action" ? `cmdk-${it.id}` : undefined
+                        }
                         onMouseEnter={() => setActiveIdx(filtered.indexOf(it))}
-                        onClick={() => activate(it)}
+                        onClick={() => {
+                          if (isDisabled) {
+                            toast(tooltip ?? "Sign in required", "error");
+                            return;
+                          }
+                          void runItem(it);
+                        }}
                         className={`w-full flex items-center justify-between gap-3 px-4 py-2 text-left text-sm transition-colors ${
-                          isActive
-                            ? "bg-blue-50 text-blue-900"
-                            : "text-slate-700 hover:bg-slate-50"
+                          isDisabled
+                            ? "text-slate-400 cursor-not-allowed"
+                            : isActive
+                              ? "bg-blue-50 text-blue-900"
+                              : "text-slate-700 hover:bg-slate-50"
                         }`}
                       >
                         <span className="truncate font-medium">{it.label}</span>
                         <span className="flex items-center gap-2 shrink-0">
-                          {it.hint && (
-                            <span className="text-[11px] text-slate-600">{it.hint}</span>
+                          {isDisabled && (
+                            <span className="text-[10px] uppercase tracking-wider text-amber-600">
+                              auth
+                            </span>
                           )}
-                          <span className="text-[11px] font-mono text-slate-600">{it.href}</span>
+                          {it.hint && !isDisabled && (
+                            <span className="text-[11px] text-slate-600">
+                              {it.hint}
+                            </span>
+                          )}
+                          {it.kind === "nav" && (
+                            <span className="text-[11px] font-mono text-slate-600">
+                              {it.href}
+                            </span>
+                          )}
                         </span>
                       </button>
                     );
@@ -297,13 +533,13 @@ export function CommandPalette() {
 
         <div className="flex items-center justify-between gap-3 px-4 py-2 border-t border-slate-100 bg-slate-50/50 text-[11px] text-slate-500">
           <div className="flex items-center gap-2">
-            <kbd className="rounded border border-slate-200 bg-white px-1.5 py-0.5 font-medium text-slate-600">↑↓</kbd>
+            <kbd className="rounded border border-slate-200 bg-white px-1.5 py-0.5 font-medium text-slate-600">{"↑↓"}</kbd>
             <span>navigate</span>
-            <kbd className="rounded border border-slate-200 bg-white px-1.5 py-0.5 font-medium text-slate-600">↵</kbd>
+            <kbd className="rounded border border-slate-200 bg-white px-1.5 py-0.5 font-medium text-slate-600">{"↵"}</kbd>
             <span>open</span>
           </div>
           <div className="flex items-center gap-1">
-            <kbd className="rounded border border-slate-200 bg-white px-1.5 py-0.5 font-medium text-slate-600">⌘</kbd>
+            <kbd className="rounded border border-slate-200 bg-white px-1.5 py-0.5 font-medium text-slate-600">{"⌘"}</kbd>
             <kbd className="rounded border border-slate-200 bg-white px-1.5 py-0.5 font-medium text-slate-600">K</kbd>
           </div>
         </div>

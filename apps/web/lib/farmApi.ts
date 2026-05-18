@@ -99,7 +99,7 @@ export function getFarmResults(taskId: string) {
   return get<FarmResult>(`/tasks/${encodeURIComponent(taskId)}/results`);
 }
 
-// ── plan slices ──────────────────────────────────────────────────────────────
+// plan slices
 //
 // FARM-UI.4 consumes /plan from the farm-api sidecar (see
 // apps/farm-api/farm_api/routes/plan.py). The response is a flat list of
@@ -129,4 +129,114 @@ export function listFarmPlan(params?: { loop?: string; status?: string }) {
   if (params?.status) q.set("status", params.status);
   const qs = q.toString();
   return get<FarmPlanSlice[]>(qs ? `/plan?${qs}` : "/plan");
+}
+
+// ---------------------------------------------------------------------------
+// Write surface (FARM-UI.6). The sidecar gates these behind FARM_API_WRITE=1
+// + FARM_API_AUTH_TOKEN; the operator provisions the same shared secret as
+// the local protea.bearer (or protea.apiKey) so the AuthChip's notion of
+// "signed in" is what unlocks the verbs here.
+//
+// readFarmToken() is the single source of truth for which localStorage key
+// becomes the X-Farm-Token header. Bearer wins over API key for parity with
+// AuthChip's display logic. Returns null when neither is present (verbs are
+// then surfaced as disabled in the palette).
+// ---------------------------------------------------------------------------
+
+export type FarmSpawnRequest = {
+  next_pickable?: boolean;
+  agent?: string;
+  task?: string;
+  args?: Record<string, unknown>;
+};
+
+export type FarmSpawnResponse = {
+  task_id: string;
+  worktree?: string | null;
+  repo?: string | null;
+  model?: string | null;
+  composed_prompt?: string | null;
+  results_dir?: string | null;
+  slice_id?: string | null;
+  loop?: string | null;
+  agent: string;
+};
+
+export type FarmKillResponse = {
+  task_id: string;
+  killed: boolean;
+  stdout: string;
+};
+
+export type FarmCleanupResponse = {
+  apply: boolean;
+  stdout: string;
+};
+
+export function readFarmToken(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const bearer = window.localStorage.getItem("protea.bearer");
+    if (bearer && bearer.length > 16) return bearer;
+    const apiKey = window.localStorage.getItem("protea.apiKey");
+    if (apiKey && apiKey.length > 8) return apiKey;
+  } catch {
+    // Private mode / disabled storage falls through to null.
+  }
+  return null;
+}
+
+async function post<T>(
+  path: string,
+  body: unknown,
+  token: string,
+): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(`${farmApiBaseUrl()}${path}`, {
+      method: "POST",
+      cache: "no-store",
+      headers: {
+        "content-type": "application/json",
+        "x-farm-token": token,
+      },
+      body: JSON.stringify(body ?? {}),
+    });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "Network error";
+    throw new Error(msg);
+  }
+  if (!res.ok) {
+    const text = await res.text();
+    const msg = text.trimStart().startsWith("<")
+      ? `HTTP ${res.status} ${res.statusText}`
+      : text;
+    throw new Error(msg);
+  }
+  return (await res.json()) as T;
+}
+
+export function spawnFarmTask(
+  body: FarmSpawnRequest,
+  token: string,
+): Promise<FarmSpawnResponse> {
+  return post<FarmSpawnResponse>("/spawn", body, token);
+}
+
+export function killFarmTask(
+  taskId: string,
+  token: string,
+): Promise<FarmKillResponse> {
+  return post<FarmKillResponse>(
+    `/tasks/${encodeURIComponent(taskId)}/kill`,
+    {},
+    token,
+  );
+}
+
+export function cleanupFarm(
+  apply: boolean,
+  token: string,
+): Promise<FarmCleanupResponse> {
+  return post<FarmCleanupResponse>("/cleanup", { apply }, token);
 }
