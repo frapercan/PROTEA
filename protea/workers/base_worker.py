@@ -20,6 +20,15 @@ from protea.infrastructure.queue.publisher import publish_job, publish_operation
 logger = logging.getLogger(__name__)
 
 
+class WorkerShutdown(Exception):
+    """Raised when a worker is asked to exit while a job is in flight.
+
+    Used by the consumer SIGTERM handler to mark the in-flight job FAILED
+    through ``BaseWorker._force_fail_job`` before the process exits, so
+    deploy-keeper redeploys never leave jobs orphaned in RUNNING.
+    """
+
+
 @dataclass(frozen=True)
 class WorkerConfig:
     worker_name: str
@@ -77,11 +86,21 @@ class BaseWorker:
             # Consumer re-publishes; job is already QUEUED.
             raise
         except Exception as exc:
-            # If retry was exhausted on a retryable error, the job is still
-            # in RUNNING with no FAILED transition recorded. Force-mark FAILED
-            # via fallback session so it never gets stuck.
-            if is_retryable(exc):
-                self._force_fail_job(job_id, exc)
+            # Any other exception leaves the job in RUNNING unless we
+            # close it out here. Two real-world paths hit this branch:
+            #   - retryable infra error exhausted by ``with_retry`` (the
+            #     execute session already rolled back, but no FAILED
+            #     transition was committed).
+            #   - non-retryable error raised BEFORE the operation ran
+            #     (e.g. ``InFailedSqlTransaction`` on the ``session.get``
+            #     inside ``_execute_with_session``), so the
+            #     ``_on_operation_failure`` path that normally records
+            #     FAILED never got a chance to fire.
+            # ``_force_fail_job`` is idempotent (UPDATE ... WHERE
+            # status=RUNNING) and uses a fresh session from the pool, so
+            # invoking it unconditionally is safe even when the primary
+            # session is aborted.
+            self._force_fail_job(job_id, exc)
             raise
 
     def _claim_job(self, job_id: UUID) -> bool:

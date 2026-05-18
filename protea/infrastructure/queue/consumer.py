@@ -18,6 +18,7 @@ from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
 from protea.infrastructure.queue.publisher import publish_operation
 from protea.infrastructure.telemetry import extract_trace_context, get_tracer
 from protea.workers.base_worker import BaseWorker
+from protea.workers.shutdown import ShutdownGuard
 
 logger = logging.getLogger(__name__)
 _TRACER = get_tracer(__name__)
@@ -107,6 +108,14 @@ class QueueConsumer:
         self._prefetch_count = options.prefetch_count
         self._requeue_on_failure = options.requeue_on_failure
         self._stop = False
+        self._channel: BlockingChannel | None = None
+        # ShutdownGuard tracks the in-flight job and arms a watchdog
+        # timer when SIGTERM arrives mid-callback. Grace seconds are
+        # read lazily so test overrides of get_tuning() are honoured.
+        self._guard = ShutdownGuard(
+            self._worker._force_fail_job,
+            grace_seconds=get_tuning().worker.worker_shutdown_grace_seconds,
+        )
 
     def run(self) -> None:
         signal.signal(signal.SIGINT, self._handle_stop)
@@ -122,6 +131,7 @@ class QueueConsumer:
         params.heartbeat = get_tuning().queue.amqp_heartbeat
         connection = pika.BlockingConnection(params)
         channel = connection.channel()
+        self._channel = channel
 
         _setup_dead_letter(channel)
         channel.queue_declare(
@@ -140,6 +150,7 @@ class QueueConsumer:
         try:
             channel.start_consuming()
         finally:
+            self._guard.cancel()
             try:
                 if channel.is_open:
                     channel.stop_consuming()
@@ -150,11 +161,47 @@ class QueueConsumer:
                     connection.close()
             except Exception:
                 pass
+            self._channel = None
             logger.info("Consumer stopped. queue=%s", self._queue_name)
 
     def _handle_stop(self, *_: object) -> None:
+        """Mark the consumer stopping and arm the shutdown watchdog.
+
+        Idempotent. If a job is in flight when the signal arrives the
+        guard schedules a force-fail+exit after
+        ``worker_shutdown_grace_seconds`` so the DB row never gets
+        stuck in RUNNING after deploy-keeper kills the process.
+        """
+        if self._stop:
+            return
         self._stop = True
-        logger.info("Stop signal received. queue=%s", self._queue_name)
+        in_flight = self._guard.current_job_id
+        logger.info(
+            "Stop signal received. queue=%s in_flight=%s",
+            self._queue_name,
+            in_flight,
+        )
+        # add_callback_threadsafe queues stop_consuming on the IO loop
+        # so it works whether or not a callback is mid-execution.
+        channel = self._channel
+        if channel is not None:
+            try:
+                channel.connection.add_callback_threadsafe(self._stop_consuming_safely)
+            except Exception:
+                try:
+                    channel.stop_consuming()
+                except Exception:
+                    pass
+        if in_flight is not None:
+            self._guard.arm(in_flight)
+
+    def _stop_consuming_safely(self) -> None:
+        if self._channel is None:
+            return
+        try:
+            self._channel.stop_consuming()
+        except Exception:
+            pass
 
     def _is_job_cancelled(self, job_id: UUID) -> bool:
         """Return True when the Job row exists and is in CANCELLED state.
@@ -245,6 +292,11 @@ class QueueConsumer:
             channel.basic_ack(delivery_tag=method.delivery_tag)
             logger.info("Job acked. job_id=%s", job_id)
 
+            # Track the in-flight job so the SIGTERM handler can force-
+            # fail it through the fresh-session fallback if the process
+            # is killed mid-callback. Cleared in ``finally`` below so
+            # idle consumers do not look like they have a job pending.
+            self._guard.track(job_id)
             try:
                 self._worker.handle_job(job_id)
             except RetryLaterError as exc:
@@ -265,6 +317,8 @@ class QueueConsumer:
             except Exception as exc:
                 span.record_exception(exc)
                 logger.error("Job failed. job_id=%s error=%s", job_id, exc)
+            finally:
+                self._guard.untrack()
 
 
 class OperationConsumer:

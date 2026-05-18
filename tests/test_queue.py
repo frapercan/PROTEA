@@ -184,6 +184,184 @@ class TestConsumerRun:
         consumer._handle_stop()
         assert consumer._stop is True
 
+
+class TestConsumerShutdownGrace:
+    """FIX-BASEWORKER-ROBUSTNESS — Bug #3.
+
+    SIGTERM / SIGINT during an in-flight job must arm a watchdog (via
+    :class:`protea.workers.shutdown.ShutdownGuard`) that force-fails
+    the job after ``worker_shutdown_grace_seconds`` so the DB row never
+    gets stuck in RUNNING after deploy-keeper kills the process.
+    """
+
+    def test_dispatch_job_sets_and_clears_in_flight_id(self):
+        """The guard tracks the in-flight job during handle_job and clears it after."""
+        job_id = uuid4()
+        observed: list[UUID | None] = []
+        worker = MagicMock()
+        consumer = _consumer(worker)
+
+        # Pre-condition: idle consumer reports no in-flight job.
+        assert consumer._guard.current_job_id is None
+
+        def _inspect(jid):
+            observed.append(consumer._guard.current_job_id)
+
+        worker.handle_job.side_effect = _inspect
+        channel = MagicMock()
+        properties = MagicMock()
+        properties.headers = None
+
+        consumer._dispatch_job(channel, _make_method(7), properties, job_id)
+
+        # Worker was called with the right tracker visible.
+        assert observed == [job_id]
+        # Post-condition: tracker cleared so a SIGTERM after this point
+        # does not try to force-fail a finished job.
+        assert consumer._guard.current_job_id is None
+
+    def test_dispatch_job_clears_in_flight_id_on_exception(self):
+        """The tracker must be cleared even when handle_job raises."""
+        worker = MagicMock()
+        worker.handle_job.side_effect = RuntimeError("boom")
+        consumer = _consumer(worker)
+        channel = MagicMock()
+        properties = MagicMock()
+        properties.headers = None
+
+        consumer._dispatch_job(channel, _make_method(8), properties, uuid4())
+
+        assert consumer._guard.current_job_id is None
+
+    def test_handle_stop_with_in_flight_job_arms_watchdog(self):
+        """When SIGTERM arrives mid-callback, the grace timer is armed."""
+        consumer = _consumer()
+        in_flight = uuid4()
+        consumer._guard.track(in_flight)
+        # Pretend the consumer has an open channel so the safe-stop
+        # callback gets a chance to run.
+        consumer._channel = MagicMock()
+
+        with patch.object(consumer._guard, "arm") as mock_arm:
+            consumer._handle_stop(15, None)
+
+        assert consumer._stop is True
+        mock_arm.assert_called_once_with(in_flight)
+        # Second invocation is idempotent (deploy-keeper can resend the
+        # signal; we must not arm two timers).
+        with patch.object(consumer._guard, "arm") as mock_arm2:
+            consumer._handle_stop(15, None)
+        mock_arm2.assert_not_called()
+
+    def test_handle_stop_with_no_in_flight_job_skips_watchdog(self):
+        """Idle consumers do not arm the grace timer on SIGTERM."""
+        consumer = _consumer()
+        consumer._channel = MagicMock()
+        assert consumer._guard.current_job_id is None
+
+        with patch.object(consumer._guard, "arm") as mock_arm:
+            consumer._handle_stop(15, None)
+
+        assert consumer._stop is True
+        mock_arm.assert_not_called()
+
+    def test_force_fail_in_flight_invokes_worker_and_exits(self):
+        """Watchdog fires: force-fail through worker, then os._exit(143)."""
+        from protea.workers.base_worker import WorkerShutdown
+
+        job_id = uuid4()
+        worker = MagicMock()
+        consumer = _consumer(worker)
+        consumer._guard.track(job_id)
+
+        with patch("protea.workers.shutdown.os._exit") as mock_exit:
+            consumer._guard._fire(job_id)
+
+        worker._force_fail_job.assert_called_once()
+        call_args = worker._force_fail_job.call_args
+        assert call_args.args[0] == job_id
+        assert isinstance(call_args.args[1], WorkerShutdown)
+        mock_exit.assert_called_once_with(143)
+
+    def test_force_fail_in_flight_skips_when_job_finished(self):
+        """If the callback finished between SIGTERM and watchdog fire,
+        the watchdog must NOT force-fail anyone."""
+        job_id = uuid4()
+        worker = MagicMock()
+        consumer = _consumer(worker)
+        consumer._guard.untrack()  # job already finished
+
+        with patch("protea.workers.shutdown.os._exit") as mock_exit:
+            consumer._guard._fire(job_id)
+
+        worker._force_fail_job.assert_not_called()
+        mock_exit.assert_not_called()
+
+    def test_arm_shutdown_timer_uses_tuning_grace(self):
+        """Grace period must come from WorkerTuning.worker_shutdown_grace_seconds."""
+        import os
+
+        from protea.config.tuning import get_tuning
+
+        prev = os.environ.get("PROTEA_TUNING__WORKER__WORKER_SHUTDOWN_GRACE_SECONDS")
+        os.environ["PROTEA_TUNING__WORKER__WORKER_SHUTDOWN_GRACE_SECONDS"] = "7"
+        get_tuning.cache_clear()
+        try:
+            consumer = _consumer()
+            job_id = uuid4()
+
+            with patch("protea.workers.shutdown.threading.Timer") as mock_timer_cls:
+                fake_timer = MagicMock()
+                mock_timer_cls.return_value = fake_timer
+                consumer._guard.arm(job_id)
+
+            mock_timer_cls.assert_called_once()
+            grace_arg = mock_timer_cls.call_args.args[0]
+            assert grace_arg == 7
+            assert fake_timer.daemon is True
+            fake_timer.start.assert_called_once()
+            assert consumer._guard.timer is fake_timer
+        finally:
+            if prev is None:
+                os.environ.pop(
+                    "PROTEA_TUNING__WORKER__WORKER_SHUTDOWN_GRACE_SECONDS", None
+                )
+            else:
+                os.environ["PROTEA_TUNING__WORKER__WORKER_SHUTDOWN_GRACE_SECONDS"] = prev
+            get_tuning.cache_clear()
+
+    def test_arm_shutdown_timer_is_idempotent(self):
+        """Two SIGTERMs in quick succession must not arm a second timer."""
+        consumer = _consumer()
+        first_timer = MagicMock()
+        consumer._guard._timer = first_timer
+
+        with patch("protea.workers.shutdown.threading.Timer") as mock_timer_cls:
+            consumer._guard.arm(uuid4())
+
+        mock_timer_cls.assert_not_called()
+        assert consumer._guard.timer is first_timer
+
+    def test_run_cancels_pending_timer_on_clean_exit(self):
+        """Clean shutdown (start_consuming returned) cancels the timer."""
+        consumer = _consumer()
+        timer = MagicMock()
+        consumer._guard._timer = timer
+
+        conn = MagicMock()
+        channel = MagicMock()
+        conn.channel.return_value = channel
+        conn.is_open = False
+
+        with patch(
+            "protea.infrastructure.queue.consumer.pika.BlockingConnection",
+            return_value=conn,
+        ):
+            consumer.run()
+
+        timer.cancel.assert_called_once()
+        assert consumer._guard.timer is None
+
     def test_run_sets_amqp_heartbeat_from_tuning(self):
         """ConnectionParameters must carry heartbeat=600 by default so
         pika does not close the channel during long blocking ops."""
