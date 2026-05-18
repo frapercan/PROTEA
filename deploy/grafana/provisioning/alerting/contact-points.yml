@@ -1,0 +1,45 @@
+# Contact-point provisioning for Grafana 11.x unified alerting.
+#
+# The agent-farm-errors point delivers alerts to Slack via an incoming
+# webhook. The webhook URL is read from the `SLACK_WEBHOOK_URL`
+# environment variable so the secret does not have to live in the repo;
+# `docker-compose.monitoring.yml` passes it through to the grafana
+# container. When the variable is unset Grafana still loads this file
+# (the webhook just silently 404s, which is the intended bootstrap state
+# until the operator drops the secret into their local .env).
+#
+# Payload contents:
+#   - title: short summary including the firing task_id
+#   - text:  markdown body with task_id, agent_name, error message,
+#     and a deep link into the Next.js farm dashboard at
+#     /en/farm/<task_id>/
+#
+# The link points at https://protea.ngrok.app/en/farm/<task_id>/, the
+# tunnel exposed by scripts/expose.sh; override the prefix per
+# environment by editing the templates below if you publish the farm
+# UI on a different origin.
+
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: agent-farm-errors
+    receivers:
+      - uid: agent-farm-slack
+        type: slack
+        disableResolveMessage: false
+        settings:
+          url: ${SLACK_WEBHOOK_URL}
+          username: agent-farm
+          # Title pinned to the firing task so Slack thread grouping is
+          # by task, not by rule name. The first label that resolves is
+          # the task_id pulled from the Loki stream.
+          title: "agent-farm error burst on {{ .CommonLabels.task_id }}"
+          # Body is plain markdown; Slack renders <url|text> as a link.
+          text: |-
+            *agent:* {{ .CommonLabels.agent_name }}
+            *task_id:* `{{ .CommonLabels.task_id }}`
+            *errors in window:* {{ len .Alerts }}
+            *latest message:* {{ with index .Alerts 0 }}{{ .Annotations.summary }}{{ end }}
+
+            <https://protea.ngrok.app/en/farm/{{ .CommonLabels.task_id }}/|Open task in farm dashboard>

@@ -39,6 +39,16 @@ services:
       - GF_AUTH_ANONYMOUS_ENABLED=false
       - GF_ANALYTICS_REPORTING_ENABLED=false
       - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+      # FARM-UI.7: Slack webhook URL for the agent-farm-errors contact
+      # point provisioned under deploy/grafana/provisioning/alerting/.
+      # Set this in the operator's local environment (.env or shell)
+      # before `docker compose up`. When unset, Grafana still boots
+      # fine; the contact point just sends to an empty URL (no 4xx
+      # storm, the alerting subsystem treats unset URLs as a bootstrap
+      # state). Grafana 11 expands ${SLACK_WEBHOOK_URL} inside the
+      # provisioned contact-point YAML at startup so the secret never
+      # has to land in grafana_data.
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
     volumes:
       - grafana_data:/var/lib/grafana
       - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro

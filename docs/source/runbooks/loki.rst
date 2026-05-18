@@ -258,6 +258,42 @@ can push or read. Keep the port off the public internet. A reverse
 proxy with basic auth is the simplest hardening step.
 
 
+**agent-farm heartbeat alerting (FARM-UI.7)**
+
+The same Loki / Grafana stack also carries the agent-farm tmux session's
+heartbeat events (``state/tasks.sqlite`` events table, mirrored to Loki
+by the sidecar in ``scripts/tail-events-to-loki.py``). Each heartbeat
+ships as a JSON line with labels ``compose_project="agent-farm"``,
+``agent_name``, ``task_id`` and field ``level`` (info, warn, error).
+Three artefacts live under ``deploy/``:
+``deploy/grafana/dashboards/agent-farm-heartbeats.json`` is the
+Grafana 11.3 dashboard with a live heartbeat stream panel, per-agent
+error timeseries, and a per-task error table that links into
+``/en/farm/<task_id>/``.
+``deploy/grafana/provisioning/alerting/rules.yml`` is the
+unified-alerting rule (3 or more error-level heartbeats per task in a
+5-minute window, evaluated every minute, in the ``agent-farm`` folder).
+``deploy/grafana/provisioning/alerting/contact-points.yml`` and
+``policies.yml`` provision the Slack contact point keyed on
+``${SLACK_WEBHOOK_URL}`` plus a notification policy that routes any
+alert with label ``service=agent-farm`` to that point. The policy sets
+``repeat_interval: 30m`` so a sustained burst produces one Slack
+message immediately then at most one follow-up per half hour.
+
+Operator setup is one line:
+
+.. code-block:: bash
+
+   export SLACK_WEBHOOK_URL='https://hooks.slack.com/services/...'
+   docker compose -f docker-compose.monitoring.yml up -d
+
+When the variable is unset, Grafana boots cleanly; the contact point
+delivers to an empty URL (no 4xx storm) until the operator drops the
+secret in. Test plumbing without involving Slack by pointing
+``SLACK_WEBHOOK_URL`` at ``https://httpbin.org/post`` and inspecting the
+response, or at a local ``nc -l 9999`` listener.
+
+
 See also
 ---------
 
@@ -266,4 +302,8 @@ See also
 - :doc:`observability` for the OpenTelemetry side of the stack (traces).
 - ``deploy/grafana/dashboards/logs.json`` for the source of truth of
   the Loki dashboard.
+- ``deploy/grafana/dashboards/agent-farm-heartbeats.json`` for the
+  agent-farm heartbeat dashboard (FARM-UI.7).
+- ``deploy/grafana/provisioning/alerting/`` for the Slack alert rule
+  and contact-point provisioning (FARM-UI.7).
 - ``deploy/loki/loki-config.yml`` for the Loki single-binary configuration.
