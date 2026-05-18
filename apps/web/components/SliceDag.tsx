@@ -158,6 +158,16 @@ interface Props {
   criticalPathIds: Set<string>;
   height?: number;
   onHover?: (state: SliceTooltip) => void;
+  // Accessible label for the canvas (cytoscape renders to <canvas>, which
+  // has no inherent text alternative; supplying ariaLabel + a visually
+  // hidden slice summary satisfies WCAG 1.1.1 for screen-reader users).
+  ariaLabel?: string;
+  // Translated string for the visually-hidden "X slice(s) in this graph"
+  // intro line. The parent owns i18n so we accept a pre-built summary.
+  srSummary?: string;
+  // Translated section title for the visually-hidden slice list. Used in
+  // the screen-reader-only DOM region only.
+  srListTitle?: string;
 }
 
 // Truncate the inline node label without breaking the GO-style id prefix.
@@ -172,6 +182,9 @@ export default function SliceDag({
   criticalPathIds,
   height = 560,
   onHover,
+  ariaLabel,
+  srSummary,
+  srListTitle,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<{ destroy: () => void } | null>(null);
@@ -332,13 +345,69 @@ export default function SliceDag({
     );
   }
 
+  // Status tally + top in-progress / blocked summary for the screen-
+  // reader-only region. Derived from the same `slices` prop the canvas
+  // visualises, so the two views stay in sync. We avoid fabricating
+  // anything beyond what is in `slices`.
+  const statusTally: Record<string, number> = {};
+  for (const s of slices) {
+    statusTally[s.status] = (statusTally[s.status] ?? 0) + 1;
+  }
+  const inProgressSlices = slices.filter((s) => s.status === "in_progress");
+  const blockedSlices = slices.filter((s) => s.status === "blocked");
+  const accessibleLabel =
+    ariaLabel ?? `Slice DAG, ${slices.length} slices`;
+  const accessibleSummary =
+    srSummary ?? `${slices.length} slices in this graph.`;
+  const accessibleListTitle = srListTitle ?? "Slice list";
+
   return (
     <div className="relative rounded-lg border bg-white overflow-hidden">
       <div
         ref={containerRef}
+        role="img"
+        aria-label={accessibleLabel}
         style={{ height }}
         data-testid="slice-dag-canvas"
       />
+      {/* Visually-hidden text alternative so screen readers receive the
+          slice catalog rather than an opaque <canvas>. Mirrors WCAG 1.1.1
+          guidance for canvas-based visualisations. */}
+      <div className="sr-only" data-testid="slice-dag-sr-summary">
+        <p>{accessibleSummary}</p>
+        <p>{accessibleListTitle}:</p>
+        <ul>
+          {Object.entries(statusTally).map(([status, count]) => (
+            <li key={status}>
+              {status}: {count}
+            </li>
+          ))}
+        </ul>
+        {inProgressSlices.length > 0 && (
+          <>
+            <p>In progress:</p>
+            <ul>
+              {inProgressSlices.slice(0, 3).map((s) => (
+                <li key={s.id}>
+                  {s.id}: {s.title}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+        {blockedSlices.length > 0 && (
+          <>
+            <p>Blocked:</p>
+            <ul>
+              {blockedSlices.slice(0, 3).map((s) => (
+                <li key={s.id}>
+                  {s.id}: {s.title}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
       {internalTip && (
         <div
           className="pointer-events-none absolute z-20 rounded-md border bg-white px-3 py-2 text-xs shadow-lg max-w-[280px]"

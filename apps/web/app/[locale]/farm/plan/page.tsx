@@ -54,7 +54,7 @@ function ChipRow({
 }) {
   return (
     <div className="flex flex-wrap items-center gap-1.5" data-testid={testId}>
-      <span className="text-xs font-medium text-slate-500 mr-1">{label}:</span>
+      <span className="text-xs font-medium text-slate-600 mr-1">{label}:</span>
       <button
         type="button"
         onClick={() => onPick("")}
@@ -178,7 +178,7 @@ export default function FarmPlanPage() {
     <>
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-semibold">{t("title")}</h1>
-        <span className="text-xs text-slate-500">{t("subtitle")}</span>
+        <span className="text-xs text-slate-600">{t("subtitle")}</span>
         <button
           type="button"
           onClick={() => void refresh()}
@@ -274,6 +274,9 @@ export default function FarmPlanPage() {
           <SliceDag
             slices={filteredSlices}
             criticalPathIds={criticalSet}
+            ariaLabel={t("a11y.dagLabel", { count: filteredSlices.length })}
+            srSummary={t("a11y.dagSummary", { count: filteredSlices.length })}
+            srListTitle={t("a11y.dagListTitle")}
           />
         )}
       </div>
@@ -297,7 +300,7 @@ export default function FarmPlanPage() {
                 }}
               />
               <span className="capitalize">{t(`status.${status}`)}</span>
-              <span className="font-mono text-slate-500">({count})</span>
+              <span className="font-mono text-slate-600">({count})</span>
             </span>
           );
         })}
