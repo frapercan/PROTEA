@@ -131,6 +131,55 @@ export function listFarmPlan(params?: { loop?: string; status?: string }) {
   return get<FarmPlanSlice[]>(qs ? `/plan?${qs}` : "/plan");
 }
 
+// cost rollup (FARM-UI.5)
+//
+// /cost returns one bucket per (date, agent, model) tuple within the
+// requested window. The cost panel pivots the same rows into three
+// views (by agent / by model + day / by day) client-side so a single
+// request feeds the whole page.
+
+export type FarmCostBucket = {
+  date: string;
+  agent: string;
+  model: string;
+  tasks: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_tokens: number;
+  usd: number;
+};
+
+export function listFarmCost(params?: {
+  days?: number;
+  agent?: string;
+  model?: string;
+}) {
+  const q = new URLSearchParams();
+  if (params?.days !== undefined) q.set("days", String(params.days));
+  if (params?.agent) q.set("agent", params.agent);
+  if (params?.model) q.set("model", params.model);
+  const qs = q.toString();
+  return get<FarmCostBucket[]>(qs ? `/cost?${qs}` : "/cost");
+}
+
+// agent budgets (FARM-UI.5)
+//
+// /agents/budgets parses agent-farm/agents/*.yaml and surfaces the
+// advisory daily cap so the cost dashboard can overlay actual-vs-budget
+// per agent.
+
+export type FarmAgentBudget = {
+  name: string;
+  kind?: string | null;
+  model?: string | null;
+  expected_tokens?: number | null;
+  max_usd_per_day?: number | null;
+};
+
+export function listFarmAgentBudgets() {
+  return get<FarmAgentBudget[]>("/agents/budgets");
+}
+
 // ---------------------------------------------------------------------------
 // Write surface (FARM-UI.6). The sidecar gates these behind FARM_API_WRITE=1
 // + FARM_API_AUTH_TOKEN; the operator provisions the same shared secret as
