@@ -216,6 +216,146 @@ class TestDatasetsRouter:
 
 
 # ---------------------------------------------------------------------------
+# /datasets/import-by-reference — lab side dump registration without job
+# ---------------------------------------------------------------------------
+
+
+class TestDatasetsImportByReference:
+    """LB.1: pre-staged datasets register via the by-reference endpoint.
+
+    Unlike ``POST /datasets`` (which enqueues
+    ``export_research_dataset``), the by-reference path inserts a
+    Dataset row directly. No Job is created and ``publish_job`` is
+    never called.
+    """
+
+    def _valid_body(self, **overrides):
+        body = {
+            "name": "bench-v1-K5-v226-lineage",
+            "storage_backend": "local",
+            "key_prefix": "datasets/bench-v1-K5-v226-lineage/",
+            "train_uri": "file:///tmp/bench/train.parquet",
+            "eval_uri": "file:///tmp/bench/eval.parquet",
+            "manifest_uri": "file:///tmp/bench/manifest.json",
+            "schema_sha": "6d97a624b8a7",
+            "manifest_sha": "f" * 64,
+            "k": 5,
+            "annotation_source": "goa",
+            "n_train_rows": 24351779,
+            "n_eval_rows": 1066859,
+            "embedding_config_id": str(uuid.uuid4()),
+            "ontology_snapshot_id": str(uuid.uuid4()),
+            "train_snapshot_pairs": ["v220-v226"],
+            "eval_snapshot_pair": "v226-v230",
+            "producer_version": "0.8.0",
+            "producer_git_sha": "059db1907c5208a965238e8e6682184fb83537be",
+            "external_source": "protea-reranker-lab@059db19",
+            "force": False,
+        }
+        body.update(overrides)
+        return body
+
+    def test_post_persists_row_without_enqueueing(self, datasets_client):
+        client, session, publish = datasets_client
+        # The handler issues three reads: duplicate-name check (None),
+        # embedding_config FK (resolves to a row), ontology_snapshot FK
+        # (resolves to a row). Use a side_effect cycle to feed those.
+        first_returns = iter(
+            [None, MagicMock(), MagicMock()]
+        )
+        session.query.return_value.filter.return_value.first.side_effect = (
+            lambda: next(first_returns)
+        )
+
+        resp = client.post(
+            "/datasets/import-by-reference", json=self._valid_body()
+        )
+        assert resp.status_code == 201, resp.text
+
+        body = resp.json()
+        assert body["name"] == "bench-v1-K5-v226-lineage"
+        assert body["schema_sha"] == "6d97a624b8a7"
+        uuid.UUID(body["id"])
+
+        # No queue interaction
+        publish.assert_not_called()
+        # The Dataset row was added
+        assert session.add.called
+
+    def test_post_rejects_duplicate_name_without_force(self, datasets_client):
+        client, session, publish = datasets_client
+        # First query is the duplicate name check, returns an existing row.
+        session.query.return_value.filter.return_value.first.return_value = MagicMock(
+            id=uuid.uuid4()
+        )
+
+        resp = client.post(
+            "/datasets/import-by-reference",
+            json=self._valid_body(force=False),
+        )
+        assert resp.status_code == 409
+        assert "already exists" in resp.json()["detail"]
+        publish.assert_not_called()
+
+    def test_post_with_force_evicts_existing(self, datasets_client):
+        client, session, publish = datasets_client
+        existing = MagicMock(id=uuid.uuid4())
+        # Duplicate check returns the existing row; FK lookups return
+        # arbitrary MagicMocks (non-None) so the FKs are kept.
+        first_returns = iter([existing, MagicMock(), MagicMock()])
+        session.query.return_value.filter.return_value.first.side_effect = (
+            lambda: next(first_returns)
+        )
+
+        resp = client.post(
+            "/datasets/import-by-reference",
+            json=self._valid_body(force=True),
+        )
+        assert resp.status_code == 201, resp.text
+        # Existing row was deleted; new row added.
+        session.delete.assert_called_once_with(existing)
+        assert session.add.called
+        publish.assert_not_called()
+
+    def test_post_rejects_missing_required_fields(self, datasets_client):
+        client, _, publish = datasets_client
+        body = self._valid_body()
+        del body["schema_sha"]
+
+        resp = client.post("/datasets/import-by-reference", json=body)
+        assert resp.status_code == 422
+        publish.assert_not_called()
+
+    def test_post_rejects_invalid_uuid_for_fk(self, datasets_client):
+        client, session, _ = datasets_client
+        # Duplicate-name check returns None so we reach FK resolution.
+        session.query.return_value.filter.return_value.first.return_value = None
+
+        c = TestClient(client.app, raise_server_exceptions=False)
+        resp = c.post(
+            "/datasets/import-by-reference",
+            json=self._valid_body(embedding_config_id="not-a-uuid"),
+        )
+        assert resp.status_code == 422
+
+    def test_post_nulls_optional_fks_when_missing(self, datasets_client):
+        client, session, publish = datasets_client
+        # All filter().first() lookups (duplicate check + both FK lookups)
+        # return None; the handler must still insert the row but with
+        # NULL FKs.
+        session.query.return_value.filter.return_value.first.return_value = None
+
+        resp = client.post(
+            "/datasets/import-by-reference",
+            json=self._valid_body(),
+        )
+        assert resp.status_code == 201, resp.text
+        publish.assert_not_called()
+        # Row should still be added even though FKs resolved to None
+        assert session.add.called
+
+
+# ---------------------------------------------------------------------------
 # /reranker-models — import paths
 # ---------------------------------------------------------------------------
 
