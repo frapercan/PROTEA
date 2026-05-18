@@ -71,8 +71,29 @@ cmd_start() {
     # running so long-running jobs (e.g. run_cafa_evaluation) are not interrupted.
     sleep 1
 
+    # Database migrations
+    printf "\n${BOLD}[2] Database schema${RESET}\n"
+    if [ "${PROTEA_SKIP_ALEMBIC:-}" != "1" ]; then
+        printf "  Waiting for postgres to accept connections...\n"
+        for i in $(seq 1 30); do
+            if pg_isready -h localhost -p 5432 -U protea -d protea -q 2>/dev/null; then
+                break
+            fi
+            sleep 1
+        done
+
+        printf "  Running alembic upgrade head...\n"
+        if ! poetry run alembic upgrade head; then
+            printf "  ${RED}✗ alembic upgrade head FAILED${RESET} — stack will not start cleanly.\n"
+            exit 1
+        fi
+        printf "  ${GREEN}✓ Schema at head${RESET}\n"
+    else
+        printf "  ${YELLOW}(skipped: PROTEA_SKIP_ALEMBIC=1)${RESET}\n"
+    fi
+
     # API
-    printf "\n${BOLD}[2] API${RESET}\n"
+    printf "\n${BOLD}[3] API${RESET}\n"
     cd "$ROOT"
     _start_bg api poetry run uvicorn protea.api.app:create_app \
         --factory --host 0.0.0.0 --port 8000 --root-path /api-proxy
@@ -82,13 +103,13 @@ cmd_start() {
         || { printf "  ${RED}API FAILED${RESET} — check logs/api.log\n"; exit 1; }
 
     # Core workers
-    printf "\n${BOLD}[3] Core workers${RESET}\n"
+    printf "\n${BOLD}[4] Core workers${RESET}\n"
     _start_bg worker-ping        poetry run python scripts/worker.py --queue protea.ping
     _start_bg worker-jobs        poetry run python scripts/worker.py --queue protea.jobs
     _start_bg worker-training    poetry run python scripts/worker.py --queue protea.training
 
     # Embeddings pipeline
-    printf "\n${BOLD}[4] Embeddings pipeline${RESET}\n"
+    printf "\n${BOLD}[5] Embeddings pipeline${RESET}\n"
     _start_bg worker-embeddings-coord  poetry run python scripts/worker.py --queue protea.embeddings
     for i in $(seq 1 "$BATCH_WORKERS"); do
         _start_bg "worker-embeddings-batch-${i}" \
@@ -97,7 +118,7 @@ cmd_start() {
     _start_bg worker-embeddings-write  poetry run python scripts/worker.py --queue protea.embeddings.write
 
     # Predictions pipeline
-    printf "\n${BOLD}[5] Predictions pipeline${RESET}\n"
+    printf "\n${BOLD}[6] Predictions pipeline${RESET}\n"
     _start_bg worker-predictions-coord poetry run python scripts/worker.py --queue protea.predictions
     for i in $(seq 1 "$BATCH_WORKERS"); do
         _start_bg "worker-predictions-batch-${i}" \
@@ -106,11 +127,11 @@ cmd_start() {
     _start_bg worker-predictions-write poetry run python scripts/worker.py --queue protea.predictions.write
 
     # Evaluations pipeline
-    printf "\n${BOLD}[6] Evaluations pipeline${RESET}\n"
+    printf "\n${BOLD}[7] Evaluations pipeline${RESET}\n"
     _start_bg worker-evaluations poetry run python scripts/worker.py --queue protea.evaluations
 
     # Stale job reaper
-    printf "\n${BOLD}[7] Stale job reaper${RESET}\n"
+    printf "\n${BOLD}[8] Stale job reaper${RESET}\n"
     _start_bg worker-reaper poetry run python scripts/worker.py --queue reaper
 
     # Frontend
@@ -119,7 +140,7 @@ cmd_start() {
     # (ngrok, Cloudflare free tier, etc). Override with FRONTEND_MODE=dev for
     # local hacking where HMR is actually useful.
     local FRONTEND_MODE="${FRONTEND_MODE:-prod}"
-    printf "\n${BOLD}[8] Frontend (%s)${RESET}\n" "$FRONTEND_MODE"
+    printf "\n${BOLD}[9] Frontend (%s)${RESET}\n" "$FRONTEND_MODE"
     cd "$ROOT/apps/web"
     if [[ "$FRONTEND_MODE" == "prod" ]]; then
         printf "  Building production bundle (this may take ~30-60s)...\n"
