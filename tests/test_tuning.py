@@ -233,7 +233,7 @@ class TestWorkerTuningDefaults:
 
     def test_reaper_defaults(self) -> None:
         w = WorkerTuning()
-        assert w.reaper_main_timeout_seconds == 86400
+        assert w.reaper_main_timeout_seconds == 21600
         assert w.reaper_default_timeout_seconds == 3600
         assert w.reaper_stall_seconds == 1800
 

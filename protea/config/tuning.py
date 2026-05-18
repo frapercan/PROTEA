@@ -131,12 +131,13 @@ class WorkerTuning(BaseModel):
         description="Reference data sets en cache por proceso predict.",
     )
     reaper_main_timeout_seconds: int = Field(
-        default=86400,
+        default=21600,
         ge=300,
         description=(
-            "Timeout duro antes de marcar jobs FAILED en producción (default 24h). "
-            "Coordinator jobs como compute_embeddings pueden correr <1d en datasets "
-            "grandes; este es el corte global."
+            "Timeout duro antes de marcar jobs FAILED en producción (default 6h). "
+            "Coordinator jobs como compute_embeddings pueden correr 2-3h en datasets "
+            "grandes con 100% headroom; este es el corte global para capturar "
+            "jobs stalled dentro de una jornada laboral (replaces 24h backstop)."
         ),
     )
     reaper_default_timeout_seconds: int = Field(

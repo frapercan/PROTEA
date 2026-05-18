@@ -5,7 +5,7 @@ Stale Job Reaper
 60-second timer and transitions stuck RUNNING jobs to FAILED. It applies
 two thresholds:
 
-- ``timeout_seconds`` (default 86400s / 24 h): a job must have been running
+- ``timeout_seconds`` (default 21600s / 6 h): a job must have been running
   longer than this before the reaper considers it a candidate.
 - ``stall_seconds`` (default 1800s / 30 min): even if the wall-clock threshold
   is exceeded, the reaper skips jobs that have emitted a ``JobEvent`` row
