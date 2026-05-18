@@ -420,8 +420,16 @@ class ImportDatasetByReferenceRequest(BaseModel):
         default="goa",
         description="``goa`` or ``quickgo``; matches the lab's manifest.",
     )
-    n_train_rows: int = Field(default=0, ge=0)
-    n_eval_rows: int = Field(default=0, ge=0)
+    n_train_rows: int = Field(
+        default=0,
+        ge=0,
+        description="Row count of the training split as captured in the producer's manifest.",
+    )
+    n_eval_rows: int = Field(
+        default=0,
+        ge=0,
+        description="Row count of the evaluation split as captured in the producer's manifest.",
+    )
     embedding_config_id: str | None = Field(
         default=None,
         description=(
@@ -447,8 +455,16 @@ class ImportDatasetByReferenceRequest(BaseModel):
         max_length=64,
         description="``v{old}-v{new}`` window of the eval parquet, if present.",
     )
-    producer_version: str | None = Field(default=None, max_length=64)
-    producer_git_sha: str | None = Field(default=None, max_length=40)
+    producer_version: str | None = Field(
+        default=None,
+        max_length=64,
+        description="Version label of the producer that emitted the dump (e.g. lab semver tag).",
+    )
+    producer_git_sha: str | None = Field(
+        default=None,
+        max_length=40,
+        description="Git SHA of the producer (lab or external pipeline) that emitted the dump.",
+    )
     external_source: str | None = Field(
         default=None,
         description=(

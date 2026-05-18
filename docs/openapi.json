@@ -633,12 +633,14 @@
           },
           "n_eval_rows": {
             "default": 0,
+            "description": "Row count of the evaluation split as captured in the producer's manifest.",
             "minimum": 0.0,
             "title": "N Eval Rows",
             "type": "integer"
           },
           "n_train_rows": {
             "default": 0,
+            "description": "Row count of the training split as captured in the producer's manifest.",
             "minimum": 0.0,
             "title": "N Train Rows",
             "type": "integer"
@@ -672,6 +674,7 @@
                 "type": "null"
               }
             ],
+            "description": "Git SHA of the producer (lab or external pipeline) that emitted the dump.",
             "title": "Producer Git Sha"
           },
           "producer_version": {
@@ -684,6 +687,7 @@
                 "type": "null"
               }
             ],
+            "description": "Version label of the producer that emitted the dump (e.g. lab semver tag).",
             "title": "Producer Version"
           },
           "schema_sha": {
