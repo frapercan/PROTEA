@@ -35,7 +35,11 @@ export default defineConfig({
         hasTouch: true,
         userAgent: devices["iPhone 12"].userAgent,
       },
-      testMatch: "**/mobile*.spec.ts",
+      // Match both the legacy "mobile-*.spec.ts" prefix and the FARM-UI.8
+      // "farm-mobile.spec.ts" file. The farm-mobile spec lives next to
+      // the farm-list / farm-palette specs (which are desktop) so the
+      // pattern is the more explicit option rather than a prefix.
+      testMatch: ["**/mobile*.spec.ts", "**/farm-mobile.spec.ts"],
     },
     {
       name: "tablet",
@@ -46,7 +50,9 @@ export default defineConfig({
         isMobile: true,
         hasTouch: true,
       },
-      testMatch: "**/tablet*.spec.ts",
+      // Same dual-pattern: legacy tablet-*.spec.ts plus the FARM-UI.8
+      // farm-tablet.spec.ts.
+      testMatch: ["**/tablet*.spec.ts", "**/farm-tablet.spec.ts"],
     },
     {
       name: "flows",
@@ -59,13 +65,15 @@ export default defineConfig({
     {
       // FARM-UI.2 smoke. The spec ships its own per-describe viewport
       // override (375x667 + 1280x800) so the project-level viewport
-      // here is only the bootstrap default.
+      // here is only the bootstrap default. Excludes farm-mobile /
+      // farm-tablet which run under the dedicated viewport projects.
       name: "farm",
       use: {
         browserName: "chromium",
         viewport: { width: 1280, height: 800 },
       },
       testMatch: "**/farm-*.spec.ts",
+      testIgnore: ["**/farm-mobile.spec.ts", "**/farm-tablet.spec.ts"],
     },
   ],
 });
