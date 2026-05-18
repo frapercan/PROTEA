@@ -2,7 +2,7 @@ ADR-D34: Selective rerank resurrection, recompute not archaeology
 =================================================================
 
 :Status: Accepted
-:Date: 2026-05-16 (proposed), 2026-05-17 (accepted with multi-seed numbers)
+:Date: 2026-05-16 (proposed), 2026-05-17 (accepted with multi-seed numbers), 2026-05-18 (closure ratified by lab LR.4 + paired CI from LB.3)
 
 Context
 -------
@@ -135,6 +135,31 @@ Decision
    policy on current bench". This ADR records the multi-seed
    acceptance.
 
+8. **Lab LR.4 closure (2026-05-18).** Lab PR
+   ``protea-reranker-lab#21`` (``lab(LR.4): leakage-free re-run of the
+   historical selective-rerank policy``) formalises the
+   supersession on the lab side: it lands
+   ``scripts/lr4_v18_selective.py`` (regenerator reading
+   ``runs/lb2_multiseed/cis.json`` or falling back to documented
+   canonical numbers), ``experiments/lr4/v18_selective_delta.csv``
+   (canonical acceptance artefact: per-cell selective rerank table
+   plus aggregate delta row), and an ``EXPERIMENTS.md`` LR.4 closure
+   section. The CSV reports the same-bench all-baseline reference
+   (the leaky 0.4562 had no per-cell breakdown on file, so the lift
+   is reported against the new bench baseline; the publishable
+   selective-rerank lift on bench-v1-K5-v226-lineage is +0.0397
+   over the same-bench KNN baseline). The legacy record is also
+   marked superseded in the lab champions appendix.
+
+9. **Paired CI evidence (LB.3, 2026-05-18).** Lab PR
+   ``protea-reranker-lab#19`` (``lab(LB.3): per-cell paired CI on
+   leakage-fixed champion``) supplies the per-cell paired confidence
+   intervals for the recomputed run. All 6 NK+LK cells are
+   significant at the 95% level (6 of 6); see memory
+   ``project_lb3_paired_ci_2026_05_18``. This is the statistical
+   evidence supporting the deployment policy in points 2 and 6
+   above.
+
 Consequences
 ------------
 
@@ -176,23 +201,59 @@ References
 
 - Lab champion declaration: ``EXPERIMENTS.md`` in
   ``frapercan/protea-reranker-lab`` (FARM-EXP.10 champion section,
-  LB.2 multi-seed sweep section).
+  LB.2 multi-seed sweep section, LR.4 closure section).
 - LB.2 multi-seed sweep commit:
   ``protea-reranker-lab`` branch
   ``feat/FARM-EXP.10-transversal-champion`` (cherry-pick of
   ``77c3b33`` from ``task/bioinfo-quick-1778972872-6d9a``).
+- Lab LR.4 closure PR: ``protea-reranker-lab#21`` (merged
+  2026-05-18, commit ``1c17f75``); ships
+  ``scripts/lr4_v18_selective.py``,
+  ``experiments/lr4/v18_selective_delta.csv``, and the LR.4
+  ``EXPERIMENTS.md`` closure section.
+- Lab LB.3 paired CI PR: ``protea-reranker-lab#19`` (merged
+  2026-05-18); per-cell paired confidence intervals (6 of 6 NK+LK
+  cells significant at the 95% level).
 - Memory entry ``project_lb2_leakage_fixed_champion`` (publishable
-  numbers).
+  numbers, 0.6215 plus or minus 0.0014 selective avg).
+- Memory entry ``project_lb3_paired_ci_2026_05_18`` (paired CI
+  evidence, 6 of 6 NK+LK cells significant).
 - Memory entry ``project_anc2vec_count_leakage`` (root cause for
   the supersession of 0.4562).
 - Memory entry ``project_v18_selective_rerank`` (legacy champion,
-  marked superseded).
+  marked historical-only and superseded 2026-05-18).
 - Memory entry ``feedback_no_archaeology_recompute`` (policy
-  decision).
+  decision; canonical wording of the recompute-not-archaeology
+  rule).
 - Memory entry ``reference_lab_validation_ranges`` (v220 / v226 /
   v230 distinction).
 - Memory entry ``project_farm_exp_2_placeholder_digests`` (catalog
-  shortid tentativeness).
-- FARM-EXP.10 slice definition.
+  shortid tentativeness; relevant to the leakage-fixed bundle's
+  pending first-class axis registration).
+- FARM-EXP.10 slice definition in
+  ``agent-farm/plans/farm-platform/PLAN.md``.
 - Lab summary file under the leakage-fixed bench runs directory
   (current bench results).
+
+Open follow-ups (deferred work, tracked separately):
+
+- ``runs/transversal/<shortid>/`` placement of per-seed
+  FARM-EXP.3-format ``run.json`` records is **deferred to the
+  writer slice (FARM-EXP.5 and later)**, which is the slice that
+  emits the ``axis`` block plus the ``fmax_samples`` array consumed
+  by ``scripts/update_champions.py``. Until that slice lands, the
+  champion declaration lives in the lab ``champions.md`` manual
+  appendix (delimited by ``MANUAL_ENTRIES_BEGIN`` /
+  ``MANUAL_ENTRIES_END`` markers) so that re-renders do not strip
+  it. See lab PR ``protea-reranker-lab#15`` (FARM-EXP.10
+  formalisation) and the LR.4 PR for the appendix-survival test
+  cases.
+- The leakage-fixed bundle (the
+  ``feat=v6_features+lineage-leakfree`` axis value: the base
+  ``v6_features+lineage`` bundle minus ``anc2vec_*`` and
+  ``emb_pca_*``) was added as a first-class entry in the
+  FARM-EXP.2 transversal catalog via FARM-EXP.10b (lab PR
+  ``protea-reranker-lab#16``); the digest-backfill slice that
+  clears the placeholder shortids documented in
+  ``project_farm_exp_2_placeholder_digests`` is the remaining
+  prerequisite for stable axis-tuple identifiers.
