@@ -839,6 +839,48 @@
       "summaryTitle": "结果摘要",
       "summaryEmpty": "结果行存在但摘要为空。",
       "summaryMissing": "尚无结果行。任务未达到 finalize 阶段。"
+    },
+    "plan": {
+      "title": "Slice DAG",
+      "subtitle": "Dependency graph across every loop in plans/",
+      "refresh": "Refresh",
+      "emptyState": "No slices match the current filters.",
+      "sliceCount": "{count} slice{count, plural, one {} other {s}} shown",
+      "filters": {
+        "loopLabel": "Loop",
+        "phaseLabel": "Phase",
+        "priorityLabel": "Priority",
+        "statusLabel": "Status",
+        "allLabel": "All",
+        "criticalPath": "Critical path"
+      },
+      "status": {
+        "pending": "Pending",
+        "in_progress": "In progress",
+        "blocked": "Blocked",
+        "done": "Done",
+        "deferred": "Deferred"
+      },
+      "legend": {
+        "nodes": "Nodes",
+        "edges": "Edges",
+        "deps": "depends on",
+        "criticalEdge": "critical edge"
+      },
+      "hover": {
+        "priority": "Priority",
+        "hours": "Hours",
+        "acceptance": "Acceptance",
+        "deps": "Deps",
+        "loop": "Loop",
+        "phase": "Phase"
+      },
+      "criticalPath": {
+        "toggleOn": "Highlight critical path",
+        "toggleOff": "Clear highlight",
+        "noneFound": "No pending-only chain found.",
+        "summary": "{count} slice{count, plural, one {} other {s}} on the longest pending chain ({hours}h budget)."
+      }
     }
   }
 }

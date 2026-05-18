@@ -98,3 +98,35 @@ export function getFarmHeartbeats(taskId: string, limit = 50) {
 export function getFarmResults(taskId: string) {
   return get<FarmResult>(`/tasks/${encodeURIComponent(taskId)}/results`);
 }
+
+// ── plan slices ──────────────────────────────────────────────────────────────
+//
+// FARM-UI.4 consumes /plan from the farm-api sidecar (see
+// apps/farm-api/farm_api/routes/plan.py). The response is a flat list of
+// PlanSlice rows from every loop directory; the slice-DAG page rebuilds
+// edges client-side off the deps[] field. Status vocabulary matches
+// scripts/lib/plan_parser.STATUS_GLYPH (pending, in_progress, blocked,
+// done, deferred). The /plan response stays small (sub-200 slices) so we
+// page everything in one request and rebuild the graph on render.
+
+export type FarmPlanSlice = {
+  id: string;
+  title: string;
+  loop: string;
+  phase: string;
+  status: string;
+  deps: string[];
+  priority?: string | null;
+  estimated_hours?: number | null;
+  tags: string[];
+  requires_human: boolean;
+  acceptance?: string | null;
+};
+
+export function listFarmPlan(params?: { loop?: string; status?: string }) {
+  const q = new URLSearchParams();
+  if (params?.loop) q.set("loop", params.loop);
+  if (params?.status) q.set("status", params.status);
+  const qs = q.toString();
+  return get<FarmPlanSlice[]>(qs ? `/plan?${qs}` : "/plan");
+}
