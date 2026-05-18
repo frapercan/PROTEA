@@ -922,6 +922,82 @@ class TestBaseWorkerForceFailJob:
         session.close.assert_called_once()
 
 
+class TestBaseWorkerForceFailOnNonRetryablePreOpException:
+    """FIX-BASEWORKER-ROBUSTNESS — Bug #2.
+
+    Regression: a non-retryable error raised inside ``_execute_with_session``
+    BEFORE the operation gets a chance to run (e.g.
+    ``psycopg.errors.InFailedSqlTransaction`` on the leading
+    ``session.get(Job, job_id)``) used to bypass both fail paths. The
+    outer except only invoked ``_force_fail_job`` when ``is_retryable``
+    was True, so the row stayed RUNNING forever (orphan job).
+
+    After the fix, ANY exception (except ``RetryLaterError``) is routed
+    through ``_force_fail_job``, which uses a fresh session from the
+    pool and writes FAILED idempotently via ``WHERE status=RUNNING``.
+    """
+
+    def test_non_retryable_db_error_in_pre_op_phase_marks_failed(self):
+        """Simulate Bug #2: session.get raises in _execute_with_session
+        with a non-retryable exception; outer except must still mark
+        the job FAILED through the fallback session.
+
+        Session call order:
+            #1 claim    — returns a QUEUED job, commits cleanly.
+            #2 execute  — session.get raises an aborted-transaction
+                          equivalent BEFORE the operation runs.
+            #3 fallback — opened by _force_fail_job; must commit the
+                          UPDATE that flips status RUNNING -> FAILED.
+        """
+        from sqlalchemy import update as sa_update
+
+        from protea.infrastructure.orm.models.job import Job, JobStatus
+
+        class _AbortedTransaction(RuntimeError):
+            """Stand-in for psycopg.errors.InFailedSqlTransaction.
+
+            A plain RuntimeError subclass so ``is_retryable`` returns
+            False (no pgcode, not a connection error).
+            """
+
+        job_id = uuid4()
+        captured: list[MagicMock] = []
+
+        def make_session():
+            s = MagicMock()
+            captured.append(s)
+            current = len(captured)
+            if current == 1:
+                claim_job = MagicMock()
+                claim_job.id = job_id
+                claim_job.status = JobStatus.QUEUED
+                claim_job.parent_job_id = None
+                s.get.return_value = claim_job
+            elif current == 2:
+                s.get.side_effect = _AbortedTransaction(
+                    "current transaction is aborted"
+                )
+            return s
+
+        factory = MagicMock(side_effect=make_session)
+        registry, _ = _make_registry()  # op never runs in this test
+
+        worker = BaseWorker(factory, registry, WorkerConfig(worker_name="test"))
+        with pytest.raises(_AbortedTransaction):
+            worker.handle_job(job_id)
+
+        # Three sessions: claim, execute, fallback.
+        assert len(captured) == 3
+        fallback = captured[2]
+        # The fallback session must have issued an UPDATE Job ...
+        # WHERE status=RUNNING with FAILED + the right error_code.
+        fallback.execute.assert_called_once()
+        stmt = fallback.execute.call_args.args[0]
+        assert isinstance(stmt, type(sa_update(Job)))
+        fallback.commit.assert_called_once()
+        fallback.close.assert_called_once()
+
+
 class TestBaseWorkerMaybeFailParent:
     """Cover _maybe_fail_parent (lines 267-302)."""
 
@@ -954,7 +1030,19 @@ class TestBaseWorkerMaybeFailParent:
         session.execute.assert_called()
 
     def test_children_still_running_does_not_fail_parent(self):
-        """If some children are still running, parent is not failed."""
+        """If some children are still running, parent is not failed.
+
+        After FIX-BASEWORKER-ROBUSTNESS ``_force_fail_job`` runs
+        unconditionally on every non-RetryLater exception. That fallback
+        emits one sa_update against the in-flight job (idempotent via
+        ``WHERE status=RUNNING``). The behavioural assertion is now:
+        the parent UPDATE (which would target ``Job.id == parent_id``)
+        does NOT fire; only the in-flight fallback UPDATE fires.
+        """
+        from sqlalchemy import update as sa_update
+
+        from protea.infrastructure.orm.models.job import Job
+
         parent_id = uuid4()
         job = _make_job(parent_job_id=parent_id)
 
@@ -969,8 +1057,24 @@ class TestBaseWorkerMaybeFailParent:
         with pytest.raises(RuntimeError, match="child failed"):
             worker.handle_job(job.id)
 
-        # session.execute should NOT have been called for parent update
-        session.execute.assert_not_called()
+        # The single ``execute`` call is the in-flight job's fallback
+        # UPDATE (idempotent), NOT a parent UPDATE — that would only
+        # happen via _maybe_fail_parent, which short-circuits when
+        # children are still running.
+        execute_calls = session.execute.call_args_list
+        assert len(execute_calls) == 1
+        stmt = execute_calls[0].args[0]
+        # Sanity: the lone UPDATE targets the in-flight job's id, not
+        # the parent_id. Inspecting compiled WHERE params is overkill
+        # for a unit test; checking the bound values keeps it readable.
+        compiled = stmt.compile(compile_kwargs={"literal_binds": False})
+        params = compiled.params
+        assert job.id in params.values()
+        assert parent_id not in params.values()
+        # The statement updates the Job table (parent UPDATE would too,
+        # so this is mainly a sanity check that we are still looking at
+        # the right SQL).
+        assert isinstance(stmt, type(sa_update(Job)))
 
 
 class TestBaseWorkerRebindJob:

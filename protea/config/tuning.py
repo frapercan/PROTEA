@@ -152,6 +152,18 @@ class WorkerTuning(BaseModel):
             "Tiempo sin JobEvent antes de considerar un job stalled candidato a reapear."
         ),
     )
+    worker_shutdown_grace_seconds: int = Field(
+        default=30,
+        ge=1,
+        description=(
+            "Ventana en segundos que el QueueConsumer concede a un job en vuelo "
+            "tras recibir SIGTERM/SIGINT antes de marcarlo FAILED con "
+            "error_code=WorkerShutdown via fallback session. 30s permite que "
+            "callbacks cortos terminen naturalmente; jobs largos quedan "
+            "registrados como FAILED en vez de quedarse colgados en RUNNING "
+            "tras un redeploy."
+        ),
+    )
     api_cache_default_ttl_seconds: float = Field(
         default=300.0,
         ge=1.0,
