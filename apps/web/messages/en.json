@@ -823,6 +823,12 @@
       "duration": "Duration",
       "model": "Model"
     },
+    "pill": {
+      "running": "{count} farm",
+      "error": "{count} err",
+      "unknown": "Farm offline",
+      "recentErrorsAria": "{count} farm errors in the last hour"
+    },
     "detail": {
       "title": "Task detail",
       "backLink": "← Back to tasks",
