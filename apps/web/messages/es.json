@@ -891,6 +891,44 @@
         "noneFound": "No pending-only chain found.",
         "summary": "{count} slice{count, plural, one {} other {s}} on the longest pending chain ({hours}h budget)."
       }
+    },
+    "cost": {
+      "title": "Reporte de coste",
+      "subtitle": "Gasto por agente, modelo y día, comparado con el tope diario de cada agente",
+      "refresh": "Refrescar",
+      "loading": "Cargando reporte de coste",
+      "emptyState": "Sin datos de coste en la ventana seleccionada.",
+      "summary": {
+        "total": "Gasto total",
+        "tasks": "Tareas facturadas",
+        "window": "Ventana",
+        "windowDays": "Últimos {days} días"
+      },
+      "controls": {
+        "viewLabel": "Vista",
+        "windowLabel": "Ventana",
+        "view": {
+          "agent": "Por agente",
+          "model": "Por modelo",
+          "day": "Por día"
+        },
+        "windowOption": {
+          "d7": "7d",
+          "d30": "30d",
+          "d60": "60d"
+        }
+      },
+      "captions": {
+        "agent": "Gasto medio diario por agente en los últimos {days} días.",
+        "model": "Gasto apilado por modelo en los últimos {days} días.",
+        "day": "Gasto diario total en los últimos {days} días."
+      },
+      "legend": {
+        "spend": "Gasto",
+        "overBudget": "sobre el tope",
+        "budget": "Tope diario",
+        "budgetTick": "marcador del tope"
+      }
     }
   }
 }

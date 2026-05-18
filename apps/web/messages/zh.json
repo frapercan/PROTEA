@@ -887,6 +887,44 @@
         "noneFound": "No pending-only chain found.",
         "summary": "{count} slice{count, plural, one {} other {s}} on the longest pending chain ({hours}h budget)."
       }
+    },
+    "cost": {
+      "title": "Cost rollup",
+      "subtitle": "Spend by agent, model, and day, compared with each agent's advisory cap",
+      "refresh": "Refresh",
+      "loading": "Loading cost rollup",
+      "emptyState": "No cost data in the selected window.",
+      "summary": {
+        "total": "Total spend",
+        "tasks": "Tasks billed",
+        "window": "Window",
+        "windowDays": "Last {days} days"
+      },
+      "controls": {
+        "viewLabel": "View",
+        "windowLabel": "Window",
+        "view": {
+          "agent": "By agent",
+          "model": "By model",
+          "day": "By day"
+        },
+        "windowOption": {
+          "d7": "7d",
+          "d30": "30d",
+          "d60": "60d"
+        }
+      },
+      "captions": {
+        "agent": "Daily-average spend per agent over the last {days} days.",
+        "model": "Stacked spend per model over the last {days} days.",
+        "day": "Total daily spend over the last {days} days."
+      },
+      "legend": {
+        "spend": "Spend",
+        "overBudget": "over cap",
+        "budget": "Daily cap",
+        "budgetTick": "cap marker"
+      }
     }
   }
 }
