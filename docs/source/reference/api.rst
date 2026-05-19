@@ -32,6 +32,7 @@ contract covers every documented request body
 (``CreateJobRequest`` / ``CreateJobCommentRequest`` /
 ``ScoringConfigCreate`` / ``CreateExperimentRunRequest`` /
 ``UpdateExperimentRunRequest`` / ``CreateDatasetRequest`` /
+``ImportDatasetByReferenceRequest`` /
 ``ImportRerankerByReferenceRequest`` / ``SupportCreate``); response
 models are not constrained because they are server-built and never
 parse client input.
@@ -304,6 +305,23 @@ configured ``ArtifactStore`` (local FS or MinIO), and inserts a
 ``GET /datasets/{id_or_name}`` expose the registry to
 ``protea-reranker-lab``'s ``pull_dataset.py`` and to UI consumers.
 
+``POST /datasets/import-by-reference`` (LB.1) is the lightweight
+registration path for datasets whose artefacts already reside in the
+artifact store. The caller supplies the name, storage backend, artifact
+URIs, content fingerprints (``schema_sha``, ``manifest_sha``), and dump
+parameters verbatim from the lab's ``manifest.json``; PROTEA inserts a
+``Dataset`` row pointing at those URIs without re-running the KNN
+pipeline or enqueueing a job. Typical use cases are: replay after a DB
+wipe while artefacts remain in MinIO, lab-side dumps produced before
+``export_research_dataset`` existed, and the FARM-EXP.2a
+placeholder-digest backfill. Optional FK columns
+(``embedding_config_id``, ``ontology_snapshot_id``) are silently set to
+NULL when the referenced row is absent in the local DB, matching the
+same defensive pattern used by
+``POST /reranker-models/import-by-reference``. The resulting ``Dataset``
+row is content-identical to one produced by an in-PROTEA export; the
+only visible difference is ``meta.imported_by_reference = true``.
+
 .. automodule:: protea.api.routers.datasets
    :members:
    :undoc-members:
@@ -412,10 +430,11 @@ exercised from CLI tools or batch scripts without importing FastAPI.
 Authentication and rate limits
 ------------------------------
 
-Four POST routes require a credential (T5.6a + T5.6b):
+Five POST routes require a credential (T5.6a + T5.6b):
 
 * ``POST /v1/jobs``
 * ``POST /v1/datasets``
+* ``POST /v1/datasets/import-by-reference``
 * ``POST /v1/reranker-models/import``
 * ``POST /v1/reranker-models/import-by-reference``
 
@@ -751,6 +770,10 @@ Endpoints summary
    * - ``POST``
      - ``/datasets``
      - Enqueue an ``export_research_dataset`` job.
+   * - ``POST``
+     - ``/datasets/import-by-reference``
+     - Register a ``Dataset`` row pointing at already-staged artefacts
+       (no job, no KNN re-run). Requires auth (LB.1).
    * - ``GET``
      - ``/datasets``
      - List registered re-ranker datasets. Cursor pagination (T4.2):

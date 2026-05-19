@@ -668,22 +668,36 @@ Payload fields
        ``artifact_uri`` / ``feature_schema_sha`` are then propagated into
        every batch payload so workers do not have to re-query the row.
 
-Reranker validation and fallback
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Reranker scoring and schema-SHA guard
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-When ``reranker_model_id`` is set, each batch worker runs
-``_apply_reranker_if_aligned`` after ``prediction_dicts`` has been built.
-The flow is:
+As of T2B.4 the reranker scoring path lives in a dedicated compositive
+class, :class:`~protea.core.operations.predict_go_terms._reranker_scorer.RerankerScorer`,
+rather than in the former ``_RerankerMixin`` hierarchy.
+``PredictGOTermsBatchOperation`` receives a ``RerankerScorer`` instance
+via its constructor (default: one instance per operation) and delegates
+the full score-and-emit cycle to it. The legacy
+:mod:`protea.core.operations.predict_go_terms._batch_op_reranker` module
+is retained as a backward-compat shim that re-exports ``load_reranker``,
+``apply_reranker``, and friends so existing tests patching the legacy
+module path continue to work.
 
-1. Compute ``live_sha = compute_feature_schema_sha(active_families)`` from
-   the live ``compute_alignments`` / ``compute_taxonomy`` / ``compute_v6_features``
-   flags.
-2. If ``live_sha != reranker_feature_schema_sha`` the worker emits
-   ``reranker.schema_mismatch`` (level ``error``) and returns stats with
-   ``applied=False``. The batch continues using the KNN ordering with **no
-   crash** and no partial scoring.
-3. On match, the worker attaches the GOTerm aspect to each dict, calls
-   :func:`protea.core.reranker.apply_reranker`, and writes the
+When ``reranker_model_id`` is set, ``RerankerScorer.score`` is invoked
+after ``prediction_dicts`` has been built. The flow is:
+
+1. Compute ``live_sha = compute_feature_schema_sha(active_families)``
+   from the live ``compute_alignments`` / ``compute_taxonomy`` /
+   ``compute_v6_features`` flags.
+2. If ``live_sha != reranker_feature_schema_sha``, the scorer emits
+   ``reranker.schema_mismatch`` (level ``error``) and raises
+   :class:`~protea.core.operations.predict_go_terms._reranker_scorer.SchemaShaMismatchError`
+   (FARM-EXP.5 guard). The base worker catches this as an operation
+   failure, transitions the batch job to ``FAILED`` with
+   ``error_code="SchemaShaMismatchError"``, and **does not continue
+   with KNN ordering**. Silent prediction with a stale booster layout
+   is the exact failure mode this guard exists to prevent.
+3. On match, the scorer attaches the GOTerm aspect to each dict,
+   calls :func:`protea.core.reranker.apply_reranker`, and writes the
    ``reranker_score`` field into every prediction dict in memory.
 
 ``reranker_score`` is **in-memory only**: ``GOPrediction`` does not yet
@@ -1464,9 +1478,10 @@ unified path returns.
 
 GPU is not required: KNN search runs on CPU unless a FAISS GPU index is
 configured at process startup. The re-ranker (``booster``) is applied
-*after* ancestor expansion via ``_apply_reranker_if_aligned``, not
-inside ``protea_method.pipeline.predict``, so the historical scoring
-order remains bit-exact.
+*after* ancestor expansion by the injected
+:class:`~protea.core.operations.predict_go_terms._reranker_scorer.RerankerScorer`
+collaborator (T2B.4), not inside ``protea_method.pipeline.predict``,
+so the historical scoring order remains bit-exact.
 
 store_predictions
 ~~~~~~~~~~~~~~~~~

@@ -484,6 +484,15 @@ Experiment runs
    │ config (JSONB)               │
    │ provenance (JSONB)           │
    │ tags (ARRAY[Text])           │
+   │ plm (Text, null)             │
+   │ k (Integer, null)            │
+   │ reranker_spec_id (Text, null)│
+   │ feature_schema_sha (Text)    │
+   │ eval_set_name (Text, null)   │
+   │ eval_set_manifest_sha (Text) │
+   │ propagation (Text, null)     │
+   │ ensemble_spec (JSONB, null)  │
+   │ axis_tuple_shortid (Text)    │
    │ created_at                   │
    │ started_at (null)            │
    │ finished_at (null)           │
@@ -503,8 +512,26 @@ Experiment runs
    rather than queued because experiments often live as drafts
    before any compute kicks off, and ``abandoned`` rather than
    ``failed`` because a research run can be stopped without a hard
-   error. Linkage to sibling rows lives in follow-up tasks
-   T4.7-T4.9.
+   error.
+
+   The nine **FARM-EXP.1 axis columns** (``plm``, ``k``,
+   ``reranker_spec_id``, ``feature_schema_sha``, ``eval_set_name``,
+   ``eval_set_manifest_sha``, ``propagation``, ``ensemble_spec``,
+   ``axis_tuple_shortid``) land in migration
+   ``e1c4a7b2d8f3_farm_exp_1_experiment_run_axis``. Together they
+   form the axis tuple that the F-EXP-RESET re-benchmark addresses
+   every cell by. ``axis_tuple_shortid`` is the canonical 12-hex
+   digest ``sha256(canonical_json(axis_tuple))[:12]`` shared with
+   ``protea-reranker-lab`` via :mod:`protea.core.axis_tuple`. A
+   partial-unique index (``uq_experiment_run_axis_tuple_shortid``)
+   enforces uniqueness only when the shortid is non-NULL, so legacy
+   rows without a shortid can coexist until backfilled.
+
+   The ``status`` column uses ``values_callable=lambda e: [m.value
+   for m in e]`` (FIX-EXP-RUN-ENUM) so SQLAlchemy persists and
+   reads the DB-native lowercase labels (``"planned"``,
+   ``"running"``, ...) instead of the Python enum names; without
+   this fix all ORM inserts raised ``InvalidTextRepresentation``.
 
 Status enum
 -----------
