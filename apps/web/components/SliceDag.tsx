@@ -287,13 +287,37 @@ export default function SliceDag({
         cy.center();
       });
 
-      cy.on("tap", "node", (evt: { target: cytoscape.NodeSingular }) => {
-        const node = evt.target;
-        cy.elements().removeClass("faded");
-        cy.elements().difference(node.closedNeighborhood()).addClass("faded");
-      });
+      // P1.5: tap on a node fades neighborhood AND surfaces the tooltip
+      // so touch users get the same metadata reveal as desktop hover.
+      // Tapping the canvas background clears both the fade and the
+      // tooltip. Real cytoscape tap events carry `renderedPosition`;
+      // when absent (e.g. an event emitted via the test seam) we fall
+      // back to the node's own renderedPosition so the tooltip still
+      // anchors near the tapped node.
+      cy.on(
+        "tap",
+        "node",
+        (evt: {
+          target: cytoscape.NodeSingular;
+          renderedPosition?: { x: number; y: number };
+        }) => {
+          const node = evt.target;
+          cy.elements().removeClass("faded");
+          cy.elements().difference(node.closedNeighborhood()).addClass("faded");
+          const slice = byId.get(node.id());
+          if (!slice) return;
+          const pos = evt.renderedPosition ?? node.renderedPosition();
+          const state: SliceTooltip = { x: pos.x, y: pos.y, slice };
+          setInternalTip(state);
+          onHover?.(state);
+        },
+      );
       cy.on("tap", (evt: { target: unknown }) => {
-        if (evt.target === cy) cy.elements().removeClass("faded");
+        if (evt.target === cy) {
+          cy.elements().removeClass("faded");
+          setInternalTip(null);
+          onHover?.(null);
+        }
       });
 
       cy.on(
@@ -319,6 +343,15 @@ export default function SliceDag({
       });
 
       cyRef.current = cy as unknown as { destroy: () => void };
+
+      // Expose the live cytoscape instance on a window-scoped hook so
+      // playwright (which cannot hit-test the cytoscape <canvas>) can
+      // exercise the tap pathway in tests. Production code never reads
+      // this handle; it is purely a test seam.
+      if (typeof window !== "undefined") {
+        (window as unknown as { __sliceDagCy?: cytoscape.Core }).__sliceDagCy =
+          cy;
+      }
     }
 
     void init();
@@ -329,6 +362,9 @@ export default function SliceDag({
       if (cyRef.current) {
         cyRef.current.destroy();
         cyRef.current = null;
+      }
+      if (typeof window !== "undefined") {
+        delete (window as unknown as { __sliceDagCy?: unknown }).__sliceDagCy;
       }
     };
   }, [slices, criticalPathIds, byId, sliceIds, onHover]);

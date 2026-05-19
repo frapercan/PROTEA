@@ -58,7 +58,7 @@ function ChipRow({
       <button
         type="button"
         onClick={() => onPick("")}
-        className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${
+        className={`inline-flex items-center min-h-[44px] sm:min-h-0 rounded-full border px-3 py-1.5 sm:py-0.5 text-sm sm:text-xs font-medium transition-colors ${
           active === ""
             ? "bg-slate-800 text-white border-slate-800"
             : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
@@ -72,7 +72,7 @@ function ChipRow({
           key={v}
           type="button"
           onClick={() => onPick(v)}
-          className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${
+          className={`inline-flex items-center min-h-[44px] sm:min-h-0 rounded-full border px-3 py-1.5 sm:py-0.5 text-sm sm:text-xs font-medium transition-colors ${
             active === v
               ? "bg-blue-600 text-white border-blue-600"
               : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
@@ -228,7 +228,7 @@ export default function FarmPlanPage() {
             onClick={toggleCritical}
             aria-pressed={criticalOn}
             data-testid="critical-toggle"
-            className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+            className={`inline-flex items-center min-h-[44px] sm:min-h-0 rounded-full border px-3 py-1.5 sm:py-1 text-sm sm:text-xs font-medium transition-colors ${
               criticalOn
                 ? "bg-red-600 text-white border-red-600"
                 : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"

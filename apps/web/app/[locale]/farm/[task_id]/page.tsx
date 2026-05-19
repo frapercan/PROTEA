@@ -28,7 +28,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { EventTimeline } from "@/components/EventTimeline";
 import { Skeleton } from "@/components/Skeleton";
 import { useToast } from "@/components/Toast";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 
 function formatDate(iso?: string | null) {
   if (!iso) return "-";
@@ -82,6 +82,7 @@ export default function FarmTaskDetail({
 }) {
   const { task_id: taskId } = use(params);
   const t = useTranslations("farm");
+  const locale = useLocale();
   const toast = useToast();
   const [task, setTask] = useState<FarmTask | null>(null);
   const [heartbeats, setHeartbeats] = useState<FarmHeartbeat[]>([]);
@@ -145,8 +146,9 @@ export default function FarmTaskDetail({
     <div>
       <div className="flex flex-wrap items-center gap-3">
         <Link
-          href="/farm"
+          href={`/${locale}/farm`}
           className="text-sm text-blue-600 hover:underline"
+          data-testid="farm-detail-back-link"
         >
           {t("detail.backLink")}
         </Link>

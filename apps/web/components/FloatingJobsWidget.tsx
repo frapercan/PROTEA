@@ -105,9 +105,8 @@ export function FloatingJobsWidget() {
         onClick={() => setExpanded((v) => !v)}
         className="flex items-center gap-2.5 rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white pl-3.5 pr-4 py-2.5 text-sm font-semibold shadow-lg shadow-blue-600/30 hover:shadow-xl hover:shadow-blue-600/40 hover:-translate-y-0.5 transition-all"
         aria-expanded={expanded}
-        aria-label={`${jobs.length} running jobs`}
       >
-        <span className="relative flex h-2.5 w-2.5">
+        <span className="relative flex h-2.5 w-2.5" aria-hidden="true">
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-70" />
           <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-white" />
         </span>

@@ -32,6 +32,9 @@
     "thesisHint": "PROTEA doctoral manuscript",
     "support": "Support",
     "supportHint": "Public comments, send thanks",
+    "farmSection": "Agent farm",
+    "farmPlan": "Plan",
+    "farmCost": "Cost",
     "pipelineHint": "From sequence to GO term",
     "dataHint": "Reference proteome, ground truth, query sets",
     "resultsHint": "Benchmark matrix and CAFA evaluation",
@@ -794,6 +797,12 @@
     "subtitle": "Tasks from the agent-farm orchestrator",
     "refresh": "Refresh",
     "emptyState": "No tasks match the current filters.",
+    "subnav": {
+      "ariaLabel": "Agent farm section navigation",
+      "tasks": "Tasks",
+      "plan": "Plan",
+      "cost": "Cost"
+    },
     "rowCount": "{count} task{count, plural, one {} other {s}} shown",
     "filters": {
       "statusLabel": "Status",
