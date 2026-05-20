@@ -25,8 +25,11 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from sqlalchemy.orm import Session
 
+from protea.core._pair_feature_compute import (
+    build_pair_feature_dict,
+    precompute_alignment_features,
+)
 from protea.core.domain.aspect import ASPECT_CODES as _ASPECTS
-from protea.core.feature_engineering import compute_alignment, compute_taxonomy
 from protea.core.knn_search import search_knn
 from protea.core.reranker import EMBEDDING_PCA_DIM
 
@@ -165,9 +168,7 @@ class _KnnTransferRunner:
         self.pivot_go_ids = ctx.pivot_go_ids
         self.embedding_pool = ctx.embedding_pool
 
-    def _unpack_sequence_context(
-        self, sequence_context: SequenceContext | None
-    ) -> None:
+    def _unpack_sequence_context(self, sequence_context: SequenceContext | None) -> None:
         """Unpack the optional ``SequenceContext`` and resolve toggles."""
         # Local import avoids the circular dependency at runtime: the
         # sibling module imports from training_dump_helpers, which imports
@@ -231,12 +232,8 @@ class _KnnTransferRunner:
         self.idx_of_go: dict[str, int] = {}
         self.has_emb_mask: np.ndarray = np.zeros(0, dtype=bool)
         self.all_norm: np.ndarray = np.zeros((0, 0), dtype=np.float32)
-        self.neighbor_info: dict[
-            tuple[str, str], tuple[np.ndarray | None, np.ndarray | None]
-        ] = {}
-        self.query_known_info: dict[
-            str, tuple[np.ndarray | None, np.ndarray | None, int]
-        ] = {}
+        self.neighbor_info: dict[tuple[str, str], tuple[np.ndarray | None, np.ndarray | None]] = {}
+        self.query_known_info: dict[str, tuple[np.ndarray | None, np.ndarray | None, int]] = {}
         self.pca_query_proj: np.ndarray | None = None
         self.expand = getattr(self.p, "expand_votes_to_ancestors", False) and bool(
             self.parent_map_str
@@ -318,9 +315,7 @@ class _KnnTransferRunner:
                 if q_idx < len(nbs):
                     for _, d in nbs[q_idx]:
                         all_dists.append(d)
-            self.rr_distance_std[q_acc] = (
-                float(np.std(all_dists)) if len(all_dists) > 1 else 0.0
-            )
+            self.rr_distance_std[q_acc] = float(np.std(all_dists)) if len(all_dists) > 1 else 0.0
         for aspect in _ASPECTS:
             self._tally_aspect_votes(aspect)
 
@@ -358,14 +353,19 @@ class _KnnTransferRunner:
 
         Nested by q_acc so per-query state can be popped atomically once
         the record-building loop is done with each query — keeps RSS
-        bounded in the test split (30k queries × 5 nbrs × 3 aspects ≈
-        450k entries).
+        bounded. Alignments (the hotspot) are pre-computed for all unique
+        ``(q_acc, ref_acc)`` pairs in one parallel + on-disk-cached pass
+        (``precompute_alignment_features``), then merged with the cheap
+        per-pair taxonomy lookup. Value-preserving: the merged dict equals
+        the original per-pair ``compute_alignment`` + ``compute_taxonomy``
+        output, only the alignment half is concurrent + memoised across
+        jobs / smaller-K datasets.
         """
         if not (self.do_alignments or self.do_taxonomy):
             return
-        # Heartbeat: this loop can run for hours on large splits with
-        # alignments enabled. Without periodic logging a stall is
-        # indistinguishable from slow progress.
+        align_by_pair = self._precompute_alignments()
+        # Heartbeat: this loop can run for hours on large splits; periodic
+        # logging distinguishes a stall from slow progress.
         hb_t0 = time.perf_counter()
         hb_last = hb_t0
         hb_n = 0
@@ -378,7 +378,14 @@ class _KnnTransferRunner:
                 for ref_acc, _ in nbs[q_idx]:
                     if ref_acc in q_pairs:
                         continue
-                    q_pairs[ref_acc] = self._pair_feature_dict(q_acc, ref_acc)
+                    q_pairs[ref_acc] = build_pair_feature_dict(
+                        q_acc,
+                        ref_acc,
+                        align_by_pair,
+                        do_alignments=self.do_alignments,
+                        do_taxonomy=self.do_taxonomy,
+                        tax_ids=(self.query_tax_ids, self.ref_tax_ids),
+                    )
                     hb_n += 1
                     now = time.perf_counter()
                     if now - hb_last >= 30.0:
@@ -394,23 +401,19 @@ class _KnnTransferRunner:
                         )
                         hb_last = now
 
-    def _pair_feature_dict(self, q_acc: str, ref_acc: str) -> dict[str, Any]:
-        """Build the alignment/taxonomy feature dict for a single pair."""
-        feats: dict[str, Any] = {}
-        if self.do_alignments:
-            assert self.query_sequences is not None and self.ref_sequences is not None
-            q_seq = self.query_sequences.get(q_acc, "")
-            r_seq = self.ref_sequences.get(ref_acc, "")
-            if q_seq and r_seq:
-                feats.update(compute_alignment(q_seq, r_seq))
-        if self.do_taxonomy:
-            assert self.query_tax_ids is not None and self.ref_tax_ids is not None
-            q_tid = self.query_tax_ids.get(q_acc)
-            r_tid = self.ref_tax_ids.get(ref_acc)
-            feats.update(compute_taxonomy(q_tid, r_tid))
-            feats["query_taxonomy_id"] = q_tid
-            feats["ref_taxonomy_id"] = r_tid
-        return feats
+    def _precompute_alignments(self) -> dict[tuple[str, str], dict[str, Any]]:
+        """Batch-align unique pairs (parallel + on-disk cached); {} if off."""
+        if not self.do_alignments:
+            return {}
+        assert self.query_sequences is not None
+        assert self.ref_sequences is not None
+        return precompute_alignment_features(
+            aspects=_ASPECTS,
+            neighbors_by_aspect=self.neighbors_by_aspect,
+            valid_queries=self.valid_queries,
+            query_sequences=self.query_sequences,
+            ref_sequences=self.ref_sequences,
+        )
 
     # ── phase 4: taxonomic-consensus voter aggregation ────────────────
 
@@ -502,9 +505,7 @@ class _KnnTransferRunner:
             if self.pca_query_proj is not None
             else self._nan_pca
         )
-        q_known_cent, q_known_mat, q_known_n = self.query_known_info.get(
-            q_acc, (None, None, 0)
-        )
+        q_known_cent, q_known_mat, q_known_n = self.query_known_info.get(q_acc, (None, None, 0))
         q_pairs_features = self.pair_features.get(q_acc, {})
         builder = self._builder
         for aspect in _ASPECTS:
