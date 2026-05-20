@@ -84,11 +84,11 @@ def upgrade() -> None:
                    || jsonb_build_object(
                           'alias_names',
                           COALESCE(meta->'alias_names', '[]'::jsonb)
-                              || to_jsonb(:legacy::text)
+                              || to_jsonb(CAST(:legacy AS text))
                       )
             WHERE name = :legacy
               AND NOT (
-                  COALESCE(meta->'alias_names', '[]'::jsonb) @> to_jsonb(:legacy::text)
+                  COALESCE(meta->'alias_names', '[]'::jsonb) @> to_jsonb(CAST(:legacy AS text))
               )
             """
         ),
