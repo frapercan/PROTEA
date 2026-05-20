@@ -315,23 +315,23 @@ class ImportDatasetByReferenceRequest(BaseModel):
         "extra": "forbid",
         "json_schema_extra": {
             "example": {
-                "name": "bench-v1-K5-v226-lineage",
+                "name": "bench-v1-K5-v226-lineage-prostt5",
                 "storage_backend": "local",
-                "key_prefix": "datasets/bench-v1-K5-v226-lineage/",
+                "key_prefix": "datasets/bench-v1-K5-v226-lineage-prostt5/",
                 "train_uri": (
                     "file:///home/frapercan/Thesis2/repositories/"
                     "protea-reranker-lab/datasets/"
-                    "bench-v1-K5-v226-lineage/train.parquet"
+                    "bench-v1-K5-v226-lineage-prostt5/train.parquet"
                 ),
                 "eval_uri": (
                     "file:///home/frapercan/Thesis2/repositories/"
                     "protea-reranker-lab/datasets/"
-                    "bench-v1-K5-v226-lineage/eval.parquet"
+                    "bench-v1-K5-v226-lineage-prostt5/eval.parquet"
                 ),
                 "manifest_uri": (
                     "file:///home/frapercan/Thesis2/repositories/"
                     "protea-reranker-lab/datasets/"
-                    "bench-v1-K5-v226-lineage/manifest.json"
+                    "bench-v1-K5-v226-lineage-prostt5/manifest.json"
                 ),
                 "schema_sha": "6d97a624b8a7",
                 "manifest_sha": "f" * 64,
@@ -626,7 +626,7 @@ def import_dataset_by_reference(
     here. PROTEA persists a Dataset row pointing at those URIs without
     re-reading the artefacts. Useful for benches the lab produced
     before ``export_research_dataset`` existed, for replays after a
-    DB wipe, and for the ``bench-v1-K5-v226-lineage`` LB.1 bootstrap.
+    DB wipe, and for the ``bench-v1-K5-v226-lineage-prostt5`` LB.1 bootstrap.
 
     The optional ``embedding_config_id`` and ``ontology_snapshot_id``
     are resolved against the local DB and NULL'd when missing, so the

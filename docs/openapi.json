@@ -509,16 +509,16 @@
           "annotation_source": "goa",
           "embedding_config_id": "c0ae5b69-d6dc-41cf-a711-1739d3d2e170",
           "eval_snapshot_pair": "v226-v230",
-          "eval_uri": "file:///home/frapercan/Thesis2/repositories/protea-reranker-lab/datasets/bench-v1-K5-v226-lineage/eval.parquet",
+          "eval_uri": "file:///home/frapercan/Thesis2/repositories/protea-reranker-lab/datasets/bench-v1-K5-v226-lineage-prostt5/eval.parquet",
           "external_source": "protea-reranker-lab@059db19",
           "force": false,
           "k": 5,
-          "key_prefix": "datasets/bench-v1-K5-v226-lineage/",
+          "key_prefix": "datasets/bench-v1-K5-v226-lineage-prostt5/",
           "manifest_sha": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-          "manifest_uri": "file:///home/frapercan/Thesis2/repositories/protea-reranker-lab/datasets/bench-v1-K5-v226-lineage/manifest.json",
+          "manifest_uri": "file:///home/frapercan/Thesis2/repositories/protea-reranker-lab/datasets/bench-v1-K5-v226-lineage-prostt5/manifest.json",
           "n_eval_rows": 1066859,
           "n_train_rows": 24351779,
-          "name": "bench-v1-K5-v226-lineage",
+          "name": "bench-v1-K5-v226-lineage-prostt5",
           "ontology_snapshot_id": "35c3ad67-3002-47db-8f71-eeed69d22ad6",
           "producer_git_sha": "059db1907c5208a965238e8e6682184fb83537be",
           "producer_version": "0.8.0",
@@ -527,7 +527,7 @@
           "train_snapshot_pairs": [
             "v220-v226"
           ],
-          "train_uri": "file:///home/frapercan/Thesis2/repositories/protea-reranker-lab/datasets/bench-v1-K5-v226-lineage/train.parquet"
+          "train_uri": "file:///home/frapercan/Thesis2/repositories/protea-reranker-lab/datasets/bench-v1-K5-v226-lineage-prostt5/train.parquet"
         },
         "properties": {
           "annotation_source": {
@@ -3481,7 +3481,7 @@
     },
     "/v1/datasets/import-by-reference": {
       "post": {
-        "description": "Register a ``Dataset`` row whose artefacts are already staged.\n\nThe lab uploads (or simply leaves on disk) the parquets and\n``manifest.json`` itself and posts the URIs + manifest fields\nhere. PROTEA persists a Dataset row pointing at those URIs without\nre-reading the artefacts. Useful for benches the lab produced\nbefore ``export_research_dataset`` existed, for replays after a\nDB wipe, and for the ``bench-v1-K5-v226-lineage`` LB.1 bootstrap.\n\nThe optional ``embedding_config_id`` and ``ontology_snapshot_id``\nare resolved against the local DB and NULL'd when missing, so the\ninsert never fails on a stale FK. ``schema_sha_v2`` is dual-written\nwhen the ``PROTEA_SCHEMA_SHA_V2_WRITE_ENABLED`` flag is on (T1.6).\n\nReturns ``201`` with the row's id + name. ``409`` on a duplicate\n``name`` unless ``force=true`` was passed.",
+        "description": "Register a ``Dataset`` row whose artefacts are already staged.\n\nThe lab uploads (or simply leaves on disk) the parquets and\n``manifest.json`` itself and posts the URIs + manifest fields\nhere. PROTEA persists a Dataset row pointing at those URIs without\nre-reading the artefacts. Useful for benches the lab produced\nbefore ``export_research_dataset`` existed, for replays after a\nDB wipe, and for the ``bench-v1-K5-v226-lineage-prostt5`` LB.1 bootstrap.\n\nThe optional ``embedding_config_id`` and ``ontology_snapshot_id``\nare resolved against the local DB and NULL'd when missing, so the\ninsert never fails on a stale FK. ``schema_sha_v2`` is dual-written\nwhen the ``PROTEA_SCHEMA_SHA_V2_WRITE_ENABLED`` flag is on (T1.6).\n\nReturns ``201`` with the row's id + name. ``409`` on a duplicate\n``name`` unless ``force=true`` was passed.",
         "operationId": "import_dataset_by_reference_v1_datasets_import_by_reference_post",
         "parameters": [
           {

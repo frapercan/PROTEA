@@ -86,9 +86,9 @@ def test_derive_falls_back_to_model_id_for_reranker_spec_id() -> None:
 
 
 def test_derive_falls_back_to_evaluation_set_for_eval_set_name() -> None:
-    cfg = {"evaluation_set": "bench-v1-K5-v226-lineage"}
+    cfg = {"evaluation_set": "bench-v1-K5-v226-lineage-prostt5"}
     out = derive_axis_payload(cfg, {})
-    assert out["eval_set_name"] == "bench-v1-K5-v226-lineage"
+    assert out["eval_set_name"] == "bench-v1-K5-v226-lineage-prostt5"
 
 
 def test_derive_propagation_defaults_to_none_string() -> None:

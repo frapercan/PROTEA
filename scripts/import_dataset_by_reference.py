@@ -12,7 +12,7 @@ dataset via the registry.
 Usage::
 
     poetry run python scripts/import_dataset_by_reference.py \\
-        --dataset-dir /path/to/bench-v1-K5-v226-lineage \\
+        --dataset-dir /path/to/bench-v1-K5-v226-lineage-prostt5 \\
         [--name <override>] [--storage-backend local|minio] \\
         [--api http://127.0.0.1:8000] [--api-key <key>] [--force]
 
