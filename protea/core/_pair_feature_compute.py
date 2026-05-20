@@ -66,7 +66,7 @@ def _align_worker(pair: tuple[str, str]) -> dict[str, Any]:
 
 
 def _seq_digest(seq: str) -> str:
-    return hashlib.md5(seq.encode()).hexdigest()  # noqa: S324  (cache key, not security)
+    return hashlib.md5(seq.encode(), usedforsecurity=False).hexdigest()
 
 
 def _cache_key(q_seq: str, r_seq: str) -> str:
