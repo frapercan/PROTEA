@@ -502,6 +502,239 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "ImportDatasetByReferenceRequest": {
+        "additionalProperties": false,
+        "description": "Body for ``POST /datasets/import-by-reference``.\n\nThe lab calls this when the train / eval parquets and the manifest\nalready live in the artifact store (filesystem dump, MinIO upload\nfrom a prior environment, salvage replay, etc.). PROTEA registers\na ``Dataset`` row pointing at those URIs verbatim. No job is\nenqueued; the artefacts are not re-read or copied.\n\nThe lab passes the fields it already has from its own ``manifest.json``\nso the registry row is content-identical to what an in-PROTEA\n``export_research_dataset`` run would have produced.",
+        "example": {
+          "annotation_source": "goa",
+          "embedding_config_id": "c0ae5b69-d6dc-41cf-a711-1739d3d2e170",
+          "eval_snapshot_pair": "v226-v230",
+          "eval_uri": "file:///home/frapercan/Thesis2/repositories/protea-reranker-lab/datasets/bench-v1-K5-v226-lineage-prostt5/eval.parquet",
+          "external_source": "protea-reranker-lab@059db19",
+          "force": false,
+          "k": 5,
+          "key_prefix": "datasets/bench-v1-K5-v226-lineage-prostt5/",
+          "manifest_sha": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "manifest_uri": "file:///home/frapercan/Thesis2/repositories/protea-reranker-lab/datasets/bench-v1-K5-v226-lineage-prostt5/manifest.json",
+          "n_eval_rows": 1066859,
+          "n_train_rows": 24351779,
+          "name": "bench-v1-K5-v226-lineage-prostt5",
+          "ontology_snapshot_id": "35c3ad67-3002-47db-8f71-eeed69d22ad6",
+          "producer_git_sha": "059db1907c5208a965238e8e6682184fb83537be",
+          "producer_version": "0.8.0",
+          "schema_sha": "6d97a624b8a7",
+          "storage_backend": "local",
+          "train_snapshot_pairs": [
+            "v220-v226"
+          ],
+          "train_uri": "file:///home/frapercan/Thesis2/repositories/protea-reranker-lab/datasets/bench-v1-K5-v226-lineage-prostt5/train.parquet"
+        },
+        "properties": {
+          "annotation_source": {
+            "default": "goa",
+            "description": "``goa`` or ``quickgo``; matches the lab's manifest.",
+            "title": "Annotation Source",
+            "type": "string"
+          },
+          "embedding_config_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UUID of the ``EmbeddingConfig`` the dump used. NULL when the FK cannot be resolved in this PROTEA instance (DB reset, different deployment); the dataset row still registers but loses the back reference.",
+            "title": "Embedding Config Id"
+          },
+          "eval_snapshot_pair": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "``v{old}-v{new}`` window of the eval parquet, if present.",
+            "title": "Eval Snapshot Pair"
+          },
+          "eval_uri": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "URI of the evaluation parquet (nullable for train only dumps).",
+            "title": "Eval Uri"
+          },
+          "external_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Free form provenance tag (e.g. ``protea-reranker-lab@<git-sha>``) recorded in the ``meta`` JSONB column. Mirrors the reranker-models import-by-reference contract.",
+            "title": "External Source"
+          },
+          "force": {
+            "default": false,
+            "description": "When ``True``, overwrite any existing Dataset row with the same ``name``. Default ``False`` rejects duplicates with 409.",
+            "title": "Force",
+            "type": "boolean"
+          },
+          "k": {
+            "description": "KNN neighbour count baked into the dump.",
+            "exclusiveMinimum": 0.0,
+            "title": "K",
+            "type": "integer"
+          },
+          "key_prefix": {
+            "description": "Artifact store prefix that contains the parquets + manifest (e.g. ``datasets/<name>/``). Used by the lab to rebuild URIs after a backend swap.",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Key Prefix",
+            "type": "string"
+          },
+          "manifest_sha": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "sha256 hex of the serialized manifest.json bytes. Nullable for legacy dumps that did not record it; the lab computes it client side for new dumps.",
+            "title": "Manifest Sha"
+          },
+          "manifest_uri": {
+            "description": "URI of the manifest.json (required).",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Manifest Uri",
+            "type": "string"
+          },
+          "meta": {
+            "additionalProperties": true,
+            "description": "Free form extension hook. Merged with ``{'imported_by_reference': True, 'external_source': \u2026}`` so a downstream audit can tell registry rows produced via this endpoint apart from in-PROTEA exports.",
+            "title": "Meta",
+            "type": "object"
+          },
+          "n_eval_rows": {
+            "default": 0,
+            "description": "Row count of the evaluation split as captured in the producer's manifest.",
+            "minimum": 0.0,
+            "title": "N Eval Rows",
+            "type": "integer"
+          },
+          "n_train_rows": {
+            "default": 0,
+            "description": "Row count of the training split as captured in the producer's manifest.",
+            "minimum": 0.0,
+            "title": "N Train Rows",
+            "type": "integer"
+          },
+          "name": {
+            "description": "Unique slug for the Dataset row. Matches the ``name`` value the lab uses in its own manifest, so callers can look the row up by name afterwards.",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "ontology_snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UUID of the ``OntologySnapshot``; nullable like ``embedding_config_id``.",
+            "title": "Ontology Snapshot Id"
+          },
+          "producer_git_sha": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Git SHA of the producer (lab or external pipeline) that emitted the dump.",
+            "title": "Producer Git Sha"
+          },
+          "producer_version": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Version label of the producer that emitted the dump (e.g. lab semver tag).",
+            "title": "Producer Version"
+          },
+          "schema_sha": {
+            "description": "Feature set fingerprint copied verbatim from the lab's manifest. Boosters trained against this dataset must match on inference.",
+            "maxLength": 16,
+            "minLength": 1,
+            "title": "Schema Sha",
+            "type": "string"
+          },
+          "storage_backend": {
+            "default": "local",
+            "description": "Backend identifier matching the URIs (``local`` for ``file://`` paths, ``minio`` for ``s3://`` keys). Recorded verbatim on the row; PROTEA does not validate the URI scheme against this value.",
+            "title": "Storage Backend",
+            "type": "string"
+          },
+          "train_snapshot_pairs": {
+            "description": "List of ``v{old}-v{new}`` strings, one per training shard. Empty list is allowed for eval only dumps.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Train Snapshot Pairs",
+            "type": "array"
+          },
+          "train_uri": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "URI of the training parquet (nullable for eval only dumps).",
+            "title": "Train Uri"
+          }
+        },
+        "required": [
+          "name",
+          "key_prefix",
+          "manifest_uri",
+          "schema_sha",
+          "k"
+        ],
+        "title": "ImportDatasetByReferenceRequest",
+        "type": "object"
+      },
       "ImportRerankerByReferenceRequest": {
         "additionalProperties": false,
         "description": "Body for ``POST /reranker-models/import-by-reference``.\n\nUse this when the lab has already uploaded ``model.txt`` to MinIO\nunder its own key and just needs PROTEA to register the URI.",
@@ -3241,6 +3474,93 @@
           }
         },
         "summary": "Enqueue a dataset export job",
+        "tags": [
+          "datasets"
+        ]
+      }
+    },
+    "/v1/datasets/import-by-reference": {
+      "post": {
+        "description": "Register a ``Dataset`` row whose artefacts are already staged.\n\nThe lab uploads (or simply leaves on disk) the parquets and\n``manifest.json`` itself and posts the URIs + manifest fields\nhere. PROTEA persists a Dataset row pointing at those URIs without\nre-reading the artefacts. Useful for benches the lab produced\nbefore ``export_research_dataset`` existed, for replays after a\nDB wipe, and for the ``bench-v1-K5-v226-lineage-prostt5`` LB.1 bootstrap.\n\nThe optional ``embedding_config_id`` and ``ontology_snapshot_id``\nare resolved against the local DB and NULL'd when missing, so the\ninsert never fails on a stale FK. ``schema_sha_v2`` is dual-written\nwhen the ``PROTEA_SCHEMA_SHA_V2_WRITE_ENABLED`` flag is on (T1.6).\n\nReturns ``201`` with the row's id + name. ``409`` on a duplicate\n``name`` unless ``force=true`` was passed.",
+        "operationId": "import_dataset_by_reference_v1_datasets_import_by_reference_post",
+        "parameters": [
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportDatasetByReferenceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Import Dataset By Reference V1 Datasets Import By Reference Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Register an already-staged dataset",
         "tags": [
           "datasets"
         ]
