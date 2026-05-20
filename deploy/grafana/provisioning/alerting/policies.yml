@@ -1,10 +1,7 @@
-# Notification policy: route any alert with `service=agent-farm` to the
-# agent-farm-errors Slack contact point. The default (catch-all) route
-# stays on Grafana's built-in `grafana-default-email` receiver, which is
-# a no-op until an SMTP server is configured (matches the previous
-# observability stance of "Loki sees errors, operator looks at them in
-# Grafana"). The matcher is on the service label rather than the rule
-# name so future agent-farm alert rules pick up Slack routing for free.
+# Notification policy: all alerts route to the built-in
+# grafana-default-email no-op receiver, viewed in the Grafana Alerting UI.
+# This matches the observability stance: Loki sees errors, operator looks
+# at them in Grafana.
 #
 # group_by collapses bursts per task; the alert rule itself has a 5min
 # evaluation window so the per-burst rate limit comes from the rule
@@ -16,15 +13,3 @@ policies:
   - orgId: 1
     receiver: grafana-default-email
     group_by: ["grafana_folder", "alertname"]
-    routes:
-      - receiver: agent-farm-errors
-        group_by: ["task_id"]
-        matchers:
-          - service = agent-farm
-        # 30min repeat interval: if the burst persists past the initial
-        # rule firing, Slack sees one follow-up per half hour rather
-        # than a stream every 5 minutes (which would defeat the rate-
-        # limit point of the alert).
-        group_wait: 30s
-        group_interval: 5m
-        repeat_interval: 30m
