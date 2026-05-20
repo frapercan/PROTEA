@@ -214,6 +214,14 @@ later revision).
      - :doc:`Selective rerank resurrection, recompute not archaeology <D34-selective-rerank-resurrection>`
      - Accepted
      - F-EXP-RESET
+   * - D35
+     - :doc:`Canonical 8-PLM embedding config IDs <D35-canonical-8plm-embedding-configs>`
+     - Accepted
+     - F-EXP-RESET
+   * - D36
+     - :doc:`PLM axis explicit in dataset naming <D36-plm-axis-explicit-in-dataset-naming>`
+     - Accepted
+     - F-EXP-RESET
 
 .. toctree::
    :maxdepth: 1
@@ -260,3 +268,5 @@ later revision).
    D30-insights-appendix
    D31-t2b5-method-object-reframe
    D34-selective-rerank-resurrection
+   D35-canonical-8plm-embedding-configs
+   D36-plm-axis-explicit-in-dataset-naming

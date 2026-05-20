@@ -17,7 +17,7 @@ tracking.
 Lab memory showed the legacy record as leakage-contaminated and of
 unknown range provenance. The lab summary file under the leakage-fixed
 bench runs directory does
-not contain 0.4562 for ``bench-v1-K5-v226-lineage`` or any other current
+not contain 0.4562 for ``bench-v1-K5-v226-lineage-prostt5`` or any other current
 validation band. The record was therefore not reproducible or
 comparable to current champion runs.
 
@@ -29,7 +29,7 @@ on the leakage-fixed feature set against the current bench.
 On 2026-05-17 the LB.2 multi-seed sweep landed (lab branch
 ``task/bioinfo-quick-1778972872-6d9a``, commit ``77c3b33``):
 6 NK+LK cells (nk-mfo, nk-bpo, nk-cco, lk-mfo, lk-bpo, lk-cco) trained
-for 3 seeds each (42, 7, 137) on the leakage-fixed bench-v1-K5-v226-lineage configuration
+for 3 seeds each (42, 7, 137) on the leakage-fixed bench-v1-K5-v226-lineage-prostt5 configuration
 (no anc2vec, no PCA features; lambdarank; LR=0.05, leaves=63,
 num_boost_round=10000, early_stop=100). The 9-cell selective policy
 applies the reranker on NK+LK cells and falls back to KNN baseline on
@@ -45,10 +45,10 @@ Decision
    old configuration.
 
 2. **Selective rerank on NK+LK; KNN baseline fallback on PK.** This
-   is the live PROTEA inference policy for ``bench-v1-K5-v226-lineage``
+   is the live PROTEA inference policy for ``bench-v1-K5-v226-lineage-prostt5``
    pending the next champion sweep.
 
-3. **Configuration:** leakage-fixed ``bench-v1-K5-v226-lineage`` bundle
+3. **Configuration:** leakage-fixed ``bench-v1-K5-v226-lineage-prostt5`` bundle
    (the ``v6_features`` bundle with lineage features enabled, minus all
    ``anc2vec_*`` and ``emb_pca_*`` columns), per-cell lambdarank
    LightGBM booster.
@@ -124,8 +124,8 @@ Decision
    comparable to the new champion: different feature set, different
    range, leakage-contaminated.
 
-6. **Deployment.** The leakage-fixed bench-v1-K5-v226-lineage config becomes the PROTEA
-   inference default for ``bench-v1-K5-v226-lineage`` on NK+LK cells.
+6. **Deployment.** The leakage-fixed bench-v1-K5-v226-lineage-prostt5 config becomes the PROTEA
+   inference default for ``bench-v1-K5-v226-lineage-prostt5`` on NK+LK cells.
    Older ``RerankerModel`` rows from pre-leakage-fix sweeps are
    considered stale; they remain in the registry for traceability but
    should not be selected for new inference jobs.
@@ -147,7 +147,7 @@ Decision
    section. The CSV reports the same-bench all-baseline reference
    (the leaky 0.4562 had no per-cell breakdown on file, so the lift
    is reported against the new bench baseline; the publishable
-   selective-rerank lift on bench-v1-K5-v226-lineage is +0.0397
+   selective-rerank lift on bench-v1-K5-v226-lineage-prostt5 is +0.0397
    over the same-bench KNN baseline). The legacy record is also
    marked superseded in the lab champions appendix.
 

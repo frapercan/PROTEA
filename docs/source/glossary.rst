@@ -37,11 +37,15 @@ any entry from another page.
       transition of a ``Job``. Together they record when a job was claimed,
       what the operation emitted, and the final outcome (or error code).
 
-   bench-v1-K5-v226-lineage
+   bench-v1-K5-v226-lineage-prostt5
       The named lineage of re-ranker training runs that use
       ``K=5`` KNN neighbours, annotation source version 226, and the
-      ``bench-v1`` feature schema. Used as a reproducibility handle in the
-      thesis evaluation chapter.
+      ``bench-v1`` feature schema, built against ProstT5 embeddings
+      (``embedding_config_id=c0ae5b69-d6dc-41cf-a711-1739d3d2e170``).
+      Used as a reproducibility handle in the thesis evaluation
+      chapter. The PLM axis is explicit in the dataset name (FARM-EXP.12,
+      ADR D36); sibling datasets follow the
+      ``bench-v1-K{k}-v{val_band}-lineage-{plm_short}`` template.
 
    BPO
       **Biological Process Ontology.** One of the three namespaces of the

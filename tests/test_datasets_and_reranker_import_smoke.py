@@ -231,9 +231,9 @@ class TestDatasetsImportByReference:
 
     def _valid_body(self, **overrides):
         body = {
-            "name": "bench-v1-K5-v226-lineage",
+            "name": "bench-v1-K5-v226-lineage-prostt5",
             "storage_backend": "local",
-            "key_prefix": "datasets/bench-v1-K5-v226-lineage/",
+            "key_prefix": "datasets/bench-v1-K5-v226-lineage-prostt5/",
             "train_uri": "file:///tmp/bench/train.parquet",
             "eval_uri": "file:///tmp/bench/eval.parquet",
             "manifest_uri": "file:///tmp/bench/manifest.json",
@@ -273,7 +273,7 @@ class TestDatasetsImportByReference:
         assert resp.status_code == 201, resp.text
 
         body = resp.json()
-        assert body["name"] == "bench-v1-K5-v226-lineage"
+        assert body["name"] == "bench-v1-K5-v226-lineage-prostt5"
         assert body["schema_sha"] == "6d97a624b8a7"
         uuid.UUID(body["id"])
 
