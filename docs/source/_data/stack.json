@@ -16,7 +16,7 @@
       "slug": "protea-contracts",
       "role": "contracts",
       "role_label": "Contracts",
-      "status": "beta",
+      "status": "active",
       "summary": "Shared contract surface. ABCs, pydantic payloads, feature schema, schema_sha. Imported by every other repo.",
       "github_url": "https://github.com/frapercan/protea-contracts",
       "docs_url": null,
