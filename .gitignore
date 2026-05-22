@@ -70,4 +70,5 @@ sops_age_key.txt
 .baseline/
 
 # Local deploy overrides (host-specific secrets, never commit)
+.env
 .env.local
