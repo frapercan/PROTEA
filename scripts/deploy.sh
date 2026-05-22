@@ -163,22 +163,6 @@ if [[ "$DO_DEPS" == "1" ]]; then
   fi
 fi
 
-# Always rebuild Sphinx HTML for PROTEA + sibling repos; the cost is
-# only a few seconds per repo and keeps /docs/<slug>/ in lockstep with
-# the deployed source. --no-build skips the frontend build (npm) but
-# still produces docs because the API mounts them dynamically and a
-# stale doc set is visible to end users via the stack page.
-#
-# build_docs.py reads SIBLINGS_DIR. We default it to a frozen worktree
-# directory so the docs are built against origin/develop of every
-# sibling, not whatever feature branch happens to be checked out in
-# ~/Thesis2/repositories/<slug>/ (where other agents may have WIP).
-# The loop's protea_refresh_siblings.sh keeps that directory on tip.
-default_siblings="$HOME/Thesis2/worktrees/_siblings"
-export SIBLINGS_DIR="${PROTEA_SIBLINGS_DIR:-${SIBLINGS_DIR:-$default_siblings}}"
-echo "${C_BOLD}building docs${C_RESET} (siblings_dir=$SIBLINGS_DIR)"
-poetry run task docs 2>&1 | tail -10 || echo "${C_YELLOW}docs build failed (non-fatal)${C_RESET}"
-
 if [[ "$DO_BUILD" == "1" ]]; then
   # apps/web/.env.local is gitignored. Seed a default if missing so the
   # build picks up NEXT_PUBLIC_API_URL. Default to a same-origin proxy
@@ -191,6 +175,17 @@ if [[ "$DO_BUILD" == "1" ]]; then
   fi
   echo "${C_BOLD}npm install + build...${C_RESET}"
   ( cd apps/web && npm ci --silent && npm run build ) | tail -5
+
+  # Build Sphinx HTML for PROTEA and every sibling repo in the stack.
+  # build_all_docs.sh reads slug list from docs/source/_data/stack.yaml,
+  # builds each repo that carries a conf.py into docs/build/<slug>/html/,
+  # and continues past any single-repo failure.
+  # SIBLINGS_DIR defaults to ~/Thesis2/worktrees/_siblings (frozen tip
+  # clones kept on origin/develop); override with PROTEA_SIBLINGS_DIR.
+  default_siblings="$HOME/Thesis2/worktrees/_siblings"
+  export SIBLINGS_DIR="${PROTEA_SIBLINGS_DIR:-${SIBLINGS_DIR:-$default_siblings}}"
+  echo "${C_BOLD}building stack docs${C_RESET} (siblings_dir=$SIBLINGS_DIR)"
+  bash scripts/build_all_docs.sh || echo "${C_YELLOW}docs build had failures (non-fatal if protea-core built)${C_RESET}"
 fi
 
 if [[ -f .env.local ]]; then
