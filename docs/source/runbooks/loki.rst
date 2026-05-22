@@ -31,18 +31,29 @@ application service opts into via a ``logging:`` block.
 How the pipeline fits together
 -------------------------------
 
+PROTEA runs as a process-based stack (uvicorn API, worker processes,
+Next.js frontend) that writes plaintext log files into ``logs/`` under
+the deploy working directory.  A ``promtail`` sidecar container in
+``docker-compose.monitoring.yml`` tails those files and ships each line
+to Loki.  This replaces the earlier docker-driver approach, which only
+works when the application itself runs as a Docker container.
+
 ::
 
-   api / worker container stdout (JSON line)
-      |
+   uvicorn / workers / next.js
+      |  write log lines to ./logs/*.log
       v
-   loki-docker-driver  (host plugin, pushes via HTTP)
-      |
+   promtail container  (tails ./logs/*.log, bind-mounted read-only)
+      |  labels: compose_project=protea, service_name=<stem>
       v
-   loki:3100          (monitoring compose)
+   loki:3100          (monitoring compose, protea_monitoring network)
       |
       v
    Grafana            (PROTEA Loki datasource, "PROTEA / Logs" dashboard)
+
+The docker-driver plugin path documented further below remains valid for
+deployments where the application runs inside containers; it is not the
+active path on the current process-based dev stack.
 
 The application code does not need to know anything about Loki. As long
 as ``configure_logging(json=True)`` ran at process startup (the default
@@ -65,6 +76,66 @@ The container exposes 3100 on the host so the docker driver (which runs
 in the host's daemon namespace, not in this compose project) can push
 to it. Grafana reaches the same Loki container by service name on the
 ``protea_monitoring`` bridge network.
+
+
+Promtail: tailing process-stack log files
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The ``promtail`` service defined in ``docker-compose.monitoring.yml``
+handles log shipping for the process-based PROTEA stack.  No additional
+host setup is required; promtail starts automatically as part of
+``docker compose -f docker-compose.monitoring.yml up -d``.
+
+**What files are tailed**
+
+Promtail watches ``/var/log/protea/*.log`` inside the container, which
+corresponds to ``./logs/*.log`` relative to the monitoring compose working
+directory (the deploy root).  The current process-stack writes:
+
+- ``logs/api.log`` (uvicorn FastAPI process)
+- ``logs/worker-jobs.log``
+- ``logs/worker-embeddings.log``
+- ``logs/worker-embeddings-batch.log``
+- ``logs/worker-embeddings-write.log``
+- ``logs/worker-predictions.log``
+- ``logs/worker-predictions-batch.log``
+- ``logs/worker-predictions-write.log``
+- ``logs/worker-training.log``
+- ``logs/worker-reaper.log``
+- ``logs/worker-ping.log``
+- ``logs/frontend.log`` (Next.js dev server)
+
+Any additional ``*.log`` file dropped into ``logs/`` is picked up
+automatically on the next tail cycle; no promtail restart is needed.
+
+**Labels injected**
+
+``compose_project=protea`` is a static label applied to every line.
+``service_name`` is derived from the log file stem, for example
+``api.log`` produces ``service_name=api`` and ``worker-jobs.log``
+produces ``service_name=worker-jobs``.  These two labels are exactly
+what the ``PROTEA / Logs (Loki)`` Grafana dashboard filters on.
+
+**Configuration file**
+
+``deploy/promtail/promtail.yml`` is mounted read-only into the container
+at ``/etc/promtail/promtail.yml``.  The scrape job uses a
+``pipeline_stages`` regex to extract ``service_name`` from the ``filename``
+label that promtail sets from the glob pattern, then promotes it to a
+Loki stream label via the ``labels:`` stage.
+
+**Applying changes**
+
+Re-run the monitoring compose to pick up any config edit:
+
+.. code-block:: bash
+
+   docker compose -f docker-compose.monitoring.yml up -d promtail
+
+Promtail stores its tail positions in ``/tmp/promtail-positions.yaml``
+inside the container.  That file is ephemeral and lost on container
+restart; promtail re-tails from the last-seen position on a best-effort
+basis using inode matching when the position file is missing.
 
 
 Installing the docker driver plugin
