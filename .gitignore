@@ -30,7 +30,6 @@ node_modules/
 *.log
 logs/
 
-CLAUDE.md
 .claude/
 
 # Local data
