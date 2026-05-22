@@ -51,6 +51,7 @@ few NOT-NULL columns need a sensible value for the InterPro path:
   this protein that map to this GO id at this ``source_version``.
 
 Out of scope (see IP.4 plan-first sub-plan):
+
 * Reranker feature integration (IP.4c, ``requires_human=true``).
 * Score blending across PredictionSets (T-RES.3 ensemble router).
 * Ancestor / aspect propagation (the caller is expected to enable

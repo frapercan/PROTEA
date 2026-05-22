@@ -10,6 +10,17 @@ layer. It is the only package that imports SQLAlchemy, psycopg2, or aio-pika
 directly. All other layers interact with the database through the session
 factory and with the queue through the publisher interface.
 
+.. rubric:: Database engine
+
+``protea.infrastructure.database.engine`` creates the SQLAlchemy engine
+from the configured database URL. The engine is constructed once at
+application startup and shared across all session factories.
+
+.. automodule:: protea.infrastructure.database.engine
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Settings
 --------
 
@@ -45,12 +56,46 @@ state.
    :undoc-members:
    :show-inheritance:
 
+.. rubric:: Telemetry
+
+``protea.infrastructure.telemetry`` configures OpenTelemetry tracing and
+Prometheus metrics collection. It instruments the FastAPI application,
+SQLAlchemy engine, and aio-pika AMQP client, emitting spans and counters
+for every request, query, and queue publish.
+
+.. automodule:: protea.infrastructure.telemetry
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. rubric:: Benchmark configuration
+
+``protea.infrastructure.benchmark_config`` loads the
+``protea/config/benchmark.yaml`` file that drives the ``/benchmark``
+router. It maps scoring-config display names, GO categories, and the
+baseline tag used in the Fmax comparison grid.
+
+.. automodule:: protea.infrastructure.benchmark_config
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 ORM models
 ----------
 
 All models use SQLAlchemy 2.x declarative style with ``Mapped[]`` type
 annotations. The schema is managed by Alembic; migrations are generated via
 ``alembic revision --autogenerate`` and stored under ``alembic/versions/``.
+
+The ORM declarative base is defined in ``protea.infrastructure.orm.base``.
+All models inherit from this base, which applies the default naming
+convention (snake-case table names, consistent constraint prefixes).
+
+.. automodule:: protea.infrastructure.orm.base
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :exclude-members: metadata
 
 **Job, JobEvent, and JobComment**
 
@@ -134,6 +179,23 @@ these edges to return ancestor subgraphs for a given set of GO term IDs.
    :undoc-members:
    :show-inheritance:
 
+**InterPro Annotations**
+
+``InterproAnnotation`` stores the domain signature results returned by
+the EBI InterProScan API for each protein. ``InterproGoMapping`` stores
+the static mapping from InterPro domain entries to their associated GO
+terms, as distributed by InterPro's ``interpro2go`` file.
+
+.. automodule:: protea.infrastructure.orm.models.annotation.interpro_annotation
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.infrastructure.orm.models.annotation.interpro_go_mapping
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 **Annotation Sets**
 
 ``AnnotationSet`` groups a batch of protein GO annotations by source
@@ -196,6 +258,19 @@ neighbour queries are performed in Python via ``protea.core.knn_search``.
    :show-inheritance:
 
 .. automodule:: protea.infrastructure.orm.models.embedding.sequence_embedding
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+**GO Prediction Features**
+
+``GOPredictionFeatures`` stores the per-prediction feature vector used
+by the re-ranker as a separate table, normalised away from
+``GOPrediction`` to keep the hot predictions table slim. Each row
+carries the full 56-column feature set produced by the feature-enrichment
+pipeline.
+
+.. automodule:: protea.infrastructure.orm.models.embedding.go_prediction_features
    :members:
    :undoc-members:
    :show-inheritance:
@@ -276,6 +351,18 @@ so any registered booster can be traced back to the PROTEA HEAD that
 emitted its dataset.
 
 .. automodule:: protea.infrastructure.orm.models.embedding.dataset
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+**API Keys**
+
+``APIKey`` stores hashed API keys together with an optional ``name``
+label and ``last_used_at`` timestamp. The raw key is never stored; only
+the SHA-256 hex digest is persisted. The ``is_active`` flag allows
+revocation without deletion.
+
+.. automodule:: protea.infrastructure.orm.models.api_key
    :members:
    :undoc-members:
    :show-inheritance:

@@ -49,7 +49,7 @@ def run_post_knn_pipeline(
 
     Returns ``(prediction_dicts, reranker_stats)``. Ancestor expansion
     runs AFTER v6 so synthetic ancestor records inherit the leaf's
-    anc2vec_/emb_pca_ values, mirroring what the dump helper emits;
+    ``anc2vec_`` / ``emb_pca_`` values, mirroring what the dump helper emits;
     without that the lab booster sees a feature distribution it never
     trained on.
     """

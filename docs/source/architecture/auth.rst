@@ -72,15 +72,15 @@ Header format
 
 Three equivalent header shapes are accepted:
 
-.. code-block:: http
+.. code-block:: text
 
    Authorization: ApiKey <raw_key>
 
-.. code-block:: http
+.. code-block:: text
 
    X-Api-Key: <raw_key>
 
-.. code-block:: http
+.. code-block:: text
 
    Authorization: Bearer <jwt>
 
@@ -116,13 +116,13 @@ Every protected POST is throttled per principal by :mod:`slowapi`. The
 bucket key is the API-key prefix, the JWT ``sub``, or the remote IP if
 neither auth header is present.
 
-================================  ===========  ====================================
-Route                             Default      Env override
-================================  ===========  ====================================
-``POST /v1/jobs``             10/minute    ``PROTEA_RATELIMIT_JOBS``
-``POST /v1/datasets``         5/minute     ``PROTEA_RATELIMIT_DATASETS``
-``POST /v1/auth/api-keys``    5/hour       ``PROTEA_RATELIMIT_API_KEYS``
-================================  ===========  ====================================
+==============================  ===========  ====================================
+Route                           Default      Env override
+==============================  ===========  ====================================
+``POST /v1/jobs``               10/minute    ``PROTEA_RATELIMIT_JOBS``
+``POST /v1/datasets``           5/minute     ``PROTEA_RATELIMIT_DATASETS``
+``POST /v1/auth/api-keys``      5/hour       ``PROTEA_RATELIMIT_API_KEYS``
+==============================  ===========  ====================================
 
 Exceeding the limit returns a 429 problem response with a
 ``Retry-After`` header. Overrides accept any slowapi syntax

@@ -73,6 +73,17 @@ It also configures CORS and mounts any static middleware.
    :undoc-members:
    :show-inheritance:
 
+.. rubric:: Application lifecycle and startup stages
+
+``protea.api.stages`` orchestrates the FastAPI lifespan: it opens the
+SQLAlchemy engine, publishes the session factory into ``app.state``, and
+tears down the AMQP connection pool on shutdown.
+
+.. automodule:: protea.api.stages
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Jobs router
 -----------
 
@@ -406,23 +417,128 @@ Services are pure Python: they accept a SQLAlchemy session and return
 domain objects or raise domain exceptions. Routers map those exceptions
 to HTTP status codes. This separation allows the same logic to be
 exercised from CLI tools or batch scripts without importing FastAPI.
+Full symbol-level documentation lives in :doc:`services`.
 
 .. automodule:: protea.services.jobs_service
    :members:
    :undoc-members:
    :show-inheritance:
+   :noindex:
 
 .. automodule:: protea.services.annotations_service
    :members:
    :undoc-members:
    :show-inheritance:
+   :noindex:
 
 .. automodule:: protea.services.embeddings_service
    :members:
    :undoc-members:
    :show-inheritance:
+   :noindex:
 
 .. automodule:: protea.services.scoring_service
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. rubric:: Authentication helpers
+
+``protea.api.auth`` implements the credential-verification layer. It
+exposes ``require_api_key_or_bearer``, a FastAPI dependency that accepts
+three header forms (``Authorization: ApiKey``, ``X-Api-Key``, or
+``Authorization: Bearer``). The API-key path computes a SHA-256 hash of
+the raw key and compares it against the database; the Bearer path verifies
+an HS256 JWT. A missing or invalid credential returns 401 with a
+``WWW-Authenticate`` challenge.
+
+.. automodule:: protea.api.auth
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+``protea.api.bearer`` provides the HS256 JWT verification utilities used
+by ``auth.require_api_key_or_bearer``. Minimum required claims are
+``sub``, ``iat``, and ``exp``.
+
+.. automodule:: protea.api.bearer
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+``protea.api.auth_api_keys`` is the router for managing API key creation
+and revocation.
+
+.. automodule:: protea.api.routers.auth_api_keys
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. rubric:: Request caching and rate limiting
+
+``protea.api.cache`` provides in-process caching utilities for expensive
+read-only endpoints (showcase statistics, benchmark matrix). Results are
+stored with a configurable TTL, reducing redundant database queries on
+frequently-polled pages.
+
+.. automodule:: protea.api.cache
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+``protea.api.rate_limit`` configures the ``slowapi`` limiter and exposes
+the per-principal rate-limit rules applied to the five write routes
+protected by authentication (``POST /jobs``, ``POST /datasets``,
+``POST /datasets/import-by-reference``, ``POST /reranker-models/import``,
+``POST /reranker-models/import-by-reference``).
+
+.. automodule:: protea.api.rate_limit
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. rubric:: Shared dependencies and error handling
+
+``protea.api.deps`` provides FastAPI ``Depends`` callables shared across
+multiple routers: database session injection, current-user extraction,
+and pagination helpers.
+
+.. automodule:: protea.api.deps
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+``protea.api.problem_details`` implements RFC 7807
+``application/problem+json`` error serialisation. Every exception handler
+in the application calls into this module to produce a consistent
+``{"type", "title", "status", "detail", "instance"}`` body. Validation
+errors carry an additional ``errors`` array with the offending field paths.
+
+.. automodule:: protea.api.problem_details
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. rubric:: Middleware
+
+``protea.api.middleware.visitor_counter`` is the WSGI middleware that
+logs one ``VisitorEvent`` row per HTTP GET to a non-asset path. It
+extracts the client IP, combines it with a daily salt, and stores the
+first 16 hex characters of the resulting SHA-256 hash.
+
+.. automodule:: protea.api.middleware.visitor_counter
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. rubric:: Metrics router
+
+The ``/metrics`` router exposes Prometheus-compatible scrape metrics for
+the API process. Response time histograms, active-connection gauges, and
+job-state counters are surfaced at ``GET /metrics``.
+
+.. automodule:: protea.api.routers.metrics
    :members:
    :undoc-members:
    :show-inheritance:
