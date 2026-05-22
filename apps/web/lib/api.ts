@@ -512,6 +512,13 @@ export function getScoredTsvUrl(
 // Re-ranker
 // ---------------------------------------------------------------------------
 
+export type RerankerFeatureSelection = {
+  families_enabled: string[] | null; // null = all available families
+  families_available: string[];
+  drop_features: string[];
+  feature_count: number | null;
+};
+
 export type RerankerModel = {
   id: string;
   name: string;
@@ -521,6 +528,17 @@ export type RerankerModel = {
   aspect: string | null;
   metrics: Record<string, any>;
   feature_importance: Record<string, number>;
+  // Provenance / reproducibility (surfaced from the reranker-model API).
+  feature_schema_sha: string | null;
+  feature_selection: RerankerFeatureSelection | null;
+  producer_version: string | null;
+  producer_git_sha: string | null;
+  external_source: string | null;
+  dataset_id: string | null;
+  dataset_name: string | null;
+  dataset_schema_sha: string | null;
+  dataset_manifest_sha: string | null;
+  spec_yaml: string | null;
   created_at: string;
 };
 

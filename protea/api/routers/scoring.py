@@ -36,6 +36,7 @@ from fastapi.responses import StreamingResponse
 
 from protea.api.deps import get_session_factory
 from protea.core.evaluation import EvalContext
+from protea.infrastructure.orm.models.embedding.dataset import Dataset
 from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
 from protea.infrastructure.session import session_scope
 from protea.services.scoring_service import (
@@ -339,7 +340,13 @@ def list_rerankers(factory=Depends(get_session_factory)):
     """Return all stored re-ranker models ordered by creation time."""
     with session_scope(factory) as session:
         models = session.query(RerankerModel).order_by(RerankerModel.created_at).all()
-        return [to_reranker_response(m) for m in models]
+        datasets = {
+            d.id: d
+            for d in session.query(Dataset)
+            .filter(Dataset.id.in_([m.dataset_id for m in models if m.dataset_id]))
+            .all()
+        }
+        return [to_reranker_response(m, datasets.get(m.dataset_id)) for m in models]
 
 
 @router.get("/rerankers/{reranker_id}", response_model=RerankerResponse)
@@ -349,7 +356,8 @@ def get_reranker(reranker_id: uuid.UUID, factory=Depends(get_session_factory)):
         model = session.get(RerankerModel, reranker_id)
         if model is None:
             raise HTTPException(status_code=404, detail="RerankerModel not found")
-        return to_reranker_response(model)
+        dataset = session.get(Dataset, model.dataset_id) if model.dataset_id else None
+        return to_reranker_response(model, dataset)
 
 
 @router.delete("/rerankers/{reranker_id}", status_code=204)

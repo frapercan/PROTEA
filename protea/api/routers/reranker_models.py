@@ -119,6 +119,25 @@ def _compute_feature_schema_sha(run: dict[str, Any]) -> str | None:
     return run.get("dataset", {}).get("schema_sha")
 
 
+def _extract_feature_selection(run: dict[str, Any]) -> dict[str, Any] | None:
+    """Pull the feature-selection block out of the lab's ``run.features``.
+
+    Returns the families enabled/available, dropped features, and the
+    resolved feature count so the reranker-model view can show exactly
+    which feature families fed the booster. ``families_enabled=None`` is
+    the lab's "all available families" sentinel and is kept as-is.
+    """
+    features = run.get("features", {}) or {}
+    if not features:
+        return None
+    return {
+        "families_enabled": features.get("families_enabled"),
+        "families_available": features.get("families_available") or [],
+        "drop_features": features.get("drop_features") or [],
+        "feature_count": features.get("feature_count"),
+    }
+
+
 def _resolve_optional_fk(
     session: Session,
     raw_id: str | None,
@@ -221,6 +240,16 @@ def _register_model(
     if cat_codes:
         m = dict(model.metrics or {})
         m["__categorical_codes__"] = cat_codes
+        model.metrics = m
+    # Stash the feature-selection block (enabled/available families,
+    # dropped features, count) under a reserved metrics key so the
+    # reranker-model view can render it without re-reading run.json.
+    # ``families_enabled=None`` is the lab's "all available" sentinel and
+    # is preserved verbatim.
+    fs = _extract_feature_selection(reg.run)
+    if fs is not None:
+        m = dict(model.metrics or {})
+        m["__feature_selection__"] = fs
         model.metrics = m
     session.add(model)
     session.flush()

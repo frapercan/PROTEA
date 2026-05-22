@@ -576,6 +576,8 @@
   },
   "scoring": {
     "title": "Scoring",
+    "labBadge": "LAB",
+    "labBadgeHint": "Area de pesquisa / LAB: os parametros de pesquisa e reprodutibilidade sao expostos intencionalmente.",
     "description": "Um ScoringConfig define como os sinais de predição são combinados em uma pontuação de confiança [0, 1] — sem re-executar o pipeline KNN.",
     "loadPresets": "Carregar predefinições",
     "presetsLoading": "Carregando…",

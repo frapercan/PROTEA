@@ -222,8 +222,8 @@ export function Sidebar({
       items: [
         { href: "/embeddings", label: t("embeddings"), hint: "PLM embedding configs · ESM-2 · ESM3c · ProstT5 · Ankh" },
         { href: "/functional-annotation", label: t("functionalAnnotation"), hint: "Embedding-similarity GO annotation, BPO / MFO / CCO" },
-        { href: "/scoring", label: t("scoring"), hint: "Combine distance, alignment, taxonomy, evidence" },
-        { href: "/reranker", label: t("reranker"), hint: "LightGBM reranker over scored predictions" },
+        { href: "/scoring", label: t("scoring"), hint: "Combine distance, alignment, taxonomy, evidence", badge: "LAB" },
+        { href: "/reranker", label: t("reranker"), hint: "LightGBM reranker over scored predictions", badge: "LAB" },
       ],
     },
     {

@@ -575,6 +575,8 @@
   },
   "scoring": {
     "title": "评分配置",
+    "labBadge": "LAB",
+    "labBadgeHint": "研究 / LAB 区域：研究与可复现性参数为有意公开展示。",
     "description": "ScoringConfig 定义如何将原始预测信号合并为单一的 [0, 1] 置信度分数。",
     "loadPresets": "加载预设",
     "presetsLoading": "加载中…",

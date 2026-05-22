@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from protea.api.routers.scoring import router
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
+from protea.infrastructure.orm.models.embedding.dataset import Dataset
 from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
 from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
 from protea.infrastructure.orm.models.embedding.scoring_config import (
@@ -987,26 +988,91 @@ def _make_reranker_model(**kwargs):
     m.model_data = kwargs.get("model_data", "lgb_model_string")
     m.metrics = kwargs.get("metrics", {"val_auc": 0.85})
     m.feature_importance = kwargs.get("feature_importance", {"distance": 100})
+    m.feature_schema_sha = kwargs.get("feature_schema_sha", "ab12cd34ef56")
+    m.producer_version = kwargs.get("producer_version", None)
+    m.producer_git_sha = kwargs.get("producer_git_sha", None)
+    m.external_source = kwargs.get("external_source", None)
+    m.dataset_id = kwargs.get("dataset_id", None)
+    m.spec_yaml = kwargs.get("spec_yaml", None)
     m.created_at = datetime(2026, 3, 18, tzinfo=UTC)
     return m
 
 
+def _make_dataset(**kwargs):
+    d = MagicMock(spec=Dataset)
+    d.id = kwargs.get("id", uuid4())
+    d.name = kwargs.get("name", "bench-v1-K5-v226-lineage")
+    d.schema_sha = kwargs.get("schema_sha", "ds5chemafff0")
+    d.manifest_sha = kwargs.get("manifest_sha", "f" * 64)
+    return d
+
+
+def _query_router(models, datasets):
+    """Route ``session.query(RerankerModel|Dataset)`` to the right rows."""
+
+    def _query(model):
+        q = MagicMock()
+        if model is Dataset:
+            q.filter.return_value.all.return_value = datasets
+        else:
+            q.order_by.return_value.all.return_value = models
+        return q
+
+    return _query
+
+
 class TestListRerankers:
     def test_empty_list(self, client, session):
-        session.query.return_value.order_by.return_value.all.return_value = []
+        session.query.side_effect = _query_router([], [])
         resp = client.get("/scoring/rerankers")
         assert resp.status_code == 200
         assert resp.json() == []
 
     def test_returns_rerankers(self, client, session):
         m = _make_reranker_model(name="my-model")
-        session.query.return_value.order_by.return_value.all.return_value = [m]
+        session.query.side_effect = _query_router([m], [])
         resp = client.get("/scoring/rerankers")
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) == 1
         assert data[0]["name"] == "my-model"
         assert "metrics" in data[0]
+
+    def test_surfaces_provenance_and_dataset_shas(self, client, session):
+        ds = _make_dataset()
+        m = _make_reranker_model(
+            name="champion",
+            dataset_id=ds.id,
+            feature_schema_sha="featschemaaa1",
+            producer_version="0.9.2",
+            producer_git_sha="deadbeefcafe",
+            external_source="protea-reranker-lab@cec8ccd",
+            spec_yaml="training:\n  cell: nk-bpo\n",
+            metrics={
+                "fmax": 0.7291,
+                "__feature_selection__": {
+                    "families_enabled": None,
+                    "families_available": ["knn", "lineage"],
+                    "drop_features": [],
+                    "feature_count": 56,
+                },
+            },
+        )
+        session.query.side_effect = _query_router([m], [ds])
+        resp = client.get("/scoring/rerankers")
+        assert resp.status_code == 200
+        row = resp.json()[0]
+        assert row["feature_schema_sha"] == "featschemaaa1"
+        assert row["producer_version"] == "0.9.2"
+        assert row["producer_git_sha"] == "deadbeefcafe"
+        assert row["external_source"] == "protea-reranker-lab@cec8ccd"
+        assert row["dataset_id"] == str(ds.id)
+        assert row["dataset_name"] == ds.name
+        assert row["dataset_schema_sha"] == ds.schema_sha
+        assert row["dataset_manifest_sha"] == ds.manifest_sha
+        assert row["spec_yaml"] == "training:\n  cell: nk-bpo\n"
+        assert row["feature_selection"]["feature_count"] == 56
+        assert row["feature_selection"]["families_available"] == ["knn", "lineage"]
 
 
 class TestGetReranker:
@@ -1016,6 +1082,22 @@ class TestGetReranker:
         resp = client.get(f"/scoring/rerankers/{m.id}")
         assert resp.status_code == 200
         assert resp.json()["name"] == "found"
+
+    def test_found_resolves_linked_dataset(self, client, session):
+        ds = _make_dataset()
+        m = _make_reranker_model(name="found", dataset_id=ds.id)
+
+        def get_side(model, id_):
+            if model is Dataset:
+                return ds
+            return m
+
+        session.get.side_effect = get_side
+        resp = client.get(f"/scoring/rerankers/{m.id}")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["dataset_schema_sha"] == ds.schema_sha
+        assert body["dataset_manifest_sha"] == ds.manifest_sha
 
     def test_not_found(self, client, session):
         session.get.return_value = None

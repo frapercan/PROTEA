@@ -12,6 +12,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from protea.infrastructure.orm.models.embedding.dataset import Dataset
 from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
 from protea.infrastructure.orm.models.embedding.scoring_config import (
     DEFAULT_EVIDENCE_WEIGHTS,
@@ -59,14 +60,70 @@ class RerankerResponse(BaseModel):
         ...,
         description="LightGBM feature-importance map keyed by feature name.",
     )
+    feature_schema_sha: str | None = Field(
+        default=None,
+        description=(
+            "Feature-family-aware schema fingerprint of the booster; "
+            "must match the live pipeline's schema at inference. "
+            "Reproducibility-critical."
+        ),
+    )
+    feature_selection: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Which feature families fed the booster: "
+            "``families_enabled`` (``None`` = all available), "
+            "``families_available``, ``drop_features``, "
+            "``feature_count``. Recorded from the lab run.json."
+        ),
+    )
+    producer_version: str | None = Field(
+        default=None,
+        description="Version tag of the producer that trained the booster.",
+    )
+    producer_git_sha: str | None = Field(
+        default=None,
+        description="Git SHA of the producer at training time.",
+    )
+    external_source: str | None = Field(
+        default=None,
+        description="Provenance tag for boosters trained outside PROTEA (e.g. ``protea-reranker-lab@<sha>``).",
+    )
+    dataset_id: uuid.UUID | None = Field(
+        default=None,
+        description="UUID of the source ``Dataset`` row this booster was trained on.",
+    )
+    dataset_name: str | None = Field(
+        default=None,
+        description="Human-readable name of the linked ``Dataset`` (when resolvable).",
+    )
+    dataset_schema_sha: str | None = Field(
+        default=None,
+        description="Feature-set fingerprint of the linked dataset; matches the booster's schema when consistent.",
+    )
+    dataset_manifest_sha: str | None = Field(
+        default=None,
+        description="sha256 of the linked dataset's serialised manifest bytes; collision detects dump drift.",
+    )
+    spec_yaml: str | None = Field(
+        default=None,
+        description="Full ExperimentSpec YAML the booster was trained from.",
+    )
     created_at: Any = Field(
         ...,
         description="ISO 8601 timestamp of when the row was inserted.",
     )
 
 
-def to_reranker_response(m: RerankerModel) -> RerankerResponse:
-    """Convert an ORM :class:`RerankerModel` to its API response model."""
+def to_reranker_response(m: RerankerModel, dataset: Dataset | None = None) -> RerankerResponse:
+    """Convert an ORM :class:`RerankerModel` to its API response model.
+
+    ``dataset`` is the resolved linked :class:`Dataset` row (when the
+    caller has joined it). When provided, its content fingerprints and
+    name are surfaced for provenance; ``None`` leaves those fields unset.
+    """
+    metrics = m.metrics or {}
+    feature_selection = metrics.get("__feature_selection__")
     return RerankerResponse(
         id=m.id,
         name=m.name,
@@ -76,6 +133,16 @@ def to_reranker_response(m: RerankerModel) -> RerankerResponse:
         aspect=m.aspect,
         metrics=m.metrics,
         feature_importance=m.feature_importance,
+        feature_schema_sha=m.feature_schema_sha,
+        feature_selection=feature_selection,
+        producer_version=m.producer_version,
+        producer_git_sha=m.producer_git_sha,
+        external_source=m.external_source,
+        dataset_id=m.dataset_id,
+        dataset_name=dataset.name if dataset is not None else None,
+        dataset_schema_sha=dataset.schema_sha if dataset is not None else None,
+        dataset_manifest_sha=dataset.manifest_sha if dataset is not None else None,
+        spec_yaml=m.spec_yaml,
         created_at=m.created_at,
     )
 
