@@ -8,11 +8,17 @@
 # api-latency / worker-throughput / embeddings-pipeline / db-connections
 # dashboards render once this server is scraping.
 #
-# The PROTEA application stack (api + workers) runs on the host, not in
-# this compose project, so the scrape targets use host.docker.internal
-# (mapped to the docker host gateway via extra_hosts in the compose
-# service). This mirrors how Grafana reaches Postgres and how the
-# loki-docker-driver reaches Loki: through the host-published port.
+# The PROTEA application stack (api + workers) runs on the host, so the
+# protea-api scrape target uses host.docker.internal (mapped to the docker
+# host gateway via extra_hosts in the compose service). This mirrors how
+# Grafana reaches Postgres and how the loki-docker-driver reaches Loki.
+#
+# RabbitMQ and the postgres-exporter run in the `protea_default` bridge
+# network (compose project "protea"). Prometheus is attached to that
+# network (see docker-compose.monitoring.yml networks section) and
+# resolves them by container name, so their ports do NOT need to be
+# published on the host. This avoids recreating the rabbitmq container
+# (which holds durable dead-letter messages on an anonymous volume).
 #
 # The PROTEA API exposes the Prometheus exposition format at /metrics
 # (and the canonical alias /v1/metrics) on port 8000; see
@@ -52,27 +58,31 @@ scrape_configs:
   # RabbitMQ: rabbitmq_prometheus plugin, port 15692.
   # The rabbitmq:3-management image ships rabbitmq_prometheus; the plugin
   # is activated via docker/rabbitmq/enabled_plugins so it works with plain
-  # rabbitmq:3 images as well. Port 15692 is published on the host by the
-  # rabbitmq service in docker-compose.yml and docker-compose.bundle.yml.
+  # rabbitmq:3 images as well. Prometheus reaches the container by name
+  # over the shared `protea_default` network (see docker-compose.monitoring.yml)
+  # so port 15692 does NOT need to be published on the host. This avoids
+  # recreating the rabbitmq container and losing durable queue state.
   # Powers the queue-depth dashboard (rabbitmq_queue_messages_ready,
   # rabbitmq_queue_messages_unacknowledged, rabbitmq_queue_consumers, etc.).
   - job_name: rabbitmq
     metrics_path: /metrics
     static_configs:
       - targets:
-          - host.docker.internal:15692
+          - protea-rabbitmq-1:15692
         labels:
           service: rabbitmq
 
   # Postgres: prometheuscommunity/postgres-exporter, port 9187.
   # The exporter runs as a sidecar in docker-compose.monitoring.yml and
   # connects to host-published Postgres via host.docker.internal:5432.
+  # Prometheus reaches it by container name over the shared `protea_monitoring`
+  # network (both services are in that network) without needing the host port.
   # Powers the db-connections dashboard (pg_stat_activity_count,
   # pg_stat_database_xact_commit/rollback, pg_stat_activity_max_tx_duration,
   # pg_stat_database_deadlocks).
   - job_name: postgres
     static_configs:
       - targets:
-          - host.docker.internal:9187
+          - protea-postgres-exporter:9187
         labels:
           service: postgres
