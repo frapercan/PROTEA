@@ -3,9 +3,12 @@
 // module exclusively, so the rest of the app stays decoupled from the
 // sidecar's origin and OpenAPI shape.
 //
-// The base URL is read from NEXT_PUBLIC_FARM_API_URL with a localhost
-// fallback so a `npm run dev` against a running sidecar Just Works. The
-// fallback intentionally matches the runbook default (port 8801).
+// The base URL defaults to the same-origin path /farm-api so that
+// Next's rewrite rule (next.config.ts) proxies requests to the sidecar
+// server-side. This avoids mixed-content blocks when the page is served
+// over HTTPS (e.g. via ngrok). NEXT_PUBLIC_FARM_API_URL overrides the
+// default for non-standard deployments (the localhost:8801 fallback was
+// removed because browsers block http fetches from https pages).
 
 export type FarmTask = {
   id: string;
@@ -43,7 +46,7 @@ export type FarmResult = {
 };
 
 export function farmApiBaseUrl(): string {
-  const u = process.env.NEXT_PUBLIC_FARM_API_URL ?? "http://localhost:8801";
+  const u = process.env.NEXT_PUBLIC_FARM_API_URL ?? "/farm-api";
   return u.replace(/\/+$/, "");
 }
 

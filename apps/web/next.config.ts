@@ -4,6 +4,7 @@ import createNextIntlPlugin from "next-intl/plugin";
 const withNextIntl = createNextIntlPlugin("./i18n/request.ts");
 
 const apiUrl = process.env.PROTEA_API_URL ?? "http://localhost:8000";
+const farmApiUrl = process.env.FARM_API_URL ?? "http://localhost:8801";
 
 const nextConfig: NextConfig = {
   output: "standalone",
@@ -20,6 +21,10 @@ const nextConfig: NextConfig = {
       {
         source: "/api-proxy/:path*",
         destination: `${apiUrl}/:path*`,
+      },
+      {
+        source: "/farm-api/:path*",
+        destination: `${farmApiUrl}/:path*`,
       },
     ];
   },
