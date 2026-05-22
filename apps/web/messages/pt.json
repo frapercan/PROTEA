@@ -643,6 +643,8 @@
     "uploadFasta": "+ Enviar FASTA",
     "noQuerySets": "Nenhum query set ainda.",
     "uploadFastaCta": "Envie um arquivo FASTA para começar",
+    "fetchError": "Não foi possível carregar os query sets",
+    "idTooltip": "ID interno (clique para copiar)",
     "tableHeaders": {
       "name": "Nome",
       "sequences": "Sequências",

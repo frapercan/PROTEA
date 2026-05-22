@@ -646,6 +646,8 @@
     "uploadFasta": "+ Upload FASTA",
     "noQuerySets": "No query sets yet.",
     "uploadFastaCta": "Upload a FASTA file to get started",
+    "fetchError": "Failed to load query sets",
+    "idTooltip": "Internal ID (click to copy)",
     "tableHeaders": {
       "name": "Name",
       "sequences": "Sequences",

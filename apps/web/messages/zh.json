@@ -642,6 +642,8 @@
     "uploadFasta": "+ 上传 FASTA",
     "noQuerySets": "暂无查询集。",
     "uploadFastaCta": "上传 FASTA 文件以开始使用",
+    "fetchError": "无法加载查询集",
+    "idTooltip": "内部 ID（点击复制）",
     "tableHeaders": {
       "name": "名称",
       "sequences": "序列",

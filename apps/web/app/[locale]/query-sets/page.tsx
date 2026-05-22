@@ -110,9 +110,15 @@ export default function QuerySetsPage() {
       </div>
 
       {error && (
-        <pre className="mb-4 whitespace-pre-wrap rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {error}
-        </pre>
+        <div
+          role="alert"
+          className="mb-4 inline-flex items-center gap-2 rounded-full bg-amber-50 ring-1 ring-inset ring-amber-200 px-3 py-1.5 text-[12px] font-medium text-amber-700"
+        >
+          <span className="relative flex h-2 w-2 shrink-0">
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500 ring-2 ring-amber-200" />
+          </span>
+          <span>{t("fetchError")}: {error}</span>
+        </div>
       )}
 
       {/* List */}
@@ -147,11 +153,16 @@ export default function QuerySetsPage() {
               onClick={() => setExpandedId(expandedId === qs.id ? null : qs.id)}
             >
               <div>
-                <span className="font-medium text-slate-900">{qs.name}</span>
+                <span
+                  className="font-medium text-slate-900 cursor-help"
+                  title={`${t("idTooltip")}: ${qs.id}`}
+                  onClick={(e) => { e.stopPropagation(); void navigator.clipboard.writeText(qs.id); }}
+                >
+                  {qs.name}
+                </span>
                 {qs.description && (
                   <span className="ml-2 text-xs text-slate-600">{qs.description}</span>
                 )}
-                <div className="font-mono text-xs text-slate-300 mt-0.5">{qs.id}</div>
               </div>
               <div className="text-slate-700">{qs.entry_count}</div>
               <div className="text-xs text-slate-600">{formatDate(qs.created_at)}</div>
@@ -174,7 +185,6 @@ export default function QuerySetsPage() {
                   {qs.entries.map((entry) => (
                     <div key={entry.accession} className="flex gap-4 text-xs text-slate-600 font-mono">
                       <span className="text-slate-900">{entry.accession}</span>
-                      <span className="text-slate-600">seq_id={entry.sequence_id}</span>
                     </div>
                   ))}
                 </div>
