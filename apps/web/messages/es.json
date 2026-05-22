@@ -646,6 +646,8 @@
     "uploadFasta": "+ Cargar FASTA",
     "noQuerySets": "Sin conjuntos de consulta aún.",
     "uploadFastaCta": "Cargue un archivo FASTA para comenzar",
+    "fetchError": "No se pudieron cargar los conjuntos de consulta",
+    "idTooltip": "ID interno (clic para copiar)",
     "tableHeaders": {
       "name": "Nombre",
       "sequences": "Secuencias",
