@@ -118,6 +118,26 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: protea-postgres-exporter
+    # Connects to the host-published Postgres instance (same host-gateway
+    # convention used for the Prometheus protea-api job). The dev creds
+    # match docker-compose.yml and the on-host dev stack: user=protea /
+    # password=protea / db=protea on port 5432.
+    #
+    # Override via POSTGRES_EXPORTER_DATA_SOURCE_NAME in the environment if
+    # the operator runs Postgres under different credentials.
+    environment:
+      - DATA_SOURCE_NAME=${POSTGRES_EXPORTER_DATA_SOURCE_NAME:-postgresql://protea:protea@host.docker.internal:5432/protea?sslmode=disable}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "9187:9187"
+    networks:
+      - protea_monitoring
+    restart: unless-stopped
+
 networks:
   protea_monitoring:
     driver: bridge

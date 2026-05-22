@@ -33,7 +33,18 @@ How the pipeline fits together
       |
       v
    dashboards        (api-latency, worker-throughput, embeddings-pipeline,
-                      db-connections)
+                      db-connections, queue-depth)
+
+Two exporters bridge the gap for the queue-depth and db-connections
+dashboards:
+
+- **RabbitMQ** (``rabbitmq_*`` series): the ``rabbitmq_prometheus`` plugin
+  built into ``rabbitmq:3-management`` exposes metrics on port 15692.
+  ``docker/rabbitmq/enabled_plugins`` activates the plugin explicitly so the
+  image never needs a custom entrypoint.
+- **Postgres** (``pg_*`` series): ``prometheuscommunity/postgres-exporter``
+  runs as a sidecar in ``docker-compose.monitoring.yml`` and connects to
+  host-published Postgres on port 5432.
 
 The application code does not need to know anything about Prometheus.
 The API already serves the Prometheus text exposition format at
@@ -79,19 +90,28 @@ The committed scrape config defines these jobs:
    Self-scrape so the ``up{}`` series and the server's own health are
    visible.
 
+``rabbitmq``
+   Scrapes ``host.docker.internal:15692/metrics`` via the
+   ``rabbitmq_prometheus`` plugin. Port 15692 is published on the host by
+   the ``rabbitmq`` service in ``docker-compose.yml`` and
+   ``docker-compose.bundle.yml``. This job powers the queue-depth dashboard
+   (``rabbitmq_queue_messages_ready``,
+   ``rabbitmq_queue_messages_unacknowledged``, ``rabbitmq_queue_consumers``,
+   and the publish/deliver rate counters).
+
+``postgres``
+   Scrapes ``host.docker.internal:9187/metrics`` from the
+   ``prometheuscommunity/postgres-exporter`` sidecar in
+   ``docker-compose.monitoring.yml``. This job powers the server-side panels
+   of the db-connections dashboard (``pg_stat_activity_count``,
+   ``pg_stat_database_xact_commit/rollback``,
+   ``pg_stat_activity_max_tx_duration``,
+   ``pg_stat_database_deadlocks``).
+
 Only the API process serves ``/metrics``. The queue workers do not open
 their own metrics port, so worker-emitted counters surface through the
 shared API registry rather than a per-worker scrape target. There is no
 separate worker scrape job by design.
-
-The ``rabbitmq`` and ``postgres`` jobs are present but commented out.
-They depend on exporters that are not yet part of this stack: RabbitMQ's
-``rabbitmq_prometheus`` plugin (port 15692) and a ``postgres_exporter``
-(port 9187). Until those are enabled the queue-depth dashboard
-(``rabbitmq_*`` series) and the connection/transaction panels of the
-db-connections dashboard (``pg_*`` series) stay empty even with
-Prometheus running. Enable the exporters and uncomment the matching job
-in ``deploy/prometheus/prometheus.yml`` to populate them.
 
 
 Verifying metrics reach Prometheus
@@ -169,6 +189,40 @@ The ``protea-prometheus`` datasource url is
 port or renamed the container, point the datasource at
 ``http://prometheus:9090`` (the in-network service name) instead and
 restart Grafana.
+
+**queue-depth panels still empty after bring-up**
+
+Confirm the RabbitMQ container is running and port 15692 is reachable
+from the host:
+
+.. code-block:: bash
+
+   curl -sf http://localhost:15692/metrics | head -5
+
+If this times out, the container may not have the plugin enabled. Check
+that ``docker/rabbitmq/enabled_plugins`` was mounted into the container
+and that the file contains ``rabbitmq_prometheus``. A container restart
+is required after mounting the file for the first time.
+
+**db-connections "server-side" panels (pg_* series) empty**
+
+Confirm the postgres-exporter sidecar is running:
+
+.. code-block:: bash
+
+   curl -sf http://localhost:9187/metrics | head -5
+
+If it is not running, bring the monitoring stack up again:
+
+.. code-block:: bash
+
+   docker compose -f docker-compose.monitoring.yml up -d postgres-exporter
+
+If the exporter starts but immediately exits, check its logs for a
+connection-refused error. The ``DATA_SOURCE_NAME`` defaults to
+``postgresql://protea:protea@host.docker.internal:5432/protea?sslmode=disable``.
+Override via ``POSTGRES_EXPORTER_DATA_SOURCE_NAME`` in the environment if
+the dev Postgres instance uses different credentials.
 
 
 Operational notes
