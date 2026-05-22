@@ -9,7 +9,7 @@ const nextConfig: NextConfig = {
   output: "standalone",
   trailingSlash: true,
   experimental: {
-    middlewareClientMaxBodySize: 100 * 1024 * 1024, // 100 MB
+    proxyClientMaxBodySize: 100 * 1024 * 1024, // 100 MB
   },
   async rewrites() {
     return [
