@@ -20,7 +20,7 @@ Design notes
 ------------
 
 The helper API is intentionally tiny so every writer site can opt in
-with a single import + one-line call:
+with a single import + one-line call::
 
     from protea.core.jsonb_dual_write import maybe_jsonb
 

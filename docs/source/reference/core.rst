@@ -11,6 +11,31 @@ and an ``emit`` callback, but they do not manage connections, queues, or
 transactions themselves. This strict boundary makes every operation
 independently testable and trivially substitutable.
 
+.. rubric:: Axis tuple
+
+``protea.core.axis_tuple`` defines the ``AxisTuple`` named-tuple used to
+identify a training configuration in the multi-PLM sweep. Each axis
+carries the PLM identifier, neighbourhood size ``k``, reranker flag,
+feature family set, evaluation set name, propagation mode, and ensemble
+strategy. All serialised config keys in ``Dataset`` and ``ExperimentRun``
+rows use the canonical axis-tuple string form derived from this type.
+
+.. automodule:: protea.core.axis_tuple
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. rubric:: Domain types
+
+``protea.core.domain.aspect`` defines the ``Aspect`` enum used throughout
+the codebase to identify the three GO namespaces: MFO (Molecular Function),
+BPO (Biological Process), and CCO (Cellular Component).
+
+.. automodule:: protea.core.domain.aspect
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Contracts
 ---------
 
@@ -105,6 +130,44 @@ suites that install/uninstall plugins between cases. Added in T2A.5
 for backend dispatch and generalised in T2A.8 (PR #240).
 
 .. automodule:: protea.core.plugins
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. rubric:: Feature registry
+
+``protea.core.features.registry`` is the central registry that maps
+feature-family names to their producer functions. The ``ALL_FEATURES``
+constant lists every column the pipeline may populate; adding a column
+without wiring a producer here causes a T1.8 invariant failure in the
+dataset-export pipeline.
+
+.. automodule:: protea.core.features.registry
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. rubric:: Schema SHA
+
+``protea.core.schema_sha_v2`` computes a 16-character deterministic
+fingerprint of the feature schema version. The hash is embedded in
+``Dataset.schema_sha`` and ``RerankerModel.feature_schema_sha``; a
+mismatch at inference time indicates that the booster was trained on a
+different feature set and must be rejected.
+
+.. automodule:: protea.core.schema_sha_v2
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. rubric:: JSONB dual-write
+
+``protea.core.jsonb_dual_write`` provides helpers for writing structured
+data to both a typed column and a JSONB fallback column in the same
+transaction. Used during schema-migration windows where old and new code
+may run concurrently against the same database.
+
+.. automodule:: protea.core.jsonb_dual_write
    :members:
    :undoc-members:
    :show-inheritance:
@@ -512,6 +575,38 @@ four ephemeral siblings (``compute_embeddings_batch``,
    :undoc-members:
    :show-inheritance:
 
+**load_interpro_go_mapping**
+   Downloads and persists the InterPro-to-GO mapping file, linking
+   InterPro domain entries to their associated GO terms. Used as a
+   prerequisite step before running InterProScan-based annotation.
+
+.. automodule:: protea.core.operations.load_interpro_go_mapping
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+**run_interproscan_batch**
+   Submits sequences to the EBI InterProScan REST API in configurable
+   batch sizes. Stores ``InterproAnnotation`` rows linking each protein
+   to its domain signatures. Supports resume via previously stored
+   job IDs.
+
+.. automodule:: protea.core.operations.run_interproscan_batch
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+**predict_go_terms_from_interpro**
+   Derives GO term predictions from stored ``InterproAnnotation`` rows
+   and the ``InterproGoMapping`` table, without running KNN search.
+   Produces a ``PredictionSet`` whose entries are directly evidence-backed
+   by domain-matching rather than embedding distance.
+
+.. automodule:: protea.core.operations.predict_go_terms_from_interpro
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 **export_research_dataset**
    Publishes the frozen re-ranker dataset (``train.parquet`` /
    ``eval.parquet`` / ``manifest.json``) consumed by
@@ -561,8 +656,7 @@ engineering layer; they are documented here for completeness but are
 not part of the public API.
 
 - ``protea.core.anc2vec_embeddings``: anc2vec ancestry embeddings for
-  GO terms, used as features by the re-ranker (see :doc:`D19 </adr/D19-fresearch-targets>` for the
-  GeOKG replacement candidate).
+  GO terms, used as features by the re-ranker.
 - ``protea.core.annotation_intern``: string interning helper for
   reducing memory pressure when loading large annotation sets.
 - ``protea.core.disk_cache``: generic on-disk cache with TTL used by
@@ -572,6 +666,83 @@ not part of the public API.
   per-candidate row.
 - ``protea.core.pca_cache``: per-PLM PCA projection cache, used to
   pre-compute the ``emb_pca`` feature family.
+- ``protea.core._anc2vec_phases``: phase helpers for the anc2vec
+  embedding pipeline.
+- ``protea.core._feature_enricher_helpers``: low-level helpers extracted
+  from ``feature_enricher`` to keep per-phase logic self-contained.
+- ``protea.core.features._bindings``: internal feature-column binding
+  declarations consumed by ``features.registry``.
+- ``protea.core._knn_transfer_runner``: worker-side KNN transfer runner
+  dispatched by the predictions coordinator.
+- ``protea.core._leaf_record_builder``: builder for leaf-prediction
+  records in the KNN transfer pipeline.
+- ``protea.core._pair_feature_compute``: pair-level feature computation
+  with optional process-pool parallelism and SQLite alignment cache.
+- ``protea.core._training_dump_loaders``: data-loading helpers used by
+  the training-dump pipeline.
+- ``protea.core.training_dump._constants``: shared constants for the
+  training-dump subpackage.
+- ``protea.core.training_dump._contexts``: context dataclasses bundling
+  session, settings, and configuration for training-dump passes.
+- ``protea.core.training_dump._data_loaders``: loaders that hydrate
+  protein, embedding, and annotation data for the training-dump pipeline.
+- ``protea.core.training_dump._knn_transfer``: KNN search and GO-term
+  transfer logic specific to the training-dump path.
+- ``protea.core.training_dump._payload``: Pydantic payload model for the
+  ``export_research_dataset`` operation.
+- ``protea.core.training_dump._runner``: top-level runner that
+  coordinates the training-dump passes.
+- ``protea.core.training_dump._test_split``: helper that materialises the
+  eval/test shard of the frozen dataset.
+- ``protea.core.training_dump._train_split``: helper that materialises the
+  train shard of the frozen dataset.
+- ``protea.core.operations._compute_embeddings_backends``: backend
+  dispatch logic for the ``compute_embeddings`` coordinator.
+- ``protea.core.operations._compute_embeddings_helpers``: batch
+  construction and progress helpers for ``compute_embeddings``.
+- ``protea.core.operations._load_ontology_helpers``: OBO parsing helpers
+  used by ``load_ontology_snapshot``.
+- ``protea.core.operations._predict_go_terms_adapter``: adapter that
+  routes the ``predict_go_terms`` coordinator to the unified-path or
+  batch-op implementations.
+- ``protea.core.operations.predict_go_terms._aspect_helpers``: per-aspect
+  splitting and merging helpers for the predict pipeline.
+- ``protea.core.operations.predict_go_terms._batch_op``: batch operation
+  executed by ``OperationConsumer`` workers.
+- ``protea.core.operations.predict_go_terms._batch_op_feature``: feature
+  generation phase of the batch operation.
+- ``protea.core.operations.predict_go_terms._batch_op_reference``:
+  reference-embedding loading and KNN search for batch operations.
+- ``protea.core.operations.predict_go_terms._batch_op_reranker``:
+  reranker scoring phase of the batch operation.
+- ``protea.core.operations.predict_go_terms._common``: shared types and
+  constants used across the predict-go-terms subpackage.
+- ``protea.core.operations.predict_go_terms._coordinator``: coordinator
+  that partitions the query set and dispatches batch messages.
+- ``protea.core.operations.predict_go_terms._post_knn_pipeline``:
+  post-KNN pipeline steps (feature enrichment, reranker, aggregation).
+- ``protea.core.operations.predict_go_terms._reranker_scorer``:
+  ``RerankerScorer`` compositive class that applies a loaded booster to
+  batch prediction DataFrames.
+- ``protea.core.operations.predict_go_terms._store``: bulk-insert helpers
+  for writing ``GOPrediction`` rows.
+- ``protea.core.operations.predict_go_terms._unified_path``: unified
+  in-process execution path used when a single worker handles both KNN
+  and write phases.
+- ``protea.core.operations._run_cafa_artifacts``: artifact download and
+  staging helpers for ``run_cafa_evaluation``.
+- ``protea.core.operations._run_cafa_data_helpers``: data-loading helpers
+  for the CAFA evaluation pipeline.
+- ``protea.core.operations._run_cafa_eval_driver``: driver that calls
+  ``cafaeval.cafa_eval`` and collects per-namespace results.
+- ``protea.core.operations._run_cafa_helpers``: shared helper functions
+  used across the ``_run_cafa_*`` modules.
+- ``protea.core.operations._run_cafa_reranker_loader``: loads and applies
+  the reranker model to CAFA prediction TSVs.
+- ``protea.core.operations._run_cafa_setup``: environment and directory
+  setup for a CAFA evaluation run.
+- ``protea.core.operations._run_cafa_summary``: summarises cafaeval
+  results into ``EvaluationResult`` rows.
 
 .. automodule:: protea.core.anc2vec_embeddings
    :members:
@@ -594,6 +765,213 @@ not part of the public API.
    :show-inheritance:
 
 .. automodule:: protea.core.pca_cache
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core._anc2vec_phases
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core._feature_enricher_helpers
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core.features._bindings
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core._knn_transfer_runner
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core._leaf_record_builder
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core._pair_feature_compute
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core._training_dump_loaders
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core.training_dump._constants
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.training_dump._contexts
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.training_dump._data_loaders
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.training_dump._knn_transfer
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.training_dump._payload
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.training_dump._runner
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.training_dump._test_split
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.training_dump._train_split
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.operations._compute_embeddings_backends
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.operations._compute_embeddings_helpers
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.operations._load_ontology_helpers
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core.operations._predict_go_terms_adapter
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.operations.predict_go_terms._aspect_helpers
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.operations.predict_go_terms._batch_op
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.operations.predict_go_terms._batch_op_feature
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.operations.predict_go_terms._batch_op_reference
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.operations.predict_go_terms._batch_op_reranker
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.operations.predict_go_terms._common
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.operations.predict_go_terms._coordinator
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.operations.predict_go_terms._post_knn_pipeline
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.operations.predict_go_terms._reranker_scorer
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.operations.predict_go_terms._store
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.operations.predict_go_terms._unified_path
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.operations._run_cafa_artifacts
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core.operations._run_cafa_data_helpers
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core.operations._run_cafa_eval_driver
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core.operations._run_cafa_helpers
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core.operations._run_cafa_reranker_loader
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core.operations._run_cafa_setup
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core.operations._run_cafa_summary
    :members:
    :undoc-members:
    :show-inheritance:

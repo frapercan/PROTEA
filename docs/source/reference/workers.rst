@@ -102,6 +102,19 @@ selected by the queue configuration in ``scripts/worker.py``:
    - ``protea.predictions.batch``: KNN search + GO transfer
    - ``protea.predictions.write``: bulk GOPrediction insert
 
+.. rubric:: Graceful shutdown
+
+``protea.workers.shutdown`` provides the signal-handler setup that
+enables graceful shutdown of long-running worker processes. It installs
+handlers for ``SIGTERM`` and ``SIGINT`` that set a shared ``stop_event``,
+allowing the main worker loop to drain the current batch and exit cleanly
+rather than being killed mid-operation.
+
+.. automodule:: protea.workers.shutdown
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Stale job reaper
 ----------------
 

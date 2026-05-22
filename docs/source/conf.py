@@ -43,6 +43,11 @@ autodoc_mock_imports = [
     'pyarrow',
     'scipy',
     'sklearn',
+    'aio_pika',
+    'minio',
+    'opentelemetry',
+    'prometheus_client',
+    'pgvector',
 ]
 
 master_doc = 'index'

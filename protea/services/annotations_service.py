@@ -202,7 +202,10 @@ def delete_annotation_set_data(
 ) -> dict[str, Any]:
     """Delete an annotation set and all its annotations.
 
-    Returns the deletion summary dict. Raises:
+    Returns the deletion summary dict.
+
+    Raises:
+
     - :class:`EntityNotFoundError` if the UUID does not resolve.
     - :class:`AnnotationSetReferencedError` if a PredictionSet
       references this set (router maps to 409).
