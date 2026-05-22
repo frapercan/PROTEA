@@ -19,3 +19,4 @@ fix sequence that an operator can execute without prior context.
    schema-sha-parallel-rollout
    observability
    loki
+   prometheus

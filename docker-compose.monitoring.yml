@@ -1,11 +1,17 @@
-# Grafana + Loki sidecar for PROTEA (Level A, visitor analytics + logs).
+# Grafana + Loki + Prometheus sidecar for PROTEA (Level A, visitor
+# analytics, logs, and metrics).
 #
-# Runs Grafana and Loki on the same `protea_monitoring` bridge network so
-# Grafana reaches Loki at http://loki:3100 by container name. Grafana
+# Runs Grafana, Loki, and Prometheus on the same `protea_monitoring`
+# bridge network so Grafana reaches Loki at http://loki:3100 and
+# Prometheus at http://prometheus:9090 by container name. Grafana
 # publishes 3001 on the host; Loki publishes 3100 on the host so the
 # loki-docker-driver running on the application stack can push logs to
 # it without a shared compose network (the driver lives outside any
 # compose context, so it has to talk to a host-published port).
+# Prometheus publishes 9090 on the host because the Grafana
+# `protea-prometheus` datasource is provisioned to reach it via
+# host.docker.internal:9090 (same host-gateway convention used for
+# Postgres), and so an operator can hit the Prometheus UI directly.
 #
 # Postgres still lives in the `pgvectorsql` bridge container which
 # publishes 5432 on the host, so Grafana reaches it via the docker0
@@ -57,6 +63,37 @@ services:
       - protea_monitoring
     depends_on:
       - loki
+      - prometheus
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: protea-prometheus
+    # Scrapes the host-run PROTEA API /metrics endpoint via
+    # host.docker.internal; the application stack is not part of this
+    # compose project. Published on 9090 so the Grafana datasource
+    # (uid protea-prometheus, url host.docker.internal:9090) and an
+    # operator's browser both reach it.
+    ports:
+      - "9090:9090"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - protea_monitoring
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider --quiet http://localhost:9090/-/ready || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
 
   loki:
@@ -88,3 +125,4 @@ networks:
 volumes:
   grafana_data:
   loki_data:
+  prometheus_data:
