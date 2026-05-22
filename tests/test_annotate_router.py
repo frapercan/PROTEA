@@ -305,6 +305,69 @@ class TestAnnotateSuccess:
         assert data["sequence_count"] == 1
         assert data["reranker_id"] is None
 
+    def _setup_happy_session(self, session):
+        config = MagicMock()
+        config.id = uuid4()
+        ann = MagicMock()
+        ann.id = uuid4()
+        snap = MagicMock()
+        snap.id = uuid4()
+        reranker = MagicMock()
+        reranker.id = uuid4()
+
+        first_results = iter([ann, snap, reranker])
+
+        def query_side_effect(*args):
+            q = MagicMock()
+            q.filter.return_value.all.return_value = []
+            q.outerjoin.return_value.group_by.return_value.order_by.return_value.all.return_value = [
+                (config, 10)
+            ]
+            q.order_by.return_value.first.side_effect = lambda: next(first_results)
+            return q
+
+        session.query.side_effect = query_side_effect
+
+        def add_side_effect(obj):
+            if not hasattr(obj, "id") or obj.id is None:
+                obj.id = uuid4()
+
+        session.add.side_effect = add_side_effect
+        session.flush.return_value = None
+
+    def test_compute_reranker_features_true_round_trips(self, client):
+        """compute_reranker_features=True must appear as True in predict_payload."""
+        c, session, _ = client
+        fasta = _fasta_content([("P12345", "MKVLWAGS")])
+        self._setup_happy_session(session)
+        resp = c.post(
+            "/annotate",
+            data={"fasta_text": fasta, "compute_reranker_features": "true"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["predict_payload"]["compute_reranker_features"] is True
+
+    def test_compute_reranker_features_false_round_trips(self, client):
+        """compute_reranker_features=False must appear as False in predict_payload."""
+        c, session, _ = client
+        fasta = _fasta_content([("P12345", "MKVLWAGS")])
+        self._setup_happy_session(session)
+        resp = c.post(
+            "/annotate",
+            data={"fasta_text": fasta, "compute_reranker_features": "false"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["predict_payload"]["compute_reranker_features"] is False
+
+    def test_compute_reranker_features_defaults_to_true(self, client):
+        """When compute_reranker_features is omitted, predict_payload carries True."""
+        c, session, _ = client
+        fasta = _fasta_content([("P12345", "MKVLWAGS")])
+        self._setup_happy_session(session)
+        resp = c.post("/annotate", data={"fasta_text": fasta})
+        assert resp.status_code == 200
+        assert resp.json()["predict_payload"]["compute_reranker_features"] is True
+
 
 # ---------------------------------------------------------------------------
 # Helper functions
