@@ -305,17 +305,38 @@ function evidenceBadgeClass(code: string): string {
   return "bg-slate-100 text-slate-500 border-slate-200";
 }
 
-type GroupedAnnotation = { go_id: string; name: string | null; aspect: string | null; evidence_codes: string[] };
+type AnnotationSource = { source: string; version: string | null };
+type GroupedAnnotation = {
+  go_id: string;
+  name: string | null;
+  aspect: string | null;
+  evidence_codes: string[];
+  sources: AnnotationSource[];
+};
+
+// "GOA 2025-03" (version optional, null-safe).
+function formatSource({ source, version }: AnnotationSource): string {
+  return version ? `${source} ${version}` : source;
+}
 
 function groupAnnotations(anns: ProteinAnnotation[]): Map<string, GroupedAnnotation> {
   const map = new Map<string, GroupedAnnotation>();
   for (const a of anns) {
+    const source: AnnotationSource = { source: a.annotation_set_source, version: a.annotation_set_version };
     const existing = map.get(a.go_id);
     if (existing) {
       if (a.evidence_code && !existing.evidence_codes.includes(a.evidence_code))
         existing.evidence_codes.push(a.evidence_code);
+      if (!existing.sources.some((s) => s.source === source.source && s.version === source.version))
+        existing.sources.push(source);
     } else {
-      map.set(a.go_id, { go_id: a.go_id, name: a.name, aspect: a.aspect, evidence_codes: a.evidence_code ? [a.evidence_code] : [] });
+      map.set(a.go_id, {
+        go_id: a.go_id,
+        name: a.name,
+        aspect: a.aspect,
+        evidence_codes: a.evidence_code ? [a.evidence_code] : [],
+        sources: [source],
+      });
     }
   }
   return map;
@@ -637,12 +658,21 @@ function ProteinDetail({
               <div key={ann.go_id} className="grid grid-cols-[90px_1fr_80px] gap-2 border-b px-3 py-2 last:border-0 items-start">
                 <span className="font-mono text-blue-600 pt-0.5">{ann.go_id}</span>
                 <span className="text-slate-700 leading-snug">{ann.name ?? "—"}</span>
-                <div className="flex flex-wrap gap-0.5 justify-end">
-                  {ann.evidence_codes.map((ec) => (
-                    <span key={ec} className={`rounded border px-1 py-0.5 text-[10px] font-mono font-medium ${evidenceBadgeClass(ec)}`}>
-                      {ec}
-                    </span>
-                  ))}
+                <div className="flex flex-col items-end gap-0.5">
+                  <div className="flex flex-wrap gap-0.5 justify-end">
+                    {ann.evidence_codes.map((ec) => (
+                      <span key={ec} className={`rounded border px-1 py-0.5 text-[10px] font-mono font-medium ${evidenceBadgeClass(ec)}`}>
+                        {ec}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-0.5 justify-end">
+                    {ann.sources.map((s) => (
+                      <span key={`${s.source}-${s.version ?? ""}`} className="rounded bg-slate-100 px-1 py-0.5 text-[10px] text-slate-500">
+                        {formatSource(s)}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </div>
             ))}
