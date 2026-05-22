@@ -1,6 +1,15 @@
 import { test, expect } from "@playwright/test";
 
-// Tablet = 768px. Desktop nav shows at lg (1024px+), so tablet shows hamburger.
+// Tablet = 768px. The desktop sidebar rail shows at lg (1024px+), so the
+// tablet viewport shows the hamburger + mobile drawer.
+
+// Dismiss the first-visit usage-policy modal before each test so it does not
+// intercept clicks on the navigation chrome.
+test.beforeEach(async ({ context }) => {
+  await context.addInitScript(() => {
+    try { localStorage.setItem("protea_policy_accepted_v1", "1"); } catch {}
+  });
+});
 
 const PAGES = [
   { path: "/jobs", name: "jobs" },
@@ -11,19 +20,23 @@ const PAGES = [
   { path: "/functional-annotation", name: "functional-annotation" },
 ];
 
-test("shows hamburger on tablet (desktop nav at lg, not md)", async ({ page }) => {
+test("shows hamburger on tablet (sidebar rail at lg, not md)", async ({ page }) => {
   await page.goto("/jobs");
   await expect(
-    page.locator('button[aria-label="Open navigation menu"], button[aria-label="Close navigation menu"]')
+    page.locator('button[aria-controls="protea-mobile-nav"]')
   ).toBeVisible();
-  await expect(page.locator("nav.hidden").first()).toBeHidden();
+  // Desktop sidebar rail (lg:flex) is hidden below 1024px.
+  await expect(page.locator("aside.hidden").first()).toBeHidden();
 });
 
 test("jobs page shows card layout on tablet", async ({ page }) => {
   await page.goto("/jobs");
-  // Card layout uses lg:hidden (visible below 1024px), desktop table uses lg:block (hidden below 1024px)
-  await expect(page.locator("div.hidden.lg\\:block").first()).toBeHidden();
-  await expect(page.locator("div.lg\\:hidden").first()).toBeVisible();
+  // Card layout uses lg:hidden (visible below 1024px); desktop table uses
+  // lg:block (hidden below 1024px). Scope to the main content region so the
+  // sidebar's own responsive utilities are not matched.
+  const main = page.locator("main#main");
+  await expect(main.locator("div.hidden.lg\\:block").first()).toBeHidden();
+  await expect(main.locator("div.lg\\:hidden").first()).toBeVisible();
 });
 
 for (const { path, name } of PAGES) {
