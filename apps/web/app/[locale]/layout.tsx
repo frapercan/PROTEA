@@ -72,6 +72,7 @@ export default async function LocaleLayout({
                 }
                 mobileTopRight={
                   <>
+                    <LanguageSwitcher />
                     <CommandPaletteTrigger />
                     <AuthChip />
                   </>

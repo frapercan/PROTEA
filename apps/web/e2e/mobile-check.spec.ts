@@ -30,6 +30,23 @@ const MENU_BTN = 'button[aria-controls="protea-mobile-nav"]';
 // The mobile slide-in drawer (dialog) holding the sidebar nav.
 const DRAWER = '#protea-mobile-nav[role="dialog"]';
 
+// ── Language switcher ──────────────────────────────────────────────────────
+
+// The language-switcher button carries aria-label="Switch language".
+const LANG_BTN = 'button[aria-label="Switch language"]';
+
+test("language switcher is visible and clickable in mobile top bar", async ({ page }) => {
+  await page.goto("/jobs");
+  // The mobile top bar (lg:hidden header) contains the LanguageSwitcher.
+  const header = page.locator("header.lg\\:hidden");
+  const langBtn = header.locator(LANG_BTN);
+  await expect(langBtn).toBeVisible();
+  // Verify the button is interactable: clicking opens the locale dropdown.
+  await langBtn.click();
+  // At least one locale option should become visible.
+  await expect(header.locator("button").filter({ hasText: /^(ES|DE|PT|中文|EN)$/ }).first()).toBeVisible();
+});
+
 // ── Navigation ─────────────────────────────────────────────────────────────
 
 test("mobile top bar shows hamburger and hides desktop rail", async ({ page }) => {
