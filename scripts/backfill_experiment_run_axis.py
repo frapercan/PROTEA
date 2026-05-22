@@ -1,69 +1,16 @@
-"""Backfill the FARM-EXP.1 axis columns on ``experiment_run`` rows.
+"""ONE-TIME BACKFILL: idempotent derivation of FARM-EXP.1 axis tuple columns.
 
-The Alembic migration ``e1c4a7b2d8f3_farm_exp_1_experiment_run_axis``
-adds 9 nullable axis columns and a partial-unique index on
-``axis_tuple_shortid``. This script walks every ``experiment_run`` row
-and derives the new columns from the legacy ``config`` / ``provenance``
-JSONB overlays where possible, then computes the canonical shortid via
-:func:`protea.core.axis_tuple.axis_tuple_shortid` (which delegates to
-``protea_contracts.axis_tuple_shortid`` once the contracts release ships
-the helper).
+THIS SCRIPT IS A ONE-TIME BACKFILL AND MUST NOT BE RE-RUN OR SCHEDULED IN NORMAL OPERATION.
+It is safe to leave in the repository for provenance and historical reference only.
 
-Idempotency
------------
-
-The script reads each row, **skips rows where ``axis_tuple_shortid IS
-NOT NULL``**, and only writes derived columns when they are currently
-NULL on the row. Re-running after a successful pass yields zero
-``UPDATE`` statements. ``--force`` recomputes every row regardless of
-existing values (useful after a provenance schema change).
-
-Derivation policy
------------------
-
-For each row, the script tries the following JSONB paths in order and
-uses the first non-empty value::
-
-    plm                    config.plm
-                           provenance.plm
-                           config.embedding_config.plm
-    k                      config.k
-                           provenance.k
-    reranker_spec_id       config.reranker_spec_id
-                           provenance.reranker_spec_id
-                           config.model.id
-    feature_schema_sha     config.feature_schema_sha
-                           provenance.feature_schema_sha
-    eval_set_name          config.eval_set_name
-                           provenance.eval_set_name
-                           config.evaluation_set
-    eval_set_manifest_sha  config.eval_set_manifest_sha
-                           provenance.eval_set_manifest_sha
-    propagation            config.propagation
-                           provenance.propagation
-                           (default "none" if missing)
-    ensemble_spec          config.ensemble_spec
-                           provenance.ensemble_spec
-
-Partial derivation
-------------------
-
-If any of the 8 axis values is unresolvable for a row, the shortid is
-left NULL (and a warning is printed) but the resolved subset is still
-written to the typed columns. A future re-run with richer provenance
-will fill the gap.
-
-Usage
------
-
-::
-
-    poetry run python scripts/backfill_experiment_run_axis.py [--dry-run] [--force] [--batch-size N]
-
-Exit code 0 on success; 1 on conflict (e.g. two rows resolving to the
-same shortid). Defaults to ``--dry-run`` semantics if neither
-``--commit`` nor ``--dry-run`` is passed, mirroring the
-``backfill_schema_sha_v2.py`` style.
+This script backfills the 9 axis columns on experiment_run rows added by the FARM-EXP.1 migration,
+deriving values from legacy config/provenance JSONB overlays and computing the canonical
+axis_tuple_shortid. Fully idempotent: skips rows where axis_tuple_shortid is already set, writes
+only to NULL columns, and re-running after a successful pass yields zero UPDATE statements. Handles
+partial derivation (when some axis values are unresolvable, shortid is left NULL but resolved
+columns are still written), detects cross-row shortid collisions, and supports --force to recompute
+every row if provenance schema changes. No re-run needed after completion; safe to leave in place
+only for historical documentation of the migration.
 """
 
 from __future__ import annotations
