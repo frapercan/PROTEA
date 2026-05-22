@@ -1,0 +1,68 @@
+# Prometheus scrape configuration for the PROTEA monitoring stack.
+#
+# Prometheus runs inside docker-compose.monitoring.yml alongside Grafana
+# and Loki, on the protea_monitoring bridge network, and publishes 9090
+# on the host. The Grafana "PROTEA Prometheus" datasource
+# (deploy/grafana/provisioning/datasources/prometheus.yml, uid
+# protea-prometheus) points at http://host.docker.internal:9090 so the
+# api-latency / worker-throughput / embeddings-pipeline / db-connections
+# dashboards render once this server is scraping.
+#
+# The PROTEA application stack (api + workers) runs on the host, not in
+# this compose project, so the scrape targets use host.docker.internal
+# (mapped to the docker host gateway via extra_hosts in the compose
+# service). This mirrors how Grafana reaches Postgres and how the
+# loki-docker-driver reaches Loki: through the host-published port.
+#
+# The PROTEA API exposes the Prometheus exposition format at /metrics
+# (and the canonical alias /v1/metrics) on port 8000; see
+# protea/api/routers/metrics.py and protea/infrastructure/telemetry.py.
+# Only the API process serves /metrics; the queue workers do not open
+# their own metrics port, so worker-emitted counters surface through the
+# shared API registry rather than a per-worker scrape target.
+
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: protea
+
+scrape_configs:
+  # PROTEA FastAPI application metrics (protea_* series): HTTP request
+  # latency, job counters, embedding/prediction batch histograms, and
+  # the DB pool gauge. Powers the api-latency, worker-throughput,
+  # embeddings-pipeline, and db-connections (protea_db_pool_* panels)
+  # dashboards.
+  - job_name: protea-api
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - host.docker.internal:8000
+        labels:
+          service: protea-api
+
+  # Prometheus self-scrape so the up{} series and the server's own
+  # health are visible in Grafana.
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - localhost:9090
+
+  # The queue-depth dashboard reads rabbitmq_* series and the
+  # db-connections dashboard reads pg_* series. Those come from
+  # exporters that are NOT yet part of this stack: RabbitMQ's
+  # rabbitmq_prometheus plugin (port 15692) and a postgres_exporter
+  # (port 9187). Enable them at deploy time and uncomment the matching
+  # job below; the dashboards then populate without further edits.
+  #
+  # - job_name: rabbitmq
+  #   metrics_path: /metrics
+  #   static_configs:
+  #     - targets:
+  #         - host.docker.internal:15692
+  #
+  # - job_name: postgres
+  #   static_configs:
+  #     - targets:
+  #         - host.docker.internal:9187
