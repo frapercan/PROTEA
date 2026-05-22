@@ -1,9 +1,8 @@
-import type { Metadata } from "next";
-import Image from "next/image";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "../globals.css";
 import { ResetDbButton } from "@/components/ResetDbButton";
-import { NavLinks } from "@/components/NavLinks";
+import { Sidebar } from "@/components/Sidebar";
 import { SupportButton } from "@/components/SupportButton";
 import { ToastProvider } from "@/components/Toast";
 import { UsagePolicyModal } from "@/components/UsagePolicyModal";
@@ -26,7 +25,14 @@ export const metadata: Metadata = {
     template: "%s | PROTEA",
     default: "PROTEA — Functional Annotation",
   },
-  description: "Protein Functional Embedding-based Annotation — job queue and pipeline management",
+  description: "Protein Functional Embedding-based Annotation, job queue and pipeline management",
+};
+
+// Ensure mobile browsers render at natural scale (no zoom-out from any
+// stray horizontal overflow). width=device-width, initialScale=1.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default async function LocaleLayout({
@@ -56,73 +62,47 @@ export default async function LocaleLayout({
             >
               {t("skipToContent")}
             </a>
-            <header className="sticky top-0 z-40 border-b border-slate-200/70 bg-white/85 backdrop-blur-md supports-[backdrop-filter]:bg-white/70">
-              <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4 sm:px-6 lg:px-8">
-                <a
-                  href={`/${locale}`}
-                  className="group flex items-center gap-2.5 shrink-0"
-                  aria-label="PROTEA home"
-                >
-                  <span
-                    aria-hidden
-                    className="relative flex h-10 w-10 items-center justify-center transition-transform group-hover:scale-105"
-                  >
-                    <Image
-                      src="/protea-mark.png"
-                      alt=""
-                      width={40}
-                      height={40}
-                      priority
-                      className="h-10 w-10"
-                    />
-                    <span className="absolute -right-0.5 -bottom-0.5 h-2 w-2 rounded-full bg-emerald-400 ring-2 ring-white" />
-                  </span>
-                  <span className="flex flex-col leading-tight">
-                    <span className="text-[17px] font-bold tracking-tight text-slate-900 group-hover:text-blue-700 transition-colors">
-                      PROTEA
-                    </span>
-                    <span className="hidden sm:block text-[10px] uppercase tracking-[0.14em] text-slate-600 font-medium">
-                      {t("subtitleShort")}
-                    </span>
-                  </span>
-                </a>
-
-                <div className="hidden xl:block h-7 w-px bg-slate-200 mx-1" />
-
-                <NavLinks
-                  mobileExtras={
-                    <>
-                      <LanguageSwitcher />
-                      <ResetDbButton />
-                    </>
-                  }
-                />
-
-                <div className="ml-auto flex items-center gap-2 sm:gap-3">
-                  <SystemStatusPill />
-                  <FarmChrome slot="pill" />
-                  <AuthChip />
-                  <CommandPaletteTrigger />
-                  <div className="hidden xl:flex items-center gap-2">
+            <div className="flex min-h-screen">
+              <Sidebar
+                extras={
+                  <>
                     <LanguageSwitcher />
-                  </div>
-                  <SupportButton />
-                  <div className="hidden xl:block">
                     <ResetDbButton />
+                  </>
+                }
+                mobileTopRight={
+                  <>
+                    <CommandPaletteTrigger />
+                    <AuthChip />
+                  </>
+                }
+              />
+
+              {/* Content column: full-width, left-aligned. The pt-14 on < lg
+                  reserves room for the fixed mobile top bar. */}
+              <div className="flex min-w-0 flex-1 flex-col pt-14 lg:pt-0">
+                {/* Desktop utility bar: status + identity + actions, right-aligned. */}
+                <div className="hidden lg:flex sticky top-0 z-30 h-16 items-center gap-3 border-b border-slate-200/70 bg-white/85 px-6 backdrop-blur-md supports-[backdrop-filter]:bg-white/70 lg:px-8">
+                  <div className="ml-auto flex items-center gap-3">
+                    <SystemStatusPill />
+                    <FarmChrome slot="pill" />
+                    <AuthChip />
+                    <CommandPaletteTrigger />
+                    <SupportButton />
                   </div>
                 </div>
+
+                <Breadcrumbs />
+
+                <main
+                  id="main"
+                  tabIndex={-1}
+                  className="w-full max-w-screen-2xl px-4 sm:px-6 lg:px-8 py-6 sm:py-8 lg:py-10 focus:outline-none"
+                >
+                  {children}
+                </main>
               </div>
-            </header>
-
-            <Breadcrumbs />
-
-            <main
-              id="main"
-              tabIndex={-1}
-              className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6 sm:py-8 lg:py-10 focus:outline-none"
-            >
-              {children}
-            </main>
+            </div>
 
             <FloatingJobsWidget />
             <FarmChrome slot="widget" />
