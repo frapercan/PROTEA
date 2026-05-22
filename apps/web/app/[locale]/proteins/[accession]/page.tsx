@@ -27,6 +27,21 @@ function AspectBadge({ aspect }: { aspect?: string | null }) {
   );
 }
 
+type AnnotationSource = { source: string; version: string | null };
+type GroupedAnnotation = {
+  go_id: string;
+  name: string | null;
+  aspect: string | null;
+  evidence_codes: string[];
+  qualifiers: string[];
+  sources: AnnotationSource[];
+};
+
+// "GOA 2025-03" (version optional, null-safe).
+function formatSource({ source, version }: AnnotationSource): string {
+  return version ? `${source} ${version}` : source;
+}
+
 function Field({ label, value }: { label: string; value?: string | null }) {
   if (!value) return null;
   return (
@@ -92,11 +107,39 @@ export default function ProteinDetailPage({ params }: { params: Promise<{ access
 
   const meta = protein.metadata;
 
-  // Group annotations by aspect
-  const byAspect: Record<string, ProteinAnnotation[]> = { F: [], P: [], C: [], other: [] };
+  // Group annotations by aspect, then dedup by go_id (merging evidence codes
+  // and provenance sources so the same GO term is shown once per aspect).
+  const byAspect: Record<string, GroupedAnnotation[]> = { F: [], P: [], C: [], other: [] };
+  const byAspectIndex: Record<string, Map<string, GroupedAnnotation>> = {
+    F: new Map(), P: new Map(), C: new Map(), other: new Map(),
+  };
   for (const ann of annotations) {
-    const key = ann.aspect && byAspect[ann.aspect] ? ann.aspect : "other";
-    byAspect[key].push(ann);
+    const key = ann.aspect && byAspectIndex[ann.aspect] ? ann.aspect : "other";
+    const index = byAspectIndex[key];
+    const existing = index.get(ann.go_id);
+    const source: AnnotationSource = {
+      source: ann.annotation_set_source,
+      version: ann.annotation_set_version,
+    };
+    if (existing) {
+      if (ann.evidence_code && !existing.evidence_codes.includes(ann.evidence_code))
+        existing.evidence_codes.push(ann.evidence_code);
+      if (ann.qualifier && !existing.qualifiers.includes(ann.qualifier))
+        existing.qualifiers.push(ann.qualifier);
+      if (!existing.sources.some((s) => s.source === source.source && s.version === source.version))
+        existing.sources.push(source);
+    } else {
+      const grouped: GroupedAnnotation = {
+        go_id: ann.go_id,
+        name: ann.name,
+        aspect: ann.aspect,
+        evidence_codes: ann.evidence_code ? [ann.evidence_code] : [],
+        qualifiers: ann.qualifier ? [ann.qualifier] : [],
+        sources: [source],
+      };
+      index.set(ann.go_id, grouped);
+      byAspect[key].push(grouped);
+    }
   }
 
   const tabs: { key: Tab; label: string }[] = [
@@ -351,13 +394,23 @@ export default function ProteinDetailPage({ params }: { params: Promise<{ access
                         <div>{t("overviewTab.goTableHeaders.qualifier")}</div>
                         <div>{t("overviewTab.goTableHeaders.source")}</div>
                       </div>
-                      {terms.map((ann, i) => (
-                        <div key={i} className="grid grid-cols-[100px_1fr_80px_100px_100px] gap-2 border-b px-4 py-2.5 text-sm last:border-0 items-center">
-                          <div className="font-mono text-xs text-blue-600">{ann.go_id}</div>
+                      {terms.map((ann) => (
+                        <div key={ann.go_id} className="grid grid-cols-[100px_1fr_80px_100px_100px] gap-2 border-b px-4 py-2.5 text-sm last:border-0 items-start">
+                          <div className="font-mono text-xs text-blue-600 pt-0.5">{ann.go_id}</div>
                           <div className="text-xs text-slate-800 truncate" title={ann.name ?? ""}>{ann.name ?? "—"}</div>
-                          <div className="text-[13px] text-slate-500">{ann.evidence_code ?? "—"}</div>
-                          <div className="text-[13px] text-slate-500">{ann.qualifier ?? "—"}</div>
-                          <div className="text-xs text-slate-600">{ann.annotation_set_source}</div>
+                          <div className="flex flex-wrap gap-0.5">
+                            {ann.evidence_codes.length === 0
+                              ? <span className="text-[13px] text-slate-500">—</span>
+                              : ann.evidence_codes.map((ec) => (
+                                <span key={ec} className="rounded border border-slate-200 bg-slate-50 px-1 py-0.5 text-[10px] font-mono font-medium text-slate-600">{ec}</span>
+                              ))}
+                          </div>
+                          <div className="text-[13px] text-slate-500">{ann.qualifiers.length > 0 ? ann.qualifiers.join(", ") : "—"}</div>
+                          <div className="flex flex-wrap gap-0.5">
+                            {ann.sources.map((s) => (
+                              <span key={`${s.source}-${s.version ?? ""}`} className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-600">{formatSource(s)}</span>
+                            ))}
+                          </div>
                         </div>
                       ))}
                     </div>

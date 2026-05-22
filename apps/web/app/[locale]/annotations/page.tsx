@@ -242,7 +242,7 @@ export default function AnnotationsPage() {
             {sets.map((a) => (
               <div key={a.id} className="rounded-lg border bg-white p-4 shadow-sm">
                 <div className="flex items-center justify-between mb-1">
-                  <span className="font-medium text-slate-800">{a.source}</span>
+                  <span className="font-medium text-slate-800">{`${a.source.toUpperCase()}${a.source_version ? ` ${a.source_version}` : ""}`}</span>
                   <button
                     onClick={() => handleDeleteSet(a.id)}
                     className="rounded border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 transition-colors"
@@ -283,7 +283,7 @@ export default function AnnotationsPage() {
             {sets.map((a) => (
               <div key={a.id} className="grid grid-cols-[80px_100px_140px_100px_1fr_160px_60px] gap-2 border-b px-4 py-3 text-sm last:border-0 items-center">
                 <div className="font-mono text-xs text-slate-600" title={a.id}>{shortId(a.id)}</div>
-                <div className="font-medium text-slate-800">{a.source}</div>
+                <div className="font-medium text-slate-800">{a.source.toUpperCase()}</div>
                 <div className="text-[13px] text-slate-500">{a.source_version ?? "—"}</div>
                 <div className="text-slate-700">{(a.annotation_count ?? 0).toLocaleString()}</div>
                 <div className="flex flex-wrap gap-1">
