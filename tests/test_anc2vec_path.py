@@ -1,10 +1,9 @@
 """Tests for the Anc2Vec path resolution chain.
 
-The chain is: env var > artifact store (minio, TODO) > repo-relative
-fallback. These tests exercise the env-var and fallback branches, plus
-the FileNotFoundError raised when neither resolves. The minio branch is
-covered by a placeholder check that confirms it falls through cleanly
-while the Dataset ORM model is still missing.
+The chain is: env var > repo-relative fallback. These tests exercise
+both branches plus the FileNotFoundError raised when neither resolves.
+The anc2vec npz is a static pre-trained artefact and is not tracked as
+a Dataset row, so there is no artifact-store resolution path.
 """
 
 from __future__ import annotations
@@ -22,7 +21,6 @@ from protea.core import anc2vec_embeddings
 def _reset_module_state(monkeypatch: pytest.MonkeyPatch) -> None:
     """Clear env vars and the one-shot fallback-warned flag between tests."""
     monkeypatch.delenv(anc2vec_embeddings._ENV_VAR, raising=False)
-    monkeypatch.delenv(anc2vec_embeddings._STORAGE_BACKEND_ENV, raising=False)
     monkeypatch.setattr(anc2vec_embeddings, "_FALLBACK_WARNED", False, raising=False)
 
 
@@ -91,23 +89,22 @@ def test_all_missing_raises_clear_filenotfound(
 ) -> None:
     monkeypatch.setattr(anc2vec_embeddings, "_DEFAULT_PATH", tmp_path / "does-not-exist.npz")
     monkeypatch.delenv(anc2vec_embeddings._ENV_VAR, raising=False)
-    monkeypatch.delenv(anc2vec_embeddings._STORAGE_BACKEND_ENV, raising=False)
 
     with pytest.raises(FileNotFoundError) as exc:
         anc2vec_embeddings._resolve_default_path()
 
     message = str(exc.value)
     assert anc2vec_embeddings._ENV_VAR in message
-    assert "artifact store" in message
     assert "repo-relative fallback" in message
+    assert "artifact store" in message
 
 
-def test_minio_backend_currently_falls_through_to_repo_default(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The minio branch is a TODO; it must fall through, not raise."""
-    monkeypatch.setenv(anc2vec_embeddings._STORAGE_BACKEND_ENV, "minio")
+def test_artifact_store_stub_always_returns_none() -> None:
+    """The artifact-store stub always returns None.
 
+    The anc2vec npz is not tracked as a Dataset row, so there is no
+    artifact-store resolution path; the stub documents that fact.
+    """
     assert anc2vec_embeddings._resolve_from_artifact_store() is None
 
 
