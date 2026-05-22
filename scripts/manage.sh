@@ -146,6 +146,16 @@ cmd_start() {
         printf "  Building production bundle (this may take ~30-60s)...\n"
         if npm run build >> "$LOG_DIR/frontend-build.log" 2>&1; then
             printf "  ${GREEN}✓${RESET} build OK → logs/frontend-build.log\n"
+            # Copy static assets and public dir into the standalone tree so
+            # node server.js can serve them.  Next 16 emits server.js at
+            # .next/standalone/server.js; static and public files must sit
+            # alongside it for correct asset resolution.
+            local STANDALONE_DIR=".next/standalone"
+            if [[ -d "$STANDALONE_DIR" ]]; then
+                cp -r .next/static   "$STANDALONE_DIR/.next/static"
+                cp -r public/.        "$STANDALONE_DIR/public/"
+                printf "  ${GREEN}✓${RESET} standalone assets copied\n"
+            fi
         else
             printf "  ${RED}✗ build FAILED${RESET} — see logs/frontend-build.log\n"
             printf "  ${YELLOW}Falling back to dev mode.${RESET}\n"
@@ -153,7 +163,15 @@ cmd_start() {
         fi
     fi
     if [[ "$FRONTEND_MODE" == "prod" ]]; then
-        _start_bg frontend npm run start
+        local STANDALONE_SERVER=".next/standalone/server.js"
+        if [[ -f "$STANDALONE_SERVER" ]]; then
+            # output:standalone build — serve via node, not next start
+            PORT=3000 HOSTNAME=0.0.0.0 _start_bg frontend node "$STANDALONE_SERVER"
+        else
+            printf "  ${YELLOW}WARNING: standalone server.js not found at %s; falling back to next start${RESET}\n" \
+                "$STANDALONE_SERVER"
+            _start_bg frontend npm run start
+        fi
     else
         _start_bg frontend npm run dev
     fi
