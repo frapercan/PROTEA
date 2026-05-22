@@ -620,7 +620,15 @@ export default function ScoringPage() {
       {/* ── Page header ── */}
       <div className="mb-6">
         <div className="flex items-center justify-between gap-4 mb-1">
-          <h1 className="text-xl font-semibold text-slate-900">{t("title")}</h1>
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-xl font-semibold text-slate-900">{t("title")}</h1>
+            <span
+              title={t("labBadgeHint")}
+              className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-violet-700 ring-1 ring-violet-200"
+            >
+              {t("labBadge")}
+            </span>
+          </div>
           <button
             onClick={handleLoadPresets}
             disabled={loadingPresets}

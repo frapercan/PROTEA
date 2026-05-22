@@ -119,6 +119,25 @@ def _compute_feature_schema_sha(run: dict[str, Any]) -> str | None:
     return run.get("dataset", {}).get("schema_sha")
 
 
+def _extract_feature_selection(run: dict[str, Any]) -> dict[str, Any] | None:
+    """Pull the feature-selection block out of the lab's ``run.features``.
+
+    Returns the families enabled/available, dropped features, and the
+    resolved feature count so the reranker-model view can show exactly
+    which feature families fed the booster. ``families_enabled=None`` is
+    the lab's "all available families" sentinel and is kept as-is.
+    """
+    features = run.get("features", {}) or {}
+    if not features:
+        return None
+    return {
+        "families_enabled": features.get("families_enabled"),
+        "families_available": features.get("families_available") or [],
+        "drop_features": features.get("drop_features") or [],
+        "feature_count": features.get("feature_count"),
+    }
+
+
 def _resolve_optional_fk(
     session: Session,
     raw_id: str | None,
@@ -170,6 +189,27 @@ def _evict_existing_or_409(
     session.flush()
 
 
+def _enrich_metrics(model: RerankerModel, run: dict[str, Any]) -> None:
+    """Stash reserved side-channel keys into ``model.metrics`` in-place.
+
+    Categorical code maps (``__categorical_codes__``) and the
+    feature-selection block (``__feature_selection__``) are stored under
+    reserved keys so the reranker-model view can render them without
+    re-reading run.json. ``families_enabled=None`` is the lab's
+    "all available" sentinel and is preserved verbatim.
+    """
+    cat_codes = run.get("categorical_codes")
+    fs = _extract_feature_selection(run)
+    if not cat_codes and fs is None:
+        return
+    m = dict(model.metrics or {})
+    if cat_codes:
+        m["__categorical_codes__"] = cat_codes
+    if fs is not None:
+        m["__feature_selection__"] = fs
+    model.metrics = m
+
+
 def _register_model(
     session: Session,
     reg: _RerankerRegistration,
@@ -207,21 +247,10 @@ def _register_model(
         spec_yaml=reg.spec_yaml_text,
         metrics=reg.run.get("metrics", {}) or {},
         feature_importance=reg.run.get("feature_importance", {}) or {},
-        # Categorical code maps live in metrics under a reserved key so the
-        # predict path can replicate the lab's sorted-unique encoding instead
-        # of falling back to ``pd.factorize`` (first-seen order, which gives
-        # different codes than training and silently corrupts LK/PK scores).
         dataset_id=dataset_uuid,
         external_source=reg.external_source,
     )
-    # Stash categorical_codes in metrics if the lab supplied them. Stored as
-    # ``metrics["__categorical_codes__"]`` to keep the column scalar-shaped
-    # without bloating spec_yaml.
-    cat_codes = reg.run.get("categorical_codes")
-    if cat_codes:
-        m = dict(model.metrics or {})
-        m["__categorical_codes__"] = cat_codes
-        model.metrics = m
+    _enrich_metrics(model, reg.run)
     session.add(model)
     session.flush()
     return model.id

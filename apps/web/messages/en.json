@@ -579,6 +579,8 @@
   },
   "scoring": {
     "title": "Scoring Configs",
+    "labBadge": "LAB",
+    "labBadgeHint": "Research / LAB surface: research and reproducibility parameters are intentionally exposed.",
     "description": "A ScoringConfig defines how raw prediction signals are combined into a single [0, 1] confidence score — without re-running the KNN pipeline.",
     "loadPresets": "Load presets",
     "presetsLoading": "Loading…",

@@ -1206,6 +1206,55 @@
             "description": "ISO 8601 timestamp of when the row was inserted.",
             "title": "Created At"
           },
+          "dataset_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UUID of the source ``Dataset`` row this booster was trained on.",
+            "title": "Dataset Id"
+          },
+          "dataset_manifest_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "sha256 of the linked dataset's serialised manifest bytes; collision detects dump drift.",
+            "title": "Dataset Manifest Sha"
+          },
+          "dataset_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Human-readable name of the linked ``Dataset`` (when resolvable).",
+            "title": "Dataset Name"
+          },
+          "dataset_schema_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Feature-set fingerprint of the linked dataset; matches the booster's schema when consistent.",
+            "title": "Dataset Schema Sha"
+          },
           "evaluation_set_id": {
             "anyOf": [
               {
@@ -1219,11 +1268,48 @@
             "description": "UUID of the ``EvaluationSet`` this booster was tuned against; ``None`` when not bound.",
             "title": "Evaluation Set Id"
           },
+          "external_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Provenance tag for boosters trained outside PROTEA (e.g. ``protea-reranker-lab@<sha>``).",
+            "title": "External Source"
+          },
           "feature_importance": {
             "additionalProperties": true,
             "description": "LightGBM feature-importance map keyed by feature name.",
             "title": "Feature Importance",
             "type": "object"
+          },
+          "feature_schema_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Feature-family-aware schema fingerprint of the booster; must match the live pipeline's schema at inference. Reproducibility-critical.",
+            "title": "Feature Schema Sha"
+          },
+          "feature_selection": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Which feature families fed the booster: ``families_enabled`` (``None`` = all available), ``families_available``, ``drop_features``, ``feature_count``. Recorded from the lab run.json.",
+            "title": "Feature Selection"
           },
           "id": {
             "description": "UUID primary key of the ``RerankerModel`` row.",
@@ -1254,6 +1340,42 @@
             ],
             "description": "UUID of the ``PredictionSet`` this booster was trained against; ``None`` when the booster is not bound to one.",
             "title": "Prediction Set Id"
+          },
+          "producer_git_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Git SHA of the producer at training time.",
+            "title": "Producer Git Sha"
+          },
+          "producer_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Version tag of the producer that trained the booster.",
+            "title": "Producer Version"
+          },
+          "spec_yaml": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Full ExperimentSpec YAML the booster was trained from.",
+            "title": "Spec Yaml"
           }
         },
         "required": [

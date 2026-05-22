@@ -450,6 +450,34 @@ class TestRerankerModelsImport:
         store.put.assert_not_called()
         assert session.add.call_count == 1
 
+    def test_import_persists_feature_selection_block(self, reranker_client):
+        client, session, _ = reranker_client
+        resp = client.post(
+            "/reranker-models/import-by-reference",
+            json={
+                "artifact_uri": "s3://protea/rerankers/run-fs/model.txt",
+                "spec_yaml": self._spec_yaml(),
+                "run": {
+                    "run_id": "run-fs",
+                    "features": {
+                        "families_enabled": None,
+                        "families_available": ["knn", "lineage"],
+                        "drop_features": ["length"],
+                        "feature_count": 55,
+                    },
+                    "dataset": {"name": "bench-v1-K5"},
+                    "feature_importance": {"distance": 0.5},
+                },
+            },
+        )
+        assert resp.status_code == 201, resp.text
+        added_model = session.add.call_args[0][0]
+        fs = added_model.metrics["__feature_selection__"]
+        assert fs["families_enabled"] is None
+        assert fs["families_available"] == ["knn", "lineage"]
+        assert fs["drop_features"] == ["length"]
+        assert fs["feature_count"] == 55
+
     def test_duplicate_name_conflicts_without_force(self, reranker_client):
         client, session, _ = reranker_client
         session.query.return_value.filter.return_value.first.return_value = MagicMock(

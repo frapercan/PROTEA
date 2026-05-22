@@ -123,6 +123,149 @@ function MetricsBadge({ label, value, suffix }: { label: string; value: number |
 }
 
 // ---------------------------------------------------------------------------
+// Provenance / feature-selection panel
+// ---------------------------------------------------------------------------
+
+// The 56-feature champion reranker (v27-binary, NK+LK) relies on the lineage
+// feature family being present; we highlight it so a model can be checked
+// against that reference at a glance.
+const LINEAGE_FAMILIES = new Set(["lineage", "anc2vec_query", "anc2vec_neighbor", "go_context"]);
+
+function CopyableSha({ value }: { value: string | null | undefined }) {
+  const [copied, setCopied] = useState(false);
+  if (!value) return <span className="font-mono text-slate-400">—</span>;
+  const short = value.length > 12 ? `${value.slice(0, 12)}…` : value;
+  return (
+    <button
+      type="button"
+      title={`${value} (click to copy)`}
+      onClick={() => {
+        navigator.clipboard?.writeText(value).then(
+          () => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1200);
+          },
+          () => {},
+        );
+      }}
+      className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[12px] text-slate-700 hover:bg-slate-200 transition-colors"
+    >
+      {short}
+      <span className="text-[10px] text-slate-400">{copied ? "✓" : "⧉"}</span>
+    </button>
+  );
+}
+
+function ProvField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{label}</span>
+      <span className="text-[13px] text-slate-700">{children}</span>
+    </div>
+  );
+}
+
+function FamilyChips({ fs }: { fs: RerankerModel["feature_selection"] }) {
+  if (!fs) return <span className="text-[13px] text-slate-400">Not recorded</span>;
+  // families_enabled === null is the lab's "all available families" sentinel.
+  const enabled = fs.families_enabled ?? fs.families_available;
+  const allEnabled = fs.families_enabled === null;
+  if (!enabled || enabled.length === 0) return <span className="text-[13px] text-slate-400">Not recorded</span>;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {allEnabled && (
+        <span className="rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[11px] font-medium text-emerald-700">
+          all available
+        </span>
+      )}
+      {enabled.map((fam) => {
+        const lineage = LINEAGE_FAMILIES.has(fam);
+        return (
+          <span
+            key={fam}
+            title={lineage ? "Lineage family (present in the 56-feature champion)" : undefined}
+            className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
+              lineage
+                ? "border border-blue-300 bg-blue-50 text-blue-700"
+                : "border border-slate-200 bg-slate-50 text-slate-600"
+            }`}
+          >
+            {fam}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function ProvenancePanel({ model }: { model: RerankerModel }) {
+  const fs = model.feature_selection;
+  const drop = fs?.drop_features ?? [];
+  return (
+    <div className="rounded-md border border-slate-200 bg-slate-50/60 p-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 mb-3">
+        Provenance &amp; feature selection
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
+        <ProvField label="Feature schema SHA">
+          <CopyableSha value={model.feature_schema_sha} />
+        </ProvField>
+        <ProvField label="Dataset">
+          {model.dataset_name ? (
+            <span>
+              {model.dataset_name}{" "}
+              <span className="font-mono text-[11px] text-slate-400">
+                ({model.dataset_id ? shortId(model.dataset_id) : "—"})
+              </span>
+            </span>
+          ) : (
+            <span className="text-slate-400">Not linked</span>
+          )}
+        </ProvField>
+        <ProvField label="Dataset schema SHA">
+          <CopyableSha value={model.dataset_schema_sha} />
+        </ProvField>
+        <ProvField label="Dataset manifest SHA">
+          <CopyableSha value={model.dataset_manifest_sha} />
+        </ProvField>
+        <ProvField label="Producer version">
+          <span className="font-mono text-[12px]">{model.producer_version ?? "—"}</span>
+        </ProvField>
+        <ProvField label="Producer git SHA">
+          <CopyableSha value={model.producer_git_sha} />
+        </ProvField>
+        <ProvField label="External source">
+          <span className="font-mono text-[12px]">{model.external_source ?? "—"}</span>
+        </ProvField>
+        <ProvField label={`Feature count${fs?.feature_count != null ? "" : ""}`}>
+          <span>{fs?.feature_count != null ? fs.feature_count : "—"}</span>
+        </ProvField>
+      </div>
+
+      <div className="mt-3 border-t border-slate-200 pt-3">
+        <ProvField label="Enabled feature families">
+          <FamilyChips fs={fs} />
+        </ProvField>
+      </div>
+
+      {drop.length > 0 && (
+        <div className="mt-3">
+          <ProvField label="Dropped features">
+            <div className="flex flex-wrap gap-1.5">
+              {drop.map((f) => (
+                <span key={f} className="rounded border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[11px] text-rose-600 line-through">
+                  {f}
+                </span>
+              ))}
+            </div>
+          </ProvField>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Reranker card
 // ---------------------------------------------------------------------------
 
@@ -243,11 +386,26 @@ function RerankerCard({
             </div>
           </div>
 
+          {/* Provenance & feature selection (reproducibility) */}
+          <ProvenancePanel model={model} />
+
           {/* Feature importance */}
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 mb-2">Feature importance (gain)</p>
             <FeatureImportanceChart importance={model.feature_importance} />
           </div>
+
+          {/* Full spec.yaml (reproducibility) */}
+          {model.spec_yaml && (
+            <details className="rounded-md border border-slate-200 bg-white">
+              <summary className="cursor-pointer px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-600 hover:bg-slate-50">
+                ExperimentSpec (spec.yaml)
+              </summary>
+              <pre className="overflow-x-auto border-t border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-700 font-mono whitespace-pre-wrap">
+                {model.spec_yaml}
+              </pre>
+            </details>
+          )}
 
           {/* Download reranked TSV */}
           {model.prediction_set_id && (
@@ -413,7 +571,15 @@ export default function RerankerPage() {
 
   return (
     <>
-      <h1 className="text-xl font-semibold mb-1">Re-ranker Models</h1>
+      <div className="flex items-center gap-2.5 mb-1">
+        <h1 className="text-xl font-semibold">Re-ranker Models</h1>
+        <span
+          title="Research / LAB surface: research and reproducibility parameters are intentionally exposed."
+          className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-violet-700 ring-1 ring-violet-200"
+        >
+          LAB
+        </span>
+      </div>
 
       <ContextBanner
         title="Train a LightGBM model to re-rank KNN predictions"

@@ -576,6 +576,8 @@
   },
   "scoring": {
     "title": "Scoring",
+    "labBadge": "LAB",
+    "labBadgeHint": "Forschungs- / LAB-Bereich: Forschungs- und Reproduzierbarkeitsparameter werden bewusst angezeigt.",
     "description": "Ein ScoringConfig definiert, wie Vorhersagesignale zu einem [0, 1]-Konfidenzwert kombiniert werden — ohne die KNN-Pipeline erneut auszuführen.",
     "loadPresets": "Voreinstellungen laden",
     "presetsLoading": "Lädt…",
