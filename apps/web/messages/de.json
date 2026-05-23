@@ -1064,6 +1064,84 @@
       }
     }
   },
+  "admin": {
+    "experimentRuns": {
+      "title": "Experiment-Runs",
+      "subtitle": "Narrative Achse der F-EXP-Kampagne: jeder Forschungs-Run trägt Beschreibung, Hypothese, strukturierte Konfig, Provenance-Overlay und Findings. Per Name mit Job- / EvaluationResult- / RerankerModel-Zeilen verknüpft.",
+      "adminBadge": "ADMIN",
+      "adminBadgeTooltip": "Schreibzugriffe sind durch den auf dem Deployment konfigurierten Auth-Modus (API-Key / Bearer) abgesichert.",
+      "newRun": "Neuer Run",
+      "filterAriaLabel": "Runs nach Status filtern",
+      "filters": {
+        "all": "Alle"
+      },
+      "status": {
+        "planned": "Geplant",
+        "running": "Läuft",
+        "done": "Fertig",
+        "abandoned": "Abgebrochen"
+      },
+      "cols": {
+        "name": "Name",
+        "status": "Status",
+        "tags": "Tags",
+        "created": "Erstellt",
+        "actions": "Aktionen"
+      },
+      "actions": {
+        "edit": "Bearbeiten",
+        "delete": "Löschen",
+        "cancel": "Abbrechen"
+      },
+      "emptyAll": "Noch keine Experiment-Runs. Erstelle den ersten, um eine Kampagnenerzählung zu starten.",
+      "emptyFiltered": "Keine Runs passen zu diesem Status-Filter.",
+      "deleteConfirm": "Experiment-Run \"{name}\" löschen? Das lässt sich nicht rückgängig machen.",
+      "toasts": {
+        "created": "Experiment-Run \"{name}\" angelegt",
+        "updated": "Experiment-Run \"{name}\" aktualisiert",
+        "deleted": "Experiment-Run \"{name}\" gelöscht"
+      },
+      "mint": {
+        "title": "Neuen Experiment-Run anlegen",
+        "subtitle": "Startet im Status geplant. Übergänge erfolgen über das Bearbeiten-Modal, sobald der Run losläuft.",
+        "submit": "Run anlegen",
+        "submitting": "Lege an…"
+      },
+      "edit": {
+        "title": "Run bearbeiten: {name}",
+        "subtitle": "Narrative, Status, Tags, Config oder Provenance patchen. Status-Übergänge stempeln started_at / finished_at automatisch serverseitig.",
+        "submit": "Änderungen speichern",
+        "submitting": "Speichere…"
+      },
+      "fields": {
+        "name": "Name",
+        "status": "Status",
+        "statusHelp": "Erster Übergang nach läuft stempelt started_at. Erster nach fertig oder abgebrochen stempelt finished_at. Wieder-Eintritt ist idempotent.",
+        "description": "Beschreibung",
+        "descriptionPlaceholder": "Freier Absichtstext, der auf der Detailseite des Runs erscheint.",
+        "hypothesis": "Hypothese",
+        "hypothesisPlaceholder": "Was dieser Run verifizieren oder falsifizieren will.",
+        "findings": "Findings",
+        "findingsHelp": "Beim Übergang zu fertig ausfüllen, um den Writeup festzuhalten.",
+        "tags": "Tags",
+        "tagsHelp": "Per Komma oder Leerzeichen getrennte Gruppierungs-Tokens (z. B. ablation, K-sweep).",
+        "config": "Config (JSON)",
+        "configHelp": "Freies JSON-Objekt: Hyperparameter, Feature-Flags, Dataset-Slugs. Leerer String löscht es.",
+        "provenance": "Provenance-Overlay (JSON)",
+        "provenanceHelp": "Freies JSON-Objekt, das mit dem Basis-Provenance des Servers gemergt wird (git sha, Hostname, Timestamp). Leerer String löscht es."
+      },
+      "readonly": {
+        "id": "ID",
+        "startedAt": "Gestartet",
+        "finishedAt": "Beendet"
+      },
+      "errors": {
+        "nameRequired": "Name ist erforderlich.",
+        "configInvalid": "Config-JSON ist ungültig: {reason}",
+        "provenanceInvalid": "Provenance-JSON ist ungültig: {reason}"
+      }
+    }
+  },
   "support": {
     "title": "Unterstützung",
     "hero": {

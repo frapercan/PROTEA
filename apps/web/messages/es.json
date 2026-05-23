@@ -1067,6 +1067,84 @@
       }
     }
   },
+  "admin": {
+    "experimentRuns": {
+      "title": "Ejecuciones de experimento",
+      "subtitle": "Espina narrativa de la campaña F-EXP: cada ejecución de investigación lleva descripción, hipótesis, configuración estructurada, capa de procedencia y hallazgos. Enlazada a filas Job / EvaluationResult / RerankerModel por nombre.",
+      "adminBadge": "ADMIN",
+      "adminBadgeTooltip": "Las escrituras están protegidas por el modo de auth (API key / bearer) del despliegue.",
+      "newRun": "Nueva ejecución",
+      "filterAriaLabel": "Filtrar ejecuciones por estado",
+      "filters": {
+        "all": "Todas"
+      },
+      "status": {
+        "planned": "Planificada",
+        "running": "En curso",
+        "done": "Hecha",
+        "abandoned": "Abandonada"
+      },
+      "cols": {
+        "name": "Nombre",
+        "status": "Estado",
+        "tags": "Etiquetas",
+        "created": "Creada",
+        "actions": "Acciones"
+      },
+      "actions": {
+        "edit": "Editar",
+        "delete": "Eliminar",
+        "cancel": "Cancelar"
+      },
+      "emptyAll": "Aún no hay ejecuciones de experimento. Crea la primera para iniciar una narrativa de campaña.",
+      "emptyFiltered": "Ninguna ejecución coincide con este filtro de estado.",
+      "deleteConfirm": "¿Eliminar la ejecución \"{name}\"? Esta acción no se puede deshacer.",
+      "toasts": {
+        "created": "Ejecución \"{name}\" creada",
+        "updated": "Ejecución \"{name}\" actualizada",
+        "deleted": "Ejecución \"{name}\" eliminada"
+      },
+      "mint": {
+        "title": "Crear nueva ejecución de experimento",
+        "subtitle": "Empieza en estado planificada. Cambia el estado desde el modal Editar cuando arranque la ejecución.",
+        "submit": "Crear ejecución",
+        "submitting": "Creando…"
+      },
+      "edit": {
+        "title": "Editar ejecución: {name}",
+        "subtitle": "Edita narrativa, estado, etiquetas, config o procedencia. Las transiciones de estado marcan started_at / finished_at automáticamente en el servidor.",
+        "submit": "Guardar cambios",
+        "submitting": "Guardando…"
+      },
+      "fields": {
+        "name": "Nombre",
+        "status": "Estado",
+        "statusHelp": "El primer paso a en curso marca started_at. El primero a hecha o abandonada marca finished_at. Re-entrar en un estado es idempotente.",
+        "description": "Descripción",
+        "descriptionPlaceholder": "Texto libre con la intención que se muestra en la página de detalle.",
+        "hypothesis": "Hipótesis",
+        "hypothesisPlaceholder": "Qué intenta verificar o refutar esta ejecución.",
+        "findings": "Hallazgos",
+        "findingsHelp": "Rellena al pasar a hecha para capturar el resumen del resultado.",
+        "tags": "Etiquetas",
+        "tagsHelp": "Tokens de agrupación separados por coma o espacio (p. ej. ablation, K-sweep).",
+        "config": "Config (JSON)",
+        "configHelp": "Objeto JSON libre: hiperparámetros, flags, slugs de dataset. Cadena vacía lo limpia.",
+        "provenance": "Procedencia (JSON)",
+        "provenanceHelp": "Objeto JSON libre fusionado con la procedencia base del servidor (git sha, hostname, timestamp). Cadena vacía lo limpia."
+      },
+      "readonly": {
+        "id": "ID",
+        "startedAt": "Iniciada",
+        "finishedAt": "Finalizada"
+      },
+      "errors": {
+        "nameRequired": "El nombre es obligatorio.",
+        "configInvalid": "El JSON de config no es válido: {reason}",
+        "provenanceInvalid": "El JSON de procedencia no es válido: {reason}"
+      }
+    }
+  },
   "support": {
     "title": "Soporte",
     "hero": {
