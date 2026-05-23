@@ -159,9 +159,7 @@ async def annotate(
     }
 
 
-async def _read_fasta_content(
-    file: UploadFile | None, fasta_text: str | None
-) -> str:
+async def _read_fasta_content(file: UploadFile | None, fasta_text: str | None) -> str:
     """Resolve the FASTA payload: prefer the uploaded file, fall back to ``fasta_text``.
 
     Enforces the configured byte cap (HTTP 413) and validates UTF-8
@@ -197,9 +195,7 @@ def _parse_and_dedup_records(content: str) -> list[tuple[str, str, str]]:
     """Parse the FASTA payload and reject duplicate accessions (HTTP 422)."""
     records = _parse_fasta(content)
     if not records:
-        raise HTTPException(
-            status_code=422, detail="No valid sequences found in the FASTA input"
-        )
+        raise HTTPException(status_code=422, detail="No valid sequences found in the FASTA input")
     seen: set[str] = set()
     for acc, _, _ in records:
         if acc in seen:
@@ -208,9 +204,7 @@ def _parse_and_dedup_records(content: str) -> list[tuple[str, str, str]]:
     return records
 
 
-def _upsert_query_set(
-    session: Session, name: str, records: list[tuple[str, str, str]]
-) -> Any:
+def _upsert_query_set(session: Session, name: str, records: list[tuple[str, str, str]]) -> Any:
     """Upsert ``Sequence`` rows for the FASTA records and create a ``QuerySet``
     with one ``QuerySetEntry`` per record. Returns the new ``QuerySet`` id."""
     hash_to_seq_id: dict[str, int] = {}
@@ -266,9 +260,7 @@ def _resolve_dispatch_resources(session: Session) -> tuple[Any, Any, Any, Any]:
             status_code=409,
             detail="No ontology snapshots available. Load a GO ontology first.",
         )
-    best_reranker = (
-        session.query(RerankerModel).order_by(RerankerModel.created_at.desc()).first()
-    )
+    best_reranker = session.query(RerankerModel).order_by(RerankerModel.created_at.desc()).first()
     reranker_id = best_reranker.id if best_reranker else None
     return config.id, ann.id, snap.id, reranker_id
 

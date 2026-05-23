@@ -447,5 +447,3 @@ class TestNewestOntologySnapshot:
         session = MagicMock()
         session.query.return_value.order_by.return_value.first.return_value = None
         assert _newest_ontology_snapshot(session) is None
-
-
