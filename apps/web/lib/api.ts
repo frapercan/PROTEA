@@ -96,6 +96,39 @@ export function cancelJob(id: string) {
   });
 }
 
+/**
+ * Cancel many jobs serially. Errors are caught per-job so a single failure
+ * does not abort the batch. `onProgress(done, total, lastId, lastError?)`
+ * is called after every attempt so the caller can drive a progress toast.
+ *
+ * Returns `{ ok, failed }` once all attempts are done.
+ *
+ * Note: there is intentionally no `bulkRetryJobs` helper. The backend
+ * has no `POST /jobs/{id}/retry` endpoint (only `cancel`); adding the
+ * UI without the API would yield a "looks clickable, silently 404s"
+ * footgun. Retry is tracked as a follow-up slice.
+ */
+export async function bulkCancelJobs(
+  ids: string[],
+  onProgress?: (done: number, total: number, lastId: string, lastError?: string) => void,
+): Promise<{ ok: string[]; failed: { id: string; error: string }[] }> {
+  const ok: string[] = [];
+  const failed: { id: string; error: string }[] = [];
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i];
+    try {
+      await cancelJob(id);
+      ok.push(id);
+      onProgress?.(i + 1, ids.length, id);
+    } catch (e: unknown) {
+      const err = e instanceof Error ? e.message : String(e);
+      failed.push({ id, error: err });
+      onProgress?.(i + 1, ids.length, id, err);
+    }
+  }
+  return { ok, failed };
+}
+
 export type EmbeddingConfig = {
   id: string;
   model_name: string;
