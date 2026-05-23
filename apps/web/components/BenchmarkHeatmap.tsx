@@ -1,6 +1,8 @@
 "use client";
 
 import { useMemo } from "react";
+import Link from "next/link";
+import { useParams } from "next/navigation";
 import type { BenchmarkEmbedding, BenchmarkRow } from "@/lib/api";
 
 /**
@@ -11,8 +13,15 @@ import type { BenchmarkEmbedding, BenchmarkRow } from "@/lib/api";
  * Bar width is proportional to Fmax; color reads on a fixed gradient
  * so the eye can scan rank quickly. The leader gets a subtle medal.
  *
- * The space marked CI is reserved — when bootstrap CIs are persisted
- * we'll render a `±` whisker without changing the cell layout.
+ * When the row carries multiseed bounds (`fmax_ci_low` / `fmax_ci_high`
+ * / `fmax_std`) the bar gains a thin dark CI band and a `±` suffix
+ * next to the Fmax number. Both are silent no-ops on rows that lack
+ * the optional fields, so the heatmap degrades gracefully against
+ * single-seed cells.
+ *
+ * Each embedding name and Fmax number is a deep link to the underlying
+ * `EvaluationResult` detail page, so the heatmap doubles as a fast
+ * router into per-cell drill-down.
  */
 export type BenchmarkHeatmapProps = {
   rows: BenchmarkRow[];
@@ -63,16 +72,29 @@ function fmaxToColor(fmax: number): string {
   return `hsl(${hue}, ${sat}%, ${light}%)`;
 }
 
+/** Both bootstrap bounds present and finite. */
+function hasCiBand(row: BenchmarkRow): boolean {
+  return (
+    row.fmax_ci_low != null &&
+    row.fmax_ci_high != null &&
+    Number.isFinite(row.fmax_ci_low) &&
+    Number.isFinite(row.fmax_ci_high) &&
+    row.fmax_ci_high >= row.fmax_ci_low
+  );
+}
+
 function HeatmapCell({
   cat,
   asp,
   rows,
   embeddings,
+  locale,
 }: {
   cat: string;
   asp: string;
   rows: BenchmarkRow[];
   embeddings: BenchmarkEmbedding[];
+  locale: string;
 }) {
   const tone = ASPECT_TONE[asp] ?? ASPECT_TONE.MFO;
   const empty = rows.length === 0;
@@ -98,17 +120,30 @@ function HeatmapCell({
               const emb = embeddings.find((e) => e.id === r.embedding_config_id);
               const name = emb?.display_name ?? r.embedding_config_id.slice(0, 6);
               const isWinner = i === 0;
+              const showBand = hasCiBand(r);
+              const stdLabel =
+                r.fmax_std != null && Number.isFinite(r.fmax_std)
+                  ? `± ${r.fmax_std.toFixed(3)}`
+                  : "";
+              const ciTitle = showBand
+                ? ` · CI95 [${r.fmax_ci_low!.toFixed(3)}, ${r.fmax_ci_high!.toFixed(3)}]`
+                : "";
               return (
                 <li
                   key={r.embedding_config_id}
-                  className="grid grid-cols-[7rem_1fr_3rem] items-center gap-2 group"
-                  title={`${name} · ${r.stage} · K=${r.k} · ${r.fmax.toFixed(3)}`}
+                  className="grid grid-cols-[7rem_1fr_3.75rem] items-center gap-2 group"
+                  title={`${name} · ${r.stage} · K=${r.k} · ${r.fmax.toFixed(3)}${stdLabel ? ` ${stdLabel}` : ""}${ciTitle}`}
                 >
                   <div className="flex items-center gap-1 min-w-0">
                     {isWinner && (
                       <span aria-label="leader" className="text-[10px]">🥇</span>
                     )}
-                    <span className="text-[11px] font-medium text-slate-700 truncate">{name}</span>
+                    <Link
+                      href={`/${locale}/evaluation/${r.evaluation_result_id}`}
+                      className="text-[11px] font-medium text-slate-700 truncate hover:text-blue-700 hover:underline focus:outline-none focus-visible:underline focus-visible:text-blue-700"
+                    >
+                      {name}
+                    </Link>
                   </div>
                   <div className="relative h-3 rounded-full bg-slate-100 overflow-hidden">
                     <div
@@ -118,11 +153,34 @@ function HeatmapCell({
                         background: fmaxToColor(r.fmax),
                       }}
                     />
-                    {/* Reserved slot for bootstrap CI whisker — see roadmap */}
+                    {/* Bootstrap CI95 band: thin horizontal stripe spanning
+                        [ci_low, ci_high]. Only renders when both bounds
+                        are persisted; otherwise the bar reads as a point
+                        estimate, matching the historical behavior. */}
+                    {showBand && (
+                      <div
+                        aria-label={`Fmax 95% CI ${r.fmax_ci_low!.toFixed(3)} to ${r.fmax_ci_high!.toFixed(3)}`}
+                        className="absolute top-1/2 -translate-y-1/2 h-[3px] rounded-full bg-slate-900/70 ring-1 ring-white/80"
+                        style={{
+                          left: `${Math.max(0, r.fmax_ci_low! * 100)}%`,
+                          width: `${Math.max(1, (r.fmax_ci_high! - r.fmax_ci_low!) * 100)}%`,
+                        }}
+                      />
+                    )}
                   </div>
-                  <span className="text-[11px] tabular-nums font-semibold text-slate-700 text-right">
-                    {r.fmax.toFixed(3)}
-                  </span>
+                  <div className="text-right leading-tight">
+                    <Link
+                      href={`/${locale}/evaluation/${r.evaluation_result_id}`}
+                      className="block text-[11px] tabular-nums font-semibold text-slate-700 hover:text-blue-700 focus:outline-none focus-visible:text-blue-700"
+                    >
+                      {r.fmax.toFixed(3)}
+                    </Link>
+                    {stdLabel && (
+                      <span className="block text-[9px] tabular-nums text-slate-500">
+                        {stdLabel}
+                      </span>
+                    )}
+                  </div>
                 </li>
               );
             })}
@@ -140,6 +198,8 @@ export function BenchmarkHeatmap({
   aspects,
   embeddingFilter,
 }: BenchmarkHeatmapProps) {
+  const params = useParams<{ locale: string }>();
+  const locale = params?.locale ?? "en";
   const grid = useMemo(() => {
     const map = new Map<string, BenchmarkRow[]>();
     for (const r of rows) {
@@ -187,13 +247,16 @@ export function BenchmarkHeatmap({
               asp={asp}
               rows={bestRowsByEmbedding(grid.get(`${cat}|${asp}`) ?? [])}
               embeddings={embeddings}
+              locale={locale}
             />
           )),
         )}
       </div>
       <p className="text-[10px] text-slate-600 italic">
-        Hover any bar for stage / K / Fmax detail. CI whiskers will render
-        in the same slot once bootstrap intervals are persisted.
+        Hover any bar for stage / K / Fmax detail. Click the embedding
+        name or Fmax number to open the underlying EvaluationResult. A
+        thin dark band over the bar marks the 95% bootstrap CI whenever
+        the lab persists multiseed bounds.
       </p>
     </section>
   );

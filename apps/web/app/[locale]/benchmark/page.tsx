@@ -2,8 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import { BenchmarkHeatmap } from "@/components/BenchmarkHeatmap";
 import { Skeleton } from "@/components/Skeleton";
+import { Tooltip } from "@/components/Tooltip";
 import { useUrlNumber, useUrlParam } from "@/lib/useUrlParam";
 import {
   getBenchmarkEmbeddings,
@@ -15,6 +17,22 @@ import {
   type BenchmarkRow,
   type BenchmarkStage,
 } from "../../../lib/api";
+
+/** Canonical category definitions. Anchored to the leakage-fixed champion
+ *  memory (project_lb2_leakage_fixed_champion) and the paired bootstrap
+ *  result (project_lb3_paired_ci_2026_05_18): NK = the strict CAFA "no
+ *  knowledge" split (no experimental annotations exist for the test
+ *  protein in the train cutoff), LK = limited knowledge (some aspects
+ *  annotated but not the one under evaluation), PK = partial knowledge
+ *  (the protein is annotated for the same aspect but with at least one
+ *  new term added in the evaluation cutoff). Selective-deploy memory
+ *  (project_v27_binary_multiseed) explains why PK is policy-zero for
+ *  the v27-binary reranker. */
+const CATEGORY_TOOLTIPS: Record<string, string> = {
+  NK: "No Knowledge — the test protein has no experimental annotations of any aspect at the train cutoff. Strictest CAFA split: 0.7291 ± 0.0028 multiseed Fmax on v27-binary (NK+LK pooled).",
+  LK: "Limited Knowledge — the protein carries annotations in other aspects but not the one being evaluated. Paired with NK in the publishable selective-deploy claim.",
+  PK: "Partial Knowledge — the protein already has annotations for the same aspect; the evaluation only scores newly added terms. Reranker stays policy-zero here; KNN baseline drives selective deploy.",
+};
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -36,6 +54,26 @@ function formatProteins(n: number | undefined): string {
 
 function cellKey(eid: string, cat: string, asp: string): string {
   return `${eid}|${cat}|${asp}`;
+}
+
+/** Format the optional fmax_std as a compact "± 0.003" suffix. Returns
+ *  an empty string when the std is missing, so callers can append
+ *  unconditionally without conditional whitespace. */
+function formatStd(std: number | null | undefined): string {
+  if (std == null || !Number.isFinite(std)) return "";
+  return `± ${std.toFixed(3)}`;
+}
+
+/** True when the row carries both bootstrap bounds. The CI band only
+ *  renders when both are present and form a valid interval. */
+function hasCiBand(row: BenchmarkRow): boolean {
+  return (
+    row.fmax_ci_low != null &&
+    row.fmax_ci_high != null &&
+    Number.isFinite(row.fmax_ci_low) &&
+    Number.isFinite(row.fmax_ci_high) &&
+    row.fmax_ci_high >= row.fmax_ci_low
+  );
 }
 
 /** Index rows by (embedding, cat, asp) for O(1) cell lookup. The matrix
@@ -142,6 +180,8 @@ function downloadCsv(filename: string, content: string): void {
 // ── Page ─────────────────────────────────────────────────────────────────
 
 export default function BenchmarkPage() {
+  const params = useParams<{ locale: string }>();
+  const locale = params?.locale ?? "en";
   const [embeddings, setEmbeddings] = useState<BenchmarkEmbedding[] | null>(null);
   const [matrix, setMatrix] = useState<BenchmarkMatrixResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -508,7 +548,17 @@ export default function BenchmarkPage() {
               <tbody>
                 {categories.map((cat) => (
                   <tr key={cat} className="border-t border-slate-200/60">
-                    <th scope="row" className="px-2 py-2.5 font-semibold text-slate-700 text-left">{cat}</th>
+                    <th scope="row" className="px-2 py-2.5 font-semibold text-slate-700 text-left">
+                      {CATEGORY_TOOLTIPS[cat] ? (
+                        <Tooltip text={CATEGORY_TOOLTIPS[cat]}>
+                          <span className="underline decoration-dotted decoration-slate-300 underline-offset-4 cursor-help">
+                            {cat}
+                          </span>
+                        </Tooltip>
+                      ) : (
+                        cat
+                      )}
+                    </th>
                     {aspects.map((asp) => {
                       const best = bestPerCellGlobal.get(`${cat}|${asp}`);
                       if (!best) {
@@ -525,17 +575,22 @@ export default function BenchmarkPage() {
                           className="px-2 py-2.5 text-center border-l border-slate-200/60"
                           title={`${emb?.display_name ?? best.embedding_config_id} · ${stageLabel(stageList, best.stage)} · K=${best.k}`}
                         >
-                          <div className="font-bold text-lg text-slate-900 tabular-nums leading-none">
-                            {best.fmax.toFixed(3)}
-                          </div>
-                          <div className="text-[11px] font-medium text-slate-700 truncate max-w-[140px] mx-auto mt-1">
-                            {emb?.display_name ?? "—"}
-                          </div>
-                          <div className="text-[10px] text-slate-500 truncate max-w-[140px] mx-auto mt-0.5">
-                            {stageLabel(stageList, best.stage)}
-                            <span className="mx-1 text-slate-300">·</span>
-                            <span className="tabular-nums">K={best.k}</span>
-                          </div>
+                          <Link
+                            href={`/${locale}/evaluation/${best.evaluation_result_id}`}
+                            className="block group rounded-md px-1 py-0.5 hover:bg-blue-50 focus:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 transition-colors"
+                          >
+                            <div className="font-bold text-lg text-slate-900 group-hover:text-blue-700 tabular-nums leading-none">
+                              {best.fmax.toFixed(3)}
+                            </div>
+                            <div className="text-[11px] font-medium text-slate-700 truncate max-w-[140px] mx-auto mt-1">
+                              {emb?.display_name ?? "—"}
+                            </div>
+                            <div className="text-[10px] text-slate-500 truncate max-w-[140px] mx-auto mt-0.5">
+                              {stageLabel(stageList, best.stage)}
+                              <span className="mx-1 text-slate-300">·</span>
+                              <span className="tabular-nums">K={best.k}</span>
+                            </div>
+                          </Link>
                         </td>
                       );
                     })}
@@ -579,7 +634,17 @@ export default function BenchmarkPage() {
               <tbody>
                 {categories.map((cat) => (
                   <tr key={cat} className="border-t">
-                    <th scope="row" className="px-2 py-2 font-semibold text-slate-700 text-left">{cat}</th>
+                    <th scope="row" className="px-2 py-2 font-semibold text-slate-700 text-left">
+                      {CATEGORY_TOOLTIPS[cat] ? (
+                        <Tooltip text={CATEGORY_TOOLTIPS[cat]}>
+                          <span className="underline decoration-dotted decoration-slate-300 underline-offset-4 cursor-help">
+                            {cat}
+                          </span>
+                        </Tooltip>
+                      ) : (
+                        cat
+                      )}
+                    </th>
                     {aspects.map((asp) => {
                       const best = bestPerCell.get(`${cat}|${asp}`);
                       if (!best) {
@@ -599,15 +664,20 @@ export default function BenchmarkPage() {
                           className="px-2 py-2 text-center border-l"
                           title={`${emb?.display_name ?? best.embedding_config_id} · ${stageLabel(stageList, best.stage)}`}
                         >
-                          <div className="font-semibold text-slate-900 tabular-nums">
-                            {best.fmax.toFixed(3)}
-                          </div>
-                          <div className="text-[10px] text-slate-500 truncate max-w-[120px] mx-auto">
-                            {emb?.display_name ?? "—"}
-                          </div>
-                          <div className="text-[9px] text-slate-600 truncate max-w-[120px] mx-auto">
-                            {stageLabel(stageList, best.stage)}
-                          </div>
+                          <Link
+                            href={`/${locale}/evaluation/${best.evaluation_result_id}`}
+                            className="block group rounded-md px-1 py-0.5 hover:bg-blue-50 focus:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 transition-colors"
+                          >
+                            <div className="font-semibold text-slate-900 group-hover:text-blue-700 tabular-nums">
+                              {best.fmax.toFixed(3)}
+                            </div>
+                            <div className="text-[10px] text-slate-500 truncate max-w-[120px] mx-auto">
+                              {emb?.display_name ?? "—"}
+                            </div>
+                            <div className="text-[9px] text-slate-600 truncate max-w-[120px] mx-auto">
+                              {stageLabel(stageList, best.stage)}
+                            </div>
+                          </Link>
                         </td>
                       );
                     })}
@@ -689,7 +759,15 @@ export default function BenchmarkPage() {
                     scope="colgroup"
                     className="px-2 py-1.5 text-center font-semibold text-slate-700 border-b border-l"
                   >
-                    {cat}
+                    {CATEGORY_TOOLTIPS[cat] ? (
+                      <Tooltip text={CATEGORY_TOOLTIPS[cat]}>
+                        <span className="underline decoration-dotted decoration-slate-300 underline-offset-4 cursor-help">
+                          {cat}
+                        </span>
+                      </Tooltip>
+                    ) : (
+                      cat
+                    )}
                   </th>
                 ))}
               </tr>
@@ -732,6 +810,11 @@ export default function BenchmarkPage() {
                         const best = bestPerCell.get(`${cat}|${asp}`);
                         const isWinner =
                           row && best && row.evaluation_result_id === best.evaluation_result_id;
+                        const std = formatStd(row?.fmax_std ?? null);
+                        const ciBand =
+                          row && hasCiBand(row)
+                            ? `CI95 [${row.fmax_ci_low!.toFixed(3)}, ${row.fmax_ci_high!.toFixed(3)}]`
+                            : "";
                         return (
                           <td
                             key={`${emb.id}-${cat}-${asp}`}
@@ -740,18 +823,28 @@ export default function BenchmarkPage() {
                             }`}
                             title={
                               row
-                                ? `precision=${row.precision ?? "—"} recall=${row.recall ?? "—"} (eval_result=${row.evaluation_result_id.slice(0, 8)}…)`
+                                ? `precision=${row.precision ?? "—"} recall=${row.recall ?? "—"}${ciBand ? ` · ${ciBand}` : ""} (eval_result=${row.evaluation_result_id.slice(0, 8)}…)`
                                 : "no data"
                             }
                           >
                             {row ? (
-                              <span
-                                className={`font-semibold ${
-                                  isWinner ? "text-green-700" : "text-slate-900"
-                                }`}
+                              <Link
+                                href={`/${locale}/evaluation/${row.evaluation_result_id}`}
+                                className="inline-flex items-baseline gap-1 rounded-md px-1 py-0.5 group hover:bg-blue-50 focus:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 transition-colors"
                               >
-                                {row.fmax.toFixed(3)}
-                              </span>
+                                <span
+                                  className={`font-semibold group-hover:text-blue-700 ${
+                                    isWinner ? "text-green-700" : "text-slate-900"
+                                  }`}
+                                >
+                                  {row.fmax.toFixed(3)}
+                                </span>
+                                {std && (
+                                  <span className="text-[10px] font-normal text-slate-500 group-hover:text-blue-600 tabular-nums">
+                                    {std}
+                                  </span>
+                                )}
+                              </Link>
                             ) : (
                               <span className="text-slate-300">—</span>
                             )}

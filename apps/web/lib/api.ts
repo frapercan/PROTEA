@@ -764,6 +764,17 @@ export type BenchmarkRow = {
   coverage: number | null;
   n_proteins: number | null;
   evaluation_result_id: string;
+  /**
+   * Multiseed dispersion + bootstrap bands. All three fields are optional
+   * and only emitted by the lab when the cell was produced from >=2
+   * seeds (see project_v27_binary_multiseed memory: 0.7291 +/- 0.0028 is
+   * the canonical publishable claim). Backends that haven't backfilled
+   * them yet keep returning the scalar shape; the UI falls back to
+   * rendering just `fmax` and skips the band/whisker silently.
+   */
+  fmax_std?: number | null;
+  fmax_ci_low?: number | null;
+  fmax_ci_high?: number | null;
 };
 
 export type BenchmarkBestCell = {
