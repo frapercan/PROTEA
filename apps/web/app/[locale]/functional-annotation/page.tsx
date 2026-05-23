@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useToast } from "@/components/Toast";
@@ -69,6 +69,39 @@ export default function FunctionalAnnotationPage() {
   const [predResult, setPredResult] = useState<{ id: string; status: string } | null>(null);
   const [predError, setPredError] = useState("");
   const [predSubmitting, setPredSubmitting] = useState(false);
+
+  // FEAT-UX-RERANKER-AUTOLOCK: when the reranker feature bundle is on we MUST
+  // also compute alignments + taxonomy (the booster's `feature_schema_sha` is
+  // load-bearing at inference, see CLAUDE.md). We auto-check + lock both
+  // checkboxes while the bundle is on, and restore the user's prior choices
+  // when they turn the bundle off again.
+  const priorAlignmentsRef = useRef<boolean>(predComputeAlignments);
+  const priorTaxonomyRef = useRef<boolean>(predComputeTaxonomy);
+  useEffect(() => {
+    if (predComputeRerankerFeatures) {
+      // Force both companions on. The "remember prior" effect below already
+      // snapshotted whatever the user had selected while the bundle was off.
+      if (!predComputeAlignments) setPredComputeAlignments(true);
+      if (!predComputeTaxonomy) setPredComputeTaxonomy(true);
+    } else {
+      // Restore whatever the user had selected before the bundle was turned on.
+      setPredComputeAlignments(priorAlignmentsRef.current);
+      setPredComputeTaxonomy(priorTaxonomyRef.current);
+    }
+    // We intentionally depend only on the bundle toggle: changes to alignments
+    // / taxonomy while the bundle is OFF are the user's free choice and we
+    // record them via the dedicated effect below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [predComputeRerankerFeatures]);
+  // Record the user's manual choices so we can restore them when the bundle is
+  // toggled off. Only meaningful while the bundle is OFF (otherwise the values
+  // are forced and would overwrite the saved prior).
+  useEffect(() => {
+    if (!predComputeRerankerFeatures) {
+      priorAlignmentsRef.current = predComputeAlignments;
+      priorTaxonomyRef.current = predComputeTaxonomy;
+    }
+  }, [predComputeAlignments, predComputeTaxonomy, predComputeRerankerFeatures]);
 
   async function loadAll() {
     setLoading(true);
@@ -387,11 +420,23 @@ export default function FunctionalAnnotationPage() {
                         type="checkbox"
                         checked={predComputeAlignments}
                         onChange={(e) => setPredComputeAlignments(e.target.checked)}
+                        disabled={predComputeRerankerFeatures}
+                        data-testid={predComputeRerankerFeatures ? "annotateform-feat-locked-by-reranker" : undefined}
+                        title={predComputeRerankerFeatures ? t("predictTab.lockedByRerankerTooltip") : undefined}
+                        aria-describedby={predComputeRerankerFeatures ? "pred-align-lock-note" : undefined}
                         className="mt-0.5 rounded"
                       />
                       <span className="text-sm text-slate-700">
                         {t("predictTab.sequenceAlignments")}
                         <span className="ml-1.5 text-xs text-slate-600">{t("predictTab.sequenceAlignmentsHelper")}</span>
+                        {predComputeRerankerFeatures && (
+                          <span
+                            id="pred-align-lock-note"
+                            className="ml-1.5 text-xs text-slate-600"
+                          >
+                            {t("predictTab.lockedByRerankerNote")}
+                          </span>
+                        )}
                       </span>
                     </label>
                     <label className="flex items-start gap-2 cursor-pointer">
@@ -399,11 +444,23 @@ export default function FunctionalAnnotationPage() {
                         type="checkbox"
                         checked={predComputeTaxonomy}
                         onChange={(e) => setPredComputeTaxonomy(e.target.checked)}
+                        disabled={predComputeRerankerFeatures}
+                        data-testid={predComputeRerankerFeatures ? "annotateform-feat-locked-by-reranker" : undefined}
+                        title={predComputeRerankerFeatures ? t("predictTab.lockedByRerankerTooltip") : undefined}
+                        aria-describedby={predComputeRerankerFeatures ? "pred-tax-lock-note" : undefined}
                         className="mt-0.5 rounded"
                       />
                       <span className="text-sm text-slate-700">
                         {t("predictTab.taxonomicDistance")}
                         <span className="ml-1.5 text-xs text-slate-600">{t("predictTab.taxonomicDistanceHelper")}</span>
+                        {predComputeRerankerFeatures && (
+                          <span
+                            id="pred-tax-lock-note"
+                            className="ml-1.5 text-xs text-slate-600"
+                          >
+                            {t("predictTab.lockedByRerankerNote")}
+                          </span>
+                        )}
                       </span>
                     </label>
                     <label className="flex items-start gap-2 cursor-pointer">

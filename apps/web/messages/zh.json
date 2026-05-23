@@ -549,6 +549,8 @@
       "taxonomicDistanceHelper": "通过 NCBI 分类学计算 LCA、距离和关系",
       "rerankerFeatures": "Reranker 特征族",
       "rerankerFeaturesHelper": "启用 lineage / anc2vec / emb_pca / annotation_meta - reranker 使用的完整特征包",
+      "lockedByRerankerNote": "（已锁定）",
+      "lockedByRerankerTooltip": "Reranker 模型的 schema 要求此项（只要 reranker 特征包启用，就无法关闭）。",
       "computedFamiliesTitle": "本次运行将计算的特征族",
       "searchBackend": "搜索后端",
       "searchBackendLabel": "后端",

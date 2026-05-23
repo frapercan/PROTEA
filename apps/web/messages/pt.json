@@ -549,6 +549,8 @@
       "taxonomicDistanceHelper": "LCA, distância e relação via taxonomia NCBI",
       "rerankerFeatures": "Famílias de features do reranker",
       "rerankerFeaturesHelper": "habilita lineage / anc2vec / emb_pca / annotation_meta - o bundle completo usado pelo reranker",
+      "lockedByRerankerNote": "(bloqueado)",
+      "lockedByRerankerTooltip": "Exigido pelo schema do modelo reranker (não pode ser desativado enquanto o bundle de reranker estiver ativo).",
       "computedFamiliesTitle": "Famílias de features que serão computadas",
       "searchBackend": "Backend de busca",
       "searchBackendLabel": "Backend",
