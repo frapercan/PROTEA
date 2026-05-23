@@ -3,6 +3,12 @@
     "schemas": {
       "Body_annotate_v1_annotate_post": {
         "properties": {
+          "compute_reranker_features": {
+            "default": true,
+            "description": "Enable the full reranker feature bundle: lineage / anc2vec / anc2vec_query / emb_pca / annotation_meta. Disable to skip these families and reduce compute time.",
+            "title": "Compute Reranker Features",
+            "type": "boolean"
+          },
           "fasta_text": {
             "anyOf": [
               {
@@ -1839,7 +1845,7 @@
     },
     "/v1/annotate": {
       "post": {
-        "description": "One-click annotation: upload FASTA, auto-select best method, run pipeline.\n\nAccepts either an uploaded FASTA ``file`` **or** raw ``fasta_text``.\nCreates a QuerySet, picks the best embedding config (or creates the\ndefault ESM-2 650M config), and queues a ``compute_embeddings`` job.\n\nReturns the IDs the frontend needs to monitor progress and chain\n``predict_go_terms`` once embeddings are ready.",
+        "description": "One-click annotation: upload FASTA, auto-select best method, run pipeline.\n\nAccepts either an uploaded FASTA ``file`` **or** raw ``fasta_text``.\nCreates a QuerySet, picks the best embedding config (or creates the\ndefault ESM-2 650M config), and queues a ``compute_embeddings`` job.\n\nReturns the IDs the frontend needs to monitor progress and chain\n``predict_go_terms`` once embeddings are ready.\n\n``compute_reranker_features`` controls whether the reranker feature\nfamilies (lineage, anc2vec, anc2vec_query, emb_pca, annotation_meta) are\nincluded in the downstream ``predict_go_terms`` job. Default: ``True``.",
         "operationId": "annotate_v1_annotate_post",
         "requestBody": {
           "content": {

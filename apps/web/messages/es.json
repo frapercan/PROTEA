@@ -61,11 +61,13 @@
     "authApiKey": "Clave API",
     "authBearer": "Bearer",
     "authAnonymousHint": "Inicia sesión para aumentar límites y poseer trabajos",
-    "openSwagger": "Abrir en Swagger"
+    "openSwagger": "Abrir en Swagger",
+    "collapseSidebar": "Plegar barra lateral",
+    "openSidebar": "Abrir barra lateral"
   },
   "home": {
     "title": "Pipeline de Prediccion de Funcion Proteica",
-    "subtitle": "De secuencia a anotacion funcional mediante similitud de embeddings, re-ranking y curacion LLM",
+    "subtitle": "De secuencia a anotación funcional mediante similitud de embeddings y re-ranking aprendido",
     "bestResults": "Mejores Resultados",
     "bestOverall": "Mejor resultado global",
     "avgFmaxAcrossCells": "Fmax promedio sobre 9 celdas",
@@ -97,7 +99,6 @@
     "stageEmbeddings": "Embeddings",
     "stageKnn": "Busqueda KNN",
     "stageReranker": "Re-ranker",
-    "stageLlm": "Curacion LLM",
     "stageAnnotation": "Anotacion",
     "stageEvaluation": "Evaluacion",
     "nkCategory": "Categoria NK (No Knowledge) — configuracion de evaluacion mas exigente",
@@ -472,6 +473,9 @@
       "sequenceAlignmentsHelper": "NW (global) + SW (local) vía parasail/BLOSUM62",
       "taxonomicDistance": "Distancia taxonómica",
       "taxonomicDistanceHelper": "LCA, distancia y relación vía taxonomía NCBI",
+      "rerankerFeatures": "Familias de features del reranker",
+      "rerankerFeaturesHelper": "habilita lineage / anc2vec / emb_pca / annotation_meta - el bundle completo que usa el reranker",
+      "computedFamiliesTitle": "Familias de features que se computarán",
       "searchBackend": "Backend de búsqueda",
       "searchBackendLabel": "Backend",
       "numpyBackend": "numpy — exacto",

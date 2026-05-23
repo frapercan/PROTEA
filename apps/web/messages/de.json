@@ -62,11 +62,13 @@
     "authBearer": "Bearer",
     "authAnonymousHint": "Anmelden für höhere Limits und Job-Besitz",
     "openSwagger": "In Swagger öffnen",
-    "_translatorTodo": "machine-translated, review by native speaker"
+    "_translatorTodo": "machine-translated, review by native speaker",
+    "collapseSidebar": "Seitenleiste einklappen",
+    "openSidebar": "Seitenleiste öffnen"
   },
   "home": {
     "title": "Pipeline zur Vorhersage von Proteinfunktionen",
-    "subtitle": "Von der Sequenz zur funktionellen Annotation durch Embedding-Ähnlichkeit, Re-Ranking und LLM-Kuration",
+    "subtitle": "Von der Sequenz zur funktionellen Annotation durch Embedding-Ähnlichkeit und gelerntes Re-Ranking",
     "bestResults": "Beste Ergebnisse",
     "bestOverall": "Bestes Gesamtergebnis",
     "avgFmaxAcrossCells": "Mittleres Fmax über 9 Zellen",
@@ -98,7 +100,6 @@
     "stageEmbeddings": "Embeddings",
     "stageKnn": "KNN-Suche",
     "stageReranker": "Re-Ranker",
-    "stageLlm": "LLM-Kuration",
     "stageAnnotation": "Annotation",
     "stageEvaluation": "Evaluierung",
     "nkCategory": "NK-Kategorie (No Knowledge) — anspruchsvollste Evaluierungseinstellung",
@@ -469,6 +470,9 @@
       "sequenceAlignmentsHelper": "NW (global) + SW (lokal) via parasail/BLOSUM62",
       "taxonomicDistance": "Taxonomische Distanz",
       "taxonomicDistanceHelper": "LCA, Distanz und Relation via NCBI-Taxonomie",
+      "rerankerFeatures": "Reranker-Feature-Familien",
+      "rerankerFeaturesHelper": "aktiviert lineage / anc2vec / emb_pca / annotation_meta (vollstaendiges Reranker-Bundle)",
+      "computedFamiliesTitle": "Feature-Familien, die berechnet werden",
       "searchBackend": "Such-Backend",
       "searchBackendLabel": "Backend",
       "numpyBackend": "numpy — exakt",
