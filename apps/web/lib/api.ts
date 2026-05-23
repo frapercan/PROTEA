@@ -24,10 +24,31 @@ export type JobEvent = {
   fields: Record<string, any>;
 };
 
+import { authHeaders } from "@/lib/auth";
+
 export function baseUrl(): string {
   const u = process.env.NEXT_PUBLIC_API_URL;
   if (!u) throw new Error("NEXT_PUBLIC_API_URL is not set");
   return u.replace(/\/+$/, "");
+}
+
+const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+// Merge ``Authorization: Bearer <token>`` onto every mutation when the
+// ``protea_session`` cookie is present. GETs stay unauthenticated so
+// public dashboards keep serving anonymous visitors. The helper is
+// idempotent: if the caller passed an explicit Authorization header,
+// it wins.
+function withAuth(init: RequestInit | undefined): RequestInit | undefined {
+  const method = (init?.method ?? "GET").toUpperCase();
+  if (!MUTATING_METHODS.has(method)) return init;
+  const extra = authHeaders();
+  if (Object.keys(extra).length === 0) return init;
+  const headers = new Headers(init?.headers);
+  if (!headers.has("Authorization")) {
+    for (const [k, v] of Object.entries(extra)) headers.set(k, v);
+  }
+  return { ...init, headers };
 }
 
 // Opt-in cache convention: pass `cacheable: true` to use Next.js fetch
@@ -40,7 +61,7 @@ async function http<T>(path: string, init?: RequestInit & { cacheable?: boolean 
     : { cache: "no-store", ...rest };
   let res: Response;
   try {
-    res = await fetch(`${baseUrl()}${path}`, fetchInit);
+    res = await fetch(`${baseUrl()}${path}`, withAuth(fetchInit));
   } catch (e: any) {
     throw new Error(e?.message ?? "Network error");
   }
@@ -516,10 +537,10 @@ export function createScoringConfig(body: {
 }
 
 export async function deleteScoringConfig(id: string) {
-  const res = await fetch(`${baseUrl()}/scoring/configs/${id}`, {
+  const res = await fetch(`${baseUrl()}/scoring/configs/${id}`, withAuth({
     cache: "no-store",
     method: "DELETE",
-  });
+  }));
   if (!res.ok) throw new Error(await res.text());
 }
 
@@ -604,10 +625,10 @@ export function trainReranker(body: {
 }
 
 export async function deleteReranker(id: string) {
-  const res = await fetch(`${baseUrl()}/scoring/rerankers/${id}`, {
+  const res = await fetch(`${baseUrl()}/scoring/rerankers/${id}`, withAuth({
     cache: "no-store",
     method: "DELETE",
-  });
+  }));
   if (!res.ok) throw new Error(await res.text());
 }
 
@@ -753,11 +774,11 @@ export async function annotateProteins(
     "compute_reranker_features",
     String(input.computeRerankerFeatures ?? true),
   );
-  const res = await fetch(`${baseUrl()}/annotate`, {
+  const res = await fetch(`${baseUrl()}/annotate`, withAuth({
     cache: "no-store",
     method: "POST",
     body: form,
-  });
+  }));
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
@@ -771,7 +792,7 @@ export async function createQuerySet(file: File, name: string, description?: str
   form.append("file", file);
   form.append("name", name);
   if (description) form.append("description", description);
-  const res = await fetch(`${baseUrl()}/query-sets`, { cache: "no-store", method: "POST", body: form });
+  const res = await fetch(`${baseUrl()}/query-sets`, withAuth({ cache: "no-store", method: "POST", body: form }));
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }

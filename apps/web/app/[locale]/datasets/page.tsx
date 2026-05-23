@@ -13,6 +13,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { SkeletonTableRow } from "@/components/Skeleton";
 import { NewDatasetDialog } from "@/components/NewDatasetDialog";
 import { useToast } from "@/components/Toast";
+import { useHasRole } from "@/lib/useRole";
 import { useUrlParam } from "@/lib/useUrlParam";
 
 /**
@@ -98,6 +99,9 @@ export default function DatasetsPage() {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
   const [showDialog, setShowDialog] = useState(false);
+  // FEAT-AUTH: dispatch is operator+; viewers see the registry but the
+  // CTA is hidden + the empty-state hint switches to a read-only line.
+  const canDispatch = useHasRole("operator");
 
   async function load() {
     setError(null);
@@ -204,12 +208,14 @@ export default function DatasetsPage() {
             >
               {t("refresh")}
             </button>
-            <button
-              onClick={() => setShowDialog(true)}
-              className="rounded-md bg-blue-700 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-800"
-            >
-              {t("newExport")}
-            </button>
+            {canDispatch && (
+              <button
+                onClick={() => setShowDialog(true)}
+                className="rounded-md bg-blue-700 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-800"
+              >
+                {t("newExport")}
+              </button>
+            )}
           </div>
         </header>
 
@@ -301,12 +307,14 @@ export default function DatasetsPage() {
                     {datasets!.length === 0 ? (
                       <>
                         <p>{t("emptyAll")}</p>
-                        <button
-                          onClick={() => setShowDialog(true)}
-                          className="mt-2 text-sm text-blue-700 underline"
-                        >
-                          {t("dispatchFirst")}
-                        </button>
+                        {canDispatch && (
+                          <button
+                            onClick={() => setShowDialog(true)}
+                            className="mt-2 text-sm text-blue-700 underline"
+                          >
+                            {t("dispatchFirst")}
+                          </button>
+                        )}
                       </>
                     ) : (
                       t("emptyFiltered")

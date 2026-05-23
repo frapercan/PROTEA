@@ -7,6 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.deps import get_session_factory
+from protea.api.roles import ROLE_OPERATOR, require_role
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
 from protea.infrastructure.session import session_scope
@@ -45,7 +46,10 @@ def preview_orphan_sequences(
     }
 
 
-@router.post("/vacuum-sequences")
+@router.post(
+    "/vacuum-sequences",
+    dependencies=[Depends(require_role(ROLE_OPERATOR))],
+)
 def vacuum_sequences(
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
@@ -112,7 +116,10 @@ def preview_unindexed_embeddings(
     }
 
 
-@router.post("/vacuum-embeddings")
+@router.post(
+    "/vacuum-embeddings",
+    dependencies=[Depends(require_role(ROLE_OPERATOR))],
+)
 def vacuum_embeddings(
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
