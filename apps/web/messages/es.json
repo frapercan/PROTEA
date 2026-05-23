@@ -174,6 +174,20 @@
       "childJobsCount": "({count})",
       "eventsTitle": "Eventos",
       "eventsCount": "({count})"
+    },
+    "commentsThread": {
+      "title": "Comentarios",
+      "empty": "Aún no hay comentarios. Anota la primera observación, seguimiento o análisis post-mortem.",
+      "anonymousAuthor": "anónimo",
+      "formLabel": "Añadir un comentario",
+      "bodyLabel": "Comentario",
+      "bodyPlaceholder": "p. ej. Re-ejecuto con k=10; k=5 topó con el techo de varianza en PK.",
+      "authorLabel": "Autor",
+      "authorPlaceholder": "tu identificador o bot (opcional)",
+      "postButton": "Publicar",
+      "posting": "Publicando…",
+      "posted": "Comentario publicado",
+      "hint": "Los comentarios son notas narrativas duraderas. La línea de eventos automática de arriba se mantiene aparte."
     }
   },
   "proteins": {

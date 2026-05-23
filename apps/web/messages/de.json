@@ -171,6 +171,20 @@
       "childJobsCount": "({count})",
       "eventsTitle": "Ereignisse",
       "eventsCount": "({count})"
+    },
+    "commentsThread": {
+      "title": "Kommentare",
+      "empty": "Noch keine Kommentare. Hinterlasse die erste Beobachtung, Nachfrage oder Post-mortem-Notiz.",
+      "anonymousAuthor": "anonym",
+      "formLabel": "Kommentar anhängen",
+      "bodyLabel": "Kommentar",
+      "bodyPlaceholder": "z. B. Wiederholung mit k=10; k=5 hat das Varianzlimit bei PK erreicht.",
+      "authorLabel": "Autor",
+      "authorPlaceholder": "dein Handle oder Bot-ID (optional)",
+      "postButton": "Senden",
+      "posting": "Wird gesendet…",
+      "posted": "Kommentar gesendet",
+      "hint": "Kommentare sind dauerhafte narrative Notizen. Die maschinengenerierte Ereignisliste oben bleibt davon getrennt."
     }
   },
   "proteins": {

@@ -171,6 +171,20 @@
       "childJobsCount": "({count})",
       "eventsTitle": "事件",
       "eventsCount": "({count})"
+    },
+    "commentsThread": {
+      "title": "评论",
+      "empty": "暂无评论。留下第一条观察、跟进或事后分析。",
+      "anonymousAuthor": "匿名",
+      "formLabel": "添加评论",
+      "bodyLabel": "评论",
+      "bodyPlaceholder": "例：使用 k=10 重新运行；k=5 在 PK 上达到了方差上限。",
+      "authorLabel": "作者",
+      "authorPlaceholder": "你的标识或机器人 ID（可选）",
+      "postButton": "发布",
+      "posting": "正在发布…",
+      "posted": "评论已发布",
+      "hint": "评论是持久的叙述性笔记。上方的机器事件时间线保持独立。"
     }
   },
   "proteins": {
