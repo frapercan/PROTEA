@@ -438,6 +438,34 @@
       "skipExisting": "Vorhandene Embeddings überspringen",
       "launchComputeJob": "Berechnungs-Job starten",
       "launching": "Wird gestartet…"
+    },
+    "computeDialog": {
+      "title": "Embeddings berechnen",
+      "subtitle": "Dispatcht einen compute_embeddings-Job in die Queue protea.embeddings, ohne die Seite zu verlassen.",
+      "close": "Schließen",
+      "configLabel": "Embedding-Konfiguration",
+      "loading": "Wird geladen…",
+      "noConfigs": "— keine Konfigurationen verfügbar —",
+      "querySetLabel": "Query-Set",
+      "querySetHelper": "(optional — leer = alle)",
+      "allSequences": "— alle Sequenzen —",
+      "queueBatchSizeLabel": "Queue-Batchgröße",
+      "queueBatchSizeHelper": "(Sequenzen/Job)",
+      "modelBatchSizeLabel": "Modell-Batchgröße",
+      "modelBatchSizeHelper": "(Sequenzen/Forward)",
+      "deviceLabel": "Gerät",
+      "deviceCpu": "cpu — CPU (FP32)",
+      "deviceCuda": "cuda — GPU-Standard (FP16 für ESM3c/T5)",
+      "deviceCuda0": "cuda:0 — GPU 0",
+      "deviceCuda1": "cuda:1 — GPU 1",
+      "deviceCustom": "benutzerdefiniert…",
+      "skipExisting": "Bestehende Embeddings überspringen",
+      "launch": "Berechnungsjob starten",
+      "launching": "Wird gestartet…",
+      "cancel": "Abbrechen",
+      "errors": {
+        "configRequired": "Bitte eine Embedding-Konfiguration auswählen."
+      }
     }
   },
   "functionalAnnotation": {
@@ -1095,6 +1123,71 @@
         "overBudget": "over cap",
         "budget": "Daily cap",
         "budgetTick": "cap marker"
+      }
+    }
+  },
+  "reranker": {
+    "importDialog": {
+      "title": "Re-Ranker-Booster importieren",
+      "subtitle": "Lade model.txt + spec.yaml + run.json hoch, die protea-reranker-lab erzeugt.",
+      "close": "Schließen",
+      "filesLegend": "Run-Artefakte",
+      "filesHelp": "Wähle die drei Dateien aus dem runs/<run_id>/-Verzeichnis des Labs. PROTEA lädt model.txt in den Artifact Store hoch und leitet die Herkunft aus spec.yaml und run.json ab.",
+      "modelFileLabel": "model.txt (LightGBM-Booster)",
+      "modelFileHelp": "LightGBM-Klartextdump (lightgbm.Booster.save_model).",
+      "specFileLabel": "spec.yaml (ExperimentSpec)",
+      "specFileHelp": "Wird zur Reproduzierbarkeit gespeichert. ``training.cell`` wird in Kategorie / Aspekt aufgelöst.",
+      "runFileLabel": "run.json (Metriken + Herkunft)",
+      "runFileHelp": "Enthält Metriken, feature_importance, Dataset-Metadaten und die Auswahl der Feature-Familien.",
+      "nameLabel": "Zeilenname (optional)",
+      "namePlaceholder": "Standard: run.run_id",
+      "nameHelp": "Überschreibt den automatisch abgeleiteten RerankerModel.name. Muss eindeutig sein, sofern „Ersetzen“ nicht aktiviert ist.",
+      "forceLabel": "Vorhandene Zeile mit gleichem Namen ersetzen",
+      "provenanceLegend": "Optionale Herkunfts-Overrides",
+      "provenanceHelp": "Wenn der Lab-Run dataset.name und die FK-UUIDs enthält, lasse diese Felder leer: der Server löst sie selbst auf. Nutze die Overrides nur, wenn das Lab die lokale PROTEA-Instanz nicht sieht.",
+      "datasetLabel": "Verknüpftes Dataset",
+      "datasetAuto": "Auto (über run.json dataset.name auflösen)",
+      "datasetPlaceholder": "Dataset-UUID",
+      "datasetHelp": "Erzwingt eine bestimmte Dataset-UUID. Bei leerem Feld löst PROTEA per run.dataset.name auf.",
+      "externalSourceLabel": "Externe Quelle (Tag)",
+      "externalSourceHelp": "Freier Herkunftshinweis, z.B. protea-reranker-lab@<git-sha>.",
+      "predictionSetLabel": "PredictionSet-UUID (optional)",
+      "evaluationSetLabel": "EvaluationSet-UUID (optional)",
+      "import": "Booster importieren",
+      "importing": "Wird hochgeladen…",
+      "cancel": "Abbrechen",
+      "errors": {
+        "filesRequired": "Alle drei Dateien (model.txt, spec.yaml, run.json) sind erforderlich."
+      }
+    },
+    "registerDialog": {
+      "title": "Booster per URI registrieren",
+      "subtitle": "Booster liegt bereits in MinIO / lokalem FS. Füge artifact_uri + spec.yaml + run.json ein, damit PROTEA die URI ohne erneuten Upload registriert.",
+      "close": "Schließen",
+      "artifactUriLabel": "Artefakt-URI",
+      "artifactUriHelp": "s3://bucket/key oder file://pfad/model.txt. PROTEA registriert dies wörtlich und vertraut dem Blob.",
+      "specYamlLabel": "spec.yaml (Inhalt einfügen)",
+      "specYamlHelp": "Vollständiger ExperimentSpec-YAML-Text. ``training.cell`` wird in Kategorie / Aspekt aufgelöst.",
+      "runJsonLabel": "run.json (Inhalt einfügen)",
+      "runJsonHelp": "Lab-Run-Metadaten (metrics, feature_importance, dataset.name, features.families_enabled). Muss gültiges JSON sein.",
+      "nameLabel": "Zeilenname (optional)",
+      "namePlaceholder": "Standard: run.run_id",
+      "nameHelp": "Überschreibt den automatisch abgeleiteten Namen.",
+      "forceLabel": "Vorhandene Zeile mit gleichem Namen ersetzen",
+      "provenanceLegend": "Optionale Herkunfts-Overrides",
+      "datasetLabel": "Verknüpftes Dataset",
+      "datasetAuto": "Auto (über run.json dataset.name auflösen)",
+      "datasetPlaceholder": "Dataset-UUID",
+      "externalSourceLabel": "Externe Quelle (Tag)",
+      "predictionSetLabel": "PredictionSet-UUID (optional)",
+      "evaluationSetLabel": "EvaluationSet-UUID (optional)",
+      "register": "Booster registrieren",
+      "registering": "Wird registriert…",
+      "cancel": "Abbrechen",
+      "errors": {
+        "uriRequired": "Artefakt-URI ist erforderlich.",
+        "specRequired": "Der Inhalt von spec.yaml ist erforderlich.",
+        "runJsonInvalid": "run.json ist kein gültiges JSON: {message}"
       }
     }
   }

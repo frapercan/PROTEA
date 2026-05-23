@@ -438,6 +438,34 @@
       "skipExisting": "跳过已有嵌入向量",
       "launchComputeJob": "启动计算任务",
       "launching": "启动中…"
+    },
+    "computeDialog": {
+      "title": "启动 embedding 计算",
+      "subtitle": "无需离开当前页面，将 compute_embeddings 任务派发到 protea.embeddings 队列。",
+      "close": "关闭",
+      "configLabel": "Embedding 配置",
+      "loading": "加载中…",
+      "noConfigs": "— 无可用配置 —",
+      "querySetLabel": "Query Set",
+      "querySetHelper": "（可选 — 为空时计算全部）",
+      "allSequences": "— 所有序列 —",
+      "queueBatchSizeLabel": "队列批量大小",
+      "queueBatchSizeHelper": "（每任务序列数）",
+      "modelBatchSizeLabel": "模型批量大小",
+      "modelBatchSizeHelper": "（每次 forward 序列数）",
+      "deviceLabel": "设备",
+      "deviceCpu": "cpu — CPU（FP32）",
+      "deviceCuda": "cuda — GPU 默认（ESM3c/T5 使用 FP16）",
+      "deviceCuda0": "cuda:0 — GPU 0",
+      "deviceCuda1": "cuda:1 — GPU 1",
+      "deviceCustom": "自定义…",
+      "skipExisting": "跳过已有的 embeddings",
+      "launch": "启动计算任务",
+      "launching": "启动中…",
+      "cancel": "取消",
+      "errors": {
+        "configRequired": "请选择 embedding 配置。"
+      }
     }
   },
   "functionalAnnotation": {
@@ -1094,6 +1122,71 @@
         "overBudget": "over cap",
         "budget": "Daily cap",
         "budgetTick": "cap marker"
+      }
+    }
+  },
+  "reranker": {
+    "importDialog": {
+      "title": "导入重排序器 booster",
+      "subtitle": "上传由 protea-reranker-lab 生成的 model.txt + spec.yaml + run.json。",
+      "close": "关闭",
+      "filesLegend": "运行产物",
+      "filesHelp": "从 lab 的 runs/<run_id>/ 目录选择三个文件。PROTEA 会将 model.txt 上传到产物存储，并从 spec.yaml 和 run.json 提取来源信息。",
+      "modelFileLabel": "model.txt（LightGBM booster）",
+      "modelFileHelp": "LightGBM 纯文本导出（lightgbm.Booster.save_model）。",
+      "specFileLabel": "spec.yaml（ExperimentSpec）",
+      "specFileHelp": "保留以供复现。``training.cell`` 会解析为类别 / 方面。",
+      "runFileLabel": "run.json（指标与来源）",
+      "runFileHelp": "包含指标、feature_importance、数据集元数据以及特征族选择。",
+      "nameLabel": "记录名（可选）",
+      "namePlaceholder": "默认为 run.run_id",
+      "nameHelp": "覆盖自动导出的 RerankerModel.name。除非勾选“替换”，否则必须唯一。",
+      "forceLabel": "替换同名现有记录",
+      "provenanceLegend": "可选的来源覆盖",
+      "provenanceHelp": "如果 lab 运行包含 dataset.name 和 FK UUID，请保持为空：服务器会自动解析。仅在 lab 看不到本地 PROTEA 实例时才使用覆盖。",
+      "datasetLabel": "关联数据集",
+      "datasetAuto": "自动（从 run.json dataset.name 解析）",
+      "datasetPlaceholder": "数据集 UUID",
+      "datasetHelp": "强制使用指定 UUID。为空时 PROTEA 会从 run.dataset.name 解析。",
+      "externalSourceLabel": "外部来源标签",
+      "externalSourceHelp": "自由格式的来源，如 protea-reranker-lab@<git-sha>。",
+      "predictionSetLabel": "PredictionSet UUID（可选）",
+      "evaluationSetLabel": "EvaluationSet UUID（可选）",
+      "import": "导入 booster",
+      "importing": "上传中…",
+      "cancel": "取消",
+      "errors": {
+        "filesRequired": "model.txt、spec.yaml、run.json 三个文件都是必须的。"
+      }
+    },
+    "registerDialog": {
+      "title": "通过 URI 注册 booster",
+      "subtitle": "Booster 已在 MinIO / 本地文件系统中。粘贴 artifact_uri + spec.yaml + run.json，PROTEA 会记录 URI 而不重复上传。",
+      "close": "关闭",
+      "artifactUriLabel": "产物 URI",
+      "artifactUriHelp": "s3://bucket/key 或 file:///路径/model.txt。PROTEA 会原样记录，并信任该 blob。",
+      "specYamlLabel": "spec.yaml（粘贴内容）",
+      "specYamlHelp": "完整的 ExperimentSpec YAML 文本。``training.cell`` 会解析为类别 / 方面。",
+      "runJsonLabel": "run.json（粘贴内容）",
+      "runJsonHelp": "Lab 运行元数据（metrics、feature_importance、dataset.name、features.families_enabled）。必须为有效 JSON。",
+      "nameLabel": "记录名（可选）",
+      "namePlaceholder": "默认为 run.run_id",
+      "nameHelp": "覆盖自动导出的名称。",
+      "forceLabel": "替换同名现有记录",
+      "provenanceLegend": "可选的来源覆盖",
+      "datasetLabel": "关联数据集",
+      "datasetAuto": "自动（从 run.json dataset.name 解析）",
+      "datasetPlaceholder": "数据集 UUID",
+      "externalSourceLabel": "外部来源标签",
+      "predictionSetLabel": "PredictionSet UUID（可选）",
+      "evaluationSetLabel": "EvaluationSet UUID（可选）",
+      "register": "注册 booster",
+      "registering": "注册中…",
+      "cancel": "取消",
+      "errors": {
+        "uriRequired": "产物 URI 是必须的。",
+        "specRequired": "spec.yaml 内容是必须的。",
+        "runJsonInvalid": "run.json 不是有效 JSON：{message}"
       }
     }
   }
