@@ -935,17 +935,38 @@
       "viewAll": "查看全部 →"
     },
     "usagePolicyModal": {
-      "title": "欢迎使用 PROTEA",
-      "subtitle": "个人计算资源，公开共享 — 请在继续前阅读",
-      "intro": "本平台运行在个人硬件上，免费用于研究目的。",
-      "rule1": "这些是自愿共享的个人资源。请注意您产生的负载。",
-      "rule2": "在启动大型任务之前，请先联系我们。",
-      "rule3": "所有处理的数据均为公开数据。",
-      "rule4": "PROTEA 是免费且开源的。源代码在 GitHub 上。",
-      "rule5": "本服务以尽力而为的方式运行，可能随时下线，恕不另行通知。",
-      "rule6": "如果出现问题，请报告。",
-      "dataPublicNote": "此处处理的所有数据均为公开数据。感谢您负责任地使用。",
-      "accept": "明白了，开始使用"
+      "title": "PROTEA：研究预览版",
+      "subtitle": "开放访问的研究工具。请在继续之前阅读以下声明。",
+      "accept": "我已了解并接受",
+      "identification": {
+        "heading": "运营方",
+        "body": "PROTEA 由 Francisco Miguel Pérez Canales 作为塞维利亚大学（Universidad de Sevilla）博士研究的一部分进行开发，由 David Orellana-Martín 和 Ana M. Rojas 共同指导。本部署由作者个人运营，不属于塞维利亚大学的官方服务。"
+      },
+      "asIs": {
+        "heading": "无任何担保",
+        "body": "本服务按现状提供，不附带任何形式的担保。作者对运行结果、服务中断或数据丢失不承担任何责任。服务以尽力而为的方式运行，可能在不另行通知的情况下因维护而下线。"
+      },
+      "dataHandling": {
+        "heading": "您提交的数据",
+        "body": "请勿提交机密、专有或可识别个人身份的数据。提交的序列以明文方式处理，并可能因调试、可复现性以及供本实例其他研究用户使用而被保留。提交即表示您确认拥有公开分享该数据的权利。"
+      },
+      "privacyLog": {
+        "heading": "隐私与日志",
+        "body": "无需注册账户。服务器将 IP 地址与请求时间戳保留 30 天，用于防止滥用。不使用任何跟踪 Cookie。数据主体请求（访问、删除、更正）请联系：frapercan1@alum.us.es。"
+      },
+      "license": {
+        "heading": "许可证",
+        "body": "源代码以仓库的 <license>GitHub LICENSE</license> 发布。本部署生成的结果以 CC-BY-4.0 许可发布，除非在具体结果页面另有明确说明。"
+      },
+      "responsibleUse": {
+        "heading": "负责任的使用",
+        "body": "请注意共享算力负载。在启动大型或长时间运行的任务之前，请先通过 <issues>GitHub issue 跟踪器</issues>与我们联系。"
+      },
+      "bugReport": {
+        "heading": "错误报告",
+        "body": "若出现故障或异常行为，请<issues>在 GitHub 上提交 issue</issues>。感谢您的反馈。"
+      },
+      "lastUpdated": "政策版本 v2，2026-05-23。"
     },
     "statusBadge": {
       "queued": "QUEUED",
