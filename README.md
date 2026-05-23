@@ -42,12 +42,15 @@ PROTEA is the successor to [PIS](https://github.com/CBBIO/protein-information-sy
 | **GO annotations** | Bulk import from GOA (GAF) and QuickGO (TSV) |
 | **Embeddings** | ESMC, ProstT5, and ESM2 backends via GPU workers; stored as pgvector `VECTOR` columns |
 | **GO prediction** | KNN transfer (FAISS IVFFlat / numpy) with optional NW/SW alignment and taxonomic features |
-| **Learning-to-rank** | LightGBM rerankers trained on temporal GOA splits (LambdaRank + IA weighting, per-tier NK/LK/PK models) |
-| **CAFA evaluation** | Benchmark pipeline with `cafaeval` integration, Fmax + IA-weighted scoring, per-aspect (BPO/MFO/CCO) results |
-| **Job queue** | RabbitMQ-backed, 8 queues (ingestion, embeddings, predictions, training), full audit trail per job |
-| **REST API** | FastAPI routers for jobs, proteins, embeddings, query sets, scoring, evaluation, and admin |
-| **Web UI** | Next.js frontend with protein explorer, annotation viewer, prediction browser, and live job widget |
-| **Observability** | OpenTelemetry SDK (OTLP traces/metrics), SQLAlchemy + pika instrumentation, Grafana dashboards for API latency, queues, workers, DB, and embeddings |
+| **Learning-to-rank** | LightGBM rerankers trained on temporal GOA splits (LambdaRank + IA weighting, per-tier NK/LK/PK models); import-by-reference from `protea-reranker-lab` via `POST /reranker-models/import-by-reference` |
+| **CAFA evaluation** | Benchmark pipeline with `cafaeval` integration, Fmax + IA-weighted scoring, per-aspect (BPO/MFO/CCO) results, NK/LK/PK tier breakdown with CI bands (PR #451) |
+| **Dataset export** | `POST /datasets` dispatches `export_research_dataset`; parallelised pair-feature compute with persistent alignment cache (PR #421); `/datasets` registry view in the web UI (PR #453) |
+| **Reranker UI** | Import-by-reference dialog, compute-embeddings dialog, feature-schema SHA + manifest SHA provenance on collapsed cards (PR #452, #455); reranker-features toggle on the annotation page (PR #444) |
+| **Job queue** | RabbitMQ-backed, 11 queues (ingestion, embeddings, predictions, training, InterPro), full audit trail per job |
+| **REST API** | FastAPI routers for jobs, proteins, embeddings, query sets, scoring, evaluation, datasets, reranker models, and admin |
+| **Web UI** | Next.js frontend with responsive sidebar shell, protein explorer, annotation viewer, prediction browser with benchmark CI bands, live job widget, and onboarding stepper |
+| **Observability** | OpenTelemetry SDK (OTLP traces/metrics), SQLAlchemy + pika instrumentation, Grafana dashboards for API latency, queues, workers, DB, and embeddings; Loki log aggregation via Promtail |
+| **Proteins stats prewarm** | API server prewarns `proteins/stats` at startup and refreshes in the background; stale data is served on error rather than blocking page renders (PR #450) |
 
 ---
 
@@ -81,9 +84,31 @@ poetry install
 cp protea/config/system.yaml.example protea/config/system.yaml
 # Edit system.yaml: set DB and AMQP URLs
 
+# Environment variables — keep secrets in ~/.secrets/protea.env and source
+# before starting the stack:
+#   set -a && source ~/.secrets/protea.env && set +a && bash scripts/manage.sh start
+# See the env vars table below for the full list.
+
 poetry run python scripts/init_db.py
 bash scripts/manage.sh start
 ```
+
+### Environment variables
+
+| Variable | Required | Default | Purpose |
+|---|---|---|---|
+| `PROTEA_DB_URL` | yes | | PostgreSQL connection URL |
+| `PROTEA_AMQP_URL` | yes | | RabbitMQ connection URL |
+| `PROTEA_ANC2VEC_PATH` | for export/inference | auto-resolved via artifact store | Path to `anc2vec_2020-10.npz`; set explicitly when running `export_research_dataset` outside the deploy worktree |
+| `PROTEA_PAIR_FEATURE_WORKERS` | no | CPU count | Process-pool size for parallel pair-feature compute during dataset export (PR #421) |
+| `PROTEA_ALIGN_CACHE_DIR` | no | `artifacts/align_cache` | Directory for persistent SQLite alignment cache; empty string disables caching; warm cache gives ~21x speedup on repeated export runs (PR #421) |
+| `PROTEA_STORAGE_BACKEND` | no | `local` | `local` or `minio` |
+| `PROTEA_MINIO_ENDPOINT` | if minio | | MinIO endpoint |
+| `PROTEA_MINIO_BUCKET` | if minio | | MinIO bucket |
+| `PROTEA_MINIO_ACCESS_KEY` | if minio | | MinIO access key |
+| `PROTEA_MINIO_SECRET_KEY` | if minio | | MinIO secret key |
+| `NEXT_PUBLIC_API_URL` | for frontend | `http://127.0.0.1:8000` | Backend API URL seen by the browser |
+| `NEXT_PUBLIC_ENABLE_DB_RESET` | no | `false` | Set to `true` to show the destructive DB-reset button in the admin UI (PR #454) |
 
 ---
 
@@ -117,6 +142,20 @@ commit → REST query. Real operations (`insert_proteins`,
 are submitted the same way; their payloads are documented at
 `/docs` (Swagger UI) and in the operation-catalog page of the
 Sphinx docs.
+
+Dispatching a dataset export (the first step before reranker training):
+
+```bash
+# POST /datasets enqueues export_research_dataset on protea.training.
+curl -s -X POST http://localhost:8000/datasets \
+  -H 'content-type: application/json' \
+  -d '{"operation": "export_research_dataset",
+       "payload": {"cell": "nk-mfo",
+                   "train_versions": [160,200,210,215,220],
+                   "test_versions": [230],
+                   "k": 5,
+                   "embedding_config_id": "<uuid>"}}'
+```
 
 Discovering the installed plugins:
 
@@ -188,8 +227,8 @@ Single source of truth: [`docs/source/_data/stack.yaml`](https://github.com/frap
 |------|------|--------|---------|
 | **PROTEA** (this repo) | Platform | `active` | Backend platform. Hosts the ORM, job queue, FastAPI surface, frontend, and orchestration. |
 | [protea-contracts](https://github.com/frapercan/protea-contracts) | Contracts | `active` | Shared contract surface. ABCs, pydantic payloads, feature schema, schema_sha. Imported by every other repo. |
-| [protea-method](https://github.com/frapercan/protea-method) | Inference | `active` | Pure inference path (KNN, feature compute, reranker apply). Delegation target for the F2C extraction; live in production since F2C.5b. Bind-mounted by the LAFA containers. |
-| [protea-sources](https://github.com/frapercan/protea-sources) | Source plugin | `active` | Annotation source plugins (GOA, QuickGO, UniProt). Discovered via Python entry_points (goa, quickgo, uniprot). |
+| [protea-method](https://github.com/frapercan/protea-method) | Inference | `active` | LAFA submission layer. Pure inference path (KNN, feature compute, reranker apply). Published to DockerHub; bind-mounted by LAFA containers for FunctionBench submissions. |
+| [protea-sources](https://github.com/frapercan/protea-sources) | Source plugin | `active` | Annotation source plugins (GOA, QuickGO, UniProt, InterPro). Discovered via Python entry_points (goa, quickgo, uniprot, interpro). |
 | [protea-runners](https://github.com/frapercan/protea-runners) | Runner plugin | `active` | Experiment runner plugins (LightGBM, KNN, baseline). Discovered via Python entry_points (lightgbm, knn, baseline). |
 | [protea-backends](https://github.com/frapercan/protea-backends) | Backend plugin | `active` | Protein language model embedding backends (ESM family, T5/ProstT5, Ankh, ESM3-C). Discovered via Python entry_points (esm, t5, ankh, esm3c). |
 | [protea-reranker-lab](https://github.com/frapercan/protea-reranker-lab) | Lab | `active` | LightGBM reranker training lab. Pulls datasets from PROTEA, trains boosters, publishes them back via /reranker-models/import-by-reference. |
