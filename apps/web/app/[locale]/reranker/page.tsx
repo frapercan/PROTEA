@@ -607,6 +607,28 @@ export default function RerankerPage() {
   const [training, setTraining] = useState(false);
   const [trainError, setTrainError] = useState<string | null>(null);
 
+  // Advanced KNN / feature-engineering knobs. Mirror the launchPredictGoTerms
+  // form on /functional-annotation so a researcher can record (and later
+  // reproduce) the upstream KNN / feature configuration the booster was
+  // trained against. The values are surfaced as research provenance: the
+  // retired /scoring/rerankers/train endpoint does not consume them (see
+  // scripts/check_openapi_refs.py allowlist), but exposing them keeps the
+  // train form aligned with the rest of the predict pipeline UX and avoids
+  // researchers having to flip pages to remember the recipe.
+  // Defaults match the predict form so the panel can default-open without
+  // visually screaming at the user; it is collapsible (NOT collapsed) per
+  // the feedback_ui_surface_provenance_not_hide_params memory: research
+  // parameters must remain visible.
+  const [advancedOpen, setAdvancedOpen] = useState(true);
+  const [trainFaissIndex, setTrainFaissIndex] = useState("Flat");
+  const [trainFaissNlist, setTrainFaissNlist] = useState(100);
+  const [trainFaissNprobe, setTrainFaissNprobe] = useState(10);
+  const [trainFaissHnswM, setTrainFaissHnswM] = useState(32);
+  const [trainFaissHnswEf, setTrainFaissHnswEf] = useState(64);
+  const [trainComputeAlignments, setTrainComputeAlignments] = useState(true);
+  const [trainComputeTaxonomy, setTrainComputeTaxonomy] = useState(true);
+  const [trainAspectSeparatedKnn, setTrainAspectSeparatedKnn] = useState(true);
+
   // Dialog flags for the lab-bridge import paths (multipart upload +
   // register-by-reference). Both dialogs reload the reranker list on
   // success so the new booster card appears immediately.
@@ -817,6 +839,200 @@ export default function RerankerPage() {
             </p>
           )}
         </div>
+
+        {/* Advanced: KNN strategy + feature engineering provenance.
+            Mirrors the /functional-annotation predict form so the
+            researcher captures the recipe alongside the trained booster.
+            Defaults to OPEN (visible) because the user wants research
+            params surfaced, not hidden behind a click. */}
+        <details
+          open={advancedOpen}
+          onToggle={(e) => setAdvancedOpen((e.target as HTMLDetailsElement).open)}
+          className="rounded-md border border-slate-200 bg-slate-50/70 mb-3"
+          data-testid="reranker-train-advanced"
+        >
+          <summary className="cursor-pointer px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-600 hover:bg-slate-100 transition-colors flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              <span>Advanced — KNN strategy &amp; feature engineering</span>
+              <Tooltip text="Upstream KNN / feature config that produced the prediction set being trained against. Recorded for reproducibility; safe defaults are pre-filled. Defaults to open per project policy on surfacing research parameters.">
+                <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-slate-200 text-slate-500 text-[10px] font-bold">?</span>
+              </Tooltip>
+            </span>
+            <span className="text-[10px] font-normal text-slate-500 normal-case">
+              defaults pre-filled
+            </span>
+          </summary>
+
+          <div className="border-t border-slate-200 px-4 py-3 space-y-4">
+            {/* KNN Strategy */}
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-2">
+                KNN Strategy
+              </p>
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={trainAspectSeparatedKnn}
+                  onChange={(e) => setTrainAspectSeparatedKnn(e.target.checked)}
+                  className="mt-0.5 rounded"
+                />
+                <span className="text-sm text-slate-700">
+                  Per-aspect KNN indices
+                  <Tooltip text="Separate BPO / MFO / CCO reference indices — improves recall for each aspect independently. Match the value used when the upstream prediction set was produced.">
+                    <span className="ml-1 text-[10px] text-slate-400 underline decoration-dotted cursor-help">aspect_separated_knn</span>
+                  </Tooltip>
+                </span>
+              </label>
+            </div>
+
+            {/* Feature Engineering */}
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-2">
+                Feature Engineering
+                <span className="ml-1.5 text-[10px] font-normal normal-case text-slate-500">
+                  (opt-in — adds compute time)
+                </span>
+              </p>
+              <div className="flex flex-col gap-1.5">
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={trainComputeAlignments}
+                    onChange={(e) => setTrainComputeAlignments(e.target.checked)}
+                    className="mt-0.5 rounded"
+                  />
+                  <span className="text-sm text-slate-700">
+                    Sequence alignments
+                    <Tooltip text="NW (global) + SW (local) via parasail/BLOSUM62. Required by the champion 56-feature booster (alignment_nw + alignment_sw families).">
+                      <span className="ml-1 text-[10px] text-slate-400 underline decoration-dotted cursor-help">compute_alignments</span>
+                    </Tooltip>
+                  </span>
+                </label>
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={trainComputeTaxonomy}
+                    onChange={(e) => setTrainComputeTaxonomy(e.target.checked)}
+                    className="mt-0.5 rounded"
+                  />
+                  <span className="text-sm text-slate-700">
+                    Taxonomic distance
+                    <Tooltip text="LCA, distance, and taxonomic relation via NCBI taxonomy. Feeds taxonomy_pair + taxonomy_voters feature families.">
+                      <span className="ml-1 text-[10px] text-slate-400 underline decoration-dotted cursor-help">compute_taxonomy</span>
+                    </Tooltip>
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            {/* FAISS index parameters */}
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-2">
+                FAISS index parameters
+                <span className="ml-1.5 text-[10px] font-normal normal-case text-slate-500">
+                  (only consulted when the upstream KNN used faiss)
+                </span>
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className={labelClass}>
+                    Index type
+                    <Tooltip text="Flat = exact; IVFFlat = inverted-file approximate (>100K refs); HNSW = graph-based approximate. Use Flat unless the index is too large to fit in RAM.">
+                      <span className="ml-1 text-[10px] text-slate-400 underline decoration-dotted cursor-help">faiss_index_type</span>
+                    </Tooltip>
+                  </label>
+                  <select
+                    value={trainFaissIndex}
+                    onChange={(e) => setTrainFaissIndex(e.target.value)}
+                    className={selectClass}
+                  >
+                    <option value="Flat">Flat — exact</option>
+                    <option value="IVFFlat">IVFFlat — approximate (&gt;100K refs)</option>
+                    <option value="HNSW">HNSW — approximate, graph-based</option>
+                  </select>
+                </div>
+                {trainFaissIndex === "IVFFlat" && (
+                  <>
+                    <div>
+                      <label className={labelClass}>
+                        nlist
+                        <Tooltip text="Number of Voronoi cells / inverted lists for IVFFlat. Rule of thumb: sqrt(N_refs).">
+                          <span className="ml-1 text-[10px] text-slate-400 underline decoration-dotted cursor-help">faiss_nlist</span>
+                        </Tooltip>
+                      </label>
+                      <input
+                        type="number"
+                        value={trainFaissNlist}
+                        onChange={(e) => setTrainFaissNlist(parseInt(e.target.value, 10))}
+                        min={1}
+                        className={selectClass}
+                      />
+                    </div>
+                    <div>
+                      <label className={labelClass}>
+                        nprobe
+                        <Tooltip text="Number of cells probed at query time for IVFFlat. Higher = better recall, slower search.">
+                          <span className="ml-1 text-[10px] text-slate-400 underline decoration-dotted cursor-help">faiss_nprobe</span>
+                        </Tooltip>
+                      </label>
+                      <input
+                        type="number"
+                        value={trainFaissNprobe}
+                        onChange={(e) => setTrainFaissNprobe(parseInt(e.target.value, 10))}
+                        min={1}
+                        className={selectClass}
+                      />
+                    </div>
+                  </>
+                )}
+                {trainFaissIndex === "HNSW" && (
+                  <>
+                    <div>
+                      <label className={labelClass}>
+                        M
+                        <Tooltip text="HNSW graph connectivity (neighbours per node). Higher = better recall, more memory.">
+                          <span className="ml-1 text-[10px] text-slate-400 underline decoration-dotted cursor-help">faiss_hnsw_m</span>
+                        </Tooltip>
+                      </label>
+                      <input
+                        type="number"
+                        value={trainFaissHnswM}
+                        onChange={(e) => setTrainFaissHnswM(parseInt(e.target.value, 10))}
+                        min={2}
+                        className={selectClass}
+                      />
+                    </div>
+                    <div>
+                      <label className={labelClass}>
+                        efSearch
+                        <Tooltip text="HNSW dynamic search list size at query time. Higher = better recall, slower search.">
+                          <span className="ml-1 text-[10px] text-slate-400 underline decoration-dotted cursor-help">faiss_hnsw_ef_search</span>
+                        </Tooltip>
+                      </label>
+                      <input
+                        type="number"
+                        value={trainFaissHnswEf}
+                        onChange={(e) => setTrainFaissHnswEf(parseInt(e.target.value, 10))}
+                        min={1}
+                        className={selectClass}
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <p className="text-[10px] leading-relaxed text-slate-500 border-t border-slate-200 pt-2">
+              Recorded for reproducibility. These knobs describe the
+              upstream KNN / feature configuration that produced the
+              prediction set. The training endpoint itself is offline
+              (boosters are now trained in <code className="font-mono">protea-reranker-lab</code>);
+              pin them to the same values you used when launching the
+              prediction job on{" "}
+              <span className="font-mono">/functional-annotation</span>.
+            </p>
+          </div>
+        </details>
 
         <div className="flex items-center gap-3">
           <button

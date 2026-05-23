@@ -34,6 +34,47 @@ const CATEGORY_TOOLTIPS: Record<string, string> = {
   PK: "Partial Knowledge — the protein already has annotations for the same aspect; the evaluation only scores newly added terms. Reranker stays policy-zero here; KNN baseline drives selective deploy.",
 };
 
+/** Lineage chip filter — decomposes the BenchmarkEvalSet.stats counters
+ *  (nk_proteins / lk_proteins / pk_proteins) along the same NK / LK / PK
+ *  axis used by the matrix rows. Selecting a chip keeps only rows whose
+ *  ``category`` matches one of the listed categories; ``All`` keeps every
+ *  category returned by the matrix endpoint. This is purely a UI filter
+ *  on top of the data already in hand — no extra request. */
+type LineageChipKey = "all" | "nk_lk" | "pk_only" | "nk" | "lk";
+
+const LINEAGE_CHIPS: { key: LineageChipKey; label: string; cats: string[]; tooltip: string }[] = [
+  {
+    key: "all",
+    label: "All",
+    cats: ["NK", "LK", "PK"],
+    tooltip: "Show every CAFA split (No / Limited / Partial Knowledge). Restores the full benchmark matrix.",
+  },
+  {
+    key: "nk_lk",
+    label: "NK + LK only",
+    cats: ["NK", "LK"],
+    tooltip: "Selective-deploy window: the v27-binary reranker is published only on NK + LK splits (0.7291 ± 0.0028 multiseed pooled). Removes PK from the matrix.",
+  },
+  {
+    key: "pk_only",
+    label: "PK only",
+    cats: ["PK"],
+    tooltip: "Partial Knowledge in isolation. The reranker stays policy-zero here, so the matrix surfaces the KNN baseline that drives the selective-deploy decision.",
+  },
+  {
+    key: "nk",
+    label: "NK",
+    cats: ["NK"],
+    tooltip: "No Knowledge in isolation — the strictest CAFA split where the test protein has zero experimental annotations at train cutoff.",
+  },
+  {
+    key: "lk",
+    label: "LK",
+    cats: ["LK"],
+    tooltip: "Limited Knowledge in isolation — proteins annotated in other aspects but not the one under evaluation.",
+  },
+];
+
 // ── Helpers ──────────────────────────────────────────────────────────────
 
 function formatParams(n: number | null): string {
@@ -191,6 +232,14 @@ export default function BenchmarkPage() {
   const evalSetId = (evalSetIdRaw ?? "all") as string | "all";
   const setEvalSetId = (v: string | "all") => setEvalSetIdRaw(v === "all" ? null : v);
   const [selectedK, setSelectedK] = useUrlNumber("k", null);
+  // Lineage chip filter (URL-synced). Default "all" is encoded as the
+  // missing param so a copied benchmark URL stays clean for the default
+  // view. Anchored to the BenchmarkEvalSet.stats nk/lk/pk counters and
+  // the selective-deploy memory (project_v27_binary_multiseed): NK+LK is
+  // the published reranker window; PK is policy-zero.
+  const [lineageRaw, setLineageRaw] = useUrlParam("lineage", null);
+  const lineage = (lineageRaw ?? "all") as LineageChipKey;
+  const setLineage = (v: LineageChipKey) => setLineageRaw(v === "all" ? null : v);
   // Default view: heatmap small-multiples (#81). The full numeric matrix is
   // still one click away under the toggle for export workflows.
   const [viewMode, setViewMode] = useState<"heatmap" | "table">("heatmap");
@@ -337,9 +386,26 @@ export default function BenchmarkPage() {
   const hasData = matrix.rows.length > 0;
   const stageList = catalog.stages.length > 0 ? catalog.stages : matrix.stages;
   const evalSetList = catalog.evalSets.length > 0 ? catalog.evalSets : matrix.evaluation_sets;
-  const categories = catalog.categories.length > 0 ? catalog.categories : matrix.categories;
+  const allCategories = catalog.categories.length > 0 ? catalog.categories : matrix.categories;
   const aspects = catalog.aspects.length > 0 ? catalog.aspects : matrix.aspects;
   const currentStageLabel = stageLabel(stageList, stage);
+
+  // Lineage chip filter — applied to every category-keyed visualisation
+  // below (champions grid, leaderboard, heatmap, full table). When the
+  // chip would null out the entire view we fall back to the unfiltered
+  // category list so the page never goes blank: this happens, for
+  // example, on a benchmark that has only NK rows when the user clicks
+  // "PK only". A subtle banner explains the fallback.
+  const activeChip = LINEAGE_CHIPS.find((c) => c.key === lineage) ?? LINEAGE_CHIPS[0];
+  const chipCats = new Set(activeChip.cats);
+  const categories = allCategories.filter((c) => chipCats.has(c));
+  const lineageHasNoMatch = categories.length === 0 && allCategories.length > 0;
+  const effectiveCategories = lineageHasNoMatch ? allCategories : categories;
+  // Used by row-level lookups (heatmap, table) to skip rows whose
+  // category was filtered out. Identical to chipCats on the happy path,
+  // but defaults to "all known" when the fallback fires above.
+  const effectiveCatSet = new Set(effectiveCategories);
+  const filteredRows = matrix.rows.filter((r) => effectiveCatSet.has(r.category));
 
   // Active eval set banner: when "all" is selected and there's only one set,
   // show that one; when a specific one is selected, show its full metadata.
@@ -369,8 +435,8 @@ export default function BenchmarkPage() {
             disabled={!hasData}
             onClick={() =>
               downloadCsv(
-                `benchmark_${stage}.csv`,
-                rowsToCsv(embeddings, matrix.rows, stage),
+                `benchmark_${stage}${lineage !== "all" ? `_${lineage}` : ""}.csv`,
+                rowsToCsv(embeddings, filteredRows, stage),
               )
             }
             className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -402,8 +468,14 @@ export default function BenchmarkPage() {
                   proteins
                 </span>
               )}
+              {/* NK/LK/PK counters dim when the lineage chip filters
+                  them out, so the banner doubles as the chip's effective
+                  scope readout. The active chip's categories stay bold. */}
               {activeEvalSet.stats.nk_proteins != null && (
-                <span>
+                <span
+                  className={effectiveCatSet.has("NK") ? "" : "opacity-40"}
+                  title={effectiveCatSet.has("NK") ? undefined : "Hidden by lineage chip"}
+                >
                   <span className="text-blue-500">NK</span>{" "}
                   <span className="font-mono font-semibold">
                     {formatProteins(activeEvalSet.stats.nk_proteins)}
@@ -411,7 +483,10 @@ export default function BenchmarkPage() {
                 </span>
               )}
               {activeEvalSet.stats.lk_proteins != null && (
-                <span>
+                <span
+                  className={effectiveCatSet.has("LK") ? "" : "opacity-40"}
+                  title={effectiveCatSet.has("LK") ? undefined : "Hidden by lineage chip"}
+                >
                   <span className="text-blue-500">LK</span>{" "}
                   <span className="font-mono font-semibold">
                     {formatProteins(activeEvalSet.stats.lk_proteins)}
@@ -419,7 +494,10 @@ export default function BenchmarkPage() {
                 </span>
               )}
               {activeEvalSet.stats.pk_proteins != null && (
-                <span>
+                <span
+                  className={effectiveCatSet.has("PK") ? "" : "opacity-40"}
+                  title={effectiveCatSet.has("PK") ? undefined : "Hidden by lineage chip"}
+                >
                   <span className="text-blue-500">PK</span>{" "}
                   <span className="font-mono font-semibold">
                     {formatProteins(activeEvalSet.stats.pk_proteins)}
@@ -509,12 +587,64 @@ export default function BenchmarkPage() {
           </div>
         )}
 
+        {/* Lineage chip filter — decomposes the matrix along the same
+            NK / LK / PK axis used by BenchmarkEvalSet.stats counters.
+            Pure UI filter, no extra request. */}
+        {allCategories.length > 1 && (
+          <div data-testid="benchmark-lineage-chips">
+            <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">
+              Lineage
+            </label>
+            <div
+              role="group"
+              aria-label="Lineage decomposition"
+              className="flex flex-wrap gap-1 rounded-lg bg-slate-100 p-0.5"
+            >
+              {LINEAGE_CHIPS.map((chip) => {
+                const active = chip.key === lineage;
+                return (
+                  <Tooltip key={chip.key} text={chip.tooltip}>
+                    <button
+                      type="button"
+                      onClick={() => setLineage(chip.key)}
+                      aria-pressed={active}
+                      className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                        active
+                          ? "bg-white text-slate-900 shadow-sm"
+                          : "text-slate-500 hover:text-slate-700"
+                      }`}
+                    >
+                      {chip.label}
+                    </button>
+                  </Tooltip>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         <div className="text-xs text-slate-600 ml-auto self-end">
-          {matrix.total} cells · {matrix.embedding_config_ids.length} embeddings ·{" "}
+          {filteredRows.length} cells
+          {filteredRows.length !== matrix.rows.length && (
+            <span className="text-slate-400"> / {matrix.total}</span>
+          )}{" "}
+          · {matrix.embedding_config_ids.length} embeddings ·{" "}
           {matrix.evaluation_sets.length} eval set
           {matrix.evaluation_sets.length === 1 ? "" : "s"}
         </div>
       </div>
+
+      {lineageHasNoMatch && (
+        <div
+          className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+          role="status"
+        >
+          The <strong>{activeChip.label}</strong> chip would hide every row
+          in the current evaluation set (no matching {activeChip.cats.join(" / ")} cells exist).
+          Showing all categories instead — pick a chip with data, or
+          choose a different evaluation set above.
+        </div>
+      )}
 
       {/* Global champions: best Fmax per (cat, asp) ignoring stage/K filters.
           Stable across filter changes — anchors the absolute-best read. */}
@@ -546,7 +676,7 @@ export default function BenchmarkPage() {
                 </tr>
               </thead>
               <tbody>
-                {categories.map((cat) => (
+                {effectiveCategories.map((cat) => (
                   <tr key={cat} className="border-t border-slate-200/60">
                     <th scope="row" className="px-2 py-2.5 font-semibold text-slate-700 text-left">
                       {CATEGORY_TOOLTIPS[cat] ? (
@@ -632,7 +762,7 @@ export default function BenchmarkPage() {
                 </tr>
               </thead>
               <tbody>
-                {categories.map((cat) => (
+                {effectiveCategories.map((cat) => (
                   <tr key={cat} className="border-t">
                     <th scope="row" className="px-2 py-2 font-semibold text-slate-700 text-left">
                       {CATEGORY_TOOLTIPS[cat] ? (
@@ -735,9 +865,9 @@ export default function BenchmarkPage() {
         </section>
       ) : viewMode === "heatmap" ? (
         <BenchmarkHeatmap
-          rows={matrix.rows}
+          rows={filteredRows}
           embeddings={embeddings}
-          categories={categories}
+          categories={effectiveCategories}
           aspects={aspects}
         />
       ) : (
@@ -752,7 +882,7 @@ export default function BenchmarkPage() {
                 >
                   Embedding
                 </th>
-                {categories.map((cat) => (
+                {effectiveCategories.map((cat) => (
                   <th
                     key={cat}
                     colSpan={aspects.length}
@@ -772,7 +902,7 @@ export default function BenchmarkPage() {
                 ))}
               </tr>
               <tr>
-                {categories.flatMap((cat) =>
+                {effectiveCategories.flatMap((cat) =>
                   aspects.map((asp) => (
                     <th
                       key={`${cat}-${asp}`}
@@ -804,7 +934,7 @@ export default function BenchmarkPage() {
                           : ""}
                       </div>
                     </td>
-                    {categories.flatMap((cat) =>
+                    {effectiveCategories.flatMap((cat) =>
                       aspects.map((asp) => {
                         const row = rowIndex.get(cellKey(emb.id, cat, asp));
                         const best = bestPerCell.get(`${cat}|${asp}`);
