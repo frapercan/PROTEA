@@ -15,6 +15,8 @@
     "reranker": "Re-ranker",
     "datasets": "Datasets",
     "jobs": "Jobs",
+    "admin": "Admin",
+    "experimentRuns": "Experiment runs",
     "maintenance": "Maintenance",
     "home": "Home",
     "data": "Reference Data",
@@ -940,6 +942,84 @@
           "kPositive": "K must be a positive integer.",
           "rowCountInvalid": "Row count must be a non-negative integer (got: {token})."
         }
+      }
+    }
+  },
+  "admin": {
+    "experimentRuns": {
+      "title": "Experiment runs",
+      "subtitle": "Narrative spine for the F-EXP campaign: every research run carries a description, hypothesis, structured config, provenance overlay, and findings. Linked to Job / EvaluationResult / RerankerModel rows by name.",
+      "adminBadge": "ADMIN",
+      "adminBadgeTooltip": "Writes are gated by the API key / bearer auth mode configured on the deployment.",
+      "newRun": "New run",
+      "filterAriaLabel": "Filter runs by status",
+      "filters": {
+        "all": "All"
+      },
+      "status": {
+        "planned": "Planned",
+        "running": "Running",
+        "done": "Done",
+        "abandoned": "Abandoned"
+      },
+      "cols": {
+        "name": "Name",
+        "status": "Status",
+        "tags": "Tags",
+        "created": "Created",
+        "actions": "Actions"
+      },
+      "actions": {
+        "edit": "Edit",
+        "delete": "Delete",
+        "cancel": "Cancel"
+      },
+      "emptyAll": "No experiment runs yet. Mint the first one to start a campaign narrative.",
+      "emptyFiltered": "No runs match this status filter.",
+      "deleteConfirm": "Delete experiment run \"{name}\"? This cannot be undone.",
+      "toasts": {
+        "created": "Experiment run \"{name}\" minted",
+        "updated": "Experiment run \"{name}\" updated",
+        "deleted": "Experiment run \"{name}\" deleted"
+      },
+      "mint": {
+        "title": "Mint a new experiment run",
+        "subtitle": "Starts in the planned state. Transition via the Edit modal once the run picks up.",
+        "submit": "Mint run",
+        "submitting": "Minting…"
+      },
+      "edit": {
+        "title": "Edit run: {name}",
+        "subtitle": "Patch narrative, status, tags, config, or provenance. Status transitions stamp started_at / finished_at automatically on the server.",
+        "submit": "Save changes",
+        "submitting": "Saving…"
+      },
+      "fields": {
+        "name": "Name",
+        "status": "Status",
+        "statusHelp": "First move to running stamps started_at. First move to done or abandoned stamps finished_at. Re-entering a state is idempotent.",
+        "description": "Description",
+        "descriptionPlaceholder": "Free-form intent text shown on the run detail page.",
+        "hypothesis": "Hypothesis",
+        "hypothesisPlaceholder": "What this run is trying to verify or falsify.",
+        "findings": "Findings",
+        "findingsHelp": "Fill in when transitioning to done to capture the writeup.",
+        "tags": "Tags",
+        "tagsHelp": "Comma or space-separated grouping tokens (e.g. ablation, K-sweep).",
+        "config": "Config (JSON)",
+        "configHelp": "Free-form JSON object: hyperparameters, feature flags, dataset slugs. Empty string clears it.",
+        "provenance": "Provenance overlay (JSON)",
+        "provenanceHelp": "Free-form JSON object merged with the server's baseline provenance (git sha, hostname, timestamp). Empty string clears it."
+      },
+      "readonly": {
+        "id": "ID",
+        "startedAt": "Started",
+        "finishedAt": "Finished"
+      },
+      "errors": {
+        "nameRequired": "Name is required.",
+        "configInvalid": "Config JSON is invalid: {reason}",
+        "provenanceInvalid": "Provenance JSON is invalid: {reason}"
       }
     }
   },
