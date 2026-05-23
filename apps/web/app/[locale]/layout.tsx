@@ -60,6 +60,15 @@ export default async function LocaleLayout({
   const { locale } = await params;
   const messages = await getMessages();
   const t = await getTranslations({ locale, namespace: "nav" });
+  // The reset-db backend route is gated by Bearer auth (returns 401 to the
+  // public). Until the frontend ships a sign-in flow that can mint that
+  // token, the destructive-looking button just produces a red error toast
+  // for every public visitor. Hide the button behind an opt-in env var.
+  // Read at SSR-time so the bundle does not leak a hidden admin affordance
+  // to anonymous clients; flip to "1" (or "true") locally to surface it.
+  const resetDbEnabled =
+    process.env.NEXT_PUBLIC_ENABLE_DB_RESET === "1" ||
+    process.env.NEXT_PUBLIC_ENABLE_DB_RESET === "true";
   return (
     <html lang={locale} suppressHydrationWarning>
       <body
@@ -82,7 +91,7 @@ export default async function LocaleLayout({
                 extras={
                   <>
                     <LanguageSwitcher />
-                    <ResetDbButton />
+                    {resetDbEnabled && <ResetDbButton />}
                   </>
                 }
                 mobileTopRight={
