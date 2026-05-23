@@ -240,13 +240,13 @@ export default function FunctionalAnnotationPage() {
 
       <section
         aria-label={t("onboarding.prereqsAriaLabel")}
-        className="mb-6"
+        className="mb-5 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2.5"
       >
-        <div className="mb-2 flex items-baseline justify-between">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+        <div className="mb-2 flex items-baseline justify-between gap-3">
+          <h2 className="text-[11px] font-semibold uppercase tracking-wider text-stone-500">
             {t("onboarding.prereqsTitle")}
           </h2>
-          <p className="text-xs text-slate-500">{t("onboarding.prereqsHelper")}</p>
+          <p className="text-[11px] text-stone-500">{t("onboarding.prereqsHelper")}</p>
         </div>
         <PipelinePrereqs steps={prereqSteps} />
       </section>
@@ -420,59 +420,45 @@ export default function FunctionalAnnotationPage() {
                     </label>
                   </div>
 
-                  {/* Computed families summary panel */}
+                  {/* Computed families summary panel.
+                      Visual encoding: families that the active configuration
+                      WILL emit are rendered with a single accent (blue-50 /
+                      blue-700); families that the pipeline could compute but
+                      the current toggles do not request appear muted
+                      (stone-100 / stone-500). Family-kind (alignment vs
+                      taxonomy vs reranker) is intentionally NOT color-coded:
+                      the only signal that carries meaning here is
+                      emitted-or-not. */}
                   <div className="mt-3 rounded-md border border-slate-200 bg-white px-3 py-2">
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 mb-1.5">
                       {t("predictTab.computedFamiliesTitle")}
                     </p>
                     <ul className="flex flex-wrap gap-1.5">
-                      {/* knn_base is always present */}
-                      {(["knn_base"] as const).map((fam) => (
-                        <li key={fam}>
-                          <code className="rounded bg-blue-50 border border-blue-200 px-1.5 py-0.5 text-[11px] font-mono text-blue-700">
-                            {fam}
+                      {([
+                        { name: "knn_base", emitted: true },
+                        { name: "alignment_nw", emitted: predComputeAlignments },
+                        { name: "alignment_sw", emitted: predComputeAlignments },
+                        { name: "taxonomy_pair", emitted: predComputeTaxonomy },
+                        { name: "taxonomy_voters", emitted: predComputeTaxonomy },
+                        { name: "lineage", emitted: predComputeRerankerFeatures },
+                        { name: "anc2vec_neighbor", emitted: predComputeRerankerFeatures },
+                        { name: "anc2vec_query", emitted: predComputeRerankerFeatures },
+                        { name: "emb_pca", emitted: predComputeRerankerFeatures },
+                        { name: "annotation_meta", emitted: predComputeRerankerFeatures },
+                      ] as const).map((fam) => (
+                        <li key={fam.name}>
+                          <code
+                            className={`rounded border px-1.5 py-0.5 text-[11px] font-mono ${
+                              fam.emitted
+                                ? "bg-blue-50 border-blue-200 text-blue-700"
+                                : "bg-stone-100 border-stone-200 text-stone-500 line-through decoration-stone-400/60"
+                            }`}
+                            title={fam.emitted ? undefined : "Not emitted by the current toggle configuration"}
+                          >
+                            {fam.name}
                           </code>
                         </li>
                       ))}
-                      {predComputeAlignments && (
-                        <>
-                          <li>
-                            <code className="rounded bg-green-50 border border-green-200 px-1.5 py-0.5 text-[11px] font-mono text-green-700">
-                              alignment_nw
-                            </code>
-                          </li>
-                          <li>
-                            <code className="rounded bg-green-50 border border-green-200 px-1.5 py-0.5 text-[11px] font-mono text-green-700">
-                              alignment_sw
-                            </code>
-                          </li>
-                        </>
-                      )}
-                      {predComputeTaxonomy && (
-                        <>
-                          <li>
-                            <code className="rounded bg-green-50 border border-green-200 px-1.5 py-0.5 text-[11px] font-mono text-green-700">
-                              taxonomy_pair
-                            </code>
-                          </li>
-                          <li>
-                            <code className="rounded bg-green-50 border border-green-200 px-1.5 py-0.5 text-[11px] font-mono text-green-700">
-                              taxonomy_voters
-                            </code>
-                          </li>
-                        </>
-                      )}
-                      {predComputeRerankerFeatures && (
-                        <>
-                          {(["lineage", "anc2vec_neighbor", "anc2vec_query", "emb_pca", "annotation_meta"] as const).map((fam) => (
-                            <li key={fam}>
-                              <code className="rounded bg-violet-50 border border-violet-200 px-1.5 py-0.5 text-[11px] font-mono text-violet-700">
-                                {fam}
-                              </code>
-                            </li>
-                          ))}
-                        </>
-                      )}
                     </ul>
                   </div>
                 </div>

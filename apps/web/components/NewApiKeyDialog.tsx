@@ -172,6 +172,16 @@ export function NewApiKeyDialog({ open, onClose, onMinted }: Props) {
               <div role="radiogroup" aria-label={t("roleLabel")} className="grid grid-cols-1 gap-1.5">
                 {ROLE_OPTIONS.map((opt) => {
                   const active = role === opt.value;
+                  // Role-dot palette mirrors the role-chip palette on the
+                  // /admin/api-keys page (amber=admin, blue=operator,
+                  // stone=viewer) so a viewer can correlate the picker with
+                  // the badge they will see in the list afterwards.
+                  const dotClass =
+                    opt.value === "admin"
+                      ? "bg-amber-500"
+                      : opt.value === "operator"
+                        ? "bg-blue-500"
+                        : "bg-stone-400";
                   return (
                     <button
                       key={opt.value}
@@ -182,23 +192,14 @@ export function NewApiKeyDialog({ open, onClose, onMinted }: Props) {
                       className={`text-left rounded-lg border px-3 py-2 transition-colors ${
                         active
                           ? "border-blue-500 bg-blue-50/70 ring-1 ring-blue-200"
-                          : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
+                          : "border-stone-200 bg-white hover:border-stone-300 hover:bg-stone-50"
                       }`}
                     >
                       <div className="flex items-center gap-2">
-                        <span
-                          aria-hidden
-                          className={`h-2 w-2 rounded-full ${
-                            opt.value === "admin"
-                              ? "bg-red-500"
-                              : opt.value === "operator"
-                                ? "bg-amber-500"
-                                : "bg-slate-400"
-                          }`}
-                        />
-                        <span className="text-sm font-semibold text-slate-900">{t(opt.labelKey)}</span>
+                        <span aria-hidden className={`h-2 w-2 rounded-full ${dotClass}`} />
+                        <span className="text-sm font-semibold text-stone-900">{t(opt.labelKey)}</span>
                       </div>
-                      <p className="mt-0.5 text-[11px] leading-snug text-slate-500">{t(opt.helpKey)}</p>
+                      <p className="mt-0.5 text-[11px] leading-snug text-stone-500">{t(opt.helpKey)}</p>
                     </button>
                   );
                 })}

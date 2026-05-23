@@ -43,14 +43,18 @@ function formatDate(iso: string | null): string {
   }
 }
 
+// Role chips are the ONLY place we keep a small color signal on this page
+// (slate viewer / blue operator / amber admin) so a quick scan tells you
+// which keys can mutate state vs which can only read. Everything else is
+// neutralized to the stone palette to match the PR #445 design system.
 function roleStyles(role: ApiKeyRole): { bg: string; text: string; ring: string; dot: string } {
   switch (role) {
     case "admin":
-      return { bg: "bg-red-50", text: "text-red-800", ring: "ring-red-200", dot: "bg-red-500" };
+      return { bg: "bg-amber-100", text: "text-amber-800", ring: "ring-amber-200", dot: "bg-amber-500" };
     case "operator":
-      return { bg: "bg-amber-50", text: "text-amber-800", ring: "ring-amber-200", dot: "bg-amber-500" };
+      return { bg: "bg-blue-100", text: "text-blue-800", ring: "ring-blue-200", dot: "bg-blue-500" };
     default:
-      return { bg: "bg-slate-100", text: "text-slate-700", ring: "ring-slate-200", dot: "bg-slate-400" };
+      return { bg: "bg-stone-100", text: "text-stone-700", ring: "ring-stone-200", dot: "bg-stone-400" };
   }
 }
 
@@ -160,13 +164,13 @@ export default function ApiKeysAdminPage() {
         {/* Header */}
         <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">{t("title")}</h1>
-            <p className="mt-1 max-w-3xl text-sm text-slate-500">{t("subtitle")}</p>
+            <h1 className="text-2xl font-bold text-stone-900">{t("title")}</h1>
+            <p className="mt-1 max-w-3xl text-sm text-stone-600">{t("subtitle")}</p>
           </div>
           <div className="flex gap-2">
             <button
               onClick={() => void load()}
-              className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+              className="rounded-md border border-stone-300 bg-white px-3 py-1.5 text-sm text-stone-700 hover:bg-stone-50"
             >
               {t("refresh")}
             </button>
@@ -181,16 +185,16 @@ export default function ApiKeysAdminPage() {
 
         {/* Filters */}
         <div className="flex flex-wrap items-center gap-3 text-sm">
-          <label className="inline-flex items-center gap-2 cursor-pointer select-none text-slate-700">
+          <label className="inline-flex items-center gap-2 cursor-pointer select-none text-stone-700">
             <input
               type="checkbox"
               checked={includeRevoked}
               onChange={(e) => setIncludeRevoked(e.target.checked)}
-              className="rounded border-slate-300"
+              className="rounded border-stone-300"
             />
             {t("includeRevoked")}
           </label>
-          <span className="ml-auto text-xs text-slate-500 tabular-nums">
+          <span className="ml-auto text-xs text-stone-500 tabular-nums">
             {t("counts", { active: activeCount, revoked: revokedCount })}
           </span>
         </div>
@@ -205,29 +209,29 @@ export default function ApiKeysAdminPage() {
         )}
 
         {/* Table — desktop */}
-        <div className="hidden md:block overflow-x-auto rounded-lg border bg-white shadow-sm">
+        <div className="hidden md:block overflow-x-auto rounded-lg border border-stone-200 bg-white shadow-sm">
           <table className="w-full text-sm">
-            <thead className="protea-thead-sticky bg-slate-50 text-left">
+            <thead className="protea-thead-sticky bg-stone-50 text-left">
               <tr>
-                <th scope="col" className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th scope="col" className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-stone-500">
                   {t("cols.name")}
                 </th>
-                <th scope="col" className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th scope="col" className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-stone-500">
                   {t("cols.role")}
                 </th>
-                <th scope="col" className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th scope="col" className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-stone-500">
                   {t("cols.prefix")}
                 </th>
-                <th scope="col" className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th scope="col" className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-stone-500">
                   {t("cols.created")}
                 </th>
-                <th scope="col" className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th scope="col" className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-stone-500">
                   {t("cols.lastUsed")}
                 </th>
-                <th scope="col" className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th scope="col" className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-stone-500">
                   {t("cols.status")}
                 </th>
-                <th scope="col" className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th scope="col" className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-stone-500">
                   {t("cols.actions")}
                 </th>
               </tr>
@@ -236,7 +240,7 @@ export default function ApiKeysAdminPage() {
               {loading && Array.from({ length: 4 }).map((_, i) => <SkeletonTableRow key={i} cols={7} />)}
               {!loading && sorted.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-sm text-slate-600">
+                  <td colSpan={7} className="px-4 py-10 text-center text-sm text-stone-600">
                     <p>{t("empty")}</p>
                     <button
                       onClick={() => setShowDialog(true)}
@@ -253,26 +257,26 @@ export default function ApiKeysAdminPage() {
                 return (
                   <tr
                     key={k.id}
-                    className={`border-t transition-colors ${revoked ? "bg-slate-50/60 text-slate-500" : "hover:bg-blue-50/60"}`}
+                    className={`border-t border-stone-200 transition-colors ${revoked ? "bg-stone-50/60 text-stone-500" : "hover:bg-stone-50"}`}
                   >
                     <td className="px-3 py-2.5">
-                      <span className={`font-mono text-[13px] ${revoked ? "text-slate-500" : "text-slate-900"}`}>
+                      <span className={`font-mono text-[13px] ${revoked ? "text-stone-500" : "text-stone-900"}`}>
                         {k.name}
                       </span>
                     </td>
                     <td className="px-3 py-2.5">
                       <RoleBadge role={r} />
                     </td>
-                    <td className="px-3 py-2.5 font-mono text-[11px] text-slate-600">
+                    <td className="px-3 py-2.5 font-mono text-[11px] text-stone-600">
                       {k.prefix}…
                     </td>
-                    <td className="px-3 py-2.5 text-xs">{formatDate(k.created_at)}</td>
-                    <td className="px-3 py-2.5 text-xs">
-                      {k.last_used_at ? formatDate(k.last_used_at) : <span className="text-slate-400">{t("neverUsed")}</span>}
+                    <td className="px-3 py-2.5 text-xs text-stone-700">{formatDate(k.created_at)}</td>
+                    <td className="px-3 py-2.5 text-xs text-stone-700">
+                      {k.last_used_at ? formatDate(k.last_used_at) : <span className="text-stone-400">{t("neverUsed")}</span>}
                     </td>
                     <td className="px-3 py-2.5">
                       {revoked ? (
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-stone-100 px-2 py-0.5 text-[11px] font-medium text-stone-600">
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-stone-100 px-2 py-0.5 text-[11px] font-medium text-stone-600 ring-1 ring-inset ring-stone-200">
                           {t("statusRevoked")}
                         </span>
                       ) : (
@@ -288,7 +292,7 @@ export default function ApiKeysAdminPage() {
                           type="button"
                           onClick={() => setConfirmTarget(k)}
                           disabled={revoking === k.id}
-                          className="inline-flex items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-2.5 py-1 text-[12px] font-semibold text-red-700 hover:bg-red-100 hover:border-red-300 disabled:opacity-50 transition-colors"
+                          className="inline-flex items-center gap-1.5 rounded-md border border-stone-300 bg-white px-2.5 py-1 text-[12px] font-semibold text-stone-700 hover:bg-stone-50 hover:border-stone-400 disabled:opacity-50 transition-colors"
                         >
                           {revoking === k.id ? t("revoking") : t("revoke")}
                         </button>
@@ -304,13 +308,13 @@ export default function ApiKeysAdminPage() {
         {/* Mobile card list */}
         <div className="md:hidden space-y-2">
           {loading && Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="rounded-lg border bg-white p-3 shadow-sm animate-pulse space-y-2">
-              <div className="h-4 w-2/3 rounded bg-slate-200" />
-              <div className="h-3 w-1/2 rounded bg-slate-100" />
+            <div key={i} className="rounded-lg border border-stone-200 bg-white p-3 shadow-sm animate-pulse space-y-2">
+              <div className="h-4 w-2/3 rounded bg-stone-200" />
+              <div className="h-3 w-1/2 rounded bg-stone-100" />
             </div>
           ))}
           {!loading && sorted.length === 0 && (
-            <div className="rounded-lg border bg-white px-4 py-8 text-center text-sm text-slate-600 shadow-sm">
+            <div className="rounded-lg border border-stone-200 bg-white px-4 py-8 text-center text-sm text-stone-600 shadow-sm">
               {t("empty")}
             </div>
           )}
@@ -320,17 +324,17 @@ export default function ApiKeysAdminPage() {
             return (
               <div
                 key={k.id}
-                className={`rounded-lg border p-3 shadow-sm ${revoked ? "bg-slate-50/60" : "bg-white"}`}
+                className={`rounded-lg border border-stone-200 p-3 shadow-sm ${revoked ? "bg-stone-50/60" : "bg-white"}`}
               >
                 <div className="flex items-start justify-between gap-2">
-                  <span className="font-mono text-[13px] font-medium text-slate-900 break-all">{k.name}</span>
+                  <span className="font-mono text-[13px] font-medium text-stone-900 break-all">{k.name}</span>
                   <RoleBadge role={r} />
                 </div>
-                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-600">
+                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-stone-600">
                   <span className="font-mono">{k.prefix}…</span>
                   <span>{formatDate(k.created_at)}</span>
                 </div>
-                <div className="mt-1 text-[11px] text-slate-500">
+                <div className="mt-1 text-[11px] text-stone-500">
                   {t("cols.lastUsed")}: {k.last_used_at ? formatDate(k.last_used_at) : t("neverUsed")}
                 </div>
                 <div className="mt-2 flex items-center justify-between">
@@ -347,7 +351,7 @@ export default function ApiKeysAdminPage() {
                       type="button"
                       onClick={() => setConfirmTarget(k)}
                       disabled={revoking === k.id}
-                      className="inline-flex items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-2.5 py-1 text-[12px] font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50"
+                      className="inline-flex items-center gap-1.5 rounded-md border border-stone-300 bg-white px-2.5 py-1 text-[12px] font-semibold text-stone-700 hover:bg-stone-50 disabled:opacity-50"
                     >
                       {revoking === k.id ? t("revoking") : t("revoke")}
                     </button>
@@ -358,7 +362,7 @@ export default function ApiKeysAdminPage() {
           })}
         </div>
 
-        <p className="text-xs text-slate-500">{t("footnote")}</p>
+        <p className="text-xs text-stone-500">{t("footnote")}</p>
       </div>
 
       <NewApiKeyDialog
@@ -401,17 +405,17 @@ function ForbiddenPanel({
           role="alert"
           className="rounded-xl border border-stone-200 bg-white p-6 shadow-sm text-center"
         >
-          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-red-50 text-red-600">
+          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-stone-100 text-stone-600">
             <svg className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
             </svg>
           </div>
-          <h1 className="text-lg font-semibold text-slate-900">{t("forbiddenTitle")}</h1>
-          <p className="mt-1 text-sm text-slate-600">{t("forbiddenBody")}</p>
-          <p className="mt-2 text-xs text-slate-500">{t("forbiddenRoleLabel")}: <span className="font-mono">{role}</span></p>
+          <h1 className="text-lg font-semibold text-stone-900">{t("forbiddenTitle")}</h1>
+          <p className="mt-1 text-sm text-stone-600">{t("forbiddenBody")}</p>
+          <p className="mt-2 text-xs text-stone-500">{t("forbiddenRoleLabel")}: <span className="font-mono">{role}</span></p>
           <Link
             href={`/${locale}`}
-            className="mt-5 inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+            className="mt-5 inline-flex items-center gap-1.5 rounded-md bg-stone-900 px-4 py-2 text-sm font-semibold text-white hover:bg-stone-800"
           >
             {t("forbiddenBackHome")}
           </Link>
@@ -451,29 +455,33 @@ function RevokeConfirmDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="w-full max-w-sm rounded-xl border bg-white p-6 shadow-xl"
+        className="w-full max-w-sm rounded-xl border border-stone-200 bg-white p-6 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 id={titleId} className="text-base font-semibold text-slate-900">
+        <h2 id={titleId} className="text-base font-semibold text-stone-900">
           {t("title")}
         </h2>
-        <p className="mt-2 text-sm text-slate-500">{t("body")}</p>
+        <p className="mt-2 text-sm text-stone-600">{t("body")}</p>
         <div className="mt-3 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-xs">
-          <div className="font-mono text-slate-800 break-all">{target.name}</div>
-          <div className="mt-0.5 font-mono text-[11px] text-slate-500">{target.prefix}…</div>
+          <div className="font-mono text-stone-800 break-all">{target.name}</div>
+          <div className="mt-0.5 font-mono text-[11px] text-stone-500">{target.prefix}…</div>
         </div>
         <div className="mt-5 flex justify-end gap-2">
           <button
             onClick={handleClose}
             disabled={loading}
-            className="rounded-md border px-4 py-2 text-sm hover:bg-slate-50 disabled:opacity-50"
+            className="rounded-md border border-stone-300 px-4 py-2 text-sm text-stone-700 hover:bg-stone-50 disabled:opacity-50"
           >
             {t("cancel")}
           </button>
+          {/* The final confirm keeps a red destructive signal: this is the
+              only "no take-backs" action on the page and the standard
+              destructive-button pattern (slate-rest, red-on-confirm) is
+              load-bearing here. */}
           <button
             onClick={onConfirm}
             disabled={loading}
-            className="rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+            className="rounded-md bg-rose-700 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-800 disabled:opacity-50"
           >
             {loading ? t("confirming") : t("confirm")}
           </button>
