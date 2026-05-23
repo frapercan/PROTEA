@@ -120,8 +120,8 @@ export async function bulkCancelJobs(
       await cancelJob(id);
       ok.push(id);
       onProgress?.(i + 1, ids.length, id);
-    } catch (e: any) {
-      const err = String(e?.message ?? e);
+    } catch (e: unknown) {
+      const err = e instanceof Error ? e.message : String(e);
       failed.push({ id, error: err });
       onProgress?.(i + 1, ids.length, id, err);
     }
