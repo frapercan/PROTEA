@@ -584,25 +584,6 @@ export function getReranker(id: string) {
   return http<RerankerModel>(`/scoring/rerankers/${id}`);
 }
 
-export function trainReranker(body: {
-  name: string;
-  prediction_set_id: string;
-  evaluation_set_id: string;
-  category?: string;
-  aspect?: string | null;
-  neg_pos_ratio?: number | null;
-  extra_pairs?: { prediction_set_id: string; evaluation_set_id: string }[];
-}) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 5 * 60_000); // 5 min
-  return http<RerankerModel>(`/scoring/rerankers/train`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    signal: controller.signal,
-  }).finally(() => clearTimeout(timer));
-}
-
 export async function deleteReranker(id: string) {
   const res = await fetch(`${baseUrl()}/scoring/rerankers/${id}`, {
     cache: "no-store",
@@ -633,17 +614,6 @@ export function getRerankerMetrics(
   q.set("evaluation_set_id", evaluationSetId);
   q.set("category", category);
   return http<Record<string, any>>(`/scoring/prediction-sets/${setId}/reranker-metrics?${q.toString()}`);
-}
-
-export function getTrainingDataTsvUrl(
-  setId: string,
-  evaluationSetId: string,
-  category: string = "nk",
-): string {
-  const q = new URLSearchParams();
-  q.set("evaluation_set_id", evaluationSetId);
-  q.set("category", category);
-  return `${baseUrl()}/scoring/prediction-sets/${setId}/training-data.tsv?${q.toString()}`;
 }
 
 // ---------------------------------------------------------------------------
