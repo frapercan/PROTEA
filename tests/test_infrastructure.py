@@ -220,10 +220,7 @@ class TestCreateApp:
         # OpenAPI must only advertise the canonical path.
         schema_paths = set(app.openapi().get("paths", {}).keys())
         assert any(p.startswith("/v1/jobs") for p in schema_paths)
-        assert not any(
-            p.startswith("/jobs") and not p.startswith("/v1/")
-            for p in schema_paths
-        )
+        assert not any(p.startswith("/jobs") and not p.startswith("/v1/") for p in schema_paths)
 
     def test_health_endpoint_registered(self):
         from protea.api.app import create_app
@@ -350,6 +347,29 @@ class TestCreateApp:
         called_root = mock_load.call_args[0][0]
         assert isinstance(called_root, Path)
         assert called_root.is_absolute()
+
+    def test_lifespan_prewarms_protein_stats_on_startup(self):
+        """The startup hook must call prewarm_protein_stats(factory) so the
+        first /v1/proteins/stats request never hits the 30s cold compute."""
+        from fastapi.testclient import TestClient
+
+        from protea.api.app import create_app
+
+        mock_settings = MagicMock()
+        mock_settings.db_url = "sqlite:///:memory:"
+        mock_settings.amqp_url = "amqp://guest:guest@localhost/"
+        mock_factory = MagicMock()
+
+        with (
+            patch("protea.api.app.load_settings", return_value=mock_settings),
+            patch("protea.api.app.build_session_factory", return_value=mock_factory),
+            patch("protea.api.app.prewarm_protein_stats") as prewarm,
+        ):
+            app = create_app(Path("/fake/root"))
+            with TestClient(app):
+                pass  # entering the context fires the lifespan startup
+
+        prewarm.assert_called_once_with(mock_factory)
 
     def test_sphinx_mount_when_directory_exists(self, tmp_path):
         """When docs/build/html exists, /sphinx is mounted."""

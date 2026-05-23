@@ -1,6 +1,10 @@
 # protea/api/app.py
 from __future__ import annotations
 
+import asyncio
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -33,6 +37,10 @@ from protea.api.routers import scoring as scoring_router
 from protea.api.routers import showcase as showcase_router
 from protea.api.routers import stack as stack_router
 from protea.api.routers import support as support_router
+from protea.api.routers.proteins import (
+    PROTEIN_STATS_TTL_SECONDS,
+    prewarm_protein_stats,
+)
 from protea.core.operation_catalog import build_operation_registry
 from protea.infrastructure.benchmark_config import load_benchmark_config
 from protea.infrastructure.session import build_session_factory
@@ -290,6 +298,40 @@ def _mount_static_assets(app: FastAPI, project_root: Path) -> None:
         _mount_sibling_docs(app, docs_build_root)
 
 
+# Refresh proteins:stats one minute before the 5-min TTL so the cache is
+# never cold from a user's perspective; cold computes take 30s+ and
+# overshoot the ngrok 30s upstream deadline.
+_STATS_REFRESH_INTERVAL_SECONDS = max(60.0, PROTEIN_STATS_TTL_SECONDS - 60.0)
+
+_log = logging.getLogger(__name__)
+
+
+async def _safe_prewarm(factory) -> None:  # noqa: ANN001 - sessionmaker factory
+    try:
+        await asyncio.to_thread(prewarm_protein_stats, factory)
+    except Exception as exc:  # pragma: no cover - logged for ops
+        _log.warning("proteins:stats prewarm failed: %s", exc)
+
+
+def _build_lifespan(factory):  # noqa: ANN001 - sessionmaker factory, mocked in tests
+    @asynccontextmanager
+    async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
+        await _safe_prewarm(factory)
+
+        async def _refresh_loop() -> None:
+            while True:
+                await asyncio.sleep(_STATS_REFRESH_INTERVAL_SECONDS)
+                await _safe_prewarm(factory)
+
+        task = asyncio.create_task(_refresh_loop(), name="proteins-stats-refresh")
+        try:
+            yield
+        finally:
+            task.cancel()
+
+    return _lifespan
+
+
 def create_app(project_root: Path | None = None) -> FastAPI:
     if project_root is None:
         project_root = Path(__file__).resolve().parents[2]
@@ -308,6 +350,7 @@ def create_app(project_root: Path | None = None) -> FastAPI:
         description=_API_DESCRIPTION,
         contact={"name": "PROTEA Team", "email": "contact@protea.example.org"},
         openapi_tags=_OPENAPI_TAGS,
+        lifespan=_build_lifespan(factory),
     )
     app.state.session_factory = factory
     app.state.amqp_url = settings.amqp_url
