@@ -128,6 +128,19 @@ Environment variable overrides
        https://protea.ngrok.app``. Empty values are stripped; the
        resolved tuple is read by
        ``protea.api.app._register_middlewares`` at startup.
+   * - ``PROTEA_PAIR_FEATURE_WORKERS``
+     - Number of parallel worker processes for pairwise alignment feature
+       computation inside ``export_research_dataset`` (PR #421). Defaults
+       to the host CPU count. Set to ``1`` to force serial execution
+       (useful for debugging or memory-constrained hosts). Read by
+       :mod:`protea.core._pair_feature_compute`.
+   * - ``PROTEA_ALIGN_CACHE_DIR``
+     - Directory for the persistent SQLite alignment cache used by
+       ``export_research_dataset`` to avoid redundant NW/SW computations
+       across K-slices of the same PLM (PR #421). Defaults to
+       ``protea/artifacts/align_cache`` inside the project root. Set to
+       an empty string to disable caching entirely. Read by
+       :mod:`protea.core._pair_feature_compute`.
 
 Frontend
 --------
@@ -136,9 +149,17 @@ Frontend
 
    # apps/web/.env.local
    NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
+   # NEXT_PUBLIC_FARM_API_URL=http://localhost:8801  # override only for non-standard deployments
 
-This is the only configuration the Next.js frontend needs. It is injected
-at build time by Next.js and embedded in the client bundle.
+``NEXT_PUBLIC_API_URL`` is the only variable required for normal
+operation. It is injected at build time by Next.js and embedded in the
+client bundle.
+
+``NEXT_PUBLIC_FARM_API_URL`` overrides the farm dashboard API origin
+when the Next.js app cannot reach it through the default same-origin
+proxy (``/farm-api/*`` rewrites to ``http://localhost:8801`` server-side).
+Setting this variable is only necessary in non-standard deployments where
+the farm API runs on a different host or port (PR #443).
 
 Integration test environment variables
 ---------------------------------------

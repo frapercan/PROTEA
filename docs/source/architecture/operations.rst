@@ -1324,6 +1324,179 @@ under its own namespace (``train_reranker_auto.*`` →
 - ``export_research_dataset.completed``: final summary including the
   three resulting URIs (``file://…`` or ``s3://bucket/key``).
 
+.. rubric:: InterPro annotation pipeline (IP.2/3/4)
+
+Three operations form the **InterPro-based functional-enrichment stage**.
+They run sequentially: first load the InterPro2GO mapping (IP.4a), then
+annotate proteins with InterProScan (IP.2/3), then propagate GO terms
+(IP.4b). All three are registered in the ``OperationRegistry`` and run on
+the ``protea.jobs`` queue. The only prerequisite outside PROTEA is an
+InterProScan binary install on the host (see the ``binary_path`` payload
+field below).
+
+load_interpro_go_mapping
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Operation name:** ``load_interpro_go_mapping``; queue: ``protea.jobs``
+
+| **Tables touched:** writes ``interpro_go_mapping`` (upsert).
+
+Downloads the EBI ``interpro2go`` flat file and upserts
+``(ipr_accession, go_id, source_version)`` rows into the
+``interpro_go_mapping`` table. The operation is idempotent: the unique
+constraint ``uq_interpro_go_mapping_pair`` on ``(ipr_accession, go_id,
+source_version)`` means that re-running for the same release is a no-op.
+
+.. list-table:: Payload fields
+   :header-rows: 1
+   :widths: 30 20 50
+
+   * - Field
+     - Default
+     - Description
+   * - ``source_version``
+     - *(required)*
+     - InterPro release tag stored with every row, e.g.
+       ``"InterPro-104.0"``. Used as the join key by
+       ``predict_go_terms_from_interpro``.
+   * - ``mapping_url``
+     - EBI FTP endpoint
+     - URL of the ``interpro2go`` flat file. Defaults to
+       ``https://ftp.ebi.ac.uk/pub/databases/GO/goa/external2go/interpro2go``.
+   * - ``evidence``
+     - ``"IEA"``
+     - Evidence code stored with each mapping row.
+   * - ``timeout_seconds``
+     - ``120``
+     - HTTP request timeout in seconds.
+   * - ``chunk_size``
+     - ``1000``
+     - Upsert batch size.
+
+The result dict reports ``rows_parsed``, ``rows_inserted``, and
+``rows_skipped_duplicate``.
+
+run_interproscan_batch
+~~~~~~~~~~~~~~~~~~~~~~~
+
+**Operation name:** ``run_interproscan_batch``; queue: ``protea.jobs``
+
+| **Tables touched:** writes ``interpro_annotation`` (insert).
+
+Annotates proteins in fixed-size chunks via an InterProScan subprocess
+(IP.3). Inputs are resolved from either a ``QuerySet`` or an explicit
+accession list. An optional ``ipr_release_floor`` makes the run resumable:
+proteins whose latest persisted annotation already meets the floor are
+skipped, so re-dispatching the same payload picks up where the prior run
+left off.
+
+.. list-table:: Payload fields
+   :header-rows: 1
+   :widths: 30 20 50
+
+   * - Field
+     - Default
+     - Description
+   * - ``query_set_id``
+     - ``null``
+     - UUID of a ``QuerySet``. Exactly one of ``query_set_id`` /
+       ``accessions`` must be provided.
+   * - ``accessions``
+     - ``null``
+     - Explicit list of UniProt accessions. Exactly one of
+       ``query_set_id`` / ``accessions`` must be provided.
+   * - ``ipr_release_floor``
+     - ``null``
+     - Lexicographic floor on ``ipr_release``. Proteins already
+       annotated at or above this release are skipped.
+   * - ``chunk_size``
+     - ``50``
+     - Proteins per ``interproscan.sh`` invocation. Small enough to
+       bound subprocess wall-clock; large enough to amortise JVM
+       startup.
+   * - ``timeout_seconds``
+     - ``3600``
+     - Per-chunk subprocess timeout in seconds.
+   * - ``binary_path``
+     - ``null``
+     - Full path to the ``interproscan.sh`` executable. Required if
+       it is not on ``$PATH``.
+   * - ``extra_args``
+     - ``[]``
+     - Additional arguments forwarded to ``interproscan.sh``.
+   * - ``commit_every_chunk``
+     - ``true``
+     - Commit after each chunk so partial progress is durable.
+
+The result dict reports ``chunks_done``, ``proteins_processed``,
+``proteins_skipped``, ``annotations_inserted``, and
+``ipr_releases_seen``. Progress events (``run_interproscan_batch.chunk_done``)
+are emitted after each chunk.
+
+predict_go_terms_from_interpro
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Operation name:** ``predict_go_terms_from_interpro``; queue: ``protea.jobs``
+
+| **Tables touched:** writes one ``PredictionSet`` row and ``GOPrediction`` rows.
+
+A parallel-signal GO term predictor (IP.4b). Given a set of query proteins
+whose ``InterProAnnotation`` rows are already in the DB, the operation:
+
+1. Joins each protein's distinct InterPro accessions against
+   ``interpro_go_mapping`` at the requested ``source_version``.
+2. Resolves GO IDs against the target ``OntologySnapshot``.
+3. Aggregates per-protein votes: N distinct InterPro entries on the same
+   protein mapping to the same GO term yield a vote count of N, with
+   ``distance = 1.0 / N`` (matching the KNN convention).
+4. Persists the result as a new ``PredictionSet`` tagged
+   ``meta["algorithm"] = "interpro_propagation"``.
+
+The operation is single-stage (no batch fan-out): the three-table join is
+a cheap index scan and the per-protein InterPro hit count is O(10-100).
+
+.. list-table:: Payload fields
+   :header-rows: 1
+   :widths: 30 20 50
+
+   * - Field
+     - Default
+     - Description
+   * - ``embedding_config_id``
+     - *(required)*
+     - UUID of the ``EmbeddingConfig`` used as the trace pointer for
+       the new ``PredictionSet``. The model is not re-run; this field
+       satisfies the NOT NULL FK on the table.
+   * - ``annotation_set_id``
+     - *(required)*
+     - UUID of the ``AnnotationSet`` that acts as the trace pointer
+       for the new ``PredictionSet``.
+   * - ``ontology_snapshot_id``
+     - *(required)*
+     - UUID of the ``OntologySnapshot`` used to resolve GO IDs.
+   * - ``source_version``
+     - *(required)*
+     - InterPro2GO mapping release tag (must match a previously loaded
+       ``load_interpro_go_mapping`` run, e.g. ``"InterPro-104.0"``).
+   * - ``query_set_id``
+     - ``null``
+     - UUID of a ``QuerySet``. At least one of ``query_set_id`` /
+       ``query_accessions`` is required; both may be set (union used).
+   * - ``query_accessions``
+     - ``null``
+     - Explicit list of UniProt accessions.
+   * - ``ipr_release_floor``
+     - ``null``
+     - If set, only ``InterProAnnotation`` rows whose ``ipr_release``
+       is at or above this floor contribute to the join.
+   * - ``chunk_size``
+     - ``1000``
+     - Accession batch size for the three-table join.
+
+The result dict reports ``prediction_set_id``, ``proteins_with_ipr``,
+``proteins_with_predictions``, ``candidate_pairs``, and
+``predictions_inserted``.
+
 Ephemeral consumer operations
 -----------------------------
 
@@ -1342,7 +1515,7 @@ batch queues. They differ from the operations documented above in three ways:
 
 They still implement the ``Operation`` protocol and are registered alongside
 the other eleven in ``protea/core/operation_catalog.py``. Bringing the
-total to **15 registered operations** (11 job-backed + 4 ephemeral).
+total to **18 registered operations** (14 job-backed + 4 ephemeral).
 
 compute_embeddings_batch
 ~~~~~~~~~~~~~~~~~~~~~~~~
