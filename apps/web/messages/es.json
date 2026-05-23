@@ -139,6 +139,31 @@
     "jobId": "ID del trabajo",
     "created": "Creado",
     "activeJobs": "{count} activos",
+    "filters": {
+      "show": "Mostrar",
+      "childJobs": "Subtrabajos",
+      "childJobsHelp": "Mostrar los subtrabajos por lotes lanzados por un coordinador (p. ej. fragmentos de compute_embeddings_batch). Ocultos por defecto para mantener legible la vista de la cola.",
+      "batchJobs": "Cola por lotes",
+      "batchJobsHelp": "Mostrar los trabajos de la cola protea.embeddings.batch (fragmentos GPU de alto rendimiento). Ocultos por defecto; actívalo cuando persigas un fragmento atascado."
+    },
+    "bulk": {
+      "regionLabel": "Acciones masivas sobre trabajos",
+      "selectAllLabel": "Seleccionar todos los trabajos de la vista actual",
+      "selectRowLabel": "Seleccionar el trabajo {id}",
+      "selectedCount": "{count} seleccionados",
+      "eligible": "Elegibles: {cancel} cancelables, {retry} reintentables",
+      "cancelButton": "Cancelar seleccionados ({count})",
+      "retryButton": "Reintentar seleccionados ({count})",
+      "clear": "Limpiar",
+      "starting": "{action} {count} trabajo(s)…",
+      "cancelling": "Cancelando",
+      "retrying": "Reintentando",
+      "inflight": "{action} {done} de {total}…",
+      "itemFailed": "{id}: {error}",
+      "allOk": "{action} {count} trabajo(s): hecho.",
+      "someFailed": "Hecho: {ok} ok, {failed} fallidos (ver avisos).",
+      "okFailed": "{ok} ok · {failed} fallidos"
+    },
     "jobDetail": {
       "title": "Detalle del trabajo",
       "backToJobs": "← Trabajos",

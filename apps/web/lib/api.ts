@@ -96,6 +96,64 @@ export function cancelJob(id: string) {
   });
 }
 
+// Retry a job. The backend `/jobs/{id}/retry` route is wired in PROTEA via
+// OperationRegistry; if a particular deployment hasn't shipped it yet, the
+// `http<>` helper will surface a clean error message that the bulk-progress
+// toast can show per-job without aborting the rest of the batch.
+export function retryJob(id: string) {
+  return http<{ id: string; status: string }>(`/jobs/${id}/retry`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+}
+
+// ─── Bulk job ops (sequential to be gentle on the API + RabbitMQ) ──
+//
+// The conductor today cancels orphan jobs one-by-one with raw curl: this
+// turns that loop into a UI affordance. We deliberately serialise so a
+// flaky RPC on one id never DDOSes the API or amplifies a wedged worker;
+// per-job errors surface in `results[i].error` but do NOT abort the run.
+
+export type BulkJobResult = {
+  id: string;
+  ok: boolean;
+  status?: string;
+  error?: string;
+};
+
+export type BulkProgress = (done: number, total: number, last: BulkJobResult) => void;
+
+async function bulkRun(
+  ids: string[],
+  fn: (id: string) => Promise<{ id: string; status: string }>,
+  onProgress?: BulkProgress,
+): Promise<BulkJobResult[]> {
+  const results: BulkJobResult[] = [];
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i];
+    let entry: BulkJobResult;
+    try {
+      const r = await fn(id);
+      entry = { id, ok: true, status: r.status };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      entry = { id, ok: false, error: msg };
+    }
+    results.push(entry);
+    onProgress?.(i + 1, ids.length, entry);
+  }
+  return results;
+}
+
+export function bulkCancelJobs(ids: string[], onProgress?: BulkProgress) {
+  return bulkRun(ids, cancelJob, onProgress);
+}
+
+export function bulkRetryJobs(ids: string[], onProgress?: BulkProgress) {
+  return bulkRun(ids, retryJob, onProgress);
+}
+
 export type EmbeddingConfig = {
   id: string;
   model_name: string;

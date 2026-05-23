@@ -139,6 +139,31 @@
     "jobId": "Job ID",
     "created": "Created",
     "activeJobs": "{count} active",
+    "filters": {
+      "show": "Show",
+      "childJobs": "Child jobs",
+      "childJobsHelp": "Show batched sub-jobs spawned by a coordinator (e.g. compute_embeddings_batch shards). Hidden by default to keep the queue overview readable.",
+      "batchJobs": "Batch queue",
+      "batchJobsHelp": "Show jobs on the protea.embeddings.batch queue (high-throughput GPU shards). Hidden by default; toggle on when chasing a wedged shard."
+    },
+    "bulk": {
+      "regionLabel": "Bulk job actions",
+      "selectAllLabel": "Select all jobs in current view",
+      "selectRowLabel": "Select job {id}",
+      "selectedCount": "{count} selected",
+      "eligible": "Eligible: {cancel} cancellable, {retry} retryable",
+      "cancelButton": "Cancel selected ({count})",
+      "retryButton": "Retry selected ({count})",
+      "clear": "Clear",
+      "starting": "{action} {count} job(s)…",
+      "cancelling": "Cancelling",
+      "retrying": "Retrying",
+      "inflight": "{action} {done} of {total}…",
+      "itemFailed": "{id}: {error}",
+      "allOk": "{action} {count} job(s) — done.",
+      "someFailed": "Done: {ok} ok, {failed} failed (see toasts).",
+      "okFailed": "{ok} ok · {failed} failed"
+    },
     "jobDetail": {
       "title": "Job Detail",
       "backToJobs": "← Jobs",

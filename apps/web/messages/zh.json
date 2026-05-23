@@ -136,6 +136,31 @@
     "jobId": "任务 ID",
     "created": "创建时间",
     "activeJobs": "{count} 个活跃",
+    "filters": {
+      "show": "显示",
+      "childJobs": "子任务",
+      "childJobsHelp": "显示由协调器派生的批量子任务（例如 compute_embeddings_batch 分片）。默认隐藏，以保持队列概览的可读性。",
+      "batchJobs": "批量队列",
+      "batchJobsHelp": "显示 protea.embeddings.batch 队列上的任务（高吞吐 GPU 分片）。默认隐藏；在排查卡住的分片时再开启。"
+    },
+    "bulk": {
+      "regionLabel": "任务批量操作",
+      "selectAllLabel": "选择当前视图中的全部任务",
+      "selectRowLabel": "选择任务 {id}",
+      "selectedCount": "已选 {count} 个",
+      "eligible": "可操作：{cancel} 个可取消，{retry} 个可重试",
+      "cancelButton": "取消所选 ({count})",
+      "retryButton": "重试所选 ({count})",
+      "clear": "清空",
+      "starting": "正在{action} {count} 个任务…",
+      "cancelling": "取消",
+      "retrying": "重试",
+      "inflight": "正在{action} {done}/{total}…",
+      "itemFailed": "{id}：{error}",
+      "allOk": "{action}完成：{count} 个任务。",
+      "someFailed": "完成：成功 {ok} 个，失败 {failed} 个（详见提示）。",
+      "okFailed": "成功 {ok} · 失败 {failed}"
+    },
     "jobDetail": {
       "title": "任务详情",
       "backToJobs": "← 任务",

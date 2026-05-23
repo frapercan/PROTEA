@@ -136,6 +136,31 @@
     "jobId": "ID do Job",
     "created": "Criado",
     "activeJobs": "{count} ativo(s)",
+    "filters": {
+      "show": "Mostrar",
+      "childJobs": "Subjobs",
+      "childJobsHelp": "Mostra os subjobs em lote disparados por um coordenador (p. ex. shards de compute_embeddings_batch). Ocultos por padrão para manter a visão da fila legível.",
+      "batchJobs": "Fila em lote",
+      "batchJobsHelp": "Mostra jobs da fila protea.embeddings.batch (shards GPU de alta vazão). Ocultos por padrão; ative ao caçar um shard travado."
+    },
+    "bulk": {
+      "regionLabel": "Ações em lote sobre jobs",
+      "selectAllLabel": "Selecionar todos os jobs da vista atual",
+      "selectRowLabel": "Selecionar o job {id}",
+      "selectedCount": "{count} selecionado(s)",
+      "eligible": "Elegíveis: {cancel} canceláveis, {retry} repetíveis",
+      "cancelButton": "Cancelar selecionados ({count})",
+      "retryButton": "Repetir selecionados ({count})",
+      "clear": "Limpar",
+      "starting": "{action} {count} job(s)…",
+      "cancelling": "Cancelando",
+      "retrying": "Repetindo",
+      "inflight": "{action} {done} de {total}…",
+      "itemFailed": "{id}: {error}",
+      "allOk": "{action} {count} job(s): concluído.",
+      "someFailed": "Concluído: {ok} ok, {failed} com falha (ver avisos).",
+      "okFailed": "{ok} ok · {failed} com falha"
+    },
     "jobDetail": {
       "title": "Detalhes do Job",
       "backToJobs": "← Jobs",

@@ -136,6 +136,31 @@
     "jobId": "Job-ID",
     "created": "Erstellt",
     "activeJobs": "{count} aktiv",
+    "filters": {
+      "show": "Anzeigen",
+      "childJobs": "Untergeordnete Jobs",
+      "childJobsHelp": "Zeigt von einem Koordinator gestartete Batch-Unterjobs an (z. B. compute_embeddings_batch-Shards). Standardmäßig ausgeblendet, damit die Warteschlangenübersicht lesbar bleibt.",
+      "batchJobs": "Batch-Warteschlange",
+      "batchJobsHelp": "Zeigt Jobs der Warteschlange protea.embeddings.batch (GPU-Shards mit hohem Durchsatz). Standardmäßig ausgeblendet; aktivieren, um einen festsitzenden Shard zu untersuchen."
+    },
+    "bulk": {
+      "regionLabel": "Massenaktionen für Jobs",
+      "selectAllLabel": "Alle Jobs der aktuellen Ansicht auswählen",
+      "selectRowLabel": "Job {id} auswählen",
+      "selectedCount": "{count} ausgewählt",
+      "eligible": "Verfügbar: {cancel} abbrechbar, {retry} wiederholbar",
+      "cancelButton": "Auswahl abbrechen ({count})",
+      "retryButton": "Auswahl wiederholen ({count})",
+      "clear": "Leeren",
+      "starting": "{action} {count} Job(s)…",
+      "cancelling": "Abbrechen",
+      "retrying": "Wiederholen",
+      "inflight": "{action} {done} von {total}…",
+      "itemFailed": "{id}: {error}",
+      "allOk": "{action} {count} Job(s): fertig.",
+      "someFailed": "Fertig: {ok} ok, {failed} fehlgeschlagen (siehe Hinweise).",
+      "okFailed": "{ok} ok · {failed} fehlgeschlagen"
+    },
     "jobDetail": {
       "title": "Job-Details",
       "backToJobs": "← Jobs",
