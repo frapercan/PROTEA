@@ -256,6 +256,7 @@ export function launchPredictGoTerms(body: {
   // Feature engineering
   compute_alignments?: boolean;
   compute_taxonomy?: boolean;
+  compute_reranker_features?: boolean;
   // Per-aspect KNN indices
   aspect_separated_knn?: boolean;
 }) {
@@ -628,12 +629,22 @@ export type AnnotateResult = {
 };
 
 export async function annotateProteins(
-  input: { file?: File; fastaText?: string; name?: string },
+  input: {
+    file?: File;
+    fastaText?: string;
+    name?: string;
+    /** Enable the full reranker feature bundle (lineage/anc2vec/emb_pca/annotation_meta). Default: true. */
+    computeRerankerFeatures?: boolean;
+  },
 ): Promise<AnnotateResult> {
   const form = new FormData();
   if (input.file) form.append("file", input.file);
   if (input.fastaText) form.append("fasta_text", input.fastaText);
   form.append("name", input.name ?? "Quick annotation");
+  form.append(
+    "compute_reranker_features",
+    String(input.computeRerankerFeatures ?? true),
+  );
   const res = await fetch(`${baseUrl()}/annotate`, {
     cache: "no-store",
     method: "POST",

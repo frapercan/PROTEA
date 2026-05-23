@@ -64,6 +64,7 @@ export default function FunctionalAnnotationPage() {
   const [predAspectSeparatedKnn, setPredAspectSeparatedKnn] = useState(true);
   const [predComputeAlignments, setPredComputeAlignments] = useState(false);
   const [predComputeTaxonomy, setPredComputeTaxonomy] = useState(false);
+  const [predComputeRerankerFeatures, setPredComputeRerankerFeatures] = useState(true);
   const [predResult, setPredResult] = useState<{ id: string; status: string } | null>(null);
   const [predError, setPredError] = useState("");
   const [predSubmitting, setPredSubmitting] = useState(false);
@@ -126,6 +127,7 @@ export default function FunctionalAnnotationPage() {
         aspect_separated_knn: predAspectSeparatedKnn,
         compute_alignments: predComputeAlignments,
         compute_taxonomy: predComputeTaxonomy,
+        compute_reranker_features: predComputeRerankerFeatures,
       });
       setPredResult(result);
       toast(t("predictTab.launchAnnotationJob"), "success");
@@ -330,6 +332,74 @@ export default function FunctionalAnnotationPage() {
                         <span className="ml-1.5 text-xs text-slate-600">{t("predictTab.taxonomicDistanceHelper")}</span>
                       </span>
                     </label>
+                    <label className="flex items-start gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={predComputeRerankerFeatures}
+                        onChange={(e) => setPredComputeRerankerFeatures(e.target.checked)}
+                        className="mt-0.5 rounded"
+                      />
+                      <span className="text-sm text-slate-700">
+                        {t("predictTab.rerankerFeatures")}
+                        <span className="ml-1.5 text-xs text-slate-600">{t("predictTab.rerankerFeaturesHelper")}</span>
+                      </span>
+                    </label>
+                  </div>
+
+                  {/* Computed families summary panel */}
+                  <div className="mt-3 rounded-md border border-slate-200 bg-white px-3 py-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 mb-1.5">
+                      {t("predictTab.computedFamiliesTitle")}
+                    </p>
+                    <ul className="flex flex-wrap gap-1.5">
+                      {/* knn_base is always present */}
+                      {(["knn_base"] as const).map((fam) => (
+                        <li key={fam}>
+                          <code className="rounded bg-blue-50 border border-blue-200 px-1.5 py-0.5 text-[11px] font-mono text-blue-700">
+                            {fam}
+                          </code>
+                        </li>
+                      ))}
+                      {predComputeAlignments && (
+                        <>
+                          <li>
+                            <code className="rounded bg-green-50 border border-green-200 px-1.5 py-0.5 text-[11px] font-mono text-green-700">
+                              alignment_nw
+                            </code>
+                          </li>
+                          <li>
+                            <code className="rounded bg-green-50 border border-green-200 px-1.5 py-0.5 text-[11px] font-mono text-green-700">
+                              alignment_sw
+                            </code>
+                          </li>
+                        </>
+                      )}
+                      {predComputeTaxonomy && (
+                        <>
+                          <li>
+                            <code className="rounded bg-green-50 border border-green-200 px-1.5 py-0.5 text-[11px] font-mono text-green-700">
+                              taxonomy_pair
+                            </code>
+                          </li>
+                          <li>
+                            <code className="rounded bg-green-50 border border-green-200 px-1.5 py-0.5 text-[11px] font-mono text-green-700">
+                              taxonomy_voters
+                            </code>
+                          </li>
+                        </>
+                      )}
+                      {predComputeRerankerFeatures && (
+                        <>
+                          {(["lineage", "anc2vec_neighbor", "anc2vec_query", "emb_pca", "annotation_meta"] as const).map((fam) => (
+                            <li key={fam}>
+                              <code className="rounded bg-violet-50 border border-violet-200 px-1.5 py-0.5 text-[11px] font-mono text-violet-700">
+                                {fam}
+                              </code>
+                            </li>
+                          ))}
+                        </>
+                      )}
+                    </ul>
                   </div>
                 </div>
 
