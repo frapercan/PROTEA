@@ -62,11 +62,13 @@
     "authBearer": "Bearer",
     "authAnonymousHint": "登录以提升速率限制并拥有任务",
     "openSwagger": "在 Swagger 中打开",
-    "_translatorTodo": "machine-translated, review by native speaker"
+    "_translatorTodo": "machine-translated, review by native speaker",
+    "collapseSidebar": "折叠侧边栏",
+    "openSidebar": "打开侧边栏"
   },
   "home": {
     "title": "蛋白质功能预测流水线",
-    "subtitle": "通过嵌入向量相似性、重排序和LLM筛选，从序列到功能注释",
+    "subtitle": "通过嵌入向量相似性与学习重排序，从序列到功能注释",
     "bestResults": "最佳结果",
     "bestOverall": "全局最佳",
     "avgFmaxAcrossCells": "9 个单元的平均 Fmax",
@@ -98,7 +100,6 @@
     "stageEmbeddings": "嵌入向量",
     "stageKnn": "KNN搜索",
     "stageReranker": "重排序器",
-    "stageLlm": "LLM筛选",
     "stageAnnotation": "注释",
     "stageEvaluation": "评估",
     "nkCategory": "NK类别（No Knowledge）— 最严格的评估设置",

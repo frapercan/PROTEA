@@ -292,23 +292,6 @@ export default function HomePage() {
                 </button>
               </div>
             ))}
-            {/* LLM stage (future) */}
-            <div className="flex flex-col sm:flex-row items-center">
-              <div className="text-slate-300 sm:mx-1 lg:mx-2 my-1 sm:my-0 select-none flex items-center justify-center">
-                <svg className="rotate-90 sm:rotate-0 w-5 h-5" fill="none" viewBox="0 0 20 20" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M5 10h10M11 6l4 4-4 4" />
-                </svg>
-              </div>
-              <div className="flex flex-col items-center justify-center w-32 sm:w-36 h-28 rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/40">
-                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100/70 text-slate-300 text-sm font-bold">
-                  LLM
-                </span>
-                <span className="text-[12px] font-medium text-slate-600 mt-2">{t("stageLlm")}</span>
-                <span className="text-[10px] text-slate-300 mt-0.5 font-semibold uppercase tracking-wider">
-                  soon
-                </span>
-              </div>
-            </div>
           </div>
         </div>
       </section>
