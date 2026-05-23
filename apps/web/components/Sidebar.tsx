@@ -327,13 +327,23 @@ export function Sidebar({
     return () => window.removeEventListener("popstate", handler);
   }, []);
 
-  // Body scroll lock while the mobile drawer is open.
+  // Body + html scroll lock while the mobile drawer is open.
+  // Locking only `body` was insufficient on iOS Safari: the `html` element
+  // remained scrollable via touch in the strip to the right of the drawer,
+  // letting page content bleed past the backdrop on vertical scroll. Lock
+  // both elements (and restore each independently) to fully pin the
+  // viewport while the drawer is mounted.
   useEffect(() => {
     if (typeof document === "undefined" || !open) return;
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    const html = document.documentElement;
+    const body = document.body;
+    const previousBody = body.style.overflow;
+    const previousHtml = html.style.overflow;
+    body.style.overflow = "hidden";
+    html.style.overflow = "hidden";
     return () => {
-      document.body.style.overflow = previous;
+      body.style.overflow = previousBody;
+      html.style.overflow = previousHtml;
     };
   }, [open]);
 
@@ -493,10 +503,17 @@ export function Sidebar({
         )}
       </header>
 
-      {/* ── Mobile drawer ────────────────────────────────────────── */}
+      {/* ── Mobile drawer ──────────────────────────────────────────
+          Backdrop: opaque enough to fully occlude page content (40% was
+          translucent enough that cards still bled through on the strip
+          to the right of the drawer); `touch-action: none` +
+          `overscroll-behavior: contain` block touch-scroll and rubber-band
+          on iOS Safari, where the html-level overflow lock alone is not
+          enough. Drawer: same `overscroll-behavior: contain` so internal
+          nav scrolling never chains out to the page underneath. */}
       {open && (
         <div
-          className="lg:hidden fixed inset-0 z-[60] bg-stone-900/40 backdrop-blur-[1px]"
+          className="lg:hidden fixed inset-0 z-[60] bg-stone-900/60 backdrop-blur-sm overscroll-contain touch-none"
           onClick={closeDrawer}
           aria-hidden
         />
@@ -508,7 +525,7 @@ export function Sidebar({
         aria-modal="true"
         aria-hidden={!open}
         aria-label={t("ariaPrimary")}
-        className={`lg:hidden fixed inset-y-0 left-0 z-[70] flex w-[85vw] max-w-xs flex-col bg-white shadow-2xl transition-transform duration-300 ease-out ${
+        className={`lg:hidden fixed inset-y-0 left-0 z-[70] flex w-[85vw] max-w-xs flex-col overscroll-contain bg-white shadow-2xl transition-transform duration-300 ease-out ${
           open ? "translate-x-0 visible" : "-translate-x-full pointer-events-none invisible"
         }`}
       >
