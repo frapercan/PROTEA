@@ -444,6 +444,36 @@
   },
   "functionalAnnotation": {
     "title": "Anotación funcional",
+    "onboarding": {
+      "intro": "La anotación funcional transfiere términos GO desde proteínas de función conocida hacia tus secuencias de consulta. PROTEA codifica cada proteína en un embedding de alta dimensión, ejecuta una búsqueda KNN sobre un conjunto de anotaciones de referencia y agrega los términos GO de los vecinos en una predicción ordenada por proteína. Necesitas tres ingredientes antes de lanzar un trabajo: embeddings precomputados, un conjunto de anotaciones de referencia y las secuencias de consulta que quieres anotar.",
+      "prereqsTitle": "Requisitos previos",
+      "prereqsHelper": "Cada paso abre su página correspondiente para construir o elegir el artefacto.",
+      "prereqsAriaLabel": "Requisitos previos de anotación",
+      "steps": {
+        "embeddings": {
+          "title": "Modelo de embedding",
+          "help": "Una configuración de modelo de lenguaje de proteínas (PLM) junto con sus vectores precomputados sobre tus proteínas de referencia. La búsqueda KNN ocurre en este espacio de embedding, así que su elección (esm2, prost_t5, ankh, etc.) determina qué proteínas se consideran similares.",
+          "unit": "vectores",
+          "emptyLabel": "Aún no hay ninguna configuración de embedding registrada.",
+          "cta": "Calcular embeddings"
+        },
+        "annotationSet": {
+          "title": "Conjunto de anotaciones de referencia",
+          "help": "El pozo de anotaciones GO desde el que transfieres. Normalmente una release de GOA o QuickGO filtrada por código de evidencia. Los vecinos encontrados por KNN deben venir de este conjunto, así que su cobertura y frescura limitan directamente el recall.",
+          "unit": "anotaciones",
+          "emptyLabel": "Aún no hay ningún conjunto de anotaciones cargado.",
+          "cta": "Cargar anotaciones"
+        },
+        "querySet": {
+          "title": "Conjunto de consulta",
+          "help": "Bundle nombrado de secuencias de proteínas que quieres anotar. Elige un conjunto guardado para que la predicción sea reproducible, o déjalo vacío para anotar todas las proteínas de la base de datos.",
+          "unit": "secuencias",
+          "allSequences": "Todas las secuencias de la base de datos",
+          "emptyLabel": "No hay conjuntos de consulta guardados. Aun así puedes anotar todas las secuencias, o subir uno.",
+          "cta": "Gestionar conjuntos de consulta"
+        }
+      }
+    },
     "tabs": {
       "predict": "Ejecutar anotación",
       "results": "Resultados"
