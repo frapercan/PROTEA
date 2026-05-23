@@ -29,6 +29,7 @@ import {
   ThumbsUp,
   PanelLeftClose,
   ChevronRight,
+  Archive,
   type LucideIcon,
 } from "lucide-react";
 import { baseUrl } from "@/lib/api";
@@ -263,6 +264,7 @@ export function Sidebar({
         { href: "/functional-annotation", label: t("functionalAnnotation"), hint: "Embedding-similarity GO annotation, BPO / MFO / CCO", icon: Tags },
         { href: "/scoring", label: t("scoring"), hint: "Combine distance, alignment, taxonomy, evidence", badge: "LAB", icon: Sliders },
         { href: "/reranker", label: t("reranker"), hint: "LightGBM reranker over scored predictions", badge: "LAB", icon: ArrowUpDown },
+        { href: "/datasets", label: t("datasets"), hint: "Frozen reranker dumps and export dispatcher", icon: Archive },
       ],
     },
     {
