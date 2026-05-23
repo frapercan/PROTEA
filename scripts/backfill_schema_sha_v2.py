@@ -1,46 +1,16 @@
-"""Backfill ``schema_sha_v2`` on ``dataset`` and ``reranker_model`` rows.
+"""ONE-TIME BACKFILL: idempotent population of schema_sha_v2 fingerprints (ADR D10).
 
-T1.6 of master plan v3 (ADR D10). The Alembic migration
-``a3c1d8e2f4b6_t1_6_add_schema_sha_v2_columns`` adds two nullable
-columns. This script populates them from
-``protea_contracts.compute_schema_sha`` so inference can switch over to
-the canonical fingerprint without re-training every booster.
+THIS SCRIPT IS A ONE-TIME BACKFILL AND MUST NOT BE RE-RUN OR SCHEDULED IN NORMAL OPERATION.
+It is safe to leave in the repository for provenance and historical reference only.
 
-Backfill policy
----------------
-
-For each ``Dataset`` row:
-
-1. If ``schema_sha_v2 IS NOT NULL`` and ``--force`` is not set, skip.
-2. Compute the v2 SHA from
-   ``protea_contracts.compute_schema_sha(canonical_features)`` where
-   ``canonical_features`` is the live feature registry's column list at
-   the time the backfill runs. This matches what a fresh export would
-   write today and is the explicit policy of ADR D10 ("compute
-   ``schema_sha_v2`` from the canonical feature list at the time the
-   backfill runs").
-3. Persist on the row.
-
-For each ``RerankerModel`` row:
-
-1. If ``schema_sha_v2 IS NOT NULL`` and ``--force`` is not set, skip.
-2. If the model is linked to a ``Dataset`` whose ``schema_sha_v2`` is
-   populated, copy it.
-3. Otherwise compute the v2 SHA from the canonical feature registry
-   (same fallback used for orphan datasets above).
-
-The script commits every ``--batch-size`` rows so a Ctrl-C is recoverable.
-Idempotent by construction: skipping already-populated rows.
-
-Usage
------
-
-::
-
-    poetry run python scripts/backfill_schema_sha_v2.py [--batch-size N] [--dry-run] [--force]
-
-Exit code 0 on success. Exit code 1 if the canonical feature registry
-could not be loaded (i.e. the runtime cannot compute the v2 SHA).
+This script populates schema_sha_v2 on dataset and reranker_model rows using the canonical
+feature registry's column list as it exists at backfill runtime, matching ADR D10 policy and
+allowing inference to switch to canonical fingerprints without re-training boosters. For each
+Dataset row, it skips if already set (unless --force), computes the v2 SHA from
+protea_contracts.compute_schema_sha, and persists. For each RerankerModel, it copies the
+schema_sha_v2 from the linked Dataset if available, otherwise computes from canonical features.
+The script commits every --batch-size rows for recoverability. Fully idempotent by construction:
+skipping already-populated rows, making re-runs unnecessary and redundant.
 """
 
 from __future__ import annotations

@@ -1,20 +1,15 @@
-"""Materialize the ground-truth parquet for every EvaluationSet that lacks one.
+"""ONE-TIME BACKFILL: idempotent materialization of ground-truth evaluation sets.
 
-EvaluationSet rows created before ``generate_evaluation_set`` started persisting
-the full delta (nk/lk/pk/known/pk_known) to the artifact store have
-``groundtruth_uri = NULL``.  This violates the project's "no on-the-fly reuse"
-rule the moment any downstream consumer (lab dump, predict_go_terms, cafaeval)
-tries to load them.  This script fixes that without regenerating the
-EvaluationSet rows themselves — the DB ids stay stable.
+THIS SCRIPT IS A ONE-TIME BACKFILL AND MUST NOT BE RE-RUN OR SCHEDULED IN NORMAL OPERATION.
+It is safe to leave in the repository for provenance and historical reference only.
 
-For each row:
-
-  1. Skip if ``groundtruth_uri`` is already set (idempotent).
-  2. Recompute EvaluationData via the same code path the worker uses
-     (``compute_evaluation_data`` for matching snapshots,
-     ``compute_evaluation_data_reconciled`` otherwise).
-  3. Serialize to parquet, upload to the configured ArtifactStore, set the
-     column.
+This script materializes the ground-truth parquet for every EvaluationSet row lacking a
+groundtruth_uri (a condition affecting rows created before the generate_evaluation_set
+operation began persisting deltas to the artifact store). For each row, it is fully idempotent:
+skips if already set, recomputes evaluation data via the same code path the worker uses
+(compute_evaluation_data for matching snapshots, compute_evaluation_data_reconciled otherwise),
+serializes to parquet, uploads to the artifact store, and updates the column. No re-run needed
+or desired; backfill is complete after first execution.
 """
 
 from __future__ import annotations
