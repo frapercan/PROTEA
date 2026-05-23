@@ -182,13 +182,21 @@ export const test = base.extend<{ mockApi: MockApi }>({
     // first visit. addInitScript runs in every fresh Document before the
     // app scripts execute, which is enough for the modal's useEffect
     // (which only opens when the storage key is missing).
-    await context.addInitScript(() => {
+    //
+    // Also inject a test session JWT so mutations (POSTs to maintenance,
+    // etc.) that require auth do not fail. The JWT payload is cosmetic
+    // in the mock fixtures; the backend rejects the signature anyway.
+    // We use a far-future expiry (year 2050) so it never expires during tests.
+    const testJwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0LXVzZXIiLCJleHAiOjI1MjQ2MDgwMDAsImlhdCI6MTcxNjU0MTUwMCwicm9sZSI6Im9wZXJhdG9yIn0.test";
+    await context.addInitScript(({ jwt }: { jwt: string }) => {
       try {
         window.localStorage.setItem("protea_policy_accepted_v1", "1");
+        // Set session cookie (non-HttpOnly so browser can read it).
+        document.cookie = `protea_session=${jwt}; path=/`;
       } catch {
         // ignore on origins where localStorage is not yet available
       }
-    });
+    }, { jwt: testJwt });
 
     const overrides = new Map<string, { body: OverrideBody; status: number }>();
     const callCounts = new Map<string, number>();
