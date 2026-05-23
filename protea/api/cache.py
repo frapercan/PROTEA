@@ -27,17 +27,41 @@ _lock = threading.Lock()
 _store: dict[str, tuple[float, Any]] = {}
 
 
-def cached(key: str, ttl: float, producer: Callable[[], Any]) -> Any:
-    """Return ``producer()`` result, cached under ``key`` for ``ttl`` seconds."""
+def cached(
+    key: str,
+    ttl: float,
+    producer: Callable[[], Any],
+    *,
+    serve_stale_on_error: bool = False,
+) -> Any:
+    """Return ``producer()`` result, cached under ``key`` for ``ttl`` seconds.
+
+    When ``serve_stale_on_error`` is true and the producer raises while a
+    prior value is still in the store (even if expired), return the stale
+    value instead of propagating; lets cold-cache hangs degrade to a slightly
+    out-of-date payload rather than a 500.
+    """
     now = time.monotonic()
     with _lock:
         hit = _store.get(key)
         if hit is not None and hit[0] > now:
             return hit[1]
-    value = producer()
+    try:
+        value = producer()
+    except Exception:
+        if serve_stale_on_error and hit is not None:
+            return hit[1]
+        raise
     with _lock:
         _store[key] = (now + ttl, value)
     return value
+
+
+def get_last_known(key: str) -> Any | None:
+    """Return the last cached value for ``key``, ignoring TTL; ``None`` if absent."""
+    with _lock:
+        hit = _store.get(key)
+        return hit[1] if hit is not None else None
 
 
 def invalidate(key: str | None = None) -> None:
@@ -49,4 +73,4 @@ def invalidate(key: str | None = None) -> None:
             _store.pop(key, None)
 
 
-__all__ = ["cached", "invalidate", "_default_ttl"]
+__all__ = ["cached", "get_last_known", "invalidate", "_default_ttl"]

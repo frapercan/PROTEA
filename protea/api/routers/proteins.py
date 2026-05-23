@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import distinct, func
 from sqlalchemy.orm import Session, sessionmaker
 
-from protea.api.cache import cached
+from protea.api.cache import cached, invalidate
 from protea.api.deps import get_session_factory
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
@@ -18,6 +18,9 @@ from protea.infrastructure.orm.models.protein.protein_metadata import ProteinUni
 from protea.infrastructure.session import session_scope
 
 router = APIRouter(prefix="/proteins", tags=["proteins"])
+
+PROTEIN_STATS_CACHE_KEY = "proteins:stats"
+PROTEIN_STATS_TTL_SECONDS = 300.0
 
 
 # ── Stats ─────────────────────────────────────────────────────────────────────
@@ -41,9 +44,7 @@ def _compute_protein_stats(
             or 0
         )
         reviewed = (
-            session.query(func.count(Protein.accession))
-            .filter(Protein.reviewed.is_(True))
-            .scalar()
+            session.query(func.count(Protein.accession)).filter(Protein.reviewed.is_(True)).scalar()
             or 0
         )
         with_metadata = (
@@ -65,8 +66,7 @@ def _compute_protein_stats(
             or 0
         )
         with_go = (
-            session.query(func.count(distinct(ProteinGOAnnotation.protein_accession))).scalar()
-            or 0
+            session.query(func.count(distinct(ProteinGOAnnotation.protein_accession))).scalar() or 0
         )
         return {
             "total": total,
@@ -90,8 +90,30 @@ def get_protein_stats(
     Cached for 5 minutes: the DISTINCT-over-JOIN counts scan 4M–80M rows and
     take 30+ seconds to run from scratch. Counts move slowly enough that a
     5-min staleness is invisible to users.
+
+    Serves the last-known value when the recompute fails (DB blip, query
+    timeout) so the page never blocks on a cold-cache 500. The startup hook
+    in ``protea.api.app`` prewarms this key and a background task refreshes
+    it before expiry so users never hit a cold path under normal operation.
     """
-    return cached("proteins:stats", 300.0, lambda: _compute_protein_stats(factory))
+    return cached(
+        PROTEIN_STATS_CACHE_KEY,
+        PROTEIN_STATS_TTL_SECONDS,
+        lambda: _compute_protein_stats(factory),
+        serve_stale_on_error=True,
+    )
+
+
+def prewarm_protein_stats(factory: sessionmaker[Session]) -> dict[str, Any]:
+    """Recompute and store ``proteins:stats``; used by the app startup hook
+    and the background refresh loop. Always bypasses the existing entry so
+    the cache is refilled with fresh counts before the old TTL expires."""
+    invalidate(PROTEIN_STATS_CACHE_KEY)
+    return cached(
+        PROTEIN_STATS_CACHE_KEY,
+        PROTEIN_STATS_TTL_SECONDS,
+        lambda: _compute_protein_stats(factory),
+    )
 
 
 # ── List ──────────────────────────────────────────────────────────────────────
