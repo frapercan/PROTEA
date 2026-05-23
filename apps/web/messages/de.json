@@ -65,7 +65,11 @@
     "openSwagger": "In Swagger öffnen",
     "_translatorTodo": "machine-translated, review by native speaker",
     "collapseSidebar": "Seitenleiste einklappen",
-    "openSidebar": "Seitenleiste öffnen"
+    "openSidebar": "Seitenleiste öffnen",
+    "adminGroup": "Admin",
+    "adminGroupHint": "Nur fur Operatoren: Schlussel, Audit",
+    "apiKeys": "API-Schlussel",
+    "apiKeysHint": "Programmatische Zugriffsschlussel erstellen, listen, widerrufen"
   },
   "home": {
     "title": "Pipeline zur Vorhersage von Proteinfunktionen",
@@ -1189,6 +1193,79 @@
         "specRequired": "Der Inhalt von spec.yaml ist erforderlich.",
         "runJsonInvalid": "run.json ist kein gültiges JSON: {message}"
       }
+    }
+  },
+  "apiKeys": {
+    "title": "API-Schlussel",
+    "subtitle": "Programmatische Zugriffsschlussel fur CLI-Clients, CI-Jobs und das Offline-Reranker-Labor. Jeder Schlussel wird gehasht gespeichert; der Klartext wird nur einmal bei der Erstellung angezeigt und kann spater nicht wiederhergestellt werden.",
+    "refresh": "Aktualisieren",
+    "mint": "Schlussel erstellen",
+    "mintFirst": "Ersten Schlussel erstellen",
+    "revoke": "Widerrufen",
+    "revoking": "Widerrufe...",
+    "empty": "Noch keine API-Schlussel.",
+    "includeRevoked": "Widerrufene Schlussel anzeigen",
+    "counts": "{active} aktiv, {revoked} widerrufen",
+    "neverUsed": "nie",
+    "statusActive": "Aktiv",
+    "statusRevoked": "Widerrufen",
+    "loadError": "API-Schlussel konnten nicht geladen werden",
+    "revokedToast": "{name} widerrufen",
+    "revokeErrorToast": "Widerruf fehlgeschlagen: {error}",
+    "mintedToast": "{name} erstellt",
+    "footnote": "Widerruf ist unwiderruflich. Widerrufene Eintrage bleiben sichtbar, wenn 'Widerrufene Schlussel anzeigen' aktiv ist.",
+    "forbiddenTitle": "Nur fur Admins",
+    "forbiddenBody": "Diese Seite verwaltet programmatische Zugriffsschlussel und ist auf Operatoren mit Admin-Rolle beschrankt.",
+    "forbiddenRoleLabel": "Deine aktuelle Rolle",
+    "forbiddenBackHome": "Zur Startseite",
+    "cols": {
+      "name": "Name",
+      "role": "Rolle",
+      "prefix": "Prafix",
+      "created": "Erstellt",
+      "lastUsed": "Zuletzt verwendet",
+      "status": "Status",
+      "actions": "Aktionen"
+    },
+    "dialog": {
+      "title": "Neuen API-Schlussel erstellen",
+      "subtitle": "Der Klartext wird nur einmal zuruckgegeben. Kopiere ihn jetzt; er kann spater nicht abgerufen werden.",
+      "revealTitle": "Neuen Schlussel kopieren",
+      "revealSubtitle": "Dies ist die einzige Gelegenheit, den Klartext zu sehen.",
+      "close": "Schliessen",
+      "cancel": "Abbrechen",
+      "mint": "Schlussel erstellen",
+      "minting": "Erstelle...",
+      "done": "Habe ihn gespeichert",
+      "copy": "Kopieren",
+      "copied": "Kopiert",
+      "nameLabel": "Name",
+      "namePlaceholder": "lab-runner-2026-05",
+      "nameHelp": "Freier Text, mit dem du den Schlussel in Audit-Logs wiedererkennst.",
+      "roleLabel": "Rolle",
+      "roleHelp": "Bestimmt, welche Endpunkte der Schlussel aufrufen darf.",
+      "roleViewer": "Leser",
+      "roleViewerHelp": "Nur Lesezugriff. Sicherer Standardwert.",
+      "roleOperator": "Operator",
+      "roleOperatorHelp": "Kann Jobs starten und Wartung ausfuhren.",
+      "roleAdmin": "Admin",
+      "roleAdminHelp": "Volle Kontrolle inkl. destruktiver Aktionen.",
+      "expiryLabel": "Ablauf (optional)",
+      "expiryHelp": "Falls gesetzt, ist der Schlussel danach ungultig.",
+      "expiryFootnote": "Serverseitig noch nicht erzwungen; UI erfasst den Wert fur den folgenden Schritt.",
+      "prefixLabel": "Prafix",
+      "warningTitle": "Schlussel jetzt speichern",
+      "warningBody": "PROTEA speichert nur einen Hash. Verlorene Schlussel mussen neu erstellt und der alte widerrufen werden.",
+      "errors": {
+        "nameRequired": "Name ist erforderlich."
+      }
+    },
+    "confirm": {
+      "title": "Diesen Schlussel widerrufen?",
+      "body": "Der Schlussel authentifiziert sofort nicht mehr. Der Eintrag bleibt fur Audits sichtbar.",
+      "cancel": "Abbrechen",
+      "confirm": "Ja, widerrufen",
+      "confirming": "Widerrufe..."
     }
   }
 }

@@ -65,7 +65,11 @@
     "openSwagger": "Abrir no Swagger",
     "_translatorTodo": "machine-translated, review by native speaker",
     "collapseSidebar": "Recolher barra lateral",
-    "openSidebar": "Abrir barra lateral"
+    "openSidebar": "Abrir barra lateral",
+    "adminGroup": "Admin",
+    "adminGroupHint": "Controles apenas para operadores: chaves, auditoria",
+    "apiKeys": "Chaves de API",
+    "apiKeysHint": "Emitir, listar e revogar chaves de acesso programatico"
   },
   "home": {
     "title": "Pipeline de Predição de Função Proteica",
@@ -1189,6 +1193,79 @@
         "specRequired": "O conteúdo de spec.yaml é obrigatório.",
         "runJsonInvalid": "run.json não é JSON válido: {message}"
       }
+    }
+  },
+  "apiKeys": {
+    "title": "Chaves de API",
+    "subtitle": "Chaves de acesso programatico usadas por clientes CLI, jobs de CI e o laboratorio de reranker offline. Cada chave e armazenada como hash; o valor em claro e mostrado apenas uma vez na criacao e nao pode ser recuperado depois.",
+    "refresh": "Atualizar",
+    "mint": "Criar chave",
+    "mintFirst": "Criar a primeira chave",
+    "revoke": "Revogar",
+    "revoking": "Revogando...",
+    "empty": "Ainda nao ha chaves de API.",
+    "includeRevoked": "Mostrar chaves revogadas",
+    "counts": "{active} ativas, {revoked} revogadas",
+    "neverUsed": "nunca",
+    "statusActive": "Ativa",
+    "statusRevoked": "Revogada",
+    "loadError": "Nao foi possivel carregar as chaves de API",
+    "revokedToast": "Revogada: {name}",
+    "revokeErrorToast": "Falha ao revogar: {error}",
+    "mintedToast": "Chave criada: {name}",
+    "footnote": "A revogacao e irreversivel. As linhas revogadas continuam visiveis para auditoria com 'Mostrar chaves revogadas' ativo.",
+    "forbiddenTitle": "Apenas administradores",
+    "forbiddenBody": "Esta pagina gere chaves de acesso programatico e esta restrita a operadores com perfil de administrador.",
+    "forbiddenRoleLabel": "Seu perfil atual",
+    "forbiddenBackHome": "Voltar ao inicio",
+    "cols": {
+      "name": "Nome",
+      "role": "Perfil",
+      "prefix": "Prefixo",
+      "created": "Criada",
+      "lastUsed": "Ultimo uso",
+      "status": "Estado",
+      "actions": "Acoes"
+    },
+    "dialog": {
+      "title": "Criar uma chave de API",
+      "subtitle": "O valor em claro e retornado uma unica vez. Copie agora; nao podera ser recuperado depois.",
+      "revealTitle": "Copie sua nova chave",
+      "revealSubtitle": "Esta e a unica vez que o valor em claro sera mostrado.",
+      "close": "Fechar",
+      "cancel": "Cancelar",
+      "mint": "Criar chave",
+      "minting": "Criando...",
+      "done": "Ja guardei",
+      "copy": "Copiar",
+      "copied": "Copiado",
+      "nameLabel": "Nome",
+      "namePlaceholder": "lab-runner-2026-05",
+      "nameHelp": "Rotulo livre que ajuda a identificar a chave em registros de auditoria.",
+      "roleLabel": "Perfil",
+      "roleHelp": "Define quais endpoints a chave pode chamar.",
+      "roleViewer": "Leitor",
+      "roleViewerHelp": "Acesso somente leitura. Padrao seguro.",
+      "roleOperator": "Operador",
+      "roleOperatorHelp": "Pode disparar jobs e executar manutencao.",
+      "roleAdmin": "Administrador",
+      "roleAdminHelp": "Controle total, inclusive acoes destrutivas.",
+      "expiryLabel": "Expiracao (opcional)",
+      "expiryHelp": "Se definida, a chave deixa de funcionar apos essa data.",
+      "expiryFootnote": "Ainda nao aplicada no servidor; a UI guarda o valor para o proximo passo.",
+      "prefixLabel": "Prefixo",
+      "warningTitle": "Guarde esta chave agora",
+      "warningBody": "PROTEA armazena apenas o hash. Se perder este valor, sera necessario criar outra chave e revogar esta.",
+      "errors": {
+        "nameRequired": "Nome e obrigatorio."
+      }
+    },
+    "confirm": {
+      "title": "Revogar esta chave?",
+      "body": "A chave deixara de autenticar imediatamente. A linha continua visivel para auditoria.",
+      "cancel": "Cancelar",
+      "confirm": "Sim, revogar",
+      "confirming": "Revogando..."
     }
   }
 }

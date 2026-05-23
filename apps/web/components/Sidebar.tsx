@@ -30,9 +30,12 @@ import {
   PanelLeftClose,
   ChevronRight,
   Archive,
+  ShieldCheck,
+  KeyRound,
   type LucideIcon,
 } from "lucide-react";
 import { baseUrl } from "@/lib/api";
+import { useHasRole } from "@/lib/useRole";
 
 /**
  * Primary navigation for PROTEA, rendered as a LEFT SIDEBAR rail.
@@ -223,6 +226,11 @@ export function Sidebar({
   const t = useTranslations("nav");
   const pathname = usePathname();
   const locale = useLocale();
+  // FEAT-AUTH role gate: the Admin group only shows up for callers
+  // whose session cookie decodes to ``role=admin``. Hook returns
+  // ``false`` on SSR / pre-hydration, so the group never flashes
+  // for anonymous visitors before the cookie is read.
+  const isAdmin = useHasRole("admin");
   const [open, setOpen] = useState(false);
   // Desktop-only: persisted collapsed/expanded state. SSR renders expanded;
   // the effect below hydrates from localStorage on mount. Brief one-frame
@@ -311,6 +319,22 @@ export function Sidebar({
       ],
     },
   ];
+
+  // Append the admin group conditionally so the entire section (group
+  // header + items) is invisible to non-admin viewers. Placing it last
+  // keeps the destructive surface visually separated from day-to-day
+  // pipeline navigation, matching the convention used for /maintenance.
+  if (isAdmin) {
+    NAV_GROUPS.push({
+      id: "admin",
+      title: t("adminGroup"),
+      hint: t("adminGroupHint"),
+      icon: ShieldCheck,
+      items: [
+        { href: "/admin/api-keys", label: t("apiKeys"), hint: t("apiKeysHint"), icon: KeyRound },
+      ],
+    });
+  }
 
   const stripped = stripLocale(pathname);
   const annotateActive = stripped.startsWith("/functional-annotation");

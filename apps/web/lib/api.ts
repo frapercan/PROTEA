@@ -1045,3 +1045,81 @@ export function createDataset(body: CreateDatasetPayload) {
     body: JSON.stringify(body),
   });
 }
+
+// ─── API keys (admin) ──────────────────────────────────────────────
+//
+// Mirrors ``protea/api/routers/auth_api_keys.py``. Mint/list/revoke
+// is wired through the admin-only ``/admin/api-keys`` page. The raw
+// ``key`` field is returned exactly once by ``POST /auth/api-keys``
+// and is never persisted in the UI — the dialog displays it in a
+// copyable monospace block and warns that it cannot be retrieved
+// again. ``role`` is optional today (the backend ignores it until
+// the FEAT-AUTH ``ApiKey.role`` column lands in develop); we still
+// surface the dropdown in the dialog so the UX is forward-compatible
+// the moment the column merges.
+
+export type ApiKeyRole = "viewer" | "operator" | "admin";
+
+export type ApiKey = {
+  id: string;
+  prefix: string;
+  name: string;
+  /**
+   * Role granted to the key. Optional in the response shape because
+   * the backend column landed in a sibling PR; pre-FEAT-AUTH rows
+   * surface as ``null`` and the UI renders them as ``viewer``.
+   */
+  role?: ApiKeyRole | null;
+  created_at: string | null;
+  revoked_at: string | null;
+  last_used_at: string | null;
+};
+
+export type CreateApiKeyResponse = ApiKey & {
+  /** Raw secret — shown exactly once, never persisted. */
+  key: string;
+};
+
+export function listApiKeys(params?: { include_revoked?: boolean; limit?: number }) {
+  const q = new URLSearchParams();
+  if (params?.include_revoked) q.set("include_revoked", "true");
+  if (params?.limit !== undefined) q.set("limit", String(params.limit));
+  const suffix = q.toString() ? `?${q.toString()}` : "";
+  return http<ApiKey[]>(`/auth/api-keys${suffix}`);
+}
+
+export function createApiKey(body: {
+  name: string;
+  /**
+   * Role to grant. CURRENTLY NOT SENT to the backend because the
+   * ``CreateApiKeyRequest`` Pydantic model is ``extra=forbid`` and
+   * the column it would land on is part of FEAT-AUTH (PR #456). The
+   * UI collects the value so the dialog is forward-compatible; a
+   * follow-up that adds the ``role`` field to the backend schema can
+   * uncomment the wiring below in a single one-line diff.
+   */
+  role?: ApiKeyRole | null;
+  /**
+   * Optional expiry timestamp (ISO 8601). Same situation as ``role``
+   * above: collected by the UI, not yet sent on the wire, deferred
+   * to a backend follow-up that adds an ``expires_at`` column.
+   */
+  expires_at?: string | null;
+}) {
+  // Forward-compatibility shim: build the smallest valid payload the
+  // current backend accepts. role/expires_at land in a follow-up.
+  void body.role;
+  void body.expires_at;
+  const payload: Record<string, unknown> = { name: body.name };
+  return http<CreateApiKeyResponse>(`/auth/api-keys`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function revokeApiKey(id: string) {
+  return http<ApiKey>(`/auth/api-keys/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}

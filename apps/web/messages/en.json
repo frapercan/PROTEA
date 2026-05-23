@@ -64,7 +64,11 @@
     "authAnonymousHint": "Sign in to raise rate limits and own jobs",
     "openSwagger": "Open in Swagger",
     "collapseSidebar": "Collapse sidebar",
-    "openSidebar": "Open sidebar"
+    "openSidebar": "Open sidebar",
+    "adminGroup": "Admin",
+    "adminGroupHint": "Operator-only controls: keys, audit",
+    "apiKeys": "API keys",
+    "apiKeysHint": "Mint, list and revoke programmatic access keys"
   },
   "home": {
     "title": "Protein Function Prediction Pipeline",
@@ -1192,6 +1196,79 @@
         "specRequired": "spec.yaml contents are required.",
         "runJsonInvalid": "run.json is not valid JSON: {message}"
       }
+    }
+  },
+  "apiKeys": {
+    "title": "API keys",
+    "subtitle": "Programmatic access keys used by CLI clients, CI jobs and the offline reranker lab. Each key is hashed at rest; the raw value is shown once at creation time and can never be retrieved again.",
+    "refresh": "Refresh",
+    "mint": "Mint new key",
+    "mintFirst": "Mint the first key",
+    "revoke": "Revoke",
+    "revoking": "Revoking...",
+    "empty": "No API keys yet.",
+    "includeRevoked": "Show revoked keys",
+    "counts": "{active} active, {revoked} revoked",
+    "neverUsed": "never",
+    "statusActive": "Active",
+    "statusRevoked": "Revoked",
+    "loadError": "Could not load API keys",
+    "revokedToast": "Revoked {name}",
+    "revokeErrorToast": "Revoke failed: {error}",
+    "mintedToast": "Minted {name}",
+    "footnote": "Revocation is irreversible. Revoked rows remain visible for audit when 'Show revoked keys' is enabled.",
+    "forbiddenTitle": "Admin only",
+    "forbiddenBody": "This page manages programmatic access keys and is restricted to operators with the admin role.",
+    "forbiddenRoleLabel": "Your current role",
+    "forbiddenBackHome": "Back to home",
+    "cols": {
+      "name": "Name",
+      "role": "Role",
+      "prefix": "Prefix",
+      "created": "Created",
+      "lastUsed": "Last used",
+      "status": "Status",
+      "actions": "Actions"
+    },
+    "dialog": {
+      "title": "Mint a new API key",
+      "subtitle": "The raw key value is returned exactly once. Copy it now; it cannot be retrieved later.",
+      "revealTitle": "Copy your new key",
+      "revealSubtitle": "This is the only time the raw value will be shown.",
+      "close": "Close",
+      "cancel": "Cancel",
+      "mint": "Mint key",
+      "minting": "Minting...",
+      "done": "I've saved it",
+      "copy": "Copy",
+      "copied": "Copied",
+      "nameLabel": "Name",
+      "namePlaceholder": "lab-runner-2026-05",
+      "nameHelp": "Free-form label that helps you identify the key in audit logs.",
+      "roleLabel": "Role",
+      "roleHelp": "Determines which endpoints the key can call.",
+      "roleViewer": "Viewer",
+      "roleViewerHelp": "Read-only access. Safe default.",
+      "roleOperator": "Operator",
+      "roleOperatorHelp": "Can dispatch jobs and run maintenance.",
+      "roleAdmin": "Admin",
+      "roleAdminHelp": "Full control including destructive admin actions.",
+      "expiryLabel": "Expiry (optional)",
+      "expiryHelp": "When set, the key stops working after this date.",
+      "expiryFootnote": "Not yet enforced server-side; UI captures the value for the upcoming follow-up.",
+      "prefixLabel": "Prefix",
+      "warningTitle": "Save this key now",
+      "warningBody": "PROTEA only stores a hash. If you lose this value you must mint a new key and revoke this one.",
+      "errors": {
+        "nameRequired": "Name is required."
+      }
+    },
+    "confirm": {
+      "title": "Revoke this key?",
+      "body": "The key will stop authenticating immediately. The row stays visible for audit.",
+      "cancel": "Cancel",
+      "confirm": "Yes, revoke",
+      "confirming": "Revoking..."
     }
   }
 }

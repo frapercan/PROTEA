@@ -65,7 +65,11 @@
     "openSwagger": "在 Swagger 中打开",
     "_translatorTodo": "machine-translated, review by native speaker",
     "collapseSidebar": "折叠侧边栏",
-    "openSidebar": "打开侧边栏"
+    "openSidebar": "打开侧边栏",
+    "adminGroup": "管理",
+    "adminGroupHint": "仅限运维人员的控制：密钥、审计",
+    "apiKeys": "API 密钥",
+    "apiKeysHint": "创建、查看和撤销程序访问密钥"
   },
   "home": {
     "title": "蛋白质功能预测流水线",
@@ -1188,6 +1192,79 @@
         "specRequired": "spec.yaml 内容是必须的。",
         "runJsonInvalid": "run.json 不是有效 JSON：{message}"
       }
+    }
+  },
+  "apiKeys": {
+    "title": "API 密钥",
+    "subtitle": "由 CLI 客户端、CI 任务和离线重排序实验室使用的程序访问密钥。每个密钥均以散列方式存储；明文仅在创建时显示一次，之后无法找回。",
+    "refresh": "刷新",
+    "mint": "创建密钥",
+    "mintFirst": "创建首个密钥",
+    "revoke": "撤销",
+    "revoking": "撤销中...",
+    "empty": "还没有 API 密钥。",
+    "includeRevoked": "显示已撤销密钥",
+    "counts": "{active} 个有效，{revoked} 个已撤销",
+    "neverUsed": "从未使用",
+    "statusActive": "有效",
+    "statusRevoked": "已撤销",
+    "loadError": "无法加载 API 密钥",
+    "revokedToast": "已撤销 {name}",
+    "revokeErrorToast": "撤销失败：{error}",
+    "mintedToast": "已创建 {name}",
+    "footnote": "撤销不可逆。启用“显示已撤销密钥”后可查看历史以供审计。",
+    "forbiddenTitle": "仅限管理员",
+    "forbiddenBody": "本页面用于管理程序访问密钥，仅限拥有管理员角色的运维人员访问。",
+    "forbiddenRoleLabel": "当前角色",
+    "forbiddenBackHome": "返回首页",
+    "cols": {
+      "name": "名称",
+      "role": "角色",
+      "prefix": "前缀",
+      "created": "创建时间",
+      "lastUsed": "最后使用",
+      "status": "状态",
+      "actions": "操作"
+    },
+    "dialog": {
+      "title": "创建新的 API 密钥",
+      "subtitle": "明文仅返回一次，请立即复制；后续无法找回。",
+      "revealTitle": "复制你的新密钥",
+      "revealSubtitle": "这是唯一一次显示明文的机会。",
+      "close": "关闭",
+      "cancel": "取消",
+      "mint": "创建密钥",
+      "minting": "创建中...",
+      "done": "已保存",
+      "copy": "复制",
+      "copied": "已复制",
+      "nameLabel": "名称",
+      "namePlaceholder": "lab-runner-2026-05",
+      "nameHelp": "自由填写的标签，便于在审计日志中识别该密钥。",
+      "roleLabel": "角色",
+      "roleHelp": "决定该密钥可调用哪些接口。",
+      "roleViewer": "只读",
+      "roleViewerHelp": "仅可读取。默认安全选项。",
+      "roleOperator": "运维",
+      "roleOperatorHelp": "可以分发任务和执行维护。",
+      "roleAdmin": "管理员",
+      "roleAdminHelp": "完全控制，包括破坏性操作。",
+      "expiryLabel": "过期时间（可选）",
+      "expiryHelp": "设置后超过该日期密钥将失效。",
+      "expiryFootnote": "服务端暂未强制执行；UI 预先保存以进行后续完善。",
+      "prefixLabel": "前缀",
+      "warningTitle": "请立即保存此密钥",
+      "warningBody": "PROTEA 仅存储散列。丢失后需重新创建并撤销原密钥。",
+      "errors": {
+        "nameRequired": "名称为必填。"
+      }
+    },
+    "confirm": {
+      "title": "撤销该密钥？",
+      "body": "密钥将立即停止认证。记录仍可见以供审计。",
+      "cancel": "取消",
+      "confirm": "是，撤销",
+      "confirming": "撤销中..."
     }
   }
 }
