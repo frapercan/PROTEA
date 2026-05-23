@@ -45,36 +45,34 @@ export type PrereqStep = {
 
 export function PipelinePrereqs({ steps }: { steps: PrereqStep[] }) {
   return (
-    <ol className="grid gap-3 sm:grid-cols-3 mb-6">
+    <ol className="grid gap-2.5 sm:grid-cols-3">
       {steps.map((step, i) => {
         const ready = !step.loading && step.value != null;
         const empty = !step.loading && step.value == null;
         return (
           <li
             key={i}
-            className={`relative flex flex-col rounded-xl border p-4 transition-colors ${
+            className={`relative flex flex-col rounded-lg border p-3 transition-colors ${
               ready
-                ? "border-emerald-200 bg-emerald-50/60"
+                ? "border-stone-200 bg-white"
                 : empty
-                  ? "border-amber-200 bg-amber-50/60"
-                  : "border-slate-200 bg-white"
+                  ? "border-stone-200 bg-stone-50"
+                  : "border-stone-200 bg-white"
             }`}
           >
-            <div className="flex items-start gap-2.5 mb-2">
+            <div className="flex items-start gap-2 mb-1.5">
               <span
                 aria-hidden
-                className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold ring-1 ring-inset ${
                   ready
-                    ? "bg-emerald-600 text-white"
-                    : empty
-                      ? "bg-amber-500 text-white"
-                      : "bg-slate-300 text-white"
+                    ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+                    : "bg-stone-100 text-stone-700 ring-stone-200"
                 }`}
               >
                 {ready ? "✓" : i + 1}
               </span>
               <div className="flex-1 leading-tight">
-                <p className="text-sm font-semibold text-slate-900">
+                <p className="text-[13px] font-semibold text-stone-900">
                   {step.title}
                   <HelpDot text={step.help} />
                 </p>
@@ -85,18 +83,18 @@ export function PipelinePrereqs({ steps }: { steps: PrereqStep[] }) {
               {step.loading ? (
                 <Skeleton className="h-4 w-32" />
               ) : ready ? (
-                <p className="text-emerald-800 font-medium break-words">
+                <p className="text-stone-700 font-medium break-words">
                   {step.value}
                 </p>
               ) : (
-                <div className="space-y-1">
+                <div className="space-y-1.5">
                   {step.emptyLabel && (
-                    <p className="text-amber-800">{step.emptyLabel}</p>
+                    <p className="text-stone-600">{step.emptyLabel}</p>
                   )}
                   {step.emptyHref && step.emptyCta && (
                     <Link
                       href={step.emptyHref}
-                      className="inline-flex items-center gap-1 rounded-md bg-amber-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-amber-700"
+                      className="inline-flex items-center gap-1 rounded-md bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1"
                     >
                       {step.emptyCta}
                       <span aria-hidden>&rarr;</span>
@@ -107,7 +105,7 @@ export function PipelinePrereqs({ steps }: { steps: PrereqStep[] }) {
             </div>
 
             {step.children && (
-              <div className="mt-3 border-t border-slate-200/70 pt-3">
+              <div className="mt-3 border-t border-stone-200/70 pt-3">
                 {step.children}
               </div>
             )}
