@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ContextBanner } from "@/components/ContextBanner";
 import { SkeletonTableRow } from "@/components/Skeleton";
+import { Tooltip } from "@/components/Tooltip";
 import {
   baseUrl,
   listPredictionSets,
@@ -198,6 +199,86 @@ function FamilyChips({ fs }: { fs: RerankerModel["feature_selection"] }) {
   );
 }
 
+// Tooltip copy for the four card-level provenance pills. Kept verbose
+// enough that a researcher reading the card without context can still
+// reason about whether a booster will inference cleanly.
+const PROV_TOOLTIPS = {
+  schema: (
+    "feature_schema_sha: feature-family-aware fingerprint of the booster. " +
+    "Must match the live pipeline's schema at inference; mismatch refuses to score."
+  ),
+  manifest: (
+    "dataset_manifest_sha: sha256 of the source dataset's serialised manifest. " +
+    "A drift here means the lab trained on a different dump than is published now."
+  ),
+  dataset: (
+    "dataset_id: UUID of the linked Dataset row (export_research_dataset output). " +
+    "Click to copy the full id."
+  ),
+  source: (
+    "external_source: provenance tag for boosters trained outside PROTEA " +
+    "(e.g. protea-reranker-lab@<git-sha>)."
+  ),
+} as const;
+
+function ProvPill({
+  label,
+  value,
+  tooltip,
+}: {
+  label: string;
+  value: string | null | undefined;
+  tooltip: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  if (!value) {
+    return (
+      <Tooltip text={tooltip}>
+        <span className="inline-flex items-center gap-1 rounded bg-slate-50 px-1.5 py-0.5 font-mono text-[11px] text-slate-400 border border-slate-200">
+          {label}=<span className="italic">unset</span>
+        </span>
+      </Tooltip>
+    );
+  }
+  const short = value.length > 12 ? `${value.slice(0, 12)}` : value;
+  return (
+    <Tooltip text={tooltip}>
+      <button
+        type="button"
+        title={`${value} (click to copy)`}
+        onClick={(e) => {
+          e.stopPropagation();
+          navigator.clipboard?.writeText(value).then(
+            () => {
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1200);
+            },
+            () => {},
+          );
+        }}
+        className="inline-flex items-center gap-1 rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[11px] text-slate-700 hover:bg-slate-100 transition-colors"
+      >
+        {label}={short}
+        <span className="text-[10px] text-slate-400">{copied ? "✓" : "⧉"}</span>
+      </button>
+    </Tooltip>
+  );
+}
+
+function ProvenanceStrip({ model }: { model: RerankerModel }) {
+  return (
+    <div
+      className="flex flex-wrap items-center gap-1.5 mt-2"
+      data-testid="reranker-provenance-strip"
+    >
+      <ProvPill label="schema" value={model.feature_schema_sha} tooltip={PROV_TOOLTIPS.schema} />
+      <ProvPill label="manifest" value={model.dataset_manifest_sha} tooltip={PROV_TOOLTIPS.manifest} />
+      <ProvPill label="dataset" value={model.dataset_id} tooltip={PROV_TOOLTIPS.dataset} />
+      <ProvPill label="source" value={model.external_source} tooltip={PROV_TOOLTIPS.source} />
+    </div>
+  );
+}
+
 function ProvenancePanel({ model }: { model: RerankerModel }) {
   const fs = model.feature_selection;
   const drop = fs?.drop_features ?? [];
@@ -363,6 +444,10 @@ function RerankerCard({
             </>
           )}
         </div>
+        {/* Reproducibility-critical provenance always visible on the collapsed card:
+            schema_sha / manifest_sha / dataset_id / external_source. Hover each
+            pill for the full meaning; click to copy the full sha. */}
+        <ProvenanceStrip model={model} />
       </div>
 
       {expanded && (
