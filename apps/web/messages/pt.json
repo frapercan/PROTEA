@@ -936,17 +936,38 @@
       "viewAll": "Ver todos →"
     },
     "usagePolicyModal": {
-      "title": "Bem-vindo ao PROTEA",
-      "subtitle": "Recursos computacionais pessoais, compartilhados abertamente — leia antes de continuar",
-      "intro": "Esta plataforma funciona em hardware pessoal compartilhado livremente para fins de pesquisa. Não é necessário registro. Por favor, tenha em mente:",
-      "rule1": "Estes são recursos pessoais compartilhados voluntariamente. Por favor, seja consciente da carga que você gera.",
-      "rule2": "Antes de iniciar jobs pesados ou de longa duração, entre em contato primeiro — uma mensagem breve sobre seu caso de uso é muito apreciada.",
-      "rule3": "Todos os dados processados são públicos e abertos. Fique à vontade para usar e compartilhar os resultados.",
-      "rule4": "PROTEA é gratuito e de código aberto. Qualquer pessoa ou instituição de pesquisa pode implantar sua própria instância — código fonte no GitHub.",
-      "rule5": "Este serviço opera em base de melhor esforço. O sistema pode ser desligado a qualquer momento para manutenção ou uso pessoal, sem aviso prévio.",
-      "rule6": "Se algo quebrar ou se comportar de forma inesperada, por favor reporte. Relatórios de bugs e feedback são muito apreciados.",
-      "dataPublicNote": "Todos os dados processados aqui são públicos. Obrigado por usar com responsabilidade.",
-      "accept": "Entendido, vamos lá"
+      "title": "PROTEA: pré-visualização de pesquisa",
+      "subtitle": "Ferramenta de pesquisa de acesso aberto. Por favor leia antes de continuar.",
+      "accept": "Entendo e aceito",
+      "identification": {
+        "heading": "Responsável",
+        "body": "PROTEA é desenvolvido por Francisco Miguel Pérez Canales como parte de uma pesquisa de doutorado na Universidad de Sevilla, sob a cossupervisão de David Orellana-Martín e Ana M. Rojas. Esta implantação é operada pessoalmente pelo autor e NÃO constitui um serviço oficial da Universidad de Sevilla."
+      },
+      "asIs": {
+        "heading": "Sem garantias",
+        "body": "Fornecido no estado em que se encontra, sem garantia de qualquer tipo. O autor não assume qualquer responsabilidade por resultados, indisponibilidades ou perda de dados. Disponibilidade em regime de melhor esforço; o serviço pode ser retirado para manutenção sem aviso prévio."
+      },
+      "dataHandling": {
+        "heading": "Dados que você envia",
+        "body": "Não envie dados confidenciais, proprietários ou de identificação pessoal. As sequências enviadas são processadas em claro e podem ser retidas para fins de depuração, reprodutibilidade e uso por outras pessoas pesquisadoras desta instância. Ao enviar, você certifica que tem o direito de compartilhar os dados publicamente."
+      },
+      "privacyLog": {
+        "heading": "Privacidade e registros",
+        "body": "Não são necessárias contas. O servidor registra endereços IP e carimbos de hora das requisições por 30 dias para prevenção de abuso. Sem cookies de rastreamento. Solicitações em matéria de proteção de dados (acesso, exclusão, retificação): frapercan1@alum.us.es."
+      },
+      "license": {
+        "heading": "Licença",
+        "body": "O código fonte é publicado sob a <license>LICENÇA do repositório no GitHub</license>. Os resultados gerados por esta implantação são publicados sob CC-BY-4.0, salvo se indicado expressamente o contrário em uma página de resultados específica."
+      },
+      "responsibleUse": {
+        "heading": "Uso responsável",
+        "body": "Tenha em mente a carga de computação compartilhada. Antes de iniciar trabalhos pesados ou de longa duração, entre em contato primeiro pelo <issues>rastreador de issues do GitHub</issues>."
+      },
+      "bugReport": {
+        "heading": "Relatórios de bugs",
+        "body": "Se algo falhar ou se comportar de forma inesperada, <issues>abra uma issue no GitHub</issues>. Os relatórios são bem-vindos."
+      },
+      "lastUpdated": "Versão da política v2, 2026-05-23."
     },
     "statusBadge": {
       "queued": "NA FILA",

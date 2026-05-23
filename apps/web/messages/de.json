@@ -936,17 +936,38 @@
       "viewAll": "Alle anzeigen →"
     },
     "usagePolicyModal": {
-      "title": "Willkommen bei PROTEA",
-      "subtitle": "Persönliche Rechenressourcen, offen geteilt — bitte vor dem Fortfahren lesen",
-      "intro": "Diese Plattform läuft auf persönlicher Hardware, die frei für Forschungszwecke geteilt wird. Keine Registrierung erforderlich. Bitte beachten Sie Folgendes:",
-      "rule1": "Dies sind persönliche, freiwillig geteilte Ressourcen. Bitte achten Sie auf die von Ihnen erzeugte Last.",
-      "rule2": "Bevor Sie rechenintensive oder langwierige Jobs starten, nehmen Sie bitte zuerst Kontakt auf — eine kurze Nachricht zu Ihrem Anwendungsfall wird sehr geschätzt.",
-      "rule3": "Alle verarbeiteten Daten sind öffentlich und offen. Ergebnisse dürfen frei verwendet und geteilt werden.",
-      "rule4": "PROTEA ist frei und Open Source. Jede Person oder Forschungseinrichtung kann eine eigene Instanz betreiben — Quellcode auf GitHub.",
-      "rule5": "Dieser Dienst läuft auf Best-Effort-Basis. Das System kann jederzeit ohne Vorankündigung für Wartung oder persönliche Nutzung abgeschaltet werden.",
-      "rule6": "Wenn etwas nicht funktioniert oder sich unerwartet verhält, melden Sie es bitte. Fehlerberichte und Feedback sind sehr willkommen.",
-      "dataPublicNote": "Alle hier verarbeiteten Daten sind öffentlich. Danke für die verantwortungsvolle Nutzung.",
-      "accept": "Verstanden, los geht's"
+      "title": "PROTEA: Forschungs-Vorabversion",
+      "subtitle": "Frei zugängliches Forschungswerkzeug. Bitte vor dem Fortfahren lesen.",
+      "accept": "Ich verstehe und akzeptiere",
+      "identification": {
+        "heading": "Betreiber",
+        "body": "PROTEA wird von Francisco Miguel Pérez Canales im Rahmen einer Doktorarbeit an der Universidad de Sevilla entwickelt, betreut von David Orellana-Martín und Ana M. Rojas. Diese Instanz wird persönlich vom Autor betrieben und ist KEIN offizieller Dienst der Universidad de Sevilla."
+      },
+      "asIs": {
+        "heading": "Keine Gewährleistung",
+        "body": "Die Bereitstellung erfolgt ohne jede Gewährleistung. Der Autor übernimmt keine Haftung für Ergebnisse, Ausfälle oder Datenverlust. Verfügbarkeit nach bestem Bemühen; der Dienst kann ohne Vorankündigung zur Wartung abgeschaltet werden."
+      },
+      "dataHandling": {
+        "heading": "Was Sie einreichen",
+        "body": "Reichen Sie keine vertraulichen, geschützten oder personenbezogenen Daten ein. Eingereichte Sequenzen werden im Klartext verarbeitet und können zu Zwecken der Fehlersuche, Reproduzierbarkeit sowie zur Nutzung durch andere Forschende dieser Instanz aufbewahrt werden. Mit der Einreichung bestätigen Sie, dass Sie berechtigt sind, die Daten öffentlich zu teilen."
+      },
+      "privacyLog": {
+        "heading": "Datenschutz und Logs",
+        "body": "Es sind keine Konten erforderlich. Der Server speichert IP-Adressen und Zeitstempel von Anfragen 30 Tage lang zur Missbrauchsprävention. Keine Tracking-Cookies. Betroffenenrechte (Auskunft, Löschung, Berichtigung): frapercan1@alum.us.es."
+      },
+      "license": {
+        "heading": "Lizenz",
+        "body": "Der Quellcode wird unter der <license>LICENSE des Repositorys auf GitHub</license> veröffentlicht. Von dieser Instanz erzeugte Ergebnisse stehen unter CC-BY-4.0, sofern auf einer konkreten Ergebnisseite nicht ausdrücklich etwas anderes angegeben ist."
+      },
+      "responsibleUse": {
+        "heading": "Verantwortungsvolle Nutzung",
+        "body": "Achten Sie auf die geteilte Rechenlast. Bevor Sie rechenintensive oder langlaufende Jobs starten, melden Sie sich bitte zuerst über den <issues>GitHub-Issue-Tracker</issues>."
+      },
+      "bugReport": {
+        "heading": "Fehlerberichte",
+        "body": "Wenn etwas nicht funktioniert oder sich unerwartet verhält, <issues>melden Sie es als Issue auf GitHub</issues>. Berichte sind willkommen."
+      },
+      "lastUpdated": "Richtlinienversion v2, 2026-05-23."
     },
     "statusBadge": {
       "queued": "WARTEND",

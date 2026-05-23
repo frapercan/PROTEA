@@ -939,17 +939,38 @@
       "viewAll": "Ver todos →"
     },
     "usagePolicyModal": {
-      "title": "Bienvenido a PROTEA",
-      "subtitle": "Recursos informáticos personales, compartidos abiertamente — por favor lee antes de continuar",
-      "intro": "Esta plataforma se ejecuta en hardware personal compartido libremente con fines de investigación. No se requiere registro ni autorización. Ten en cuenta lo siguiente:",
-      "rule1": "Estos son recursos personales compartidos voluntariamente. Por favor, ten en cuenta la carga que generas.",
-      "rule2": "Antes de lanzar trabajos pesados o de larga duración, contáctanos primero — un mensaje rápido explicando tu caso de uso es muy apreciado.",
-      "rule3": "Todos los datos procesados son públicos y abiertos. Siéntete libre de usar y compartir los resultados.",
-      "rule4": "PROTEA es libre y de código abierto. Cualquier individuo o institución de investigación puede desplegar su propia instancia — código fuente en GitHub.",
-      "rule5": "Este servicio funciona en modo best-effort. El sistema puede ser dado de baja por mantenimiento o uso personal en cualquier momento sin previo aviso.",
-      "rule6": "Si algo falla o se comporta de forma inesperada, por favor repórtalo. Los informes de errores y el feedback son genuinamente apreciados.",
-      "dataPublicNote": "Todos los datos procesados aquí son públicos. Gracias por usar esto de forma responsable.",
-      "accept": "Entendido, ¡vamos!"
+      "title": "PROTEA: vista previa de investigación",
+      "subtitle": "Herramienta de investigación de acceso abierto. Lee este aviso antes de continuar.",
+      "accept": "Entiendo y acepto",
+      "identification": {
+        "heading": "Responsable",
+        "body": "PROTEA es desarrollado por Francisco Miguel Pérez Canales como parte de una investigación doctoral en la Universidad de Sevilla, bajo la cosupervisión de David Orellana-Martín y Ana M. Rojas. Este despliegue lo opera personalmente el autor y NO constituye un servicio oficial de la Universidad de Sevilla."
+      },
+      "asIs": {
+        "heading": "Sin garantías",
+        "body": "Se proporciona tal cual, sin garantía de ningún tipo. El autor no asume responsabilidad alguna por los resultados, indisponibilidades o pérdida de datos. Disponibilidad en régimen de mejor esfuerzo; el servicio puede retirarse por mantenimiento sin previo aviso."
+      },
+      "dataHandling": {
+        "heading": "Datos que envías",
+        "body": "No envíes datos confidenciales, de carácter propietario o de identificación personal. Las secuencias enviadas se procesan en claro y pueden conservarse con fines de depuración, reproducibilidad y uso por parte de otras personas investigadoras que utilicen esta instancia. Al enviarlos, certificas que tienes derecho a compartirlos públicamente."
+      },
+      "privacyLog": {
+        "heading": "Privacidad y registros",
+        "body": "No se requieren cuentas. El servidor registra direcciones IP y marcas de tiempo de las peticiones durante 30 días para la prevención de abusos. Sin cookies de seguimiento. Solicitudes en materia de protección de datos (acceso, supresión, rectificación): frapercan1@alum.us.es."
+      },
+      "license": {
+        "heading": "Licencia",
+        "body": "El código fuente se publica bajo la <license>LICENCIA del repositorio en GitHub</license>. Los resultados generados por este despliegue se publican bajo CC-BY-4.0, salvo que se indique expresamente lo contrario en una página de resultados concreta."
+      },
+      "responsibleUse": {
+        "heading": "Uso responsable",
+        "body": "Ten en cuenta la carga de cómputo compartida. Antes de lanzar trabajos pesados o de larga duración, ponte en contacto primero a través del <issues>gestor de incidencias de GitHub</issues>."
+      },
+      "bugReport": {
+        "heading": "Informes de errores",
+        "body": "Si algo falla o se comporta de forma inesperada, <issues>abre una incidencia en GitHub</issues>. Los informes son bienvenidos."
+      },
+      "lastUpdated": "Versión de la política v2, 2026-05-23."
     },
     "statusBadge": {
       "queued": "EN COLA",
