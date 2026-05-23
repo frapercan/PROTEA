@@ -70,6 +70,10 @@ const RERANKER_MODEL = {
     identity_nw: 1800,
     taxonomic_distance: 950,
   },
+  feature_schema_sha: "feat0schema00abc",
+  dataset_id: "ds-uuid-cafebabe",
+  dataset_manifest_sha: "manif00sha00deadbeef",
+  external_source: "protea-reranker-lab@cec8ccd",
   created_at: "2026-05-14T10:00:00Z",
 };
 
@@ -137,6 +141,28 @@ test.describe("reranker flow", () => {
     await expect(
       page.getByRole("button", { name: "Delete reranker" }),
     ).toBeVisible();
+  });
+
+  test("collapsed card shows monospace provenance strip with schema/manifest/dataset/source", async ({
+    page,
+    mockApi,
+  }) => {
+    mockApi.override("/scoring/rerankers/", [RERANKER_MODEL]);
+    mockApi.override("/embeddings/prediction-sets/", PREDICTION_SETS);
+    mockApi.override("/annotations/evaluation-sets", EVALUATION_SETS);
+    mockApi.override("/annotations/sets/", ANNOTATION_SETS);
+
+    await page.goto("/en/reranker/");
+
+    // The strip lives on the collapsed card header and never requires
+    // expanding the card. Its testid lets us scope the four pills
+    // without colliding with the expanded-view ProvenancePanel.
+    const strip = page.getByTestId("reranker-provenance-strip").first();
+    await expect(strip).toBeVisible();
+    await expect(strip.getByRole("button", { name: /^schema=/ })).toBeVisible();
+    await expect(strip.getByRole("button", { name: /^manifest=/ })).toBeVisible();
+    await expect(strip.getByRole("button", { name: /^dataset=/ })).toBeVisible();
+    await expect(strip.getByRole("button", { name: /^source=/ })).toBeVisible();
   });
 
   test("Train button enables once name, prediction set, and evaluation set are picked", async ({
