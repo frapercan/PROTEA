@@ -64,7 +64,11 @@
     "authAnonymousHint": "Inicia sesión para aumentar límites y poseer trabajos",
     "openSwagger": "Abrir en Swagger",
     "collapseSidebar": "Plegar barra lateral",
-    "openSidebar": "Abrir barra lateral"
+    "openSidebar": "Abrir barra lateral",
+    "adminGroup": "Administracion",
+    "adminGroupHint": "Controles solo para operadores: claves, auditoria",
+    "apiKeys": "Claves API",
+    "apiKeysHint": "Emitir, listar y revocar claves de acceso programatico"
   },
   "home": {
     "title": "Pipeline de Prediccion de Funcion Proteica",
@@ -1206,6 +1210,79 @@
         "specRequired": "El contenido de spec.yaml es obligatorio.",
         "runJsonInvalid": "run.json no es JSON válido: {message}"
       }
+    }
+  },
+  "apiKeys": {
+    "title": "Claves API",
+    "subtitle": "Claves de acceso programatico utilizadas por clientes CLI, trabajos de CI y el laboratorio de reranker offline. Cada clave se almacena hasheada; el valor en claro se muestra una unica vez al crearla y no se puede recuperar despues.",
+    "refresh": "Recargar",
+    "mint": "Crear clave",
+    "mintFirst": "Crear la primera clave",
+    "revoke": "Revocar",
+    "revoking": "Revocando...",
+    "empty": "Aun no hay claves API.",
+    "includeRevoked": "Mostrar claves revocadas",
+    "counts": "{active} activas, {revoked} revocadas",
+    "neverUsed": "nunca",
+    "statusActive": "Activa",
+    "statusRevoked": "Revocada",
+    "loadError": "No se pudieron cargar las claves API",
+    "revokedToast": "Se revoco {name}",
+    "revokeErrorToast": "Error al revocar: {error}",
+    "mintedToast": "Clave creada: {name}",
+    "footnote": "La revocacion es irreversible. Las filas revocadas siguen visibles para auditoria al activar 'Mostrar claves revocadas'.",
+    "forbiddenTitle": "Solo administradores",
+    "forbiddenBody": "Esta pagina gestiona claves de acceso programatico y esta restringida a operadores con rol administrador.",
+    "forbiddenRoleLabel": "Tu rol actual",
+    "forbiddenBackHome": "Volver al inicio",
+    "cols": {
+      "name": "Nombre",
+      "role": "Rol",
+      "prefix": "Prefijo",
+      "created": "Creada",
+      "lastUsed": "Ultimo uso",
+      "status": "Estado",
+      "actions": "Acciones"
+    },
+    "dialog": {
+      "title": "Crear una clave API",
+      "subtitle": "El valor en claro se devuelve una unica vez. Copialo ahora; no podra recuperarse despues.",
+      "revealTitle": "Copia tu nueva clave",
+      "revealSubtitle": "Esta es la unica vez que se mostrara el valor en claro.",
+      "close": "Cerrar",
+      "cancel": "Cancelar",
+      "mint": "Crear clave",
+      "minting": "Creando...",
+      "done": "Ya la guarde",
+      "copy": "Copiar",
+      "copied": "Copiada",
+      "nameLabel": "Nombre",
+      "namePlaceholder": "lab-runner-2026-05",
+      "nameHelp": "Etiqueta libre que te ayuda a identificar la clave en los registros de auditoria.",
+      "roleLabel": "Rol",
+      "roleHelp": "Determina a que endpoints puede llamar la clave.",
+      "roleViewer": "Lector",
+      "roleViewerHelp": "Acceso solo lectura. Valor por defecto seguro.",
+      "roleOperator": "Operador",
+      "roleOperatorHelp": "Puede lanzar trabajos y ejecutar mantenimiento.",
+      "roleAdmin": "Administrador",
+      "roleAdminHelp": "Control total, incluidas acciones destructivas.",
+      "expiryLabel": "Caducidad (opcional)",
+      "expiryHelp": "Si se indica, la clave deja de funcionar pasada esa fecha.",
+      "expiryFootnote": "Aun no se aplica en el servidor; la UI guarda el valor para el siguiente avance.",
+      "prefixLabel": "Prefijo",
+      "warningTitle": "Guarda esta clave ahora",
+      "warningBody": "PROTEA solo almacena un hash. Si pierdes este valor tendras que crear otra clave y revocar esta.",
+      "errors": {
+        "nameRequired": "El nombre es obligatorio."
+      }
+    },
+    "confirm": {
+      "title": "Revocar esta clave?",
+      "body": "La clave dejara de autenticar inmediatamente. La fila seguira visible para auditoria.",
+      "cancel": "Cancelar",
+      "confirm": "Si, revocar",
+      "confirming": "Revocando..."
     }
   }
 }

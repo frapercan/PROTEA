@@ -22,7 +22,9 @@ type NavKey =
   | "support"
   | "farmSection"
   | "farmPlan"
-  | "farmCost";
+  | "farmCost"
+  | "adminGroup"
+  | "apiKeys";
 
 // Map URL segments to `nav` translation keys. Segments without an entry here
 // are rendered verbatim (typically dynamic ids like /jobs/<uuid>).
@@ -46,6 +48,8 @@ const SEGMENT_TO_NAV_KEY: Record<string, NavKey> = {
   farm: "farmSection",
   plan: "farmPlan",
   cost: "farmCost",
+  admin: "adminGroup",
+  "api-keys": "apiKeys",
 };
 
 export function Breadcrumbs() {
