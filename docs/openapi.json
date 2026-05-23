@@ -5656,7 +5656,7 @@
     },
     "/v1/proteins/stats": {
       "get": {
-        "description": "Return aggregate counts: total proteins, canonical vs isoforms, reviewed,\nand how many have metadata, embeddings, or GO annotations.\n\nCached for 5 minutes: the DISTINCT-over-JOIN counts scan 4M\u201380M rows and\ntake 30+ seconds to run from scratch. Counts move slowly enough that a\n5-min staleness is invisible to users.",
+        "description": "Return aggregate counts: total proteins, canonical vs isoforms, reviewed,\nand how many have metadata, embeddings, or GO annotations.\n\nCached for 5 minutes: the DISTINCT-over-JOIN counts scan 4M\u201380M rows and\ntake 30+ seconds to run from scratch. Counts move slowly enough that a\n5-min staleness is invisible to users.\n\nServes the last-known value when the recompute fails (DB blip, query\ntimeout) so the page never blocks on a cold-cache 500. The startup hook\nin ``protea.api.app`` prewarms this key and a background task refreshes\nit before expiry so users never hit a cold path under normal operation.",
         "operationId": "get_protein_stats_v1_proteins_stats_get",
         "responses": {
           "200": {
