@@ -110,10 +110,17 @@ export default async function LocaleLayout({
 
                 <Breadcrumbs />
 
+                {/* w-full lets the column claim the row width; mx-auto then
+                    centers the max-w-screen-2xl content cap inside the
+                    remaining (sidebar-aware) area. Without mx-auto the
+                    capped main glues to the left edge of the flex column,
+                    which on >=1280 viewports left-shifts everything and
+                    becomes especially obvious when the sidebar is
+                    collapsed (extra space appears on the right only). */}
                 <main
                   id="main"
                   tabIndex={-1}
-                  className="w-full max-w-screen-2xl px-4 sm:px-6 lg:px-8 py-6 sm:py-8 lg:py-10 focus:outline-none"
+                  className="mx-auto w-full max-w-screen-2xl px-4 sm:px-6 lg:px-8 py-6 sm:py-8 lg:py-10 focus:outline-none"
                 >
                   {children}
                 </main>
