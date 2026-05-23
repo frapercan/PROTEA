@@ -62,11 +62,13 @@
     "authBearer": "Bearer",
     "authAnonymousHint": "Entre para aumentar limites e ser dono dos jobs",
     "openSwagger": "Abrir no Swagger",
-    "_translatorTodo": "machine-translated, review by native speaker"
+    "_translatorTodo": "machine-translated, review by native speaker",
+    "collapseSidebar": "Recolher barra lateral",
+    "openSidebar": "Abrir barra lateral"
   },
   "home": {
     "title": "Pipeline de Predição de Função Proteica",
-    "subtitle": "De sequência a anotação funcional por similaridade de embeddings, re-ranking e curação LLM",
+    "subtitle": "De sequência a anotação funcional por similaridade de embeddings e re-ranking aprendido",
     "bestResults": "Melhores Resultados",
     "bestOverall": "Melhor resultado geral",
     "avgFmaxAcrossCells": "Fmax médio sobre 9 células",
@@ -98,7 +100,6 @@
     "stageEmbeddings": "Embeddings",
     "stageKnn": "Busca KNN",
     "stageReranker": "Re-ranker",
-    "stageLlm": "Curação LLM",
     "stageAnnotation": "Anotação",
     "stageEvaluation": "Avaliação",
     "nkCategory": "Categoria NK (No Knowledge) — configuração de avaliação mais exigente",

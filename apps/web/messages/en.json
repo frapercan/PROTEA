@@ -61,11 +61,13 @@
     "authApiKey": "API key",
     "authBearer": "Bearer",
     "authAnonymousHint": "Sign in to raise rate limits and own jobs",
-    "openSwagger": "Open in Swagger"
+    "openSwagger": "Open in Swagger",
+    "collapseSidebar": "Collapse sidebar",
+    "openSidebar": "Open sidebar"
   },
   "home": {
     "title": "Protein Function Prediction Pipeline",
-    "subtitle": "From sequence to functional annotation through embedding similarity, re-ranking, and LLM curation",
+    "subtitle": "From sequence to functional annotation through embedding similarity and learned re-ranking",
     "bestResults": "Best Results",
     "bestOverall": "Best Overall",
     "avgFmaxAcrossCells": "mean Fmax across 9 cells",
@@ -97,7 +99,6 @@
     "stageEmbeddings": "Embeddings",
     "stageKnn": "KNN Search",
     "stageReranker": "Re-ranker",
-    "stageLlm": "LLM Curation",
     "stageAnnotation": "Annotation",
     "stageEvaluation": "Evaluation",
     "nkCategory": "NK category (No prior Knowledge) — most demanding evaluation setting",

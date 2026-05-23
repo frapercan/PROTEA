@@ -5,6 +5,32 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useLocale, useTranslations } from "next-intl";
+import {
+  Sparkles,
+  Workflow,
+  Database,
+  BarChart3,
+  Server,
+  BookOpen,
+  Atom,
+  Tags,
+  Sliders,
+  ArrowUpDown,
+  Dna,
+  Tag,
+  FolderOpen,
+  Gauge,
+  Inbox,
+  Wrench,
+  Boxes,
+  Book,
+  Braces,
+  GraduationCap,
+  ThumbsUp,
+  PanelLeftClose,
+  ChevronRight,
+  type LucideIcon,
+} from "lucide-react";
 import { baseUrl } from "@/lib/api";
 
 /**
@@ -34,12 +60,14 @@ type NavItem = {
   hint?: string;
   external?: boolean;
   badge?: string;
+  icon: LucideIcon;
 };
 
 type NavGroup = {
   id: string;
   title: string;
   hint?: string;
+  icon: LucideIcon;
   items: NavItem[];
 };
 
@@ -53,21 +81,6 @@ function isInternalActive(stripped: string, href: string): boolean {
   }
   return stripped === href || stripped.startsWith(href + "/");
 }
-
-const ArrowIcon = () => (
-  <svg
-    className="w-3.5 h-3.5"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2.2"
-    viewBox="0 0 12 12"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    aria-hidden="true"
-  >
-    <path d="M2 6h8M6.5 2l3.5 4-3.5 4" />
-  </svg>
-);
 
 /**
  * The shared body of the rail: brand block, Annotate CTA, grouped sections,
@@ -102,13 +115,13 @@ function RailContent({
           onClick={onNavigate}
           aria-current={annotateActive ? "page" : undefined}
           title={t("annotateTooltip")}
-          className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-[13px] font-semibold transition-all ${
+          className={`flex items-center gap-2.5 rounded-xl px-3.5 py-3 text-sm font-semibold tracking-[-0.005em] transition-all ${
             annotateActive
-              ? "bg-blue-700 text-white shadow-sm shadow-blue-600/30"
-              : "bg-blue-600 text-white hover:bg-blue-700 hover:shadow-md hover:shadow-blue-600/20"
+              ? "bg-blue-900 text-white shadow-sm shadow-blue-800/30"
+              : "bg-blue-800 text-white hover:bg-blue-900 hover:shadow-md hover:shadow-blue-800/25"
           }`}
         >
-          <ArrowIcon />
+          <Sparkles className="h-4 w-4 shrink-0" aria-hidden />
           <span>{t("annotate")}</span>
         </Link>
       </div>
@@ -116,76 +129,82 @@ function RailContent({
       {/* Grouped sections */}
       <nav
         aria-label={t("ariaPrimary")}
-        className="flex-1 overflow-y-auto px-3 py-3"
+        className="flex-1 overflow-y-auto px-3 py-4"
       >
-        {groups.map((group, gi) => (
-          <section
-            key={group.id}
-            className={gi > 0 ? "mt-4 pt-4 border-t border-slate-200/70" : ""}
-            aria-labelledby={`sidebar-group-${group.id}`}
-          >
-            <h2
-              id={`sidebar-group-${group.id}`}
-              className="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500"
+        {groups.map((group, gi) => {
+          const GroupIcon = group.icon;
+          return (
+            <section
+              key={group.id}
+              className={gi > 0 ? "mt-5 pt-4 border-t border-stone-200/80" : ""}
+              aria-labelledby={`sidebar-group-${group.id}`}
             >
-              {group.title}
-            </h2>
-            <ul className="space-y-0.5">
-              {group.items.map((item) => {
-                const active = isInternalActive(stripped, item.href);
-                const href = item.external ? item.href : `/${locale}${item.href}`;
-                return (
-                  <li key={item.href}>
-                    <Link
-                      href={href}
-                      onClick={onNavigate}
-                      target={item.external ? "_blank" : undefined}
-                      rel={item.external ? "noopener noreferrer" : undefined}
-                      aria-current={active ? "page" : undefined}
-                      title={item.hint}
-                      className={`group/link relative flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13.5px] transition-colors ${
-                        active
-                          ? "bg-blue-50 font-semibold text-blue-800"
-                          : "text-slate-700 hover:bg-slate-100/80 hover:text-slate-900"
-                      }`}
-                    >
-                      {active && (
-                        <span
-                          aria-hidden
-                          className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full bg-blue-600"
-                        />
-                      )}
-                      <span
-                        aria-hidden
-                        className={`h-1.5 w-1.5 shrink-0 rounded-full transition-colors ${
+              <h2
+                id={`sidebar-group-${group.id}`}
+                className="protea-eyebrow flex items-center gap-2 px-3 pb-2 text-xs uppercase text-stone-500"
+              >
+                <GroupIcon className="h-3.5 w-3.5 shrink-0 text-stone-400" aria-hidden />
+                <span>{group.title}</span>
+              </h2>
+              <ul className="space-y-px">
+                {group.items.map((item) => {
+                  const active = isInternalActive(stripped, item.href);
+                  const href = item.external ? item.href : `/${locale}${item.href}`;
+                  const Icon = item.icon;
+                  return (
+                    <li key={item.href}>
+                      <Link
+                        href={href}
+                        onClick={onNavigate}
+                        target={item.external ? "_blank" : undefined}
+                        rel={item.external ? "noopener noreferrer" : undefined}
+                        aria-current={active ? "page" : undefined}
+                        title={item.hint}
+                        className={`group/link relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-[0.9rem] tracking-[-0.005em] transition-colors ${
                           active
-                            ? "bg-blue-600"
-                            : "bg-slate-300 group-hover/link:bg-slate-400"
+                            ? "font-semibold text-blue-900"
+                            : "text-stone-700 hover:bg-stone-100/70 hover:text-stone-950"
                         }`}
-                      />
-                      <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                      {item.external && (
-                        <span aria-hidden className="text-[10px] text-slate-400">
-                          ↗
-                        </span>
-                      )}
-                      {item.badge && (
-                        <span className="rounded bg-slate-100 px-1 py-0.5 text-[9px] uppercase tracking-wider text-slate-600">
-                          {item.badge}
-                        </span>
-                      )}
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          </section>
-        ))}
+                      >
+                        {active && (
+                          <span
+                            aria-hidden
+                            className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full bg-blue-800"
+                          />
+                        )}
+                        <Icon
+                          aria-hidden
+                          className={`h-[18px] w-[18px] shrink-0 transition-colors ${
+                            active
+                              ? "text-blue-800"
+                              : "text-stone-500 group-hover/link:text-stone-700"
+                          }`}
+                          strokeWidth={active ? 2.25 : 1.85}
+                        />
+                        <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                        {item.external && (
+                          <span aria-hidden className="text-[0.7rem] text-stone-400">
+                            ↗
+                          </span>
+                        )}
+                        {item.badge && (
+                          <span className="rounded bg-stone-100 px-1.5 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wider text-stone-600">
+                            {item.badge}
+                          </span>
+                        )}
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          );
+        })}
       </nav>
 
       {/* Utility footer */}
       {extras && (
-        <div className="border-t border-slate-200/70 px-4 py-3">
+        <div className="border-t border-stone-200/80 px-4 py-3">
           <div className="flex items-center justify-between gap-3">{extras}</div>
         </div>
       )}
@@ -204,9 +223,28 @@ export function Sidebar({
   const pathname = usePathname();
   const locale = useLocale();
   const [open, setOpen] = useState(false);
+  // Desktop-only: persisted collapsed/expanded state. SSR renders expanded;
+  // the effect below hydrates from localStorage on mount. Brief one-frame
+  // flicker is acceptable (no critical CLS) and avoids the cookie/header
+  // dance a no-flash impl would need.
+  const [desktopCollapsed, setDesktopCollapsed] = useState(false);
   const drawerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const previouslyFocused = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setDesktopCollapsed(window.localStorage.getItem("protea-sidebar-collapsed") === "1");
+  }, []);
+  const toggleDesktop = useCallback(() => {
+    setDesktopCollapsed((v) => {
+      const next = !v;
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem("protea-sidebar-collapsed", next ? "1" : "0");
+      }
+      return next;
+    });
+  }, []);
 
   const onHome = stripLocale(pathname) === "/";
   const annotateHref = onHome
@@ -219,50 +257,55 @@ export function Sidebar({
       id: "pipeline",
       title: t("pipelineGroup"),
       hint: t("pipelineHint"),
+      icon: Workflow,
       items: [
-        { href: "/embeddings", label: t("embeddings"), hint: "PLM embedding configs · ESM-2 · ESM3c · ProstT5 · Ankh" },
-        { href: "/functional-annotation", label: t("functionalAnnotation"), hint: "Embedding-similarity GO annotation, BPO / MFO / CCO" },
-        { href: "/scoring", label: t("scoring"), hint: "Combine distance, alignment, taxonomy, evidence", badge: "LAB" },
-        { href: "/reranker", label: t("reranker"), hint: "LightGBM reranker over scored predictions", badge: "LAB" },
+        { href: "/embeddings", label: t("embeddings"), hint: "PLM embedding configs · ESM-2 · ESM3c · ProstT5 · Ankh", icon: Atom },
+        { href: "/functional-annotation", label: t("functionalAnnotation"), hint: "Embedding-similarity GO annotation, BPO / MFO / CCO", icon: Tags },
+        { href: "/scoring", label: t("scoring"), hint: "Combine distance, alignment, taxonomy, evidence", badge: "LAB", icon: Sliders },
+        { href: "/reranker", label: t("reranker"), hint: "LightGBM reranker over scored predictions", badge: "LAB", icon: ArrowUpDown },
       ],
     },
     {
       id: "data",
       title: t("data"),
       hint: t("dataHint"),
+      icon: Database,
       items: [
-        { href: "/proteins", label: t("proteins"), hint: "UniProt entries · Swiss-Prot + TrEMBL, isoforms" },
-        { href: "/annotations", label: t("annotations"), hint: "GO ontology snapshots and ground-truth GAF / QuickGO sets" },
-        { href: "/query-sets", label: t("querySets"), hint: "FASTA uploads grouped for batch runs" },
+        { href: "/proteins", label: t("proteins"), hint: "UniProt entries · Swiss-Prot + TrEMBL, isoforms", icon: Dna },
+        { href: "/annotations", label: t("annotations"), hint: "GO ontology snapshots and ground-truth GAF / QuickGO sets", icon: Tag },
+        { href: "/query-sets", label: t("querySets"), hint: "FASTA uploads grouped for batch runs", icon: FolderOpen },
       ],
     },
     {
       id: "results",
       title: t("results"),
       hint: t("resultsHint"),
+      icon: BarChart3,
       items: [
-        { href: "/benchmark", label: t("benchmark"), hint: "Fmax matrix across embedding × stage × NK / LK / PK" },
-        { href: "/evaluation", label: t("evaluation"), hint: "CAFA-style delta evaluation (Fmax, Smin, coverage)" },
+        { href: "/benchmark", label: t("benchmark"), hint: "Fmax matrix across embedding × stage × NK / LK / PK", icon: BarChart3 },
+        { href: "/evaluation", label: t("evaluation"), hint: "CAFA-style delta evaluation (Fmax, Smin, coverage)", icon: Gauge },
       ],
     },
     {
       id: "operations",
       title: t("system"),
       hint: t("operationsHint"),
+      icon: Server,
       items: [
-        { href: "/jobs", label: t("jobs"), hint: "Live job queue and event audit trail" },
-        { href: "/maintenance", label: t("maintenance"), hint: "Vacuum orphan sequences and unindexed embeddings" },
-        { href: "/stack", label: t("stack"), hint: "Eight repositories, open PRs, deploy targets" },
+        { href: "/jobs", label: t("jobs"), hint: "Live job queue and event audit trail", icon: Inbox },
+        { href: "/maintenance", label: t("maintenance"), hint: "Vacuum orphan sequences and unindexed embeddings", icon: Wrench },
+        { href: "/stack", label: t("stack"), hint: "Eight repositories, open PRs, deploy targets", icon: Boxes },
       ],
     },
     {
       id: "docs",
       title: t("docs"),
+      icon: BookOpen,
       items: [
-        { href: "/sphinx/", label: t("sphinx"), hint: t("sphinxHint"), external: true },
-        { href: swaggerHref, label: t("swagger"), hint: t("swaggerHint"), external: true },
-        { href: "/thesis.pdf", label: t("thesis"), hint: t("thesisHint"), external: true },
-        { href: "/support", label: t("support"), hint: t("supportHint") },
+        { href: "/sphinx/", label: t("sphinx"), hint: t("sphinxHint"), external: true, icon: Book },
+        { href: swaggerHref, label: t("swagger"), hint: t("swaggerHint"), external: true, icon: Braces },
+        { href: "/thesis.pdf", label: t("thesis"), hint: t("thesisHint"), external: true, icon: GraduationCap },
+        { href: "/support", label: t("support"), hint: t("supportHint"), icon: ThumbsUp },
       ],
     },
   ];
@@ -340,30 +383,46 @@ export function Sidebar({
   return (
     <>
       {/* ── Desktop rail ─────────────────────────────────────────── */}
-      <aside className="hidden lg:flex lg:w-64 xl:w-72 shrink-0">
-        <div className="sticky top-0 flex h-screen w-full flex-col border-r border-slate-200/70 bg-white/85 backdrop-blur-md supports-[backdrop-filter]:bg-white/70">
-          {/* Brand */}
-          <Link
-            href={`/${locale}`}
-            className="group flex items-center gap-2.5 border-b border-slate-200/70 px-4 h-16 shrink-0"
-            aria-label="PROTEA home"
-          >
-            <span
-              aria-hidden
-              className="relative flex h-10 w-10 items-center justify-center transition-transform group-hover:scale-105"
+      <aside
+        aria-hidden={desktopCollapsed}
+        className={`hidden lg:flex lg:shrink-0 transition-[width] duration-300 ease-out ${
+          desktopCollapsed ? "lg:w-0 lg:overflow-hidden" : "lg:w-64 xl:w-72"
+        }`}
+      >
+        <div className="protea-sidebar-bg sticky top-0 flex h-screen w-full flex-col border-r border-stone-200/80">
+          {/* Brand + collapse toggle */}
+          <div className="flex items-stretch border-b border-stone-200/80 h-16 shrink-0">
+            <Link
+              href={`/${locale}`}
+              className="group flex flex-1 min-w-0 items-center gap-2.5 px-4"
+              aria-label="PROTEA home"
             >
-              <Image src="/protea-mark.png" alt="" width={40} height={40} priority className="h-10 w-10" />
-              <span className="absolute -right-0.5 -bottom-0.5 h-2 w-2 rounded-full bg-emerald-400 ring-2 ring-white" />
-            </span>
-            <span className="flex min-w-0 flex-col leading-tight">
-              <span className="text-[17px] font-bold tracking-tight text-slate-900 transition-colors group-hover:text-blue-700">
-                PROTEA
+              <span
+                aria-hidden
+                className="relative flex h-10 w-10 shrink-0 items-center justify-center transition-transform group-hover:scale-105"
+              >
+                <Image src="/protea-mark.png" alt="" width={40} height={40} priority className="h-10 w-10 object-contain" />
+                <span className="absolute -right-0.5 -bottom-0.5 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-white" />
               </span>
-              <span className="truncate text-[10px] font-medium uppercase tracking-[0.12em] text-slate-500">
-                {t("subtitleShort")}
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span className="text-lg font-bold tracking-tight leading-none text-stone-950 transition-colors group-hover:text-blue-800">
+                  PROTEA
+                </span>
+                <span className="line-clamp-2 text-[0.68rem] leading-snug text-stone-500">
+                  {t("subtitleShort")}
+                </span>
               </span>
-            </span>
-          </Link>
+            </Link>
+            <button
+              type="button"
+              onClick={toggleDesktop}
+              aria-label={t("collapseSidebar")}
+              title={t("collapseSidebar")}
+              className="flex h-16 w-12 shrink-0 items-center justify-center text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-900"
+            >
+              <PanelLeftClose className="h-5 w-5" aria-hidden strokeWidth={1.9} />
+            </button>
+          </div>
 
           <div className="min-h-0 flex-1">
             <RailContent
@@ -379,13 +438,32 @@ export function Sidebar({
         </div>
       </aside>
 
+      {/* Floating expand pill (desktop, only when collapsed).
+          Keeps the PROTEA brand mark visible when the rail is hidden;
+          the chevron on the right hints at "open the navigation". */}
+      <button
+        type="button"
+        onClick={toggleDesktop}
+        aria-label={t("openSidebar")}
+        title={t("openSidebar")}
+        className={`group fixed left-3 top-3 z-40 items-center gap-1.5 rounded-full border border-stone-200 bg-white/95 py-1.5 pl-1.5 pr-3 text-stone-700 shadow-md backdrop-blur transition-all hover:bg-stone-50 hover:text-stone-950 hover:shadow-lg ${
+          desktopCollapsed ? "inline-flex lg:flex" : "hidden"
+        }`}
+      >
+        <span aria-hidden className="relative flex h-8 w-8 shrink-0 items-center justify-center">
+          <Image src="/protea-mark.png" alt="" width={32} height={32} className="h-8 w-8 object-contain" />
+          <span className="absolute -right-0.5 -bottom-0.5 h-1.5 w-1.5 rounded-full bg-emerald-500 ring-2 ring-white" />
+        </span>
+        <ChevronRight className="h-4 w-4 text-stone-500 transition-transform group-hover:translate-x-0.5" aria-hidden strokeWidth={2.2} />
+      </button>
+
       {/* ── Mobile top bar (hamburger + brand + utility cluster) ───
           Fixed (not a flex item) so it never affects the rail/main row;
           <main> reserves space with a top padding on < lg. */}
-      <header className="lg:hidden fixed inset-x-0 top-0 z-50 flex h-14 items-center gap-2 border-b border-slate-200/70 bg-white/85 px-2 backdrop-blur-md supports-[backdrop-filter]:bg-white/70">
+      <header className="lg:hidden fixed inset-x-0 top-0 z-50 flex h-14 items-center gap-2 border-b border-stone-200/80 bg-white/85 px-2 backdrop-blur-md supports-[backdrop-filter]:bg-white/70">
         <button
           ref={triggerRef}
-          className="flex h-11 w-11 shrink-0 flex-col items-center justify-center gap-1.5 rounded-lg text-slate-600 transition-colors hover:bg-slate-100"
+          className="flex h-11 w-11 shrink-0 flex-col items-center justify-center gap-1.5 rounded-lg text-stone-600 transition-colors hover:bg-stone-100"
           onClick={() => setOpen((v) => !v)}
           aria-label={open ? t("closeMenu") : t("openMenu")}
           aria-expanded={open}
@@ -404,7 +482,7 @@ export function Sidebar({
             <Image src="/protea-mark.png" alt="" width={32} height={32} priority className="h-8 w-8" />
             <span className="absolute -right-0.5 -bottom-0.5 h-1.5 w-1.5 rounded-full bg-emerald-400 ring-2 ring-white" />
           </span>
-          <span className="truncate text-[15px] font-bold tracking-tight text-slate-900 group-hover:text-blue-700">
+          <span className="truncate text-[15px] font-bold tracking-tight text-stone-950 group-hover:text-blue-800">
             PROTEA
           </span>
         </Link>
@@ -416,7 +494,7 @@ export function Sidebar({
       {/* ── Mobile drawer ────────────────────────────────────────── */}
       {open && (
         <div
-          className="lg:hidden fixed inset-0 z-[60] bg-slate-900/40 backdrop-blur-[1px]"
+          className="lg:hidden fixed inset-0 z-[60] bg-stone-900/40 backdrop-blur-[1px]"
           onClick={closeDrawer}
           aria-hidden
         />
@@ -433,23 +511,23 @@ export function Sidebar({
         }`}
       >
         {/* Drawer header: brand + close */}
-        <div className="flex h-16 shrink-0 items-center justify-between gap-2 border-b border-slate-200/70 px-4">
+        <div className="flex h-16 shrink-0 items-center justify-between gap-2 border-b border-stone-200/80 px-4">
           <Link
             href={`/${locale}`}
             onClick={closeDrawer}
             className="group flex items-center gap-2.5"
             aria-label="PROTEA home"
           >
-            <span aria-hidden className="relative flex h-9 w-9 items-center justify-center">
-              <Image src="/protea-mark.png" alt="" width={36} height={36} className="h-9 w-9" />
-              <span className="absolute -right-0.5 -bottom-0.5 h-2 w-2 rounded-full bg-emerald-400 ring-2 ring-white" />
+            <span aria-hidden className="relative flex h-9 w-9 shrink-0 items-center justify-center">
+              <Image src="/protea-mark.png" alt="" width={36} height={36} className="h-9 w-9 object-contain" />
+              <span className="absolute -right-0.5 -bottom-0.5 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-white" />
             </span>
-            <span className="text-[16px] font-bold tracking-tight text-slate-900">PROTEA</span>
+            <span className="text-[16px] font-bold tracking-tight text-stone-950">PROTEA</span>
           </Link>
           <button
             onClick={closeDrawer}
             aria-label={t("closeMenu")}
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900"
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-950"
           >
             <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 6l12 12M18 6L6 18" />

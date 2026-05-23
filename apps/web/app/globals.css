@@ -1,37 +1,54 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f7f8fb;
-  --surface: #ffffff;
-  --foreground: #0f172a;
-  --muted: #475569;
-  --subtle: #94a3b8;
-  --border: #e2e8f0;
-  --border-strong: #cbd5e1;
-  --primary: #2563eb;
-  --primary-strong: #1d4ed8;
-  --primary-soft: #eff6ff;
-  --accent: #6366f1;
-  --ring: #2563eb;
-  --ring-offset: #ffffff;
-  --shadow-sm: 0 1px 2px 0 rgba(15, 23, 42, 0.05);
-  --shadow-md: 0 4px 12px -2px rgba(15, 23, 42, 0.08), 0 2px 4px -2px rgba(15, 23, 42, 0.04);
-  --shadow-lg: 0 12px 32px -8px rgba(15, 23, 42, 0.12), 0 4px 12px -4px rgba(15, 23, 42, 0.08);
+  /* Editorial-warm palette (stone family) for research-tool feel.
+     Contrast ratios on white surface verified for WCAG 2.2 AA. */
+  --background: #FAFAF9;       /* stone-50 */
+  --surface: #FFFFFF;
+  --foreground: #0C0A09;       /* stone-950 — 19.5:1 on white */
+  --muted: #57534E;            /* stone-600 — 7.1:1 on white  */
+  --subtle: #78716C;           /* stone-500 — 4.9:1 on white  */
+  --border: #E7E5E4;           /* stone-200 */
+  --border-strong: #D6D3D1;    /* stone-300 */
+  --primary: #1E40AF;          /* blue-800 — 8.6:1 on white   */
+  --primary-strong: #1E3A8A;   /* blue-900                    */
+  --primary-soft: #EFF6FF;     /* blue-50                     */
+  --accent: #4F46E5;           /* indigo-600                  */
+  --ring: #1E40AF;
+  --ring-offset: #FFFFFF;
+  /* Functional state palette, separate from --primary so brand blue
+     does not double as the "info" signal. */
+  --success: #047857;          /* emerald-700 */
+  --warning: #B45309;          /* amber-700 */
+  --danger: #BE123C;           /* rose-700 */
+  --info: #0369A1;             /* sky-700 */
+  --shadow-sm: 0 1px 2px 0 rgba(12, 10, 9, 0.05);
+  --shadow-md: 0 4px 12px -2px rgba(12, 10, 9, 0.08), 0 2px 4px -2px rgba(12, 10, 9, 0.04);
+  --shadow-lg: 0 12px 32px -8px rgba(12, 10, 9, 0.12), 0 4px 12px -4px rgba(12, 10, 9, 0.08);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system,
+  /* Sans: Inter Variable (loaded in layout.tsx via next/font/google).
+     Mono: Geist Mono retained (excellent for IDs / UUIDs / SHAs).
+     Serif: Newsreader, opt-in via the `font-serif` utility on hero H1s. */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system,
     "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, "JetBrains Mono",
     Menlo, monospace;
+  --font-serif: var(--font-newsreader), ui-serif, Georgia, "Times New Roman", serif;
 }
 
 html {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  /* Accessibility: lift the rem anchor from the 16px default to 17px
+     (+6%). Every rem-based Tailwind size (text-sm, text-base, text-lg,
+     spacing, etc.) scales up proportionally without per-component edits.
+     Helps low-vision users and projector exposure. */
+  font-size: 17px;
 }
 
 body {
@@ -39,41 +56,52 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans, ui-sans-serif, system-ui, -apple-system,
     "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif);
-  font-feature-settings: "cv11", "ss01", "ss03";
-  letter-spacing: -0.005em;
+  /* Inter feature settings: cv11 (single-storey a), ss01 (alt 1),
+     ss03 (alt G), cv05 (alt l with tail) for clearer 1/l/I discrimination. */
+  font-feature-settings: "cv11", "ss01", "ss03", "cv05";
+  letter-spacing: -0.011em;
 }
 
 h1, h2, h3, h4 {
-  letter-spacing: -0.02em;
+  letter-spacing: -0.022em;
+}
+
+/* Uppercase eyebrow labels read better with a slight positive tracking.
+   Apply with the `protea-eyebrow` class on small uppercase chrome text. */
+.protea-eyebrow {
+  letter-spacing: 0.02em;
+  font-weight: 600;
 }
 
 /* Focus ring — WCAG 2.2 SC 2.4.11 requires >=3:1 contrast against the
    adjacent color. Solid 2px outline with a contrasting offset gives a
    well-above-3:1 indicator on every surface tone we use. Scoped to
-   :focus-visible so mouse clicks do not draw the ring. */
+   :focus-visible so mouse clicks do not draw the ring. Adds a brief
+   ease on offset for a subtle landing animation while tabbing. */
 *:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
   border-radius: 6px;
+  transition: outline-offset 120ms ease-out;
 }
 
-/* Subtle, modern scrollbar */
+/* Subtle, modern scrollbar — tuned to the stone palette */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #cbd5e1 transparent;
+  scrollbar-color: var(--border-strong) transparent;
 }
 *::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 *::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: var(--border-strong);
   border-radius: 999px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 *::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: var(--subtle);
   background-clip: padding-box;
   border: 2px solid transparent;
 }
@@ -94,10 +122,20 @@ h1, h2, h3, h4 {
 }
 
 .protea-gradient-text {
-  background: linear-gradient(135deg, #2563eb 0%, #6366f1 50%, #8b5cf6 100%);
+  background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 55%, #7C3AED 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+}
+
+/* Sidebar background — subtle vertical gradient that adds depth without
+   stealing attention from the navigation items. Apply on the rail's
+   sticky inner container. */
+.protea-sidebar-bg {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, rgba(250, 250, 249, 0.88) 100%);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 
 /* Sticky table header — sits below the sticky h-16 chrome header.
