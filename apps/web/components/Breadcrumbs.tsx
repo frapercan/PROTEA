@@ -14,6 +14,7 @@ type NavKey =
   | "evaluation"
   | "scoring"
   | "reranker"
+  | "datasets"
   | "querySets"
   | "maintenance"
   | "benchmark"
@@ -36,6 +37,7 @@ const SEGMENT_TO_NAV_KEY: Record<string, NavKey> = {
   evaluation: "evaluation",
   scoring: "scoring",
   reranker: "reranker",
+  datasets: "datasets",
   "query-sets": "querySets",
   maintenance: "maintenance",
   benchmark: "benchmark",

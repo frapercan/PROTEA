@@ -897,3 +897,76 @@ export function getStack() {
 export function getStackPulls() {
   return http<StackPullsResponse>("/stack/pulls");
 }
+
+// ─── Datasets (frozen reranker dumps) ──────────────────────────────
+//
+// Mirrors ``protea/api/routers/datasets.py``. The Dataset row is the
+// durable handle the offline lab uses to pull the exact dump by name
+// or id; the UI surfaces the same registry so operators can see what
+// has been exported, copy provenance shas, and dispatch new exports
+// without having to compose a raw POST /v1/datasets curl call.
+
+export type Dataset = {
+  id: string;
+  name: string;
+  operation: string;
+  job_id: string | null;
+  storage_backend: string;
+  key_prefix: string;
+  train_uri: string | null;
+  eval_uri: string | null;
+  manifest_uri: string;
+  schema_sha: string | null;
+  manifest_sha: string | null;
+  n_train_rows: number;
+  n_eval_rows: number;
+  k: number;
+  annotation_source: string;
+  embedding_config_id: string | null;
+  ontology_snapshot_id: string | null;
+  train_snapshot_pairs: string[];
+  eval_snapshot_pair: string | null;
+  producer_version: string | null;
+  producer_git_sha: string | null;
+  meta: Record<string, any> | null;
+  created_at: string | null;
+};
+
+export function listDatasets(params?: {
+  name_like?: string;
+  embedding_config_id?: string;
+  limit?: number;
+}) {
+  const q = new URLSearchParams();
+  if (params?.name_like) q.set("name_like", params.name_like);
+  if (params?.embedding_config_id) q.set("embedding_config_id", params.embedding_config_id);
+  q.set("limit", String(params?.limit ?? 200));
+  return http<Dataset[]>(`/datasets?${q.toString()}`);
+}
+
+export function getDataset(idOrName: string) {
+  return http<Dataset>(`/datasets/${encodeURIComponent(idOrName)}`);
+}
+
+export type CreateDatasetPayload = {
+  output_name: string;
+  embedding_config_id: string;
+  ontology_snapshot_id: string;
+  train_versions: number[];
+  test_versions: number[];
+  annotation_source?: string;
+  k?: number;
+  search_backend?: string;
+  compute_alignments?: boolean;
+  compute_taxonomy?: boolean;
+  expand_votes_to_ancestors?: boolean;
+  use_embedding_pca?: boolean;
+};
+
+export function createDataset(body: CreateDatasetPayload) {
+  return http<{ job_id: string; queue: string; status: string }>(`/datasets`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
