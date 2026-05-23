@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { ContextBanner } from "@/components/ContextBanner";
 import { SkeletonTableRow } from "@/components/Skeleton";
 import { Tooltip } from "@/components/Tooltip";
+import { ImportRerankerDialog } from "@/components/ImportRerankerDialog";
+import { RegisterRerankerDialog } from "@/components/RegisterRerankerDialog";
 import {
   baseUrl,
   listPredictionSets,
@@ -605,6 +607,12 @@ export default function RerankerPage() {
   const [training, setTraining] = useState(false);
   const [trainError, setTrainError] = useState<string | null>(null);
 
+  // Dialog flags for the lab-bridge import paths (multipart upload +
+  // register-by-reference). Both dialogs reload the reranker list on
+  // success so the new booster card appears immediately.
+  const [importOpen, setImportOpen] = useState(false);
+  const [registerOpen, setRegisterOpen] = useState(false);
+
   async function loadAll() {
     setLoading(true);
     setError(null);
@@ -656,7 +664,7 @@ export default function RerankerPage() {
 
   return (
     <>
-      <div className="flex items-center gap-2.5 mb-1">
+      <div className="flex flex-wrap items-center gap-2.5 mb-1">
         <h1 className="text-xl font-semibold">Re-ranker Models</h1>
         <span
           title="Research / LAB surface: research and reproducibility parameters are intentionally exposed."
@@ -664,6 +672,22 @@ export default function RerankerPage() {
         >
           LAB
         </span>
+        <div className="ml-auto flex gap-2">
+          <button
+            type="button"
+            onClick={() => setImportOpen(true)}
+            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Import booster (upload)
+          </button>
+          <button
+            type="button"
+            onClick={() => setRegisterOpen(true)}
+            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Register by URI
+          </button>
+        </div>
       </div>
 
       <ContextBanner
@@ -843,6 +867,19 @@ export default function RerankerPage() {
           />
         ))}
       </div>
+
+      {/* Lab-bridge dialogs: both reload the reranker list on success so
+          the newly registered booster card materialises in place. */}
+      <ImportRerankerDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={() => loadAll()}
+      />
+      <RegisterRerankerDialog
+        open={registerOpen}
+        onClose={() => setRegisterOpen(false)}
+        onRegistered={() => loadAll()}
+      />
     </>
   );
 }

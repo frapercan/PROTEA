@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { useToast } from "@/components/Toast";
 import { SkeletonTableRow } from "@/components/Skeleton";
 import { ContextBanner } from "@/components/ContextBanner";
+import { ComputeEmbeddingsDialog } from "@/components/ComputeEmbeddingsDialog";
 import {
   listEmbeddingConfigs,
   createEmbeddingConfig,
@@ -102,6 +103,10 @@ export default function EmbeddingsPage() {
   const [cmpError, setCmpError] = useState("");
   const [cmpSubmitting, setCmpSubmitting] = useState(false);
   const [proteinCount, setProteinCount] = useState<number | null>(null);
+
+  // Quick-action dialog (mirrors the Compute tab but launchable from the
+  // header so operators can re-queue without switching tabs).
+  const [computeDialogOpen, setComputeDialogOpen] = useState(false);
 
   async function loadAll() {
     setLoading(true);
@@ -230,6 +235,15 @@ export default function EmbeddingsPage() {
     <>
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <h1 className="text-xl font-semibold">{t("title")}</h1>
+        <button
+          type="button"
+          onClick={() => setComputeDialogOpen(true)}
+          disabled={configs.length === 0}
+          className="ml-auto rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          title={configs.length === 0 ? t("computeTab.noConfigs") : undefined}
+        >
+          {t("computeDialog.launch")}
+        </button>
       </div>
 
       <ContextBanner
@@ -585,6 +599,18 @@ export default function EmbeddingsPage() {
           )}
         </div>
       )}
+
+      {/* Quick-action dialog: same payload shape as the Compute tab so a
+          launch from either surface results in identical jobs. */}
+      <ComputeEmbeddingsDialog
+        open={computeDialogOpen}
+        onClose={() => setComputeDialogOpen(false)}
+        initialConfigId={cmpConfigId || configs[0]?.id || null}
+        onLaunched={(job) => {
+          setCmpResult(job);
+          toast("Compute job queued", "success");
+        }}
+      />
 
       {/* ── Compute Tab ── */}
       {activeTab === "compute" && (
