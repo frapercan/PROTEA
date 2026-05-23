@@ -20,6 +20,7 @@ export function useRole(): Role {
   const [role, setRole] = useState<Role>("viewer");
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setRole(read());
     const onStorage = (e: StorageEvent) => {
       if (!e.key || e.key.startsWith("protea.")) setRole(read());
