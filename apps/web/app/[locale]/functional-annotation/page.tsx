@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { useToast } from "@/components/Toast";
 import { SkeletonTableRow } from "@/components/Skeleton";
 import { ContextBanner } from "@/components/ContextBanner";
+import { PipelinePrereqs, type PrereqStep } from "@/components/PipelinePrereqs";
 import {
   listEmbeddingConfigs,
   launchPredictGoTerms,
@@ -160,22 +161,95 @@ export default function FunctionalAnnotationPage() {
     { key: "results", label: t("tabs.results") },
   ];
 
+  // Resolve the currently-selected entities so the stepper can show their
+  // human names rather than UUID prefixes. AnnotationSet still has no
+  // name field on the backend (TODO: add a migration in a follow-up
+  // slice, see PR body); surface source + version + count as a label.
+  const selectedConfig = configs.find((c) => c.id === predConfigId);
+  const selectedAnnotationSet = annotationSets.find((a) => a.id === predAnnotationSetId);
+  const selectedQuerySet = querySets.find((qs) => qs.id === predQuerySetId);
+
+  const configValue = selectedConfig
+    ? `${selectedConfig.description || selectedConfig.model_name}${
+        selectedConfig.embedding_count != null
+          ? ` (${selectedConfig.embedding_count.toLocaleString()} ${t("onboarding.steps.embeddings.unit")})`
+          : ""
+      }`
+    : null;
+
+  const annotationValue = selectedAnnotationSet
+    ? `${selectedAnnotationSet.source}${
+        selectedAnnotationSet.source_version
+          ? ` ${selectedAnnotationSet.source_version}`
+          : ""
+      }${
+        selectedAnnotationSet.annotation_count != null
+          ? ` (${selectedAnnotationSet.annotation_count.toLocaleString()} ${t("onboarding.steps.annotationSet.unit")})`
+          : ""
+      }`
+    : null;
+
+  // For the query-set step we treat "no query set picked" as a valid state
+  // (it means: annotate all sequences in the DB). The CTA is therefore
+  // optional and shows a hint instead of a hard error when the user has
+  // not created any query sets yet.
+  const queryValue = selectedQuerySet
+    ? `${selectedQuerySet.name} (${selectedQuerySet.entry_count.toLocaleString()} ${t("onboarding.steps.querySet.unit")})`
+    : querySets.length > 0
+      ? t("onboarding.steps.querySet.allSequences")
+      : null;
+
+  const prereqSteps: PrereqStep[] = [
+    {
+      title: t("onboarding.steps.embeddings.title"),
+      help: t("onboarding.steps.embeddings.help"),
+      loading,
+      value: configValue ?? undefined,
+      emptyLabel: t("onboarding.steps.embeddings.emptyLabel"),
+      emptyHref: "/embeddings",
+      emptyCta: t("onboarding.steps.embeddings.cta"),
+    },
+    {
+      title: t("onboarding.steps.annotationSet.title"),
+      help: t("onboarding.steps.annotationSet.help"),
+      loading,
+      value: annotationValue ?? undefined,
+      emptyLabel: t("onboarding.steps.annotationSet.emptyLabel"),
+      emptyHref: "/annotations",
+      emptyCta: t("onboarding.steps.annotationSet.cta"),
+    },
+    {
+      title: t("onboarding.steps.querySet.title"),
+      help: t("onboarding.steps.querySet.help"),
+      loading,
+      value: queryValue ?? undefined,
+      emptyLabel: t("onboarding.steps.querySet.emptyLabel"),
+      emptyHref: "/query-sets",
+      emptyCta: t("onboarding.steps.querySet.cta"),
+    },
+  ];
+
   return (
     <>
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-semibold">{t("title")}</h1>
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-slate-900">{t("title")}</h1>
+        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-600">
+          {t("onboarding.intro")}
+        </p>
       </div>
 
-      <ContextBanner
-        title="Predict GO terms by embedding similarity"
-        description="Uses KNN search to transfer GO annotations from similar proteins. Requires computed embeddings and a loaded annotation set."
-        prerequisites={!loading ? [
-          { label: `${configs.length} embedding config(s)`, met: configs.length > 0, href: "/embeddings" },
-          { label: `${annotationSets.length} annotation set(s)`, met: annotationSets.length > 0, href: "/annotations" },
-          { label: `${ontologySnapshots.length} ontology snapshot(s)`, met: ontologySnapshots.length > 0, href: "/annotations" },
-        ] : undefined}
-        nextStep={{ label: "Evaluation", href: "/evaluation" }}
-      />
+      <section
+        aria-label={t("onboarding.prereqsAriaLabel")}
+        className="mb-6"
+      >
+        <div className="mb-2 flex items-baseline justify-between">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            {t("onboarding.prereqsTitle")}
+          </h2>
+          <p className="text-xs text-slate-500">{t("onboarding.prereqsHelper")}</p>
+        </div>
+        <PipelinePrereqs steps={prereqSteps} />
+      </section>
 
       <div className="flex gap-1 border-b mb-6 overflow-x-auto">
         {tabs.map((tab) => (

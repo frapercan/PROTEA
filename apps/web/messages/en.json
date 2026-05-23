@@ -444,6 +444,36 @@
   },
   "functionalAnnotation": {
     "title": "Functional Annotation",
+    "onboarding": {
+      "intro": "Functional annotation transfers GO terms from proteins of known function to your query sequences. PROTEA encodes each protein into a high-dimensional embedding, runs a KNN search against a reference annotation set, and aggregates the neighbors' GO terms into a ranked prediction per protein. You need three ingredients before launching a job: precomputed embeddings, a reference annotation set, and the query sequences you want to annotate.",
+      "prereqsTitle": "Prerequisites",
+      "prereqsHelper": "Each step opens its dedicated page so you can build or pick the artefact.",
+      "prereqsAriaLabel": "Annotation prerequisites",
+      "steps": {
+        "embeddings": {
+          "title": "Embedding model",
+          "help": "A protein language model (PLM) configuration plus its precomputed vectors over your reference proteins. The KNN search runs in this embedding space, so its choice (esm2, prost_t5, ankh, etc.) determines which proteins look similar.",
+          "unit": "vectors",
+          "emptyLabel": "No embedding configuration is registered yet.",
+          "cta": "Compute embeddings"
+        },
+        "annotationSet": {
+          "title": "Reference annotation set",
+          "help": "The pool of GO annotations you transfer from. Typically a GOA or QuickGO release filtered by evidence code. Neighbors found by KNN must come from this set, so its coverage and freshness directly limit recall.",
+          "unit": "annotations",
+          "emptyLabel": "No reference annotation set is loaded yet.",
+          "cta": "Load annotations"
+        },
+        "querySet": {
+          "title": "Query set",
+          "help": "Named bundle of protein sequences you want to annotate. Pick a saved query set to keep the prediction reproducible, or leave it empty to annotate every protein in the database.",
+          "unit": "sequences",
+          "allSequences": "All sequences in the database",
+          "emptyLabel": "No saved query sets. You can still annotate all sequences, or upload one.",
+          "cta": "Manage query sets"
+        }
+      }
+    },
     "tabs": {
       "predict": "Run Annotation",
       "results": "Results"

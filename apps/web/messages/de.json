@@ -441,6 +441,36 @@
   },
   "functionalAnnotation": {
     "title": "Funktionale Annotation",
+    "onboarding": {
+      "intro": "Funktionale Annotation überträgt GO-Begriffe von Proteinen mit bekannter Funktion auf Ihre Abfragesequenzen. PROTEA kodiert jedes Protein in ein hochdimensionales Embedding, führt eine KNN-Suche gegen einen Referenz-Annotationssatz aus und aggregiert die GO-Begriffe der Nachbarn zu einer gerankten Vorhersage pro Protein. Vor dem Start eines Jobs werden drei Zutaten benötigt: vorberechnete Embeddings, ein Referenz-Annotationssatz und die Abfragesequenzen, die annotiert werden sollen.",
+      "prereqsTitle": "Voraussetzungen",
+      "prereqsHelper": "Jeder Schritt öffnet seine dedizierte Seite zum Erstellen oder Auswählen des Artefakts.",
+      "prereqsAriaLabel": "Voraussetzungen für die Annotation",
+      "steps": {
+        "embeddings": {
+          "title": "Embedding-Modell",
+          "help": "Eine Konfiguration eines Protein-Sprachmodells (PLM) plus dessen vorberechnete Vektoren über Ihre Referenzproteine. Die KNN-Suche läuft in diesem Embedding-Raum, daher bestimmt die Wahl (esm2, prost_t5, ankh, etc.), welche Proteine als ähnlich gelten.",
+          "unit": "Vektoren",
+          "emptyLabel": "Es ist noch keine Embedding-Konfiguration registriert.",
+          "cta": "Embeddings berechnen"
+        },
+        "annotationSet": {
+          "title": "Referenz-Annotationssatz",
+          "help": "Der Pool von GO-Annotationen, aus dem übertragen wird. Typischerweise ein GOA- oder QuickGO-Release, gefiltert nach Evidenzcode. Die von KNN gefundenen Nachbarn müssen aus diesem Satz stammen, daher begrenzen seine Abdeckung und Aktualität direkt den Recall.",
+          "unit": "Annotationen",
+          "emptyLabel": "Es ist noch kein Referenz-Annotationssatz geladen.",
+          "cta": "Annotationen laden"
+        },
+        "querySet": {
+          "title": "Abfrageset",
+          "help": "Benanntes Bündel von Proteinsequenzen, die annotiert werden sollen. Wählen Sie ein gespeichertes Abfrageset, damit die Vorhersage reproduzierbar bleibt, oder lassen Sie es leer, um alle Proteine in der Datenbank zu annotieren.",
+          "unit": "Sequenzen",
+          "allSequences": "Alle Sequenzen in der Datenbank",
+          "emptyLabel": "Keine gespeicherten Abfragesets. Sie können trotzdem alle Sequenzen annotieren oder eines hochladen.",
+          "cta": "Abfragesets verwalten"
+        }
+      }
+    },
     "tabs": {
       "predict": "Annotation starten",
       "results": "Ergebnisse"
