@@ -188,10 +188,22 @@ export const test = base.extend<{ mockApi: MockApi }>({
     // in the mock fixtures; the backend rejects the signature anyway.
     // We use a far-future expiry (year 2050) so it never expires during tests.
     const testJwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0LXVzZXIiLCJleHAiOjI1MjQ2MDgwMDAsImlhdCI6MTcxNjU0MTUwMCwicm9sZSI6Im9wZXJhdG9yIn0.test";
+    // Set the session cookie at the context level BEFORE any navigation
+    // so the middleware sees it on the very first request. addInitScript
+    // runs inside the page after navigation starts; by then the middleware
+    // has already redirected role-gated routes (/maintenance, /admin/*).
+    // Covers both localhost and 127.0.0.1 because CI and local dev use
+    // each interchangeably depending on the runner.
+    await context.addCookies([
+      { name: "protea_session", value: testJwt, domain: "localhost", path: "/" },
+      { name: "protea_session", value: testJwt, domain: "127.0.0.1", path: "/" },
+    ]);
     await context.addInitScript(({ jwt }: { jwt: string }) => {
       try {
         window.localStorage.setItem("protea_policy_accepted_v1", "1");
-        // Set session cookie (non-HttpOnly so browser can read it).
+        window.localStorage.setItem("protea_policy_accepted_v2", "1");
+        // Mirror into document.cookie in case any client-side code reads it
+        // before the context cookie shows up via document.cookie API.
         document.cookie = `protea_session=${jwt}; path=/`;
       } catch {
         // ignore on origins where localStorage is not yet available
