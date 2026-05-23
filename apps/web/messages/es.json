@@ -441,6 +441,34 @@
       "skipExisting": "Omitir embeddings existentes",
       "launchComputeJob": "Lanzar trabajo de cálculo",
       "launching": "Lanzando…"
+    },
+    "computeDialog": {
+      "title": "Lanzar cálculo de embeddings",
+      "subtitle": "Despacha un job compute_embeddings a la cola protea.embeddings sin salir de esta página.",
+      "close": "Cerrar",
+      "configLabel": "Configuración de embedding",
+      "loading": "Cargando…",
+      "noConfigs": "— no hay configuraciones —",
+      "querySetLabel": "Query set",
+      "querySetHelper": "(opcional — vacío = todas)",
+      "allSequences": "— todas las secuencias —",
+      "queueBatchSizeLabel": "Tamaño de batch (cola)",
+      "queueBatchSizeHelper": "(seqs/job)",
+      "modelBatchSizeLabel": "Tamaño de batch (modelo)",
+      "modelBatchSizeHelper": "(seqs/forward)",
+      "deviceLabel": "Dispositivo",
+      "deviceCpu": "cpu — CPU (FP32)",
+      "deviceCuda": "cuda — GPU por defecto (FP16 para ESM3c/T5)",
+      "deviceCuda0": "cuda:0 — GPU 0",
+      "deviceCuda1": "cuda:1 — GPU 1",
+      "deviceCustom": "personalizado…",
+      "skipExisting": "Saltar embeddings existentes",
+      "launch": "Lanzar job de cálculo",
+      "launching": "Lanzando…",
+      "cancel": "Cancelar",
+      "errors": {
+        "configRequired": "Selecciona una configuración de embedding."
+      }
     }
   },
   "functionalAnnotation": {
@@ -1098,6 +1126,71 @@
         "overBudget": "sobre el tope",
         "budget": "Tope diario",
         "budgetTick": "marcador del tope"
+      }
+    }
+  },
+  "reranker": {
+    "importDialog": {
+      "title": "Importar booster del re-ranker",
+      "subtitle": "Sube model.txt + spec.yaml + run.json generados por protea-reranker-lab.",
+      "close": "Cerrar",
+      "filesLegend": "Artefactos del run",
+      "filesHelp": "Selecciona los tres archivos del directorio runs/<run_id>/ del lab. PROTEA sube model.txt al almacén de artefactos y deriva la procedencia de spec.yaml y run.json.",
+      "modelFileLabel": "model.txt (booster LightGBM)",
+      "modelFileHelp": "Volcado de LightGBM en texto plano (lightgbm.Booster.save_model).",
+      "specFileLabel": "spec.yaml (ExperimentSpec)",
+      "specFileHelp": "Se guarda para reproducibilidad. ``training.cell`` se convierte en categoría / aspecto.",
+      "runFileLabel": "run.json (métricas y procedencia)",
+      "runFileHelp": "Incluye métricas, feature_importance, metadatos del dataset y selección de familias de features.",
+      "nameLabel": "Nombre de fila (opcional)",
+      "namePlaceholder": "por defecto: run.run_id",
+      "nameHelp": "Sobrescribe el nombre auto-derivado de RerankerModel.name. Debe ser único salvo que marques \"reemplazar\".",
+      "forceLabel": "Reemplazar fila existente con el mismo nombre",
+      "provenanceLegend": "Overrides de procedencia (opcionales)",
+      "provenanceHelp": "Si el run del lab incluye dataset.name y los UUIDs FK, deja estos campos vacíos: el servidor los resuelve solo. Úsalos sólo cuando el lab no ve la instancia PROTEA local.",
+      "datasetLabel": "Dataset enlazado",
+      "datasetAuto": "Auto (resolver por run.json dataset.name)",
+      "datasetPlaceholder": "UUID del Dataset",
+      "datasetHelp": "Fuerza un UUID concreto. Si lo dejas vacío, PROTEA resuelve por run.dataset.name.",
+      "externalSourceLabel": "Tag de fuente externa",
+      "externalSourceHelp": "Procedencia en formato libre, p.ej. protea-reranker-lab@<git-sha>.",
+      "predictionSetLabel": "UUID de PredictionSet (opcional)",
+      "evaluationSetLabel": "UUID de EvaluationSet (opcional)",
+      "import": "Importar booster",
+      "importing": "Subiendo…",
+      "cancel": "Cancelar",
+      "errors": {
+        "filesRequired": "Los tres archivos (model.txt, spec.yaml, run.json) son obligatorios."
+      }
+    },
+    "registerDialog": {
+      "title": "Registrar booster por URI",
+      "subtitle": "Booster ya en MinIO/FS local. Pega artifact_uri + spec.yaml + run.json para que PROTEA registre la URI sin volver a subir el blob.",
+      "close": "Cerrar",
+      "artifactUriLabel": "URI del artefacto",
+      "artifactUriHelp": "s3://bucket/key o file://ruta/model.txt. PROTEA registra esto tal cual y confía en el blob.",
+      "specYamlLabel": "spec.yaml (pegar contenido)",
+      "specYamlHelp": "Texto YAML completo del ExperimentSpec. ``training.cell`` se convierte en categoría / aspecto.",
+      "runJsonLabel": "run.json (pegar contenido)",
+      "runJsonHelp": "Metadatos del run (metrics, feature_importance, dataset.name, features.families_enabled). Debe ser JSON válido.",
+      "nameLabel": "Nombre de fila (opcional)",
+      "namePlaceholder": "por defecto: run.run_id",
+      "nameHelp": "Sobrescribe el nombre auto-derivado.",
+      "forceLabel": "Reemplazar fila existente con el mismo nombre",
+      "provenanceLegend": "Overrides de procedencia (opcionales)",
+      "datasetLabel": "Dataset enlazado",
+      "datasetAuto": "Auto (resolver por run.json dataset.name)",
+      "datasetPlaceholder": "UUID del Dataset",
+      "externalSourceLabel": "Tag de fuente externa",
+      "predictionSetLabel": "UUID de PredictionSet (opcional)",
+      "evaluationSetLabel": "UUID de EvaluationSet (opcional)",
+      "register": "Registrar booster",
+      "registering": "Registrando…",
+      "cancel": "Cancelar",
+      "errors": {
+        "uriRequired": "La URI del artefacto es obligatoria.",
+        "specRequired": "El contenido de spec.yaml es obligatorio.",
+        "runJsonInvalid": "run.json no es JSON válido: {message}"
       }
     }
   }

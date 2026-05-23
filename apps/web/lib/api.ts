@@ -614,6 +614,81 @@ export function getTrainingDataTsvUrl(
 }
 
 // ---------------------------------------------------------------------------
+// Re-ranker import (lab → PROTEA bridge)
+// ---------------------------------------------------------------------------
+
+export type RerankerImportResponse = {
+  id: string;
+  name: string;
+  artifact_uri: string;
+  storage_backend?: string;
+};
+
+export type RerankerImportOverrides = {
+  name?: string | null;
+  dataset_id?: string | null;
+  external_source?: string | null;
+  prediction_set_id?: string | null;
+  evaluation_set_id?: string | null;
+  force?: boolean;
+};
+
+/**
+ * Upload a lab-trained booster (`model.txt` + `spec.yaml` + `run.json`)
+ * to ``POST /reranker-models/import``. PROTEA stores the booster in the
+ * configured artifact store (local FS or MinIO) and inserts a
+ * ``RerankerModel`` row linked back to the source dataset.
+ */
+export async function importRerankerMultipart(
+  files: { modelFile: File; specYaml: File; runJson: File },
+  overrides: RerankerImportOverrides = {},
+): Promise<RerankerImportResponse> {
+  const form = new FormData();
+  form.append("model_file", files.modelFile);
+  form.append("spec_yaml", files.specYaml);
+  form.append("run_json", files.runJson);
+  if (overrides.name) form.append("name", overrides.name);
+  if (overrides.dataset_id) form.append("dataset_id", overrides.dataset_id);
+  if (overrides.external_source) form.append("external_source", overrides.external_source);
+  if (overrides.prediction_set_id) form.append("prediction_set_id", overrides.prediction_set_id);
+  if (overrides.evaluation_set_id) form.append("evaluation_set_id", overrides.evaluation_set_id);
+  if (overrides.force) form.append("force", "true");
+  const res = await fetch(`${baseUrl()}/reranker-models/import`, {
+    method: "POST",
+    body: form,
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as RerankerImportResponse;
+}
+
+export type RerankerImportByReferenceBody = {
+  artifact_uri: string;
+  spec_yaml: string;
+  run: Record<string, unknown>;
+  name?: string | null;
+  dataset_id?: string | null;
+  external_source?: string | null;
+  prediction_set_id?: string | null;
+  evaluation_set_id?: string | null;
+  force?: boolean;
+};
+
+/**
+ * Register a booster whose blob is already in the artifact store
+ * (``s3://…`` or ``file://…``) via ``POST /reranker-models/import-by-reference``.
+ * Useful when the lab pushes ``model.txt`` to MinIO directly and only
+ * needs PROTEA to record the URI + provenance.
+ */
+export function importRerankerByReference(body: RerankerImportByReferenceBody) {
+  return http<RerankerImportResponse>(`/reranker-models/import-by-reference`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Annotate (one-click pipeline)
 // ---------------------------------------------------------------------------
 
