@@ -204,6 +204,7 @@ def _lookup_and_validate(
             created_at=matched.created_at,
             revoked_at=matched.revoked_at,
             last_used_at=matched.last_used_at,
+            role=matched.role,
         )
         return snapshot, None
 

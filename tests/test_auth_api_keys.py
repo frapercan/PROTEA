@@ -27,6 +27,7 @@ from protea.api.auth import (
     PREFIX_LEN,
     _authn_required,
     _extract_raw_key,
+    _lookup_and_validate,
     generate_raw_key,
     hash_key,
     prefix_of,
@@ -200,6 +201,39 @@ class TestRequireApiKey:
         resp = client.get("/secret", headers={"X-Api-Key": raw})
         assert resp.status_code == 401
         assert "revoked" in resp.json().get("detail", "")
+
+    def test_snapshot_carries_role_column(self, monkeypatch):
+        """Regression: `_lookup_and_validate` must copy ``role`` into the
+        detached snapshot so downstream `role_of()` sees the real value
+        instead of collapsing every api_key request to viewer.
+
+        Without ``role=matched.role`` in the snapshot ctor, operator/admin
+        api_keys silently degraded to viewer at every gate, breaking
+        FARM-EXP.13 dispatch (the bug surfaced 2026-05-25).
+        """
+        monkeypatch.setenv("PROTEA_AUTHN_REQUIRED", "true")
+        raw = generate_raw_key()
+        row = MagicMock()
+        row.id = "00000000-0000-0000-0000-000000000010"
+        row.key_hash = hash_key(raw)
+        row.prefix = prefix_of(raw)
+        row.name = "operator-key"
+        row.role = "operator"
+        row.revoked_at = None
+        row.created_at = None
+        row.last_used_at = None
+
+        session = MagicMock()
+        session.query.return_value.filter.return_value.all.return_value = [row]
+        factory = MagicMock()
+        with patch(
+            "protea.api.auth.session_scope",
+            side_effect=lambda _: _scope(session),
+        ):
+            snapshot, err = _lookup_and_validate(factory, raw)
+        assert err is None
+        assert snapshot is not None
+        assert snapshot.role == "operator"
 
     def test_authn_disabled_short_circuits(self, monkeypatch):
         """``PROTEA_AUTHN_REQUIRED=false`` waves every request through."""
