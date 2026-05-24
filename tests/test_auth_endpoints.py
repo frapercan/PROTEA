@@ -242,6 +242,9 @@ class _FakeSession:
             )
 
         for obj in self._pending_add:
+            # Skip non-User objects (e.g. AuthAudit rows from audit_event calls).
+            if not hasattr(obj, "email"):
+                continue
             if obj.email in self._store:
                 raise _FakeIntegrityError("uq_user_email")
             obj.id = uuid4()
