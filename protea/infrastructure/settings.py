@@ -32,9 +32,10 @@ Two backward-compat affordances emit :class:`DeprecationWarning`:
 
 from __future__ import annotations
 
+import json
 import os
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -95,6 +96,16 @@ class Settings:
     # its repo-relative fallback. See the deployment runbook for the
     # full resolution chain (env > artifact store > repo fallback).
     anc2vec_path: str | None = None
+    # FARM-AUTH.7: per-user daily quota limits keyed by operation name.
+    # Override via PROTEA_USER_QUOTA_JSON='{"predict": 50}' (JSON string).
+    # Keys not present keep the built-in default; extra keys are ignored.
+    user_quota_per_day: dict[str, int] = field(
+        default_factory=lambda: {
+            "predict": 100,
+            "export_research_dataset": 5,
+            "run_cafa_evaluation": 20,
+        }
+    )
 
 
 class _YamlConfigSource(PydanticBaseSettingsSource):
@@ -198,6 +209,10 @@ def _make_settings_cls(env_prefix: str, env_file: Path | None) -> type[BaseSetti
         minio_secret_key: str | None = None
         minio_secure: bool = False
         anc2vec_path: str | None = None
+        # FARM-AUTH.7: JSON string override for per-user daily quota limits.
+        # Example: PROTEA_USER_QUOTA_JSON='{"predict": 50}'
+        # Merges on top of built-in defaults; unknown keys are ignored.
+        user_quota_json: str | None = None
         # ``allowed_origins`` is stored as a list internally so pydantic's
         # JSON-mode env parsing does not try to JSON-decode the raw
         # comma-separated env value. The field validator below normalises
@@ -308,6 +323,20 @@ def _materialise(raw: Any, project_root: Path) -> Settings:
         if raw.allowed_origins is None
         else tuple(raw.allowed_origins)
     )
+    # FARM-AUTH.7: merge PROTEA_USER_QUOTA_JSON on top of defaults.
+    _quota_defaults: dict[str, int] = {
+        "predict": 100,
+        "export_research_dataset": 5,
+        "run_cafa_evaluation": 20,
+    }
+    if raw.user_quota_json:
+        try:
+            _quota_defaults.update(
+                {k: int(v) for k, v in json.loads(raw.user_quota_json).items()}
+            )
+        except (ValueError, TypeError):
+            pass  # malformed JSON: keep built-in defaults
+
     return Settings(
         db_url=raw.db_url,
         amqp_url=raw.amqp_url,
@@ -321,6 +350,7 @@ def _materialise(raw: Any, project_root: Path) -> Settings:
         minio_secure=raw.minio_secure,
         allowed_origins=allowed,
         anc2vec_path=raw.anc2vec_path,
+        user_quota_per_day=_quota_defaults,
     )
 
 

@@ -6017,7 +6017,7 @@
         ]
       },
       "post": {
-        "description": "Create a Job row and publish its ID to the specified RabbitMQ queue.\n\nThe job transitions `QUEUED \u2192 RUNNING \u2192 SUCCEEDED/FAILED` as the worker processes it.\nUse `GET /jobs/{id}/events` to poll structured progress events in real time.",
+        "description": "Create a Job row and publish its ID to the specified RabbitMQ queue.\n\nThe job transitions `QUEUED \u2192 RUNNING \u2192 SUCCEEDED/FAILED` as the worker processes it.\nUse `GET /jobs/{id}/events` to poll structured progress events in real time.\n\nExpensive operations (``export_research_dataset``, ``run_cafa_evaluation``) are\nsubject to per-user daily quota limits (FARM-AUTH.7). Admins are exempt.",
         "operationId": "create_job_v1_jobs_post",
         "parameters": [
           {
