@@ -1,7 +1,7 @@
 """farm_auth_7_user_quota
 
 Revision ID: b202e7d5
-Revises: a1f2b3c4d5e6
+Revises: b201e6d4
 Create Date: 2026-05-24 20:00:00.000000
 
 FARM-AUTH.7 -- per-user daily operation quota table.
@@ -18,7 +18,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "b202e7d5"
-down_revision: str | None = "a1f2b3c4d5e6"
+down_revision: str | None = "b201e6d4"
 branch_labels: str | None = None
 depends_on: str | None = None
 
