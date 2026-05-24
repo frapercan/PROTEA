@@ -5858,6 +5858,174 @@
         ]
       }
     },
+    "/v1/proteins/stats/dataset-registry": {
+      "get": {
+        "description": "Frozen reranker datasets summary. Cached 5 minutes.",
+        "operationId": "get_dataset_registry_v1_proteins_stats_dataset_registry_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Dataset Registry V1 Proteins Stats Dataset Registry Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Dataset registry summary by K and eval-snapshot pair",
+        "tags": [
+          "proteins"
+        ]
+      }
+    },
+    "/v1/proteins/stats/embeddings-by-plm": {
+      "get": {
+        "description": "Per-PLM protein coverage. Cached 10 minutes.",
+        "operationId": "get_embeddings_by_plm_v1_proteins_stats_embeddings_by_plm_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Embeddings By Plm V1 Proteins Stats Embeddings By Plm Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Embedding coverage per PLM (config)",
+        "tags": [
+          "proteins"
+        ]
+      }
+    },
+    "/v1/proteins/stats/go-annotations-matrix": {
+      "get": {
+        "description": "4D-grouped annotation counts. Cached 10 minutes.",
+        "operationId": "get_go_matrix_v1_proteins_stats_go_annotations_matrix_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Go Matrix V1 Proteins Stats Go Annotations Matrix Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "GO annotations by source/version/aspect/evidence",
+        "tags": [
+          "proteins"
+        ]
+      }
+    },
+    "/v1/proteins/stats/go-density": {
+      "get": {
+        "description": "Per-aspect annotation density. Cached 10 minutes.",
+        "operationId": "get_go_density_v1_proteins_stats_go_density_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Go Density V1 Proteins Stats Go Density Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "GO term density per protein per aspect",
+        "tags": [
+          "proteins"
+        ]
+      }
+    },
+    "/v1/proteins/stats/pipeline-activity": {
+      "get": {
+        "description": "Last-30-days job activity. Cached 60 seconds (high-freshness expectation).",
+        "operationId": "get_pipeline_activity_v1_proteins_stats_pipeline_activity_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Pipeline Activity V1 Proteins Stats Pipeline Activity Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Job activity by operation over the last 30 days",
+        "tags": [
+          "proteins"
+        ]
+      }
+    },
+    "/v1/proteins/stats/sequence-length": {
+      "get": {
+        "description": "Length distribution. Cached 60 minutes.",
+        "operationId": "get_sequence_length_v1_proteins_stats_sequence_length_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Sequence Length V1 Proteins Stats Sequence Length Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Sequence length percentiles and histogram",
+        "tags": [
+          "proteins"
+        ]
+      }
+    },
+    "/v1/proteins/stats/taxonomy-top-20": {
+      "get": {
+        "description": "Top-20 organisms. Cached 60 minutes (organism mix rarely moves).",
+        "operationId": "get_taxonomy_top_v1_proteins_stats_taxonomy_top_20_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Taxonomy Top V1 Proteins Stats Taxonomy Top 20 Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Top 20 organisms by canonical-protein count",
+        "tags": [
+          "proteins"
+        ]
+      }
+    },
     "/v1/proteins/{accession}": {
       "get": {
         "description": "Full details for one protein: core fields, UniProt functional metadata, embedding count,\nGO annotation count, and accessions of known isoforms (if canonical).",
