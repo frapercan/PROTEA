@@ -18,5 +18,7 @@ fix sequence that an operator can execute without prior context.
    schema-sha-parallel-backfill
    schema-sha-parallel-rollout
    observability
+   observability-ops
    loki
    prometheus
+   deployment-process-stack
