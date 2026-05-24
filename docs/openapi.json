@@ -3381,7 +3381,7 @@
     },
     "/v1/benchmark/embeddings": {
       "get": {
-        "description": "Return every ``EmbeddingConfig`` with its persisted display metadata.\n\nThe metadata lives in ``embedding_config.display_name / family /\nparam_count``: filled at creation time by the seed scripts. No\nheuristic inference happens here.",
+        "description": "Return every ``EmbeddingConfig`` with its persisted display metadata.\n\nThe metadata lives in ``embedding_config.display_name / family /\nparam_count``: filled at creation time by the seed scripts. No\nheuristic inference happens here. Cached for 5 min; the benchmark\npage is the first router touch on a fresh deploy so cold pg pages\npush this past several seconds without the cache.",
         "operationId": "list_benchmark_embeddings_v1_benchmark_embeddings_get",
         "responses": {
           "200": {
