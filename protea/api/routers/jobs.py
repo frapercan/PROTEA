@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any, NamedTuple
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -212,6 +212,23 @@ _QUOTA_GATED_OPERATIONS: frozenset[str] = frozenset(
 )
 
 
+class _CreateJobDeps(NamedTuple):
+    """Bundle of resolved deps for ``POST /jobs`` so the route signature
+    stays under the §3 6-param ceiling without losing FastAPI injection."""
+
+    factory: sessionmaker[Session]
+    amqp_url: str
+    quota_map: dict[str, int]
+
+
+def _create_job_deps(
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+    amqp_url: str = Depends(get_amqp_url),
+    quota_map: dict[str, int] = Depends(get_user_quota_per_day),
+) -> _CreateJobDeps:
+    return _CreateJobDeps(factory=factory, amqp_url=amqp_url, quota_map=quota_map)
+
+
 def _maybe_enforce_user_quota(
     principal: ApiKey | BearerPrincipal | None,
     body: CreateJobRequest,
@@ -255,17 +272,19 @@ def _maybe_enforce_user_quota(
 @limiter.limit(jobs_limit)
 def create_job(
     request: Request,
+    response: Response,
     body: CreateJobRequest,
-    factory: sessionmaker[Session] = Depends(get_session_factory),
-    amqp_url: str = Depends(get_amqp_url),
+    deps: _CreateJobDeps = Depends(_create_job_deps),
     principal: ApiKey | BearerPrincipal | None = Depends(require_role(ROLE_OPERATOR)),
-    quota_map: dict[str, int] = Depends(get_user_quota_per_day),
 ) -> dict[str, Any]:
     """Create a Job row and publish its ID to the specified RabbitMQ queue.
 
     Expensive operations (``export_research_dataset``, ``run_cafa_evaluation``) are
     subject to per-user daily quota limits (FARM-AUTH.7). Admins are exempt.
     """
+    factory = deps.factory
+    amqp_url = deps.amqp_url
+    quota_map = deps.quota_map
     _maybe_enforce_user_quota(principal, body, quota_map, factory)
     with session_scope(factory) as session:
         job = Job(
