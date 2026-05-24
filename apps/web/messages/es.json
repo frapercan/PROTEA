@@ -245,9 +245,9 @@
     },
     "insertTab": {
       "title": "Insertar proteínas desde UniProt",
-      "description": "Descarga secuencias FASTA e inserta filas Protein + Sequence.",
+      "description": "Descarga secuencias de proteínas de UniProt en formato FASTA y guarda cada una como una fila Protein junto con una fila Sequence deduplicada. Este paso es siempre el primero: todas las demás etapas del pipeline (embeddings, anotación, evaluación) requieren que las proteínas y sus secuencias estén cargadas aquí previamente.",
       "searchCriteriaLabel": "Criterios de búsqueda",
-      "searchCriteriaHelper": "Consulta UniProt — reviewed:true = solo Swiss-Prot",
+      "searchCriteriaHelper": "Sintaxis de consulta UniProt. Ej. \"reviewed:true\" = solo Swiss-Prot (~600k); \"reviewed:true AND organism_id:9606\" = solo humano revisado.",
       "pageSizeLabel": "Tamaño de página",
       "totalLimitLabel": "Límite total",
       "totalLimitOptional": "(opcional)",
@@ -257,10 +257,10 @@
       "launching": "Lanzando…"
     },
     "metadataTab": {
-      "title": "Obtener metadatos de UniProt",
-      "description": "Descarga anotaciones TSV e inserta filas ProteinUniProtMetadata.",
+      "title": "Enriquecer proteínas con UniProt",
+      "description": "Tras \"Insertar proteínas\" (que solo carga accession + secuencia), este paso baja de UniProt la información funcional de cada proteína y la guarda como ProteinUniProtMetadata: nombre, gen, organismo, EC, actividad catalítica, sitios activos y de unión, cofactor, pathway, cinética, keywords y más. También rellena los campos básicos de Protein (Swiss-Prot/TrEMBL, organismo, longitud, gen) que quedaron vacíos al insertar. Idempotente: re-lanzarlo solo actualiza lo que cambió en UniProt.",
       "searchCriteriaLabel": "Criterios de búsqueda",
-      "searchCriteriaHelper": "Consulta UniProt — reviewed:true = solo Swiss-Prot",
+      "searchCriteriaHelper": "Sintaxis de consulta UniProt. Ej. \"reviewed:true\" = solo Swiss-Prot (~600k); \"reviewed:true AND organism_id:9606\" = solo humano revisado.",
       "pageSizeLabel": "Tamaño de página",
       "totalLimitLabel": "Límite total",
       "totalLimitOptional": "(opcional)",
@@ -592,7 +592,8 @@
     "resultsTab": {
       "title": "Resultados",
       "refresh": "Actualizar",
-      "noResults": "Sin resultados de anotación aún. Ejecute un trabajo de anotación desde la pestaña Ejecutar anotación.",
+      "noResults": "Aún no has anotado nada. Lanza una anotación desde \"Ejecutar anotación\", los resultados aparecerán aquí, listos para descargar TSV, ver puntuación por término y exportar para evaluación CAFA.",
+      "resultCount": "{count, plural, one {1 anotación} other {{count} anotaciones}}",
       "emptyHero": {
         "title": "Aún no has anotado nada",
         "body": "Cada ejecución produce un PredictionSet con scores GO por proteína, descargable como TSV o exportable a cafaeval. Cuando lances la primera desde la pestaña anterior, aparecerá aquí.",
