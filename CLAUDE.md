@@ -161,3 +161,12 @@ Related HTTP routers: `protea/api/routers/datasets.py` (dataset registry), `prot
 ### Testing
 
 Integration tests require `--with-postgres`. The `conftest.py` `postgres_url` session-scoped fixture pulls `pgvector/pgvector:pg16` via Docker, waits for readiness, enables the `vector` extension, yields the connection URL, then tears down the container. Configurable via: `PROTEA_PG_IMAGE`, `PROTEA_PG_USER`, `PROTEA_PG_PASSWORD`, `PROTEA_PG_DB`, `PROTEA_PG_PORT`, `PROTEA_PG_TIMEOUT`.
+
+## Architecture Decision Records (recent)
+
+Key ADRs that affect ongoing development. Full catalog at `docs/source/adr/`.
+
+- **D34** (Accepted): Selective rerank resurrection (recompute on v226, not archaeology)
+- **D35** (Accepted): Canonical 8-PLM embedding config IDs and orphan classification
+- **D36** (Accepted): PLM axis explicit in dataset naming (bench-v1-K{k}-v{band}-lineage-{plm})
+- **D37** (Proposed): Single auth system, manual approvals, multi-instance (FEAT-AUTH-V2); supersedes D6
