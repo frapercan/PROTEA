@@ -186,6 +186,13 @@ export type AnnotationSet = {
   id: string;
   source: string;
   source_version?: string | null;
+  /**
+   * Upstream publication date (e.g. EBI FTP timestamp for GOA releases).
+   * Populated by the `refresh_goa_release_dates` operation; absent until
+   * the refresh has run for this release, in which case the UI renders a
+   * greyed-out marker.
+   */
+  source_published_at?: string | null;
   ontology_snapshot_id: string;
   job_id?: string | null;
   created_at: string;

@@ -54,6 +54,13 @@ class AnnotationSet(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    # Upstream publication date (e.g. EBI FTP timestamp for GOA releases).
+    # Populated by the ``refresh_goa_release_dates`` operation so the
+    # evaluation-page timeline can place each release at its true date
+    # instead of the local ``created_at``.
+    source_published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     meta: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
 
     ontology_snapshot: Mapped[OntologySnapshot] = relationship(

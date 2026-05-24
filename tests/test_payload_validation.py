@@ -78,6 +78,9 @@ from protea.core.operations.load_quickgo_annotations import (
 from protea.core.operations.predict_go_terms_from_interpro import (
     PredictGOTermsFromInterProPayload,
 )
+from protea.core.operations.refresh_goa_release_dates import (
+    RefreshGoaReleaseDatesPayload,
+)
 from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationPayload
 from protea.core.operations.run_interproscan_batch import (
     RunInterProScanBatchPayload,
@@ -238,6 +241,13 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         RunInterProScanBatchPayload,
         {},
         (),
+    ),
+    # wrong-type: timeout_seconds must be a positive int
+    (
+        "refresh_goa_release_dates",
+        RefreshGoaReleaseDatesPayload,
+        {"timeout_seconds": 0},
+        ("timeout_seconds",),
     ),
 ]
 

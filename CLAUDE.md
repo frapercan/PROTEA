@@ -68,7 +68,7 @@ logs/frontend.log               ← Next.js dev server
 
 **Queue routing:**
 - `protea.ping` → ping operation (smoke test)
-- `protea.jobs` → insert_proteins, fetch_uniprot_metadata, load_ontology_snapshot, load_goa_annotations, load_quickgo_annotations, generate_evaluation_set, load_interpro_go_mapping, run_interproscan_batch, predict_go_terms_from_interpro
+- `protea.jobs` → insert_proteins, fetch_uniprot_metadata, load_ontology_snapshot, load_goa_annotations, load_quickgo_annotations, generate_evaluation_set, load_interpro_go_mapping, run_interproscan_batch, predict_go_terms_from_interpro, refresh_goa_release_dates
 - `protea.embeddings` → compute_embeddings coordinator (serialized: one at a time, retries with 60s delay if GPU busy)
 - `protea.embeddings.batch` → compute_embeddings_batch (GPU inference; OperationConsumer, no DB Job row)
 - `protea.embeddings.write` → store_embeddings (bulk pgvector insert; OperationConsumer)
@@ -105,6 +105,7 @@ The frontend (`apps/web/`) is a Next.js 16 app with Tailwind v4. API URL is conf
 - `load_interpro_go_mapping` (`LoadInterProGoMappingOperation`): downloads the EBI InterPro2GO flat file and upserts `(ipr_accession, go_id)` mappings; idempotent per release version. Runs on `protea.jobs`.
 - `run_interproscan_batch` (`RunInterProScanBatchOperation`): annotates proteins in fixed-size chunks via InterProScan, resumable through release-floor filtering. Runs on `protea.jobs`.
 - `predict_go_terms_from_interpro` (`PredictGOTermsFromInterProOperation`): predicts GO terms by joining InterPro hits against the InterPro2GO mapping, aggregates per-protein votes, and emits a tagged `PredictionSet`. Runs on `protea.jobs`.
+- `refresh_goa_release_dates` (`RefreshGoaReleaseDatesOperation`): scrapes the EBI FTP index (`ftp.ebi.ac.uk/pub/databases/GO/goa/old/UNIPROT/`), extracts the official publication date for each `goa_uniprot_all.gaf.<N>.gz` release, and upserts `source_published_at` onto matching `goa` AnnotationSet rows. Backs the temporal release-timeline component on `/evaluation`. Runs on `protea.jobs`.
 
 These three operations form the **post-reranker functional-enrichment stage, the last component to be developed before uploading results to LAFA**. All three are fully wired and registered in the `OperationRegistry`; the remaining prerequisite is an InterProScan binary install on the host.
 

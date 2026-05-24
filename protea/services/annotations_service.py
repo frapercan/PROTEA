@@ -143,6 +143,9 @@ def annotation_set_to_dict(a: AnnotationSet, count: int) -> dict[str, Any]:
         "id": str(a.id),
         "source": a.source,
         "source_version": a.source_version,
+        "source_published_at": (
+            a.source_published_at.isoformat() if a.source_published_at else None
+        ),
         "ontology_snapshot_id": str(a.ontology_snapshot_id),
         "job_id": str(a.job_id) if a.job_id else None,
         "created_at": a.created_at.isoformat(),

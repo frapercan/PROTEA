@@ -35,6 +35,9 @@ from protea.core.operations.predict_go_terms import (
 from protea.core.operations.predict_go_terms_from_interpro import (
     PredictGOTermsFromInterProOperation,
 )
+from protea.core.operations.refresh_goa_release_dates import (
+    RefreshGoaReleaseDatesOperation,
+)
 from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationOperation
 from protea.core.operations.run_interproscan_batch import RunInterProScanBatchOperation
 
@@ -58,6 +61,7 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(PredictGOTermsBatchOperation())
     registry.register(StorePredictionsOperation())
     registry.register(PredictGOTermsFromInterProOperation())
+    registry.register(RefreshGoaReleaseDatesOperation())
     # TrainRerankerOperation / TrainRerankerAutoOperation are no longer
     # publicly registered: all re-ranker training moves to
     # protea-reranker-lab. They remain importable as internal helpers —
