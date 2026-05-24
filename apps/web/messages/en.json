@@ -1135,7 +1135,7 @@
       "accept": "I understand and accept",
       "identification": {
         "heading": "Operator",
-        "body": "PROTEA is developed by Francisco Miguel Pérez Canales as part of doctoral research at Universidad de Sevilla, supervised by David Orellana-Martín and Ana M. Rojas. This deployment is operated personally by the author and is NOT an official service of Universidad de Sevilla."
+        "body": "This is a non-commercial academic research deployment, operated personally and independently. It does NOT constitute an official service of any institution."
       },
       "asIs": {
         "heading": "No warranty",
@@ -1147,7 +1147,7 @@
       },
       "privacyLog": {
         "heading": "Privacy and logs",
-        "body": "No accounts required. The server records IP addresses and request timestamps for 30 days for abuse prevention. No tracking cookies. Data subject requests (access, deletion, rectification): frapercan1@alum.us.es."
+        "body": "No accounts required. The server logs IP addresses and request timestamps for 30 days for abuse prevention. No tracking cookies. Data protection requests (access, erasure, rectification): open an issue on the project repository on GitHub."
       },
       "license": {
         "heading": "License",

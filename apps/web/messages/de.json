@@ -625,8 +625,7 @@
       },
       "delete": "Löschen",
       "deleteConfirm": "Dieses Annotationsset und seine {count} GO-Term-Zuweisungen löschen? Dies kann nicht rückgängig gemacht werden.",
-      "deleteConfirmNoAssignments": "Dieses Annotationsset löschen?",
-      "resultCount": "{count, plural, one {1 Annotation} other {{count} Annotationen}}"
+      "deleteConfirmNoAssignments": "Dieses Annotationsset löschen?"
     }
   },
   "evaluation": {
@@ -1133,7 +1132,7 @@
       "accept": "Ich verstehe und akzeptiere",
       "identification": {
         "heading": "Betreiber",
-        "body": "PROTEA wird von Francisco Miguel Pérez Canales im Rahmen einer Doktorarbeit an der Universidad de Sevilla entwickelt, betreut von David Orellana-Martín und Ana M. Rojas. Diese Instanz wird persönlich vom Autor betrieben und ist KEIN offizieller Dienst der Universidad de Sevilla."
+        "body": "Dies ist ein nicht-kommerzielles akademisches Forschungs-Deployment, das persönlich und unabhängig betrieben wird. Es stellt KEINEN offiziellen Dienst einer Institution dar."
       },
       "asIs": {
         "heading": "Keine Gewährleistung",
@@ -1145,7 +1144,7 @@
       },
       "privacyLog": {
         "heading": "Datenschutz und Logs",
-        "body": "Es sind keine Konten erforderlich. Der Server speichert IP-Adressen und Zeitstempel von Anfragen 30 Tage lang zur Missbrauchsprävention. Keine Tracking-Cookies. Betroffenenrechte (Auskunft, Löschung, Berichtigung): frapercan1@alum.us.es."
+        "body": "Keine Konten erforderlich. Der Server protokolliert IP-Adressen und Zeitstempel von Anfragen 30 Tage lang zur Missbrauchsprävention. Keine Tracking-Cookies. Datenschutzanfragen (Auskunft, Löschung, Berichtigung): Issue im GitHub-Repository des Projekts eröffnen."
       },
       "license": {
         "heading": "Lizenz",
