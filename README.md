@@ -11,7 +11,7 @@ PROTEA provides a unified backend for ingesting protein data from UniProt, compu
 [![codecov](https://codecov.io/gh/frapercan/PROTEA/branch/main/graph/badge.svg)](https://codecov.io/gh/frapercan/PROTEA)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
 
-**Status:** v0.8.0 (experimental, pre-1.0; the platform is production-capable but the public API is not yet stable across minor releases).
+**Status:** v0.8.0, production. The platform is actively deployed and drives live CAFA 6 evaluation and research dataset exports. The public REST API is not yet stable across minor releases.
 
 ---
 

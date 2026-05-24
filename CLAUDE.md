@@ -90,7 +90,7 @@ The frontend (`apps/web/`) is a Next.js 16 app with Tailwind v4. API URL is conf
 
 **`OperationRegistry`** (`contracts/registry.py`): a dict-backed registry. Operations are registered at startup; `BaseWorker` resolves them by name at dispatch time.
 
-**`UniProtHttpMixin`** (`core/utils.py`): shared HTTP retry logic (exponential backoff + jitter, Retry-After header, cursor extraction). Used by `insert_proteins` and `fetch_uniprot_metadata`. Also exports `chunks()` utility.
+**`core/utils.py`**: small set of shared utilities (`utcnow()`, `chunks(seq, n)`). The previous `UniProtHttpMixin` was inlined into its callers when those operations were rewritten; HTTP retry / backoff / Retry-After / cursor handling now lives directly inside `insert_proteins` and `fetch_uniprot_metadata`.
 
 **Current operations** (`core/operations/`):
 - `insert_proteins`: paginates the UniProt REST API (FASTA format, cursor-based, exponential backoff + jitter), deduplicates sequences by MD5 hash, and upserts `Protein` + `Sequence` rows.
@@ -109,7 +109,7 @@ The frontend (`apps/web/`) is a Next.js 16 app with Tailwind v4. API URL is conf
 These three operations form the **post-reranker functional-enrichment stage, the last component to be developed before uploading results to LAFA**. All three are fully wired and registered in the `OperationRegistry`; the remaining prerequisite is an InterProScan binary install on the host.
 
 **Internal helpers** (not registered as standalone operations):
-- `TrainRerankerOperation` and `TrainRerankerAutoOperation` (in `protea/core/operations/train_reranker.py`) remain importable but are **not** wired into the `OperationRegistry`. LightGBM training has been moved to [`protea-reranker-lab`](https://github.com/frapercan/protea-reranker-lab); these classes survive only as containers for the KNN / feature-generation / reference-loading helpers that `ExportResearchDatasetOperation` reuses in-process to produce frozen dumps.
+- `TrainRerankerAutoOperation` (in `protea/core/training_dump/_runner.py`, with loaders in `protea/core/_training_dump_loaders.py` and reusable helpers in `protea/core/training_dump_helpers.py`) is importable but **not** wired into the `OperationRegistry`. LightGBM training has been moved to [`protea-reranker-lab`](https://github.com/frapercan/protea-reranker-lab); this class survives only as the in-process KNN + feature-generation runner that `ExportResearchDatasetOperation` reuses in `dump_only` mode to produce frozen parquet shards. The old `TrainRerankerOperation` and the standalone `protea/core/operations/train_reranker.py` module were deleted in F0 (T0.6); any external doc or commit still referencing that path is stale.
 
 ### Job Lifecycle (`protea/workers/base_worker.py`)
 
@@ -153,7 +153,7 @@ LightGBM training has been moved out of PROTEA into the standalone [`protea-rera
 1. `POST /datasets` → enqueues an `export_research_dataset` job on `protea.training`. The worker runs KNN + feature generation, uploads `train.parquet` / `eval.parquet` / `manifest.json` via `ArtifactStore`, and inserts a `Dataset` row.
 2. The lab's `pull_dataset.py` hits `GET /datasets/{id_or_name}`, resolves the URIs, downloads the dump, trains a LightGBM booster, and writes `runs/<run_id>/{model.txt, spec.yaml, run.json}`.
 3. `POST /reranker-models/import` (multipart) or `POST /reranker-models/import-by-reference` (JSON, booster already in MinIO) → uploads the booster if needed, validates `feature_schema_sha`, and inserts a `RerankerModel` row linked back to the `Dataset` via `dataset_id`.
-4. Inference consumes registered `RerankerModel` rows via the scoring router (`GET /scoring/prediction-sets/{id}/score.tsv`, `…/metrics`, `…/reranker-metrics`). Boosters are loaded from `artifact_uri` (or inline `model_data` on legacy rows) and scored with `protea.core.reranker.predict`. There is no in-PROTEA training endpoint: the old `TrainRerankerOperation` / `TrainRerankerAutoOperation` classes are unregistered and should not be exposed by new code.
+4. Inference consumes registered `RerankerModel` rows via the scoring router (`GET /scoring/prediction-sets/{id}/score.tsv`, `…/metrics`, `…/reranker-metrics`). Boosters are loaded from `artifact_uri` (or inline `model_data` on legacy rows) and scored with `protea.core.reranker.predict`. There is no in-PROTEA training endpoint: `TrainRerankerAutoOperation` survives only as an internal helper used by `export_research_dataset` in `dump_only` mode and should not be exposed by new code.
 
 Related HTTP routers: `protea/api/routers/datasets.py` (dataset registry), `protea/api/routers/reranker_models.py` (model registry + import).
 

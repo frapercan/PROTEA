@@ -195,17 +195,19 @@ stable resolver and future code has a one-line entry. Closes T2A.8
 Utilities
 ---------
 
-``protea.core.utils`` provides three shared utilities used across multiple
+``protea.core.utils`` provides two shared utilities used across multiple
 operations.
 
 ``utcnow()`` returns a timezone-aware UTC datetime, avoiding the common
 mistake of calling ``datetime.utcnow()`` which returns a naive object.
 ``chunks(seq, n)`` splits any sequence into fixed-size chunks, used by
-coordinator operations to partition work into batches. ``UniProtHttpMixin``
-encapsulates all retry logic for the UniProt REST API: exponential backoff
-with jitter, ``Retry-After`` header parsing, and cursor extraction for
-paginated endpoints. It is mixed into ``InsertProteinsOperation`` and
-``FetchUniProtMetadataOperation``.
+coordinator operations to partition work into batches.
+
+The previous ``UniProtHttpMixin`` (exponential backoff with jitter,
+``Retry-After`` header parsing, cursor extraction for paginated UniProt
+REST endpoints) was inlined into ``InsertProteinsOperation`` and
+``FetchUniProtMetadataOperation`` when those operations were rewritten;
+the retry/backoff/cursor logic now lives directly in each operation.
 
 .. automodule:: protea.core.utils
    :members:
@@ -442,19 +444,22 @@ than raising. Added in T3.11 of master plan v3.2 §24 Fase 4.
 Operations
 ----------
 
-PROTEA ships fifteen registered operation instances at worker startup
-via ``protea.core.operation_catalog.build_operation_registry``: eleven
-job-backed (reachable through ``POST /jobs``) plus four ephemeral
-consumers (dispatched internally by the ``compute_embeddings`` and
-``predict_go_terms`` coordinators; see :doc:`/architecture/operations`
-for that taxonomy). Each operation is a class that implements the
-``Operation`` protocol: a ``name`` string and an ``execute`` method.
-Operations are stateless with respect to infrastructure: they receive a
-session and emit structured events, but do not open connections or manage
-transactions. The eleven job-backed entries are documented below; the
-four ephemeral siblings (``compute_embeddings_batch``,
-``store_embeddings``, ``predict_go_terms_batch``,
-``store_predictions``) live in :doc:`/architecture/operations`.
+PROTEA ships a curated set of registered operation instances at worker
+startup via ``protea.core.operation_catalog.build_operation_registry``,
+which is the authoritative list (read the function body for the live
+count).
+The catalog splits into job-backed entries (reachable through
+``POST /jobs``) and ephemeral consumers (dispatched internally by the
+``compute_embeddings`` and ``predict_go_terms`` coordinators; see
+:doc:`/architecture/operations` for that taxonomy). Each operation is a
+class that implements the ``Operation`` protocol: a ``name`` string and
+an ``execute`` method. Operations are stateless with respect to
+infrastructure: they receive a session and emit structured events, but
+do not open connections or manage transactions. The job-backed entries
+are documented below; the four ephemeral siblings
+(``compute_embeddings_batch``, ``store_embeddings``,
+``predict_go_terms_batch``, ``store_predictions``) live in
+:doc:`/architecture/operations`.
 
 **ping**
    Smoke-test operation. Returns immediately with a success result.
@@ -470,7 +475,7 @@ four ephemeral siblings (``compute_embeddings_batch``,
    Fetches protein sequences from the UniProt REST API using cursor-based
    FASTA streaming. Sequences are deduplicated by MD5 hash before upsert;
    proteins are upserted by accession. Exponential backoff with jitter and
-   ``Retry-After`` header handling are provided by ``UniProtHttpMixin``.
+   ``Retry-After`` header handling are implemented inline in the operation.
    Isoforms are parsed and stored separately, sharing the canonical sequence
    where the amino-acid string is identical.
 

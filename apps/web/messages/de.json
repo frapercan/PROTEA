@@ -242,9 +242,9 @@
     },
     "insertTab": {
       "title": "Proteine aus UniProt einfügen",
-      "description": "Lädt FASTA-Sequenzen herunter und fügt Protein- und Sequenz-Einträge ein.",
+      "description": "Laedt Proteinsequenzen von UniProt im FASTA-Format herunter und speichert jede als Protein-Eintrag mit einer deduplizierten Sequence-Zeile. Dieser Schritt ist immer der erste: alle weiteren Pipeline-Stufen (Embeddings, Annotation, Evaluierung) setzen voraus, dass Proteine und Sequenzen hier bereits geladen wurden.",
       "searchCriteriaLabel": "Suchkriterien",
-      "searchCriteriaHelper": "UniProt-Abfrage — reviewed:true = nur Swiss-Prot",
+      "searchCriteriaHelper": "UniProt-Abfragesyntax. Z.B. \"reviewed:true\" = nur Swiss-Prot (ca. 600k); \"reviewed:true AND organism_id:9606\" = nur geprueftes Human-Proteom.",
       "pageSizeLabel": "Seitengröße",
       "totalLimitLabel": "Gesamtlimit",
       "totalLimitOptional": "(optional)",
@@ -254,10 +254,10 @@
       "launching": "Wird gestartet…"
     },
     "metadataTab": {
-      "title": "UniProt-Metadaten abrufen",
-      "description": "Lädt TSV-Annotationen herunter und fügt ProteinUniProtMetadata-Einträge ein.",
+      "title": "Proteine mit UniProt anreichern",
+      "description": "Nach dem Schritt \"Proteine einfuegen\" (der nur Accession und Sequenz laedt) ruft dieser Schritt den Funktionsdatensatz jedes Proteins von UniProt ab und speichert ihn als ProteinUniProtMetadata: Name, Gen, Organismus, EC, katalytische Aktivitaet, aktive und Bindungsstellen, Kofaktor, Signalweg, Kinetik, Keywords und mehr. Ausserdem ergaenzt er die beim Einfuegen leer gebliebenen Kernfelder von Protein (Swiss-Prot/TrEMBL, Organismus, Laenge, Gen). Idempotent: erneutes Ausfuehren aktualisiert nur, was sich in UniProt geaendert hat.",
       "searchCriteriaLabel": "Suchkriterien",
-      "searchCriteriaHelper": "UniProt-Abfrage — reviewed:true = nur Swiss-Prot",
+      "searchCriteriaHelper": "UniProt-Abfragesyntax. Z.B. \"reviewed:true\" = nur Swiss-Prot (ca. 600k); \"reviewed:true AND organism_id:9606\" = nur geprueftes Human-Proteom.",
       "pageSizeLabel": "Seitengröße",
       "totalLimitLabel": "Gesamtlimit",
       "totalLimitOptional": "(optional)",
@@ -589,7 +589,8 @@
     "resultsTab": {
       "title": "Ergebnisse",
       "refresh": "Aktualisieren",
-      "noResults": "Noch keine Annotationsergebnisse. Starten Sie einen Annotations-Job im Tab „Annotation starten“.",
+      "noResults": "Noch keine Annotationen gestartet. Starten Sie eine unter \"Annotation starten\", die Ergebnisse erscheinen hier und koennen als TSV heruntergeladen, nach Term-Scores durchsucht oder fuer die CAFA-Evaluierung exportiert werden.",
+      "resultCount": "{count, plural, one {1 Annotation} other {{count} Annotationen}}",
       "emptyHero": {
         "title": "Noch keine Annotation ausgeführt",
         "body": "Jeder Lauf erzeugt ein PredictionSet mit GO-Scores pro Protein, ladbar als TSV oder exportierbar nach cafaeval. Sobald Sie den ersten Lauf im vorherigen Tab starten, erscheint er hier.",
@@ -608,7 +609,8 @@
       },
       "delete": "Löschen",
       "deleteConfirm": "Dieses Annotationsset und seine {count} GO-Term-Zuweisungen löschen? Dies kann nicht rückgängig gemacht werden.",
-      "deleteConfirmNoAssignments": "Dieses Annotationsset löschen?"
+      "deleteConfirmNoAssignments": "Dieses Annotationsset löschen?",
+      "resultCount": "{count, plural, one {1 Annotation} other {{count} Annotationen}}"
     }
   },
   "evaluation": {
