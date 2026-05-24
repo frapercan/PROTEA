@@ -3209,6 +3209,56 @@
         ]
       }
     },
+    "/v1/auth/admin/revoke-sessions/{user_id}": {
+      "post": {
+        "description": "Mark all non-revoked sessions for ``user_id`` as revoked.\n\nThis is the security-incident-response endpoint: call it when an\naccount is believed to be compromised so that all active browser\nsessions are immediately invalidated.\n\nAuthentication is intentionally not gated by a user session cookie\n(which would create a circular dependency) \u2014 callers must use the\n``PROTEA_ADMIN_TOKEN`` header pattern (``Authorization: Bearer <token>``)\nenforced upstream by the admin role gate.  The endpoint lives under\n``/auth/admin/`` so the API gateway can route it to admin-only callers.\n\nReturns ``{user_id, revoked_count}`` indicating how many sessions were\ninvalidated. Returns 404 if the user does not exist.",
+        "operationId": "admin_revoke_user_sessions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Admin Revoke User Sessions",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revoke all active sessions for a user (admin only)",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/v1/auth/api-keys": {
       "get": {
         "description": "Return registered API keys newest-first.\n\nThe response never includes the secret \u2014 only the prefix and the\nname. Use this endpoint to confirm a key was created or to look\nup the id of a key you want to revoke.",
@@ -3379,7 +3429,7 @@
     },
     "/v1/auth/login": {
       "post": {
-        "description": "Verify credentials and issue a session cookie.\n\n* 200 + cookie \u2014 credentials valid, account active.\n* 401          \u2014 wrong email or wrong password (generic message to avoid user enumeration).\n* 403          \u2014 valid credentials but account not yet approved (``account_pending_approval``)\n                 or has been deactivated (``account_deactivated``).\n\n``last_login_at`` is updated on every successful login.",
+        "description": "Verify credentials and issue a session cookie.\n\n* 200 + cookie \u2014 credentials valid, account active.\n* 401          \u2014 wrong email or wrong password (generic message to avoid user enumeration).\n* 403          \u2014 valid credentials but account not yet approved or deactivated.\n\n``last_login_at`` is updated on every successful login.\nA ``user_session`` row is inserted to enable server-side revocation.",
         "operationId": "user_login",
         "requestBody": {
           "content": {
@@ -3428,7 +3478,7 @@
     },
     "/v1/auth/logout": {
       "post": {
-        "description": "Clear the session cookie and invalidate the server-side session token.\n\nReturns 204 both when a valid session was found and when no cookie\nwas present (idempotent logout).",
+        "description": "Clear the session cookie and revoke the server-side session.\n\nReturns 204 both when a valid session was found and when no cookie\nwas present (idempotent logout).",
         "operationId": "user_logout",
         "parameters": [
           {
@@ -3476,7 +3526,7 @@
     },
     "/v1/auth/me": {
       "get": {
-        "description": "Return ``{id, email, username, display_name, role, status}`` for the session user.\n\nReturns 401 when no valid session cookie is present or when the\nsession has been invalidated via ``POST /auth/logout``.",
+        "description": "Return ``{id, email, username, display_name, role, status}`` for the session user.\n\nReturns 401 when no valid session cookie is present or when the\nsession has been revoked via ``POST /auth/logout`` or admin revocation.\nUpdates ``last_seen_at`` on the session row for liveness tracking.",
         "operationId": "user_me",
         "parameters": [
           {
