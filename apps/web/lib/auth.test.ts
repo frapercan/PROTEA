@@ -91,6 +91,15 @@ describe("hasRole", () => {
     expect(hasRole("operator", "viewer")).toBe(true);
     expect(hasRole("operator", "admin")).toBe(false);
   });
+
+  it("researcher sits between viewer and operator", () => {
+    expect(hasRole("researcher", "viewer")).toBe(true);
+    expect(hasRole("researcher", "researcher")).toBe(true);
+    expect(hasRole("researcher", "operator")).toBe(false);
+    expect(hasRole("researcher", "admin")).toBe(false);
+    expect(hasRole("operator", "researcher")).toBe(true);
+    expect(hasRole("admin", "researcher")).toBe(true);
+  });
 });
 
 describe("authHeaders", () => {

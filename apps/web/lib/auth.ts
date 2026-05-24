@@ -15,13 +15,16 @@
 // cosmetic. If a user tampers with the cookie they only fool the UI;
 // the backend rejects the forged token at the gate.
 
-export type Role = "viewer" | "operator" | "admin";
+export type Role = "viewer" | "researcher" | "operator" | "admin";
 
 const COOKIE_NAME = "protea_session";
 
-const KNOWN_ROLES: ReadonlyArray<Role> = ["viewer", "operator", "admin"];
+// ``viewer`` is the synthesized anonymous / API-key floor, kept for
+// pre-FARM-AUTH.3 sessions; ``researcher`` is the default User role
+// minted by signup (between viewer and operator in the ranking).
+const KNOWN_ROLES: ReadonlyArray<Role> = ["viewer", "researcher", "operator", "admin"];
 
-const RANK: Record<Role, number> = { viewer: 0, operator: 1, admin: 2 };
+const RANK: Record<Role, number> = { viewer: 0, researcher: 1, operator: 2, admin: 3 };
 
 export type SessionClaims = {
   sub?: string;
