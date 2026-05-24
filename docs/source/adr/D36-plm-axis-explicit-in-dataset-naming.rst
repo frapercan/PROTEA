@@ -111,7 +111,7 @@ Decision
 6. **Champion records updated.** ``champions.md`` is rewritten so
    every axis tuple that pointed at the legacy name now reads the
    ``-prostt5`` form; the 9-cell selective-rerank champion row
-   (study_v23 leakage-fixed) keeps its measured numbers
+   (study_v23, post-replication-artefact fix) keeps its measured numbers
    (``selective_avg_cafaeval = 0.6215``); only the ``dataset`` column
    text changes.
 

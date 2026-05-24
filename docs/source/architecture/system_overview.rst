@@ -61,8 +61,8 @@ PROTEA is structured in four horizontal layers with strict downward dependency:
    │  │ protea.embeddings        │ coord  protea_method.pipeline.predict()    │
    │  │ protea.embeddings.batch  │ eph.   (pure inference library, F2C.5b)    │
    │  │ protea.embeddings.write  │ eph.                                       │
-   │  │ protea.predictions       │ coord  OperationRegistry (15 operations)   │
-   │  │ protea.predictions.batch │ eph.   11 job-backed + 4 ephemeral         │
+   │  │ protea.predictions       │ coord  OperationRegistry (live list in     │
+   │  │ protea.predictions.batch │ eph.   protea.core.operation_catalog)      │
    │  │ protea.predictions.write │ eph.                                       │
    │  │ protea.evaluations       │                                            │
    │  └──────────────────────────┘                                            │
@@ -268,7 +268,7 @@ Code layout
        evidence_codes.py  ECO→GO evidence code mapping
        evaluation.py      CAFA5 evaluation protocol (NK/LK/PK delta)
        reranker.py        LightGBM binary classifier for re-ranking predictions
-       utils.py           UniProtHttpMixin, chunks(), utcnow()
+       utils.py           chunks(), utcnow() (the old UniProtHttpMixin was inlined into its callers)
      infrastructure/
        orm/models/        SQLAlchemy 2.x ORM models (protein, sequence, annotation,
                           embedding, prediction, query, job, evaluation, scoring,
@@ -284,7 +284,7 @@ Code layout
      web/                 Next.js frontend
    scripts/
      manage.sh            Unified stack manager (start/stop/status/logs/scale)
-     worker.py            Worker entry point (registers all 15 operations)
+     worker.py            Worker entry point (registers every operation in the catalog)
      init_db.py           Schema initialisation
 
 Technology stack

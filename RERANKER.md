@@ -1,10 +1,11 @@
 # PROTEA Re-Ranker: Design and Rationale
 
-**Status**: implemented (v3 shipped, v4 training in progress)
-**Location in code**: `protea/core/reranker.py`, `protea/core/operations/train_reranker.py`
-**Version**: 2.0 (2026-04-10, rewrite)
+**Status**: LightGBM training has been **decoupled from PROTEA and moved to [`protea-reranker-lab`](https://github.com/frapercan/protea-reranker-lab)**. PROTEA owns inference (`protea/core/reranker.py`), the KNN + feature-generation pipeline (`protea/core/feature_engineering.py`, `protea/core/_knn_transfer_runner.py`) and the dataset publishing operation that the lab consumes (`protea/core/operations/export_research_dataset.py`). The current champion booster is the multi-seed bench-v1-K5-v226-lineage-prostt5 bundle (see ADR D34 and chapter 6).
+**Version**: 2.0 (2026-04-10, design rewrite); historical narrative retained for thesis chapter 6.
 
-> This document describes **the re-ranker as it exists in PROTEA today**. An earlier version of this file proposed a PyTorch cross-attention architecture with WebDataset shards; that proposal was explored on paper but **never implemented**. The system converged on a simpler LightGBM design for the reasons documented in §3 ("Why LightGBM and not a neural cross-encoder"). The experiment log showing the evolution across versions lives in `EXPERIMENTS.md`; the forward-looking PLM benchmark plan that uses this re-ranker as a fixed downstream stage lives in `EXPERIMENTAL_DESIGN.md`.
+> This document describes the re-ranker as a **design**. An earlier draft proposed a PyTorch cross-attention architecture with WebDataset shards; that proposal was explored on paper but **never implemented**. The system converged on a simpler LightGBM design for the reasons documented in §3 ("Why LightGBM and not a neural cross-encoder"). The experiment log showing the evolution across versions lives in `EXPERIMENTS.md`; the forward-looking PLM benchmark plan that uses this re-ranker as a fixed downstream stage lives in `EXPERIMENTAL_DESIGN.md`.
+>
+> **Decoupling note (current state).** The in-process `train_reranker` / `train_reranker_auto` operations described in §7.4 and the v1-v4 evolution table in §9 below were retired in F0 (T0.6): the `protea/core/operations/train_reranker.py` module was deleted. `TrainRerankerAutoOperation` survives only as an internal helper in `protea/core/training_dump/_runner.py` that `export_research_dataset` reuses in `dump_only` mode to produce frozen parquet shards; boosters are registered into PROTEA via `POST /reranker-models/import` (multipart) or `POST /reranker-models/import-by-reference` (JSON). The §7.4 / §9 narrative is retained for thesis context; do not interpret it as a description of the current PROTEA control flow.
 
 ---
 

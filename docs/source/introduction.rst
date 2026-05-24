@@ -135,10 +135,12 @@ a typed operation protocol, a two-session job lifecycle, a RabbitMQ job queue
 with ten routed queues, and a PostgreSQL + pgvector data model that
 versions every input (OBO release, annotation set source, embedding config)
 by UUID. The platform is released as open source and runs end-to-end on a
-single workstation with one GPU. PROTEA currently consolidates fifteen
+single workstation with one GPU. PROTEA currently consolidates eighteen
 registered operations covering ingestion, embedding, prediction, evaluation,
-and re-ranking, as well as a one-click ``/annotate`` endpoint that takes a
-FASTA upload and returns ranked GO predictions.
+re-ranking and provenance maintenance, as well as a one-click ``/annotate``
+endpoint that takes a FASTA upload and returns ranked GO predictions. The
+authoritative list is the body of
+``protea.core.operation_catalog.build_operation_registry``.
 
 **C2.** A quantitative data-leakage analysis of Pannzer2, InterProScan, and
 eggNOG-mapper against a GOA 220 → 229 temporal holdout. The analysis measures
@@ -200,8 +202,9 @@ database migrations managed by Alembic.
 Current capabilities
 ---------------------
 
-PROTEA currently provides fifteen registered operations spanning the full
-protein functional annotation pipeline:
+PROTEA currently provides the following registered operations across
+the protein functional annotation pipeline (the authoritative list is
+the body of ``protea.core.operation_catalog.build_operation_registry``):
 
 - **Data ingestion**: ``insert_proteins``, ``fetch_uniprot_metadata``,
   ``load_ontology_snapshot``, ``load_goa_annotations``,
@@ -210,6 +213,8 @@ protein functional annotation pipeline:
   ``compute_embeddings_batch``, ``store_embeddings``.
 - **GO term prediction**: ``predict_go_terms`` (coordinator),
   ``predict_go_terms_batch``, ``store_predictions``.
+- **InterPro-based prediction**: ``load_interpro_go_mapping``,
+  ``run_interproscan_batch``, ``predict_go_terms_from_interpro``.
 - **Evaluation**: ``generate_evaluation_set``, ``run_cafa_evaluation``.
 - **Re-ranker dataset publishing**: ``export_research_dataset`` (LightGBM
   training itself lives in ``protea-reranker-lab``; PROTEA only produces
