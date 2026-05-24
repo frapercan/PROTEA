@@ -9,6 +9,7 @@ import {
   type ApiKey,
   type ApiKeyRole,
 } from "@/lib/api";
+import type { Role } from "@/lib/auth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { SkeletonTableRow } from "@/components/Skeleton";
 import { NewApiKeyDialog } from "@/components/NewApiKeyDialog";
@@ -394,7 +395,9 @@ function ForbiddenPanel({
   t,
 }: {
   locale: string;
-  role: ApiKeyRole;
+  // Accept the broader session Role union (includes ``researcher``
+  // post-FARM-AUTH.10) rather than the narrower API-key role enum.
+  role: Role;
   t: ReturnType<typeof useTranslations>;
 }) {
   return (

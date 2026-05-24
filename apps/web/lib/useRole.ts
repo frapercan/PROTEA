@@ -44,3 +44,31 @@ export function useHasRole(required: Role): boolean {
   const current = useRole();
   return hasRole(current, required);
 }
+
+/**
+ * FARM-AUTH.10 — true when a non-expired session cookie is present.
+ *
+ * Distinct from ``useHasRole``: the role hierarchy treats anonymous
+ * AND API-key-only sessions as ``viewer``, so a ``viewer`` chip might
+ * mean "anonymous visitor" OR "API-key holder" OR "User with viewer
+ * role". The signup/login/profile/logout chrome needs to know whether
+ * a session cookie is present at all, not just what role it claims.
+ */
+export function useIsAuthenticated(): boolean {
+  const [authed, setAuthed] = useState(false);
+  useEffect(() => {
+    const read = () => setAuthed(Boolean(getSessionToken()));
+    read();
+    const onStorage = (e: StorageEvent) => {
+      if (!e.key || e.key.startsWith("protea.")) read();
+    };
+    const onFocus = () => read();
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, []);
+  return authed;
+}
