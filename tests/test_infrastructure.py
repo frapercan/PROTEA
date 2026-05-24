@@ -371,6 +371,39 @@ class TestCreateApp:
 
         prewarm.assert_called_once_with(mock_factory)
 
+    def test_lifespan_prewarms_all_slow_aggregates_on_startup(self):
+        """The startup hook must fire every prewarm target so the first user
+        request finds proteins:stats, embeddings:prediction-sets,
+        embeddings:configs, annotations:snapshots and annotations:sets all
+        already warm. Mirrors the prediction-sets cold-cache fix (was 115s)."""
+        from fastapi.testclient import TestClient
+
+        from protea.api.app import create_app
+
+        mock_settings = MagicMock()
+        mock_settings.db_url = "sqlite:///:memory:"
+        mock_settings.amqp_url = "amqp://guest:guest@localhost/"
+        mock_factory = MagicMock()
+
+        with (
+            patch("protea.api.app.load_settings", return_value=mock_settings),
+            patch("protea.api.app.build_session_factory", return_value=mock_factory),
+            patch("protea.api.app.prewarm_protein_stats") as prewarm_stats,
+            patch("protea.api.app.prewarm_prediction_sets") as prewarm_ps,
+            patch("protea.api.app.prewarm_embedding_configs") as prewarm_configs,
+            patch("protea.api.app.prewarm_snapshots") as prewarm_snapshots,
+            patch("protea.api.app.prewarm_annotation_sets") as prewarm_asets,
+        ):
+            app = create_app(Path("/fake/root"))
+            with TestClient(app):
+                pass  # entering the context fires the lifespan startup
+
+        prewarm_stats.assert_called_once_with(mock_factory)
+        prewarm_ps.assert_called_once_with(mock_factory)
+        prewarm_configs.assert_called_once_with(mock_factory)
+        prewarm_snapshots.assert_called_once_with(mock_factory)
+        prewarm_asets.assert_called_once_with(mock_factory)
+
     def test_sphinx_mount_when_directory_exists(self, tmp_path):
         """When docs/build/html exists, /sphinx is mounted."""
         from protea.api.app import create_app

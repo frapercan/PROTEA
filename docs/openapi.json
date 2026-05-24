@@ -2592,7 +2592,7 @@
     },
     "/v1/annotations/sets": {
       "get": {
-        "description": "List annotation sets with their annotation counts, newest first.\n\nCached 5 minutes: GROUP BY over protein_go_annotation (80M rows) takes\n6+ seconds. Per-source views are cached independently.",
+        "description": "List annotation sets with their annotation counts, newest first.\n\nCached 5 minutes: GROUP BY over protein_go_annotation (80M rows) takes\n6+ seconds. Per-source views are cached independently. Serves the\nlast-known payload on producer failure so a transient DB blip does\nnot surface as a 500.",
         "operationId": "list_annotation_sets_v1_annotations_sets_get",
         "parameters": [
           {
@@ -2856,7 +2856,7 @@
     },
     "/v1/annotations/snapshots": {
       "get": {
-        "description": "List all loaded GO ontology snapshots with their GO term counts, newest first.\n\nCached 5 minutes: the GROUP BY over go_term (N million rows per snapshot)\ntakes multiple seconds, and snapshots are effectively immutable once loaded.",
+        "description": "List all loaded GO ontology snapshots with their GO term counts, newest first.\n\nCached 5 minutes: the GROUP BY over go_term (N million rows per snapshot)\ntakes multiple seconds, and snapshots are effectively immutable once loaded.\nServes the last-known payload on producer failure so a transient DB blip\ndoes not surface as a 500.",
         "operationId": "list_snapshots_v1_annotations_snapshots_get",
         "responses": {
           "200": {
@@ -3820,7 +3820,7 @@
     },
     "/v1/embeddings/configs": {
       "get": {
-        "description": "List all embedding configurations with their stored embedding counts, newest first.\n\nThe per-config GROUP BY over a 4M-row table is cached 5 minutes; new\nconfigs still appear immediately (they have 0 embeddings), only the\ncounts are stale.",
+        "description": "List all embedding configurations with their stored embedding counts, newest first.\n\nThe per-config GROUP BY over a 4M-row table is cached 5 minutes; new\nconfigs still appear immediately (they have 0 embeddings), only the\ncounts are stale. Serves the last-known value when the recompute\nfails (DB blip, query timeout) so the page never blocks on a\ncold-cache 500.",
         "operationId": "list_embedding_configs_v1_embeddings_configs_get",
         "responses": {
           "200": {
@@ -4047,7 +4047,7 @@
     },
     "/v1/embeddings/prediction-sets": {
       "get": {
-        "description": "List the 100 most recent prediction sets, cached 5 min.",
+        "description": "List the 100 most recent prediction sets, cached 5 min.\n\nThe DISTINCT-over-JOIN against prediction_set + embedding_config +\nannotation_set + ontology_snapshot scans tens of millions of rows on\ncold cache (115s+ measured). The startup hook in ``protea.api.app``\nprewarms this key and a background task refreshes it before expiry\nso users never hit a cold path under normal operation. Serves the\nlast-known value on producer failure to prevent a DB blip from\nsurfacing as a 500.",
         "operationId": "list_prediction_sets_v1_embeddings_prediction_sets_get",
         "responses": {
           "200": {

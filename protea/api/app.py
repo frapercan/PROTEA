@@ -38,6 +38,20 @@ from protea.api.routers import scoring as scoring_router
 from protea.api.routers import showcase as showcase_router
 from protea.api.routers import stack as stack_router
 from protea.api.routers import support as support_router
+from protea.api.routers.annotations.sets import (
+    ANNOTATION_SETS_TTL_SECONDS,
+    prewarm_annotation_sets,
+)
+from protea.api.routers.annotations.snapshots import (
+    SNAPSHOTS_TTL_SECONDS,
+    prewarm_snapshots,
+)
+from protea.api.routers.embeddings import (
+    EMBEDDING_CONFIGS_TTL_SECONDS,
+    PREDICTION_SETS_TTL_SECONDS,
+    prewarm_embedding_configs,
+    prewarm_prediction_sets,
+)
 from protea.api.routers.proteins import (
     PROTEIN_STATS_TTL_SECONDS,
     prewarm_protein_stats,
@@ -300,36 +314,65 @@ def _mount_static_assets(app: FastAPI, project_root: Path) -> None:
         _mount_sibling_docs(app, docs_build_root)
 
 
-# Refresh proteins:stats one minute before the 5-min TTL so the cache is
-# never cold from a user's perspective; cold computes take 30s+ and
-# overshoot the ngrok 30s upstream deadline.
-_STATS_REFRESH_INTERVAL_SECONDS = max(60.0, PROTEIN_STATS_TTL_SECONDS - 60.0)
+# Refresh cached aggregates one minute before their TTL so the cache is
+# never cold from a user's perspective; cold computes take tens of
+# seconds (proteins:stats: 30s+, embeddings:prediction-sets: 115s+,
+# annotations:sets: 6s+) and overshoot the ngrok 30s upstream deadline.
+def _refresh_interval(ttl: float) -> float:
+    return max(60.0, ttl - 60.0)
+
 
 _log = logging.getLogger(__name__)
 
 
-async def _safe_prewarm(factory) -> None:  # noqa: ANN001 - sessionmaker factory
+# Each entry is (label, prewarm_callable, ttl_seconds). The label is used
+# for both log messages and the asyncio task name so a hanging refresh
+# loop is easy to spot in `asyncio.all_tasks()`. Add new entries here when
+# wiring a new cached aggregate that has a slow cold path.
+def _prewarm_targets():
+    return (
+        ("proteins:stats", prewarm_protein_stats, PROTEIN_STATS_TTL_SECONDS),
+        (
+            "embeddings:prediction-sets",
+            prewarm_prediction_sets,
+            PREDICTION_SETS_TTL_SECONDS,
+        ),
+        ("embeddings:configs", prewarm_embedding_configs, EMBEDDING_CONFIGS_TTL_SECONDS),
+        ("annotations:snapshots", prewarm_snapshots, SNAPSHOTS_TTL_SECONDS),
+        ("annotations:sets", prewarm_annotation_sets, ANNOTATION_SETS_TTL_SECONDS),
+    )
+
+
+async def _safe_prewarm(label: str, fn, factory) -> None:  # noqa: ANN001
     try:
-        await asyncio.to_thread(prewarm_protein_stats, factory)
+        await asyncio.to_thread(fn, factory)
     except Exception as exc:  # pragma: no cover - logged for ops
-        _log.warning("proteins:stats prewarm failed: %s", exc)
+        _log.warning("%s prewarm failed: %s", label, exc)
 
 
 def _build_lifespan(factory):  # noqa: ANN001 - sessionmaker factory, mocked in tests
     @asynccontextmanager
     async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
-        await _safe_prewarm(factory)
+        targets = _prewarm_targets()
+        # Fire the initial prewarm for every target in parallel so the
+        # first user request finds every slow aggregate already populated.
+        await asyncio.gather(*(_safe_prewarm(label, fn, factory) for label, fn, _ in targets))
 
-        async def _refresh_loop() -> None:
+        async def _refresh_loop(label: str, fn, ttl: float) -> None:
+            interval = _refresh_interval(ttl)
             while True:
-                await asyncio.sleep(_STATS_REFRESH_INTERVAL_SECONDS)
-                await _safe_prewarm(factory)
+                await asyncio.sleep(interval)
+                await _safe_prewarm(label, fn, factory)
 
-        task = asyncio.create_task(_refresh_loop(), name="proteins-stats-refresh")
+        tasks = [
+            asyncio.create_task(_refresh_loop(label, fn, ttl), name=f"{label}-refresh")
+            for label, fn, ttl in targets
+        ]
         try:
             yield
         finally:
-            task.cancel()
+            for task in tasks:
+                task.cancel()
 
     return _lifespan
 
