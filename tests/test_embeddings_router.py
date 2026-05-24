@@ -73,14 +73,19 @@ def session():
 def client(session):
     factory = MagicMock()
     app = _make_app(factory)
-    with patch(
-        "protea.api.routers.embeddings.session_scope", side_effect=lambda _: _mock_scope(session)
-    ), patch(
-        "protea.services._embeddings_cafa_helpers.session_scope",
-        side_effect=lambda _: _mock_scope(session),
-    ), patch(
-        "protea.services._embeddings_predictions_helpers.session_scope",
-        side_effect=lambda _: _mock_scope(session),
+    with (
+        patch(
+            "protea.api.routers.embeddings.session_scope",
+            side_effect=lambda _: _mock_scope(session),
+        ),
+        patch(
+            "protea.services._embeddings_cafa_helpers.session_scope",
+            side_effect=lambda _: _mock_scope(session),
+        ),
+        patch(
+            "protea.services._embeddings_predictions_helpers.session_scope",
+            side_effect=lambda _: _mock_scope(session),
+        ),
     ):
         yield TestClient(app, raise_server_exceptions=True)
 
@@ -134,8 +139,9 @@ class TestCreateEmbeddingConfigValidation:
 
     def test_ankh_backend_is_accepted(self, client, session):
         """Ankh is a valid backend; the router should not reject it."""
-        session.add.side_effect = lambda obj: setattr(obj, "id", uuid4()) or setattr(
-            obj, "created_at", datetime(2024, 1, 1, tzinfo=UTC)
+        session.add.side_effect = lambda obj: (
+            setattr(obj, "id", uuid4())
+            or setattr(obj, "created_at", datetime(2024, 1, 1, tzinfo=UTC))
         )
         body = {
             **_VALID_CONFIG_BODY,
@@ -806,6 +812,48 @@ class TestListPredictionSets:
         resp = client.get("/embeddings/prediction-sets")
         assert resp.status_code == 200
         assert resp.json() == []
+
+    def test_serves_stale_when_recompute_raises(self, client, session):
+        """Cold cache + DB blip must serve the last-known payload, not 500.
+
+        Mirrors the proteins:stats fix: /embeddings/prediction-sets was
+        measured at 115s cold and pages calling it block render. Raising
+        on producer failure surfaces the multi-refresh hang to users.
+        """
+        from protea.api.cache import _store as cache_store
+        from protea.api.routers.embeddings import PREDICTION_SETS_CACHE_KEY
+
+        warm = [{"id": "fake", "prediction_count": 1}]
+        cache_store[PREDICTION_SETS_CACHE_KEY] = (0.0, warm)
+        session.query.side_effect = RuntimeError("simulated DB blip")
+
+        resp = client.get("/embeddings/prediction-sets")
+        assert resp.status_code == 200
+        assert resp.json() == warm
+
+    def test_perf_smoke_warm_cache_under_two_seconds(self, client, session):
+        """Regression guard: once the cache is warm, the route returns
+        in well under 2s. Catches accidental disable of the cache or
+        new producer-time work added to the request path."""
+        import time
+
+        from protea.api.cache import _store as cache_store
+        from protea.api.routers.embeddings import PREDICTION_SETS_CACHE_KEY
+
+        # Pre-seed the cache so the in-flight request never calls the producer.
+        cache_store[PREDICTION_SETS_CACHE_KEY] = (
+            time.monotonic() + 60.0,
+            [{"id": "warm", "prediction_count": 0}],
+        )
+
+        start = time.monotonic()
+        resp = client.get("/embeddings/prediction-sets")
+        elapsed = time.monotonic() - start
+
+        assert resp.status_code == 200
+        # 2s is generous to absorb CI container jitter; the warm path
+        # should be <50ms in practice.
+        assert elapsed < 2.0, f"warm-cache /prediction-sets took {elapsed:.3f}s"
 
 
 # ---------------------------------------------------------------------------
