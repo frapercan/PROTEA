@@ -706,7 +706,7 @@ export default function BenchmarkPage() {
                           title={`${emb?.display_name ?? best.embedding_config_id} · ${stageLabel(stageList, best.stage)} · K=${best.k}`}
                         >
                           <Link
-                            href={`/${locale}/evaluation/${best.evaluation_result_id}`}
+                            href={`/${locale}/evaluation/${best.evaluation_set_id}?result=${best.evaluation_result_id}`}
                             className="block group rounded-md px-1 py-0.5 hover:bg-blue-50 focus:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 transition-colors"
                           >
                             <div className="font-bold text-lg text-slate-900 group-hover:text-blue-700 tabular-nums leading-none">
@@ -795,7 +795,7 @@ export default function BenchmarkPage() {
                           title={`${emb?.display_name ?? best.embedding_config_id} · ${stageLabel(stageList, best.stage)}`}
                         >
                           <Link
-                            href={`/${locale}/evaluation/${best.evaluation_result_id}`}
+                            href={`/${locale}/evaluation/${best.evaluation_set_id}?result=${best.evaluation_result_id}`}
                             className="block group rounded-md px-1 py-0.5 hover:bg-blue-50 focus:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 transition-colors"
                           >
                             <div className="font-semibold text-slate-900 group-hover:text-blue-700 tabular-nums">
@@ -959,7 +959,7 @@ export default function BenchmarkPage() {
                           >
                             {row ? (
                               <Link
-                                href={`/${locale}/evaluation/${row.evaluation_result_id}`}
+                                href={`/${locale}/evaluation/${row.evaluation_set_id}?result=${row.evaluation_result_id}`}
                                 className="inline-flex items-baseline gap-1 rounded-md px-1 py-0.5 group hover:bg-blue-50 focus:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 transition-colors"
                               >
                                 <span
