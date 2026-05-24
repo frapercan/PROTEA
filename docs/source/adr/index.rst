@@ -222,6 +222,10 @@ later revision).
      - :doc:`PLM axis explicit in dataset naming <D36-plm-axis-explicit-in-dataset-naming>`
      - Accepted
      - F-EXP-RESET
+   * - D37
+     - :doc:`Single auth system, manual approvals, multi-instance (FEAT-AUTH) <D37-feat-auth-users-roles-multi-instance>`
+     - Proposed
+     - F-AUTH
 
 .. toctree::
    :maxdepth: 1
@@ -270,3 +274,4 @@ later revision).
    D34-selective-rerank-resurrection
    D35-canonical-8plm-embedding-configs
    D36-plm-axis-explicit-in-dataset-naming
+   D37-feat-auth-users-roles-multi-instance
