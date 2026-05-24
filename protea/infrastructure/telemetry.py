@@ -488,59 +488,82 @@ def build_metric_registry() -> MetricRegistry | None:
         return None
 
     registry = CollectorRegistry()
+    job = _build_job_collectors(registry, Counter, Histogram)
+    http = _build_http_collectors(registry, Counter, Histogram, Gauge)
     return MetricRegistry(
         registry=registry,
-        jobs_total=Counter(
+        jobs_total=job["jobs_total"],
+        job_duration_seconds=job["job_duration_seconds"],
+        embeddings_batch_seconds=job["embeddings_batch_seconds"],
+        predictions_batch_seconds=job["predictions_batch_seconds"],
+        db_pool_in_use=Gauge(
+            "protea_db_pool_in_use",
+            "Connections currently checked out of the SQLAlchemy pool.",
+            registry=registry,
+        ),
+        http_requests_total=http["http_requests_total"],
+        http_request_duration_seconds=http["http_request_duration_seconds"],
+        http_requests_in_flight=http["http_requests_in_flight"],
+    )
+
+
+def _build_job_collectors(registry: Any, Counter: Any, Histogram: Any) -> dict[str, Any]:
+    """Worker-side collectors: per-operation counters + batch latencies."""
+    return {
+        "jobs_total": Counter(
             "protea_jobs_total",
             "Total number of jobs processed, labelled by operation and terminal status.",
             labelnames=("operation", "status"),
             registry=registry,
         ),
-        job_duration_seconds=Histogram(
+        "job_duration_seconds": Histogram(
             "protea_job_duration_seconds",
             "End-to-end job duration in seconds (claim to terminal status).",
             labelnames=("operation", "status"),
             buckets=_JOB_DURATION_BUCKETS,
             registry=registry,
         ),
-        embeddings_batch_seconds=Histogram(
+        "embeddings_batch_seconds": Histogram(
             "protea_embeddings_batch_seconds",
             "Wall-clock duration of a single embeddings batch in seconds.",
             labelnames=("backend",),
             buckets=_BATCH_DURATION_BUCKETS,
             registry=registry,
         ),
-        predictions_batch_seconds=Histogram(
+        "predictions_batch_seconds": Histogram(
             "protea_predictions_batch_seconds",
             "Wall-clock duration of a single predictions batch in seconds.",
             labelnames=("runner",),
             buckets=_BATCH_DURATION_BUCKETS,
             registry=registry,
         ),
-        db_pool_in_use=Gauge(
-            "protea_db_pool_in_use",
-            "Connections currently checked out of the SQLAlchemy pool.",
-            registry=registry,
-        ),
-        http_requests_total=Counter(
+    }
+
+
+def _build_http_collectors(
+    registry: Any, Counter: Any, Histogram: Any, Gauge: Any
+) -> dict[str, Any]:
+    """HTTP-surface collectors: per-route counter, latency histogram, in-flight gauge."""
+    return {
+        "http_requests_total": Counter(
             "protea_http_requests_total",
             "Total HTTP requests handled by the FastAPI surface, by method/route/status.",
             labelnames=("method", "route", "status"),
             registry=registry,
         ),
-        http_request_duration_seconds=Histogram(
+        "http_request_duration_seconds": Histogram(
             "protea_http_request_duration_seconds",
             "Per-request wall-clock duration in seconds, by method/route.",
             labelnames=("method", "route"),
             buckets=_HTTP_DURATION_BUCKETS,
             registry=registry,
         ),
-        http_requests_in_flight=Gauge(
+        "http_requests_in_flight": Gauge(
             "protea_http_requests_in_flight",
             "Number of HTTP requests currently being processed.",
             registry=registry,
         ),
-    )
+    }
 
 
 def refresh_db_pool_gauge(metrics: MetricRegistry, engine: Any) -> None:
