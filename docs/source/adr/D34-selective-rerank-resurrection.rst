@@ -4,6 +4,26 @@ ADR-D34: Selective rerank resurrection, recompute not archaeology
 :Status: Accepted
 :Date: 2026-05-16 (proposed), 2026-05-17 (accepted with multi-seed numbers), 2026-05-18 (closure ratified by lab LR.4 + paired CI from LB.3)
 
+.. note::
+
+   **Terminology.** Earlier drafts called the pre-fix dataset
+   "leakage-contaminated". That framing is technically inaccurate: the
+   CAFA temporal partition (NK / LK / PK in
+   :doc:`/architecture/evaluation`) is mathematically clean; PK simply
+   records that the protein had experimental annotations in some
+   namespace at t0, which is a legitimate evaluation split, not a leak.
+   The actual incident was a **dataset-construction replication
+   artefact** in the early ``export_research_dataset`` pipeline that
+   made ``anc2vec_query_known_count`` act as a row-bucket identifier;
+   see the *Replication artefact in the anc2vec_query feature family*
+   entry in :doc:`/insights` for the corrected description. Wording in
+   this ADR has been updated accordingly, except for frozen artefact
+   identifiers (e.g. the lab axis value
+   ``feat=v6_features+lineage-leakfree`` and the memory keys
+   ``project_lb2_leakage_fixed_champion`` and
+   ``project_anc2vec_leakage_mechanism``) where the literal string is
+   load-bearing.
+
 Context
 -------
 
@@ -14,22 +34,22 @@ historical "selective rerank at K=10" champion record (avg cafaeval
 range distinction and was not generated with explicit ``eval_set_name``
 tracking.
 
-Lab memory showed the legacy record as leakage-contaminated and of
-unknown range provenance. The lab summary file under the leakage-fixed
+Lab memory showed the legacy record as non-reproducible (pre-replication-fix) and of
+unknown range provenance. The lab summary file under the replication-fixed
 bench runs directory does
 not contain 0.4562 for ``bench-v1-K5-v226-lineage-prostt5`` or any other current
 validation band. The record was therefore not reproducible or
 comparable to current champion runs.
 
-On 2026-05-05 the anc2vec count-leakage finding (memory
-``project_anc2vec_count_leakage``) confirmed that any pre-fix Fmax is
+On 2026-05-05 the anc2vec_query_known_count replication-artefact finding (memory
+``project_anc2vec_leakage_mechanism``) confirmed that any pre-fix Fmax is
 inflated and must be discarded; the only correct path is to recompute
-on the leakage-fixed feature set against the current bench.
+on the replication-fixed feature set against the current bench.
 
 On 2026-05-17 the LB.2 multi-seed sweep landed (lab branch
 ``task/bioinfo-quick-1778972872-6d9a``, commit ``77c3b33``):
 6 NK+LK cells (nk-mfo, nk-bpo, nk-cco, lk-mfo, lk-bpo, lk-cco) trained
-for 3 seeds each (42, 7, 137) on the leakage-fixed bench-v1-K5-v226-lineage-prostt5 configuration
+for 3 seeds each (42, 7, 137) on the replication-fixed bench-v1-K5-v226-lineage-prostt5 configuration
 (no anc2vec, no PCA features; lambdarank; LR=0.05, leaves=63,
 num_boost_round=10000, early_stop=100). The 9-cell selective policy
 applies the reranker on NK+LK cells and falls back to KNN baseline on
@@ -48,7 +68,7 @@ Decision
    is the live PROTEA inference policy for ``bench-v1-K5-v226-lineage-prostt5``
    pending the next champion sweep.
 
-3. **Configuration:** leakage-fixed ``bench-v1-K5-v226-lineage-prostt5`` bundle
+3. **Configuration:** replication-fixed ``bench-v1-K5-v226-lineage-prostt5`` bundle
    (the ``v6_features`` bundle with lineage features enabled, minus all
    ``anc2vec_*`` and ``emb_pca_*`` columns), per-cell lambdarank
    LightGBM booster.
@@ -122,11 +142,11 @@ Decision
    record (memory key ``project_v18_selective_rerank``) is retained
    for audit and explicitly marked as superseded. It is not
    comparable to the new champion: different feature set, different
-   range, leakage-contaminated.
+   range, non-reproducible (pre-replication-fix).
 
-6. **Deployment.** The leakage-fixed bench-v1-K5-v226-lineage-prostt5 config becomes the PROTEA
+6. **Deployment.** The replication-fixed bench-v1-K5-v226-lineage-prostt5 config becomes the PROTEA
    inference default for ``bench-v1-K5-v226-lineage-prostt5`` on NK+LK cells.
-   Older ``RerankerModel`` rows from pre-leakage-fix sweeps are
+   Older ``RerankerModel`` rows from pre-replication-fix sweeps are
    considered stale; they remain in the registry for traceability but
    should not be selected for new inference jobs.
 
@@ -136,8 +156,8 @@ Decision
    acceptance.
 
 8. **Lab LR.4 closure (2026-05-18).** Lab PR
-   ``protea-reranker-lab#21`` (``lab(LR.4): leakage-free re-run of the
-   historical selective-rerank policy``) formalises the
+   ``protea-reranker-lab#21`` (``lab(LR.4): replication-artefact-free
+   re-run of the historical selective-rerank policy``) formalises the
    supersession on the lab side: it lands
    ``scripts/lr4_v18_selective.py`` (regenerator reading
    ``runs/lb2_multiseed/cis.json`` or falling back to documented
@@ -145,7 +165,7 @@ Decision
    (canonical acceptance artefact: per-cell selective rerank table
    plus aggregate delta row), and an ``EXPERIMENTS.md`` LR.4 closure
    section. The CSV reports the same-bench all-baseline reference
-   (the leaky 0.4562 had no per-cell breakdown on file, so the lift
+   (the pre-fix 0.4562 had no per-cell breakdown on file, so the lift
    is reported against the new bench baseline; the publishable
    selective-rerank lift on bench-v1-K5-v226-lineage-prostt5 is +0.0397
    over the same-bench KNN baseline). The legacy record is also
@@ -153,7 +173,7 @@ Decision
 
 9. **Paired CI evidence (LB.3, 2026-05-18).** Lab PR
    ``protea-reranker-lab#19`` (``lab(LB.3): per-cell paired CI on
-   leakage-fixed champion``) supplies the per-cell paired confidence
+   replication-fixed champion``) supplies the per-cell paired confidence
    intervals for the recomputed run. All 6 NK+LK cells are
    significant at the 95% level (6 of 6); see memory
    ``project_lb3_paired_ci_2026_05_18``. This is the statistical
@@ -181,10 +201,10 @@ Consequences
   cell is incorrect.
 - Requires regeneration of the cell, not mere documentation of an
   existing artefact.
-- The catalog cell ``axis.features`` value for this leakage-fixed
+- The catalog cell ``axis.features`` value for this replication-fixed
   bundle is not yet a named entry in the FARM-EXP.2 transversal catalog
   (see ``project_farm_exp_2_placeholder_digests``); a follow-up
-  slice will add the leakage-fixed bundle as a first-class axis
+  slice will add the replication-fixed bundle as a first-class axis
   value once the digest backfill clears.
 
 **Neutral**
@@ -218,7 +238,7 @@ References
   numbers, 0.6215 plus or minus 0.0014 selective avg).
 - Memory entry ``project_lb3_paired_ci_2026_05_18`` (paired CI
   evidence, 6 of 6 NK+LK cells significant).
-- Memory entry ``project_anc2vec_count_leakage`` (root cause for
+- Memory entry ``project_anc2vec_leakage_mechanism`` (root cause for
   the supersession of 0.4562).
 - Memory entry ``project_v18_selective_rerank`` (legacy champion,
   marked historical-only and superseded 2026-05-18).
@@ -228,11 +248,11 @@ References
 - Memory entry ``reference_lab_validation_ranges`` (v220 / v226 /
   v230 distinction).
 - Memory entry ``project_farm_exp_2_placeholder_digests`` (catalog
-  shortid tentativeness; relevant to the leakage-fixed bundle's
+  shortid tentativeness; relevant to the replication-fixed bundle's
   pending first-class axis registration).
 - FARM-EXP.10 slice definition in
   ``agent-farm/plans/farm-platform/PLAN.md``.
-- Lab summary file under the leakage-fixed bench runs directory
+- Lab summary file under the replication-fixed bench runs directory
   (current bench results).
 
 Open follow-ups (deferred work, tracked separately):
@@ -248,7 +268,7 @@ Open follow-ups (deferred work, tracked separately):
   it. See lab PR ``protea-reranker-lab#15`` (FARM-EXP.10
   formalisation) and the LR.4 PR for the appendix-survival test
   cases.
-- The leakage-fixed bundle (the
+- The replication-fixed bundle (the
   ``feat=v6_features+lineage-leakfree`` axis value: the base
   ``v6_features+lineage`` bundle minus ``anc2vec_*`` and
   ``emb_pca_*``) was added as a first-class entry in the

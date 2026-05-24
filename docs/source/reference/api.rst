@@ -5,7 +5,9 @@ HTTP API
    :local:
    :depth: 2
 
-The PROTEA HTTP API is a FastAPI application that exposes seventeen routers.
+The PROTEA HTTP API is a FastAPI application that exposes a set of routers
+under ``protea/api/routers/`` (the live OpenAPI is regenerated into
+``docs/openapi.json`` and is authoritative for the exact endpoint list).
 All state mutations flow through this layer: it writes ``Job`` rows to
 PostgreSQL and publishes messages to RabbitMQ. The API is stateless between
 requests; the session factory and AMQP URL are injected via ``app.state``

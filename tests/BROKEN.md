@@ -1,5 +1,11 @@
 # Broken tests inventory
 
+> **Status: stale snapshot (2026-05-05).** El conteo abajo (1056 passed)
+> está muy desactualizado. La suite unit actual sobre `develop` supera
+> los 2100 tests. Mantén este histórico como registro de la deuda
+> resuelta en T0.1b; para el estado vigente ejecuta `poetry run pytest`
+> o consulta el run más reciente en GitHub Actions (`test.yml`).
+
 Snapshot 2026-05-05 tras T0.1b. Suite unit verde end-to-end: **1056 passed, 10 skipped, 0 failed**.
 
 Política: este fichero registra cualquier test que esté roto en `master` o `refactor/*`. Si está vacío, la suite está limpia.
