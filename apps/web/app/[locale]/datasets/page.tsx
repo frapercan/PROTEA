@@ -189,6 +189,12 @@ export default function DatasetsPage() {
     // Refresh once the user navigates back; meanwhile point them at the job.
   }
 
+  function onImported(datasetId: string, name: string) {
+    toast(t("imported", { name, datasetId: datasetId.slice(0, 8) }), "success");
+    // Reload the list so the freshly-registered row appears immediately.
+    void load();
+  }
+
   const loading = datasets === null;
 
   return (
@@ -421,6 +427,7 @@ export default function DatasetsPage() {
         open={showDialog}
         onClose={() => setShowDialog(false)}
         onCreated={onCreated}
+        onImported={onImported}
       />
     </>
   );

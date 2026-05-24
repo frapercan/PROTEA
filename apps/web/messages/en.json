@@ -15,6 +15,8 @@
     "reranker": "Re-ranker",
     "datasets": "Datasets",
     "jobs": "Jobs",
+    "admin": "Admin",
+    "experimentRuns": "Experiment runs",
     "maintenance": "Maintenance",
     "home": "Home",
     "data": "Reference Data",
@@ -174,6 +176,20 @@
       "childJobsCount": "({count})",
       "eventsTitle": "Events",
       "eventsCount": "({count})"
+    },
+    "commentsThread": {
+      "title": "Comments",
+      "empty": "No comments yet. Drop the first observation, follow-up, or post-mortem.",
+      "anonymousAuthor": "anonymous",
+      "formLabel": "Append a comment",
+      "bodyLabel": "Comment",
+      "bodyPlaceholder": "e.g. Re-running with k=10; k=5 hit the variance ceiling on PK.",
+      "authorLabel": "Author",
+      "authorPlaceholder": "your handle or bot id (optional)",
+      "postButton": "Post",
+      "posting": "Posting…",
+      "posted": "Comment posted",
+      "hint": "Comments are durable narrative notes. The machine-emitted event timeline above stays separate."
     }
   },
   "proteins": {
@@ -772,6 +788,7 @@
     "emptyFiltered": "No datasets match the current filters.",
     "dispatchFirst": "Dispatch the first export",
     "dispatched": "Export dispatched: {name} (job {jobId})",
+    "imported": "Dataset registered by reference: {name} ({datasetId})",
     "footnote": "Each row is one Dataset record. Click a name to inspect schema/manifest provenance and link back to the producer job.",
     "filters": {
       "family": "PLM family",
@@ -875,6 +892,134 @@
         "needTwoTrain": "Need at least two train versions to build a temporal split.",
         "needOneTest": "Need at least one test version.",
         "badVersionToken": "Bad version token: {token} (must be a non-negative integer)"
+      },
+      "tabs": {
+        "ariaLabel": "Dataset registration mode",
+        "dispatch": "Dispatch export",
+        "import": "Import from reference"
+      },
+      "import": {
+        "title": "Register a dataset by reference",
+        "subtitle": "Train/eval parquets and manifest.json already live in the artifact store; PROTEA only persists a Dataset row pointing at the URIs.",
+        "intro": "No job is enqueued, no artefacts re-read. Use this for lab dumps, salvage replays, or cross-environment imports where the data is already staged.",
+        "storageBackendLabel": "Storage backend",
+        "storageBackendHelp": "Identifier matching the URIs (local for file:// paths, minio for s3:// keys). Recorded verbatim; PROTEA does not validate the scheme against this value.",
+        "keyPrefixLabel": "Key prefix",
+        "keyPrefixHelp": "Artifact-store prefix that contains the parquets and manifest (e.g. datasets/<name>/). Used to rebuild URIs after a backend swap.",
+        "manifestUriLabel": "manifest.json URI",
+        "manifestUriHelp": "Required. PROTEA records the URI verbatim and never re-reads it.",
+        "trainUriLabel": "train.parquet URI",
+        "trainUriHelp": "Optional; leave empty for eval-only dumps.",
+        "evalUriLabel": "eval.parquet URI",
+        "evalUriHelp": "Optional; leave empty for train-only dumps.",
+        "schemaShaLabel": "schema_sha",
+        "schemaShaHelp": "Feature-set fingerprint from the lab's manifest. Boosters trained on this dump must match it at inference.",
+        "manifestShaLabel": "manifest_sha",
+        "manifestShaHelp": "sha256 hex of the serialized manifest.json bytes. Nullable for legacy dumps.",
+        "annotationSourceLabel": "Annotation source",
+        "nTrainRowsLabel": "Train row count",
+        "nEvalRowsLabel": "Eval row count",
+        "embeddingHelp": "Optional. NULL'd when the FK cannot be resolved in this PROTEA instance.",
+        "embeddingNotResolved": "(none / not resolved)",
+        "snapshotHelp": "Optional. Same NULL-on-unresolved semantics as the embedding config.",
+        "snapshotNotResolved": "(none / not resolved)",
+        "trainPairsLabel": "Train snapshot pairs",
+        "trainPairsHelp": "Comma/space-separated v{old}-v{new} tokens, one per shard. Empty for eval-only dumps.",
+        "evalPairLabel": "Eval snapshot pair",
+        "evalPairHelp": "v{old}-v{new} window of the eval parquet, if present.",
+        "producerVersionLabel": "Producer version",
+        "producerGitShaLabel": "Producer git SHA",
+        "externalSourceLabel": "External source",
+        "externalSourceHelp": "Free-form provenance tag (e.g. protea-reranker-lab@<git-sha>). Recorded in the meta JSONB column.",
+        "forceLabel": "Overwrite existing row with the same name",
+        "forceHelp": "Default rejects duplicates with 409. Enable only when re-registering after a backend swap or salvage replay.",
+        "importButton": "Register dataset",
+        "importing": "Registering…",
+        "errors": {
+          "keyPrefixRequired": "Key prefix is required.",
+          "manifestUriRequired": "manifest.json URI is required.",
+          "schemaShaRequired": "schema_sha is required.",
+          "kPositive": "K must be a positive integer.",
+          "rowCountInvalid": "Row count must be a non-negative integer (got: {token})."
+        }
+      }
+    }
+  },
+  "admin": {
+    "experimentRuns": {
+      "title": "Experiment runs",
+      "subtitle": "Narrative spine for the F-EXP campaign: every research run carries a description, hypothesis, structured config, provenance overlay, and findings. Linked to Job / EvaluationResult / RerankerModel rows by name.",
+      "adminBadge": "ADMIN",
+      "adminBadgeTooltip": "Writes are gated by the API key / bearer auth mode configured on the deployment.",
+      "newRun": "New run",
+      "filterAriaLabel": "Filter runs by status",
+      "filters": {
+        "all": "All"
+      },
+      "status": {
+        "planned": "Planned",
+        "running": "Running",
+        "done": "Done",
+        "abandoned": "Abandoned"
+      },
+      "cols": {
+        "name": "Name",
+        "status": "Status",
+        "tags": "Tags",
+        "created": "Created",
+        "actions": "Actions"
+      },
+      "actions": {
+        "edit": "Edit",
+        "delete": "Delete",
+        "cancel": "Cancel"
+      },
+      "emptyAll": "No experiment runs yet. Mint the first one to start a campaign narrative.",
+      "emptyFiltered": "No runs match this status filter.",
+      "deleteConfirm": "Delete experiment run \"{name}\"? This cannot be undone.",
+      "toasts": {
+        "created": "Experiment run \"{name}\" minted",
+        "updated": "Experiment run \"{name}\" updated",
+        "deleted": "Experiment run \"{name}\" deleted"
+      },
+      "mint": {
+        "title": "Mint a new experiment run",
+        "subtitle": "Starts in the planned state. Transition via the Edit modal once the run picks up.",
+        "submit": "Mint run",
+        "submitting": "Minting…"
+      },
+      "edit": {
+        "title": "Edit run: {name}",
+        "subtitle": "Patch narrative, status, tags, config, or provenance. Status transitions stamp started_at / finished_at automatically on the server.",
+        "submit": "Save changes",
+        "submitting": "Saving…"
+      },
+      "fields": {
+        "name": "Name",
+        "status": "Status",
+        "statusHelp": "First move to running stamps started_at. First move to done or abandoned stamps finished_at. Re-entering a state is idempotent.",
+        "description": "Description",
+        "descriptionPlaceholder": "Free-form intent text shown on the run detail page.",
+        "hypothesis": "Hypothesis",
+        "hypothesisPlaceholder": "What this run is trying to verify or falsify.",
+        "findings": "Findings",
+        "findingsHelp": "Fill in when transitioning to done to capture the writeup.",
+        "tags": "Tags",
+        "tagsHelp": "Comma or space-separated grouping tokens (e.g. ablation, K-sweep).",
+        "config": "Config (JSON)",
+        "configHelp": "Free-form JSON object: hyperparameters, feature flags, dataset slugs. Empty string clears it.",
+        "provenance": "Provenance overlay (JSON)",
+        "provenanceHelp": "Free-form JSON object merged with the server's baseline provenance (git sha, hostname, timestamp). Empty string clears it."
+      },
+      "readonly": {
+        "id": "ID",
+        "startedAt": "Started",
+        "finishedAt": "Finished"
+      },
+      "errors": {
+        "nameRequired": "Name is required.",
+        "configInvalid": "Config JSON is invalid: {reason}",
+        "provenanceInvalid": "Provenance JSON is invalid: {reason}"
       }
     }
   },

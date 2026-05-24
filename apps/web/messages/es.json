@@ -15,6 +15,8 @@
     "reranker": "Re-ranker",
     "datasets": "Datasets",
     "jobs": "Trabajos",
+    "admin": "Admin",
+    "experimentRuns": "Ejecuciones de experimento",
     "maintenance": "Mantenimiento",
     "home": "Inicio",
     "data": "Datos de referencia",
@@ -174,6 +176,20 @@
       "childJobsCount": "({count})",
       "eventsTitle": "Eventos",
       "eventsCount": "({count})"
+    },
+    "commentsThread": {
+      "title": "Comentarios",
+      "empty": "Aún no hay comentarios. Anota la primera observación, seguimiento o análisis post-mortem.",
+      "anonymousAuthor": "anónimo",
+      "formLabel": "Añadir un comentario",
+      "bodyLabel": "Comentario",
+      "bodyPlaceholder": "p. ej. Re-ejecuto con k=10; k=5 topó con el techo de varianza en PK.",
+      "authorLabel": "Autor",
+      "authorPlaceholder": "tu identificador o bot (opcional)",
+      "postButton": "Publicar",
+      "posting": "Publicando…",
+      "posted": "Comentario publicado",
+      "hint": "Los comentarios son notas narrativas duraderas. La línea de eventos automática de arriba se mantiene aparte."
     }
   },
   "proteins": {
@@ -772,6 +788,7 @@
     "emptyFiltered": "Ningún dataset coincide con los filtros actuales.",
     "dispatchFirst": "Lanza la primera exportación",
     "dispatched": "Exportación lanzada: {name} (job {jobId})",
+    "imported": "Dataset registrado por referencia: {name} ({datasetId})",
     "footnote": "Cada fila es un registro Dataset. Haz clic en el nombre para inspeccionar la procedencia (schema/manifest) y enlazar con el job productor.",
     "filters": {
       "family": "Familia PLM",
@@ -875,6 +892,134 @@
         "needTwoTrain": "Hacen falta al menos dos versiones train para construir un split temporal.",
         "needOneTest": "Hace falta al menos una versión test.",
         "badVersionToken": "Token de versión inválido: {token} (debe ser entero no negativo)"
+      },
+      "tabs": {
+        "ariaLabel": "Modo de registro del dataset",
+        "dispatch": "Lanzar exportación",
+        "import": "Importar por referencia"
+      },
+      "import": {
+        "title": "Registrar un dataset por referencia",
+        "subtitle": "Los parquet de train/eval y manifest.json ya están en el almacén de artefactos; PROTEA solo persiste una fila Dataset que apunta a los URI.",
+        "intro": "No se encola ningún job, no se re-leen los artefactos. Úsalo para volcados del lab, replays de salvage o importaciones cruzadas entre entornos cuando los datos ya están preparados.",
+        "storageBackendLabel": "Backend de almacenamiento",
+        "storageBackendHelp": "Identificador que casa con los URI (local para rutas file://, minio para claves s3://). Se registra tal cual; PROTEA no valida el esquema contra este valor.",
+        "keyPrefixLabel": "Prefijo de clave",
+        "keyPrefixHelp": "Prefijo del almacén que contiene los parquet y el manifest (p. ej. datasets/<nombre>/). Sirve para reconstruir los URI tras un cambio de backend.",
+        "manifestUriLabel": "URI de manifest.json",
+        "manifestUriHelp": "Obligatorio. PROTEA registra el URI literal y nunca lo re-lee.",
+        "trainUriLabel": "URI de train.parquet",
+        "trainUriHelp": "Opcional; déjalo vacío para volcados solo-eval.",
+        "evalUriLabel": "URI de eval.parquet",
+        "evalUriHelp": "Opcional; déjalo vacío para volcados solo-train.",
+        "schemaShaLabel": "schema_sha",
+        "schemaShaHelp": "Huella del conjunto de features tomada del manifest del lab. Los boosters entrenados sobre este volcado deben coincidir en inferencia.",
+        "manifestShaLabel": "manifest_sha",
+        "manifestShaHelp": "sha256 hex de los bytes serializados de manifest.json. Nulable para volcados legacy.",
+        "annotationSourceLabel": "Fuente de anotación",
+        "nTrainRowsLabel": "Filas train",
+        "nEvalRowsLabel": "Filas eval",
+        "embeddingHelp": "Opcional. Se queda nulo si el FK no se resuelve en esta instancia PROTEA.",
+        "embeddingNotResolved": "(ninguno / no resuelto)",
+        "snapshotHelp": "Opcional. Misma semántica de nulo-si-no-se-resuelve que el embedding config.",
+        "snapshotNotResolved": "(ninguno / no resuelto)",
+        "trainPairsLabel": "Pares de snapshot train",
+        "trainPairsHelp": "Tokens v{old}-v{new} separados por coma/espacio, uno por shard. Vacío para volcados solo-eval.",
+        "evalPairLabel": "Par de snapshot eval",
+        "evalPairHelp": "Ventana v{old}-v{new} del parquet de eval, si la hay.",
+        "producerVersionLabel": "Versión del productor",
+        "producerGitShaLabel": "Git SHA del productor",
+        "externalSourceLabel": "Fuente externa",
+        "externalSourceHelp": "Etiqueta de procedencia libre (p. ej. protea-reranker-lab@<git-sha>). Se registra en la columna meta JSONB.",
+        "forceLabel": "Sobrescribir la fila existente con el mismo nombre",
+        "forceHelp": "Por defecto se rechazan duplicados con 409. Actívalo solo al re-registrar tras un cambio de backend o un replay de salvage.",
+        "importButton": "Registrar dataset",
+        "importing": "Registrando…",
+        "errors": {
+          "keyPrefixRequired": "El prefijo de clave es obligatorio.",
+          "manifestUriRequired": "El URI de manifest.json es obligatorio.",
+          "schemaShaRequired": "schema_sha es obligatorio.",
+          "kPositive": "K debe ser un entero positivo.",
+          "rowCountInvalid": "El contador de filas debe ser un entero no negativo (recibido: {token})."
+        }
+      }
+    }
+  },
+  "admin": {
+    "experimentRuns": {
+      "title": "Ejecuciones de experimento",
+      "subtitle": "Espina narrativa de la campaña F-EXP: cada ejecución de investigación lleva descripción, hipótesis, configuración estructurada, capa de procedencia y hallazgos. Enlazada a filas Job / EvaluationResult / RerankerModel por nombre.",
+      "adminBadge": "ADMIN",
+      "adminBadgeTooltip": "Las escrituras están protegidas por el modo de auth (API key / bearer) del despliegue.",
+      "newRun": "Nueva ejecución",
+      "filterAriaLabel": "Filtrar ejecuciones por estado",
+      "filters": {
+        "all": "Todas"
+      },
+      "status": {
+        "planned": "Planificada",
+        "running": "En curso",
+        "done": "Hecha",
+        "abandoned": "Abandonada"
+      },
+      "cols": {
+        "name": "Nombre",
+        "status": "Estado",
+        "tags": "Etiquetas",
+        "created": "Creada",
+        "actions": "Acciones"
+      },
+      "actions": {
+        "edit": "Editar",
+        "delete": "Eliminar",
+        "cancel": "Cancelar"
+      },
+      "emptyAll": "Aún no hay ejecuciones de experimento. Crea la primera para iniciar una narrativa de campaña.",
+      "emptyFiltered": "Ninguna ejecución coincide con este filtro de estado.",
+      "deleteConfirm": "¿Eliminar la ejecución \"{name}\"? Esta acción no se puede deshacer.",
+      "toasts": {
+        "created": "Ejecución \"{name}\" creada",
+        "updated": "Ejecución \"{name}\" actualizada",
+        "deleted": "Ejecución \"{name}\" eliminada"
+      },
+      "mint": {
+        "title": "Crear nueva ejecución de experimento",
+        "subtitle": "Empieza en estado planificada. Cambia el estado desde el modal Editar cuando arranque la ejecución.",
+        "submit": "Crear ejecución",
+        "submitting": "Creando…"
+      },
+      "edit": {
+        "title": "Editar ejecución: {name}",
+        "subtitle": "Edita narrativa, estado, etiquetas, config o procedencia. Las transiciones de estado marcan started_at / finished_at automáticamente en el servidor.",
+        "submit": "Guardar cambios",
+        "submitting": "Guardando…"
+      },
+      "fields": {
+        "name": "Nombre",
+        "status": "Estado",
+        "statusHelp": "El primer paso a en curso marca started_at. El primero a hecha o abandonada marca finished_at. Re-entrar en un estado es idempotente.",
+        "description": "Descripción",
+        "descriptionPlaceholder": "Texto libre con la intención que se muestra en la página de detalle.",
+        "hypothesis": "Hipótesis",
+        "hypothesisPlaceholder": "Qué intenta verificar o refutar esta ejecución.",
+        "findings": "Hallazgos",
+        "findingsHelp": "Rellena al pasar a hecha para capturar el resumen del resultado.",
+        "tags": "Etiquetas",
+        "tagsHelp": "Tokens de agrupación separados por coma o espacio (p. ej. ablation, K-sweep).",
+        "config": "Config (JSON)",
+        "configHelp": "Objeto JSON libre: hiperparámetros, flags, slugs de dataset. Cadena vacía lo limpia.",
+        "provenance": "Procedencia (JSON)",
+        "provenanceHelp": "Objeto JSON libre fusionado con la procedencia base del servidor (git sha, hostname, timestamp). Cadena vacía lo limpia."
+      },
+      "readonly": {
+        "id": "ID",
+        "startedAt": "Iniciada",
+        "finishedAt": "Finalizada"
+      },
+      "errors": {
+        "nameRequired": "El nombre es obligatorio.",
+        "configInvalid": "El JSON de config no es válido: {reason}",
+        "provenanceInvalid": "El JSON de procedencia no es válido: {reason}"
       }
     }
   },
