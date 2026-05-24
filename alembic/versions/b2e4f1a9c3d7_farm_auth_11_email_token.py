@@ -73,21 +73,20 @@ def upgrade() -> None:
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("consumed_at", sa.DateTime(timezone=True), nullable=True),
     )
-    op.create_index(
-        "ix_email_token_token_hash",
-        "email_token",
-        ["token_hash"],
-        unique=True,
+    # IF NOT EXISTS keeps the upgrade idempotent on the shared CI pg
+    # service container, which can carry leftover indexes from previous
+    # PR runs even after the alembic_version row is reset.
+    op.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_email_token_token_hash "
+        "ON email_token (token_hash)"
     )
-    op.create_index(
-        "ix_email_token_user_id",
-        "email_token",
-        ["user_id"],
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_email_token_user_id "
+        "ON email_token (user_id)"
     )
-    op.create_index(
-        "ix_email_token_expires_at",
-        "email_token",
-        ["expires_at"],
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_email_token_expires_at "
+        "ON email_token (expires_at)"
     )
 
 

@@ -37,7 +37,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Index, Text
+from sqlalchemy import DateTime, ForeignKey, Text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -88,18 +88,14 @@ class EmailToken(Base):
         default=None,
     )
 
-    __table_args__ = (
-        # Primary access pattern: look up an email token by its hash to
-        # validate a magic-link or password-reset request. The unique
-        # constraint already provides a usable B-tree index; the explicit
-        # named index below lets us reference it in maintenance queries.
-        Index("ix_email_token_token_hash", "token_hash", unique=True),
-        # Secondary pattern: list or purge all tokens for a given user
-        # (e.g., admin action or account deletion cascade).
-        Index("ix_email_token_user_id", "user_id"),
-        # Purge jobs can cheaply find all expired tokens for cleanup.
-        Index("ix_email_token_expires_at", "expires_at"),
-    )
+    # Indexes are declared in the alembic migration only (with IF NOT EXISTS
+    # so re-running upgrade head against the shared CI pg never duplicates):
+    #   - ix_email_token_token_hash (unique)
+    #   - ix_email_token_user_id
+    #   - ix_email_token_expires_at
+    # Keeping them out of __table_args__ avoids the create_all collision
+    # in tests that drop_all + create_all without dropping indexes first
+    # (SQLAlchemy's metadata.create_all does not checkfirst on Index objects).
 
     def __repr__(self) -> str:
         return (
