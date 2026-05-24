@@ -99,6 +99,18 @@ class Settings:
     # Override with env var PROTEA_ANON_QUOTA_PER_DAY.
     anon_quota_per_day: int = 5
 
+    # SMTP settings for optional email-driven auth flows (FARM-AUTH.11).
+    # All fields are optional; SMTP features are disabled when
+    # ``smtp_enabled`` is False (the default). Set PROTEA_SMTP_ENABLED=true
+    # and supply the remaining PROTEA_SMTP_* vars to activate magic-link
+    # login and password-reset flows.
+    smtp_enabled: bool = False
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    smtp_from_addr: str | None = None
+
 
 class _YamlConfigSource(PydanticBaseSettingsSource):
     """Pydantic-settings source that reads ``protea/config/system.yaml``.
@@ -171,14 +183,31 @@ class _YamlConfigSource(PydanticBaseSettingsSource):
         return dict(self._load())
 
 
+def _normalise_storage_backend(value: Any) -> Any:
+    if isinstance(value, str):
+        return value.lower()
+    return value
+
+
+def _normalise_allowed_origins(value: Any) -> Any:
+    """Accept list, tuple, or comma-separated string; emit a list of stripped
+    non-empty strings or ``None``."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return [p.strip() for p in value.split(",") if p.strip()]
+    if isinstance(value, (list, tuple)):
+        return [str(o).strip() for o in value if str(o).strip()]
+    return value
+
+
 def _make_settings_cls(env_prefix: str, env_file: Path | None) -> type[BaseSettings]:
     """Build a ``BaseSettings`` subclass parameterised by ``env_prefix``.
 
     The class is constructed at call time because :class:`SettingsConfigDict`
     bakes ``env_prefix`` and ``env_file`` into the class, not the instance.
-    Generated classes are cheap (no schema cache pressure in practice) and
-    stay private to this module. ``env_file`` is the absolute path to the
-    project's ``.env`` so the loader is independent of the process CWD.
+    ``env_file`` is the absolute path to the project's ``.env`` so the loader
+    is independent of the process CWD.
     """
 
     class _ProteaBaseSettings(BaseSettings):
@@ -202,30 +231,20 @@ def _make_settings_cls(env_prefix: str, env_file: Path | None) -> type[BaseSetti
         minio_secure: bool = False
         anc2vec_path: str | None = None
         anon_quota_per_day: int = 5
-        # ``allowed_origins`` is stored as a list internally so pydantic's
-        # JSON-mode env parsing does not try to JSON-decode the raw
-        # comma-separated env value. The field validator below normalises
-        # both shapes (list-from-YAML and str-from-env) into a list.
+        smtp_enabled: bool = False
+        smtp_host: str | None = None
+        smtp_port: int = 587
+        smtp_user: str | None = None
+        smtp_password: str | None = None
+        smtp_from_addr: str | None = None
         allowed_origins: list[str] | None = Field(default=None)
 
-        @field_validator("storage_backend", mode="before")
-        @classmethod
-        def _lower_backend(cls, value: Any) -> Any:
-            if isinstance(value, str):
-                return value.lower()
-            return value
-
-        @field_validator("allowed_origins", mode="before")
-        @classmethod
-        def _parse_allowed_origins(cls, value: Any) -> Any:
-            if value is None:
-                return None
-            if isinstance(value, str):
-                # Empty string disables CORS (matches T5.5 contract).
-                return [p.strip() for p in value.split(",") if p.strip()]
-            if isinstance(value, (list, tuple)):
-                return [str(o).strip() for o in value if str(o).strip()]
-            return value
+        _v_backend = field_validator("storage_backend", mode="before")(
+            classmethod(lambda cls, v: _normalise_storage_backend(v))
+        )
+        _v_origins = field_validator("allowed_origins", mode="before")(
+            classmethod(lambda cls, v: _normalise_allowed_origins(v))
+        )
 
     return _ProteaBaseSettings
 
@@ -326,6 +345,12 @@ def _materialise(raw: Any, project_root: Path) -> Settings:
         allowed_origins=allowed,
         anc2vec_path=raw.anc2vec_path,
         anon_quota_per_day=raw.anon_quota_per_day,
+        smtp_enabled=raw.smtp_enabled,
+        smtp_host=raw.smtp_host,
+        smtp_port=raw.smtp_port,
+        smtp_user=raw.smtp_user,
+        smtp_password=raw.smtp_password,
+        smtp_from_addr=raw.smtp_from_addr,
     )
 
 

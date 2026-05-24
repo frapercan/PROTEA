@@ -854,6 +854,61 @@
         "title": "ImportRerankerByReferenceRequest",
         "type": "object"
       },
+      "MagicLinkRequestBody": {
+        "additionalProperties": false,
+        "description": "Body for POST /auth/magic-link/request.",
+        "properties": {
+          "email": {
+            "description": "Email address to send the magic link to.",
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "MagicLinkRequestBody",
+        "type": "object"
+      },
+      "PasswordResetConsumeBody": {
+        "additionalProperties": false,
+        "description": "Body for POST /auth/password-reset/consume.",
+        "properties": {
+          "new_password": {
+            "description": "New plaintext password.",
+            "minLength": 8,
+            "title": "New Password",
+            "type": "string"
+          },
+          "token": {
+            "description": "Raw reset token from the email.",
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "new_password"
+        ],
+        "title": "PasswordResetConsumeBody",
+        "type": "object"
+      },
+      "PasswordResetRequestBody": {
+        "additionalProperties": false,
+        "description": "Body for POST /auth/password-reset/request.",
+        "properties": {
+          "email": {
+            "description": "Email address registered to the account.",
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "PasswordResetRequestBody",
+        "type": "object"
+      },
       "PluginInfo": {
         "description": "Metadata for one discovered plugin.",
         "properties": {
@@ -4020,6 +4075,94 @@
         ]
       }
     },
+    "/v1/auth/magic-link/consume": {
+      "get": {
+        "description": "Validate a magic-link token, create a session cookie, redirect to /.\n\n* 302 (redirect to /)  -- token valid, session cookie set.\n* 400                  -- invalid, expired, or already-consumed token.\n* 404                  -- SMTP not enabled.\n* 503                  -- JWT secret not configured.",
+        "operationId": "auth_magic_link_consume",
+        "parameters": [
+          {
+            "description": "Raw magic-link token from the email.",
+            "in": "query",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "description": "Raw magic-link token from the email.",
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Consume a magic-link token and create a session",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/magic-link/request": {
+      "post": {
+        "description": "Send a magic-link email if a matching active account exists.\n\nAlways returns 204 so the caller cannot infer whether the email is\nregistered. Emails are sent only to ``active`` accounts; pending and\ndeactivated accounts are silently skipped (same 204 response).\n\nReturns 404 when SMTP is not enabled.",
+        "operationId": "auth_magic_link_request",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MagicLinkRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Request a magic-link sign-in email",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/v1/auth/me": {
       "get": {
         "description": "Return ``{id, email, username, display_name, role, status}`` for the session user.\n\nReturns 401 when no valid session cookie is present, when the JWT\nis expired/invalid, or when the session has been revoked via\n``POST /auth/logout`` or the admin revoke endpoint.\nUpdates ``last_seen_at`` on every successful call.",
@@ -4077,6 +4220,86 @@
         ]
       }
     },
+    "/v1/auth/password-reset/consume": {
+      "post": {
+        "description": "Validate a reset token and update the account's password hash.\n\n* 204 -- token valid, password updated.\n* 400 -- invalid, expired, or already-consumed token.\n* 404 -- SMTP not enabled.",
+        "operationId": "auth_password_reset_consume",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordResetConsumeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Consume a password-reset token and update the password",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/password-reset/request": {
+      "post": {
+        "description": "Send a password-reset email if a matching active account exists.\n\nAlways returns 204 (no user-enumeration). Returns 404 when SMTP is\nnot enabled.",
+        "operationId": "auth_password_reset_request",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordResetRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Request a password-reset email",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/v1/auth/signup": {
       "post": {
         "description": "Create a User with ``status=pending``.\n\nThe account is not activated until an admin approves it (ADR D37\nmanual-approval flow). No session cookie is issued here: the client\nmust wait for approval, then call ``POST /auth/login``.\n\nReturns ``{id, email, username, status}`` on success. Returns 409\nif the email or username is already registered.",
@@ -4121,6 +4344,32 @@
           }
         },
         "summary": "Register a new user account",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/smtp-enabled": {
+      "get": {
+        "description": "Return ``{enabled: bool}`` \u2014 200 regardless of SMTP configuration.\n\nThe frontend queries this endpoint to decide whether to show the\nmagic-link option on the login page. This endpoint is always 200;\nit never returns 404.",
+        "operationId": "auth_smtp_enabled",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Auth Smtp Enabled",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Check whether SMTP-based auth flows are enabled",
         "tags": [
           "auth"
         ]
