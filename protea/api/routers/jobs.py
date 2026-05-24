@@ -9,9 +9,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session, sessionmaker
 
-from protea.api.auth import require_api_key_or_bearer
 from protea.api.deps import get_amqp_url, get_operation_registry, get_session_factory
 from protea.api.rate_limit import jobs_limit, limiter
+from protea.api.roles import ROLE_OPERATOR, require_role
 from protea.core.contracts.registry import OperationRegistry
 from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.job import Job, JobComment, JobEvent, JobStatus
@@ -201,7 +201,7 @@ class CreateJobRequest(BaseModel):
 @router.post(
     "",
     summary="Create and enqueue a job",
-    dependencies=[Depends(require_api_key_or_bearer)],
+    dependencies=[Depends(require_role(ROLE_OPERATOR))],
 )
 @limiter.limit(jobs_limit)
 def create_job(
@@ -448,6 +448,7 @@ def _serialise_job_comment(c: JobComment) -> dict[str, Any]:
     "/{job_id}/comments",
     status_code=201,
     summary="Append a comment to a job",
+    dependencies=[Depends(require_role(ROLE_OPERATOR))],
 )
 def create_job_comment(
     job_id: UUID,
@@ -514,7 +515,7 @@ def list_job_comments(
         return [_serialise_job_comment(c) for c in rows]
 
 
-@router.delete("/{job_id}", summary="Delete a job")
+@router.delete("/{job_id}", summary="Delete a job", dependencies=[Depends(require_role(ROLE_OPERATOR))])
 def delete_job(
     job_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),
@@ -530,7 +531,7 @@ def delete_job(
     return {"deleted": str(job_id)}
 
 
-@router.post("/{job_id}/cancel", summary="Cancel a job")
+@router.post("/{job_id}/cancel", summary="Cancel a job", dependencies=[Depends(require_role(ROLE_OPERATOR))])
 def cancel_job(
     job_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),

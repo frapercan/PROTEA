@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field, field_validator
 
 from protea.api.deps import get_session_factory
+from protea.api.roles import ROLE_VIEWER, require_role
 from protea.config.tuning import get_tuning
 from protea.infrastructure.orm.models.support_entry import SupportEntry
 from protea.infrastructure.session import session_scope
@@ -81,7 +82,7 @@ def get_support(
         }
 
 
-@router.post("", status_code=201)
+@router.post("", status_code=201, dependencies=[Depends(require_role(ROLE_VIEWER))])
 def post_support(
     body: SupportCreate,
     factory=Depends(get_session_factory),

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.cache import cached, invalidate
 from protea.api.deps import get_amqp_url, get_session_factory
+from protea.api.roles import ROLE_OPERATOR, require_role
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 from protea.infrastructure.queue.publisher import publish_job
@@ -123,7 +124,7 @@ def prewarm_embedding_configs(
     )
 
 
-@router.post("/configs", summary="Create an embedding config")
+@router.post("/configs", summary="Create an embedding config", dependencies=[Depends(require_role(ROLE_OPERATOR))])
 def create_embedding_config(
     body: dict[str, Any],
     factory: sessionmaker[Session] = Depends(get_session_factory),
@@ -164,7 +165,7 @@ def get_embedding_config(
         return _config_to_dict(c, embedding_count=embedding_count)
 
 
-@router.delete("/configs/{config_id}", summary="Delete an embedding config")
+@router.delete("/configs/{config_id}", summary="Delete an embedding config", dependencies=[Depends(require_role(ROLE_OPERATOR))])
 def delete_embedding_config(
     config_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),
@@ -180,7 +181,7 @@ def delete_embedding_config(
 # ── Predict ───────────────────────────────────────────────────────────────────
 
 
-@router.post("/predict", summary="Trigger GO term prediction")
+@router.post("/predict", summary="Trigger GO term prediction", dependencies=[Depends(require_role(ROLE_OPERATOR))])
 def predict_go_terms(
     body: dict[str, Any],
     factory: sessionmaker[Session] = Depends(get_session_factory),
@@ -450,7 +451,7 @@ def download_predictions_cafa(
     )
 
 
-@router.delete("/prediction-sets/{set_id}", summary="Delete a prediction set")
+@router.delete("/prediction-sets/{set_id}", summary="Delete a prediction set", dependencies=[Depends(require_role(ROLE_OPERATOR))])
 def delete_prediction_set(
     set_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),

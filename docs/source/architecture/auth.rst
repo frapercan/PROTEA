@@ -27,9 +27,10 @@ gate in order:
    └───────────────────────┬───────────────────────────────────────────┘
                            │
    ┌───────────────────────▼───────────────────────────────────────────┐
-   │  AUTH GATE  (T5.6a + T5.6b, active)                               │
+   │  AUTH GATE  (T5.6a + T5.6b + FARM-AUTH.5, active)                 │
    │                                                                   │
-   │  require_api_key_or_bearer dependency on protected POST endpoints │
+   │  require_role(min_role) dependency on all mutable endpoints       │
+   │  (wraps require_api_key_or_bearer; roles: viewer/operator/admin)  │
    │                                                                   │
    │  Authorization: ApiKey <raw_key>       (API-key form)             │
    │  X-Api-Key: <raw_key>                  (alternative carrier)      │
@@ -45,27 +46,52 @@ gate in order:
    ┌───────────────────────▼───────────────────────────────────────────┐
    │  FASTAPI ROUTER  (open GET / protected POST)                      │
    │                                                                   │
-   │  Protected:  POST /v1/jobs                                        │
-   │              POST /v1/datasets                                    │
-   │              POST /v1/reranker-models/import                      │
-   │              POST /v1/reranker-models/import-by-reference         │
+   │  Role tiers (FARM-AUTH.5):                                        │
+   │    viewer   - POST /v1/annotate, /v1/query-sets, /v1/support     │
+   │    operator - POST /v1/jobs, /v1/datasets, /v1/embeddings/*      │
+   │               /v1/experiment-runs, /v1/maintenance/*             │
+   │               /v1/scoring/configs*, DELETE /v1/scoring/*         │
+   │               /v1/reranker-models/import*, /v1/annotations/*     │
+   │    admin    - /v1/auth/api-keys (POST/GET/DELETE)                │
    │                                                                   │
-   │  Open (T5.6c may restrict):  GET /v1/jobs,  GET /v1/proteins,    │
-   │                               GET /v1/scoring/*, GET /v1/stack    │
+   │  Open (no auth):  GET /v1/jobs, GET /v1/proteins,                │
+   │                   GET /v1/scoring/*, GET /v1/stack, /v1/health   │
    └───────────────────────────────────────────────────────────────────┘
 
-Protected routes
-----------------
+Role-based endpoint map (FARM-AUTH.5)
+--------------------------------------
 
-The following endpoints reject unauthenticated requests with a 401:
+PROTEA recognises three roles ordered by privilege. Every mutable
+endpoint (POST, PATCH, DELETE) now carries an explicit
+``require_role(min_role)`` dependency that short-circuits with 403
+when the principal's role is below the floor.
 
-* ``POST /v1/jobs``
-* ``POST /v1/datasets``
-* ``POST /v1/reranker-models/import``
-* ``POST /v1/reranker-models/import-by-reference``
+**viewer** (any authenticated user)
+   ``POST /v1/annotate``, ``POST /v1/query-sets``,
+   ``DELETE /v1/query-sets/{set_id}``, ``POST /v1/support``
 
-GET endpoints stay open for now (researcher UX). Full lockdown is
-post T5.6c.
+**operator** (pipeline operators)
+   ``POST /v1/jobs``, ``POST|DELETE /v1/datasets``,
+   ``POST|DELETE /v1/embeddings/configs``,
+   ``POST /v1/embeddings/predict``,
+   ``DELETE /v1/embeddings/prediction-sets/{set_id}``,
+   ``POST|PATCH|DELETE /v1/experiment-runs``,
+   ``POST /v1/maintenance/vacuum-embeddings``, ``POST /v1/maintenance/vacuum-sequences``,
+   ``POST|DELETE /v1/reranker-models/import*``,
+   ``POST|DELETE /v1/scoring/configs*``,
+   ``DELETE /v1/scoring/rerankers/{reranker_id}``,
+   ``POST|DELETE /v1/annotations/sets/*``,
+   ``PATCH /v1/annotations/snapshots/{snapshot_id}/ia-url``,
+   ``POST /v1/annotations/snapshots/load``,
+   ``POST|DELETE /v1/annotations/evaluation-sets/*``
+
+**admin** (platform administrators)
+   ``POST /v1/auth/api-keys``,
+   ``GET  /v1/auth/api-keys``,
+   ``DELETE /v1/auth/api-keys/{key_id}``
+
+GET endpoints remain open (no authentication required) for researcher
+UX. Full read-lockdown is deferred to T5.6c (oauth2-proxy).
 
 Header format
 -------------
@@ -186,8 +212,8 @@ This iteration is a forward-defence layer, not a full identity story:
   group. T5.6c will revisit RBAC together with the OIDC layer.
 * No OIDC / human SSO. T5.6c (post-defensa) wires
   ``oauth2-proxy`` in front of the admin UI; until then the
-  ``/v1/auth/api-keys`` endpoints themselves are intentionally
-  unauthenticated and should be reachable only from a trusted
-  network.
+  ``/v1/auth/api-keys`` endpoints now require ``role=admin``
+  (FARM-AUTH.5); bootstrap the first admin key via a direct SQL
+  insert or the ``PROTEA_ADMIN_TOKEN`` env var on a trusted host.
 * Bearer signing is symmetric (HS256). A leaked secret invalidates
   every issued token; RS256 / asymmetric keys land in T5.6c.

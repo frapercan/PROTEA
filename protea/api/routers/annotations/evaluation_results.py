@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.deps import get_session_factory
+from protea.api.roles import ROLE_OPERATOR, require_role
 from protea.core.domain.aspect import ASPECT_CAFA_CODES
 from protea.infrastructure.session import session_scope
 from protea.services.annotations_service import (
@@ -111,6 +112,7 @@ def list_evaluation_results(
     "/evaluation-sets/{eval_id}/results/{result_id}",
     summary="Delete an evaluation result",
     status_code=204,
+    dependencies=[Depends(require_role(ROLE_OPERATOR))],
 )
 def delete_evaluation_result(
     eval_id: UUID,

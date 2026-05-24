@@ -28,7 +28,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session, sessionmaker
 
-from protea.api.auth import require_api_key_or_bearer
 from protea.api.deps import get_amqp_url, get_session_factory
 from protea.api.rate_limit import datasets_limit, limiter
 from protea.api.roles import ROLE_OPERATOR, require_role
@@ -607,7 +606,7 @@ def _build_imported_dataset(
     "/import-by-reference",
     status_code=201,
     summary="Register an already-staged dataset",
-    dependencies=[Depends(require_api_key_or_bearer)],
+    dependencies=[Depends(require_role(ROLE_OPERATOR))],
 )
 def import_dataset_by_reference(
     body: ImportDatasetByReferenceRequest,

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.cache import cached, invalidate
 from protea.api.deps import get_amqp_url, get_session_factory
+from protea.api.roles import ROLE_OPERATOR, require_role
 from protea.core.operations.load_ontology_snapshot import LoadOntologySnapshotPayload
 from protea.infrastructure.session import session_scope
 from protea.services.annotations_service import (
@@ -86,7 +87,7 @@ def get_snapshot(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.patch("/snapshots/{snapshot_id}/ia-url", summary="Set IA URL on an ontology snapshot")
+@router.patch("/snapshots/{snapshot_id}/ia-url", summary="Set IA URL on an ontology snapshot", dependencies=[Depends(require_role(ROLE_OPERATOR))])
 def set_snapshot_ia_url(
     snapshot_id: UUID,
     body: dict[str, Any],
@@ -113,7 +114,7 @@ def set_snapshot_ia_url(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.post("/snapshots/load", summary="Trigger ontology snapshot load")
+@router.post("/snapshots/load", summary="Trigger ontology snapshot load", dependencies=[Depends(require_role(ROLE_OPERATOR))])
 def load_ontology_snapshot(
     body: dict[str, Any],
     factory: sessionmaker[Session] = Depends(get_session_factory),

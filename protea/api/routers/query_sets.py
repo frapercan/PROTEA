@@ -9,6 +9,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.deps import get_session_factory
+from protea.api.roles import ROLE_VIEWER, require_role
 from protea.infrastructure.orm.models.query.query_set import QuerySet, QuerySetEntry
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
 from protea.infrastructure.session import session_scope
@@ -150,7 +151,7 @@ def _upsert_sequences(
     return hash_to_seq_id
 
 
-@router.post("", status_code=201)
+@router.post("", status_code=201, dependencies=[Depends(require_role(ROLE_VIEWER))])
 async def create_query_set(
     file: UploadFile,
     name: str = Form(...),
@@ -257,7 +258,7 @@ def get_query_set(
         return result
 
 
-@router.delete("/{query_set_id}", summary="Delete a query set")
+@router.delete("/{query_set_id}", summary="Delete a query set", dependencies=[Depends(require_role(ROLE_VIEWER))])
 def delete_query_set(
     query_set_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),

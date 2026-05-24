@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.deps import get_session_factory
+from protea.api.roles import ROLE_OPERATOR, require_role
 from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.experiment_run import (
     ExperimentRun,
@@ -212,7 +213,7 @@ def _stamp_status_transition(run: ExperimentRun, new_status: ExperimentRunStatus
     run.status = new_status
 
 
-@router.post("", status_code=201, summary="Create an experiment run")
+@router.post("", status_code=201, summary="Create an experiment run", dependencies=[Depends(require_role(ROLE_OPERATOR))])
 def create_experiment_run(
     body: CreateExperimentRunRequest,
     factory: sessionmaker[Session] = Depends(get_session_factory),
@@ -296,7 +297,7 @@ def get_experiment_run(
         return _serialise_experiment_run(run)
 
 
-@router.patch("/{run_id}", summary="Update an experiment run")
+@router.patch("/{run_id}", summary="Update an experiment run", dependencies=[Depends(require_role(ROLE_OPERATOR))])
 def update_experiment_run(
     run_id: UUID,
     body: UpdateExperimentRunRequest,
@@ -322,7 +323,7 @@ def update_experiment_run(
         return _serialise_experiment_run(run)
 
 
-@router.delete("/{run_id}", status_code=204, summary="Delete an experiment run")
+@router.delete("/{run_id}", status_code=204, summary="Delete an experiment run", dependencies=[Depends(require_role(ROLE_OPERATOR))])
 def delete_experiment_run(
     run_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),
