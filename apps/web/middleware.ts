@@ -24,6 +24,11 @@ const PROTECTED: ReadonlyArray<[RegExp, Role]> = [
   [/^\/maintenance(\/|$)/, "operator"],
   // /admin/* — destructive controls (reset-db, key-management UI to come).
   [/^\/admin(\/|$)/, "admin"],
+  // NOTE: /profile is intentionally NOT gated at the edge. The page
+  // itself surfaces an inline "sign in to view your profile" panel
+  // for anonymous visitors instead of returning the blunt 403 text
+  // body the middleware would render. The profile data fetch is the
+  // real authoritative gate (GET /auth/me returns 401 → anonymous).
 ];
 
 function stripLocale(pathname: string): string {

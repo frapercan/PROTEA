@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
+import Link from "next/link";
 import { baseUrl } from "@/lib/api";
+import { logout as logoutCall } from "@/lib/authApi";
 import {
   SESSION_COOKIE_NAME,
   decodeJwtPayload,
@@ -56,6 +58,7 @@ function readMode(): { mode: AuthMode; hint: string | null; role: Role } {
 
 export function AuthChip() {
   const t = useTranslations("nav");
+  const locale = useLocale();
   const [mode, setMode] = useState<AuthMode>("anonymous");
   const [hint, setHint] = useState<string | null>(null);
   const [role, setRole] = useState<Role>("viewer");
@@ -93,6 +96,10 @@ export function AuthChip() {
   };
 
   function signOut() {
+    // Fire-and-forget: POST /v1/auth/logout invalidates the server-side
+    // session jti. The local cookie wipe below is the immediate fallback
+    // so the chrome flips even if the API call is in flight or errors.
+    void logoutCall().catch(() => undefined);
     try {
       window.localStorage.removeItem("protea.bearer");
       window.localStorage.removeItem("protea.apiKey");
@@ -178,6 +185,35 @@ export function AuthChip() {
               </p>
             </div>
             <div className="p-2 text-[12px]">
+              {mode === "anonymous" ? (
+                <>
+                  <Link
+                    href={`/${locale}/login`}
+                    onClick={() => setOpen(false)}
+                    className="flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-slate-700 hover:bg-slate-50 hover:text-slate-900"
+                  >
+                    <span className="font-semibold">Sign in</span>
+                    <span aria-hidden className="text-slate-400">→</span>
+                  </Link>
+                  <Link
+                    href={`/${locale}/signup`}
+                    onClick={() => setOpen(false)}
+                    className="flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-slate-600 hover:bg-slate-50 hover:text-slate-800"
+                  >
+                    <span>Create account</span>
+                    <span aria-hidden className="text-slate-400">+</span>
+                  </Link>
+                </>
+              ) : (
+                <Link
+                  href={`/${locale}/profile`}
+                  onClick={() => setOpen(false)}
+                  className="flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-slate-700 hover:bg-slate-50 hover:text-slate-900"
+                >
+                  <span className="font-semibold">View profile</span>
+                  <span aria-hidden className="text-slate-400">→</span>
+                </Link>
+              )}
               <a
                 href={`${baseUrl()}/docs#/auth`}
                 target="_blank"
