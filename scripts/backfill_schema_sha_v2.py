@@ -16,6 +16,7 @@ skipping already-populated rows, making re-runs unnecessary and redundant.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -154,6 +155,15 @@ def _backfill_reranker_models(
 
 
 def main() -> int:
+    if not os.getenv("PROTEA_ALLOW_BACKFILL"):
+        print(
+            "ERROR: backfill scripts are disabled by default (one-time use only).",
+            "Set PROTEA_ALLOW_BACKFILL=1 to enable.",
+            sep="\n",
+            file=sys.stderr,
+        )
+        return 1
+
     args = _args()
     try:
         canonical_sha = _canonical_v2_sha()

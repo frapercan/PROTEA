@@ -15,6 +15,7 @@ or desired; backfill is complete after first execution.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import tempfile
 import uuid
@@ -101,6 +102,15 @@ def _backfill_one(session, store, eval_set: EvaluationSet) -> str | None:
 
 
 def main() -> None:
+    if not os.getenv("PROTEA_ALLOW_BACKFILL"):
+        print(
+            "ERROR: backfill scripts are disabled by default (one-time use only).",
+            "Set PROTEA_ALLOW_BACKFILL=1 to enable.",
+            sep="\n",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     a = _args()
     settings = load_settings(PROJECT_ROOT)
     factory = build_session_factory(settings.db_url)
