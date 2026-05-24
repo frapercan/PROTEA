@@ -346,24 +346,20 @@ class TestMagicLinkEnabled:
         user = _make_user(engine)
         raw = _insert_token(engine, user_id=user["id"], kind="magic_link")
 
+        # AUTH.8 swapped the in-memory _SESSION_STORE dict for a persistent
+        # UserSession table. The sqlite test schema does not include that
+        # table, so patch create_session() to a no-op (the cookie minting
+        # path is what this test asserts).
         with (
             _build_client(lite_factory, smtp_enabled=True) as client,
-            patch(
-                "protea.api.routers.auth_smtp._consume_token"
-            ) as mock_consume,
-            patch(
-                "protea.api.routers.auth_smtp._SESSION_STORE",
-                {},
-                create=True,
-            ),
+            patch("protea.api.routers.auth_smtp._consume_token") as mock_consume,
+            patch("protea.api.routers.auth_user.create_session", return_value=None),
         ):
-            # Build a fake EmailToken row object.
             fake_row = MagicMock()
             fake_row.user_id = user["id"]
             fake_row.kind = "magic_link"
             mock_consume.return_value = fake_row
 
-            # Patch session.get to return a fake User.
             fake_user = MagicMock()
             fake_user.id = user["id"]
             fake_user.role.value = "researcher"
@@ -378,7 +374,6 @@ class TestMagicLinkEnabled:
                     params={"token": raw},
                     follow_redirects=False,
                 )
-            # Should redirect (302) or 200 depending on follow_redirects.
             assert resp.status_code in (200, 302, 307)
 
     def test_consume_marks_consumed_at(self, engine, lite_factory):
