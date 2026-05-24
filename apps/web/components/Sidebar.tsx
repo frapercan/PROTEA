@@ -32,10 +32,15 @@ import {
   Archive,
   ShieldCheck,
   KeyRound,
+  Users,
+  LogIn,
+  LogOut,
+  UserPlus,
+  UserCircle2,
   type LucideIcon,
 } from "lucide-react";
 import { baseUrl } from "@/lib/api";
-import { useHasRole } from "@/lib/useRole";
+import { useHasRole, useIsAuthenticated } from "@/lib/useRole";
 
 /**
  * Primary navigation for PROTEA, rendered as a LEFT SIDEBAR rail.
@@ -231,6 +236,7 @@ export function Sidebar({
   // ``false`` on SSR / pre-hydration, so the group never flashes
   // for anonymous visitors before the cookie is read.
   const isAdmin = useHasRole("admin");
+  const isAuthed = useIsAuthenticated();
   const [open, setOpen] = useState(false);
   // Desktop-only: persisted collapsed/expanded state. SSR renders expanded;
   // the effect below hydrates from localStorage on mount. Brief one-frame
@@ -321,6 +327,25 @@ export function Sidebar({
     },
   ];
 
+  // FARM-AUTH.10 account group: surface sign-in / sign-up for guests
+  // and profile / sign-out for authenticated callers. Placed before
+  // the admin group so the destructive ShieldCheck section stays
+  // visually anchored at the bottom of the rail.
+  NAV_GROUPS.push({
+    id: "account",
+    title: isAuthed ? "Account" : "Get started",
+    icon: UserCircle2,
+    items: isAuthed
+      ? [
+          { href: "/profile", label: "Profile", hint: "Your account details, role and status", icon: UserCircle2 },
+          { href: "/logout", label: "Sign out", hint: "End your current session", icon: LogOut },
+        ]
+      : [
+          { href: "/login", label: "Sign in", hint: "Use your email and password", icon: LogIn },
+          { href: "/signup", label: "Create account", hint: "Request a new researcher account", icon: UserPlus },
+        ],
+  });
+
   // Append the admin group conditionally so the entire section (group
   // header + items) is invisible to non-admin viewers. Placing it last
   // keeps the destructive surface visually separated from day-to-day
@@ -332,6 +357,7 @@ export function Sidebar({
       hint: t("adminGroupHint"),
       icon: ShieldCheck,
       items: [
+        { href: "/admin/users", label: "Users", hint: "Approve sign-ups, change roles, deactivate accounts", icon: Users },
         { href: "/admin/api-keys", label: t("apiKeys"), hint: t("apiKeysHint"), icon: KeyRound },
       ],
     });

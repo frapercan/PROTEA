@@ -8,6 +8,7 @@ from .annotation.interpro_go_mapping import InterProGoMapping  # noqa: F401
 from .annotation.ontology_snapshot import OntologySnapshot  # noqa: F401
 from .annotation.protein_go_annotation import ProteinGOAnnotation  # noqa: F401
 from .api_key import ApiKey  # noqa: F401
+from .auth_audit import AuthAudit  # noqa: F401
 from .embedding.dataset import Dataset  # noqa: F401
 from .embedding.embedding_config import EmbeddingConfig  # noqa: F401
 from .embedding.go_prediction import GOPrediction  # noqa: F401

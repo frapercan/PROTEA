@@ -854,31 +854,6 @@
         "title": "ImportRerankerByReferenceRequest",
         "type": "object"
       },
-      "LoginRequest": {
-        "additionalProperties": false,
-        "description": "Body for ``POST /auth/login`` (raw key + optional TTL).",
-        "properties": {
-          "api_key": {
-            "description": "Raw API key.",
-            "minLength": 8,
-            "title": "Api Key",
-            "type": "string"
-          },
-          "ttl_seconds": {
-            "default": 3600,
-            "description": "JWT lifetime in seconds (capped at 24h, default 1h).",
-            "maximum": 86400.0,
-            "minimum": 60.0,
-            "title": "Ttl Seconds",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "api_key"
-        ],
-        "title": "LoginRequest",
-        "type": "object"
-      },
       "PluginInfo": {
         "description": "Metadata for one discovered plugin.",
         "properties": {
@@ -1549,6 +1524,71 @@
         "title": "ScoringConfigResponse",
         "type": "object"
       },
+      "SignupRequest": {
+        "additionalProperties": false,
+        "description": "Body for ``POST /auth/signup``.",
+        "example": {
+          "display_name": "Jane Smith",
+          "email": "researcher@example.org",
+          "intended_use": "Benchmarking GO-term predictors for the CAFA challenge.",
+          "password": "c0rrect-h0rse-battery-staple",
+          "username": "jsmith"
+        },
+        "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Human-readable display name (optional).",
+            "title": "Display Name"
+          },
+          "email": {
+            "description": "Login email address.",
+            "maxLength": 255,
+            "minLength": 3,
+            "title": "Email",
+            "type": "string"
+          },
+          "intended_use": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Free-text note telling admins what the requester plans to use PROTEA for.",
+            "title": "Intended Use"
+          },
+          "password": {
+            "description": "Plaintext password (min 8 characters).",
+            "minLength": 8,
+            "title": "Password",
+            "type": "string"
+          },
+          "username": {
+            "description": "Unique username handle.",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "username",
+          "password"
+        ],
+        "title": "SignupRequest",
+        "type": "object"
+      },
       "StackResponse": {
         "description": "Top-level payload for ``GET /stack``.\n\nLists every repository in the PROTEA family plus the link to the\ncanonical thesis PDF. Consumed by the frontend's stack overview\npage and the docs portal sidebar.",
         "properties": {
@@ -1742,6 +1782,53 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "protea__api__routers__auth_login__LoginRequest": {
+        "additionalProperties": false,
+        "description": "Body for ``POST /auth/login`` (raw key + optional TTL).",
+        "properties": {
+          "api_key": {
+            "description": "Raw API key.",
+            "minLength": 8,
+            "title": "Api Key",
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "default": 3600,
+            "description": "JWT lifetime in seconds (capped at 24h, default 1h).",
+            "maximum": 86400.0,
+            "minimum": 60.0,
+            "title": "Ttl Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "api_key"
+        ],
+        "title": "LoginRequest",
+        "type": "object"
+      },
+      "protea__api__routers__auth_user__LoginRequest": {
+        "additionalProperties": false,
+        "description": "Body for ``POST /auth/login``.",
+        "properties": {
+          "email": {
+            "description": "Registered email address.",
+            "title": "Email",
+            "type": "string"
+          },
+          "password": {
+            "description": "Account password.",
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "LoginRequest",
         "type": "object"
       }
     }
@@ -3772,13 +3859,13 @@
     },
     "/v1/auth/login": {
       "post": {
-        "description": "Mint a short-lived bearer JWT (``sub``+``exp``+``iat``+``role``).\n\nThe role is read from the matched ``ApiKey`` row (NULL \u2192 ``viewer``).",
-        "operationId": "login_v1_auth_login_post",
+        "description": "Verify credentials and issue a session cookie.\n\n* 200 + cookie \u2014 credentials valid, account active.\n* 401          \u2014 wrong email or wrong password (generic message to avoid user enumeration).\n* 403          \u2014 valid credentials but account not yet approved (``account_pending_approval``)\n                 or has been deactivated (``account_deactivated``).\n\n``last_login_at`` is updated on every successful login.",
+        "operationId": "user_login",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/LoginRequest"
+                "$ref": "#/components/schemas/protea__api__routers__auth_user__LoginRequest"
               }
             }
           },
@@ -3790,7 +3877,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Login V1 Auth Login Post",
+                  "title": "Response User Login",
                   "type": "object"
                 }
               }
@@ -3813,7 +3900,161 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Exchange an API key for a session JWT",
+        "summary": "Authenticate with email and password",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/logout": {
+      "post": {
+        "description": "Clear the session cookie and invalidate the server-side session token.\n\nReturns 204 both when a valid session was found and when no cookie\nwas present (idempotent logout).",
+        "operationId": "user_logout",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "protea_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Protea Session"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Invalidate the current session",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/me": {
+      "get": {
+        "description": "Return ``{id, email, username, display_name, role, status}`` for the session user.\n\nReturns 401 when no valid session cookie is present or when the\nsession has been invalidated via ``POST /auth/logout``.",
+        "operationId": "user_me",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "protea_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Protea Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response User Me",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Return the currently authenticated user",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/signup": {
+      "post": {
+        "description": "Create a User with ``status=pending``.\n\nThe account is not activated until an admin approves it (ADR D37\nmanual-approval flow). No session cookie is issued here: the client\nmust wait for approval, then call ``POST /auth/login``.\n\nReturns ``{id, email, username, status}`` on success. Returns 409\nif the email or username is already registered.",
+        "operationId": "user_signup",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response User Signup",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Register a new user account",
         "tags": [
           "auth"
         ]
