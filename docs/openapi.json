@@ -1841,7 +1841,7 @@
       },
       "protea__api__routers__auth_login__LoginRequest": {
         "additionalProperties": false,
-        "description": "Body for ``POST /auth/login`` (raw key + optional TTL).",
+        "description": "Body for ``POST /auth/api-key-login`` (raw key + optional TTL).",
         "properties": {
           "api_key": {
             "description": "Raw API key.",
@@ -3695,6 +3695,55 @@
           }
         },
         "summary": "Revoke all active sessions for a user (admin only)",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/api-key-login": {
+      "post": {
+        "description": "Mint a short-lived bearer JWT (``sub``+``exp``+``iat``+``role``).\n\nThe role is read from the matched ``ApiKey`` row (NULL -> ``viewer``).",
+        "operationId": "login_v1_auth_api_key_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/protea__api__routers__auth_login__LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Login V1 Auth Api Key Login Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Exchange an API key for a session JWT",
         "tags": [
           "auth"
         ]
