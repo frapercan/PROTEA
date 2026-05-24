@@ -1,13 +1,40 @@
-name: Co-author guard
-
-# Server-side guard against Claude / Anthropic / AI-attribution
-# commit-message trailers. Invokes the reusable workflow in
-# frapercan/agent-farm. See FARM-1.1a in the farm-platform plan.
+name: coauthor-guard / scan
 
 on:
   pull_request:
-    branches: [main, develop]
+    types: [opened, synchronize, reopened]
 
 jobs:
-  coauthor-guard:
-    uses: frapercan/agent-farm/.github/workflows/coauthor-guard.yml@main
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check commits for Claude co-author
+        run: |
+          set +e
+          BASE="${{ github.base_ref }}"
+          HEAD="HEAD"
+          
+          FOUND=0
+          while IFS= read -r line; do
+            if echo "$line" | grep -iE "(co-authored-by:\s*claude|co-authored-by:.*anthropic|generated with claude)" > /dev/null; then
+              echo "VIOLATION: $line"
+              FOUND=1
+            fi
+          done < <(git log $BASE..$HEAD --pretty=format:"%B")
+          
+          PR_BODY='${{ github.event.pull_request.body }}'
+          if echo "$PR_BODY" | grep -iE "(co-authored-by:\s*claude|co-authored-by:.*anthropic|generated with claude)" > /dev/null; then
+            echo "VIOLATION in PR body: Claude/Anthropic co-author mention"
+            FOUND=1
+          fi
+          
+          if [ $FOUND -eq 1 ]; then
+            echo "::error::Commits or PR body contain Claude/Anthropic co-author mentions. This violates project policy."
+            exit 1
+          fi
+          
+          exit 0
