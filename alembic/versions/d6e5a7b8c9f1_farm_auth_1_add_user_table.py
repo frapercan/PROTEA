@@ -79,13 +79,13 @@ def upgrade() -> None:
             "role",
             role_enum,
             nullable=False,
-            server_default=sa.text("'researcher'::user_role"),
+            server_default="researcher",
         ),
         sa.Column(
             "status",
             status_enum,
             nullable=False,
-            server_default=sa.text("'pending'::user_status"),
+            server_default="pending",
         ),
         sa.Column("intended_use", sa.Text(), nullable=True),
         sa.Column(
