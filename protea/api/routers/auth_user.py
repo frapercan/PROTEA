@@ -333,53 +333,60 @@ def login(
         )
 
     with session_scope(factory) as session:
-        user = session.query(User).filter(User.email == body.email).first()
-        if user is None or not verify_password(body.password, user.password_hash):
-            audit_event(session, "login_fail", actor_id=None, email=body.email)
-            raise HTTPException(status_code=401, detail="invalid_credentials")
-
-        if user.status is UserStatus.PENDING:
-            audit_event(session, "login_fail", actor_id=str(user.id), reason="account_pending_approval")
-            raise HTTPException(status_code=403, detail="account_pending_approval")
-        if user.status is UserStatus.DEACTIVATED:
-            audit_event(session, "login_fail", actor_id=str(user.id), reason="account_deactivated")
-            raise HTTPException(status_code=403, detail="account_deactivated")
-
+        user = _authenticate_or_raise(session, body)
+        _check_account_status_or_raise(session, user)
         user.last_login_at = utcnow()
-        jti = secrets.token_hex(16)
-        user_id = str(user.id)
-        role = user.role.value
-        status = user.status.value
-        email = user.email
-        username = user.username
-        display_name = user.display_name
-
-        # Mint the JWT before inserting the session row so we can hash the
-        # real token. The row participates in the same transaction.
-        token = _mint_session_jwt(user_id, role, status, jti, secret)
-        expires_at = datetime.fromtimestamp(int(time.time()) + _COOKIE_MAX_AGE, tz=UTC)
-
-        ua = request.headers.get("user-agent")
-        create_session(
-            session,
-            user_id=user.id,
-            raw_token=token,
-            expires_at=expires_at,
-            user_agent=ua[:512] if ua else None,
-        )
-
-        audit_event(session, "login_ok", actor_id=user_id)
+        token, claims = _issue_login_session(session, user, secret, request)
+        audit_event(session, "login_ok", actor_id=claims["id"])
         session.flush()
 
     _set_session_cookie(response, token)
-    return {
+    return claims
+
+
+def _authenticate_or_raise(session: Session, body: LoginRequest) -> User:
+    user = session.query(User).filter(User.email == body.email).first()
+    if user is None or not verify_password(body.password, user.password_hash):
+        audit_event(session, "login_fail", actor_id=None, email=body.email)
+        raise HTTPException(status_code=401, detail="invalid_credentials")
+    return user
+
+
+def _check_account_status_or_raise(session: Session, user: User) -> None:
+    if user.status is UserStatus.PENDING:
+        audit_event(session, "login_fail", actor_id=str(user.id), reason="account_pending_approval")
+        raise HTTPException(status_code=403, detail="account_pending_approval")
+    if user.status is UserStatus.DEACTIVATED:
+        audit_event(session, "login_fail", actor_id=str(user.id), reason="account_deactivated")
+        raise HTTPException(status_code=403, detail="account_deactivated")
+
+
+def _issue_login_session(
+    session: Session, user: User, secret: str, request: Request
+) -> tuple[str, dict[str, Any]]:
+    jti = secrets.token_hex(16)
+    user_id = str(user.id)
+    role = user.role.value
+    status = user.status.value
+    token = _mint_session_jwt(user_id, role, status, jti, secret)
+    expires_at = datetime.fromtimestamp(int(time.time()) + _COOKIE_MAX_AGE, tz=UTC)
+    ua = request.headers.get("user-agent")
+    create_session(
+        session,
+        user_id=user.id,
+        raw_token=token,
+        expires_at=expires_at,
+        user_agent=ua[:512] if ua else None,
+    )
+    claims = {
         "id": user_id,
-        "email": email,
-        "username": username,
-        "display_name": display_name,
+        "email": user.email,
+        "username": user.username,
+        "display_name": user.display_name,
         "role": role,
         "status": status,
     }
+    return token, claims
 
 
 @router.post("/logout", status_code=204, summary="Invalidate the current session", operation_id="user_logout")
