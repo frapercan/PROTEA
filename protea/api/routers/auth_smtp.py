@@ -305,6 +305,11 @@ def magic_link_consume(
             detail="Bearer authentication is not configured on this server",
         )
 
+    import time
+    from datetime import UTC, datetime
+
+    from protea.api.routers.auth_user import _COOKIE_MAX_AGE, create_session
+
     with session_scope(factory) as session:
         row = _consume_token(session, token, "magic_link")
         user: User | None = session.get(User, row.user_id)
@@ -321,13 +326,14 @@ def magic_link_consume(
             jti,
             secret,
         )
+        expires_at = datetime.fromtimestamp(int(time.time()) + _COOKIE_MAX_AGE, tz=UTC)
+        create_session(
+            session,
+            user_id=user.id,
+            raw_token=jwt_token,
+            expires_at=expires_at,
+        )
 
-    # Import SESSION_STORE from auth_user to share the in-memory store.
-    # This keeps sessions consistent across the two routers until
-    # FARM-AUTH.8 replaces the in-memory store with a DB-backed table.
-    from protea.api.routers.auth_user import _SESSION_STORE  # noqa: PLC0415
-
-    _SESSION_STORE[jti] = str(user.id)
     redirect = RedirectResponse(url="/", status_code=302)
     _set_session_cookie(redirect, jwt_token)
     return redirect
