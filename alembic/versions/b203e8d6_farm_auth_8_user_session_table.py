@@ -1,6 +1,6 @@
 """farm_auth_8_user_session_table
 
-Revision ID: b2c3d4e5f6a7
+Revision ID: b203e8d6
 Revises: a1f2b3c4d5e6
 Create Date: 2026-05-24 19:00:00.000000
 
@@ -38,7 +38,7 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "b2c3d4e5f6a7"
+revision: str = "b203e8d6"
 down_revision: str | Sequence[str] | None = "a1f2b3c4d5e6"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
