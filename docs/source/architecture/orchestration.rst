@@ -168,7 +168,7 @@ never hardcodes backend or source names.
    ┌───────────────────────────────────────────────────────────────────────┐
    │  PROTEA platform (this repo)                                          │
    │                                                                       │
-   │  OperationRegistry  ←  15 operations wired at worker startup          │
+   │  OperationRegistry  ←  protea.core.operation_catalog (live list)      │
    │  PluginLoader       ←  entry_points discovery at import time          │
    │                                                                       │
    │  entry_points group       discovered from       example keys          │

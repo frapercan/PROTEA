@@ -1,5 +1,9 @@
 # Slow tests inventory
 
+> **Status: stale snapshot (2026-05-05).** Para el estado vigente
+> ejecuta `poetry run pytest --durations=30` localmente; este fichero
+> queda como histórico del primer pase de T0.1.
+
 Snapshot 2026-05-05 tras T0.1. Cobertura unit `--durations=30`.
 
 Ningún test supera el umbral del master plan v3 (`5s`).

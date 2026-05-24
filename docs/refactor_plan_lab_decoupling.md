@@ -1,7 +1,7 @@
 # PROTEA ↔ protea-reranker-lab: plan de desacoplamiento
 
 **Fecha:** 2026-05-04
-**Estado:** propuesta, sin aprobar
+**Estado:** **implementado**. El plan se ejecutó vía ADR D10 (rollout de `schema_sha_v2`) y ADR 007 (contract-first lab integration). LightGBM training vive ya en `protea-reranker-lab`; PROTEA importa la definición canónica de features desde `protea-contracts`, y la columna `schema_sha_v2` está activa en `Dataset` y `RerankerModel`. Mantenido como contexto histórico del diagnóstico inicial.
 **Autor:** discusión con Claude (sesión guru/PROTEA-audit)
 
 Plan completo para limpiar el contrato entre PROTEA y `protea-reranker-lab`. La fricción central es que las definiciones de columnas viven duplicadas en tres sitios y el cómputo está disperso entre tres archivos de PROTEA. Esto crea un canal silencioso de schema-drift que solo se detecta en runtime de inferencia.

@@ -1,5 +1,10 @@
 # Flaky tests inventory
 
+> **Status: stale snapshot (2026-05-05).** Para el estado vigente
+> ejecuta `poetry run pytest -p no:cacheprovider` repetidamente o
+> consulta el run más reciente en GitHub Actions; este fichero queda
+> como histórico de la política heredada de T0.1 / F6.
+
 Snapshot 2026-05-05 tras T0.1.
 
 Ningún test detectado como flaky en este pase. Esto significa que en una sola ejecución todos los que pasan, pasan deterministically y todos los que fallan, fallan deterministically (deuda documentada en `BROKEN.md`).

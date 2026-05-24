@@ -32,8 +32,9 @@ metadata enrichment, and job orchestration.
       :shadow: md
       :text-align: left
 
-      :bdg-info:`Design` System layers, job lifecycle, data model, all 15
-      operations, the CAFA evaluation protocol, and the ADRs that explain *why*.
+      :bdg-info:`Design` System layers, job lifecycle, data model, the full
+      operation catalogue, the CAFA evaluation protocol, and the ADRs that
+      explain *why*.
 
    .. grid-item-card:: API Reference
       :link: reference/index

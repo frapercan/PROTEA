@@ -25,128 +25,108 @@ that closed each issue.
    - :doc:`/runbooks/index` for on-call operational procedures.
 
 
-Schema SHA drift
-----------------
+Feature-schema SHA drift across the platform-lab boundary
+----------------------------------------------------------
 
 **What it is.**
-``schema_sha`` is a 12-hex-char fingerprint computed over the sorted list of
-feature families active at training time. It is the load-bearing safety check
-that prevents inference from scoring with a booster trained against a different
-feature schema. The predict-time batch worker recomputes it from its own active
-flags and compares for strict equality; a mismatch emits
-``reranker.schema_mismatch`` and falls back to KNN ordering rather than
-silently producing miscalibrated scores.
+``feature_schema_sha`` is a deterministic fingerprint over the sorted
+list of feature families active at training time. It is the load-bearing
+safety check that prevents inference from scoring with a booster trained
+against a different feature schema: the predict-time batch worker
+recomputes it from its own active flags and falls back to KNN ordering
+on a mismatch rather than producing miscalibrated scores.
 
-**How it broke.**
-Two separate definitions of ``compute_schema_sha`` accumulated across the
-codebase: one in PROTEA and one in ``protea-reranker-lab``. For the first
-several study generations they happened to agree, because the feature lists
-were short. Around the study_v9 timeframe (2026-05-01), a feature-family
-refactor in the lab changed the sort order of one family group. The PROTEA
-copy used a different normalization, producing a different fingerprint for the
-same logical feature set. The result was a non-reproducible run: the booster
-import script accepted the model (because it read the lab's own fingerprint),
-but the batch worker refused to activate re-ranking (because it recomputed
-from PROTEA's definition). The fallback to KNN ordering was silent enough
-that the mismatch went unnoticed for one full study iteration.
+**The lesson.**
+For one study iteration in 2026-05, two independent implementations of
+``compute_schema_sha`` (one in PROTEA, one in
+``protea-reranker-lab``) used different normalisations of the same
+feature list. The booster import accepted the model but the batch
+worker rejected it at scoring time. The fallback to KNN was silent
+enough to mask the drift for a full sweep.
 
-**How it was caught.**
-A side-by-side comparison of Fmax between the lab's internal evaluation and
-PROTEA's ``run_cafa_evaluation`` output on the same prediction set revealed
-an unexplained gap. Tracing the scoring path surfaced the
-``reranker.schema_mismatch`` event log entries that had been logged but not
-surfaced to the developer's attention.
-
-**The fix.**
-:doc:`D10 </adr/D10-schema-sha-parallel-migration>` introduced a parallel
-``schema_sha_v2`` column on both ``Dataset`` and ``RerankerModel``. The
-``schema_sha_v2`` value is computed exclusively from
-``protea_contracts.compute_schema_sha``, which is the shared, versioned
-implementation in the contracts package
-(see :doc:`/adr/D10-schema-sha-parallel-migration`). A backfill script
-recomputed ``schema_sha_v2`` from historical rows; a regression test
-asserted that any divergence between ``schema_sha`` and ``schema_sha_v2``
-on historical rows is expected and documented rather than silently fixed.
-Production inference reads ``schema_sha_v2``.
-
-**Prevention.**
-The single source of truth rule: anything that both sides of the
-platform-lab boundary need to agree on must live in ``protea-contracts``,
-not duplicated in each repo. Drift between two copies is not detectable
-until a run fails for an unrelated-looking reason. The ``feature_schema_sha``
-strict-equality check was the right design; the mistake was implementing it
-twice. See :doc:`/adr/007-contract-first-lab-integration` for the full
+The fix moved the canonical implementation to ``protea-contracts`` and
+backfilled a parallel column (``schema_sha_v2``) so historical rows
+could be compared without disturbing the live ``schema_sha``. Production
+inference reads ``schema_sha_v2``. See
+:doc:`/adr/D10-schema-sha-parallel-migration` for the dual-write rollout
+and :doc:`/adr/007-contract-first-lab-integration` for the broader
 contract-first rationale.
 
+**Prevention rule.**
+Anything that both sides of the platform-lab boundary must agree on
+lives in ``protea-contracts``, not duplicated in each repo. The
+strict-equality check was the right design; the only mistake was
+implementing it twice.
 
-Annotation leakage in temporal evaluation
-------------------------------------------
+
+Replication artefact in the anc2vec_query feature family
+---------------------------------------------------------
+
+.. note::
+
+   Earlier drafts of this section described the incident as "temporal label
+   leakage". That framing was wrong and has been corrected. The CAFA
+   temporal partition itself (NK / LK / PK in :doc:`/architecture/evaluation`)
+   is mathematically clean: PK simply records that the protein already had
+   experimental annotations in some namespace at t0, which is a legitimate
+   evaluation split, not a leak. The incident below was a feature-construction
+   artefact in one feature family, not a flaw in the temporal protocol.
 
 **What it is.**
-The CAFA evaluation protocol requires that the re-ranker is trained on
-annotations that were *known at t0* and evaluated on annotations that became
-known only between t0 and t1. This temporal boundary is straightforward for
-direct GO annotations but breaks down as soon as GO lineage propagation enters
-the picture.
+``anc2vec_query_known_count`` counts the protein's t0 annotations in the
+query namespace. As a stand-alone feature this is unproblematic. The issue
+arose from how the training table was assembled in the early
+``export_research_dataset`` pipeline.
 
 **How it broke.**
-The ``anc2vec_query`` feature family computes ancestry-based embeddings for
-each candidate GO term relative to the query protein's existing annotation
-profile. When the training rows were generated, the annotation profile used
-was the *t1* profile rather than the *t0* profile. This meant that terms the
-protein acquired between t0 and t1 (the labels the re-ranker is supposed to
-predict) were already visible in the feature values. The label and the feature
-shared information: the model was, in effect, learning to recognize its own
-answers.
+The export materialised the training parquet by replicating each
+``(protein, aspect)`` row across categories (NK, LK, PK) so the booster
+could see all three label streams in one pass. The replication step did
+not filter on whether the protein actually belonged to that category in
+that aspect: a protein that was genuinely NK in F appeared as a synthetic
+negative row in P and C, and a protein that was PK in P got a synthetic
+NK row in aspects where it had no terms. Because ``anc2vec_query_known_count``
+is deterministic in the t0 annotation profile, its value silently became
+a perfect bucket identifier: low value → "this is a genuine NK row", high
+value → "this is a synthetic negative replicated from another category".
+The booster learned the bucket, not the biology.
 
 The effect was dramatic and initially invisible. In the study_v9 leave-one-out
 ablation, dropping ``anc2vec_query`` cost 0.2565 Fmax on nk-bpo and 0.1524 on
 lk-cco, mean delta +0.1449 across three representative cells. Those are
 signals three to four times larger than any legitimate feature family in the
-study. At the time, the size of the delta was misread as evidence that ancestry
-features were particularly informative, not as a red flag for leakage.
+study. At the time, the size of the delta was misread as evidence that
+ancestry features were unusually informative.
 
 **How it was caught.**
-During the study_v9 cafaeval re-validation phase (see runs/study_v9/SUMMARY.md,
-section 5), the ratio between lab Fmax and cafaeval Fmax for lk-cco reached
-3.00x and for lk-mfo 2.57x. Those ratios were plausible given that cafaeval
-propagates predictions through the GO DAG and the lab evaluator does not, but
-the magnitude prompted a closer look at feature construction. Inspecting the
-``anc2vec_query`` construction code revealed that it called into a utility
-that resolved the protein's annotation set against the full database view,
-not against the t0 snapshot materialised for each training pair.
+During the study_v9 cafaeval re-validation phase, the ratio between lab
+Fmax and cafaeval Fmax for lk-cco reached 3.00x and for lk-mfo 2.57x.
+Those ratios were plausible given that cafaeval propagates predictions
+through the GO DAG and the lab evaluator does not, but the magnitude
+prompted a closer look at the training table. Inspecting the row
+distribution per ``(protein, aspect, category)`` exposed the
+cross-category replication.
 
 **The fix.**
-The bench-v1-K5-filtered dataset was generated by re-running the feature
-pipeline with the annotation snapshot pinned to the relevant t0 for each
-training pair. The ``filter_provenance`` block in the manifest records the
-rule: keep only rows where the (category, protein_accession, aspect) tuple
-has at least one label=1 row in that category, removing cross-category
-replicas introduced by the earlier export. After retraining on the filtered
-dataset, nk-bpo Fmax dropped from 0.4649 (study_v9 replication) to a
-corrected evaluation under strict temporal holdout. The cafaeval re-validation
-ratios returned to the 1.1-1.6x range that is expected from GO propagation
-alone.
+PROTEA commit ``223299c`` filters ``(protein, aspect)`` by category
+membership before the replication step: a row is emitted in category
+:math:`c` only if there is at least one label-1 row for that
+``(protein, aspect)`` in category :math:`c`. The synthetic-negative
+buckets disappear; ``anc2vec_query_known_count`` reverts to a normal
+feature with normal importance. After the rebuild, the cafaeval
+re-validation ratios returned to the 1.1-1.6x range expected from GO
+propagation alone, and per-category Fmax values aligned across
+evaluators.
 
 **Prevention.**
-Every feature family that touches the protein's annotation state must be
-constructed against an explicitly time-stamped annotation snapshot, passed
-in as a parameter rather than resolved at construction time from the live
-database view. The ``export_research_dataset`` operation now materialises a
-frozen annotation table per snapshot pair and passes its id as a payload
-parameter. Any new feature family that requires annotation-side context must
-accept this id and resolve against it. See thesis chapter 6 and appendix B
-for the full reproducible setup.
-
-.. note::
-
-   This discovery is one of the methodological contributions of the doctoral
-   work. Most CAFA-style methods in the literature publish an Fmax number
-   without disclosing the exact t0/t1 annotation snapshot used for feature
-   construction. The leakage is easy to introduce inadvertently. The
-   PROTEA campaign discovered it empirically; the corrected evaluation
-   protocol is the version reported in chapter 6. See the
-   :ref:`reproducibility-section` entry below for the broader context.
+Any cross-category replication in dataset assembly must be gated by an
+explicit per-category membership filter. The ``filter_provenance``
+block in the manifest records the rule. Generally, any feature derived
+from the t0 annotation profile must be constructed against an
+explicitly time-stamped snapshot, passed as a payload parameter rather
+than resolved at construction time against the live database view, so
+its values cannot accidentally encode metadata about the row that
+carries them.
 
 
 cafaeval PK coverage bug
@@ -425,12 +405,13 @@ given the snapshot pair, reproducible to four decimal places. But they would
 look like unexplained variance to a researcher who had not pinned the snapshot
 version in their run record.
 
-The leakage discovery (see above) made this concrete. The ``anc2vec_query``
-features produced dramatically inflated Fmax numbers because they used t1
-annotations in the training rows. The inflation looked like a strong feature
-signal. The corrected evaluation required pinning the annotation snapshot
-explicitly in the ``export_research_dataset`` payload and verifying that every
-feature family respected the pin.
+The ``anc2vec_query`` artefact (see above) made this concrete. The
+cross-category replication in the early training-table assembly turned
+``anc2vec_query_known_count`` into a bucket identifier and inflated its
+apparent importance. The corrected pipeline filters
+``(protein, aspect)`` by category membership before replication, so each
+feature carries only the information its definition implies and not
+metadata about how its row was constructed.
 
 **The contribution.**
 PROTEA's experiment infrastructure was designed to make the full snapshot pair
