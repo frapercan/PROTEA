@@ -15,6 +15,8 @@
     "reranker": "重排序器",
     "datasets": "数据集",
     "jobs": "任务",
+    "admin": "管理",
+    "experimentRuns": "实验运行",
     "maintenance": "维护",
     "home": "首页",
     "data": "参考数据",
@@ -171,6 +173,20 @@
       "childJobsCount": "({count})",
       "eventsTitle": "事件",
       "eventsCount": "({count})"
+    },
+    "commentsThread": {
+      "title": "评论",
+      "empty": "暂无评论。留下第一条观察、跟进或事后分析。",
+      "anonymousAuthor": "匿名",
+      "formLabel": "添加评论",
+      "bodyLabel": "评论",
+      "bodyPlaceholder": "例：使用 k=10 重新运行；k=5 在 PK 上达到了方差上限。",
+      "authorLabel": "作者",
+      "authorPlaceholder": "你的标识或机器人 ID（可选）",
+      "postButton": "发布",
+      "posting": "正在发布…",
+      "posted": "评论已发布",
+      "hint": "评论是持久的叙述性笔记。上方的机器事件时间线保持独立。"
     }
   },
   "proteins": {
@@ -774,6 +790,7 @@
     "emptyFiltered": "没有数据集匹配当前过滤条件。",
     "dispatchFirst": "派发首个导出",
     "dispatched": "已派发导出：{name}（任务 {jobId}）",
+    "imported": "已按引用注册数据集：{name}（{datasetId}）",
     "footnote": "每一行代表一条 Dataset 记录。点击名称查看 schema/manifest 来源并跳转到生产任务。",
     "filters": {
       "family": "PLM 系列",
@@ -877,6 +894,134 @@
         "needTwoTrain": "至少需要两个训练版本以构建时间切分。",
         "needOneTest": "至少需要一个测试版本。",
         "badVersionToken": "无效的版本标记：{token}（必须是非负整数）"
+      },
+      "tabs": {
+        "ariaLabel": "数据集注册模式",
+        "dispatch": "派发导出",
+        "import": "按引用导入"
+      },
+      "import": {
+        "title": "按引用注册数据集",
+        "subtitle": "训练/评估 parquet 与 manifest.json 已经位于工件存储；PROTEA 仅插入一条指向这些 URI 的 Dataset 记录。",
+        "intro": "不会排队任何任务，也不会再次读取工件。适用于 lab 转储、抢救重放或数据已就绪的跨环境导入。",
+        "storageBackendLabel": "存储后端",
+        "storageBackendHelp": "与 URI 匹配的标识符（file:// 路径用 local，s3:// 键用 minio）。原样记录；PROTEA 不会据此校验 URI 协议。",
+        "keyPrefixLabel": "键前缀",
+        "keyPrefixHelp": "工件存储中存放 parquet 与 manifest 的前缀（例如 datasets/<name>/）。便于后端切换后重建 URI。",
+        "manifestUriLabel": "manifest.json URI",
+        "manifestUriHelp": "必填。PROTEA 按原样记录 URI，绝不会再次读取。",
+        "trainUriLabel": "train.parquet URI",
+        "trainUriHelp": "可选；仅评估的转储留空即可。",
+        "evalUriLabel": "eval.parquet URI",
+        "evalUriHelp": "可选；仅训练的转储留空即可。",
+        "schemaShaLabel": "schema_sha",
+        "schemaShaHelp": "来自 lab manifest 的特征集合指纹。基于此转储训练的 booster 在推理时必须匹配。",
+        "manifestShaLabel": "manifest_sha",
+        "manifestShaHelp": "序列化 manifest.json 字节的 sha256 hex。遗留转储可留空。",
+        "annotationSourceLabel": "注释来源",
+        "nTrainRowsLabel": "训练行数",
+        "nEvalRowsLabel": "评估行数",
+        "embeddingHelp": "可选。若此 PROTEA 实例无法解析外键，则置为 NULL。",
+        "embeddingNotResolved": "（无 / 未解析）",
+        "snapshotHelp": "可选。与嵌入配置相同的“无法解析则 NULL”语义。",
+        "snapshotNotResolved": "（无 / 未解析）",
+        "trainPairsLabel": "训练快照配对",
+        "trainPairsHelp": "以逗号/空格分隔的 v{old}-v{new} 令牌，每个分片一个。仅评估的转储留空。",
+        "evalPairLabel": "评估快照配对",
+        "evalPairHelp": "评估 parquet 的 v{old}-v{new} 窗口（若有）。",
+        "producerVersionLabel": "生产者版本",
+        "producerGitShaLabel": "生产者 git SHA",
+        "externalSourceLabel": "外部来源",
+        "externalSourceHelp": "自由格式的来源标签（例如 protea-reranker-lab@<git-sha>）。记录在 meta JSONB 列中。",
+        "forceLabel": "覆盖同名的现有记录",
+        "forceHelp": "默认会以 409 拒绝重复名称。仅在后端切换或抢救重放后重新注册时启用。",
+        "importButton": "注册数据集",
+        "importing": "正在注册…",
+        "errors": {
+          "keyPrefixRequired": "键前缀为必填。",
+          "manifestUriRequired": "manifest.json URI 为必填。",
+          "schemaShaRequired": "schema_sha 为必填。",
+          "kPositive": "K 必须为正整数。",
+          "rowCountInvalid": "行数必须为非负整数（收到：{token}）。"
+        }
+      }
+    }
+  },
+  "admin": {
+    "experimentRuns": {
+      "title": "实验运行",
+      "subtitle": "F-EXP 活动的叙述主线：每次研究运行都带有描述、假设、结构化配置、来源覆盖层与发现。按名称与 Job / EvaluationResult / RerankerModel 行关联。",
+      "adminBadge": "管理",
+      "adminBadgeTooltip": "写操作由部署中配置的 API key / bearer 鉴权模式保护。",
+      "newRun": "新运行",
+      "filterAriaLabel": "按状态过滤运行",
+      "filters": {
+        "all": "全部"
+      },
+      "status": {
+        "planned": "已规划",
+        "running": "进行中",
+        "done": "已完成",
+        "abandoned": "已放弃"
+      },
+      "cols": {
+        "name": "名称",
+        "status": "状态",
+        "tags": "标签",
+        "created": "创建于",
+        "actions": "操作"
+      },
+      "actions": {
+        "edit": "编辑",
+        "delete": "删除",
+        "cancel": "取消"
+      },
+      "emptyAll": "暂无实验运行。新建第一个以启动一段活动叙述。",
+      "emptyFiltered": "没有运行符合当前状态筛选。",
+      "deleteConfirm": "删除实验运行 \"{name}\"？此操作不可撤销。",
+      "toasts": {
+        "created": "已创建实验运行 \"{name}\"",
+        "updated": "已更新实验运行 \"{name}\"",
+        "deleted": "已删除实验运行 \"{name}\""
+      },
+      "mint": {
+        "title": "创建新的实验运行",
+        "subtitle": "默认处于已规划状态。运行开始后，通过编辑模态切换状态。",
+        "submit": "创建运行",
+        "submitting": "正在创建…"
+      },
+      "edit": {
+        "title": "编辑运行：{name}",
+        "subtitle": "可修改叙述、状态、标签、配置或来源。状态切换会在服务端自动标记 started_at / finished_at。",
+        "submit": "保存修改",
+        "submitting": "正在保存…"
+      },
+      "fields": {
+        "name": "名称",
+        "status": "状态",
+        "statusHelp": "首次切到“进行中”会标记 started_at。首次切到“已完成”或“已放弃”会标记 finished_at。再次进入同一状态是幂等的。",
+        "description": "描述",
+        "descriptionPlaceholder": "在详情页面显示的自由格式意图文本。",
+        "hypothesis": "假设",
+        "hypothesisPlaceholder": "此次运行试图验证或推翻的内容。",
+        "findings": "发现",
+        "findingsHelp": "在切换到“已完成”时填写以记录总结。",
+        "tags": "标签",
+        "tagsHelp": "以逗号或空格分隔的分组令牌（例如 ablation、K-sweep）。",
+        "config": "配置 (JSON)",
+        "configHelp": "自由格式的 JSON 对象：超参数、特性开关、数据集别名。留空可清除。",
+        "provenance": "来源覆盖层 (JSON)",
+        "provenanceHelp": "自由格式的 JSON 对象，会与服务器基础来源（git sha、主机名、时间戳）合并。留空可清除。"
+      },
+      "readonly": {
+        "id": "ID",
+        "startedAt": "开始于",
+        "finishedAt": "完成于"
+      },
+      "errors": {
+        "nameRequired": "名称为必填。",
+        "configInvalid": "配置 JSON 无效：{reason}",
+        "provenanceInvalid": "来源 JSON 无效：{reason}"
       }
     }
   },

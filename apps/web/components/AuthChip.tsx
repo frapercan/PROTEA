@@ -3,56 +3,69 @@
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { baseUrl } from "@/lib/api";
+import {
+  SESSION_COOKIE_NAME,
+  decodeJwtPayload,
+  getSessionToken,
+  type Role,
+  roleFromToken,
+} from "@/lib/auth";
 
 /**
  * Auth-state indicator for the header.
  *
- * Reads three local sources of truth (in order of strength):
- *   1. ``localStorage["protea.bearer"]``   - Bearer JWT (T5.6b, PR #303)
- *   2. ``localStorage["protea.apiKey"]``   - long-lived API key
- *   3. otherwise: anonymous
- *
- * Renders a small chip whose color and label communicate the mode.
- * On click it opens a lightweight popover with the relevant info
- * (key prefix, swagger link to /docs#/auth, sign-out). Read-only:
- * sign-in flow is owned by the docs/swagger pages, not the navbar.
- *
- * The component degrades gracefully when the live API does not expose
- * the auth security schemes yet: it simply shows ``Anonymous`` and
- * the "sign in" hint is informational.
+ * FEAT-AUTH (2026-05-23): the source of truth is the ``protea_session``
+ * cookie minted by ``POST /v1/auth/login``. The legacy
+ * ``localStorage["protea.bearer"]`` / ``localStorage["protea.apiKey"]``
+ * fallbacks are still inspected so devs who haven't migrated to the
+ * cookie flow keep seeing an accurate chip. The role label is read
+ * from the JWT payload (``role`` claim) and rendered next to the
+ * identity hint.
  */
 
 type AuthMode = "anonymous" | "apiKey" | "bearer";
 
-function readMode(): { mode: AuthMode; hint: string | null } {
-  if (typeof window === "undefined") return { mode: "anonymous", hint: null };
+function readMode(): { mode: AuthMode; hint: string | null; role: Role } {
+  if (typeof window === "undefined") return { mode: "anonymous", hint: null, role: "viewer" };
+  // Cookie session wins.
+  const cookieToken = getSessionToken();
+  if (cookieToken) {
+    const claims = decodeJwtPayload(cookieToken);
+    const sub = typeof claims?.sub === "string" ? claims.sub : cookieToken;
+    return {
+      mode: "bearer",
+      hint: `${sub.slice(0, 6)}…`,
+      role: roleFromToken(cookieToken),
+    };
+  }
   try {
     const bearer = window.localStorage.getItem("protea.bearer");
     if (bearer && bearer.length > 16) {
-      // Show only the first 6 chars to avoid leaking a token in the chrome.
-      return { mode: "bearer", hint: `${bearer.slice(0, 6)}…` };
+      return { mode: "bearer", hint: `${bearer.slice(0, 6)}…`, role: roleFromToken(bearer) };
     }
     const apiKey = window.localStorage.getItem("protea.apiKey");
     if (apiKey && apiKey.length > 8) {
       const prefix = apiKey.slice(0, apiKey.indexOf(".") > 0 ? apiKey.indexOf(".") : 6);
-      return { mode: "apiKey", hint: `${prefix}…` };
+      return { mode: "apiKey", hint: `${prefix}…`, role: "viewer" };
     }
   } catch {
     // ignore (private mode, etc.)
   }
-  return { mode: "anonymous", hint: null };
+  return { mode: "anonymous", hint: null, role: "viewer" };
 }
 
 export function AuthChip() {
   const t = useTranslations("nav");
   const [mode, setMode] = useState<AuthMode>("anonymous");
   const [hint, setHint] = useState<string | null>(null);
+  const [role, setRole] = useState<Role>("viewer");
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
     const r = readMode();
     setMode(r.mode);
     setHint(r.hint);
+    setRole(r.role);
 
     // Cross-tab synchronisation: if another tab signs in / out, reflect it.
     const onStorage = (e: StorageEvent) => {
@@ -60,6 +73,7 @@ export function AuthChip() {
         const r2 = readMode();
         setMode(r2.mode);
         setHint(r2.hint);
+        setRole(r2.role);
       }
     };
     window.addEventListener("storage", onStorage);
@@ -82,11 +96,16 @@ export function AuthChip() {
     try {
       window.localStorage.removeItem("protea.bearer");
       window.localStorage.removeItem("protea.apiKey");
+      // Drop the cookie session too. Path=/ so the gate sees it.
+      if (typeof document !== "undefined") {
+        document.cookie = `${SESSION_COOKIE_NAME}=; Path=/; Max-Age=0; SameSite=Lax`;
+      }
     } catch {
       /* ignore */
     }
     setMode("anonymous");
     setHint(null);
+    setRole("viewer");
     setOpen(false);
   }
 
@@ -122,6 +141,14 @@ export function AuthChip() {
         <span className="uppercase tracking-wider">{labelMap[mode]}</span>
         {hint && (
           <span className="hidden xl:inline-flex font-mono text-[10px] opacity-70 normal-case">{hint}</span>
+        )}
+        {mode !== "anonymous" && (
+          <span
+            className="hidden xl:inline-flex text-[10px] font-semibold uppercase tracking-wider opacity-80"
+            aria-label={`role-${role}`}
+          >
+            {role}
+          </span>
         )}
         <span className={`h-1.5 w-1.5 rounded-full ${s.dot}`} aria-hidden />
       </button>

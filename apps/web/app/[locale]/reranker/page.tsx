@@ -11,11 +11,9 @@ import {
   listPredictionSets,
   listAnnotationSets,
   listRerankers,
-  trainReranker,
   deleteReranker,
   getRerankedTsvUrl,
   getRerankerMetrics,
-  getTrainingDataTsvUrl,
 } from "@/lib/api";
 import type { PredictionSet, AnnotationSet, RerankerModel } from "@/lib/api";
 
@@ -59,7 +57,6 @@ function evalLabel(es: EvaluationSet, annotationSets: AnnotationSet[]) {
   return `${oldVer} → ${newVer} · ${delta} delta proteins (${shortId(es.id)}…)`;
 }
 
-const labelClass = "block text-sm font-medium text-slate-700 mb-1";
 const selectClass =
   "w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
 const btnPrimary =
@@ -68,15 +65,9 @@ const btnDanger =
   "rounded-md bg-red-50 border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-100 transition-colors";
 
 const CATEGORY_HINTS: Record<string, string> = {
-  nk: "No Knowledge: proteins with zero GO annotations at t0. Hardest setting — measures pure prediction ability.",
+  nk: "No Knowledge: proteins with zero GO annotations at t0. Hardest setting, measures pure prediction ability.",
   lk: "Limited Knowledge: proteins annotated in some GO namespaces but not all at t0. New annotations in previously empty namespaces.",
   pk: "Partial Knowledge: proteins that already had annotations in a namespace at t0 and gained new ones at t1.",
-};
-
-const ASPECT_LABELS: Record<string, string> = {
-  bpo: "BPO (Biological Process)",
-  mfo: "MFO (Molecular Function)",
-  cco: "CCO (Cellular Component)",
 };
 
 // ---------------------------------------------------------------------------
@@ -596,42 +587,13 @@ export default function RerankerPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Train form
-  const [trainName, setTrainName] = useState("");
-  const [trainPsId, setTrainPsId] = useState("");
-  const [trainEsId, setTrainEsId] = useState("");
-  const [trainCategory, setTrainCategory] = useState("nk");
-  const [trainAspect, setTrainAspect] = useState("");
-  const [trainNegPosRatio, setTrainNegPosRatio] = useState("");
-  const [extraPairs, setExtraPairs] = useState<{ psId: string; esId: string }[]>([]);
-  const [training, setTraining] = useState(false);
-  const [trainError, setTrainError] = useState<string | null>(null);
-
-  // Advanced KNN / feature-engineering knobs. Mirror the launchPredictGoTerms
-  // form on /functional-annotation so a researcher can record (and later
-  // reproduce) the upstream KNN / feature configuration the booster was
-  // trained against. The values are surfaced as research provenance: the
-  // retired /scoring/rerankers/train endpoint does not consume them (see
-  // scripts/check_openapi_refs.py allowlist), but exposing them keeps the
-  // train form aligned with the rest of the predict pipeline UX and avoids
-  // researchers having to flip pages to remember the recipe.
-  // Defaults match the predict form so the panel can default-open without
-  // visually screaming at the user; it is collapsible (NOT collapsed) per
-  // the feedback_ui_surface_provenance_not_hide_params memory: research
-  // parameters must remain visible.
-  const [advancedOpen, setAdvancedOpen] = useState(true);
-  const [trainFaissIndex, setTrainFaissIndex] = useState("Flat");
-  const [trainFaissNlist, setTrainFaissNlist] = useState(100);
-  const [trainFaissNprobe, setTrainFaissNprobe] = useState(10);
-  const [trainFaissHnswM, setTrainFaissHnswM] = useState(32);
-  const [trainFaissHnswEf, setTrainFaissHnswEf] = useState(64);
-  const [trainComputeAlignments, setTrainComputeAlignments] = useState(true);
-  const [trainComputeTaxonomy, setTrainComputeTaxonomy] = useState(true);
-  const [trainAspectSeparatedKnn, setTrainAspectSeparatedKnn] = useState(true);
-
   // Dialog flags for the lab-bridge import paths (multipart upload +
   // register-by-reference). Both dialogs reload the reranker list on
-  // success so the new booster card appears immediately.
+  // success so the new booster card appears immediately. LightGBM
+  // training itself lives in protea-reranker-lab and is registered back
+  // via these two paths; the legacy in-PROTEA "Train" form was removed
+  // when ``TrainRerankerOperation`` was unregistered from the operation
+  // registry (POST /scoring/rerankers/train returns 405).
   const [importOpen, setImportOpen] = useState(false);
   const [registerOpen, setRegisterOpen] = useState(false);
 
@@ -657,32 +619,6 @@ export default function RerankerPage() {
   }
 
   useEffect(() => { loadAll(); }, []);
-
-  async function handleTrain() {
-    if (!trainName.trim() || !trainPsId || !trainEsId) return;
-    setTraining(true);
-    setTrainError(null);
-    try {
-      const validExtraPairs = extraPairs
-        .filter((p) => p.psId && p.esId)
-        .map((p) => ({ prediction_set_id: p.psId, evaluation_set_id: p.esId }));
-      const model = await trainReranker({
-        name: trainName.trim(),
-        prediction_set_id: trainPsId,
-        evaluation_set_id: trainEsId,
-        category: trainCategory,
-        aspect: trainAspect || null,
-        neg_pos_ratio: trainNegPosRatio ? parseFloat(trainNegPosRatio) : null,
-        extra_pairs: validExtraPairs.length > 0 ? validExtraPairs : undefined,
-      });
-      setRerankers((prev) => [...prev, model]);
-      setTrainName("");
-    } catch (e: any) {
-      setTrainError(e.message ?? "Training failed");
-    } finally {
-      setTraining(false);
-    }
-  }
 
   return (
     <>
@@ -713,8 +649,8 @@ export default function RerankerPage() {
       </div>
 
       <ContextBanner
-        title="Train a LightGBM model to re-rank KNN predictions"
-        description="Uses features like alignment scores, taxonomic distance, and embedding similarity to learn an optimal ranking. Requires a prediction set and evaluation set for training."
+        title="Register a LightGBM booster trained in protea-reranker-lab"
+        description="LightGBM training lives in the offline lab; this page registers the resulting booster so PROTEA can score predictions with it. Use Import booster to upload a fresh model.txt + spec.yaml + run.json, or Register by URI when the artefact already lives in MinIO."
         prerequisites={[
           { label: `${predictionSets.length} prediction set(s)`, met: predictionSets.length > 0, href: "/functional-annotation" },
           { label: `${evaluationSets.length} evaluation set(s)`, met: evaluationSets.length > 0, href: "/evaluation" },
@@ -726,334 +662,6 @@ export default function RerankerPage() {
         A re-ranker uses alignment, taxonomy, and aggregate features to re-score GO predictions
         with calibrated probabilities, replacing the raw embedding distance ranking.
       </p>
-
-      {/* Train new reranker */}
-      <div className="rounded-lg border bg-white p-5 shadow-sm mb-6">
-        <h2 className="text-sm font-semibold text-slate-700 mb-4">Train new re-ranker</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 mb-3">
-          <div>
-            <label className={labelClass}>Name</label>
-            <input
-              type="text"
-              value={trainName}
-              onChange={(e) => setTrainName(e.target.value)}
-              placeholder="e.g. reranker-nk-bpo-v1"
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <div>
-            <label className={labelClass}>Prediction set</label>
-            <select value={trainPsId} onChange={(e) => setTrainPsId(e.target.value)} className={selectClass}>
-              <option value="">Select...</option>
-              {predictionSets.map((ps) => (
-                <option key={ps.id} value={ps.id}>{predLabel(ps)}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className={labelClass}>Evaluation set</label>
-            <select value={trainEsId} onChange={(e) => setTrainEsId(e.target.value)} className={selectClass}>
-              <option value="">Select...</option>
-              {evaluationSets.map((es) => (
-                <option key={es.id} value={es.id}>{evalLabel(es, annotationSets)}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className={labelClass}>Category</label>
-            <select value={trainCategory} onChange={(e) => setTrainCategory(e.target.value)} className={selectClass}>
-              <option value="nk">NK (No Knowledge)</option>
-              <option value="lk">LK (Limited Knowledge)</option>
-              <option value="pk">PK (Partial Knowledge)</option>
-            </select>
-            <p className="text-[10px] text-slate-600 mt-1 leading-snug">{CATEGORY_HINTS[trainCategory]}</p>
-          </div>
-          <div>
-            <label className={labelClass}>Aspect</label>
-            <select value={trainAspect} onChange={(e) => setTrainAspect(e.target.value)} className={selectClass}>
-              <option value="">All aspects</option>
-              <option value="bpo">BPO (Biological Process)</option>
-              <option value="mfo">MFO (Molecular Function)</option>
-              <option value="cco">CCO (Cellular Component)</option>
-            </select>
-          </div>
-          <div>
-            <label className={labelClass}>Neg:Pos ratio</label>
-            <input
-              type="number" min="1" step="1" placeholder="all (no limit)"
-              value={trainNegPosRatio}
-              onChange={(e) => setTrainNegPosRatio(e.target.value)}
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-        </div>
-
-        {/* Extra training pairs */}
-        <div className="mb-3">
-          <div className="flex items-center gap-2 mb-2">
-            <label className="text-xs font-medium text-slate-600">Additional training pairs (multi-temporal)</label>
-            <button
-              type="button"
-              onClick={() => setExtraPairs((prev) => [...prev, { psId: "", esId: "" }])}
-              className="rounded border border-slate-300 bg-white px-2 py-0.5 text-[13px] text-slate-600 hover:bg-slate-50"
-            >
-              + Add pair
-            </button>
-          </div>
-          {extraPairs.map((pair, i) => (
-            <div key={i} className="grid grid-cols-[1fr_1fr_auto] gap-2 mb-1.5">
-              <select
-                value={pair.psId}
-                onChange={(e) => setExtraPairs((prev) => prev.map((p, j) => j === i ? { ...p, psId: e.target.value } : p))}
-                className={selectClass}
-              >
-                <option value="">Prediction set...</option>
-                {predictionSets.map((ps) => (
-                  <option key={ps.id} value={ps.id}>{predLabel(ps)}</option>
-                ))}
-              </select>
-              <select
-                value={pair.esId}
-                onChange={(e) => setExtraPairs((prev) => prev.map((p, j) => j === i ? { ...p, esId: e.target.value } : p))}
-                className={selectClass}
-              >
-                <option value="">Evaluation set...</option>
-                {evaluationSets.map((es) => (
-                  <option key={es.id} value={es.id}>{evalLabel(es, annotationSets)}</option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={() => setExtraPairs((prev) => prev.filter((_, j) => j !== i))}
-                className="rounded border border-red-200 px-2 py-1 text-xs text-red-500 hover:bg-red-50"
-              >
-                x
-              </button>
-            </div>
-          ))}
-          {extraPairs.length > 0 && (
-            <p className="text-[10px] text-slate-600 mt-1">
-              Data from all pairs will be concatenated before training a single model.
-              {extraPairs.filter((p) => p.psId && p.esId).length > 0 &&
-                ` (${1 + extraPairs.filter((p) => p.psId && p.esId).length} pairs total)`}
-            </p>
-          )}
-        </div>
-
-        {/* Advanced: KNN strategy + feature engineering provenance.
-            Mirrors the /functional-annotation predict form so the
-            researcher captures the recipe alongside the trained booster.
-            Defaults to OPEN (visible) because the user wants research
-            params surfaced, not hidden behind a click. */}
-        <details
-          open={advancedOpen}
-          onToggle={(e) => setAdvancedOpen((e.target as HTMLDetailsElement).open)}
-          className="rounded-md border border-slate-200 bg-slate-50/70 mb-3"
-          data-testid="reranker-train-advanced"
-        >
-          <summary className="cursor-pointer px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-600 hover:bg-slate-100 transition-colors flex items-center justify-between">
-            <span className="flex items-center gap-2">
-              <span>Advanced — KNN strategy &amp; feature engineering</span>
-              <Tooltip text="Upstream KNN / feature config that produced the prediction set being trained against. Recorded for reproducibility; safe defaults are pre-filled. Defaults to open per project policy on surfacing research parameters.">
-                <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-slate-200 text-slate-500 text-[10px] font-bold">?</span>
-              </Tooltip>
-            </span>
-            <span className="text-[10px] font-normal text-slate-500 normal-case">
-              defaults pre-filled
-            </span>
-          </summary>
-
-          <div className="border-t border-slate-200 px-4 py-3 space-y-4">
-            {/* KNN Strategy */}
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-2">
-                KNN Strategy
-              </p>
-              <label className="flex items-start gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={trainAspectSeparatedKnn}
-                  onChange={(e) => setTrainAspectSeparatedKnn(e.target.checked)}
-                  className="mt-0.5 rounded"
-                />
-                <span className="text-sm text-slate-700">
-                  Per-aspect KNN indices
-                  <Tooltip text="Separate BPO / MFO / CCO reference indices — improves recall for each aspect independently. Match the value used when the upstream prediction set was produced.">
-                    <span className="ml-1 text-[10px] text-slate-400 underline decoration-dotted cursor-help">aspect_separated_knn</span>
-                  </Tooltip>
-                </span>
-              </label>
-            </div>
-
-            {/* Feature Engineering */}
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-2">
-                Feature Engineering
-                <span className="ml-1.5 text-[10px] font-normal normal-case text-slate-500">
-                  (opt-in — adds compute time)
-                </span>
-              </p>
-              <div className="flex flex-col gap-1.5">
-                <label className="flex items-start gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={trainComputeAlignments}
-                    onChange={(e) => setTrainComputeAlignments(e.target.checked)}
-                    className="mt-0.5 rounded"
-                  />
-                  <span className="text-sm text-slate-700">
-                    Sequence alignments
-                    <Tooltip text="NW (global) + SW (local) via parasail/BLOSUM62. Required by the champion 56-feature booster (alignment_nw + alignment_sw families).">
-                      <span className="ml-1 text-[10px] text-slate-400 underline decoration-dotted cursor-help">compute_alignments</span>
-                    </Tooltip>
-                  </span>
-                </label>
-                <label className="flex items-start gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={trainComputeTaxonomy}
-                    onChange={(e) => setTrainComputeTaxonomy(e.target.checked)}
-                    className="mt-0.5 rounded"
-                  />
-                  <span className="text-sm text-slate-700">
-                    Taxonomic distance
-                    <Tooltip text="LCA, distance, and taxonomic relation via NCBI taxonomy. Feeds taxonomy_pair + taxonomy_voters feature families.">
-                      <span className="ml-1 text-[10px] text-slate-400 underline decoration-dotted cursor-help">compute_taxonomy</span>
-                    </Tooltip>
-                  </span>
-                </label>
-              </div>
-            </div>
-
-            {/* FAISS index parameters */}
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-2">
-                FAISS index parameters
-                <span className="ml-1.5 text-[10px] font-normal normal-case text-slate-500">
-                  (only consulted when the upstream KNN used faiss)
-                </span>
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className={labelClass}>
-                    Index type
-                    <Tooltip text="Flat = exact; IVFFlat = inverted-file approximate (>100K refs); HNSW = graph-based approximate. Use Flat unless the index is too large to fit in RAM.">
-                      <span className="ml-1 text-[10px] text-slate-400 underline decoration-dotted cursor-help">faiss_index_type</span>
-                    </Tooltip>
-                  </label>
-                  <select
-                    value={trainFaissIndex}
-                    onChange={(e) => setTrainFaissIndex(e.target.value)}
-                    className={selectClass}
-                  >
-                    <option value="Flat">Flat — exact</option>
-                    <option value="IVFFlat">IVFFlat — approximate (&gt;100K refs)</option>
-                    <option value="HNSW">HNSW — approximate, graph-based</option>
-                  </select>
-                </div>
-                {trainFaissIndex === "IVFFlat" && (
-                  <>
-                    <div>
-                      <label className={labelClass}>
-                        nlist
-                        <Tooltip text="Number of Voronoi cells / inverted lists for IVFFlat. Rule of thumb: sqrt(N_refs).">
-                          <span className="ml-1 text-[10px] text-slate-400 underline decoration-dotted cursor-help">faiss_nlist</span>
-                        </Tooltip>
-                      </label>
-                      <input
-                        type="number"
-                        value={trainFaissNlist}
-                        onChange={(e) => setTrainFaissNlist(parseInt(e.target.value, 10))}
-                        min={1}
-                        className={selectClass}
-                      />
-                    </div>
-                    <div>
-                      <label className={labelClass}>
-                        nprobe
-                        <Tooltip text="Number of cells probed at query time for IVFFlat. Higher = better recall, slower search.">
-                          <span className="ml-1 text-[10px] text-slate-400 underline decoration-dotted cursor-help">faiss_nprobe</span>
-                        </Tooltip>
-                      </label>
-                      <input
-                        type="number"
-                        value={trainFaissNprobe}
-                        onChange={(e) => setTrainFaissNprobe(parseInt(e.target.value, 10))}
-                        min={1}
-                        className={selectClass}
-                      />
-                    </div>
-                  </>
-                )}
-                {trainFaissIndex === "HNSW" && (
-                  <>
-                    <div>
-                      <label className={labelClass}>
-                        M
-                        <Tooltip text="HNSW graph connectivity (neighbours per node). Higher = better recall, more memory.">
-                          <span className="ml-1 text-[10px] text-slate-400 underline decoration-dotted cursor-help">faiss_hnsw_m</span>
-                        </Tooltip>
-                      </label>
-                      <input
-                        type="number"
-                        value={trainFaissHnswM}
-                        onChange={(e) => setTrainFaissHnswM(parseInt(e.target.value, 10))}
-                        min={2}
-                        className={selectClass}
-                      />
-                    </div>
-                    <div>
-                      <label className={labelClass}>
-                        efSearch
-                        <Tooltip text="HNSW dynamic search list size at query time. Higher = better recall, slower search.">
-                          <span className="ml-1 text-[10px] text-slate-400 underline decoration-dotted cursor-help">faiss_hnsw_ef_search</span>
-                        </Tooltip>
-                      </label>
-                      <input
-                        type="number"
-                        value={trainFaissHnswEf}
-                        onChange={(e) => setTrainFaissHnswEf(parseInt(e.target.value, 10))}
-                        min={1}
-                        className={selectClass}
-                      />
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-
-            <p className="text-[10px] leading-relaxed text-slate-500 border-t border-slate-200 pt-2">
-              Recorded for reproducibility. These knobs describe the
-              upstream KNN / feature configuration that produced the
-              prediction set. The training endpoint itself is offline
-              (boosters are now trained in <code className="font-mono">protea-reranker-lab</code>);
-              pin them to the same values you used when launching the
-              prediction job on{" "}
-              <span className="font-mono">/functional-annotation</span>.
-            </p>
-          </div>
-        </details>
-
-        <div className="flex items-center gap-3">
-          <button
-            onClick={handleTrain}
-            disabled={!trainName.trim() || !trainPsId || !trainEsId || training}
-            className={btnPrimary}
-          >
-            {training ? "Training… (this may take 1-2 min)" : "Train"}
-          </button>
-          {trainPsId && trainEsId && (
-            <a
-              href={getTrainingDataTsvUrl(trainPsId, trainEsId, trainCategory)}
-              download={`training_data_${shortId(trainPsId)}_${trainCategory}.tsv`}
-              className="text-xs text-blue-600 hover:underline"
-            >
-              ↓ Preview training data TSV
-            </a>
-          )}
-        </div>
-        {trainError && <p className="text-xs text-red-500 mt-2">{trainError}</p>}
-      </div>
 
       {/* List of rerankers */}
       {loading && (
@@ -1067,7 +675,7 @@ export default function RerankerPage() {
 
       {!loading && rerankers.length === 0 && (
         <div className="rounded-lg border bg-white px-4 py-12 text-center text-sm text-slate-600 shadow-sm">
-          No re-ranker models trained yet. Use the form above to train one.
+          No re-ranker models registered yet. Use the buttons above to import a booster trained in protea-reranker-lab.
         </div>
       )}
 

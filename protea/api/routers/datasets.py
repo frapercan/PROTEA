@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from protea.api.auth import require_api_key_or_bearer
 from protea.api.deps import get_amqp_url, get_session_factory
 from protea.api.rate_limit import datasets_limit, limiter
+from protea.api.roles import ROLE_OPERATOR, require_role
 from protea.core.schema_sha_v2 import maybe_v2
 from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.embedding.dataset import Dataset
@@ -106,8 +107,7 @@ class CreateDatasetRequest(BaseModel):
         ...,
         min_length=1,
         description=(
-            "GOA snapshot versions used for evaluation; typically a "
-            "single recent release."
+            "GOA snapshot versions used for evaluation; typically a single recent release."
         ),
     )
     annotation_source: str = Field(
@@ -139,10 +139,7 @@ class CreateDatasetRequest(BaseModel):
     )
     compute_taxonomy: bool = Field(
         default=False,
-        description=(
-            "When true, attach taxonomy-distance features per "
-            "neighbour pair."
-        ),
+        description=("When true, attach taxonomy-distance features per neighbour pair."),
     )
     expand_votes_to_ancestors: bool = Field(
         default=False,
@@ -198,7 +195,7 @@ def _dataset_to_dict(d: Dataset) -> dict[str, Any]:
 @router.post(
     "",
     summary="Enqueue a dataset export job",
-    dependencies=[Depends(require_api_key_or_bearer)],
+    dependencies=[Depends(require_role(ROLE_OPERATOR))],
 )
 @limiter.limit(datasets_limit)
 def create_dataset(
@@ -216,9 +213,7 @@ def create_dataset(
     """
     # Up-front conflict check — saves a whole KNN run if the name is taken.
     with session_scope(factory) as session:
-        existing = (
-            session.query(Dataset.id).filter(Dataset.name == body.output_name).first()
-        )
+        existing = session.query(Dataset.id).filter(Dataset.name == body.output_name).first()
         if existing is not None:
             raise HTTPException(
                 status_code=409,
@@ -258,8 +253,7 @@ def list_datasets(
     embedding_config_id: UUID | None = Query(
         default=None,
         description=(
-            "Filter datasets to those derived from one specific "
-            "``embedding_config`` UUID."
+            "Filter datasets to those derived from one specific ``embedding_config`` UUID."
         ),
     ),
     limit: int = Query(
