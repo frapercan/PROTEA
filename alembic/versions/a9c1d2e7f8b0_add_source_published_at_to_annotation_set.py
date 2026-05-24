@@ -1,7 +1,7 @@
 """add_source_published_at_to_annotation_set
 
 Revision ID: a9c1d2e7f8b0
-Revises: d8e2f4b6a3c1
+Revises: fe74cbd2f871
 Create Date: 2026-05-24 02:00:00.000000
 
 Adds a nullable, timezone-aware ``source_published_at`` column to
@@ -25,7 +25,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "a9c1d2e7f8b0"
-down_revision: str | Sequence[str] | None = "d8e2f4b6a3c1"
+down_revision: str | Sequence[str] | None = "fe74cbd2f871"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
