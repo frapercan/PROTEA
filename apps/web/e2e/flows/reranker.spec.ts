@@ -1,9 +1,12 @@
 // Critical user flow: the reranker page (/reranker) lists trained
 // LightGBM models from /scoring/rerankers/, surfaces training-time
-// metrics + feature importance when a card is expanded, and gates the
-// Train button on the name/prediction-set/evaluation-set triple. The
-// ContextBanner reports prerequisites from /embeddings/prediction-sets
-// + /annotations/evaluation-sets. Hermetic via mock-api.
+// metrics + feature importance when a card is expanded, and exposes
+// the two lab-bridge import paths (multipart upload + register-by-URI)
+// for boosters trained in protea-reranker-lab. The legacy in-PROTEA
+// Train form was removed when TrainRerankerOperation was unregistered
+// (POST /scoring/rerankers/train returns 405). The ContextBanner
+// reports prerequisites from /embeddings/prediction-sets +
+// /annotations/evaluation-sets. Hermetic via mock-api.
 
 import { test, expect } from "./fixtures/mock-api";
 
@@ -78,7 +81,7 @@ const RERANKER_MODEL = {
 };
 
 test.describe("reranker flow", () => {
-  test("page header renders and Train button is disabled when required inputs are empty", async ({
+  test("page header renders import + register buttons and the empty-state copy when no rerankers exist", async ({
     page,
     mockApi,
   }) => {
@@ -92,11 +95,18 @@ test.describe("reranker flow", () => {
     await expect(
       page.getByRole("heading", { name: "Re-ranker Models", level: 1 }),
     ).toBeVisible();
-    await expect(page.getByRole("button", { name: /^Train$/ })).toBeDisabled();
+    // The two lab-bridge actions are the only entry points for new boosters
+    // now that the in-PROTEA Train form is gone.
+    await expect(
+      page.getByRole("button", { name: /Import booster/ }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /Register by URI/ }),
+    ).toBeVisible();
     // Empty-state copy renders when no rerankers exist.
     await expect(
       page.getByText(
-        "No re-ranker models trained yet. Use the form above to train one.",
+        "No re-ranker models registered yet. Use the buttons above to import a booster trained in protea-reranker-lab.",
       ),
     ).toBeVisible();
   });
@@ -165,29 +175,4 @@ test.describe("reranker flow", () => {
     await expect(strip.getByRole("button", { name: /^source=/ })).toBeVisible();
   });
 
-  test("Train button enables once name, prediction set, and evaluation set are picked", async ({
-    page,
-    mockApi,
-  }) => {
-    mockApi.override("/scoring/rerankers/", []);
-    mockApi.override("/embeddings/prediction-sets/", PREDICTION_SETS);
-    mockApi.override("/annotations/evaluation-sets", EVALUATION_SETS);
-    mockApi.override("/annotations/sets/", ANNOTATION_SETS);
-
-    await page.goto("/en/reranker/");
-
-    const trainBtn = page.getByRole("button", { name: /^Train$/ });
-    await expect(trainBtn).toBeDisabled();
-
-    // Labels are not wired with htmlFor; address the Name input by
-    // its placeholder. The two selects sit immediately after their
-    // label, so we target them as the label's adjacent sibling.
-    await page.getByPlaceholder("e.g. reranker-nk-bpo-v1").fill("rr-test-001");
-    const predSelect = page.locator("label:has-text('Prediction set') + select").first();
-    const evalSelect = page.locator("label:has-text('Evaluation set') + select").first();
-    await predSelect.selectOption("ps-001");
-    await evalSelect.selectOption("es-001");
-
-    await expect(trainBtn).toBeEnabled();
-  });
 });

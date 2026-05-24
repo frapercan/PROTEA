@@ -10,6 +10,7 @@ import { Skeleton, SkeletonTableRow } from "@/components/Skeleton";
 import { useToast } from "@/components/Toast";
 import { useTranslations } from "next-intl";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { CommentsThread } from "@/components/CommentsThread";
 
 const TERMINAL = ["succeeded", "failed", "cancelled"];
 
@@ -308,6 +309,12 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
         </h2>
         <EventTimeline events={events} />
       </div>
+
+      {/* Curator / operator comment thread (D11 narrative surface).
+          Sits under the machine-emitted event timeline because comments
+          are typically reactions to events; rendered for every job
+          (live or terminal) so a post-mortem can land on a failed run. */}
+      <CommentsThread jobId={jobId} />
     </div>
   );
 }

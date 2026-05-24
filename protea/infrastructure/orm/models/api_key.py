@@ -56,9 +56,7 @@ class ApiKey(Base):
         Index("ix_api_key_created_at", "created_at"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     key_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     prefix: Mapped[str] = mapped_column(String(8), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -66,12 +64,16 @@ class ApiKey(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
-    revoked_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    last_used_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # FEAT-AUTH (2026-05-23): role propagated into the JWT minted by
+    # ``POST /auth/login``. Three values are recognised by the gate
+    # (see ``protea.api.roles``): ``viewer`` (read-only, the default
+    # so keys minted before the migration keep working), ``operator``
+    # (can dispatch jobs / run vacuums), ``admin`` (destructive ops
+    # like /admin/reset-db). Stored nullable so legacy rows backfill
+    # to ``viewer`` at decode time instead of needing a DML update.
+    role: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
     def __repr__(self) -> str:
         state = "revoked" if self.revoked_at else "active"

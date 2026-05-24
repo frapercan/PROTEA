@@ -854,6 +854,31 @@
         "title": "ImportRerankerByReferenceRequest",
         "type": "object"
       },
+      "LoginRequest": {
+        "additionalProperties": false,
+        "description": "Body for ``POST /auth/login`` (raw key + optional TTL).",
+        "properties": {
+          "api_key": {
+            "description": "Raw API key.",
+            "minLength": 8,
+            "title": "Api Key",
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "default": 3600,
+            "description": "JWT lifetime in seconds (capped at 24h, default 1h).",
+            "maximum": 86400.0,
+            "minimum": 60.0,
+            "title": "Ttl Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "api_key"
+        ],
+        "title": "LoginRequest",
+        "type": "object"
+      },
       "PluginInfo": {
         "description": "Metadata for one discovered plugin.",
         "properties": {
@@ -3265,6 +3290,55 @@
         ]
       }
     },
+    "/v1/auth/login": {
+      "post": {
+        "description": "Mint a short-lived bearer JWT (``sub``+``exp``+``iat``+``role``).\n\nThe role is read from the matched ``ApiKey`` row (NULL \u2192 ``viewer``).",
+        "operationId": "login_v1_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Login V1 Auth Login Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Exchange an API key for a session JWT",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/v1/backends": {
       "get": {
         "description": "List all installed embedding backend plugins.\n\nThe plugin set depends on which ``protea-backends[<extra>]``\nextras are installed (esm, t5, ankh, esm3c). With the default\ninstall all four are discoverable; only the ones whose lazy\nimports succeed at ``stream_*`` time will actually run on GPU.",
@@ -5419,6 +5493,44 @@
       "post": {
         "description": "Delete embeddings for sequences not referenced by any Protein.\n\nSafe to run after predictions have been generated; query protein\nembeddings are only needed during the prediction job itself.",
         "operationId": "vacuum_embeddings_v1_maintenance_vacuum_embeddings_post",
+        "parameters": [
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -5431,6 +5543,21 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Vacuum Embeddings",
@@ -5467,6 +5594,44 @@
       "post": {
         "description": "Delete sequences not referenced by any Protein or QuerySetEntry.\n\nSafe to run at any time: orphan sequences have no embeddings that\ncan be reached from any active protein or query set.",
         "operationId": "vacuum_sequences_v1_maintenance_vacuum_sequences_post",
+        "parameters": [
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -5479,6 +5644,21 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Vacuum Sequences",

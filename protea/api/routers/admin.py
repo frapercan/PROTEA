@@ -7,6 +7,8 @@ from pathlib import Path
 from fastapi import APIRouter, Header, HTTPException
 from starlette.requests import Request
 
+from protea.api.bearer import decode_bearer_token, extract_bearer_token
+from protea.api.roles import ROLE_ADMIN, role_of
 from protea.infrastructure.session import build_session_factory
 from protea.infrastructure.settings import load_settings
 
@@ -17,8 +19,36 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _ADMIN_TOKEN = os.getenv("PROTEA_ADMIN_TOKEN", "")
 
 
+def _try_admin_role_bearer(authorization: str | None) -> bool:
+    """FEAT-AUTH: accept an admin-role session JWT alongside the legacy token.
+
+    Returns True when the ``Authorization: Bearer <jwt>`` header decodes
+    successfully AND carries ``role=admin``. Any failure (missing
+    header, bad signature, missing claim, wrong role) returns False
+    silently so the caller can fall back to the legacy token gate.
+    """
+    token = extract_bearer_token(authorization)
+    if token is None:
+        return False
+    try:
+        principal = decode_bearer_token(token)
+    except HTTPException:
+        return False
+    return role_of(principal) == ROLE_ADMIN
+
+
 def _require_admin_token(authorization: str | None) -> None:
-    """Validate bearer token for destructive admin endpoints."""
+    """Validate bearer token for destructive admin endpoints.
+
+    Accepts either:
+
+    * a session JWT (minted by ``/auth/login``) whose ``role`` claim
+      is ``admin`` (FEAT-AUTH path), or
+    * the legacy ``PROTEA_ADMIN_TOKEN`` env-var match (kept for the
+      bootstrap flow until the api-keys-management UI lands).
+    """
+    if _try_admin_role_bearer(authorization):
+        return
     if not _ADMIN_TOKEN:
         raise HTTPException(
             status_code=403,
