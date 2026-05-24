@@ -426,6 +426,26 @@ _BATCH_DURATION_BUCKETS = (
     60.0,
     120.0,
 )
+# HTTP request latency: covers fast UI endpoints (<10ms) up to slow
+# cold-cache queries we already know about (proteins:stats ~45s,
+# prediction-sets ~115s) so the histogram retains resolution at both ends.
+_HTTP_DURATION_BUCKETS = (
+    0.005,
+    0.01,
+    0.025,
+    0.05,
+    0.1,
+    0.25,
+    0.5,
+    1.0,
+    2.5,
+    5.0,
+    10.0,
+    30.0,
+    60.0,
+    120.0,
+    300.0,
+)
 
 
 @dataclass(frozen=True)
@@ -443,6 +463,9 @@ class MetricRegistry:
     embeddings_batch_seconds: Any  # Histogram
     predictions_batch_seconds: Any  # Histogram
     db_pool_in_use: Any  # Gauge
+    http_requests_total: Any  # Counter
+    http_request_duration_seconds: Any  # Histogram
+    http_requests_in_flight: Any  # Gauge
 
 
 def build_metric_registry() -> MetricRegistry | None:
@@ -497,6 +520,24 @@ def build_metric_registry() -> MetricRegistry | None:
         db_pool_in_use=Gauge(
             "protea_db_pool_in_use",
             "Connections currently checked out of the SQLAlchemy pool.",
+            registry=registry,
+        ),
+        http_requests_total=Counter(
+            "protea_http_requests_total",
+            "Total HTTP requests handled by the FastAPI surface, by method/route/status.",
+            labelnames=("method", "route", "status"),
+            registry=registry,
+        ),
+        http_request_duration_seconds=Histogram(
+            "protea_http_request_duration_seconds",
+            "Per-request wall-clock duration in seconds, by method/route.",
+            labelnames=("method", "route"),
+            buckets=_HTTP_DURATION_BUCKETS,
+            registry=registry,
+        ),
+        http_requests_in_flight=Gauge(
+            "protea_http_requests_in_flight",
+            "Number of HTTP requests currently being processed.",
             registry=registry,
         ),
     )

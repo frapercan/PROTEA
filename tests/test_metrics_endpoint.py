@@ -53,7 +53,7 @@ def _make_app(metrics: MetricRegistry | None, *, engine: Any | None = None) -> F
 
 
 class TestBuildMetricRegistry:
-    def test_returns_registry_with_five_metrics(self) -> None:
+    def test_returns_registry_with_baseline_metrics(self) -> None:
         metrics = build_metric_registry()
         assert metrics is not None
         # Render the payload and assert every baseline metric name shows
@@ -66,6 +66,9 @@ class TestBuildMetricRegistry:
         assert "protea_embeddings_batch_seconds" in text
         assert "protea_predictions_batch_seconds" in text
         assert "protea_db_pool_in_use" in text
+        assert "protea_http_requests_total" in text
+        assert "protea_http_request_duration_seconds" in text
+        assert "protea_http_requests_in_flight" in text
 
     def test_returns_none_when_prometheus_client_missing(
         self, monkeypatch: pytest.MonkeyPatch

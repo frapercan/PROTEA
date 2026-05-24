@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from protea.api.bearer import assert_bearer_config
-from protea.api.middleware import VisitorCounterMiddleware
+from protea.api.middleware import HttpMetricsMiddleware, VisitorCounterMiddleware
 from protea.api.problem_details import (
     install_problem_openapi_schema,
     register_problem_handlers,
@@ -211,6 +211,7 @@ def _register_middlewares(app: FastAPI, allowed_origins: tuple[str, ...]) -> Non
         # with a daily-rotated-salt hash instead of the IP. Powers the Grafana
         # "unique visitors" dashboard.
         app.add_middleware(VisitorCounterMiddleware)
+        app.add_middleware(HttpMetricsMiddleware)
         return
 
     if "*" in allowed_origins:
@@ -232,6 +233,7 @@ def _register_middlewares(app: FastAPI, allowed_origins: tuple[str, ...]) -> Non
             allow_headers=["*"],
         )
     app.add_middleware(VisitorCounterMiddleware)
+    app.add_middleware(HttpMetricsMiddleware)
 
 
 def _register_health_endpoints(app: FastAPI, factory, settings) -> None:
