@@ -187,6 +187,22 @@
       "posting": "正在发布…",
       "posted": "评论已发布",
       "hint": "评论是持久的叙述性笔记。上方的机器事件时间线保持独立。"
+    },
+    "description": "PROTEA 执行的每个操作（插入蛋白质、计算嵌入向量、导出数据集）都作为后台任务运行。此页面是实时审计记录：追踪进度、诊断故障、取消不再需要的任务。",
+    "showChildJobsHint": "某些操作会为每个批次生成子任务（例如每个嵌入分片）。默认隐藏以保持列表可读；启用后可查看完整任务树。",
+    "showBatchJobsHint": "嵌入批次在独立队列中运行，默认隐藏。启用后可监控底层 GPU 推理吞吐量。",
+    "statusTooltips": {
+      "queued": "在工作队列中等待。任务已被接受，但尚无工作进程拾取。",
+      "running": "工作进程正在主动处理此任务。进度更新实时显示。",
+      "succeeded": "任务无错误完成。结果已存储且可用。",
+      "failed": "任务遇到错误并停止。打开详情页查看错误代码和事件日志。",
+      "cancelled": "任务在执行前或执行中被取消。部分结果（如有）会被保留。"
+    },
+    "emptyHero": {
+      "title": "暂无任务",
+      "body": "一旦您调度操作（插入蛋白质、计算嵌入向量、导出研究数据集或运行 CAFA 评估），任务就会出现在这里。每个任务显示实时进度和完整事件日志。",
+      "ctaJobs": "从嵌入向量页调度",
+      "ctaAnnotate": "运行 KNN 注释"
     }
   },
   "proteins": {
@@ -740,7 +756,17 @@
       "saving": "保存中…",
       "cancel": "取消"
     },
-    "noConfigs": "暂无配置。请加载预设或在上方创建一个。"
+    "noConfigs": "暂无配置。请加载预设或在上方创建一个。",
+    "pageDescription": "KNN 注释产生候选 GO 术语的排名列表后，评分层使用可配置的信号组合对这些候选进行重新加权：嵌入向量相似性、序列比对一致性、GO 证据代码质量和分类学邻近度。不同的配置允许在同一预测集上比较评分策略，而无需重新调度注释任务。",
+    "formulaHints": {
+      "linear": "活跃信号的加权平均值：score = sum(w_i * s_i) / sum(w_i)。简单且可解释。",
+      "evidenceWeighted": "与 linear 相同的加权平均值，然后乘以解析的证据质量权重。仅由 IEA（电子）支持的预测会自动降级，即使其嵌入相似性很高。"
+    },
+    "emptyHero": {
+      "title": "尚无评分配置",
+      "body": "加载内置预设开始使用，涵盖纯嵌入评分、比对增强评分和证据加权评分之间的最常见权衡。",
+      "cta": "加载预设"
+    }
   },
   "querySets": {
     "title": "查询集",
@@ -781,7 +807,7 @@
   },
   "datasets": {
     "title": "数据集",
-    "subtitle": "由 export_research_dataset 或 import-by-reference 注册的冻结重排序器数据转储。离线实验室按名称拉取。",
+    "subtitle": "由 export_research_dataset 生成并在此注册以供复现的冻结训练切片。每行是 KNN 邻居加特征的版本化快照，可供离线重排序实验室使用。",
     "refresh": "刷新",
     "newExport": "派发新导出",
     "loadError": "加载数据集失败",
@@ -809,7 +835,12 @@
       "manifestSha": "manifest_sha",
       "nTrain": "训练行数",
       "nEval": "评估行数",
-      "created": "创建时间"
+      "created": "创建时间",
+      "kTooltip": "每个查询蛋白质的 KNN 邻居数量。K 越大产生的训练对越多，但转储文件也越大。",
+      "trainWindowTooltip": "用于时间训练分割的 GOA 快照版本。将较旧快照中已注释的蛋白质与较新快照中获得的新注释配对。",
+      "testTooltip": "保留的评估快照对。不能与训练窗口重叠，以确保评估衡量真实的泛化能力。",
+      "schemaShaTooltip": "特征集指纹。在此数据集上训练的任何 Booster 在推理时必须呈现完全相同的值；不匹配会导致 PROTEA 拒绝评分。",
+      "manifestShaTooltip": "序列化 manifest.json 的 SHA-256。此处的变化意味着实验室使用了与此处发布的不同转储进行训练。"
     },
     "copy": {
       "schemaSha": "复制 schema_sha",
@@ -945,6 +976,12 @@
           "rowCountInvalid": "行数必须为非负整数（收到：{token}）。"
         }
       }
+    },
+    "emptyHero": {
+      "title": "尚未注册任何数据集",
+      "body": "当 export_research_dataset 任务完成时，Dataset 行会自动创建。从上方按钮调度，或通过引用注册现有实验室转储。",
+      "ctaDispatch": "调度新导出",
+      "ctaImport": "通过引用导入"
     }
   },
   "admin": {
@@ -1119,7 +1156,7 @@
         "heading": "错误报告",
         "body": "若出现故障或异常行为，请<issues>在 GitHub 上提交 issue</issues>。感谢您的反馈。"
       },
-      "lastUpdated": "政策版本 v2，2026-05-23。"
+      "lastUpdated": "政策版本 2，2026-05-23。"
     },
     "statusBadge": {
       "queued": "QUEUED",
@@ -1380,11 +1417,47 @@
         "specRequired": "spec.yaml 内容是必须的。",
         "runJsonInvalid": "run.json 不是有效 JSON：{message}"
       }
+    },
+    "page": {
+      "title": "重排序模型",
+      "labBadge": "LAB",
+      "labBadgeHint": "研究界面：可复现性参数为有意公开展示。",
+      "description": "使用比对、分类学和聚合特征对 GO 预测进行重新评分的 LightGBM 二元分类器。训练位于离线实验室 protea-reranker-lab；此页面注册生成的 Booster，以便 PROTEA 在推理期间使用它。",
+      "importBtn": "导入 Booster（上传）",
+      "importBtnHint": "上传实验室运行的三个文件：model.txt（LightGBM Booster）、spec.yaml（实验规格）和 run.json（指标和来源）。",
+      "registerBtn": "通过 URI 注册",
+      "registerBtnHint": "Booster 已在 MinIO 或本地制品存储中。粘贴 URI 和 spec/run 元数据，以便 PROTEA 记录行而不重新上传二进制文件。",
+      "contextBannerTitle": "注册在 protea-reranker-lab 中训练的 LightGBM Booster",
+      "contextBannerBody": "LightGBM 训练位于离线实验室；此页面注册生成的 Booster，以便 PROTEA 使用它对预测进行评分。",
+      "categoryHints": {
+        "nk": "无知识（NK）：在训练截止点没有 GO 注释的蛋白质。最严苛的评估设置；衡量纯粹从序列预测的能力。",
+        "lk": "有限知识（LK）：在训练截止点在部分 GO 命名空间中有注释但不是全部的蛋白质。Booster 针对以前空命名空间中的新注释。",
+        "pk": "部分知识（PK）：在训练截止点在某个命名空间中已有注释并在之后获得更多注释的蛋白质。Booster 预测现有功能概况的扩展。"
+      },
+      "provenanceTitle": "来源与特征选择",
+      "schemaShaHint": "feature_schema_sha：训练 Booster 所用特征集的指纹。PROTEA 拒绝使用 schema 与实时流水线不匹配的 Booster。",
+      "manifestShaHint": "dataset_manifest_sha：训练数据集清单的 SHA-256。此处的差异意味着实验室使用了与数据集页面中注册的不同转储进行训练。",
+      "datasetHint": "用于训练的 Dataset 行。点击名称在数据集页面中打开完整来源。",
+      "externalSourceHint": "记录生成 Booster 的外部工具和版本的自由格式来源标签。",
+      "emptyHero": {
+        "title": "尚未注册任何重排序模型",
+        "body": "使用冻结数据集在 protea-reranker-lab 中训练 LightGBM Booster，然后在此导入它。",
+        "ctaImport": "导入 Booster",
+        "ctaRegister": "通过 URI 注册"
+      },
+      "metricsTitle": "训练时指标",
+      "importanceTitle": "特征重要性（增益）",
+      "specTitle": "实验规格（spec.yaml）",
+      "downloadTitle": "下载重新排序的预测",
+      "downloadBtn": "下载重排序 TSV",
+      "computeMetricsTitle": "计算 CAFA 指标",
+      "computeMetricsBtn": "计算指标",
+      "computeMetricsRunning": "计算中...（可能需要 30-60 秒）"
     }
   },
   "apiKeys": {
     "title": "API 密钥",
-    "subtitle": "由 CLI 客户端、CI 任务和离线重排序实验室使用的程序访问密钥。每个密钥均以散列方式存储；明文仅在创建时显示一次，之后无法找回。",
+    "subtitle": "供 CLI 客户端、CI 流水线和离线重排序实验室使用的程序化访问密钥。每个密钥在创建时立即在服务器上进行哈希；明文值仅显示一次，之后无法找回。请定期轮换密钥并撤销不再使用的密钥。",
     "refresh": "刷新",
     "mint": "创建密钥",
     "mintFirst": "创建首个密钥",
@@ -1453,6 +1526,18 @@
       "cancel": "取消",
       "confirm": "是，撤销",
       "confirming": "撤销中..."
+    },
+    "roleDescriptions": {
+      "viewer": "对所有公共端点的只读访问。适用于监控仪表板或只读 CI 检查。",
+      "operator": "可以调度任务（POST /v1/datasets、POST /v1/jobs）、运行维护并管理查询集。当重排序实验室下载数据集或注册 Booster 时需要此角色。",
+      "admin": "完全控制，包括创建和撤销其他 API 密钥、管理页面和破坏性操作。仅限受信任的自动化使用。"
+    },
+    "rotationAdvice": "每 90 天轮换一次密钥，或在任何疑似泄露后立即轮换。",
+    "storageAdvice": "将明文值存储在密钥管理器中（如 GitHub Actions secrets、Vault）。切勿提交到版本控制。",
+    "emptyHero": {
+      "title": "暂无 API 密钥",
+      "body": "创建密钥以向 CI 流水线、离线重排序实验室或任何自动化客户端授予程序化访问权限。选择客户端所需的最小权限角色。",
+      "cta": "创建第一个密钥"
     }
   }
 }

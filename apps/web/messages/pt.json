@@ -187,6 +187,22 @@
       "posting": "A publicar…",
       "posted": "Comentário publicado",
       "hint": "Os comentários são notas narrativas duradouras. A linha de eventos automática acima mantém-se separada."
+    },
+    "description": "Cada ação que o PROTEA executa (inserir proteínas, calcular embeddings, exportar datasets) corre como um job em segundo plano. Esta página é o registo de auditoria em tempo real: acompanhe o progresso, diagnostique falhas e cancele trabalho que já não seja necessário.",
+    "showChildJobsHint": "Algumas operações geram jobs filhos por lote (por exemplo, cada shard de embeddings). Ocultos por defeito para manter a lista legível; ative para ver a árvore de tarefas completa.",
+    "showBatchJobsHint": "Os lotes de embeddings correm numa fila separada e estão ocultos por defeito. Ative para monitorizar o débito de inferência GPU a baixo nível.",
+    "statusTooltips": {
+      "queued": "A aguardar na fila de trabalho. O job foi aceite mas ainda nenhum worker o recolheu.",
+      "running": "Um worker está a processar este job ativamente. As atualizações de progresso aparecem em tempo real.",
+      "succeeded": "O job completou sem erros. Os resultados estão armazenados e disponíveis.",
+      "failed": "O job encontrou um erro e parou. Abra a página de detalhe para ver o código de erro e o log de eventos.",
+      "cancelled": "O job foi cancelado antes ou durante a execução. Resultados parciais, se existirem, são preservados."
+    },
+    "emptyHero": {
+      "title": "Ainda sem jobs",
+      "body": "Os jobs aparecem aqui assim que uma operação é lançada: inserir proteínas, calcular embeddings, exportar um dataset de investigação ou correr uma avaliação CAFA. Cada job mostra progresso em tempo real e um log completo de eventos.",
+      "ctaJobs": "Lançar de Embeddings",
+      "ctaAnnotate": "Correr Anotação KNN"
     }
   },
   "proteins": {
@@ -741,7 +757,17 @@
       "saving": "Salvando…",
       "cancel": "Cancelar"
     },
-    "noConfigs": "Nenhuma configuração ainda. Carregue predefinições ou crie uma acima."
+    "noConfigs": "Nenhuma configuração ainda. Carregue predefinições ou crie uma acima.",
+    "pageDescription": "Após a anotação KNN produzir uma lista ordenada de termos GO candidatos, a camada de scoring repesa esses candidatos usando combinações configuráveis de sinais: similaridade de embedding, identidade de alinhamento de sequência, qualidade do código de evidência GO e proximidade taxonómica. Diferentes configs permitem comparar estratégias de scoring no mesmo conjunto de predições sem lançar novos jobs de anotação.",
+    "formulaHints": {
+      "linear": "Média ponderada dos sinais ativos: score = soma(w_i * s_i) / soma(w_i). Simples e interpretável.",
+      "evidenceWeighted": "Mesma média ponderada que linear, multiplicada pelo peso de qualidade de evidência resolvido. As predições suportadas apenas por IEA (eletrónico) são automaticamente penalizadas."
+    },
+    "emptyHero": {
+      "title": "Ainda sem configurações de scoring",
+      "body": "Carregue os presets incorporados para começar: cobrem as trocas mais comuns entre scoring apenas por embedding, scoring com alinhamento e scoring ponderado por evidência.",
+      "cta": "Carregar presets"
+    }
   },
   "querySets": {
     "title": "Query Sets",
@@ -782,7 +808,7 @@
   },
   "datasets": {
     "title": "Datasets",
-    "subtitle": "Dumps congelados do re-ranker registrados por export_research_dataset ou import-by-reference. O laboratório baixa pelo nome.",
+    "subtitle": "Cortes de treino congelados produzidos por export_research_dataset e registados aqui para reprodutibilidade. Cada linha é um snapshot versionado de vizinhos KNN mais features, pronto para ser consumido pelo laboratório de reranker offline.",
     "refresh": "Atualizar",
     "newExport": "Despachar nova exportação",
     "loadError": "Falha ao carregar datasets",
@@ -810,7 +836,12 @@
       "manifestSha": "manifest_sha",
       "nTrain": "Linhas treino",
       "nEval": "Linhas eval",
-      "created": "Criado"
+      "created": "Criado",
+      "kTooltip": "Número de vizinhos KNN por proteína de consulta. Um K maior produz mais pares de treino mas um dump mais pesado.",
+      "trainWindowTooltip": "Versões de snapshot GOA usadas para a divisão temporal de treino. Emparelha proteínas anotadas no snapshot mais antigo com novas anotações ganhas no mais recente.",
+      "testTooltip": "Par de snapshot de avaliação reservado. Não pode sobrepor-se à janela de treino para que a avaliação meça generalização genuína.",
+      "schemaShaTooltip": "Impressão digital do conjunto de features. Qualquer booster treinado neste dataset deve apresentar este valor exato na inferência; uma discrepância faz com que o PROTEA recuse o scoring.",
+      "manifestShaTooltip": "SHA-256 do manifest.json serializado. Uma mudança aqui significa que o laboratório treinou com um dump diferente do publicado aqui."
     },
     "copy": {
       "schemaSha": "Copiar schema_sha",
@@ -946,6 +977,12 @@
           "rowCountInvalid": "Contador de linhas tem de ser inteiro não negativo (recebido: {token})."
         }
       }
+    },
+    "emptyHero": {
+      "title": "Ainda sem datasets registados",
+      "body": "Uma linha Dataset é criada automaticamente quando um job export_research_dataset completa. Lance um pelo botão acima, ou registe um dump de laboratório existente por referência.",
+      "ctaDispatch": "Lançar nova exportação",
+      "ctaImport": "Importar por referência"
     }
   },
   "admin": {
@@ -1120,7 +1157,7 @@
         "heading": "Relatórios de bugs",
         "body": "Se algo falhar ou se comportar de forma inesperada, <issues>abra uma issue no GitHub</issues>. Os relatórios são bem-vindos."
       },
-      "lastUpdated": "Versão da política v2, 2026-05-23."
+      "lastUpdated": "Revisão da política 2, 2026-05-23."
     },
     "statusBadge": {
       "queued": "NA FILA",
@@ -1381,11 +1418,47 @@
         "specRequired": "O conteúdo de spec.yaml é obrigatório.",
         "runJsonInvalid": "run.json não é JSON válido: {message}"
       }
+    },
+    "page": {
+      "title": "Modelos de Re-ranker",
+      "labBadge": "LAB",
+      "labBadgeHint": "Superfície de investigação: os parâmetros de reprodutibilidade são intencionalmente visíveis.",
+      "description": "Classificadores binários LightGBM que reclassificam predições GO usando features de alinhamento, taxonomia e agregados. O treino vive no laboratório offline protea-reranker-lab; esta página regista o booster resultante para que o PROTEA possa usá-lo na inferência.",
+      "importBtn": "Importar booster (upload)",
+      "importBtnHint": "Faça upload dos três ficheiros de um run de laboratório: model.txt (o booster LightGBM), spec.yaml (spec do experimento) e run.json (métricas e proveniência).",
+      "registerBtn": "Registar por URI",
+      "registerBtnHint": "O booster já está em MinIO ou no armazenamento de artefactos local. Cole o URI e os metadados spec/run para que o PROTEA registe a linha sem re-enviar o binário.",
+      "contextBannerTitle": "Registar um booster LightGBM treinado em protea-reranker-lab",
+      "contextBannerBody": "O treino LightGBM vive no laboratório offline; esta página regista o booster resultante para que o PROTEA pontue predições com ele.",
+      "categoryHints": {
+        "nk": "Sem Conhecimento (NK): proteínas sem anotações GO no corte de treino. O cenário de avaliação mais exigente; mede a capacidade de predição pura apenas a partir da sequência.",
+        "lk": "Conhecimento Limitado (LK): proteínas anotadas em alguns namespaces GO mas não em todos no corte de treino. O booster visa novas anotações em namespaces anteriormente vazios.",
+        "pk": "Conhecimento Parcial (PK): proteínas que já tinham anotações num namespace no corte de treino e ganharam mais depois. O booster prediz extensões a perfis funcionais existentes."
+      },
+      "provenanceTitle": "Proveniência e seleção de features",
+      "schemaShaHint": "feature_schema_sha: impressão digital do conjunto de features com que o booster foi treinado. O PROTEA recusa-se a usar um booster cujo schema não coincida com o pipeline em produção.",
+      "manifestShaHint": "dataset_manifest_sha: SHA-256 do manifesto do dataset de treino. Uma discrepância significa que o laboratório treinou com um dump diferente do registado na página Datasets.",
+      "datasetHint": "Linha Dataset usada para o treino. Clique no nome para abrir a proveniência completa na página Datasets.",
+      "externalSourceHint": "Tag de proveniência livre que regista qual ferramenta externa e versão produziu o booster.",
+      "emptyHero": {
+        "title": "Ainda sem modelos de re-ranker registados",
+        "body": "Treine um booster LightGBM em protea-reranker-lab usando um Dataset congelado, depois importe-o aqui.",
+        "ctaImport": "Importar booster",
+        "ctaRegister": "Registar por URI"
+      },
+      "metricsTitle": "Métricas de treino",
+      "importanceTitle": "Importância de features (ganho)",
+      "specTitle": "ExperimentSpec (spec.yaml)",
+      "downloadTitle": "Descarregar predições reclassificadas",
+      "downloadBtn": "Descarregar TSV reclassificado",
+      "computeMetricsTitle": "Calcular métricas CAFA",
+      "computeMetricsBtn": "Calcular métricas",
+      "computeMetricsRunning": "A calcular... (pode demorar 30-60s)"
     }
   },
   "apiKeys": {
     "title": "Chaves de API",
-    "subtitle": "Chaves de acesso programatico usadas por clientes CLI, jobs de CI e o laboratorio de reranker offline. Cada chave e armazenada como hash; o valor em claro e mostrado apenas uma vez na criacao e nao pode ser recuperado depois.",
+    "subtitle": "Chaves de acesso programático para clientes CLI, pipelines de CI e o laboratório de reranker offline. Cada chave é submetida a hash no servidor no momento da criação; o valor em texto claro é mostrado uma única vez e não pode ser recuperado. Rode as chaves regularmente e revogue as que já não estejam em uso.",
     "refresh": "Atualizar",
     "mint": "Criar chave",
     "mintFirst": "Criar a primeira chave",
@@ -1454,6 +1527,18 @@
       "cancel": "Cancelar",
       "confirm": "Sim, revogar",
       "confirming": "Revogando..."
+    },
+    "roleDescriptions": {
+      "viewer": "Acesso apenas de leitura a todos os endpoints públicos. Use para dashboards de monitorização ou verificações de CI apenas de leitura.",
+      "operator": "Pode lançar jobs (POST /v1/datasets, POST /v1/jobs), executar manutenção e gerir query sets. Necessária quando o laboratório de reranker descarrega datasets ou regista boosters.",
+      "admin": "Controlo total incluindo criação e revogação de outras chaves API, páginas de administração e operações destrutivas. Restrinja a automação de confiança apenas."
+    },
+    "rotationAdvice": "Rode as chaves a cada 90 dias ou imediatamente após qualquer exposição suspeita.",
+    "storageAdvice": "Guarde o valor em texto claro num gestor de segredos (ex. GitHub Actions secrets, Vault). Nunca o coloque em controlo de versões.",
+    "emptyHero": {
+      "title": "Ainda sem chaves API",
+      "body": "Crie uma chave para dar a pipelines de CI, ao laboratório de reranker offline ou a qualquer cliente automatizado acesso programático. Escolha o papel mais restrito que o cliente necessite.",
+      "cta": "Criar a primeira chave"
     }
   }
 }
