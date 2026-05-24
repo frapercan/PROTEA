@@ -23,13 +23,9 @@ type NavKey =
   | "farmSection"
   | "farmPlan"
   | "farmCost"
-<<<<<<< HEAD
   | "adminGroup"
-  | "apiKeys";
-=======
-  | "admin"
+  | "apiKeys"
   | "experimentRuns";
->>>>>>> 3db057c (feat(web): admin page for ExperimentRun CRUD (F-EXP narrative spine))
 
 // Map URL segments to `nav` translation keys. Segments without an entry here
 // are rendered verbatim (typically dynamic ids like /jobs/<uuid>).
@@ -53,13 +49,9 @@ const SEGMENT_TO_NAV_KEY: Record<string, NavKey> = {
   farm: "farmSection",
   plan: "farmPlan",
   cost: "farmCost",
-<<<<<<< HEAD
   admin: "adminGroup",
   "api-keys": "apiKeys",
-=======
-  admin: "admin",
   "experiment-runs": "experimentRuns",
->>>>>>> 3db057c (feat(web): admin page for ExperimentRun CRUD (F-EXP narrative spine))
 };
 
 export function Breadcrumbs() {
