@@ -242,9 +242,9 @@
     },
     "insertTab": {
       "title": "Inserir proteínas do UniProt",
-      "description": "Baixa sequências FASTA e insere registros Protein + Sequence.",
+      "description": "Descarrega sequências de proteínas do UniProt em formato FASTA e guarda cada uma como um registo Protein mais uma linha Sequence deduplicada. Este passo é sempre o primeiro: todas as etapas seguintes do pipeline (embeddings, anotação, avaliação) requerem que as proteínas e as suas sequências estejam já carregadas aqui.",
       "searchCriteriaLabel": "Critérios de busca",
-      "searchCriteriaHelper": "Consulta UniProt — reviewed:true = apenas Swiss-Prot",
+      "searchCriteriaHelper": "Sintaxe de consulta UniProt. Ex. \"reviewed:true\" = apenas Swiss-Prot (aprox. 600k); \"reviewed:true AND organism_id:9606\" = apenas humano revisto.",
       "pageSizeLabel": "Tamanho da página",
       "totalLimitLabel": "Limite total",
       "totalLimitOptional": "(opcional)",
@@ -254,10 +254,10 @@
       "launching": "Iniciando…"
     },
     "metadataTab": {
-      "title": "Buscar metadados do UniProt",
-      "description": "Baixa anotações TSV e insere registros ProteinUniProtMetadata.",
+      "title": "Enriquecer proteínas com UniProt",
+      "description": "Após \"Inserir proteínas\" (que só carrega accession e sequência), este passo obtém o registo funcional de cada proteína do UniProt e guarda-o como ProteinUniProtMetadata: nome, gene, organismo, EC, atividade catalítica, sítios ativos e de ligação, cofator, via metabólica, cinética, palavras-chave e mais. Preenche também os campos básicos de Protein (Swiss-Prot/TrEMBL, organismo, comprimento, gene) que ficaram vazios na inserção. Idempotente: voltar a executar apenas atualiza o que mudou no UniProt.",
       "searchCriteriaLabel": "Critérios de busca",
-      "searchCriteriaHelper": "Consulta UniProt — reviewed:true = apenas Swiss-Prot",
+      "searchCriteriaHelper": "Sintaxe de consulta UniProt. Ex. \"reviewed:true\" = apenas Swiss-Prot (aprox. 600k); \"reviewed:true AND organism_id:9606\" = apenas humano revisto.",
       "pageSizeLabel": "Tamanho da página",
       "totalLimitLabel": "Limite total",
       "totalLimitOptional": "(opcional)",
@@ -589,7 +589,8 @@
     "resultsTab": {
       "title": "Resultados",
       "refresh": "Atualizar",
-      "noResults": "Nenhum resultado de anotação ainda. Execute um job na aba Executar Anotação.",
+      "noResults": "Ainda não foram executadas anotações. Lance uma em \"Executar anotação\", os resultados aparecerão aqui, prontos para descarregar em TSV, explorar pontuações por termo ou exportar para avaliação CAFA.",
+      "resultCount": "{count, plural, one {1 anotação} other {{count} anotações}}",
       "emptyHero": {
         "title": "Ainda não há anotações executadas",
         "body": "Cada execução produz um PredictionSet com scores GO por proteína, baixável como TSV ou exportável para cafaeval. Assim que você iniciar a primeira na aba anterior, ela aparece aqui.",
