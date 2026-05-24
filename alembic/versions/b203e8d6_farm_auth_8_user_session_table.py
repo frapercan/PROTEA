@@ -1,7 +1,7 @@
 """farm_auth_8_user_session_table
 
 Revision ID: b203e8d6
-Revises: a1f2b3c4d5e6
+Revises: b201e6d4
 Create Date: 2026-05-24 19:00:00.000000
 
 FARM-AUTH.8 - persistent user_session table.
@@ -39,7 +39,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "b203e8d6"
-down_revision: str | Sequence[str] | None = "a1f2b3c4d5e6"
+down_revision: str | Sequence[str] | None = "b201e6d4"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
