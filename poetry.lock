@@ -283,10 +283,9 @@ trio = ["trio (>=0.32.0)"]
 name = "argon2-cffi"
 version = "25.1.0"
 description = "Argon2 for Python"
-optional = true
+optional = false
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "extra == \"storage\""
 files = [
     {file = "argon2_cffi-25.1.0-py3-none-any.whl", hash = "sha256:fdc8b074db390fccb6eb4a3604ae7231f219aa669a2652e0f20e16ba513d5741"},
     {file = "argon2_cffi-25.1.0.tar.gz", hash = "sha256:694ae5cc8a42f4c4e2bf2ca0e64e51e23a040c6a517a85074683d3959e1346c1"},
@@ -299,10 +298,9 @@ argon2-cffi-bindings = "*"
 name = "argon2-cffi-bindings"
 version = "25.1.0"
 description = "Low-level CFFI bindings for Argon2"
-optional = true
+optional = false
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"storage\""
 files = [
     {file = "argon2_cffi_bindings-25.1.0-cp314-cp314t-macosx_10_13_universal2.whl", hash = "sha256:3d3f05610594151994ca9ccb3c771115bdb4daef161976a266f0dd8aa9996b8f"},
     {file = "argon2_cffi_bindings-25.1.0-cp314-cp314t-macosx_10_13_x86_64.whl", hash = "sha256:8b8efee945193e667a396cbc7b4fb7d357297d6234d30a489905d96caabde56b"},
@@ -692,10 +690,9 @@ files = [
 name = "cffi"
 version = "2.0.0"
 description = "Foreign Function Interface for Python calling C code."
-optional = true
+optional = false
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"storage\""
 files = [
     {file = "cffi-2.0.0-cp310-cp310-macosx_10_13_x86_64.whl", hash = "sha256:0cf2d91ecc3fcc0625c2c530fe004f82c110405f101548512cce44322fa8ac44"},
     {file = "cffi-2.0.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:f73b96c41e3b2adedc34a7356e64c8eb96e03a3782b535e043a986276ce12a49"},
@@ -4014,8 +4011,8 @@ pydantic = ">=2.5"
 [package.source]
 type = "git"
 url = "https://github.com/frapercan/protea-contracts.git"
-reference = "master"
-resolved_reference = "c268488a031f46a4f3fc3dbbc830cf24bdd175e2"
+reference = "main"
+resolved_reference = "4e898af5e75559dea009b585157fd59cecc96981"
 
 [[package]]
 name = "protea-method"
@@ -4374,10 +4371,10 @@ pybtex = ">=0.16"
 name = "pycparser"
 version = "3.0"
 description = "C parser in Python"
-optional = true
+optional = false
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "extra == \"storage\" and implementation_name != \"PyPy\""
+markers = "implementation_name != \"PyPy\""
 files = [
     {file = "pycparser-3.0-py3-none-any.whl", hash = "sha256:b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992"},
     {file = "pycparser-3.0.tar.gz", hash = "sha256:600f49d217304a5902ac3c37e1281c9fe94e4d0489de643a9504c5cdfdfc6b29"},
@@ -7041,4 +7038,4 @@ storage = ["minio"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "239306e0e7bed0f26fce960caa9dc5756183de6e5f6acb0fc2980472f5e35c14"
+content-hash = "e546f3daa7469eb96fdd2e211cf6ab693cc17a51922152c05b0d1b719988569a"
