@@ -82,7 +82,6 @@ class Settings:
     db_url: str
     amqp_url: str
     artifacts_dir: Path
-    admin_token: str
     storage_backend: str = "local"
     storage_root: Path | None = None
     minio_endpoint: str | None = None
@@ -129,9 +128,6 @@ class _YamlConfigSource(PydanticBaseSettingsSource):
         queue = raw.get("queue") or {}
         if "amqp_url" in queue:
             flat["amqp_url"] = queue["amqp_url"]
-        admin = raw.get("admin") or {}
-        if "token" in admin:
-            flat["admin_token"] = admin["token"]
         storage = raw.get("storage") or {}
         if "artifacts_dir" in storage:
             flat["artifacts_dir"] = storage["artifacts_dir"]
@@ -193,7 +189,6 @@ def _make_settings_cls(env_prefix: str, env_file: Path | None) -> type[BaseSetti
 
         db_url: str = _DEFAULT_DB_URL
         amqp_url: str = _DEFAULT_AMQP_URL
-        admin_token: str = ""
         artifacts_dir: str = _DEFAULT_ARTIFACTS_DIR
         storage_backend: str = _DEFAULT_STORAGE_BACKEND
         storage_root: str | None = None
@@ -316,7 +311,6 @@ def _materialise(raw: Any, project_root: Path) -> Settings:
     return Settings(
         db_url=raw.db_url,
         amqp_url=raw.amqp_url,
-        admin_token=raw.admin_token,
         artifacts_dir=artifacts_dir,
         storage_backend=raw.storage_backend,
         storage_root=storage_root,

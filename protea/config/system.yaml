@@ -15,5 +15,3 @@ storage:
     secret_key: minioadmin
     secure: false
 
-admin:
-  token: protea-admin

@@ -86,8 +86,6 @@ Key variables required at runtime:
      - AMQP URL for RabbitMQ (``amqp://...``).
    * - ``JWT_SECRET``
      - Required when ``AUTHN_REQUIRED=true`` (the default).
-   * - ``PROTEA_ADMIN_TOKEN``
-     - Bearer token for admin API endpoints.
    * - ``PROTEA_STORAGE_BACKEND``
      - ``local`` or ``minio`` (default ``local``).
    * - ``PROTEA_ANC2VEC_PATH``

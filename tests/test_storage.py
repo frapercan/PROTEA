@@ -25,7 +25,6 @@ def base_settings(tmp_path: Path) -> Settings:
         db_url="",
         amqp_url="",
         artifacts_dir=tmp_path / "legacy_eval",
-        admin_token="",
         storage_backend="local",
         storage_root=tmp_path / "artifacts",
     )

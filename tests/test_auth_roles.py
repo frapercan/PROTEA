@@ -219,29 +219,56 @@ class TestAuthLogin:
 
 
 # ---------------------------------------------------------------------------
-# Admin role bearer path (parallel to legacy PROTEA_ADMIN_TOKEN)
+# POST /admin/reset-db — role gate (FARM-AUTH.4)
 # ---------------------------------------------------------------------------
 
 
-class TestAdminBearerRole:
-    def test_admin_role_jwt_bypasses_admin_token(self, monkeypatch):
-        monkeypatch.setenv("PROTEA_AUTHN_REQUIRED", "true")
-        monkeypatch.setenv("PROTEA_JWT_SECRET", _SECRET)
-        from protea.api.routers.admin import _try_admin_role_bearer
+@pytest.fixture()
+def admin_app(monkeypatch):
+    """Minimal FastAPI app that includes the admin router, no real DB."""
+    monkeypatch.setenv("PROTEA_AUTHN_REQUIRED", "true")
+    monkeypatch.setenv("PROTEA_JWT_SECRET", _SECRET)
+    from protea.api.routers import admin as admin_router
 
-        token = _mint("admin")
-        assert _try_admin_role_bearer(f"Bearer {token}") is True
+    app = FastAPI()
+    app.state.session_factory = MagicMock()
+    app.include_router(admin_router.router)
+    return app
 
-    def test_operator_role_jwt_does_not_pass_admin_gate(self, monkeypatch):
-        monkeypatch.setenv("PROTEA_AUTHN_REQUIRED", "true")
-        monkeypatch.setenv("PROTEA_JWT_SECRET", _SECRET)
-        from protea.api.routers.admin import _try_admin_role_bearer
 
-        token = _mint("operator")
-        assert _try_admin_role_bearer(f"Bearer {token}") is False
+class TestAdminResetDbRoleGate:
+    def test_admin_jwt_returns_200(self, admin_app):
+        # Patch out the destructive DB work; psycopg is imported locally inside
+        # the handler so we patch via sys.modules rather than the module attribute.
+        import sys
 
-    def test_missing_bearer_returns_false(self):
-        from protea.api.routers.admin import _try_admin_role_bearer
+        fake_psycopg = MagicMock()
+        fake_conn = MagicMock()
+        fake_psycopg.connect.return_value.__enter__ = MagicMock(return_value=fake_conn)
+        fake_psycopg.connect.return_value.__exit__ = MagicMock(return_value=False)
+        with patch.dict(sys.modules, {"psycopg": fake_psycopg}), patch(
+            "protea.api.routers.admin.subprocess.run"
+        ) as mock_run, patch(
+            "protea.api.routers.admin.build_session_factory"
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stderr="")
+            client = TestClient(admin_app, raise_server_exceptions=False)
+            resp = client.post(
+                "/admin/reset-db",
+                headers={"Authorization": f"Bearer {_mint('admin')}"},
+            )
+        assert resp.status_code == 200
 
-        assert _try_admin_role_bearer(None) is False
-        assert _try_admin_role_bearer("ApiKey foo") is False
+    def test_operator_jwt_rejected_at_admin_gate(self, admin_app):
+        client = TestClient(admin_app)
+        resp = client.post(
+            "/admin/reset-db",
+            headers={"Authorization": f"Bearer {_mint('operator')}"},
+        )
+        assert resp.status_code == 403
+        assert "insufficient" in resp.json()["detail"]
+
+    def test_unauthenticated_reset_db_rejected(self, admin_app):
+        client = TestClient(admin_app)
+        resp = client.post("/admin/reset-db")
+        assert resp.status_code == 401
