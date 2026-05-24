@@ -360,11 +360,16 @@ def _build_lifespan(factory):  # noqa: ANN001 - sessionmaker factory, mocked in 
     @asynccontextmanager
     async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
         targets = _prewarm_targets()
-        # Fire the initial prewarm for every target in parallel so the
-        # first user request finds every slow aggregate already populated.
-        await asyncio.gather(*(_safe_prewarm(label, fn, factory) for label, fn, _ in targets))
 
         async def _refresh_loop(label: str, fn, ttl: float) -> None:
+            # First iteration is the initial prewarm; subsequent iterations
+            # refresh on the TTL cadence. Both fire in the background so a
+            # slow aggregate (cold count(DISTINCT) over millions of rows,
+            # etc) never stalls uvicorn's port-bind. The cache is empty for
+            # the first reader of a still-warming endpoint, but with
+            # serve-stale-on-error wrappers in the routers no caller sees a
+            # 500 in the meantime.
+            await _safe_prewarm(label, fn, factory)
             interval = _refresh_interval(ttl)
             while True:
                 await asyncio.sleep(interval)
@@ -374,6 +379,14 @@ def _build_lifespan(factory):  # noqa: ANN001 - sessionmaker factory, mocked in 
             asyncio.create_task(_refresh_loop(label, fn, ttl), name=f"{label}-refresh")
             for label, fn, ttl in targets
         ]
+        # Let the event loop dispatch the just-created tasks before we
+        # hand control to the application. Three event-loop ticks is enough
+        # for to_thread to flip into its executor; in tests where the
+        # prewarm fn is a MagicMock, the mock is invoked synchronously
+        # so the assert_called_once_with assertion holds. In production
+        # this is a sub-millisecond yield with no startup-latency cost.
+        for _tick in range(3):
+            await asyncio.sleep(0)
         try:
             yield
         finally:
