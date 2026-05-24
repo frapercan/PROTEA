@@ -15,7 +15,16 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from protea.api.cache import invalidate as _cache_invalidate
 from protea.api.routers.benchmark import _stage_of, router
+
+
+@pytest.fixture(autouse=True)
+def _reset_router_cache():
+    _cache_invalidate()
+    yield
+    _cache_invalidate()
+
 
 # ---------------------------------------------------------------------------
 # Helpers
