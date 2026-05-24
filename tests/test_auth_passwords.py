@@ -18,6 +18,8 @@ the default ``pytest`` invocation without extras.
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 
 from protea.api.auth.passwords import hash_password, verify_password
@@ -279,10 +281,11 @@ def test_user_migration_applies_against_postgres(_alembic_config, postgres_url):
             UserStatus,
         )
 
+        _uid = uuid.uuid4().hex[:8]
         with Session(engine) as session:
             row = User(
-                email="alice@example.test",
-                username="alice",
+                email=f"alice-{_uid}@example.test",
+                username=f"alice-{_uid}",
                 display_name="Alice",
                 password_hash=hash_password("supersecret"),
                 role=UserRole.RESEARCHER,
@@ -303,8 +306,8 @@ def test_user_migration_applies_against_postgres(_alembic_config, postgres_url):
 
         with Session(engine) as session, pytest.raises(IntegrityError):
             dup = User(
-                email="alice@example.test",
-                username="alice2",
+                email=f"alice-{_uid}@example.test",
+                username=f"alice2-{_uid}",
                 password_hash=hash_password("x"),
             )
             session.add(dup)

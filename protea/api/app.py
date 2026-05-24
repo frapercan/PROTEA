@@ -48,6 +48,12 @@ from protea.api.routers.annotations.snapshots import (
     SNAPSHOTS_TTL_SECONDS,
     prewarm_snapshots,
 )
+from protea.api.routers.benchmark import (
+    BENCHMARK_EMBEDDINGS_TTL_SECONDS,
+    BENCHMARK_MATRIX_TTL_SECONDS,
+    prewarm_benchmark_embeddings,
+    prewarm_benchmark_matrix,
+)
 from protea.api.routers.embeddings import (
     EMBEDDING_CONFIGS_TTL_SECONDS,
     PREDICTION_SETS_TTL_SECONDS,
@@ -348,6 +354,12 @@ def _prewarm_targets():
         ("annotations:snapshots", prewarm_snapshots, SNAPSHOTS_TTL_SECONDS),
         ("annotations:sets", prewarm_annotation_sets, ANNOTATION_SETS_TTL_SECONDS),
         ("proteins:stats:sections", prewarm_protein_stats_sections, 600),
+        (
+            "benchmark:embeddings",
+            prewarm_benchmark_embeddings,
+            BENCHMARK_EMBEDDINGS_TTL_SECONDS,
+        ),
+        ("benchmark:matrix", prewarm_benchmark_matrix, BENCHMARK_MATRIX_TTL_SECONDS),
     )
 
 

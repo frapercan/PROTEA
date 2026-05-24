@@ -393,6 +393,8 @@ class TestCreateApp:
             patch("protea.api.app.prewarm_embedding_configs") as prewarm_configs,
             patch("protea.api.app.prewarm_snapshots") as prewarm_snapshots,
             patch("protea.api.app.prewarm_annotation_sets") as prewarm_asets,
+            patch("protea.api.app.prewarm_benchmark_embeddings") as prewarm_bench_emb,
+            patch("protea.api.app.prewarm_benchmark_matrix") as prewarm_bench_mtx,
         ):
             app = create_app(Path("/fake/root"))
             with TestClient(app):
@@ -403,6 +405,8 @@ class TestCreateApp:
         prewarm_configs.assert_called_once_with(mock_factory)
         prewarm_snapshots.assert_called_once_with(mock_factory)
         prewarm_asets.assert_called_once_with(mock_factory)
+        prewarm_bench_emb.assert_called_once_with(mock_factory)
+        prewarm_bench_mtx.assert_called_once_with(mock_factory)
 
     def test_sphinx_mount_when_directory_exists(self, tmp_path):
         """When docs/build/html exists, /sphinx is mounted."""
