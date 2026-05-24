@@ -7038,4 +7038,4 @@ storage = ["minio"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "e546f3daa7469eb96fdd2e211cf6ab693cc17a51922152c05b0d1b719988569a"
+content-hash = "2be3ab385ee6890403b4466f75ea4513f3fec0703d32f30c3f35fa75191d3d59"
