@@ -668,7 +668,7 @@ export default function FunctionalAnnotationPage() {
             <>
           <div className="flex items-center justify-between mb-3">
             <p className="text-sm text-slate-500">
-              {predictionSets.length} annotation result{predictionSets.length !== 1 ? "s" : ""}
+              {t("resultsTab.resultCount", { count: predictionSets.length })}
             </p>
             <button onClick={loadResults} className="rounded-md border bg-white px-3 py-1.5 text-sm hover:bg-slate-50">
               {t("resultsTab.refresh")}
