@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
 
-from protea.api.cache import cached
+from protea.api.cache import cached, invalidate
 from protea.api.deps import get_amqp_url, get_session_factory
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
@@ -39,6 +39,11 @@ router = APIRouter(prefix="/embeddings", tags=["embeddings"])
 
 _PREDICTIONS_QUEUE = "protea.predictions"
 
+PREDICTION_SETS_CACHE_KEY = "embeddings:prediction-sets"
+PREDICTION_SETS_TTL_SECONDS = 300.0
+EMBEDDING_CONFIGS_CACHE_KEY = "embeddings:configs"
+EMBEDDING_CONFIGS_TTL_SECONDS = 300.0
+
 
 def _validate_embedding_config_body(body: dict[str, Any]) -> dict[str, Any]:
     """Translate :class:`InvalidEmbeddingConfigError` to HTTP 422.
@@ -61,6 +66,28 @@ def _config_to_dict(c: EmbeddingConfig, embedding_count: int | None = None) -> d
 # ── Embedding Configs ─────────────────────────────────────────────────────────
 
 
+def _compute_embedding_configs(
+    factory: sessionmaker[Session],
+) -> list[dict[str, Any]]:
+    """Run the configs + per-config GROUP BY count and shape the payload.
+
+    Sits at module scope (not nested inside the route handler) so the
+    prewarm hook can share the exact same producer the route caches under.
+    """
+    with session_scope(factory) as session:
+        rows = session.query(EmbeddingConfig).order_by(EmbeddingConfig.created_at.desc()).all()
+        counts = {
+            config_id: cnt
+            for config_id, cnt in session.query(
+                SequenceEmbedding.embedding_config_id,
+                func.count(SequenceEmbedding.id),
+            )
+            .group_by(SequenceEmbedding.embedding_config_id)
+            .all()
+        }
+        return [_config_to_dict(c, embedding_count=counts.get(c.id, 0)) for c in rows]
+
+
 @router.get("/configs", summary="List embedding configs")
 def list_embedding_configs(
     factory: sessionmaker[Session] = Depends(get_session_factory),
@@ -69,24 +96,31 @@ def list_embedding_configs(
 
     The per-config GROUP BY over a 4M-row table is cached 5 minutes; new
     configs still appear immediately (they have 0 embeddings), only the
-    counts are stale.
+    counts are stale. Serves the last-known value when the recompute
+    fails (DB blip, query timeout) so the page never blocks on a
+    cold-cache 500.
     """
+    return cached(
+        EMBEDDING_CONFIGS_CACHE_KEY,
+        EMBEDDING_CONFIGS_TTL_SECONDS,
+        lambda: _compute_embedding_configs(factory),
+        serve_stale_on_error=True,
+    )
 
-    def _compute() -> list[dict[str, Any]]:
-        with session_scope(factory) as session:
-            rows = session.query(EmbeddingConfig).order_by(EmbeddingConfig.created_at.desc()).all()
-            counts = {
-                config_id: cnt
-                for config_id, cnt in session.query(
-                    SequenceEmbedding.embedding_config_id,
-                    func.count(SequenceEmbedding.id),
-                )
-                .group_by(SequenceEmbedding.embedding_config_id)
-                .all()
-            }
-            return [_config_to_dict(c, embedding_count=counts.get(c.id, 0)) for c in rows]
 
-    return cached("embeddings:configs", 300.0, _compute)
+def prewarm_embedding_configs(
+    factory: sessionmaker[Session],
+) -> list[dict[str, Any]]:
+    """Recompute and store ``embeddings:configs``; used by the app startup
+    hook and the background refresh loop. Always bypasses the existing
+    entry so the cache is refilled with fresh counts before the old TTL
+    expires."""
+    invalidate(EMBEDDING_CONFIGS_CACHE_KEY)
+    return cached(
+        EMBEDDING_CONFIGS_CACHE_KEY,
+        EMBEDDING_CONFIGS_TTL_SECONDS,
+        lambda: _compute_embedding_configs(factory),
+    )
 
 
 @router.post("/configs", summary="Create an embedding config")
@@ -188,17 +222,53 @@ def predict_go_terms(
 # ── Prediction Sets ───────────────────────────────────────────────────────────
 
 
+def _compute_prediction_sets(
+    factory: sessionmaker[Session],
+) -> list[dict[str, Any]]:
+    """Run the prediction-sets DISTINCT-over-JOIN and shape the payload.
+
+    Sits at module scope (not nested inside the route handler) so the
+    prewarm hook can share the exact same producer the route caches under.
+    """
+    with session_scope(factory) as session:
+        return list_prediction_sets_data(session)
+
+
 @router.get("/prediction-sets", summary="List prediction sets")
 def list_prediction_sets(
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> list[dict[str, Any]]:
-    """List the 100 most recent prediction sets, cached 5 min."""
+    """List the 100 most recent prediction sets, cached 5 min.
 
-    def _compute() -> list[dict[str, Any]]:
-        with session_scope(factory) as session:
-            return list_prediction_sets_data(session)
+    The DISTINCT-over-JOIN against prediction_set + embedding_config +
+    annotation_set + ontology_snapshot scans tens of millions of rows on
+    cold cache (115s+ measured). The startup hook in ``protea.api.app``
+    prewarms this key and a background task refreshes it before expiry
+    so users never hit a cold path under normal operation. Serves the
+    last-known value on producer failure to prevent a DB blip from
+    surfacing as a 500.
+    """
+    return cached(
+        PREDICTION_SETS_CACHE_KEY,
+        PREDICTION_SETS_TTL_SECONDS,
+        lambda: _compute_prediction_sets(factory),
+        serve_stale_on_error=True,
+    )
 
-    return cached("embeddings:prediction-sets", 300.0, _compute)
+
+def prewarm_prediction_sets(
+    factory: sessionmaker[Session],
+) -> list[dict[str, Any]]:
+    """Recompute and store ``embeddings:prediction-sets``; used by the app
+    startup hook and the background refresh loop. Always bypasses the
+    existing entry so the cache is refilled with fresh data before the
+    old TTL expires."""
+    invalidate(PREDICTION_SETS_CACHE_KEY)
+    return cached(
+        PREDICTION_SETS_CACHE_KEY,
+        PREDICTION_SETS_TTL_SECONDS,
+        lambda: _compute_prediction_sets(factory),
+    )
 
 
 @router.get("/prediction-sets/{set_id}", summary="Get prediction set details")
@@ -276,10 +346,7 @@ def get_go_term_distribution(
     set_id: UUID,
     limit: int = Query(
         default=50,
-        description=(
-            "Max number of top-N GO terms to return per aspect "
-            "(``F``/``P``/``C``)."
-        ),
+        description=("Max number of top-N GO terms to return per aspect (``F``/``P``/``C``)."),
     ),
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
@@ -287,9 +354,7 @@ def get_go_term_distribution(
     and the total prediction counts per aspect."""
     try:
         with session_scope(factory) as session:
-            return get_go_term_distribution_data(
-                session, prediction_set_id=set_id, limit=limit
-            )
+            return get_go_term_distribution_data(session, prediction_set_id=set_id, limit=limit)
     except EntityNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -367,9 +432,7 @@ def download_predictions_cafa(
     """
     try:
         with session_scope(factory) as _check:
-            delta_proteins = prepare_cafa_export(
-                _check, prediction_set_id=set_id, eval_id=eval_id
-            )
+            delta_proteins = prepare_cafa_export(_check, prediction_set_id=set_id, eval_id=eval_id)
     except EntityNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

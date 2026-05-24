@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, sessionmaker
 
-from protea.api.cache import cached
+from protea.api.cache import cached, invalidate
 from protea.api.deps import get_amqp_url, get_session_factory
 from protea.core.operations.load_ontology_snapshot import LoadOntologySnapshotPayload
 from protea.infrastructure.session import session_scope
@@ -30,6 +30,16 @@ from ._common import JOBS_QUEUE
 
 router = APIRouter()
 
+SNAPSHOTS_CACHE_KEY = "annotations:snapshots"
+SNAPSHOTS_TTL_SECONDS = 300.0
+
+
+def _compute_snapshots(
+    factory: sessionmaker[Session],
+) -> list[dict[str, Any]]:
+    with session_scope(factory) as session:
+        return list_snapshots_data(session)
+
 
 @router.get("/snapshots", summary="List ontology snapshots")
 def list_snapshots(
@@ -39,13 +49,28 @@ def list_snapshots(
 
     Cached 5 minutes: the GROUP BY over go_term (N million rows per snapshot)
     takes multiple seconds, and snapshots are effectively immutable once loaded.
+    Serves the last-known payload on producer failure so a transient DB blip
+    does not surface as a 500.
     """
+    return cached(
+        SNAPSHOTS_CACHE_KEY,
+        SNAPSHOTS_TTL_SECONDS,
+        lambda: _compute_snapshots(factory),
+        serve_stale_on_error=True,
+    )
 
-    def _compute() -> list[dict[str, Any]]:
-        with session_scope(factory) as session:
-            return list_snapshots_data(session)
 
-    return cached("annotations:snapshots", 300.0, _compute)
+def prewarm_snapshots(
+    factory: sessionmaker[Session],
+) -> list[dict[str, Any]]:
+    """Recompute and store ``annotations:snapshots``; used by the app startup
+    hook and the background refresh loop."""
+    invalidate(SNAPSHOTS_CACHE_KEY)
+    return cached(
+        SNAPSHOTS_CACHE_KEY,
+        SNAPSHOTS_TTL_SECONDS,
+        lambda: _compute_snapshots(factory),
+    )
 
 
 @router.get("/snapshots/{snapshot_id}", summary="Get ontology snapshot details")
@@ -100,8 +125,12 @@ def load_ontology_snapshot(
     """
     try:
         return dispatch_validated_job(
-            factory, amqp_url, body, LoadOntologySnapshotPayload,
-            operation="load_ontology_snapshot", queue_name=JOBS_QUEUE,
+            factory,
+            amqp_url,
+            body,
+            LoadOntologySnapshotPayload,
+            operation="load_ontology_snapshot",
+            queue_name=JOBS_QUEUE,
         )
     except InvalidJobPayloadError as exc:
         raise HTTPException(status_code=422, detail=exc.errors) from exc

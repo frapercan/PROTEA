@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, sessionmaker
 
-from protea.api.cache import cached
+from protea.api.cache import cached, invalidate
 from protea.api.deps import get_amqp_url, get_session_factory
 from protea.core.operations.load_goa_annotations import LoadGOAAnnotationsPayload
 from protea.core.operations.load_quickgo_annotations import LoadQuickGOAnnotationsPayload
@@ -29,6 +29,20 @@ from ._common import JOBS_QUEUE
 
 router = APIRouter()
 
+ANNOTATION_SETS_TTL_SECONDS = 300.0
+
+
+def _annotation_sets_cache_key(source: str | None) -> str:
+    return f"annotations:sets:{source or '*'}"
+
+
+def _compute_annotation_sets(
+    factory: sessionmaker[Session],
+    source: str | None,
+) -> list[dict[str, Any]]:
+    with session_scope(factory) as session:
+        return list_annotation_sets_data(session, source)
+
 
 @router.get("/sets", summary="List annotation sets")
 def list_annotation_sets(
@@ -38,14 +52,32 @@ def list_annotation_sets(
     """List annotation sets with their annotation counts, newest first.
 
     Cached 5 minutes: GROUP BY over protein_go_annotation (80M rows) takes
-    6+ seconds. Per-source views are cached independently.
+    6+ seconds. Per-source views are cached independently. Serves the
+    last-known payload on producer failure so a transient DB blip does
+    not surface as a 500.
     """
+    return cached(
+        _annotation_sets_cache_key(source),
+        ANNOTATION_SETS_TTL_SECONDS,
+        lambda: _compute_annotation_sets(factory, source),
+        serve_stale_on_error=True,
+    )
 
-    def _compute() -> list[dict[str, Any]]:
-        with session_scope(factory) as session:
-            return list_annotation_sets_data(session, source)
 
-    return cached(f"annotations:sets:{source or '*'}", 300.0, _compute)
+def prewarm_annotation_sets(
+    factory: sessionmaker[Session],
+) -> list[dict[str, Any]]:
+    """Recompute and store the unfiltered ``annotations:sets:*`` view; used by
+    the app startup hook and the background refresh loop. Only the unfiltered
+    variant is prewarmed because the per-source views are computed on demand
+    and rarely hit cold."""
+    key = _annotation_sets_cache_key(None)
+    invalidate(key)
+    return cached(
+        key,
+        ANNOTATION_SETS_TTL_SECONDS,
+        lambda: _compute_annotation_sets(factory, None),
+    )
 
 
 @router.get("/sets/{set_id}", summary="Get annotation set details")
@@ -86,8 +118,12 @@ def load_goa_annotations(
     GO annotations into an AnnotationSet. Only proteins already in the DB are annotated."""
     try:
         return dispatch_validated_job(
-            factory, amqp_url, body, LoadGOAAnnotationsPayload,
-            operation="load_goa_annotations", queue_name=JOBS_QUEUE,
+            factory,
+            amqp_url,
+            body,
+            LoadGOAAnnotationsPayload,
+            operation="load_goa_annotations",
+            queue_name=JOBS_QUEUE,
         )
     except InvalidJobPayloadError as exc:
         raise HTTPException(status_code=422, detail=exc.errors) from exc
@@ -103,8 +139,12 @@ def load_quickgo_annotations(
     bulk download API with optional taxon, aspect, and evidence code filtering."""
     try:
         return dispatch_validated_job(
-            factory, amqp_url, body, LoadQuickGOAnnotationsPayload,
-            operation="load_quickgo_annotations", queue_name=JOBS_QUEUE,
+            factory,
+            amqp_url,
+            body,
+            LoadQuickGOAnnotationsPayload,
+            operation="load_quickgo_annotations",
+            queue_name=JOBS_QUEUE,
         )
     except InvalidJobPayloadError as exc:
         raise HTTPException(status_code=422, detail=exc.errors) from exc
