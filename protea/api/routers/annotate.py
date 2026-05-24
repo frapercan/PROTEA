@@ -15,8 +15,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
 
+from protea.api.auth.anon_quota import require_anon_quota
 from protea.api.deps import get_amqp_url, get_session_factory
-from protea.api.roles import ROLE_VIEWER, require_role
 from protea.api.routers.query_sets import _parse_fasta
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
@@ -96,7 +96,7 @@ class AnnotateFormOptions(BaseModel):
     # it here; adding it would silently be ignored by the coordinator payload.
 
 
-@router.post("", summary="Annotate proteins from FASTA", dependencies=[Depends(require_role(ROLE_VIEWER))])
+@router.post("", summary="Annotate proteins from FASTA", dependencies=[Depends(require_anon_quota)])
 async def annotate(
     file: UploadFile | None = None,
     fasta_text: str | None = Form(None),

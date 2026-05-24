@@ -95,6 +95,9 @@ class Settings:
     # its repo-relative fallback. See the deployment runbook for the
     # full resolution chain (env > artifact store > repo fallback).
     anc2vec_path: str | None = None
+    # Maximum anonymous quick-annotate calls per IP hash per UTC day.
+    # Override with env var PROTEA_ANON_QUOTA_PER_DAY.
+    anon_quota_per_day: int = 5
 
     # SMTP settings for optional email-driven auth flows (FARM-AUTH.11).
     # All fields are optional; SMTP features are disabled when
@@ -227,6 +230,7 @@ def _make_settings_cls(env_prefix: str, env_file: Path | None) -> type[BaseSetti
         minio_secret_key: str | None = None
         minio_secure: bool = False
         anc2vec_path: str | None = None
+        anon_quota_per_day: int = 5
         smtp_enabled: bool = False
         smtp_host: str | None = None
         smtp_port: int = 587
@@ -340,6 +344,7 @@ def _materialise(raw: Any, project_root: Path) -> Settings:
         minio_secure=raw.minio_secure,
         allowed_origins=allowed,
         anc2vec_path=raw.anc2vec_path,
+        anon_quota_per_day=raw.anon_quota_per_day,
         smtp_enabled=raw.smtp_enabled,
         smtp_host=raw.smtp_host,
         smtp_port=raw.smtp_port,
