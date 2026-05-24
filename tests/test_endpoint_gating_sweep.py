@@ -109,8 +109,9 @@ def _collect_mutable_routes(app: Any) -> list[tuple[str, str]]:
 # ---------------------------------------------------------------------------
 
 _PUBLIC_POST_PATHS = {
-    # Login endpoint must be unauthenticated by design.
-    "/auth/login",
+    # Login endpoints must be unauthenticated by design.
+    "/auth/login",           # FARM-AUTH.3 email + password
+    "/auth/api-key-login",   # legacy api-key -> JWT (renamed from /auth/login)
 }
 
 _ADMIN_ONLY_PATHS = {
@@ -418,8 +419,8 @@ class TestPublicGetRoutes:
         )
 
     def test_login_endpoint_has_no_bearer_gate(self, monkeypatch, client):
-        """POST /auth/login has no role gate dependency (any 401 comes from
-        business logic inside the handler, not from require_role).
+        """POST /auth/api-key-login has no role gate dependency (any 401 comes
+        from business logic inside the handler, not from require_role).
 
         We verify this by checking that the response does not include the
         WWW-Authenticate: ApiKey header that require_api_key_or_bearer injects.
@@ -427,10 +428,10 @@ class TestPublicGetRoutes:
         """
         monkeypatch.setenv("PROTEA_AUTHN_REQUIRED", "true")
         monkeypatch.setenv("PROTEA_JWT_SECRET", _SECRET)
-        resp = client.post("/auth/login", json={"api_key": "fake-key-12345678"})
+        resp = client.post("/auth/api-key-login", json={"api_key": "fake-key-12345678"})
         www_auth = resp.headers.get("www-authenticate", "")
         assert "ApiKey" not in www_auth, (
-            "POST /auth/login should not return an ApiKey challenge (no gate dep)"
+            "POST /auth/api-key-login should not return an ApiKey challenge (no gate dep)"
         )
 
     def test_authn_disabled_all_routes_open(self, monkeypatch, client):
