@@ -96,6 +96,13 @@ class Settings:
     # its repo-relative fallback. See the deployment runbook for the
     # full resolution chain (env > artifact store > repo fallback).
     anc2vec_path: str | None = None
+    # FARM-AUTH.2: bootstrap admin on startup when this env var is set.
+    # If PROTEA_BOOTSTRAP_ADMIN_EMAIL is set and no admin row exists yet,
+    # the lifespan hook creates one. Password comes from
+    # PROTEA_BOOTSTRAP_ADMIN_PASSWORD when set; otherwise a random
+    # password is generated and printed to stderr once.
+    bootstrap_admin_email: str | None = None
+    bootstrap_admin_password: str | None = None
 
 
 class _YamlConfigSource(PydanticBaseSettingsSource):
@@ -203,6 +210,8 @@ def _make_settings_cls(env_prefix: str, env_file: Path | None) -> type[BaseSetti
         minio_secret_key: str | None = None
         minio_secure: bool = False
         anc2vec_path: str | None = None
+        bootstrap_admin_email: str | None = None
+        bootstrap_admin_password: str | None = None
         # ``allowed_origins`` is stored as a list internally so pydantic's
         # JSON-mode env parsing does not try to JSON-decode the raw
         # comma-separated env value. The field validator below normalises
@@ -327,6 +336,8 @@ def _materialise(raw: Any, project_root: Path) -> Settings:
         minio_secure=raw.minio_secure,
         allowed_origins=allowed,
         anc2vec_path=raw.anc2vec_path,
+        bootstrap_admin_email=raw.bootstrap_admin_email,
+        bootstrap_admin_password=raw.bootstrap_admin_password,
     )
 
 

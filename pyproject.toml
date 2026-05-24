@@ -35,7 +35,11 @@ dependencies = [
     "prometheus-client (>=0.20.0,<1.0.0)",
     "protea-contracts @ git+https://github.com/frapercan/protea-contracts.git@main",
     "argon2-cffi (>=23.1.0,<26.0.0)",
+    "click (>=8.0.0,<9.0.0)",
 ]
+
+[project.scripts]
+protea-cli = "protea.cli.admin:cli"
 
 [project.optional-dependencies]
 storage = ["minio (>=7.2,<8.0)"]

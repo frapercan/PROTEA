@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from protea.api.auth.bootstrap import bootstrap_admin
 from protea.api.bearer import assert_bearer_config
 from protea.api.middleware import HttpMetricsMiddleware, VisitorCounterMiddleware
 from protea.api.problem_details import (
@@ -60,8 +61,8 @@ from protea.api.routers.proteins import (
 from protea.api.routers.proteins_stats import prewarm_all as prewarm_protein_stats_sections
 from protea.core.operation_catalog import build_operation_registry
 from protea.infrastructure.benchmark_config import load_benchmark_config
-from protea.infrastructure.session import build_session_factory
-from protea.infrastructure.settings import load_settings
+from protea.infrastructure.session import build_session_factory, session_scope
+from protea.infrastructure.settings import Settings, load_settings
 from protea.infrastructure.telemetry import build_metric_registry, configure_telemetry
 
 _API_DESCRIPTION = (
@@ -356,9 +357,33 @@ async def _safe_prewarm(label: str, fn, factory) -> None:  # noqa: ANN001
         _log.warning("%s prewarm failed: %s", label, exc)
 
 
-def _build_lifespan(factory):  # noqa: ANN001 - sessionmaker factory, mocked in tests
+def _run_bootstrap(factory, settings: Settings) -> None:
+    """Run the admin bootstrap hook synchronously before the server accepts requests.
+
+    This is called inside the lifespan via ``asyncio.to_thread`` so the
+    Argon2id hashing (CPU-bound) does not block the event loop. The call
+    is a no-op when ``settings.bootstrap_admin_email`` is not set.
+    """
+    if not settings.bootstrap_admin_email:
+        return
+    with session_scope(factory) as session:
+        bootstrap_admin(
+            session,
+            settings.bootstrap_admin_email,
+            password=settings.bootstrap_admin_password or None,
+        )
+
+
+def _build_lifespan(factory, settings: Settings):  # noqa: ANN201
     @asynccontextmanager
     async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
+        # Bootstrap admin before we start accepting requests so that
+        # the first login attempt can succeed even on a fresh deployment.
+        try:
+            await asyncio.to_thread(_run_bootstrap, factory, settings)
+        except Exception as exc:  # pragma: no cover - logged for ops
+            _log.warning("admin bootstrap failed: %s", exc)
+
         targets = _prewarm_targets()
 
         async def _refresh_loop(label: str, fn, ttl: float) -> None:
@@ -414,7 +439,7 @@ def create_app(project_root: Path | None = None) -> FastAPI:
         description=_API_DESCRIPTION,
         contact={"name": "PROTEA Team", "email": "contact@protea.example.org"},
         openapi_tags=_OPENAPI_TAGS,
-        lifespan=_build_lifespan(factory),
+        lifespan=_build_lifespan(factory, settings),
     )
     app.state.session_factory = factory
     app.state.amqp_url = settings.amqp_url
