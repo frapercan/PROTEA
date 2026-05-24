@@ -1,6 +1,6 @@
 """farm_auth_6_anon_quota
 
-Revision ID: b2c3d4e5f6a7
+Revision ID: b201e6d4
 Revises: a1f2b3c4d5e6
 Create Date: 2026-05-24 20:00:00.000000
 
@@ -17,7 +17,7 @@ from sqlalchemy.dialects.postgresql import UUID
 
 from alembic import op
 
-revision: str = "b2c3d4e5f6a7"
+revision: str = "b201e6d4"
 down_revision: str = "a1f2b3c4d5e6"
 branch_labels = None
 depends_on = None
