@@ -1,6 +1,6 @@
 """farm_auth_7_user_quota
 
-Revision ID: b2c3d4e5f6a7
+Revision ID: b202e7d5
 Revises: a1f2b3c4d5e6
 Create Date: 2026-05-24 20:00:00.000000
 
@@ -17,7 +17,7 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = "b2c3d4e5f6a7"
+revision: str = "b202e7d5"
 down_revision: str | None = "a1f2b3c4d5e6"
 branch_labels: str | None = None
 depends_on: str | None = None
