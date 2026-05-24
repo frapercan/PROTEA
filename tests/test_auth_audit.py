@@ -260,12 +260,8 @@ _SECRET = "farm-auth-9-test-secret-long-enough-padding"
 
 @pytest.fixture()
 def _fresh_store():
-    """Reset the in-memory session store before each test."""
-    from protea.api.routers import auth_user
-
-    auth_user._SESSION_STORE.clear()
-    yield auth_user._SESSION_STORE
-    auth_user._SESSION_STORE.clear()
+    """No-op fixture retained for backward compatibility (AUTH.8 removed _SESSION_STORE)."""
+    yield
 
 
 # ---------------------------------------------------------------------------
@@ -295,18 +291,31 @@ _user_lite2 = Table(
 
 
 class _FakeSession2:
-    """Minimal session stub that skips non-User adds and tracks audit calls."""
+    """Minimal session stub that skips non-User adds and tracks audit calls.
+
+    AUTH.8 update: also maintains a ``_sess_store`` dict for UserSession rows
+    so that find_session() / revoke_session() work during login + logout tests.
+    """
 
     def __init__(self, store: dict, audit_calls: list):
         self._store = store
+        self._sess_store: dict = {}  # token_hash -> UserSession-like row
         self._pending_add: list = []
         self._live_proxies: list = []
         self._audit_calls = audit_calls
 
     def query(self, model):
-        return _FakeQuery2(self._store, model, self._live_proxies)
+        return _FakeQuery2(self._store, self._sess_store, model, self._live_proxies)
 
     def get(self, model, pk):
+        from protea.infrastructure.orm.models.user_session import UserSession
+
+        if model is UserSession:
+            for row in self._sess_store.values():
+                if str(row.id) == str(pk):
+                    return row
+            return None
+
         for u in self._store.values():
             if str(u["id"]) == str(pk):
                 return _make_user2(u)
@@ -319,6 +328,7 @@ class _FakeSession2:
         from uuid import uuid4 as _uuid4
 
         from protea.core.utils import utcnow
+        from protea.infrastructure.orm.models.user_session import UserSession
 
         for store_dict, proxy in self._live_proxies:
             store_dict["last_login_at"] = getattr(proxy, "last_login_at", None)
@@ -327,8 +337,13 @@ class _FakeSession2:
             )
 
         for obj in self._pending_add:
+            if isinstance(obj, UserSession):
+                # Track the session row for find_session lookups.
+                self._sess_store[obj.token_hash] = obj
+                continue
+
             if not hasattr(obj, "email"):
-                # AuthAudit row — record the call and skip.
+                # AuthAudit row: record the call and skip.
                 self._audit_calls.append(
                     {
                         "event_type": getattr(obj, "event_type", None),
@@ -382,21 +397,53 @@ class _FakeIntegrityError2(Exception):
 
 
 class _FakeQuery2:
-    def __init__(self, store: dict, model, live_proxies: list):
+    def __init__(self, store: dict, sess_store: dict, model, live_proxies: list):
         self._store = store
+        self._sess_store = sess_store
         self._model = model
         self._live_proxies = live_proxies
         self._filter_email: str | None = None
+        self._filter_token_hash: str | None = None
+        self._filter_user_id: str | None = None
+        self._filter_not_revoked: bool = False
 
     def filter(self, *_args):
+
         for arg in _args:
             try:
-                self._filter_email = arg.right.value
+                col_key = arg.left.key
+                val = arg.right.value
+                if col_key == "token_hash":
+                    self._filter_token_hash = val
+                elif col_key == "user_id":
+                    self._filter_user_id = str(val)
+                elif col_key == "email":
+                    self._filter_email = val
             except AttributeError:
-                pass
+                self._filter_not_revoked = True
         return self
 
+    def all(self):
+        from protea.infrastructure.orm.models.user_session import UserSession
+
+        if self._model is UserSession:
+            results = list(self._sess_store.values())
+            if self._filter_user_id is not None:
+                results = [r for r in results if str(r.user_id) == self._filter_user_id]
+            if self._filter_not_revoked:
+                results = [r for r in results if r.revoked_at is None]
+            return results
+        return []
+
     def first(self):
+        from protea.infrastructure.orm.models.user_session import UserSession
+
+        if self._model is UserSession:
+            if self._filter_token_hash is not None:
+                return self._sess_store.get(self._filter_token_hash)
+            results = self.all()
+            return results[0] if results else None
+
         if self._filter_email is None:
             return None
         u = self._store.get(self._filter_email)
@@ -441,10 +488,14 @@ def endpoint_client(_fresh_store, monkeypatch: pytest.MonkeyPatch, audit_calls):
     monkeypatch.setenv("PROTEA_JWT_SECRET", _SECRET)
 
     user_store: dict = {}
+    # Shared session store persisted across factory calls so token lookups work.
+    sess_store_shared: dict = {}
 
     class _Wrapper:
         def __call__(self):
-            return _FakeSession2(user_store, audit_calls)
+            s = _FakeSession2(user_store, audit_calls)
+            s._sess_store = sess_store_shared
+            return s
 
     wrapped = _Wrapper()
 
@@ -473,8 +524,9 @@ def endpoint_client(_fresh_store, monkeypatch: pytest.MonkeyPatch, audit_calls):
             s.close()
 
     monkeypatch.setattr(_ss_mod, "session_scope", _patched_scope)
+    monkeypatch.setattr("protea.api.routers.auth_user.session_scope", _patched_scope)
 
-    return TestClient(app, raise_server_exceptions=True)
+    return TestClient(app, base_url="https://testserver", raise_server_exceptions=True)
 
 
 def _do_signup(client, email: str = "u@example.com", username: str = "u1", password: str = "password123"):
