@@ -29,8 +29,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, sessionmaker
 
-from protea.api.auth import require_api_key_or_bearer
 from protea.api.deps import get_session_factory
+from protea.api.roles import ROLE_OPERATOR, require_role
 from protea.core.schema_sha_v2 import maybe_v2
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.orm.models.embedding.dataset import Dataset
@@ -307,7 +307,7 @@ def _reranker_import_fields_dep(
     "/import",
     status_code=201,
     summary="Import a lab-trained booster",
-    dependencies=[Depends(require_api_key_or_bearer)],
+    dependencies=[Depends(require_role(ROLE_OPERATOR))],
 )
 async def import_reranker_model_multipart(
     files: _RerankerImportFiles = Depends(_reranker_import_files_dep),
@@ -449,7 +449,7 @@ class ImportRerankerByReferenceRequest(BaseModel):
     "/import-by-reference",
     status_code=201,
     summary="Register a booster already in the artifact store",
-    dependencies=[Depends(require_api_key_or_bearer)],
+    dependencies=[Depends(require_role(ROLE_OPERATOR))],
 )
 def import_reranker_model_by_reference(
     body: ImportRerankerByReferenceRequest,

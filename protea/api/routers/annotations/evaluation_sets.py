@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.deps import get_amqp_url, get_benchmark_config, get_session_factory
+from protea.api.roles import ROLE_OPERATOR, require_role
 from protea.core.operations.generate_evaluation_set import GenerateEvaluationSetPayload
 from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationPayload
 from protea.infrastructure.benchmark_config import BenchmarkConfig
@@ -37,7 +38,7 @@ from ._common import EVALUATIONS_QUEUE, JOBS_QUEUE, stream_groundtruth
 router = APIRouter()
 
 
-@router.post("/evaluation-sets/generate", summary="Queue a generate_evaluation_set job")
+@router.post("/evaluation-sets/generate", summary="Queue a generate_evaluation_set job", dependencies=[Depends(require_role(ROLE_OPERATOR))])
 def generate_evaluation_set(
     body: dict[str, Any],
     factory: sessionmaker[Session] = Depends(get_session_factory),
@@ -67,7 +68,7 @@ def list_evaluation_sets(
         return list_evaluation_sets_data(session)
 
 
-@router.delete("/evaluation-sets/{eval_id}", summary="Delete an evaluation set", status_code=204)
+@router.delete("/evaluation-sets/{eval_id}", summary="Delete an evaluation set", status_code=204, dependencies=[Depends(require_role(ROLE_OPERATOR))])
 def delete_evaluation_set(
     eval_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),
@@ -191,7 +192,7 @@ def download_delta_fasta(
     )
 
 
-@router.post("/evaluation-sets/{eval_id}/run", summary="Queue a run_cafa_evaluation job")
+@router.post("/evaluation-sets/{eval_id}/run", summary="Queue a run_cafa_evaluation job", dependencies=[Depends(require_role(ROLE_OPERATOR))])
 def run_cafa_evaluation(
     eval_id: UUID,
     body: dict[str, Any],

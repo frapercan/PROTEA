@@ -1872,6 +1872,44 @@
       "post": {
         "description": "One-click annotation: upload FASTA, auto-select best method, run pipeline.\n\nAccepts either an uploaded FASTA ``file`` **or** raw ``fasta_text``.\nCreates a QuerySet, picks the best embedding config (or creates the\ndefault ESM-2 650M config), and queues a ``compute_embeddings`` job.\n\nReturns the IDs the frontend needs to monitor progress and chain\n``predict_go_terms`` once embeddings are ready.\n\n``compute_reranker_features`` controls whether the reranker feature\nfamilies (lineage, anc2vec, anc2vec_query, emb_pca, annotation_meta) are\nincluded in the downstream ``predict_go_terms`` job. Default: ``True``.",
         "operationId": "annotate_v1_annotate_post",
+        "parameters": [
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "multipart/form-data": {
@@ -1947,6 +1985,44 @@
       "post": {
         "description": "Queue a job that computes the CAFA delta between two annotation sets.\n\nApplies experimental evidence filtering, NOT-qualifier propagation through\nthe GO DAG, and classifies delta proteins into NK/LK.  Stats are stored in\na new EvaluationSet row; ground-truth TSVs are streamed on demand.",
         "operationId": "generate_evaluation_set_v1_annotations_evaluation_sets_generate_post",
+        "parameters": [
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -2007,6 +2083,42 @@
               "format": "uuid",
               "title": "Eval Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
             }
           }
         ],
@@ -2385,6 +2497,42 @@
               "title": "Result Id",
               "type": "string"
             }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
           }
         ],
         "responses": {
@@ -2541,6 +2689,42 @@
               "title": "Eval Id",
               "type": "string"
             }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
           }
         ],
         "requestBody": {
@@ -2656,6 +2840,44 @@
       "post": {
         "description": "Queue a `load_goa_annotations` job that streams a GAF file (gzip or plain) and upserts\nGO annotations into an AnnotationSet. Only proteins already in the DB are annotated.",
         "operationId": "load_goa_annotations_v1_annotations_sets_load_goa_post",
+        "parameters": [
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -2707,6 +2929,44 @@
       "post": {
         "description": "Queue a `load_quickgo_annotations` job that streams GO annotations from the QuickGO\nbulk download API with optional taxon, aspect, and evidence code filtering.",
         "operationId": "load_quickgo_annotations_v1_annotations_sets_load_quickgo_post",
+        "parameters": [
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -2767,6 +3027,42 @@
               "format": "uuid",
               "title": "Set Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
             }
           }
         ],
@@ -2885,6 +3181,44 @@
       "post": {
         "description": "Queue a `load_ontology_snapshot` job that downloads and parses a GO OBO file.\n\nIdempotent by ``obo_version``: existing snapshots are skipped or backfilled.",
         "operationId": "load_ontology_snapshot_v1_annotations_snapshots_load_post",
+        "parameters": [
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -2996,6 +3330,42 @@
               "format": "uuid",
               "title": "Snapshot Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
             }
           }
         ],
@@ -3152,6 +3522,42 @@
               "title": "Limit",
               "type": "integer"
             }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
           }
         ],
         "responses": {
@@ -3194,6 +3600,44 @@
       "post": {
         "description": "Create a fresh API key and return its raw value **once**.\n\nResponse shape::\n\n    {\n      \"id\": \"<uuid>\",\n      \"prefix\": \"abc12345\",\n      \"name\": \"lab-runner-2026-05\",\n      \"key\": \"<the only chance to copy this>\",\n      \"created_at\": \"...\"\n    }\n\nThe raw ``key`` field is the value the caller should store in their\nsecret manager / CI. PROTEA stores only the sha256 hash + the\n8-char prefix; we cannot recover the value if it is lost (just mint\nanother and revoke the misplaced one).",
         "operationId": "create_api_key_v1_auth_api_keys_post",
+        "parameters": [
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -3252,6 +3696,42 @@
               "format": "uuid",
               "title": "Key Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
             }
           }
         ],
@@ -3847,6 +4327,44 @@
       "post": {
         "description": "Create a new EmbeddingConfig that defines the model, layer selection, pooling strategy, and chunking.\n\nThis config is referenced by `compute_embeddings` jobs and `predict_go_terms` jobs to ensure\nquery and reference embeddings were produced under identical settings.",
         "operationId": "create_embedding_config_v1_embeddings_configs_post",
+        "parameters": [
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -3907,6 +4425,42 @@
               "format": "uuid",
               "title": "Config Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
             }
           }
         ],
@@ -3998,6 +4552,44 @@
       "post": {
         "description": "Queue a `predict_go_terms` job that runs KNN-based GO term transfer.\n\nThe coordinator partitions query proteins into batches, each dispatched to\n`protea.predictions.batch` workers for KNN search (numpy or FAISS) + GO annotation transfer.\nResults are written to a new `PredictionSet` via `protea.predictions.write` workers.\n\nRequired body fields: `embedding_config_id`, `annotation_set_id`, `ontology_snapshot_id`.\nOptional: `query_set_id` (FASTA upload), `limit_per_entry`, `distance_threshold`,\n`batch_size`, `search_backend`. Feature-engineering flags default to True:\n`compute_alignments`, `compute_taxonomy`, `compute_reranker_features` all run\nunless explicitly set to false. `aspect_separated_knn` defaults to true\n(one KNN index per GO aspect to guarantee BPO/MFO/CCO coverage even when\nunified nearest neighbours carry only one aspect).",
         "operationId": "predict_go_terms_v1_embeddings_predict_post",
+        "parameters": [
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -4085,6 +4677,42 @@
               "format": "uuid",
               "title": "Set Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
             }
           }
         ],
@@ -4681,6 +5309,44 @@
       "post": {
         "description": "Create a new ``ExperimentRun`` row in ``planned`` status.",
         "operationId": "create_experiment_run_v1_experiment_runs_post",
+        "parameters": [
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -4739,6 +5405,42 @@
               "format": "uuid",
               "title": "Run Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
             }
           }
         ],
@@ -4828,6 +5530,42 @@
               "format": "uuid",
               "title": "Run Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
             }
           }
         ],
@@ -5119,6 +5857,42 @@
               "title": "Job Id",
               "type": "string"
             }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
           }
         ],
         "responses": {
@@ -5218,6 +5992,42 @@
               "format": "uuid",
               "title": "Job Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
             }
           }
         ],
@@ -5354,6 +6164,42 @@
               "format": "uuid",
               "title": "Job Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
             }
           }
         ],
@@ -6176,6 +7022,44 @@
       "post": {
         "description": "Upload a FASTA file and create a QuerySet.\n\nEach sequence in the FASTA is stored (or reused if already present) in the\n``sequence`` table. A ``query_set_entry`` row is created per sequence,\npreserving the original FASTA accession. Duplicate accessions within the\nsame upload are rejected with 422.",
         "operationId": "create_query_set_v1_query_sets_post",
+        "parameters": [
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "multipart/form-data": {
@@ -6234,6 +7118,42 @@
               "format": "uuid",
               "title": "Query Set Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
             }
           }
         ],
@@ -6545,6 +7465,44 @@
       "post": {
         "description": "Create a new ScoringConfig. Pydantic validators on ``ScoringConfigCreate``\nalready enforce ``formula`` membership + signal-name allowlist (422).",
         "operationId": "create_scoring_config_v1_scoring_configs_post",
+        "parameters": [
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -6592,6 +7550,44 @@
       "post": {
         "description": "Seed the database with the four built-in preset ScoringConfigs.\n\nIdempotent: presets matched by name are skipped silently. Returns\nthe list of preset names that were actually created.",
         "operationId": "create_preset_configs_v1_scoring_configs_presets_post",
+        "parameters": [
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "responses": {
           "201": {
             "content": {
@@ -6600,6 +7596,21 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Create Preset Configs",
@@ -6621,6 +7632,42 @@
               "format": "uuid",
               "title": "Config Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
             }
           }
         ],
@@ -7167,6 +8214,42 @@
               "title": "Reranker Id",
               "type": "string"
             }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
           }
         ],
         "responses": {
@@ -7387,6 +8470,44 @@
       "post": {
         "description": "Submit a thumbs-up with an optional comment.",
         "operationId": "post_support_v1_support_post",
+        "parameters": [
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
