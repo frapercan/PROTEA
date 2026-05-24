@@ -1,0 +1,30 @@
+name: Playwright (skip)
+
+# Companion to playwright.yml. Branch protection on develop requires
+# "critical user flows". The real workflow only fires when apps/web/**
+# or playwright.yml changes, so PRs that touch only backend/CI/docs
+# never produce that check and stay blocked.
+#
+# This workflow mirrors paths-ignore of the real trigger and reports
+# a job with the same name so the required check is satisfied on all
+# develop-bound PRs.
+
+on:
+  pull_request:
+    paths-ignore:
+      - apps/web/**
+      - .github/workflows/playwright.yml
+
+concurrency:
+  group: playwright-skip-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  flows:
+    name: critical user flows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+
+    steps:
+      - name: Skip (no frontend paths changed)
+        run: 'echo "skip - no apps/web/** changes"'

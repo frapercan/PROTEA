@@ -1,9 +1,7 @@
-name: coauthor-guard / scan
-
+name: coauthor-guard
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-
 jobs:
   scan:
     runs-on: ubuntu-latest
@@ -11,30 +9,40 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
 
-      - name: Check commits for Claude co-author
+      - name: Fetch base commit
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          set +e
-          BASE="${{ github.base_ref }}"
-          HEAD="HEAD"
-          
-          FOUND=0
-          while IFS= read -r line; do
-            if echo "$line" | grep -iE "(co-authored-by:\s*claude|co-authored-by:.*anthropic|generated with claude)" > /dev/null; then
-              echo "VIOLATION: $line"
-              FOUND=1
-            fi
-          done < <(git log $BASE..$HEAD --pretty=format:"%B")
-          
-          PR_BODY='${{ github.event.pull_request.body }}'
-          if echo "$PR_BODY" | grep -iE "(co-authored-by:\s*claude|co-authored-by:.*anthropic|generated with claude)" > /dev/null; then
-            echo "VIOLATION in PR body: Claude/Anthropic co-author mention"
-            FOUND=1
-          fi
-          
-          if [ $FOUND -eq 1 ]; then
-            echo "::error::Commits or PR body contain Claude/Anthropic co-author mentions. This violates project policy."
+          set -euo pipefail
+          git fetch --no-tags --depth=200 origin "${BASE_SHA}"
+
+      - name: Scan commit messages for forbidden attribution
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          range="${BASE_SHA}..${HEAD_SHA}"
+          echo "Scanning commit range: ${range}"
+          tmp="$(mktemp)"
+          git log --format='commit %H%n%B%n---END---' "${range}" > "${tmp}"
+          pattern='co-authored-by:[[:space:]]*.*(claude|anthropic|noreply@anthropic)|generated[[:space:]]+with[[:space:]]+\[?claude|generated[[:space:]]+by[[:space:]]+\[?anthropic'
+          if grep -iEn "${pattern}" "${tmp}"; then
+            echo "ERROR: commit message contains forbidden Claude/Anthropic attribution."
+            echo "Fix: rebase the offending commit(s) and force-push the PR branch."
             exit 1
           fi
-          
-          exit 0
+          echo "OK: no forbidden attribution found in ${range}"
+
+      - name: Scan PR body for forbidden attribution
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          if printf '%s' "${PR_BODY:-}" | grep -iE "(co-authored-by:[[:space:]]*.*(claude|anthropic)|generated[[:space:]]+with[[:space:]]+claude|generated[[:space:]]+by[[:space:]]+anthropic)" > /dev/null; then
+            echo "::error::PR body contains Claude/Anthropic co-author mention."
+            exit 1
+          fi
+          echo "OK: no forbidden attribution found in PR body."
