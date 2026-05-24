@@ -385,7 +385,7 @@ def _build_lifespan(factory):  # noqa: ANN001 - sessionmaker factory, mocked in 
         # prewarm fn is a MagicMock, the mock is invoked synchronously
         # so the assert_called_once_with assertion holds. In production
         # this is a sub-millisecond yield with no startup-latency cost.
-        for _ in range(3):
+        for _tick in range(3):
             await asyncio.sleep(0)
         try:
             yield
