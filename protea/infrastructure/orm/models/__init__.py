@@ -1,3 +1,4 @@
+from .anon_quota import AnonQuota  # noqa: F401
 from .annotation.annotation_set import AnnotationSet  # noqa: F401
 from .annotation.evaluation_result import EvaluationResult  # noqa: F401
 from .annotation.evaluation_set import EvaluationSet  # noqa: F401

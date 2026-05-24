@@ -95,6 +95,9 @@ class Settings:
     # its repo-relative fallback. See the deployment runbook for the
     # full resolution chain (env > artifact store > repo fallback).
     anc2vec_path: str | None = None
+    # Maximum anonymous quick-annotate calls per IP hash per UTC day.
+    # Override with env var PROTEA_ANON_QUOTA_PER_DAY.
+    anon_quota_per_day: int = 5
 
 
 class _YamlConfigSource(PydanticBaseSettingsSource):
@@ -198,6 +201,7 @@ def _make_settings_cls(env_prefix: str, env_file: Path | None) -> type[BaseSetti
         minio_secret_key: str | None = None
         minio_secure: bool = False
         anc2vec_path: str | None = None
+        anon_quota_per_day: int = 5
         # ``allowed_origins`` is stored as a list internally so pydantic's
         # JSON-mode env parsing does not try to JSON-decode the raw
         # comma-separated env value. The field validator below normalises
@@ -321,6 +325,7 @@ def _materialise(raw: Any, project_root: Path) -> Settings:
         minio_secure=raw.minio_secure,
         allowed_origins=allowed,
         anc2vec_path=raw.anc2vec_path,
+        anon_quota_per_day=raw.anon_quota_per_day,
     )
 
 

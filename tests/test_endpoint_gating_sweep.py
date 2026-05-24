@@ -154,10 +154,14 @@ _OPERATOR_PATHS = {
 
 # Paths that require at least viewer (logged-in user).
 _VIEWER_PATHS = {
-    "/annotate",
     "/query-sets",
     "/query-sets/{query_set_id}",
     "/support",
+}
+
+# Paths open to anonymous callers (no auth gate, quota-only).
+_ANON_OPEN_PATHS = {
+    "/annotate",
 }
 
 
@@ -176,11 +180,16 @@ def _skip_public(path: str) -> bool:
 
 
 def _is_gated(path: str) -> bool:
-    """True when the path is one we explicitly gate in FARM-AUTH.5."""
+    """True when the path requires auth credentials (gated in FARM-AUTH.5)."""
     for gated in _ADMIN_ONLY_PATHS | _OPERATOR_PATHS | _VIEWER_PATHS:
         if path == gated:
             return True
     return False
+
+
+def _is_anon_open(path: str) -> bool:
+    """True when the path is intentionally open to anonymous callers (FARM-AUTH.6)."""
+    return path in _ANON_OPEN_PATHS
 
 
 class TestUnauthenticatedMustNotSucceed:
@@ -192,6 +201,9 @@ class TestUnauthenticatedMustNotSucceed:
         failures = []
         for method, path in mutable_routes:
             if _skip_public(path):
+                continue
+            if _is_anon_open(path):
+                # FARM-AUTH.6: intentionally open to anonymous callers
                 continue
             if not _is_gated(path):
                 continue
@@ -217,7 +229,6 @@ class TestViewerFloorRoutes:
     @pytest.mark.parametrize(
         "method,path",
         [
-            ("POST", "/annotate"),
             ("POST", "/query-sets"),
             ("POST", "/support"),
         ],
@@ -228,6 +239,17 @@ class TestViewerFloorRoutes:
         resp = getattr(client, method.lower())(path, json={})
         assert resp.status_code in (401, 403), (
             f"{method} {path}: expected 401/403 for unauthenticated, got {resp.status_code}"
+        )
+
+    def test_annotate_allows_anonymous(self, monkeypatch, client):
+        """POST /annotate is open to anonymous callers (FARM-AUTH.6 quota gate)."""
+        monkeypatch.setenv("PROTEA_AUTHN_REQUIRED", "true")
+        monkeypatch.setenv("PROTEA_JWT_SECRET", _SECRET)
+        # Anonymous request must NOT be blocked by 401/403; quota gate may 422/500
+        # depending on body, but auth itself must not block it.
+        resp = client.post("/annotate", json={})
+        assert resp.status_code not in (401, 403), (
+            f"POST /annotate: anonymous caller was blocked by auth gate ({resp.status_code})"
         )
 
     @pytest.mark.parametrize(
