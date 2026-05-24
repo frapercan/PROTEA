@@ -257,8 +257,7 @@ Admin router
 
 The ``/admin`` router exposes destructive administrative operations.
 Currently provides ``POST /admin/reset-db``, which drops and recreates
-the public schema and re-applies all Alembic migrations. Protected by a
-bearer token (``PROTEA_ADMIN_TOKEN`` environment variable).
+the public schema and re-applies all Alembic migrations. Protected by the ``admin`` role via :func:`require_role` (FARM-AUTH.4).
 
 .. automodule:: protea.api.routers.admin
    :members:

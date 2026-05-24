@@ -97,8 +97,6 @@ Environment variable overrides
    * - ``PROTEA_RATELIMIT_API_KEYS``
      - slowapi rate-limit rule for ``POST /v1/auth/api-keys``. Default
        ``5/hour`` (T5.6b).
-   * - ``PROTEA_ADMIN_TOKEN``
-     - Overrides ``admin.token``.
    * - ``PROTEA_REF_CACHE_DIR``
      - Directory for the on-disk KNN reference cache (embedding +
        annotation matrices keyed by ``(embedding_config_id,
