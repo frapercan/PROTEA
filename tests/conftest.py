@@ -139,33 +139,6 @@ def postgres_url(pytestconfig: pytest.Config) -> str:
 
     if external_db:
         url = f"postgresql+psycopg://{user}:{password}@localhost:{host_port}/{db}"
-        # Reset the schema at session start so a shared/persistent service
-        # container from a previous CI run does not pollute this session.
-        # We drop + recreate the public schema (DDL-level wipe) rather than
-        # using alembic downgrade("base") because some historical downgrade
-        # paths are broken (e.g. e037f3ae9f58 drop_constraint(None)).
-        # After the wipe we re-enable pgvector and run upgrade("head") to
-        # get a clean 29-table schema for every session.
-        import sqlalchemy as _sa
-
-        from pathlib import Path
-
-        from alembic import command as _alembic_command
-        from alembic.config import Config as _AlembicConfig
-
-        _wipe_engine = _sa.create_engine(url, isolation_level="AUTOCOMMIT")
-        with _wipe_engine.connect() as _conn:
-            _conn.execute(_sa.text("DROP SCHEMA public CASCADE"))
-            _conn.execute(_sa.text("CREATE SCHEMA public"))
-            _conn.execute(_sa.text("CREATE EXTENSION IF NOT EXISTS vector"))
-        _wipe_engine.dispose()
-
-        _repo_root = Path(__file__).resolve().parents[1]
-        _cfg = _AlembicConfig(str(_repo_root / "alembic.ini"))
-        _cfg.set_main_option("script_location", str(_repo_root / "alembic"))
-        _cfg.set_main_option("sqlalchemy.url", url)
-        os.environ["PROTEA_DB_URL"] = url
-        _alembic_command.upgrade(_cfg, "head")
         yield url
         return
 
