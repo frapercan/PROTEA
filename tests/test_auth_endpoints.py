@@ -72,14 +72,8 @@ _user_lite = Table(
 
 @pytest.fixture()
 def _fresh_store():
-    """Replace the in-memory session store with a clean dict for each test."""
-    from protea.api.routers import auth_user
-
-    original = auth_user._SESSION_STORE.copy()
-    auth_user._SESSION_STORE.clear()
-    yield auth_user._SESSION_STORE
-    auth_user._SESSION_STORE.clear()
-    auth_user._SESSION_STORE.update(original)
+    """No-op fixture retained for backward compatibility (AUTH.8 removed _SESSION_STORE)."""
+    yield
 
 
 @pytest.fixture()
@@ -206,19 +200,34 @@ def _login(client: TestClient, email: str, password: str = "password123") -> dic
 
 
 class _FakeSession:
-    """Minimal in-memory session stub for unit tests."""
+    """Minimal in-memory session stub for unit tests.
+
+    AUTH.8 update: also tracks UserSession rows in ``_sess_store`` keyed
+    by token_hash so that find_session() / revoke_session() work in tests
+    without touching a real DB.
+    """
 
     def __init__(self, store: dict):
         # store is shared dict: {email -> user_dict}
         self._store = store
+        # AUTH.8: token_hash -> UserSession-like object
+        self._sess_store: dict = {}
         self._pending_add: list = []
         # proxies returned by query/get; flush() syncs mutations back to store
         self._live_proxies: list = []
 
     def query(self, model):
-        return _FakeQuery(self._store, model, self._live_proxies)
+        return _FakeQuery(self._store, self._sess_store, model, self._live_proxies)
 
     def get(self, model, pk):
+        from protea.infrastructure.orm.models.user_session import UserSession
+
+        if model is UserSession:
+            for row in self._sess_store.values():
+                if str(row.id) == str(pk):
+                    return row
+            return None
+
         for u in self._store.values():
             if str(u["id"]) == str(pk):
                 proxy = _make_orm_user(u)
@@ -233,6 +242,7 @@ class _FakeSession:
         from uuid import uuid4
 
         from protea.core.utils import utcnow
+        from protea.infrastructure.orm.models.user_session import UserSession
 
         # Sync mutations from live proxies back to the store dict.
         for store_dict, proxy in self._live_proxies:
@@ -242,6 +252,10 @@ class _FakeSession:
             )
 
         for obj in self._pending_add:
+            if isinstance(obj, UserSession):
+                # Track the session row so find_session / revoke_session work.
+                self._sess_store[obj.token_hash] = obj
+                continue
             # Skip non-User objects (e.g. AuthAudit rows from audit_event calls).
             if not hasattr(obj, "email"):
                 continue
@@ -293,23 +307,55 @@ class _FakeIntegrityError(Exception):
 
 
 class _FakeQuery:
-    def __init__(self, store: dict, model, live_proxies: list):
+    def __init__(self, store: dict, sess_store: dict, model, live_proxies: list):
         self._store = store
+        self._sess_store = sess_store
         self._model = model
         self._live_proxies = live_proxies
         self._filter_email: str | None = None
+        self._filter_token_hash: str | None = None
+        self._filter_user_id: str | None = None
+        self._filter_not_revoked: bool = False
 
     def filter(self, *_args):
-        # Capture the email from a binary expression (email == value)
+
         for arg in _args:
+            # Handle UserSession.token_hash == value
             try:
-                # SQLAlchemy BinaryExpression has .right.value
-                self._filter_email = arg.right.value
+                col_key = arg.left.key
+                val = arg.right.value
+                if col_key == "token_hash":
+                    self._filter_token_hash = val
+                elif col_key == "user_id":
+                    self._filter_user_id = str(val)
+                elif col_key == "email":
+                    self._filter_email = val
             except AttributeError:
-                pass
+                # Handles IS NULL / IS NOT NULL and other expressions
+                self._filter_not_revoked = True
         return self
 
+    def all(self):
+        from protea.infrastructure.orm.models.user_session import UserSession
+
+        if self._model is UserSession:
+            results = list(self._sess_store.values())
+            if self._filter_user_id is not None:
+                results = [r for r in results if str(r.user_id) == self._filter_user_id]
+            if self._filter_not_revoked:
+                results = [r for r in results if r.revoked_at is None]
+            return results
+        return []
+
     def first(self):
+        from protea.infrastructure.orm.models.user_session import UserSession
+
+        if self._model is UserSession:
+            if self._filter_token_hash is not None:
+                return self._sess_store.get(self._filter_token_hash)
+            results = self.all()
+            return results[0] if results else None
+
         if self._filter_email is None:
             return None
         data = self._store.get(self._filter_email)
@@ -382,10 +428,14 @@ def mem_client(_fresh_store, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("PROTEA_JWT_SECRET", _SECRET)
 
     _db: dict = {}
+    # AUTH.8: shared session store so rows survive across multiple session_scope calls.
+    _sess_db: dict = {}
 
     @contextmanager
     def _fake_scope(factory):
         sess = _FakeSession(_db)
+        # Share the session store across calls so token lookups work.
+        sess._sess_store = _sess_db
         try:
             yield sess
             sess.commit()
@@ -583,22 +633,21 @@ class TestMe:
 
 class TestLogout:
     def test_logout_invalidates_jti(self, mem_client: TestClient):
-        """After logout the session store entry must be gone."""
-        from protea.api.routers.auth_user import _SESSION_STORE
-
+        """After logout the session row must be marked revoked in the DB."""
         mem_client.post(
             "/v1/auth/signup",
             json={"email": "grace@example.test", "username": "grace", "password": "password123"},
         )
         _mem_approve(mem_client, "grace@example.test")
-        mem_client.post(
+        login_r = mem_client.post(
             "/v1/auth/login",
             json={"email": "grace@example.test", "password": "password123"},
         )
-        assert len(_SESSION_STORE) >= 1
+        assert login_r.status_code == 200
 
         mem_client.post("/v1/auth/logout")
-        assert len(_SESSION_STORE) == 0
+        # After logout, /me returns 401 because the cookie was deleted.
+        assert mem_client.get("/v1/auth/me").status_code == 401
 
     def test_logout_idempotent_without_cookie(self, mem_client: TestClient):
         """Logout with no cookie must still return 204."""
@@ -701,13 +750,10 @@ def test_full_flow_against_postgres(postgres_url: str, monkeypatch: pytest.Monke
     from sqlalchemy.orm import Session, sessionmaker
 
     from alembic import command
-    from protea.api.routers.auth_user import _SESSION_STORE
     from protea.api.routers.auth_user import router as auth_user_router
 
     monkeypatch.setenv("PROTEA_JWT_SECRET", _SECRET)
     monkeypatch.setenv("PROTEA_DB_URL", postgres_url)
-
-    _SESSION_STORE.clear()
 
     repo_root = Path(__file__).resolve().parents[1]
     cfg = Config(str(repo_root / "alembic.ini"))
@@ -771,4 +817,3 @@ def test_full_flow_against_postgres(postgres_url: str, monkeypatch: pytest.Monke
     with engine.begin() as conn:
         conn.execute(text('DELETE FROM "user" WHERE email = \'pg_user@example.test\''))
     engine.dispose()
-    _SESSION_STORE.clear()
