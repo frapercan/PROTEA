@@ -97,6 +97,9 @@ jobs:
             echo "modules=${joined}" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Build module-to-property-test map
+        run: python3 scripts/mutation-build-module-map.py > property_test_map.json
+
       - name: Run cosmic-ray per touched module
         if: steps.touched.outputs.modules != ''
         env:

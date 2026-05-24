@@ -97,10 +97,16 @@ cmd_start() {
     cd "$ROOT"
     _start_bg api poetry run uvicorn protea.api.app:create_app \
         --factory --host 0.0.0.0 --port 8000 --root-path /api-proxy
-    sleep 3
-    curl -sf http://localhost:8000/jobs > /dev/null \
-        && printf "  ${GREEN}API OK${RESET} → http://localhost:8000\n" \
-        || { printf "  ${RED}API FAILED${RESET} — check logs/api.log\n"; exit 1; }
+    api_ready=0
+    for _ in $(seq 1 120); do
+        if curl -sf http://localhost:8000/jobs > /dev/null 2>&1; then api_ready=1; break; fi
+        sleep 1
+    done
+    if [[ $api_ready -eq 1 ]]; then
+        printf "  ${GREEN}API OK${RESET} → http://localhost:8000\n"
+    else
+        printf "  ${RED}API FAILED${RESET} — check logs/api.log\n"; exit 1
+    fi
 
     # Core workers
     printf "\n${BOLD}[4] Core workers${RESET}\n"
@@ -152,8 +158,19 @@ cmd_start() {
             # alongside it for correct asset resolution.
             local STANDALONE_DIR=".next/standalone"
             if [[ -d "$STANDALONE_DIR" ]]; then
-                cp -r .next/static   "$STANDALONE_DIR/.next/static"
-                cp -r public/.        "$STANDALONE_DIR/public/"
+                mkdir -p "$STANDALONE_DIR/.next" "$STANDALONE_DIR/public"
+                if ! cp -r .next/static "$STANDALONE_DIR/.next/static"; then
+                    printf "  ${RED}✗ FAILED to copy .next/static into standalone${RESET}\n"; exit 1
+                fi
+                if ! cp -r public/. "$STANDALONE_DIR/public/"; then
+                    printf "  ${RED}✗ FAILED to copy public/ into standalone${RESET}\n"; exit 1
+                fi
+                if ! ls "$STANDALONE_DIR/.next/static/chunks/"*.css > /dev/null 2>&1; then
+                    printf "  ${RED}✗ FAILED to populate standalone static chunks (no CSS found)${RESET}\n"; exit 1
+                fi
+                if [[ ! -f "$STANDALONE_DIR/public/protea-mark.png" ]]; then
+                    printf "  ${RED}✗ FAILED to populate standalone public (protea-mark.png missing)${RESET}\n"; exit 1
+                fi
                 printf "  ${GREEN}✓${RESET} standalone assets copied\n"
             fi
         else
