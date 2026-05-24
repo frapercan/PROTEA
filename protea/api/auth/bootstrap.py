@@ -58,6 +58,49 @@ def _any_admin_exists(session: Session) -> bool:
     return session.scalar(select(User).where(User.role == UserRole.ADMIN)) is not None
 
 
+def _generate_and_announce_password(email: str) -> str:
+    generated = secrets.token_urlsafe(32)
+    print(  # noqa: T201 — intentional: one-time credential to stderr
+        f"[PROTEA bootstrap] Generated admin password for {email}: {generated}",
+        file=sys.stderr,
+        flush=True,
+    )
+    return generated
+
+
+def _build_admin_user(email: str, password: str) -> User:
+    return User(
+        email=email,
+        username=email.split("@")[0],
+        display_name=_BOOTSTRAP_DISPLAY_NAME,
+        password_hash=hash_password(password),
+        role=UserRole.ADMIN,
+        status=UserStatus.ACTIVE,
+    )
+
+
+def _insert_or_resolve_race(session: Session, user: User, email: str) -> User:
+    """Insert and flush; on IntegrityError treat as race and re-resolve.
+
+    Returns the inserted user on success, the racing-winner admin row
+    on integrity-race, and re-raises the IntegrityError when no admin
+    was found post-rollback (i.e. the conflict was on a different
+    constraint — caller must surface it).
+    """
+    session.add(user)
+    try:
+        session.flush()
+        return user
+    except IntegrityError:
+        session.rollback()
+        _log.warning("bootstrap_admin: race condition for %s — re-checking", email)
+        session.begin()
+        winner = _find_admin_by_email(session, email)
+        if winner is None:
+            raise
+        return winner
+
+
 def bootstrap_admin(
     session: Session,
     email: str,
@@ -66,68 +109,22 @@ def bootstrap_admin(
 ) -> tuple[User | None, bool]:
     """Ensure an admin user with *email* exists; create one if not.
 
-    Parameters
-    ----------
-    session:
-        An open SQLAlchemy ``Session``. The caller is responsible for
-        committing after a successful return; this function does not
-        commit so it can be composed inside a larger transaction or
-        tested with a rollback.
-    email:
-        Email address for the admin account.
-    password:
-        Plaintext password to hash and store. When ``None``, a secure
-        random password is generated and printed to ``stderr``.
-
-    Returns
-    -------
-    (user, created):
-        ``user`` is the ``User`` ORM object (existing or newly built).
-        ``created`` is ``True`` when a new row was inserted, ``False``
-        when the admin already existed and no changes were made.
+    Returns ``(user, created)``. The caller commits after a successful return.
+    A ``None`` password triggers ``token_urlsafe(32)`` generation, printed to
+    stderr exactly once.
     """
     existing = _find_admin_by_email(session, email)
     if existing is not None:
-        _log.info(
-            "bootstrap_admin: admin row already exists for %s — no-op",
-            email,
-        )
+        _log.info("bootstrap_admin: admin row already exists for %s — no-op", email)
         return existing, False
 
     if password is None:
-        generated = secrets.token_urlsafe(32)
-        print(  # noqa: T201 — intentional: one-time credential to stderr
-            f"[PROTEA bootstrap] Generated admin password for {email}: {generated}",
-            file=sys.stderr,
-            flush=True,
-        )
-        password = generated
+        password = _generate_and_announce_password(email)
 
-    # Derive a stable username from the local-part of the email so the
-    # unique constraint on ``username`` is satisfied without user input.
-    username_candidate = email.split("@")[0]
-    user = User(
-        email=email,
-        username=username_candidate,
-        display_name=_BOOTSTRAP_DISPLAY_NAME,
-        password_hash=hash_password(password),
-        role=UserRole.ADMIN,
-        status=UserStatus.ACTIVE,
-    )
-    session.add(user)
-    try:
-        session.flush()
-    except IntegrityError:
-        session.rollback()
-        _log.warning(
-            "bootstrap_admin: race condition detected for %s — re-checking",
-            email,
-        )
-        session.begin()
-        existing = _find_admin_by_email(session, email)
-        if existing is not None:
-            return existing, False
-        raise
+    user = _build_admin_user(email, password)
+    resolved = _insert_or_resolve_race(session, user, email)
+    if resolved is not user:
+        return resolved, False
 
     _log.info("bootstrap_admin: created admin user %s (id=%s)", email, user.id)
     return user, True
