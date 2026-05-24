@@ -38,7 +38,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Index, Text
+from sqlalchemy import DateTime, ForeignKey, Text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -95,15 +95,14 @@ class UserSession(Base):
     user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
     client_ip_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    __table_args__ = (
-        # Unique token_hash: prevents duplicate rows for the same JWT and
-        # lets find_session() use an indexed equality lookup.
-        Index("uq_user_session_token_hash", "token_hash", unique=True),
-        # Fast revocation sweep: all rows for a user (used by admin revoke).
-        Index("ix_user_session_user_id", "user_id"),
-        # TTL cleanup queries (optional background job can prune expired rows).
-        Index("ix_user_session_expires_at", "expires_at"),
-    )
+    # Indexes are declared in the alembic migration only (with IF NOT EXISTS
+    # so re-running upgrade head against a shared CI pg never duplicates):
+    #   - uq_user_session_token_hash (unique)
+    #   - ix_user_session_user_id
+    #   - ix_user_session_expires_at
+    # Keeping them out of __table_args__ avoids the create_all collision in
+    # tests that drop_all + create_all without dropping indexes first
+    # (SQLAlchemy's metadata.create_all doesn't checkfirst on Index objects).
 
     def __repr__(self) -> str:
         return (

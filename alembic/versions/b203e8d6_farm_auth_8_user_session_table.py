@@ -77,11 +77,21 @@ def upgrade() -> None:
         sa.Column("user_agent", sa.Text, nullable=True),
         sa.Column("client_ip_hash", sa.Text, nullable=True),
     )
-    op.create_index(
-        "uq_user_session_token_hash", "user_session", ["token_hash"], unique=True
+    # IF NOT EXISTS keeps the upgrade idempotent on the shared CI
+    # pg service container, which can carry leftover indexes from
+    # previous PR runs even after the alembic_version row is reset.
+    op.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_user_session_token_hash "
+        "ON user_session (token_hash)"
     )
-    op.create_index("ix_user_session_user_id", "user_session", ["user_id"])
-    op.create_index("ix_user_session_expires_at", "user_session", ["expires_at"])
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_user_session_user_id "
+        "ON user_session (user_id)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_user_session_expires_at "
+        "ON user_session (expires_at)"
+    )
 
 
 def downgrade() -> None:
