@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
+import { Telescope } from "lucide-react";
 import { useToast } from "@/components/Toast";
 import { SkeletonTableRow } from "@/components/Skeleton";
 import { ContextBanner } from "@/components/ContextBanner";
@@ -611,6 +612,60 @@ export default function FunctionalAnnotationPage() {
       {/* ── Results ── */}
       {activeTab === "results" && (
         <div>
+          {predictionSets.length === 0 ? (
+            // Empty-state hero: when no PredictionSets exist, the table
+            // headers ("ID / Config / …") read as broken UI on top of zero
+            // rows. Replace BOTH the desktop table and the mobile card grid
+            // with a single onboarding panel that points the user back to
+            // the Run Annotation tab. See FD-empty-state task (2026-05-24).
+            <section
+              aria-labelledby="results-empty-title"
+              className="rounded-lg border border-stone-200 bg-white px-6 py-12 sm:px-10 sm:py-16 shadow-sm"
+            >
+              <div className="mx-auto flex max-w-xl flex-col items-center text-center">
+                <span
+                  aria-hidden
+                  className="mb-5 inline-flex h-14 w-14 items-center justify-center rounded-full border border-stone-200 bg-stone-50 text-stone-500"
+                >
+                  <Telescope className="h-7 w-7" strokeWidth={1.5} />
+                </span>
+                <h3
+                  id="results-empty-title"
+                  className="text-lg font-semibold text-slate-900"
+                >
+                  {t("resultsTab.emptyHero.title")}
+                </h3>
+                <p className="mt-2 max-w-lg text-sm leading-relaxed text-slate-600">
+                  {t("resultsTab.emptyHero.body")}
+                </p>
+                <div className="mt-6 flex flex-col items-center gap-3 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("predict")}
+                    className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                  >
+                    {t("resultsTab.emptyHero.ctaPrimary")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={loadResults}
+                    className="inline-flex items-center justify-center rounded-md border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-stone-50"
+                  >
+                    {t("resultsTab.refresh")}
+                  </button>
+                </div>
+                <p className="mt-5 text-xs text-slate-500">
+                  <Link
+                    href="/benchmark"
+                    className="text-blue-600 hover:text-blue-800 hover:underline"
+                  >
+                    {t("resultsTab.emptyHero.ctaSecondary")}
+                  </Link>
+                </p>
+              </div>
+            </section>
+          ) : (
+            <>
           <div className="flex items-center justify-between mb-3">
             <p className="text-sm text-slate-500">
               {predictionSets.length} annotation result{predictionSets.length !== 1 ? "s" : ""}
@@ -622,11 +677,6 @@ export default function FunctionalAnnotationPage() {
 
           {/* Mobile card list */}
           <div className="lg:hidden space-y-2">
-            {predictionSets.length === 0 && (
-              <div className="rounded-lg border bg-white px-4 py-8 text-center text-sm text-slate-600 shadow-sm">
-                {t("resultsTab.noResults")}
-              </div>
-            )}
             {predictionSets.map((ps) => (
               <div
                 key={ps.id}
@@ -744,14 +794,10 @@ export default function FunctionalAnnotationPage() {
                   </div>
                 </div>
               ))}
-
-              {predictionSets.length === 0 && (
-                <div className="px-4 py-8 text-center text-sm text-slate-600">
-                  {t("resultsTab.noResults")}
-                </div>
-              )}
             </div>
           </div>
+            </>
+          )}
         </div>
       )}
     </>

@@ -590,6 +590,12 @@
       "title": "Ergebnisse",
       "refresh": "Aktualisieren",
       "noResults": "Noch keine Annotationsergebnisse. Starten Sie einen Annotations-Job im Tab „Annotation starten“.",
+      "emptyHero": {
+        "title": "Noch keine Annotation ausgeführt",
+        "body": "Jeder Lauf erzeugt ein PredictionSet mit GO-Scores pro Protein, ladbar als TSV oder exportierbar nach cafaeval. Sobald Sie den ersten Lauf im vorherigen Tab starten, erscheint er hier.",
+        "ctaPrimary": "Zu Annotation starten",
+        "ctaSecondary": "Beispiele finden Sie auch unter /benchmark"
+      },
       "tableHeaders": {
         "id": "ID",
         "config": "Konfiguration",
