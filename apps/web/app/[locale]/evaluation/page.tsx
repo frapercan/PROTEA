@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { ContextBanner } from "@/components/ContextBanner";
+import { GoaReleaseTimeline } from "@/components/GoaReleaseTimeline";
 import {
   listAnnotationSets, listPredictionSets, listScoringConfigs,
   listRerankers, baseUrl,
@@ -100,9 +101,12 @@ const deleteEvaluationSet = (evalId: string) =>
   fetch(`${baseUrl()}/annotations/evaluation-sets/${evalId}`, { method: "DELETE" });
 
 function setLabel(s: AnnotationSet) {
-  const date = new Date(s.created_at).toLocaleDateString();
+  const date = s.source_published_at
+    ? new Date(s.source_published_at).toISOString().slice(0, 10)
+    : new Date(s.created_at).toLocaleDateString();
   const count = s.annotation_count != null ? ` · ${s.annotation_count.toLocaleString()} ann.` : "";
-  return `[${s.source.toUpperCase()}] ${s.source_version ?? "—"} · ${date}${count}`;
+  const version = s.source_version != null ? `v${s.source_version}` : "?";
+  return `[${s.source.toUpperCase()}] ${version} · ${date}${count}`;
 }
 
 function predLabel(p: PredictionSet) {
@@ -752,6 +756,8 @@ export default function EvaluationPage() {
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState("");
   const [selectedEvalId, setSelectedEvalId] = useState("");
+  const [refreshingDates, setRefreshingDates] = useState(false);
+  const [refreshError, setRefreshError] = useState("");
 
   const reload = () =>
     Promise.all([listAnnotationSets(), listPredictionSets(), listEvaluationSets(), listScoringConfigs(), listRerankers()])
@@ -788,6 +794,30 @@ export default function EvaluationPage() {
     }
   }
 
+  async function handleRefreshReleaseDates() {
+    setRefreshingDates(true);
+    setRefreshError("");
+    try {
+      await apiFetch("/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          operation: "refresh_goa_release_dates",
+          queue_name: "protea.jobs",
+          payload: {},
+        }),
+      });
+      // Re-fetch after a short delay so the just-queued job has time
+      // to run (small HTTP+SQL op, completes in seconds).
+      await new Promise((r) => setTimeout(r, 3500));
+      await reload();
+    } catch (e: any) {
+      setRefreshError(e.message ?? "Unknown error");
+    } finally {
+      setRefreshingDates(false);
+    }
+  }
+
   if (loading) return <div className="p-8 text-sm text-slate-500">Loading…</div>;
 
   return (
@@ -803,6 +833,31 @@ export default function EvaluationPage() {
         ]}
         nextStep={{ label: "Scoring configs", href: "/scoring" }}
       />
+
+      {/* ── Loaded releases (temporal axis) ───────────────────────── */}
+      {annotationSets.length > 0 && (
+        <section className="space-y-2">
+          <GoaReleaseTimeline
+            sets={annotationSets}
+            selectedId={oldSetId || newSetId}
+            onSelect={(s) => {
+              if (!oldSetId) setOldSetId(s.id);
+              else if (!newSetId && s.id !== oldSetId) setNewSetId(s.id);
+              else {
+                setOldSetId(s.id);
+                setNewSetId("");
+              }
+            }}
+            refreshing={refreshingDates}
+            onRefresh={handleRefreshReleaseDates}
+          />
+          {refreshError && (
+            <p className="rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              {refreshError}
+            </p>
+          )}
+        </section>
+      )}
 
       {/* ── Generate Evaluation Set ───────────────────────────────── */}
       <section className="rounded-lg border border-slate-200 p-6 space-y-5">
