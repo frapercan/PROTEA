@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useToast } from "@/components/Toast";
 import { SkeletonTableRow } from "@/components/Skeleton";
+import { ProteinsStatsAnalytics } from "@/components/ProteinsStatsAnalytics";
 import { useTranslations } from "next-intl";
 import { useUrlParam } from "@/lib/useUrlParam";
 import {
@@ -346,40 +347,47 @@ export default function ProteinsPage() {
               {t("statsTab.refresh")}
             </button>
           </div>
-          {loadingStats && <p className="text-sm text-slate-600">{t("statsTab.loading")}</p>}
-          {stats && (
-            <div className="space-y-6">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 mb-3">{t("statsTab.overview")}</p>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  <StatCard label={t("statsTab.totalProteins")} value={stats.total} />
-                  <StatCard label={t("statsTab.canonical")} value={stats.canonical} sub={t("statsTab.isoforms", { count: stats.isoforms.toLocaleString() })} />
-                  <StatCard label={t("statsTab.reviewed")} value={stats.reviewed} sub={t("statsTab.reviewedSub")} />
-                  <StatCard label={t("statsTab.unreviewed")} value={stats.unreviewed} sub={t("statsTab.unreviewedSub")} />
-                </div>
-              </div>
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 mb-3">{t("statsTab.coverage")}</p>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  <StatCard
-                    label={t("statsTab.withMetadata")}
-                    value={stats.with_metadata}
-                    sub={stats.canonical > 0 ? t("statsTab.metadataSub", { percent: Math.round((stats.with_metadata / stats.canonical) * 100) }) : undefined}
-                  />
-                  <StatCard
-                    label={t("statsTab.withEmbeddings")}
-                    value={stats.with_embeddings}
-                    sub={stats.total > 0 ? t("statsTab.embeddingsSub", { percent: Math.round((stats.with_embeddings / stats.total) * 100) }) : undefined}
-                  />
-                  <StatCard
-                    label={t("statsTab.withGoAnnotations")}
-                    value={stats.with_go_annotations}
-                    sub={stats.total > 0 ? t("statsTab.goAnnotationsSub", { percent: Math.round((stats.with_go_annotations / stats.total) * 100) }) : undefined}
-                  />
-                </div>
-              </div>
+          {loadingStats && !stats && <p className="text-sm text-slate-600">{t("statsTab.loading")}</p>}
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-4">
+            {/* Left column: fast summary cards. The misleading "with-embeddings"
+                and TrEMBL-zero cards are dropped per design feedback; the
+                per-PLM coverage card on the right replaces them with the
+                actually-interesting breakdown. */}
+            <div className="space-y-4">
+              {stats && (
+                <>
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 mb-3">{t("statsTab.overview")}</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <StatCard label={t("statsTab.totalProteins")} value={stats.total} />
+                      <StatCard label={t("statsTab.canonical")} value={stats.canonical} sub={t("statsTab.isoforms", { count: stats.isoforms.toLocaleString() })} />
+                      <StatCard label={t("statsTab.reviewed")} value={stats.reviewed} sub={t("statsTab.reviewedSub")} />
+                      <StatCard
+                        label={t("statsTab.withGoAnnotations")}
+                        value={stats.with_go_annotations}
+                        sub={stats.total > 0 ? t("statsTab.goAnnotationsSub", { percent: Math.round((stats.with_go_annotations / stats.total) * 100) }) : undefined}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 mb-3">{t("statsTab.coverage")}</p>
+                    <div className="grid grid-cols-1 gap-3">
+                      <StatCard
+                        label={t("statsTab.withMetadata")}
+                        value={stats.with_metadata}
+                        sub={stats.canonical > 0 ? t("statsTab.metadataSub", { percent: Math.round((stats.with_metadata / stats.canonical) * 100) }) : undefined}
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
-          )}
+            {/* Right column: lazy-loaded analytical breakdowns. Each card
+                fetches its endpoint on first viewport entry. */}
+            <div className="min-w-0">
+              <ProteinsStatsAnalytics />
+            </div>
+          </div>
         </div>
       )}
 
