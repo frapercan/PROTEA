@@ -96,6 +96,18 @@ class Settings:
     # full resolution chain (env > artifact store > repo fallback).
     anc2vec_path: str | None = None
 
+    # SMTP settings for optional email-driven auth flows (FARM-AUTH.11).
+    # All fields are optional; SMTP features are disabled when
+    # ``smtp_enabled`` is False (the default). Set PROTEA_SMTP_ENABLED=true
+    # and supply the remaining PROTEA_SMTP_* vars to activate magic-link
+    # login and password-reset flows.
+    smtp_enabled: bool = False
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    smtp_from_addr: str | None = None
+
 
 class _YamlConfigSource(PydanticBaseSettingsSource):
     """Pydantic-settings source that reads ``protea/config/system.yaml``.
@@ -198,6 +210,13 @@ def _make_settings_cls(env_prefix: str, env_file: Path | None) -> type[BaseSetti
         minio_secret_key: str | None = None
         minio_secure: bool = False
         anc2vec_path: str | None = None
+        # SMTP (FARM-AUTH.11)
+        smtp_enabled: bool = False
+        smtp_host: str | None = None
+        smtp_port: int = 587
+        smtp_user: str | None = None
+        smtp_password: str | None = None
+        smtp_from_addr: str | None = None
         # ``allowed_origins`` is stored as a list internally so pydantic's
         # JSON-mode env parsing does not try to JSON-decode the raw
         # comma-separated env value. The field validator below normalises
@@ -321,6 +340,12 @@ def _materialise(raw: Any, project_root: Path) -> Settings:
         minio_secure=raw.minio_secure,
         allowed_origins=allowed,
         anc2vec_path=raw.anc2vec_path,
+        smtp_enabled=raw.smtp_enabled,
+        smtp_host=raw.smtp_host,
+        smtp_port=raw.smtp_port,
+        smtp_user=raw.smtp_user,
+        smtp_password=raw.smtp_password,
+        smtp_from_addr=raw.smtp_from_addr,
     )
 
 
