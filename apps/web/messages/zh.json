@@ -1131,7 +1131,7 @@
       "accept": "我已了解并接受",
       "identification": {
         "heading": "运营方",
-        "body": "PROTEA 由 Francisco Miguel Pérez Canales 作为塞维利亚大学（Universidad de Sevilla）博士研究的一部分进行开发，由 David Orellana-Martín 和 Ana M. Rojas 共同指导。本部署由作者个人运营，不属于塞维利亚大学的官方服务。"
+        "body": "这是一个非商业的学术研究部署，由个人独立运营。不构成任何机构的官方服务。"
       },
       "asIs": {
         "heading": "无任何担保",
@@ -1143,7 +1143,7 @@
       },
       "privacyLog": {
         "heading": "隐私与日志",
-        "body": "无需注册账户。服务器将 IP 地址与请求时间戳保留 30 天，用于防止滥用。不使用任何跟踪 Cookie。数据主体请求（访问、删除、更正）请联系：frapercan1@alum.us.es。"
+        "body": "无需账户。服务器在 30 天内记录 IP 地址和请求时间戳，仅用于防止滥用。无跟踪 cookie。数据保护请求（访问、删除、更正）：请在项目的 GitHub 仓库上开一个 issue。"
       },
       "license": {
         "heading": "许可证",

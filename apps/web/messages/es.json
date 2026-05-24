@@ -1135,7 +1135,7 @@
       "accept": "Entiendo y acepto",
       "identification": {
         "heading": "Responsable",
-        "body": "PROTEA es desarrollado por Francisco Miguel Pérez Canales como parte de una investigación doctoral en la Universidad de Sevilla, bajo la cosupervisión de David Orellana-Martín y Ana M. Rojas. Este despliegue lo opera personalmente el autor y NO constituye un servicio oficial de la Universidad de Sevilla."
+        "body": "Este es un despliegue de investigación académica sin ánimo de lucro, operado de forma personal e independiente. NO constituye un servicio oficial de ninguna institución."
       },
       "asIs": {
         "heading": "Sin garantías",
@@ -1147,7 +1147,7 @@
       },
       "privacyLog": {
         "heading": "Privacidad y registros",
-        "body": "No se requieren cuentas. El servidor registra direcciones IP y marcas de tiempo de las peticiones durante 30 días para la prevención de abusos. Sin cookies de seguimiento. Solicitudes en materia de protección de datos (acceso, supresión, rectificación): frapercan1@alum.us.es."
+        "body": "No se requieren cuentas. El servidor registra direcciones IP y marcas de tiempo de las peticiones durante 30 días para la prevención de abusos. Sin cookies de seguimiento. Solicitudes en materia de protección de datos (acceso, supresión, rectificación): abre una incidencia en el repositorio del proyecto en GitHub."
       },
       "license": {
         "heading": "Licencia",
