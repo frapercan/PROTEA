@@ -1,5 +1,5 @@
-ADR-D37: Single auth system, manual approvals, multi-instance (FEAT-AUTH-V2)
-============================================================================
+ADR-D37: Single auth system, manual approvals, multi-instance (FEAT-AUTH)
+=========================================================================
 
 :Status: Proposed
 :Date: 2026-05-24

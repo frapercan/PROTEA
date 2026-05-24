@@ -223,7 +223,7 @@ later revision).
      - Accepted
      - F-EXP-RESET
    * - D37
-     - :doc:`Single auth system, manual approvals, multi-instance (FEAT-AUTH-V2) <D37-feat-auth-v2-users-roles-multi-instance>`
+     - :doc:`Single auth system, manual approvals, multi-instance (FEAT-AUTH) <D37-feat-auth-users-roles-multi-instance>`
      - Proposed
      - F-AUTH
 
@@ -274,4 +274,4 @@ later revision).
    D34-selective-rerank-resurrection
    D35-canonical-8plm-embedding-configs
    D36-plm-axis-explicit-in-dataset-naming
-   D37-feat-auth-v2-users-roles-multi-instance
+   D37-feat-auth-users-roles-multi-instance

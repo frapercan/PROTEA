@@ -169,4 +169,4 @@ Key ADRs that affect ongoing development. Full catalog at `docs/source/adr/`.
 - **D34** (Accepted): Selective rerank resurrection (recompute on v226, not archaeology)
 - **D35** (Accepted): Canonical 8-PLM embedding config IDs and orphan classification
 - **D36** (Accepted): PLM axis explicit in dataset naming (bench-v1-K{k}-v{band}-lineage-{plm})
-- **D37** (Proposed): Single auth system, manual approvals, multi-instance (FEAT-AUTH-V2); supersedes D6
+- **D37** (Proposed): Single auth system, manual approvals, multi-instance (FEAT-AUTH); supersedes D6

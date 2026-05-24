@@ -103,6 +103,14 @@ _ALLOWLIST: frozenset[tuple[str, str]] = frozenset(
         # routes (/ground-truth-NK.tsv, -LK.tsv, -PK.tsv) ARE documented in the
         # api.rst endpoints-summary table and therefore covered elsewhere.
         ("GET", "/annotations/evaluation-sets/{*}/ground-truth-{*}.tsv"),
+        # F-AUTH phase routes (ADR D37): cited in ADR prose as the design target
+        # but not yet implemented in the OpenAPI schema.  Remove from allowlist
+        # once FARM-AUTH.1-FARM-AUTH.5 ships and openapi.json is regenerated.
+        ("POST", "/auth/signup"),
+        ("POST", "/maintenance"),
+        ("GET", "/admin/audit"),
+        ("GET", "/workers/status"),
+        ("DELETE", "/users/{*}"),
     ]
 )
 
