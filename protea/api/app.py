@@ -23,6 +23,7 @@ from protea.api.routers import annotate as annotate_router
 from protea.api.routers import annotations as annotations_router
 from protea.api.routers import auth_api_keys as auth_api_keys_router
 from protea.api.routers import auth_login as auth_login_router
+from protea.api.routers import auth_user as auth_user_router
 from protea.api.routers import benchmark as benchmark_router
 from protea.api.routers import datasets as datasets_router
 from protea.api.routers import embeddings as embeddings_router
@@ -162,6 +163,7 @@ _ROUTER_MODULES = (
     annotate_router,
     auth_api_keys_router,
     auth_login_router,
+    auth_user_router,
     jobs_router,
     proteins_router,
     proteins_stats_router,
