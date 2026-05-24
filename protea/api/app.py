@@ -437,6 +437,9 @@ def create_app(project_root: Path | None = None) -> FastAPI:
     app.state.artifacts_dir = settings.artifacts_dir
     app.state.operation_registry = build_operation_registry()
     app.state.benchmark_config = load_benchmark_config(project_root)
+    # FARM-AUTH.7: expose quota limits so the dependency can read them
+    # without importing the full Settings object.
+    app.state.user_quota_per_day = settings.user_quota_per_day
 
     # T5.1a: boot OpenTelemetry before middlewares so FastAPI
     # instrumentation wraps the full middleware chain. Disabled by

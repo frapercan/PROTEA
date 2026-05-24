@@ -44,3 +44,12 @@ def get_benchmark_config(request: Request) -> BenchmarkConfig:
     if cfg is None:
         raise RuntimeError("app.state.benchmark_config is not set")
     return cfg  # type: ignore[no-any-return]
+
+
+def get_user_quota_per_day(request: Request) -> dict[str, int]:
+    """Return the per-user daily quota limit map from app state (FARM-AUTH.7)."""
+    quotas = getattr(request.app.state, "user_quota_per_day", None)
+    if quotas is None:
+        # Fail-safe: return generous defaults rather than crashing.
+        return {"predict": 100, "export_research_dataset": 5, "run_cafa_evaluation": 20}
+    return quotas  # type: ignore[no-any-return]

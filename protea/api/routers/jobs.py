@@ -9,11 +9,19 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session, sessionmaker
 
-from protea.api.deps import get_amqp_url, get_operation_registry, get_session_factory
+from protea.api.auth.user_quota import _authn_required, _enforce_quota, _resolve_user_id
+from protea.api.bearer import BearerPrincipal
+from protea.api.deps import (
+    get_amqp_url,
+    get_operation_registry,
+    get_session_factory,
+    get_user_quota_per_day,
+)
 from protea.api.rate_limit import jobs_limit, limiter
-from protea.api.roles import ROLE_OPERATOR, require_role
+from protea.api.roles import ROLE_ADMIN, ROLE_OPERATOR, require_role, role_of
 from protea.core.contracts.registry import OperationRegistry
 from protea.core.utils import utcnow
+from protea.infrastructure.orm.models.api_key import ApiKey
 from protea.infrastructure.orm.models.job import Job, JobComment, JobEvent, JobStatus
 from protea.infrastructure.queue.publisher import publish_job
 from protea.infrastructure.session import session_scope
@@ -198,6 +206,64 @@ class CreateJobRequest(BaseModel):
         return v.strip()
 
 
+# Operations that consume the per-user daily quota on POST /jobs.
+_QUOTA_GATED_OPERATIONS: frozenset[str] = frozenset(
+    {"export_research_dataset", "run_cafa_evaluation"}
+)
+
+
+class _CreateJobDeps(NamedTuple):
+    """Bundle of resolved deps for ``POST /jobs`` so the route signature
+    stays under the §3 6-param ceiling without losing FastAPI injection."""
+
+    factory: sessionmaker[Session]
+    amqp_url: str
+    quota_map: dict[str, int]
+
+
+def _create_job_deps(
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+    amqp_url: str = Depends(get_amqp_url),
+    quota_map: dict[str, int] = Depends(get_user_quota_per_day),
+) -> _CreateJobDeps:
+    return _CreateJobDeps(factory=factory, amqp_url=amqp_url, quota_map=quota_map)
+
+
+def _maybe_enforce_user_quota(
+    principal: ApiKey | BearerPrincipal | None,
+    body: CreateJobRequest,
+    quota_map: dict[str, int],
+    factory: sessionmaker[Session],
+) -> None:
+    """Apply per-user daily quota for the gated operations; no-op for admins
+    and for unauthenticated callers when auth is off. DB errors fail open
+    so a transient blip never blocks a real job create."""
+    if not _authn_required():
+        return
+    if body.operation not in _QUOTA_GATED_OPERATIONS:
+        return
+    if role_of(principal) == ROLE_ADMIN:
+        return
+    user_id = _resolve_user_id(principal)
+    if user_id is None:
+        return
+    limit = quota_map.get(body.operation, 0)
+    try:
+        with session_scope(factory) as quota_session:
+            _enforce_quota(quota_session, user_id, body.operation, limit)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        import logging as _logging
+
+        _logging.getLogger(__name__).warning(
+            "user_quota DB error for user_id=%s operation=%r; allowing: %s",
+            user_id,
+            body.operation,
+            exc,
+        )
+
+
 @router.post(
     "",
     summary="Create and enqueue a job",
@@ -208,14 +274,18 @@ def create_job(
     request: Request,
     response: Response,
     body: CreateJobRequest,
-    factory: sessionmaker[Session] = Depends(get_session_factory),
-    amqp_url: str = Depends(get_amqp_url),
+    deps: _CreateJobDeps = Depends(_create_job_deps),
+    principal: ApiKey | BearerPrincipal | None = Depends(require_role(ROLE_OPERATOR)),
 ) -> dict[str, Any]:
     """Create a Job row and publish its ID to the specified RabbitMQ queue.
 
-    The job transitions `QUEUED → RUNNING → SUCCEEDED/FAILED` as the worker processes it.
-    Use `GET /jobs/{id}/events` to poll structured progress events in real time.
+    Expensive operations (``export_research_dataset``, ``run_cafa_evaluation``) are
+    subject to per-user daily quota limits (FARM-AUTH.7). Admins are exempt.
     """
+    factory = deps.factory
+    amqp_url = deps.amqp_url
+    quota_map = deps.quota_map
+    _maybe_enforce_user_quota(principal, body, quota_map, factory)
     with session_scope(factory) as session:
         job = Job(
             operation=body.operation,

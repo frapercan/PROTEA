@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
 
+from protea.api.auth.user_quota import require_user_quota
 from protea.api.cache import cached, invalidate
 from protea.api.deps import get_amqp_url, get_session_factory
 from protea.api.roles import ROLE_OPERATOR, require_role
@@ -181,7 +182,14 @@ def delete_embedding_config(
 # ── Predict ───────────────────────────────────────────────────────────────────
 
 
-@router.post("/predict", summary="Trigger GO term prediction", dependencies=[Depends(require_role(ROLE_OPERATOR))])
+@router.post(
+    "/predict",
+    summary="Trigger GO term prediction",
+    dependencies=[
+        Depends(require_role(ROLE_OPERATOR)),
+        Depends(require_user_quota("predict")),
+    ],
+)
 def predict_go_terms(
     body: dict[str, Any],
     factory: sessionmaker[Session] = Depends(get_session_factory),
