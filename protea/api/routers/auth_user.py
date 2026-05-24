@@ -1,10 +1,9 @@
-"""``/auth/signup``, ``/auth/login``, ``/auth/logout``, ``GET /auth/me`` — User identity flow (FARM-AUTH.3).
+"""``/auth/signup``, ``/auth/login``, ``/auth/logout``, ``GET /auth/me``: User identity flow (FARM-AUTH.3/AUTH.8).
 
-Implements the four endpoints that wire User-based authentication end-to-end.
-Session storage is an in-memory dict keyed by a random ``jti`` (JWT ID).
-A real session-revocation table is deferred to FARM-AUTH.8; this slice
-keeps it intentionally simple so subsequent slices can depend on a
-working authenticated session without waiting for the full store.
+AUTH.3 shipped the four core endpoints with an in-memory ``_SESSION_STORE``
+dict. AUTH.8 replaces that dict with a persistent ``user_session`` table
+so logout invalidates tokens server-wide across all replicas and an admin
+can revoke a user's sessions at any time.
 
 Cookie contract (ADR D37)
 -------------------------
@@ -14,29 +13,32 @@ Cookie contract (ADR D37)
 * Attributes: ``HttpOnly``, ``Secure``, ``SameSite=strict``, ``Max-Age=2592000`` (30 days)
 * Payload: ``{sub, jti, role, status, exp, iat}``
 
-The ``jti`` (JWT ID) is a random UUID written to the in-memory session
-store at login. Logout deletes the ``jti`` entry so a captured token
-cannot be replayed after the user has signed out.
+The ``jti`` (JWT ID) is a random UUID. On login a ``user_session`` row is
+inserted with ``token_hash = sha256(raw_jwt)``. On logout the row's
+``revoked_at`` is set to now(). ``/me`` looks up the row by token_hash,
+rejects it when ``revoked_at`` is not null, and updates ``last_seen_at``.
 
 Status semantics (from ADR D37 + User.status enum)
 ---------------------------------------------------
 
-* ``pending``     — signup done, admin approval required. Login returns 403.
-* ``active``      — approved; authentication succeeds.
-* ``deactivated`` — admin-disabled. Login returns 403.
+* ``pending``     - signup done, admin approval required. Login returns 403.
+* ``active``      - approved; authentication succeeds.
+* ``deactivated`` - admin-disabled. Login returns 403.
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import secrets
 import time
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
 import jwt
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -44,24 +46,15 @@ from sqlalchemy.orm import Session, sessionmaker
 from protea.api.auth.audit import audit_event
 from protea.api.auth.passwords import hash_password, verify_password
 from protea.api.deps import get_session_factory
+from protea.api.roles import ROLE_ADMIN, require_role
 from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.user import User, UserRole, UserStatus
+from protea.infrastructure.orm.models.user_session import UserSession
 from protea.infrastructure.session import session_scope
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-
-# ---------------------------------------------------------------------------
-# Session store — in-memory dict for FARM-AUTH.3; replaced in FARM-AUTH.8
-# ---------------------------------------------------------------------------
-
-# Maps jti (str UUID) -> user_id (str UUID). Login writes; logout deletes;
-# /me verifies presence. Intentionally not thread-safe at the dict level —
-# FastAPI/uvicorn runs in a single event-loop thread for requests and the
-# dict ops are atomic at the CPython level. A real deployment would swap
-# this for a DB-backed table (FARM-AUTH.8) or Redis.
-_SESSION_STORE: dict[str, str] = {}
 
 # ---------------------------------------------------------------------------
 # JWT helpers
@@ -104,6 +97,74 @@ def _decode_session_jwt(token: str, secret: str) -> dict[str, Any]:
         )
     except jwt.InvalidTokenError as exc:
         raise HTTPException(status_code=401, detail=f"Invalid session token: {exc}") from exc
+
+
+def _hash_token(raw_token: str) -> str:
+    """Return the SHA-256 hex digest of a raw JWT string."""
+    return hashlib.sha256(raw_token.encode()).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# Session DB helpers
+# ---------------------------------------------------------------------------
+
+
+def create_session(
+    session: Session,
+    *,
+    user_id: UUID,
+    raw_token: str,
+    expires_at: datetime,
+    user_agent: str | None = None,
+    client_ip_hash: str | None = None,
+) -> UserSession:
+    """Insert a new UserSession row and flush it within the caller's transaction."""
+    row = UserSession(
+        user_id=user_id,
+        token_hash=_hash_token(raw_token),
+        expires_at=expires_at,
+        last_seen_at=utcnow(),
+        user_agent=user_agent,
+        client_ip_hash=client_ip_hash,
+    )
+    session.add(row)
+    session.flush()
+    return row
+
+
+def find_session(session: Session, raw_token: str) -> UserSession | None:
+    """Return the UserSession row for a token, or None if not found."""
+    token_hash = _hash_token(raw_token)
+    return (
+        session.query(UserSession)
+        .filter(UserSession.token_hash == token_hash)
+        .first()
+    )
+
+
+def revoke_session(session: Session, raw_token: str) -> bool:
+    """Mark the session as revoked; returns True when a live row was found."""
+    row = find_session(session, raw_token)
+    if row is None:
+        return False
+    if row.revoked_at is None:
+        row.revoked_at = utcnow()
+        session.flush()
+    return True
+
+
+def revoke_all_sessions(session: Session, user_id: UUID) -> int:
+    """Revoke every non-revoked session for the given user; returns count."""
+    now = utcnow()
+    rows = (
+        session.query(UserSession)
+        .filter(UserSession.user_id == user_id, UserSession.revoked_at.is_(None))
+        .all()
+    )
+    for row in rows:
+        row.revoked_at = now
+    session.flush()
+    return len(rows)
 
 
 # ---------------------------------------------------------------------------
@@ -248,17 +309,20 @@ def signup(
 
 @router.post("/login", status_code=200, summary="Authenticate with email and password", operation_id="user_login")
 def login(
+    request: Request,
     response: Response,
     body: LoginRequest,
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
     """Verify credentials and issue a session cookie.
 
-    * 200 + cookie — credentials valid, account active.
-    * 401          — wrong email or wrong password (generic message to avoid user enumeration).
-    * 403          — valid credentials but account not yet approved (``account_pending_approval``)
+    * 200 + cookie - credentials valid, account active.
+    * 401          - wrong email or wrong password (generic message to avoid user enumeration).
+    * 403          - valid credentials but account not yet approved (``account_pending_approval``)
                      or has been deactivated (``account_deactivated``).
 
+    On success a ``user_session`` row is inserted with the token hash so
+    the session can be revoked server-side without waiting for JWT expiry.
     ``last_login_at`` is updated on every successful login.
     """
     secret = _read_secret()
@@ -269,40 +333,60 @@ def login(
         )
 
     with session_scope(factory) as session:
-        user = session.query(User).filter(User.email == body.email).first()
-        if user is None or not verify_password(body.password, user.password_hash):
-            audit_event(session, "login_fail", actor_id=None, email=body.email)
-            raise HTTPException(status_code=401, detail="invalid_credentials")
-
-        if user.status is UserStatus.PENDING:
-            audit_event(session, "login_fail", actor_id=str(user.id), reason="account_pending_approval")
-            raise HTTPException(status_code=403, detail="account_pending_approval")
-        if user.status is UserStatus.DEACTIVATED:
-            audit_event(session, "login_fail", actor_id=str(user.id), reason="account_deactivated")
-            raise HTTPException(status_code=403, detail="account_deactivated")
-
+        user = _authenticate_or_raise(session, body)
+        _check_account_status_or_raise(session, user)
         user.last_login_at = utcnow()
-        jti = secrets.token_hex(16)
-        user_id = str(user.id)
-        role = user.role.value
-        status = user.status.value
-        email = user.email
-        username = user.username
-        display_name = user.display_name
-        audit_event(session, "login_ok", actor_id=user_id)
+        token, claims = _issue_login_session(session, user, secret, request)
+        audit_event(session, "login_ok", actor_id=claims["id"])
         session.flush()
 
-    _SESSION_STORE[jti] = user_id
-    token = _mint_session_jwt(user_id, role, status, jti, secret)
     _set_session_cookie(response, token)
-    return {
+    return claims
+
+
+def _authenticate_or_raise(session: Session, body: LoginRequest) -> User:
+    user = session.query(User).filter(User.email == body.email).first()
+    if user is None or not verify_password(body.password, user.password_hash):
+        audit_event(session, "login_fail", actor_id=None, email=body.email)
+        raise HTTPException(status_code=401, detail="invalid_credentials")
+    return user
+
+
+def _check_account_status_or_raise(session: Session, user: User) -> None:
+    if user.status is UserStatus.PENDING:
+        audit_event(session, "login_fail", actor_id=str(user.id), reason="account_pending_approval")
+        raise HTTPException(status_code=403, detail="account_pending_approval")
+    if user.status is UserStatus.DEACTIVATED:
+        audit_event(session, "login_fail", actor_id=str(user.id), reason="account_deactivated")
+        raise HTTPException(status_code=403, detail="account_deactivated")
+
+
+def _issue_login_session(
+    session: Session, user: User, secret: str, request: Request
+) -> tuple[str, dict[str, Any]]:
+    jti = secrets.token_hex(16)
+    user_id = str(user.id)
+    role = user.role.value
+    status = user.status.value
+    token = _mint_session_jwt(user_id, role, status, jti, secret)
+    expires_at = datetime.fromtimestamp(int(time.time()) + _COOKIE_MAX_AGE, tz=UTC)
+    ua = request.headers.get("user-agent")
+    create_session(
+        session,
+        user_id=user.id,
+        raw_token=token,
+        expires_at=expires_at,
+        user_agent=ua[:512] if ua else None,
+    )
+    claims = {
         "id": user_id,
-        "email": email,
-        "username": username,
-        "display_name": display_name,
+        "email": user.email,
+        "username": user.username,
+        "display_name": user.display_name,
         "role": role,
         "status": status,
     }
+    return token, claims
 
 
 @router.post("/logout", status_code=204, summary="Invalidate the current session", operation_id="user_logout")
@@ -311,10 +395,11 @@ def logout(
     protea_session: str | None = Cookie(default=None),
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> None:
-    """Clear the session cookie and invalidate the server-side session token.
+    """Clear the session cookie and revoke the server-side session row.
 
     Returns 204 both when a valid session was found and when no cookie
-    was present (idempotent logout).
+    was present (idempotent logout). Sets ``revoked_at`` on the
+    ``user_session`` row so a captured token cannot be replayed.
     """
     actor_id: str | None = None
     if protea_session is not None:
@@ -322,14 +407,16 @@ def logout(
         if secret is not None:
             try:
                 claims = _decode_session_jwt(protea_session, secret)
-                jti = claims.get("jti")
-                if isinstance(jti, str):
-                    actor_id = _SESSION_STORE.pop(jti, None)
+                actor_id = claims.get("sub")
             except HTTPException:
-                # Malformed / expired token — still clear the cookie.
+                # Malformed / expired token: still clear the cookie.
                 pass
-    with session_scope(factory) as session:
-        audit_event(session, "logout", actor_id=actor_id)
+            with session_scope(factory) as session:
+                revoke_session(session, protea_session)
+                audit_event(session, "logout", actor_id=actor_id)
+    else:
+        with session_scope(factory) as session:
+            audit_event(session, "logout", actor_id=None)
     _clear_session_cookie(response)
 
 
@@ -340,8 +427,10 @@ def me(
 ) -> dict[str, Any]:
     """Return ``{id, email, username, display_name, role, status}`` for the session user.
 
-    Returns 401 when no valid session cookie is present or when the
-    session has been invalidated via ``POST /auth/logout``.
+    Returns 401 when no valid session cookie is present, when the JWT
+    is expired/invalid, or when the session has been revoked via
+    ``POST /auth/logout`` or the admin revoke endpoint.
+    Updates ``last_seen_at`` on every successful call.
     """
     if protea_session is None:
         raise HTTPException(status_code=401, detail="not_authenticated")
@@ -351,10 +440,6 @@ def me(
         raise HTTPException(status_code=503, detail="Bearer authentication is not configured")
 
     claims = _decode_session_jwt(protea_session, secret)
-
-    jti = claims.get("jti")
-    if not isinstance(jti, str) or jti not in _SESSION_STORE:
-        raise HTTPException(status_code=401, detail="session_revoked")
 
     user_id_str = claims.get("sub")
     if not isinstance(user_id_str, str):
@@ -366,6 +451,16 @@ def me(
         raise HTTPException(status_code=401, detail="invalid_session_payload") from exc
 
     with session_scope(factory) as session:
+        # Validate the session row exists and is not revoked.
+        sess_row = find_session(session, protea_session)
+        if sess_row is None:
+            raise HTTPException(status_code=401, detail="session_revoked")
+        if sess_row.revoked_at is not None:
+            raise HTTPException(status_code=401, detail="session_revoked")
+
+        # Update last_seen_at so admins can distinguish stale from active sessions.
+        sess_row.last_seen_at = utcnow()
+
         user = session.get(User, user_id)
         if user is None:
             raise HTTPException(status_code=401, detail="user_not_found")
@@ -379,4 +474,50 @@ def me(
         }
 
 
-__all__ = ["router", "_SESSION_STORE"]
+# ---------------------------------------------------------------------------
+# Admin endpoint: revoke all sessions for a user
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/admin/revoke-sessions/{user_id}",
+    status_code=200,
+    summary="Revoke all active sessions for a user (admin only)",
+    operation_id="admin_revoke_user_sessions",
+    dependencies=[Depends(require_role(ROLE_ADMIN))],
+)
+def admin_revoke_sessions(
+    user_id: str,
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+    _principal: Any = Depends(require_role(ROLE_ADMIN)),
+) -> dict[str, Any]:
+    """Mark all non-revoked sessions for ``user_id`` as revoked.
+
+    Requires admin role. The target user will be logged out of every
+    active browser/API session on their next request. Idempotent: calling
+    twice for the same user returns count=0 on the second call.
+
+    Emits an ``admin_session_revoke`` audit event with the target user id.
+    """
+    try:
+        target_uuid = UUID(user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="invalid user_id format") from exc
+
+    with session_scope(factory) as session:
+        target_user = session.get(User, target_uuid)
+        if target_user is None:
+            raise HTTPException(status_code=404, detail="user_not_found")
+
+        count = revoke_all_sessions(session, target_uuid)
+        audit_event(
+            session,
+            "admin_session_revoke",
+            target_id=user_id,
+            revoked_count=count,
+        )
+
+    return {"user_id": user_id, "revoked_count": count}
+
+
+__all__ = ["router", "create_session", "find_session", "revoke_session", "revoke_all_sessions"]

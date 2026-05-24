@@ -25,4 +25,5 @@ from .query.query_set import QuerySet, QuerySetEntry  # noqa: F401
 from .sequence.sequence import Sequence  # noqa: F401
 from .support_entry import SupportEntry  # noqa: F401
 from .user import User, UserRole, UserStatus  # noqa: F401
+from .user_session import UserSession  # noqa: F401
 from .visitor_event import VisitorEvent  # noqa: F401
