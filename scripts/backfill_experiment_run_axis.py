@@ -16,6 +16,7 @@ only for historical documentation of the migration.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -293,6 +294,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if not os.getenv("PROTEA_ALLOW_BACKFILL"):
+        print(
+            "ERROR: backfill scripts are disabled by default (one-time use only).",
+            "Set PROTEA_ALLOW_BACKFILL=1 to enable.",
+            sep="\n",
+            file=sys.stderr,
+        )
+        return 1
+
     args = _parse_args(argv)
     dry_run = args.dry_run or not args.commit
 
