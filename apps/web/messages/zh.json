@@ -574,6 +574,12 @@
       "title": "结果",
       "refresh": "刷新",
       "noResults": "暂无注释结果。请在\"运行注释\"标签页运行注释任务。",
+      "emptyHero": {
+        "title": "尚未运行任何注释",
+        "body": "每次运行都会生成一个 PredictionSet，包含每个蛋白的 GO 评分，可下载为 TSV 或导出到 cafaeval。在上一个标签页启动首次运行后，结果将显示在此处。",
+        "ctaPrimary": "前往运行注释",
+        "ctaSecondary": "也可在 /benchmark 查看基准示例"
+      },
       "tableHeaders": {
         "id": "ID",
         "config": "配置",

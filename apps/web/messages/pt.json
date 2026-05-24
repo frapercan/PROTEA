@@ -574,6 +574,12 @@
       "title": "Resultados",
       "refresh": "Atualizar",
       "noResults": "Nenhum resultado de anotação ainda. Execute um job na aba Executar Anotação.",
+      "emptyHero": {
+        "title": "Ainda não há anotações executadas",
+        "body": "Cada execução produz um PredictionSet com scores GO por proteína, baixável como TSV ou exportável para cafaeval. Assim que você iniciar a primeira na aba anterior, ela aparece aqui.",
+        "ctaPrimary": "Ir para Executar Anotação",
+        "ctaSecondary": "Você também pode ver exemplos em /benchmark"
+      },
       "tableHeaders": {
         "id": "ID",
         "config": "Configuração",

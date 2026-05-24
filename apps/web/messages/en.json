@@ -577,6 +577,12 @@
       "title": "Results",
       "refresh": "Refresh",
       "noResults": "No annotation results yet. Run an annotation job from the Run Annotation tab.",
+      "emptyHero": {
+        "title": "No annotations run yet",
+        "body": "Each run produces a PredictionSet with per-protein GO scores, downloadable as TSV or exportable to cafaeval. Once you launch the first one from the previous tab, it shows up here.",
+        "ctaPrimary": "Go to Run Annotation",
+        "ctaSecondary": "You can also see benchmark examples in /benchmark"
+      },
       "tableHeaders": {
         "id": "ID",
         "config": "Config",
