@@ -46,6 +46,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session, aliased, sessionmaker
 
+from protea.api.cache import cached, invalidate
 from protea.api.deps import get_benchmark_config, get_session_factory
 from protea.api.stages import RERANKER_STAGE as _RERANKER_STAGE
 from protea.api.stages import StageKind  # noqa: F401  (re-exported for type hints)
@@ -62,6 +63,11 @@ from protea.infrastructure.orm.models.embedding.scoring_config import ScoringCon
 from protea.infrastructure.session import session_scope
 
 router = APIRouter(prefix="/benchmark", tags=["benchmark"])
+
+BENCHMARK_EMBEDDINGS_CACHE_KEY = "benchmark:embeddings"
+BENCHMARK_EMBEDDINGS_TTL_SECONDS = 300.0
+BENCHMARK_MATRIX_CACHE_KEY = "benchmark:matrix"
+BENCHMARK_MATRIX_TTL_SECONDS = 300.0
 
 # (embedding_id, evaluation_set_id, stage, k, category, aspect)
 _BestKey = tuple[str, str, str, int, str, str]
@@ -178,6 +184,24 @@ def _eval_set_label(
 # ── Endpoints ──────────────────────────────────────────────────────────────
 
 
+def _compute_benchmark_embeddings(
+    factory: sessionmaker[Session],
+) -> dict[str, Any]:
+    """Run the ``EmbeddingConfig`` SELECT and shape the response payload.
+
+    Module-scope so the prewarm hook can share the exact same producer
+    the route caches under.
+    """
+    with session_scope(factory) as session:
+        cfgs = (
+            session.execute(select(EmbeddingConfig).order_by(EmbeddingConfig.created_at.asc()))
+            .scalars()
+            .all()
+        )
+        out = [_embedding_display(cfg) for cfg in cfgs]
+        return {"embeddings": out, "total": len(out)}
+
+
 @router.get(
     "/embeddings",
     summary="List embedding configs with persisted display metadata",
@@ -189,16 +213,29 @@ def list_benchmark_embeddings(
 
     The metadata lives in ``embedding_config.display_name / family /
     param_count``: filled at creation time by the seed scripts. No
-    heuristic inference happens here.
+    heuristic inference happens here. Cached for 5 min; the benchmark
+    page is the first router touch on a fresh deploy so cold pg pages
+    push this past several seconds without the cache.
     """
-    with session_scope(factory) as session:
-        cfgs = (
-            session.execute(select(EmbeddingConfig).order_by(EmbeddingConfig.created_at.asc()))
-            .scalars()
-            .all()
-        )
-        out = [_embedding_display(cfg) for cfg in cfgs]
-        return {"embeddings": out, "total": len(out)}
+    return cached(
+        BENCHMARK_EMBEDDINGS_CACHE_KEY,
+        BENCHMARK_EMBEDDINGS_TTL_SECONDS,
+        lambda: _compute_benchmark_embeddings(factory),
+        serve_stale_on_error=True,
+    )
+
+
+def prewarm_benchmark_embeddings(
+    factory: sessionmaker[Session],
+) -> dict[str, Any]:
+    """Recompute and store ``benchmark:embeddings`` for the lifespan
+    prewarm hook + background refresh loop."""
+    invalidate(BENCHMARK_EMBEDDINGS_CACHE_KEY)
+    return cached(
+        BENCHMARK_EMBEDDINGS_CACHE_KEY,
+        BENCHMARK_EMBEDDINGS_TTL_SECONDS,
+        lambda: _compute_benchmark_embeddings(factory),
+    )
 
 
 @router.get(
@@ -236,6 +273,26 @@ def get_benchmark_matrix(
         agg = _aggregate_benchmark_matrix(session, evaluation_set_id, cfg, stage, k)
         eval_sets_payload = _load_eval_set_metadata(session, agg.eval_set_ids, cfg)
     return _build_matrix_response(agg, eval_sets_payload, cfg, evaluation_set_id, stage, k)
+
+
+def prewarm_benchmark_matrix(
+    factory: sessionmaker[Session],
+) -> None:
+    """Pre-warm the benchmark matrix by running the full EvaluationResult
+    scan with no filters. The underlying pg statement is filter-agnostic
+    (stage/K filters are applied in Python on the materialised rows), so
+    one warm pass populates the buffer cache for every filtered variant
+    the UI requests next. The /matrix endpoint itself is not response-
+    cached: pg-pages-hot is enough to keep the live response sub-100ms,
+    and filter combos multiply too much for a useful in-process cache."""
+    from pathlib import Path
+
+    from protea.infrastructure.benchmark_config import load_benchmark_config
+
+    project_root = Path(__file__).resolve().parents[3]
+    cfg = load_benchmark_config(project_root)
+    with session_scope(factory) as session:
+        _aggregate_benchmark_matrix(session, None, cfg, None, None)
 
 
 def _build_matrix_response(
