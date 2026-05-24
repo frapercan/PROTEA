@@ -1,7 +1,7 @@
 """farm_auth_1_add_user_table
 
 Revision ID: d6e5a7b8c9f1
-Revises: a9c1d2e7f8b0
+Revises: 7b023568309d
 Create Date: 2026-05-24 17:00:00.000000
 
 FARM-AUTH.1 of the F-AUTH phase (ADR D37). Brings up the ``user``
@@ -50,7 +50,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "d6e5a7b8c9f1"
-down_revision: str | Sequence[str] | None = "a9c1d2e7f8b0"
+down_revision: str | Sequence[str] | None = "7b023568309d"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
