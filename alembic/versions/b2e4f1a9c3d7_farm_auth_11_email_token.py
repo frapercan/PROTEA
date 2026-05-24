@@ -1,7 +1,7 @@
 """farm_auth_11_email_token
 
 Revision ID: b2e4f1a9c3d7
-Revises: a1f2b3c4d5e6
+Revises: b201e6d4
 Create Date: 2026-05-24 22:00:00.000000
 
 FARM-AUTH.11 -- one-time email token table for magic-link and
@@ -41,7 +41,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision: str = "b2e4f1a9c3d7"
-down_revision: str | Sequence[str] | None = "a1f2b3c4d5e6"
+down_revision: str | Sequence[str] | None = "b201e6d4"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
