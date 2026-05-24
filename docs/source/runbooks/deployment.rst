@@ -173,8 +173,6 @@ The default tag is ``latest``.
      - Image tag for the ``ghcr.io/frapercan/protea`` image (default ``latest``).
    * - ``PROTEA_FRONTEND_TAG``
      - Image tag for the frontend image (default ``latest``).
-   * - ``PROTEA_ADMIN_TOKEN``
-     - Admin bearer token for the API (default ``protea-admin`` in bundle).
    * - ``PROTEA_ALLOWED_ORIGINS``
      - CORS allowed origins (default ``http://localhost:3000``).
    * - ``PROTEA_API_PORT``
@@ -242,7 +240,6 @@ secrets before the first deploy:
    printf 'change-me-pg' | docker secret create protea_postgres_password -
    printf 'change-me-rmq' | docker secret create protea_rabbitmq_password -
    printf 'change-me-minio' | docker secret create protea_minio_password -
-   printf 'change-me-admin' | docker secret create protea_admin_token -
    printf 'postgresql+psycopg://protea:change-me-pg@postgres:5432/protea' \
        | docker secret create protea_db_url -
    printf 'amqp://protea:change-me-rmq@rabbitmq:5672/' \
@@ -445,9 +442,6 @@ value (e.g. ``PROTEA_DB_URL``) or a file-path variant (e.g.
      - (required)
      - AMQP connection URL for RabbitMQ.
        Format: ``amqp://user:pass@host:5672/``.
-   * - ``PROTEA_ADMIN_TOKEN``
-     - (none)
-     - Bearer token for the admin API endpoints. Unset disables admin access.
    * - ``PROTEA_ALLOWED_ORIGINS``
      - (none)
      - Comma-separated list of allowed CORS origins.

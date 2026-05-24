@@ -27,7 +27,6 @@ def _generate_spec() -> dict[str, Any]:
         allowed_origins=(),
         storage_backend="local",
         artifacts_dir=Path("/tmp/protea-openapi-fake"),
-        admin_token="",
     )
     with (
         patch("protea.api.app.load_settings", return_value=fake_settings),

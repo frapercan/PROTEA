@@ -104,32 +104,10 @@ class TestSourcePriority:
         # Clear any process-wide PROTEA_* env so the defaults shine through.
         monkeypatch.delenv("PROTEA_DB_URL", raising=False)
         monkeypatch.delenv("PROTEA_AMQP_URL", raising=False)
-        monkeypatch.delenv("PROTEA_ADMIN_TOKEN", raising=False)
         s = load_settings(tmp_path)
         assert s.db_url.startswith("postgresql+psycopg://")
         assert s.amqp_url.startswith("amqp://")
-        assert s.admin_token == ""
         assert s.storage_backend == "local"
-
-    def test_dotenv_at_project_root_is_picked_up(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.delenv("PROTEA_ADMIN_TOKEN", raising=False)
-        (tmp_path / ".env").write_text(
-            'PROTEA_ADMIN_TOKEN="from-dotenv"\n', encoding="utf-8"
-        )
-        s = load_settings(tmp_path)
-        assert s.admin_token == "from-dotenv"
-
-    def test_env_beats_dotenv(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        (tmp_path / ".env").write_text(
-            'PROTEA_ADMIN_TOKEN="from-dotenv"\n', encoding="utf-8"
-        )
-        monkeypatch.setenv("PROTEA_ADMIN_TOKEN", "from-env")
-        s = load_settings(tmp_path)
-        assert s.admin_token == "from-env"
 
     def test_yaml_beats_default(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
