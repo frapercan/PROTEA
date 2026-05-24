@@ -1177,3 +1177,153 @@ export function revokeApiKey(id: string) {
     method: "DELETE",
   });
 }
+
+// ---------------------------------------------------------------------------
+// Job comments (D11 narrative thread)
+// ---------------------------------------------------------------------------
+//
+// Mirrors ``POST/GET /jobs/{id}/comments`` in the jobs router.
+
+export type JobComment = {
+  id: number;
+  job_id: string;
+  author: string | null;
+  body: string;
+  created_at: string;
+};
+
+export function listJobComments(jobId: string, params?: { limit?: number; after?: string }) {
+  const q = new URLSearchParams();
+  if (params?.limit !== undefined) q.set("limit", String(params.limit));
+  if (params?.after) q.set("after", params.after);
+  const suffix = q.toString() ? `?${q.toString()}` : "";
+  return http<JobComment[]>(`/jobs/${encodeURIComponent(jobId)}/comments${suffix}`);
+}
+
+export function createJobComment(jobId: string, body: { body: string; author?: string | null }) {
+  return http<JobComment>(`/jobs/${encodeURIComponent(jobId)}/comments`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Dataset import-by-reference (lab -> PROTEA bridge)
+// ---------------------------------------------------------------------------
+//
+// Mirrors ``POST /v1/datasets/import-by-reference`` in the datasets router.
+
+export type ImportDatasetByReferencePayload = {
+  name: string;
+  storage_backend?: string;
+  key_prefix: string;
+  train_uri?: string | null;
+  eval_uri?: string | null;
+  manifest_uri: string;
+  schema_sha: string;
+  manifest_sha?: string | null;
+  k: number;
+  annotation_source?: string;
+  n_train_rows?: number;
+  n_eval_rows?: number;
+  embedding_config_id?: string | null;
+  ontology_snapshot_id?: string | null;
+  train_snapshot_pairs?: string[];
+  eval_snapshot_pair?: string | null;
+  producer_version?: string | null;
+  producer_git_sha?: string | null;
+  external_source?: string | null;
+  force?: boolean;
+};
+
+export function importDatasetByReference(body: ImportDatasetByReferencePayload) {
+  return http<Dataset>(`/v1/datasets/import-by-reference`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Experiment runs (admin — F-EXP campaign narrative spine)
+// ---------------------------------------------------------------------------
+//
+// Mirrors ``protea/api/routers/experiment_runs.py`` mounted at
+// ``/v1/experiment-runs``.  Every research run dispatched by the
+// F-EXP conductor is anchored here; the admin page surfaces CRUD.
+
+export type ExperimentRunStatus = "planned" | "running" | "done" | "abandoned";
+
+export type ExperimentRun = {
+  id: string;
+  name: string;
+  description: string | null;
+  hypothesis: string | null;
+  findings: string | null;
+  status: ExperimentRunStatus;
+  config: Record<string, unknown>;
+  provenance: Record<string, unknown>;
+  tags: string[];
+  created_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+};
+
+export type CreateExperimentRunPayload = {
+  name: string;
+  description?: string | null;
+  hypothesis?: string | null;
+  config?: Record<string, unknown>;
+  provenance?: Record<string, unknown>;
+  tags?: string[];
+};
+
+export type UpdateExperimentRunPayload = {
+  description?: string | null;
+  hypothesis?: string | null;
+  findings?: string | null;
+  status?: ExperimentRunStatus | null;
+  config?: Record<string, unknown> | null;
+  provenance?: Record<string, unknown> | null;
+  tags?: string[] | null;
+};
+
+export function listExperimentRuns(params?: {
+  status?: ExperimentRunStatus;
+  limit?: number;
+  after?: string;
+}) {
+  const q = new URLSearchParams();
+  if (params?.status) q.set("status", params.status);
+  if (params?.limit !== undefined) q.set("limit", String(params.limit));
+  if (params?.after) q.set("after", params.after);
+  const suffix = q.toString() ? `?${q.toString()}` : "";
+  return http<ExperimentRun[]>(`/v1/experiment-runs${suffix}`);
+}
+
+export function getExperimentRun(id: string) {
+  return http<ExperimentRun>(`/v1/experiment-runs/${encodeURIComponent(id)}`);
+}
+
+export function createExperimentRun(body: CreateExperimentRunPayload) {
+  return http<ExperimentRun>(`/v1/experiment-runs`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateExperimentRun(id: string, body: UpdateExperimentRunPayload) {
+  return http<ExperimentRun>(`/v1/experiment-runs/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteExperimentRun(id: string) {
+  return http<void>(`/v1/experiment-runs/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
