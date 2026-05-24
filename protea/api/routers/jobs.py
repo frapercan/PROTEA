@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any, NamedTuple
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -212,6 +212,41 @@ _QUOTA_GATED_OPERATIONS: frozenset[str] = frozenset(
 )
 
 
+def _maybe_enforce_user_quota(
+    principal: ApiKey | BearerPrincipal | None,
+    body: CreateJobRequest,
+    quota_map: dict[str, int],
+    factory: sessionmaker[Session],
+) -> None:
+    """Apply per-user daily quota for the gated operations; no-op for admins
+    and for unauthenticated callers when auth is off. DB errors fail open
+    so a transient blip never blocks a real job create."""
+    if not _authn_required():
+        return
+    if body.operation not in _QUOTA_GATED_OPERATIONS:
+        return
+    if role_of(principal) == ROLE_ADMIN:
+        return
+    user_id = _resolve_user_id(principal)
+    if user_id is None:
+        return
+    limit = quota_map.get(body.operation, 0)
+    try:
+        with session_scope(factory) as quota_session:
+            _enforce_quota(quota_session, user_id, body.operation, limit)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        import logging as _logging
+
+        _logging.getLogger(__name__).warning(
+            "user_quota DB error for user_id=%s operation=%r; allowing: %s",
+            user_id,
+            body.operation,
+            exc,
+        )
+
+
 @router.post(
     "",
     summary="Create and enqueue a job",
@@ -220,7 +255,6 @@ _QUOTA_GATED_OPERATIONS: frozenset[str] = frozenset(
 @limiter.limit(jobs_limit)
 def create_job(
     request: Request,
-    response: Response,
     body: CreateJobRequest,
     factory: sessionmaker[Session] = Depends(get_session_factory),
     amqp_url: str = Depends(get_amqp_url),
@@ -229,34 +263,10 @@ def create_job(
 ) -> dict[str, Any]:
     """Create a Job row and publish its ID to the specified RabbitMQ queue.
 
-    The job transitions `QUEUED → RUNNING → SUCCEEDED/FAILED` as the worker processes it.
-    Use `GET /jobs/{id}/events` to poll structured progress events in real time.
-
     Expensive operations (``export_research_dataset``, ``run_cafa_evaluation``) are
     subject to per-user daily quota limits (FARM-AUTH.7). Admins are exempt.
     """
-    # FARM-AUTH.7: enforce quota for expensive job operations.
-    if (
-        _authn_required()
-        and body.operation in _QUOTA_GATED_OPERATIONS
-        and role_of(principal) != ROLE_ADMIN
-    ):
-        user_id = _resolve_user_id(principal)
-        if user_id is not None:
-            limit = quota_map.get(body.operation, 0)
-            import logging as _logging
-            _log = _logging.getLogger(__name__)
-            try:
-                with session_scope(factory) as _qs:
-                    _enforce_quota(_qs, user_id, body.operation, limit)
-            except HTTPException:
-                raise
-            except Exception as exc:
-                _log.warning(
-                    "user_quota DB error for user_id=%s operation=%r; allowing: %s",
-                    user_id, body.operation, exc,
-                )
-
+    _maybe_enforce_user_quota(principal, body, quota_map, factory)
     with session_scope(factory) as session:
         job = Job(
             operation=body.operation,
