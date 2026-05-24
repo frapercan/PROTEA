@@ -41,6 +41,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
+from protea.api.auth.audit import audit_event
 from protea.api.auth.passwords import hash_password, verify_password
 from protea.api.deps import get_session_factory
 from protea.core.utils import utcnow
@@ -228,6 +229,7 @@ def signup(
             user_email = user.email
             user_username = user.username
             user_status = user.status.value
+            audit_event(session, "signup", actor_id=None, target_id=user_id, email=user_email)
     except IntegrityError as exc:
         detail = str(exc.orig) if exc.orig else str(exc)
         if "uq_user_email" in detail or "email" in detail.lower():
@@ -269,16 +271,17 @@ def login(
     with session_scope(factory) as session:
         user = session.query(User).filter(User.email == body.email).first()
         if user is None or not verify_password(body.password, user.password_hash):
+            audit_event(session, "login_fail", actor_id=None, email=body.email)
             raise HTTPException(status_code=401, detail="invalid_credentials")
 
         if user.status is UserStatus.PENDING:
+            audit_event(session, "login_fail", actor_id=str(user.id), reason="account_pending_approval")
             raise HTTPException(status_code=403, detail="account_pending_approval")
         if user.status is UserStatus.DEACTIVATED:
+            audit_event(session, "login_fail", actor_id=str(user.id), reason="account_deactivated")
             raise HTTPException(status_code=403, detail="account_deactivated")
 
         user.last_login_at = utcnow()
-        session.flush()
-
         jti = secrets.token_hex(16)
         user_id = str(user.id)
         role = user.role.value
@@ -286,6 +289,8 @@ def login(
         email = user.email
         username = user.username
         display_name = user.display_name
+        audit_event(session, "login_ok", actor_id=user_id)
+        session.flush()
 
     _SESSION_STORE[jti] = user_id
     token = _mint_session_jwt(user_id, role, status, jti, secret)
@@ -304,12 +309,14 @@ def login(
 def logout(
     response: Response,
     protea_session: str | None = Cookie(default=None),
+    factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> None:
     """Clear the session cookie and invalidate the server-side session token.
 
     Returns 204 both when a valid session was found and when no cookie
     was present (idempotent logout).
     """
+    actor_id: str | None = None
     if protea_session is not None:
         secret = _read_secret()
         if secret is not None:
@@ -317,10 +324,12 @@ def logout(
                 claims = _decode_session_jwt(protea_session, secret)
                 jti = claims.get("jti")
                 if isinstance(jti, str):
-                    _SESSION_STORE.pop(jti, None)
+                    actor_id = _SESSION_STORE.pop(jti, None)
             except HTTPException:
                 # Malformed / expired token — still clear the cookie.
                 pass
+    with session_scope(factory) as session:
+        audit_event(session, "logout", actor_id=actor_id)
     _clear_session_cookie(response)
 
 
