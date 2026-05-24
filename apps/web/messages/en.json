@@ -130,6 +130,7 @@
   },
   "jobs": {
     "title": "Jobs",
+    "description": "Every action PROTEA executes — inserting proteins, computing embeddings, exporting datasets — runs as a background job. This page is the live audit trail: track progress, diagnose failures, and cancel work that is no longer needed.",
     "allStatuses": "All statuses",
     "queued": "Queued",
     "running": "Running",
@@ -146,7 +147,22 @@
     "created": "Created",
     "activeJobs": "{count} active",
     "showChildJobs": "Show child jobs",
+    "showChildJobsHint": "Some operations spawn child jobs per batch (e.g. each embedding shard). Hidden by default to keep the list readable; enable to see the full task tree.",
     "showBatchJobs": "Show batch jobs",
+    "showBatchJobsHint": "Embedding batches run on a separate queue and are hidden by default. Enable to monitor low-level GPU inference throughput.",
+    "statusTooltips": {
+      "queued": "Waiting in the work queue. The job has been accepted but no worker has picked it up yet.",
+      "running": "A worker is actively processing this job. Progress updates appear in real time.",
+      "succeeded": "The job completed without error. Results are stored and available.",
+      "failed": "The job encountered an error and stopped. Open the detail page for the error code and event log.",
+      "cancelled": "The job was cancelled before or during execution. Partial results, if any, are retained."
+    },
+    "emptyHero": {
+      "title": "No jobs yet",
+      "body": "Jobs appear here as soon as you dispatch an operation — inserting proteins, computing embeddings, exporting a research dataset, or running a CAFA evaluation. Each job shows live progress and a full event log.",
+      "ctaJobs": "Dispatch from Embeddings",
+      "ctaAnnotate": "Run KNN Annotation"
+    },
     "selectRow": "Select job",
     "selectAll": "Select all",
     "selectedCount": "{count} selected",
@@ -688,6 +704,16 @@
     "labBadge": "LAB",
     "labBadgeHint": "Research / LAB surface: research and reproducibility parameters are intentionally exposed.",
     "description": "A ScoringConfig defines how raw prediction signals are combined into a single [0, 1] confidence score — without re-running the KNN pipeline.",
+    "pageDescription": "After KNN annotation produces a ranked list of candidate GO terms, the scoring layer re-weights those candidates using configurable signal combinations: embedding similarity, sequence alignment identity, GO evidence code quality, and taxonomic proximity. Different configs let you compare scoring strategies on the same prediction set without dispatching new annotation jobs.",
+    "formulaHints": {
+      "linear": "Weighted average of active signals: score = sum(w_i * s_i) / sum(w_i). Simple and interpretable.",
+      "evidenceWeighted": "Same weighted average as linear, then multiplied by the resolved evidence quality weight. Predictions backed only by IEA (electronic) are automatically down-ranked even if their embedding similarity is high."
+    },
+    "emptyHero": {
+      "title": "No scoring configs yet",
+      "body": "Load the built-in presets to start — they cover the most common trade-offs between embedding-only scoring, alignment-boosted scoring, and evidence-weighted scoring. You can then clone and tune them.",
+      "cta": "Load presets"
+    },
     "loadPresets": "Load presets",
     "presetsLoading": "Loading…",
     "availableSignals": "Available signals",
@@ -786,7 +812,7 @@
   },
   "datasets": {
     "title": "Datasets",
-    "subtitle": "Frozen reranker dumps registered by export_research_dataset or import-by-reference. Pull by name from the offline lab.",
+    "subtitle": "Frozen training cuts produced by export_research_dataset and registered here for reproducibility. Each row is a versioned snapshot of KNN neighbours plus features, ready to be consumed by the offline reranker lab.",
     "refresh": "Refresh",
     "newExport": "Dispatch new export",
     "loadError": "Failed to load datasets",
@@ -808,13 +834,24 @@
       "name": "Name",
       "family": "Family",
       "k": "K",
+      "kTooltip": "Number of KNN neighbours per query protein. Higher K produces more training pairs but a heavier dump.",
       "trainWindow": "Train window",
+      "trainWindowTooltip": "GOA snapshot versions used for the temporal training split. Pairs proteins annotated in the older snapshot against new annotations gained by the newer one.",
       "test": "Test pair",
+      "testTooltip": "The held-out evaluation snapshot pair. Must not overlap with the training window so the evaluation measures genuine generalization.",
       "schemaSha": "schema_sha",
+      "schemaShaTooltip": "Feature-set fingerprint. Any booster trained on this dataset must present this exact value at inference time; a mismatch causes PROTEA to refuse scoring.",
       "manifestSha": "manifest_sha",
+      "manifestShaTooltip": "SHA-256 of the serialised manifest.json bytes. A change here means the lab trained on a different dump than the one published here.",
       "nTrain": "Train rows",
       "nEval": "Eval rows",
       "created": "Created"
+    },
+    "emptyHero": {
+      "title": "No datasets registered yet",
+      "body": "A Dataset row is created automatically when an export_research_dataset job completes. Dispatch one from the button above, or register an existing lab dump by reference.",
+      "ctaDispatch": "Dispatch new export",
+      "ctaImport": "Import by reference"
     },
     "copy": {
       "schemaSha": "Copy schema_sha",
@@ -1124,7 +1161,7 @@
         "heading": "Bug reports",
         "body": "If something breaks or behaves unexpectedly, <issues>file an issue on GitHub</issues>. Reports are appreciated."
       },
-      "lastUpdated": "Policy version v2, 2026-05-23."
+      "lastUpdated": "Policy revision 2, 2026-05-23."
     },
     "statusBadge": {
       "queued": "QUEUED",
@@ -1323,6 +1360,42 @@
     }
   },
   "reranker": {
+    "page": {
+      "title": "Re-ranker Models",
+      "labBadge": "LAB",
+      "labBadgeHint": "Research surface: reproducibility parameters are intentionally visible.",
+      "description": "LightGBM binary classifiers that re-score GO predictions using alignment, taxonomy, and aggregate features. Training lives in the offline protea-reranker-lab; this page registers the resulting booster so PROTEA can use it during inference.",
+      "importBtn": "Import booster (upload)",
+      "importBtnHint": "Upload the three files from a lab run: model.txt (the LightGBM booster), spec.yaml (experiment spec), and run.json (metrics and provenance). PROTEA stores the booster in the artifact store and records a RerankerModel row.",
+      "registerBtn": "Register by URI",
+      "registerBtnHint": "The booster already lives in MinIO or the local artifact store. Paste the URI and the spec/run metadata so PROTEA records the row without re-uploading the binary.",
+      "contextBannerTitle": "Register a LightGBM booster trained in protea-reranker-lab",
+      "contextBannerBody": "LightGBM training lives in the offline lab; this page registers the resulting booster so PROTEA can score predictions with it. Use Import booster to upload a fresh model.txt + spec.yaml + run.json, or Register by URI when the artefact already lives in MinIO.",
+      "categoryHints": {
+        "nk": "No Knowledge: proteins with zero GO annotations at the training cutoff. The hardest evaluation setting; measures pure prediction ability from sequence alone.",
+        "lk": "Limited Knowledge: proteins annotated in some GO namespaces but not all at the training cutoff. The booster targets new annotations in previously empty namespaces.",
+        "pk": "Partial Knowledge: proteins that already had annotations in a namespace at the training cutoff and gained further annotations later. The booster predicts extensions to existing functional profiles."
+      },
+      "provenanceTitle": "Provenance and feature selection",
+      "schemaShaHint": "feature_schema_sha: family-aware fingerprint of the feature set the booster was trained on. PROTEA refuses to use a booster whose schema does not match the live pipeline.",
+      "manifestShaHint": "dataset_manifest_sha: SHA-256 of the training dataset manifest. A drift here means the lab trained on a different dump than the one registered in the Datasets page.",
+      "datasetHint": "Dataset row that was used for training. Click the name to open the full provenance in the Datasets page.",
+      "externalSourceHint": "Free-form provenance tag recording which external tool and version produced the booster (e.g. protea-reranker-lab@<git-sha>).",
+      "emptyHero": {
+        "title": "No re-ranker models registered yet",
+        "body": "Train a LightGBM booster in protea-reranker-lab using a frozen Dataset, then import it here. The booster will replace the raw embedding distance ranking with calibrated probabilities.",
+        "ctaImport": "Import booster",
+        "ctaRegister": "Register by URI"
+      },
+      "metricsTitle": "Training-time metrics",
+      "importanceTitle": "Feature importance (gain)",
+      "specTitle": "ExperimentSpec (spec.yaml)",
+      "downloadTitle": "Download re-ranked predictions",
+      "downloadBtn": "Download reranked TSV",
+      "computeMetricsTitle": "Compute CAFA metrics",
+      "computeMetricsBtn": "Compute metrics",
+      "computeMetricsRunning": "Computing... (this may take 30-60s)"
+    },
     "importDialog": {
       "title": "Import re-ranker booster",
       "subtitle": "Upload model.txt + spec.yaml + run.json produced by protea-reranker-lab.",
@@ -1389,7 +1462,19 @@
   },
   "apiKeys": {
     "title": "API keys",
-    "subtitle": "Programmatic access keys used by CLI clients, CI jobs and the offline reranker lab. Each key is hashed at rest; the raw value is shown once at creation time and can never be retrieved again.",
+    "subtitle": "Programmatic access keys for CLI clients, CI pipelines, and the offline reranker lab. Each key is hashed on the server the moment it is created; the raw value is displayed once and cannot be retrieved again. Rotate keys regularly and revoke any that are no longer in use.",
+    "roleDescriptions": {
+      "viewer": "Read-only access to all public endpoints. Use for monitoring dashboards or read-only CI checks.",
+      "operator": "Can dispatch jobs (POST /v1/datasets, POST /v1/jobs), run maintenance, and manage query sets. Required by the reranker lab when pulling datasets or registering boosters.",
+      "admin": "Full control including minting and revoking other API keys, admin-only pages, and destructive operations. Restrict to trusted automation only."
+    },
+    "rotationAdvice": "Rotate keys every 90 days or immediately after any suspected exposure.",
+    "storageAdvice": "Store the raw key in a secret manager (e.g. GitHub Actions secrets, Vault). Never commit it to source control.",
+    "emptyHero": {
+      "title": "No API keys yet",
+      "body": "Mint a key to give CI pipelines, the offline reranker lab, or any automated client programmatic access. Choose the narrowest role that the client needs.",
+      "cta": "Mint the first key"
+    },
     "refresh": "Refresh",
     "mint": "Mint new key",
     "mintFirst": "Mint the first key",
