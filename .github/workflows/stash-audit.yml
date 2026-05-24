@@ -1,0 +1,26 @@
+name: stash-audit
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect stash usage
+        run: |
+          STASH_COUNT=$(git stash list | wc -l)
+          if [ "$STASH_COUNT" -gt 0 ]; then
+            echo "::error::Detected $STASH_COUNT stash entries. This violates project policy (use git restore + commit instead of git stash)."
+            echo "Stash entries:"
+            git stash list
+            exit 1
+          fi
+          
+          echo "OK: No stash entries detected"
+          exit 0
