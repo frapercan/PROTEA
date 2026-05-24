@@ -254,6 +254,120 @@ export function getProteinStats() {
   return http<ProteinStats>(`/proteins/stats/`);
 }
 
+// ── /proteins/stats deep-dive sections ──────────────────────────────────────
+// Each endpoint is cached server-side (see protea/api/routers/proteins_stats.py
+// for the per-section TTLs). The frontend lazy-loads each card on first
+// viewport entry and renders a skeleton until the response lands.
+
+export type EmbeddingsByPlmItem = {
+  embedding_config_id: string;
+  model_name: string;
+  display_name?: string | null;
+  family?: string | null;
+  param_count?: number | null;
+  protein_count: number;
+  coverage_pct: number;
+};
+
+export type EmbeddingsByPlm = {
+  total_proteins: number;
+  items: EmbeddingsByPlmItem[];
+};
+
+export type GoMatrixItem = {
+  source: string;
+  source_version: string | null;
+  aspect: string | null;
+  experimental: boolean;
+  count: number;
+};
+
+export type GoMatrix = { items: GoMatrixItem[] };
+
+export type TaxonomyItem = {
+  organism: string;
+  taxonomy_id: string | null;
+  protein_count: number;
+};
+
+export type TaxonomyTop = { items: TaxonomyItem[] };
+
+export type SequenceLengthBin = { lo: number; hi: number; count: number };
+
+export type SequenceLength = {
+  count: number;
+  percentiles: {
+    min?: number;
+    p10?: number;
+    p50?: number;
+    p90?: number;
+    p99?: number;
+    max?: number;
+  };
+  bins: SequenceLengthBin[];
+};
+
+export type GoDensityItem = {
+  aspect: string;
+  protein_count: number;
+  avg: number;
+  p50: number;
+  p90: number;
+  max: number;
+};
+
+export type GoDensity = { items: GoDensityItem[] };
+
+export type PipelineDailyItem = {
+  operation: string;
+  day: string | null;
+  count: number;
+};
+
+export type PipelineActivity = {
+  window_days: number;
+  items: PipelineDailyItem[];
+  last_24h: { operation: string; count: number }[];
+};
+
+export type DatasetRegistryItem = {
+  k: number | null;
+  eval_snapshot_pair: string | null;
+  dataset_count: number;
+  n_train_rows: number;
+  n_eval_rows: number;
+};
+
+export type DatasetRegistry = { items: DatasetRegistryItem[] };
+
+export function getEmbeddingsByPlm() {
+  return http<EmbeddingsByPlm>(`/proteins/stats/embeddings-by-plm`);
+}
+
+export function getGoMatrix() {
+  return http<GoMatrix>(`/proteins/stats/go-annotations-matrix`);
+}
+
+export function getTaxonomyTop() {
+  return http<TaxonomyTop>(`/proteins/stats/taxonomy-top-20`);
+}
+
+export function getSequenceLength() {
+  return http<SequenceLength>(`/proteins/stats/sequence-length`);
+}
+
+export function getGoDensity() {
+  return http<GoDensity>(`/proteins/stats/go-density`);
+}
+
+export function getPipelineActivity() {
+  return http<PipelineActivity>(`/proteins/stats/pipeline-activity`);
+}
+
+export function getDatasetRegistry() {
+  return http<DatasetRegistry>(`/proteins/stats/dataset-registry`);
+}
+
 export function listProteins(params?: {
   search?: string;
   reviewed?: boolean;

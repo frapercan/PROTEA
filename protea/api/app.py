@@ -31,6 +31,7 @@ from protea.api.routers import jobs as jobs_router
 from protea.api.routers import maintenance as maintenance_router
 from protea.api.routers import metrics as metrics_router
 from protea.api.routers import proteins as proteins_router
+from protea.api.routers import proteins_stats as proteins_stats_router
 from protea.api.routers import query_sets as query_sets_router
 from protea.api.routers import registry as registry_router
 from protea.api.routers import reranker_models as reranker_models_router
@@ -56,6 +57,7 @@ from protea.api.routers.proteins import (
     PROTEIN_STATS_TTL_SECONDS,
     prewarm_protein_stats,
 )
+from protea.api.routers.proteins_stats import prewarm_all as prewarm_protein_stats_sections
 from protea.core.operation_catalog import build_operation_registry
 from protea.infrastructure.benchmark_config import load_benchmark_config
 from protea.infrastructure.session import build_session_factory
@@ -162,6 +164,7 @@ _ROUTER_MODULES = (
     auth_login_router,
     jobs_router,
     proteins_router,
+    proteins_stats_router,
     annotations_router,
     embeddings_router,
     query_sets_router,
@@ -340,6 +343,7 @@ def _prewarm_targets():
         ("embeddings:configs", prewarm_embedding_configs, EMBEDDING_CONFIGS_TTL_SECONDS),
         ("annotations:snapshots", prewarm_snapshots, SNAPSHOTS_TTL_SECONDS),
         ("annotations:sets", prewarm_annotation_sets, ANNOTATION_SETS_TTL_SECONDS),
+        ("proteins:stats:sections", prewarm_protein_stats_sections, 600),
     )
 
 
