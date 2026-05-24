@@ -1,11 +1,11 @@
-"""``POST /auth/login`` — exchange an API key for a short-lived JWT.
+"""``POST /auth/api-key-login`` -- api-key->JWT exchange (programmatic clients).
 
 FEAT-AUTH (WAVE-2 2026-05-23). The frontend trades a long-lived
 ``X-Api-Key`` for a Bearer JWT carrying the caller's role; the JWT
 rides in a ``protea_session`` cookie that ``apps/web/middleware.ts``
 and ``apps/web/lib/auth.ts`` read. HS256, signed with
 ``PROTEA_JWT_SECRET``. The role on the matched ``ApiKey`` row becomes
-the ``role`` claim (NULL → ``viewer``).
+the ``role`` claim (NULL -> ``viewer``).
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ def _read_secret() -> str | None:
 
 
 class LoginRequest(BaseModel):
-    """Body for ``POST /auth/login`` (raw key + optional TTL)."""
+    """Body for ``POST /auth/api-key-login`` (raw key + optional TTL)."""
 
     model_config = {"extra": "forbid"}
 
@@ -81,7 +81,7 @@ def _lookup_role(factory: sessionmaker[Session], raw: str) -> tuple[str, str] | 
         return str(matched.id), normalise_role(matched.role or ROLE_VIEWER)
 
 
-@router.post("/login", summary="Exchange an API key for a session JWT")
+@router.post("/api-key-login", summary="Exchange an API key for a session JWT")
 @limiter.limit(api_keys_limit)
 def login(
     request: Request,
@@ -91,7 +91,7 @@ def login(
 ) -> dict[str, Any]:
     """Mint a short-lived bearer JWT (``sub``+``exp``+``iat``+``role``).
 
-    The role is read from the matched ``ApiKey`` row (NULL → ``viewer``).
+    The role is read from the matched ``ApiKey`` row (NULL -> ``viewer``).
     """
     secret = _read_secret()
     if secret is None:

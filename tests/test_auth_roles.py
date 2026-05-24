@@ -4,7 +4,7 @@ Covers:
 
 * :mod:`protea.api.roles` — ``normalise_role``, ``role_of``,
   ``require_role`` dependency factory.
-* ``POST /auth/login`` — role claim minted from the matched ``ApiKey``
+* ``POST /auth/api-key-login`` — role claim minted from the matched ``ApiKey``
   row, NULL collapsed to ``viewer``.
 * Role gates on ``POST /datasets`` and ``POST /maintenance/vacuum-*``
   (operator floor) and the bearer-admin path on ``POST /admin/reset-db``.
@@ -157,7 +157,7 @@ class TestRequireRoleGate:
 
 
 # ---------------------------------------------------------------------------
-# POST /auth/login — role propagation
+# POST /auth/api-key-login — role propagation
 # ---------------------------------------------------------------------------
 
 
@@ -186,7 +186,7 @@ class TestAuthLogin:
         with patch("protea.api.routers.auth_login._lookup_role") as m:
             m.return_value = (str(row.id), "operator")
             client = TestClient(login_app)
-            resp = client.post("/auth/login", json={"api_key": "abcdefgh1234567890"})
+            resp = client.post("/auth/api-key-login", json={"api_key": "abcdefgh1234567890"})
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert body["role"] == "operator"
@@ -199,7 +199,7 @@ class TestAuthLogin:
         with patch("protea.api.routers.auth_login._lookup_role") as m:
             m.return_value = ("00000000-0000-0000-0000-0000000000ff", ROLE_VIEWER)
             client = TestClient(login_app)
-            resp = client.post("/auth/login", json={"api_key": "abcdefgh1234567890"})
+            resp = client.post("/auth/api-key-login", json={"api_key": "abcdefgh1234567890"})
         assert resp.status_code == 200
         decoded = jwt.decode(resp.json()["token"], _SECRET, algorithms=[_ALG])
         assert decoded["role"] == ROLE_VIEWER
@@ -208,13 +208,13 @@ class TestAuthLogin:
         with patch("protea.api.routers.auth_login._lookup_role") as m:
             m.return_value = None
             client = TestClient(login_app)
-            resp = client.post("/auth/login", json={"api_key": "no-such-key-here-12345"})
+            resp = client.post("/auth/api-key-login", json={"api_key": "no-such-key-here-12345"})
         assert resp.status_code == 401
 
     def test_login_503_when_secret_missing(self, login_app, monkeypatch):
         monkeypatch.delenv("PROTEA_JWT_SECRET", raising=False)
         client = TestClient(login_app)
-        resp = client.post("/auth/login", json={"api_key": "abcdefgh1234567890"})
+        resp = client.post("/auth/api-key-login", json={"api_key": "abcdefgh1234567890"})
         assert resp.status_code == 503
 
 

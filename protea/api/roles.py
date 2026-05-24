@@ -8,7 +8,7 @@ PROTEA recognises three roles, ordered by privilege:
 * ``admin`` — destructive ops (``POST /admin/reset-db``); reserved
   for the operator persona holding the platform reins.
 
-The role is carried by the JWT minted at ``POST /auth/login``; the
+The role is carried by the JWT minted at ``POST /auth/api-key-login``; the
 ``ApiKey`` row holds the source-of-truth value (nullable, defaults
 to ``viewer`` at decode time). Routes opt into a gate via the
 :func:`require_role` dependency factory.
