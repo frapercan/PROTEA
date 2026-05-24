@@ -242,9 +242,9 @@
     },
     "insertTab": {
       "title": "从 UniProt 导入蛋白质",
-      "description": "下载 FASTA 序列并插入蛋白质及序列记录。",
+      "description": "从 UniProt 下载 FASTA 格式的蛋白质序列，并将每条序列保存为一个 Protein 行和一个去重的 Sequence 行。此步骤始终是第一步：嵌入向量计算、功能注释、评估等所有后续流程都需要先在此处加载蛋白质及其序列。",
       "searchCriteriaLabel": "搜索条件",
-      "searchCriteriaHelper": "UniProt 查询 — reviewed:true = 仅 Swiss-Prot",
+      "searchCriteriaHelper": "UniProt 查询语法。例如 \"reviewed:true\" = 仅 Swiss-Prot（约 60 万条）；\"reviewed:true AND organism_id:9606\" = 仅人类已审核蛋白。",
       "pageSizeLabel": "每页条数",
       "totalLimitLabel": "总限制",
       "totalLimitOptional": "（可选）",
@@ -254,10 +254,10 @@
       "launching": "启动中…"
     },
     "metadataTab": {
-      "title": "获取 UniProt 元数据",
-      "description": "下载 TSV 注释并插入 ProteinUniProtMetadata 记录。",
+      "title": "用 UniProt 丰富蛋白质信息",
+      "description": "在完成「导入蛋白质」（仅加载登录号和序列）之后，此步骤从 UniProt 获取每个蛋白质的功能信息，并保存为 ProteinUniProtMetadata：名称、基因、生物体、EC 编号、催化活性、活性位点和结合位点、辅因子、通路、动力学、关键词等。同时回填导入时留空的 Protein 核心字段（Swiss-Prot/TrEMBL、生物体、长度、基因名）。该步骤幂等，重复执行只更新 UniProt 中已变更的内容。",
       "searchCriteriaLabel": "搜索条件",
-      "searchCriteriaHelper": "UniProt 查询 — reviewed:true = 仅 Swiss-Prot",
+      "searchCriteriaHelper": "UniProt 查询语法。例如 \"reviewed:true\" = 仅 Swiss-Prot（约 60 万条）；\"reviewed:true AND organism_id:9606\" = 仅人类已审核蛋白。",
       "pageSizeLabel": "每页条数",
       "totalLimitLabel": "总限制",
       "totalLimitOptional": "（可选）",
@@ -589,7 +589,8 @@
     "resultsTab": {
       "title": "结果",
       "refresh": "刷新",
-      "noResults": "暂无注释结果。请在\"运行注释\"标签页运行注释任务。",
+      "noResults": "尚未运行任何注释。请在\"运行注释\"标签页启动一个任务，结果将在此处显示，可下载 TSV、浏览各术语评分或导出用于 CAFA 评估。",
+      "resultCount": "{count, plural, other {{count} 条注释}}",
       "emptyHero": {
         "title": "尚未运行任何注释",
         "body": "每次运行都会生成一个 PredictionSet，包含每个蛋白的 GO 评分，可下载为 TSV 或导出到 cafaeval。在上一个标签页启动首次运行后，结果将显示在此处。",

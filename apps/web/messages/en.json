@@ -244,10 +244,10 @@
       "goAnnotationsSub": "{percent}% of total"
     },
     "insertTab": {
-      "title": "Insert Proteins from UniProt",
-      "description": "Downloads FASTA sequences and upserts Protein + Sequence rows.",
+      "title": "Insert proteins from UniProt",
+      "description": "Fetches protein sequences from UniProt in FASTA format and saves each one as a Protein row plus a deduplicated Sequence row. This is always the first step: every other pipeline stage (embeddings, annotation, evaluation) requires proteins and their sequences to be loaded here first.",
       "searchCriteriaLabel": "Search criteria",
-      "searchCriteriaHelper": "UniProt query — reviewed:true = Swiss-Prot only",
+      "searchCriteriaHelper": "UniProt query syntax. E.g. \"reviewed:true\" = Swiss-Prot only (~600k); \"reviewed:true AND organism_id:9606\" = reviewed human only.",
       "pageSizeLabel": "Page size",
       "totalLimitLabel": "Total limit",
       "totalLimitOptional": "(optional)",
@@ -257,10 +257,10 @@
       "launching": "Launching…"
     },
     "metadataTab": {
-      "title": "Fetch UniProt Metadata",
-      "description": "Downloads TSV annotations and upserts ProteinUniProtMetadata rows.",
+      "title": "Enrich proteins with UniProt",
+      "description": "After \"Insert proteins\" (which only loads accession + sequence), this step fetches each protein's functional record from UniProt and stores it as ProteinUniProtMetadata: name, gene, organism, EC, catalytic activity, active and binding sites, cofactor, pathway, kinetics, keywords, and more. It also backfills the core Protein columns (Swiss-Prot/TrEMBL, organism, length, gene) left empty by the insert. Idempotent: re-running only updates what changed upstream.",
       "searchCriteriaLabel": "Search criteria",
-      "searchCriteriaHelper": "UniProt query — reviewed:true = Swiss-Prot only",
+      "searchCriteriaHelper": "UniProt query syntax. E.g. \"reviewed:true\" = Swiss-Prot only (~600k); \"reviewed:true AND organism_id:9606\" = reviewed human only.",
       "pageSizeLabel": "Page size",
       "totalLimitLabel": "Total limit",
       "totalLimitOptional": "(optional)",
@@ -592,7 +592,8 @@
     "resultsTab": {
       "title": "Results",
       "refresh": "Refresh",
-      "noResults": "No annotation results yet. Run an annotation job from the Run Annotation tab.",
+      "noResults": "No annotations run yet. Launch one from \"Run annotation\", results will land here, ready to download as TSV, browse term scores, or export for CAFA evaluation.",
+      "resultCount": "{count, plural, one {1 annotation} other {{count} annotations}}",
       "emptyHero": {
         "title": "No annotations run yet",
         "body": "Each run produces a PredictionSet with per-protein GO scores, downloadable as TSV or exportable to cafaeval. Once you launch the first one from the previous tab, it shows up here.",
