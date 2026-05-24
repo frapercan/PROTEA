@@ -68,27 +68,27 @@ when the principal's role is below the floor.
 
 **viewer** (any authenticated user)
    ``POST /v1/annotate``, ``POST /v1/query-sets``,
-   ``DELETE /v1/query-sets/*``, ``POST /v1/support``
+   ``DELETE /v1/query-sets/{set_id}``, ``POST /v1/support``
 
 **operator** (pipeline operators)
    ``POST /v1/jobs``, ``POST|DELETE /v1/datasets``,
    ``POST|DELETE /v1/embeddings/configs``,
    ``POST /v1/embeddings/predict``,
-   ``DELETE /v1/embeddings/prediction-sets/*``,
+   ``DELETE /v1/embeddings/prediction-sets/{set_id}``,
    ``POST|PATCH|DELETE /v1/experiment-runs``,
-   ``POST /v1/maintenance/vacuum-*``,
+   ``POST /v1/maintenance/vacuum-embeddings``, ``POST /v1/maintenance/vacuum-sequences``,
    ``POST|DELETE /v1/reranker-models/import*``,
    ``POST|DELETE /v1/scoring/configs*``,
-   ``DELETE /v1/scoring/rerankers/*``,
+   ``DELETE /v1/scoring/rerankers/{reranker_id}``,
    ``POST|DELETE /v1/annotations/sets/*``,
-   ``PATCH /v1/annotations/snapshots/*/ia-url``,
+   ``PATCH /v1/annotations/snapshots/{snapshot_id}/ia-url``,
    ``POST /v1/annotations/snapshots/load``,
    ``POST|DELETE /v1/annotations/evaluation-sets/*``
 
 **admin** (platform administrators)
    ``POST /v1/auth/api-keys``,
    ``GET  /v1/auth/api-keys``,
-   ``DELETE /v1/auth/api-keys/*``
+   ``DELETE /v1/auth/api-keys/{key_id}``
 
 GET endpoints remain open (no authentication required) for researcher
 UX. Full read-lockdown is deferred to T5.6c (oauth2-proxy).
