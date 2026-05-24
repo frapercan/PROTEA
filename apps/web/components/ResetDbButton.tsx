@@ -2,6 +2,8 @@
 
 import { useCallback, useId, useState } from "react";
 import { useTranslations } from "next-intl";
+import { authHeaders } from "@/lib/auth";
+import { useHasRole } from "@/lib/useRole";
 import { useFocusTrap } from "@/lib/useFocusTrap";
 
 export function ResetDbButton() {
@@ -10,6 +12,7 @@ export function ResetDbButton() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<"ok" | "error" | null>(null);
   const titleId = useId();
+  const canAdmin = useHasRole("admin");
 
   const closeConfirm = useCallback(() => {
     if (!loading) setShowConfirm(false);
@@ -23,6 +26,7 @@ export function ResetDbButton() {
     try {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/admin/reset-db`, {
         method: "POST",
+        headers: { ...authHeaders() },
       });
       const data = await res.json();
       setResult(data.ok ? "ok" : "error");
@@ -33,6 +37,11 @@ export function ResetDbButton() {
       setShowConfirm(false);
     }
   }
+
+  // FEAT-AUTH: hide the destructive control from non-admin sessions.
+  // The backend gate still enforces; this is purely affordance hygiene
+  // so viewers don't see a button that will only ever 403.
+  if (!canAdmin) return null;
 
   return (
     <>
