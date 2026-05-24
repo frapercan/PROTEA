@@ -307,6 +307,7 @@ def magic_link_consume(
 
     import time
     from datetime import UTC, datetime
+    from uuid import UUID as _UUID
 
     from protea.api.routers.auth_user import _COOKIE_MAX_AGE, create_session
 
@@ -329,7 +330,7 @@ def magic_link_consume(
         expires_at = datetime.fromtimestamp(int(time.time()) + _COOKIE_MAX_AGE, tz=UTC)
         create_session(
             session,
-            user_id=user.id,
+            user_id=(user.id if isinstance(user.id, _UUID) else _UUID(str(user.id))),
             raw_token=jwt_token,
             expires_at=expires_at,
         )
