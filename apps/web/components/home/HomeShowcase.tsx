@@ -118,17 +118,32 @@ export async function HomeShowcase() {
   const t = await getTranslations("home");
   const locale = await getLocale();
   let data: ShowcaseData;
+  // In E2E mode the Playwright fixture swaps the mock response between
+  // tests, so the 60s fetch revalidate window would serve stale data
+  // from the prior test. Disable the data cache when the build flag
+  // is set; prod renders keep the cache.
+  const cacheable = process.env.NEXT_PUBLIC_E2E !== "1";
   try {
-    data = await getShowcase({ cacheable: true });
+    data = await getShowcase({ cacheable });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Failed to load showcase";
+    // Retry: target this exact route on the active locale so the
+    // visitor stays on the homepage. A plain <a> works without client
+    // JS (server component constraint); the browser performs a fresh
+    // RSC fetch which re-runs `getShowcase()`.
     return (
-      <div className="mx-auto max-w-3xl">
+      <div className="mx-auto max-w-3xl" data-testid="showcase-error">
         <div className="rounded-2xl border border-red-200 bg-red-50/70 p-8 text-center shadow-sm">
           <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-red-100 text-red-600 text-lg">
             !
           </div>
           <p className="text-red-800 text-sm">{message}</p>
+          <a
+            href={`/${locale}/`}
+            className="mt-5 inline-flex items-center gap-2 rounded-xl bg-red-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-red-700 transition-colors"
+          >
+            Retry
+          </a>
         </div>
       </div>
     );
@@ -271,7 +286,10 @@ export async function HomeShowcase() {
           </div>
         </section>
       ) : (
-        <section className="mx-auto max-w-3xl rounded-3xl border-2 border-dashed border-slate-200 bg-white/60 p-10 text-center">
+        <section
+          data-testid="showcase-empty"
+          className="mx-auto max-w-3xl rounded-3xl border-2 border-dashed border-slate-200 bg-white/60 p-10 text-center"
+        >
           <p className="text-slate-500 text-base">{t("noDataYet")}</p>
           <Link
             href={`/${locale}/proteins`}
