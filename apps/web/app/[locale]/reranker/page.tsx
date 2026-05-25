@@ -528,8 +528,13 @@ function RerankerCard({
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 mb-2">Compute CAFA metrics</p>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-2">
               <div>
-                <label className="text-[13px] text-slate-500 mb-0.5 block">Prediction set</label>
-                <select value={metricsPsId} onChange={(e) => setMetricsPsId(e.target.value)} className={selectClass}>
+                <label htmlFor={`rr-metrics-ps-${model.id}`} className="text-[13px] text-slate-500 mb-0.5 block">Prediction set</label>
+                <select
+                  id={`rr-metrics-ps-${model.id}`}
+                  value={metricsPsId}
+                  onChange={(e) => setMetricsPsId(e.target.value)}
+                  className={selectClass}
+                >
                   <option value="">Select...</option>
                   {predictionSets.map((ps) => (
                     <option key={ps.id} value={ps.id}>{predLabel(ps)}</option>
@@ -537,8 +542,13 @@ function RerankerCard({
                 </select>
               </div>
               <div>
-                <label className="text-[13px] text-slate-500 mb-0.5 block">Evaluation set</label>
-                <select value={metricsEsId} onChange={(e) => setMetricsEsId(e.target.value)} className={selectClass}>
+                <label htmlFor={`rr-metrics-es-${model.id}`} className="text-[13px] text-slate-500 mb-0.5 block">Evaluation set</label>
+                <select
+                  id={`rr-metrics-es-${model.id}`}
+                  value={metricsEsId}
+                  onChange={(e) => setMetricsEsId(e.target.value)}
+                  className={selectClass}
+                >
                   <option value="">Select...</option>
                   {evaluationSets.map((es) => (
                     <option key={es.id} value={es.id}>{evalLabel(es, annotationSets)}</option>
@@ -546,8 +556,13 @@ function RerankerCard({
                 </select>
               </div>
               <div>
-                <label className="text-[13px] text-slate-500 mb-0.5 block">Category</label>
-                <select value={metricsCategory} onChange={(e) => setMetricsCategory(e.target.value)} className={selectClass}>
+                <label htmlFor={`rr-metrics-cat-${model.id}`} className="text-[13px] text-slate-500 mb-0.5 block">Category</label>
+                <select
+                  id={`rr-metrics-cat-${model.id}`}
+                  value={metricsCategory}
+                  onChange={(e) => setMetricsCategory(e.target.value)}
+                  className={selectClass}
+                >
                   <option value="nk">NK (No Knowledge)</option>
                   <option value="lk">LK (Limited Knowledge)</option>
                   <option value="pk">PK (Partial Knowledge)</option>
