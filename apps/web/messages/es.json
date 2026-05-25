@@ -1240,7 +1240,8 @@
         "heading": "Informes de errores",
         "body": "Si algo falla o se comporta de forma inesperada, <issues>abre una incidencia en GitHub</issues>. Los informes son bienvenidos."
       },
-      "lastUpdated": "Revisión de la política 2, 2026-05-23."
+      "lastUpdated": "Revisión de la política 2, 2026-05-23.",
+      "keyboardHint": "Pulsa Enter o Espacio para aceptar"
     },
     "statusBadge": {
       "queued": "EN COLA",

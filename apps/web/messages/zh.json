@@ -1236,7 +1236,8 @@
         "heading": "错误报告",
         "body": "若出现故障或异常行为，请<issues>在 GitHub 上提交 issue</issues>。感谢您的反馈。"
       },
-      "lastUpdated": "政策版本 2，2026-05-23。"
+      "lastUpdated": "政策版本 2，2026-05-23。",
+      "keyboardHint": "按 Enter 或空格键接受"
     },
     "statusBadge": {
       "queued": "QUEUED",

@@ -1162,7 +1162,8 @@
         "heading": "Bug reports",
         "body": "If something breaks or behaves unexpectedly, <issues>file an issue on GitHub</issues>. Reports are appreciated."
       },
-      "lastUpdated": "Policy revision 2, 2026-05-23."
+      "lastUpdated": "Policy revision 2, 2026-05-23.",
+      "keyboardHint": "Press Enter or Space to accept"
     },
     "statusBadge": {
       "queued": "QUEUED",

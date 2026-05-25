@@ -1237,7 +1237,8 @@
         "heading": "Relatórios de bugs",
         "body": "Se algo falhar ou se comportar de forma inesperada, <issues>abra uma issue no GitHub</issues>. Os relatórios são bem-vindos."
       },
-      "lastUpdated": "Revisão da política 2, 2026-05-23."
+      "lastUpdated": "Revisão da política 2, 2026-05-23.",
+      "keyboardHint": "Pressione Enter ou Espaço para aceitar"
     },
     "statusBadge": {
       "queued": "NA FILA",
