@@ -1050,6 +1050,15 @@
       "emptyAll": "No experiment runs yet. Mint the first one to start a campaign narrative.",
       "emptyFiltered": "No runs match this status filter.",
       "deleteConfirm": "Delete experiment run \"{name}\"? This cannot be undone.",
+      "deleteDialog": {
+        "title": "Delete experiment run?",
+        "body": "This removes the row from the server. The narrative, hypothesis, and findings cannot be restored.",
+        "confirm": "Delete run",
+        "confirming": "Deleting…"
+      },
+      "modal": {
+        "close": "Close dialog"
+      },
       "toasts": {
         "created": "Experiment run \"{name}\" minted",
         "updated": "Experiment run \"{name}\" updated",

@@ -1050,6 +1050,15 @@
       "emptyAll": "暂无实验运行。新建第一个以启动一段活动叙述。",
       "emptyFiltered": "没有运行符合当前状态筛选。",
       "deleteConfirm": "删除实验运行 \"{name}\"？此操作不可撤销。",
+      "deleteDialog": {
+        "title": "删除实验运行？",
+        "body": "这将从服务器删除该行。叙述、假设和发现将无法恢复。",
+        "confirm": "删除运行",
+        "confirming": "正在删除…"
+      },
+      "modal": {
+        "close": "关闭对话框"
+      },
       "toasts": {
         "created": "已创建实验运行 \"{name}\"",
         "updated": "已更新实验运行 \"{name}\"",
@@ -1128,6 +1137,15 @@
       "emptyAll": "暂无实验运行。新建第一个以启动一段活动叙述。",
       "emptyFiltered": "没有运行符合当前状态筛选。",
       "deleteConfirm": "删除实验运行 \"{name}\"？此操作不可撤销。",
+      "deleteDialog": {
+        "title": "删除实验运行？",
+        "body": "这将从服务器删除该行。叙述、假设和发现将无法恢复。",
+        "confirm": "删除运行",
+        "confirming": "正在删除…"
+      },
+      "modal": {
+        "close": "关闭对话框"
+      },
       "toasts": {
         "created": "已创建实验运行 \"{name}\"",
         "updated": "已更新实验运行 \"{name}\"",
