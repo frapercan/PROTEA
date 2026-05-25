@@ -91,6 +91,7 @@ export default function ExperimentRunsPage() {
   const [showMint, setShowMint] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ExperimentRun | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -108,6 +109,21 @@ export default function ExperimentRunsPage() {
   }, [statusFilter]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // Manual refresh — other admins on the same deployment may have
+  // minted or transitioned runs since the page was loaded, and the
+  // backend has no SSE / polling channel for ExperimentRun yet. The
+  // loading state is local (separate from initial-fetch skeleton) so
+  // the table content does not blank during the refetch.
+  async function handleRefresh() {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await load();
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   function handleCreated(run: ExperimentRun) {
     setRuns((prev) => (prev ? [run, ...prev] : [run]));
@@ -177,25 +193,40 @@ export default function ExperimentRunsPage() {
           </button>
         </header>
 
-        {/* Status filter chips */}
-        <div
-          role="tablist"
-          aria-label={t("filterAriaLabel")}
-          className="inline-flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm"
-        >
-          <FilterChip
-            label={`${t("filters.all")} (${counts.all})`}
-            active={statusFilter === "all"}
-            onClick={() => setStatusFilter("all")}
-          />
-          {STATUS_OPTIONS.map((s) => (
+        {/* Status filter chips + manual refresh.
+
+            Refresh sits next to (not on top of) the chips so the
+            tablist remains a single horizontal block at the natural
+            breakpoint; on narrow viewports the wrapper flexes to a
+            stack so the button does not crowd the chip row. */}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div
+            role="tablist"
+            aria-label={t("filterAriaLabel")}
+            className="inline-flex flex-wrap rounded-lg border border-slate-200 bg-white p-1 shadow-sm self-start"
+          >
             <FilterChip
-              key={s}
-              label={`${t(`status.${s}`)} (${counts[s]})`}
-              active={statusFilter === s}
-              onClick={() => setStatusFilter(s)}
+              label={`${t("filters.all")} (${counts.all})`}
+              active={statusFilter === "all"}
+              onClick={() => setStatusFilter("all")}
             />
-          ))}
+            {STATUS_OPTIONS.map((s) => (
+              <FilterChip
+                key={s}
+                label={`${t(`status.${s}`)} (${counts[s]})`}
+                active={statusFilter === s}
+                onClick={() => setStatusFilter(s)}
+              />
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => void handleRefresh()}
+            disabled={refreshing || runs === null}
+            className="self-start rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {refreshing ? t("refreshing") : t("refresh")}
+          </button>
         </div>
 
         {loadError && (
@@ -219,7 +250,72 @@ export default function ExperimentRunsPage() {
         )}
 
         {runs && runs.length > 0 && (
-          <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
+          <>
+            {/* Mobile card list — matches the proteins page convention
+                (each row becomes a card stacked vertically with the
+                key fields, status chip and per-row actions). The dense
+                4-column table is illegible at 375px once tags and
+                descriptions wrap. */}
+            <ul className="md:hidden space-y-2">
+              {runs.map((r) => {
+                const style = STATUS_STYLES[r.status];
+                return (
+                  <li
+                    key={r.id}
+                    className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm space-y-2"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="font-medium text-slate-900 break-words">{r.name}</div>
+                        {r.description && (
+                          <p className="mt-0.5 text-xs text-slate-500 leading-snug line-clamp-3">
+                            {r.description}
+                          </p>
+                        )}
+                      </div>
+                      <span className={`shrink-0 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${style.chip}`}>
+                        <span className={`inline-block h-1.5 w-1.5 rounded-full ${style.dot}`} />
+                        {t(`status.${r.status}`)}
+                      </span>
+                    </div>
+                    {r.tags.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {r.tags.map((tag) => (
+                          <span
+                            key={tag}
+                            className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-600"
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <p className="text-[11px] text-slate-500">
+                      {t("cols.created")}: {formatDate(r.created_at)}
+                    </p>
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setEditing(r)}
+                        className="flex-1 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                      >
+                        {t("actions.edit")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDeleteTarget(r)}
+                        className="flex-1 rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100"
+                      >
+                        {t("actions.delete")}
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+
+            {/* Desktop table — unchanged from the original layout. */}
+            <div className="hidden md:block overflow-x-auto rounded-lg border bg-white shadow-sm">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-left">
                 <tr>
@@ -292,6 +388,7 @@ export default function ExperimentRunsPage() {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </div>
 
