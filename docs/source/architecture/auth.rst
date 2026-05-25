@@ -84,16 +84,16 @@ PROTEA recognises four roles in ascending privilege order:
        1 000 sequences/day, 100 jobs/day, one self-managed API key.
    * - ``operator``
      - All researcher capabilities plus pipeline management:
-       ``POST /datasets`` (export_research_dataset),
-       ``POST /reranker-models/import``,
-       ``POST /jobs`` (run_cafa_evaluation, heavy ops),
-       ``GET /maintenance``, ``GET /workers/status``.
+       ``POST /v1/datasets`` (export_research_dataset),
+       ``POST /v1/reranker-models/import``,
+       ``POST /v1/jobs`` (run_cafa_evaluation, heavy ops),
+       maintenance endpoints (vacuum), ``GET /v1/workers/status``.
    * - ``admin``
      - All operator capabilities plus user management (approve, role change,
        deactivate), DB maintenance (vacuum, reset), API-key management for any
-       user, ``POST /maintenance``, ``POST /admin/reset-db``,
-       ``DELETE /users/{id}``, ``GET /admin/audit``,
-       ``POST /auth/admin/revoke-sessions/{user_id}``.
+       user, ``POST /v1/admin/reset-db``,
+       ``DELETE /v1/users/{id}``, ``GET /v1/admin/audit``,
+       ``POST /v1/auth/admin/revoke-sessions/{user_id}``.
 
 The ``require_role`` dependency normalises unknown role strings to
 ``researcher`` (the lowest named role), so a malformed JWT or a stale key
@@ -118,8 +118,7 @@ cannot escalate privileges.
      POST /v1/datasets  (export_research_dataset)
      POST /v1/reranker-models/import*
      POST /v1/jobs  (run_cafa_evaluation, all heavy ops)
-     POST /v1/maintenance/vacuum-*
-     GET  /v1/maintenance /v1/workers/status
+     GET  /v1/maintenance/* /v1/workers/status
      POST|DELETE /v1/annotations/sets/*
      POST|DELETE /v1/scoring/configs*
 
@@ -226,8 +225,9 @@ The ``jti`` is a random UUID. On login a ``user_session`` row is inserted with
 .. rubric:: Optional SMTP integration (FARM-AUTH.11)
 
 If ``PROTEA_SMTP_*`` env vars are set, magic-link login and email-driven
-password reset are enabled via ``POST /auth/magic-link`` and
-``POST /auth/reset-password``. Without SMTP both features are disabled and
+password reset are enabled via ``POST /v1/auth/magic-link/request``,
+``GET /v1/auth/magic-link/consume``, ``POST /v1/auth/password-reset/request``,
+and ``POST /v1/auth/password-reset/consume``. Without SMTP both features are disabled and
 password reset is admin-driven out of band. The deployment is fully functional
 without SMTP.
 
