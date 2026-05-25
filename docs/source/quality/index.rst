@@ -261,28 +261,42 @@ CI gates (GitHub Actions)
 
 Required checks on ``develop``-targeted PRs:
 
-========================  =============================================
-Workflow file             What it checks
-========================  =============================================
-``test.yml``              pytest unit suite (Python 3.12, no DB)
-``integration.yml``       pytest with Postgres (Docker Postgres)
-``lint.yml``              ruff, ruff-format, mypy, check_smells.py
-``security.yml``          pip-audit (blocking) + bandit (blocking)
-``docs.yml``              Sphinx HTML build, zero warnings policy
-``openapi-drift.yml``     ``docs/openapi.json`` matches live app
-``playwright.yml``        Playwright critical user flows
-``deploy-e2e.yml``        Build Dockerfile + compose smoke
-``deploy-e2e-skip.yml``   Branch protection canary (fires when deploy
-                          paths are NOT changed, reports the same check
-                          name so the required check is always present)
-``mutation.yml``          Cosmic Ray on PR-touched core modules
-                          (informational, not blocking)
-``reranker-token-lint.yml`` Dataset naming convention in prose
-``coauthor-guard.yml``    No Claude co-author trailers in commits
-``stash-audit.yml``       No git stash entries in checked-out branch
-``auto-merge.yml``        Enables squash auto-merge once all required
-                          checks pass on non-draft PRs to develop
-========================  =============================================
+.. list-table::
+   :header-rows: 1
+   :widths: 35 65
+
+   * - Workflow file
+     - What it checks
+   * - ``test.yml``
+     - pytest unit suite (Python 3.12, no DB required)
+   * - ``integration.yml``
+     - pytest with Postgres flag (Docker Postgres container)
+   * - ``lint.yml``
+     - ruff, ruff-format, mypy, check_smells.py
+   * - ``security.yml``
+     - pip-audit (blocking) + bandit (blocking)
+   * - ``docs.yml``
+     - Sphinx HTML build, zero warnings policy
+   * - ``openapi-drift.yml``
+     - ``docs/openapi.json`` matches live app
+   * - ``playwright.yml``
+     - Playwright critical user flows
+   * - ``deploy-e2e.yml``
+     - Build Dockerfile + compose smoke
+   * - ``deploy-e2e-skip.yml``
+     - Branch protection canary: fires when deploy paths are NOT changed,
+       reports the same check name so the required check is always present
+   * - ``mutation.yml``
+     - Cosmic Ray on PR-touched core modules (informational, not blocking)
+   * - ``reranker-token-lint.yml``
+     - Dataset naming convention in docs and README prose
+   * - ``coauthor-guard.yml``
+     - No Claude co-author trailers in commits
+   * - ``stash-audit.yml``
+     - No git stash entries in the checked-out branch
+   * - ``auto-merge.yml``
+     - Enables squash auto-merge once all required checks pass on
+       non-draft PRs targeting develop
 
 Refactoring patterns applied
 =============================
