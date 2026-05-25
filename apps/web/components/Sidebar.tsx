@@ -309,7 +309,6 @@ export function Sidebar({
       icon: Server,
       items: [
         { href: "/jobs", label: t("jobs"), hint: "Live job queue and event audit trail", icon: Inbox },
-        { href: "/admin/experiment-runs", label: t("experimentRuns"), hint: "F-EXP campaign narrative: hypothesis / config / findings per run", badge: "ADMIN", icon: GraduationCap },
         { href: "/maintenance", label: t("maintenance"), hint: "Vacuum orphan sequences and unindexed embeddings", icon: Wrench },
         { href: "/stack", label: t("stack"), hint: "Eight repositories, open PRs, deploy targets", icon: Boxes },
       ],
@@ -359,6 +358,7 @@ export function Sidebar({
       items: [
         { href: "/admin/users", label: "Users", hint: "Approve sign-ups, change roles, deactivate accounts", icon: Users },
         { href: "/admin/api-keys", label: t("apiKeys"), hint: t("apiKeysHint"), icon: KeyRound },
+        { href: "/admin/experiment-runs", label: t("experimentRuns"), hint: "F-EXP campaign narrative: hypothesis / config / findings per run", icon: GraduationCap },
       ],
     });
   }

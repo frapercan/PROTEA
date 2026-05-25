@@ -1025,6 +1025,8 @@
       "adminBadge": "ADMIN",
       "adminBadgeTooltip": "Writes are gated by the API key / bearer auth mode configured on the deployment.",
       "newRun": "New run",
+      "refresh": "Refresh",
+      "refreshing": "Refreshing…",
       "filterAriaLabel": "Filter runs by status",
       "filters": {
         "all": "All"

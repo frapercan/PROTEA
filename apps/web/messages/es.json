@@ -1025,6 +1025,8 @@
       "adminBadge": "ADMIN",
       "adminBadgeTooltip": "Las escrituras están protegidas por el modo de auth (API key / bearer) del despliegue.",
       "newRun": "Nueva ejecución",
+      "refresh": "Actualizar",
+      "refreshing": "Actualizando…",
       "filterAriaLabel": "Filtrar ejecuciones por estado",
       "filters": {
         "all": "Todas"
@@ -1112,6 +1114,8 @@
       "adminBadge": "ADMIN",
       "adminBadgeTooltip": "Las escrituras están protegidas por el modo de auth (API key / bearer) del despliegue.",
       "newRun": "Nueva ejecución",
+      "refresh": "Actualizar",
+      "refreshing": "Actualizando…",
       "filterAriaLabel": "Filtrar ejecuciones por estado",
       "filters": {
         "all": "Todas"

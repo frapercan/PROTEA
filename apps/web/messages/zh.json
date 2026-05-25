@@ -1025,6 +1025,8 @@
       "adminBadge": "管理",
       "adminBadgeTooltip": "写操作由部署中配置的 API key / bearer 鉴权模式保护。",
       "newRun": "新运行",
+      "refresh": "刷新",
+      "refreshing": "刷新中…",
       "filterAriaLabel": "按状态过滤运行",
       "filters": {
         "all": "全部"
@@ -1112,6 +1114,8 @@
       "adminBadge": "管理",
       "adminBadgeTooltip": "写操作由部署中配置的 API key / bearer 鉴权模式保护。",
       "newRun": "新运行",
+      "refresh": "刷新",
+      "refreshing": "刷新中…",
       "filterAriaLabel": "按状态过滤运行",
       "filters": {
         "all": "全部"

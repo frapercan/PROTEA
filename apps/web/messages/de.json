@@ -1026,6 +1026,8 @@
       "adminBadge": "ADMIN",
       "adminBadgeTooltip": "Schreibzugriffe sind durch den auf dem Deployment konfigurierten Auth-Modus (API-Key / Bearer) abgesichert.",
       "newRun": "Neuer Run",
+      "refresh": "Aktualisieren",
+      "refreshing": "Wird aktualisiert…",
       "filterAriaLabel": "Runs nach Status filtern",
       "filters": {
         "all": "Alle"
@@ -1113,6 +1115,8 @@
       "adminBadge": "ADMIN",
       "adminBadgeTooltip": "Schreibzugriffe sind durch den auf dem Deployment konfigurierten Auth-Modus (API-Key / Bearer) abgesichert.",
       "newRun": "Neuer Run",
+      "refresh": "Aktualisieren",
+      "refreshing": "Wird aktualisiert…",
       "filterAriaLabel": "Runs nach Status filtern",
       "filters": {
         "all": "Alle"
