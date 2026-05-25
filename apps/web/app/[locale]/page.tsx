@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { getShowcase, type ShowcaseData } from "../../lib/api";
 import { AnnotateForm } from "../../components/AnnotateForm";
+import { Tooltip } from "../../components/Tooltip";
 
 const ASPECTS = ["MFO", "BPO", "CCO"] as const;
 const ASPECT_LABELS: Record<string, string> = {
@@ -13,6 +14,30 @@ const ASPECT_LABELS: Record<string, string> = {
   BPO: "Biological Process",
   CCO: "Cellular Component",
 };
+
+// Tooltips for the GO aspects, written in plain English. Hover surfaces
+// the longer explanation so the short MFO / BPO / CCO acronyms stay
+// usable in tight grid cells (P1.2 + P1.9).
+const ASPECT_TOOLTIPS: Record<string, string> = {
+  MFO: "Molecular Function: what the protein does at the molecular level (binding, catalysis, transport).",
+  BPO: "Biological Process: the broader biological program the protein contributes to (cell cycle, signalling, metabolism).",
+  CCO: "Cellular Component: where in the cell the protein is active (membrane, nucleus, ribosome, organelle).",
+};
+
+// Mirror the CAFA-split tooltips already used on the benchmark page so
+// the NK / LK / PK acronyms in the 'Top performing model across NK /
+// LK / PK categories' subtitle are self-explaining (P1.9). Source of
+// truth lives on the benchmark page; copy is kept short here.
+const CATEGORY_TOOLTIPS: Record<string, string> = {
+  NK: "No Knowledge: the test protein has no experimental GO annotations of any aspect at the train cutoff. Strictest CAFA split.",
+  LK: "Limited Knowledge: the protein is annotated in other aspects but not the one under evaluation.",
+  PK: "Partial Knowledge: the protein is already annotated for the same aspect, so scoring only counts newly added terms.",
+};
+
+// Definition of the Fmax metric. Kept short so the dotted-underline
+// inline pattern stays readable.
+const FMAX_TOOLTIP =
+  "Fmax: the maximum F1 score across all decision thresholds. The standard CAFA metric for ranking GO-term predictions.";
 
 const ASPECT_COLORS: Record<string, { bg: string; text: string; ring: string }> = {
   MFO: { bg: "bg-blue-50", text: "text-blue-700", ring: "ring-blue-100" },
@@ -209,7 +234,31 @@ export default function HomePage() {
                 {t("bestOverall")}
               </h2>
               <p className="text-sm text-slate-500 mt-1">
-                Top performing model across NK / LK / PK categories
+                Top{" "}
+                <Tooltip text={FMAX_TOOLTIP}>
+                  <span className="underline decoration-dotted decoration-slate-400 underline-offset-4 cursor-help">
+                    Fmax
+                  </span>
+                </Tooltip>
+                {" "}across the{" "}
+                <Tooltip text={CATEGORY_TOOLTIPS.NK}>
+                  <span className="underline decoration-dotted decoration-slate-400 underline-offset-4 cursor-help">
+                    NK
+                  </span>
+                </Tooltip>
+                {" / "}
+                <Tooltip text={CATEGORY_TOOLTIPS.LK}>
+                  <span className="underline decoration-dotted decoration-slate-400 underline-offset-4 cursor-help">
+                    LK
+                  </span>
+                </Tooltip>
+                {" / "}
+                <Tooltip text={CATEGORY_TOOLTIPS.PK}>
+                  <span className="underline decoration-dotted decoration-slate-400 underline-offset-4 cursor-help">
+                    PK
+                  </span>
+                </Tooltip>
+                {" "}CAFA splits
               </p>
             </div>
             <div className="flex items-center gap-3 shrink-0">
@@ -294,13 +343,16 @@ export default function HomePage() {
                   <div
                     key={aspect}
                     className={`rounded-2xl ${color.bg} p-4 text-center ring-1 ring-inset ${color.ring} transition-transform hover:-translate-y-0.5`}
-                    title={ASPECT_LABELS[aspect]}
                   >
                     <div className={`text-2xl sm:text-3xl font-bold tabular-nums ${color.text}`}>
                       {value != null ? value.toFixed(3) : "—"}
                     </div>
                     <div className={`text-xs uppercase tracking-[0.14em] mt-1.5 font-semibold ${color.text} opacity-80`}>
-                      {aspect}
+                      <Tooltip text={ASPECT_TOOLTIPS[aspect]}>
+                        <span className="underline decoration-dotted decoration-slate-400 underline-offset-4 cursor-help">
+                          {aspect}
+                        </span>
+                      </Tooltip>
                     </div>
                     <div className="text-xs text-slate-500 mt-0.5 truncate" title={ASPECT_LABELS[aspect]}>
                       {ASPECT_LABELS[aspect]}
