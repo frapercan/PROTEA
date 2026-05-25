@@ -363,6 +363,11 @@
         "qualifier": "Qualifikator",
         "source": "Quelle"
       }
+    },
+    "notFound": {
+      "title": "Protein nicht gefunden",
+      "body": "Kein Protein mit der Akzession {accession} ist in diesem Datensatz vorhanden. Die Akzession ist möglicherweise zurückgezogen, falsch geschrieben oder im aktuellen Snapshot gefiltert.",
+      "cta": "Zurück zur Proteinsuche"
     }
   },
   "annotations": {

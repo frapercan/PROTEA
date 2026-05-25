@@ -363,6 +363,11 @@
         "qualifier": "限定词",
         "source": "来源"
       }
+    },
+    "notFound": {
+      "title": "未找到蛋白质",
+      "body": "该数据集中不存在登录号为 {accession} 的蛋白质。该登录号可能已废弃、输入有误，或已被当前快照过滤。",
+      "cta": "返回蛋白质搜索"
     }
   },
   "annotations": {

@@ -55,7 +55,7 @@ function Field({ label, value }: { label: string; value?: string | null }) {
 export default function ProteinDetailPage({ params }: { params: Promise<{ accession: string }> }) {
   const { accession } = use(params);
   const t = useTranslations("proteinDetail");
-const tToast = useTranslations("toasts");
+  const tToast = useTranslations("toasts");
   const locale = useLocale();
   const toast = useToast();
   const [protein, setProtein] = useState<ProteinDetail | null>(null);
@@ -105,7 +105,31 @@ const tToast = useTranslations("toasts");
       </div>
     );
   }
-  if (!protein) return <p className="text-sm text-red-500 mt-8">Protein not found.</p>;
+  if (!protein) {
+    return (
+      <div className="mx-auto max-w-md px-4 sm:px-6 py-12">
+        <div
+          role="alert"
+          className="rounded-xl border border-stone-200 bg-white p-6 text-center shadow-sm"
+        >
+          <h1 className="text-lg font-semibold text-stone-950">
+            {t("notFound.title")}
+          </h1>
+          <p className="mt-2 text-sm text-stone-600">
+            {t("notFound.body", { accession: decodeURIComponent(accession) })}
+          </p>
+          <div className="mt-5 flex justify-center">
+            <Link
+              href={`/${locale}/proteins`}
+              className="rounded-md bg-blue-800 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-900"
+            >
+              {t("notFound.cta")}
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const meta = protein.metadata;
 

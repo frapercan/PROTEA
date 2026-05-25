@@ -363,6 +363,11 @@
         "qualifier": "Qualificador",
         "source": "Fonte"
       }
+    },
+    "notFound": {
+      "title": "Proteína não encontrada",
+      "body": "Não existe nenhuma proteína com a acessão {accession} neste conjunto de dados. A acessão pode estar retirada, escrita incorretamente ou filtrada do snapshot atual.",
+      "cta": "Voltar à pesquisa de proteínas"
     }
   },
   "annotations": {
