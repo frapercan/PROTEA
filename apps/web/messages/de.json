@@ -1236,7 +1236,8 @@
         "heading": "Fehlerberichte",
         "body": "Wenn etwas nicht funktioniert oder sich unerwartet verhält, <issues>melden Sie es als Issue auf GitHub</issues>. Berichte sind willkommen."
       },
-      "lastUpdated": "Richtlinienversion 2, 2026-05-23."
+      "lastUpdated": "Richtlinienversion 2, 2026-05-23.",
+      "keyboardHint": "Eingabetaste oder Leertaste zum Akzeptieren"
     },
     "statusBadge": {
       "queued": "WARTEND",
