@@ -168,11 +168,16 @@ def _mint_session_jwt(user_id: str, role: str, status: str, jti: str, secret: st
 
 
 def _set_session_cookie(response: Response, token: str) -> None:
+    # ``httponly=False`` mirrors ``auth_user._set_session_cookie`` (see the
+    # FARM-AUTH.10 amendment note there): the chrome reads the JWT via
+    # ``document.cookie`` to mint the ``Authorization: Bearer`` header and
+    # populate AuthChip / useRole; flipping this to ``True`` strands every
+    # cookie-derived surface and makes the SMTP login appear to not persist.
     response.set_cookie(
         key=_COOKIE_NAME,
         value=token,
         max_age=_COOKIE_MAX_AGE,
-        httponly=True,
+        httponly=False,
         secure=True,
         samesite="strict",
     )

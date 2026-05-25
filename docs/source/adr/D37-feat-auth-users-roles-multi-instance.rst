@@ -119,13 +119,29 @@ deactivate, DB reset, signup approval.
 
 **3. Session JWT**
 
-The session JWT cookie introduced in PR #456 is retained unchanged
-(HttpOnly, Secure, SameSite=Strict). The middleware is extended to
+The session JWT cookie introduced in PR #456 is retained
+(``Secure``, ``SameSite=Strict``). The middleware is extended to
 check ``jti`` against ``session_revocation`` before accepting the
 token. The JWT payload gains a ``role`` claim, avoiding a DB lookup on
 every request for the common case; the middleware falls back to DB if
 the claim is absent (backward compat with tokens minted before this
 ADR).
+
+**Amendment (FARM-AUTH.10, LOGIN-PERSIST-DEBUG)**: the ``HttpOnly``
+attribute was dropped. The entire frontend chrome (``lib/auth.ts``,
+``lib/api.ts``, ``useRole``, ``AuthChip``, sidebar admin gate, every
+POST/PATCH/DELETE) reads the JWT via ``document.cookie`` to render
+role-conditional UI and to mint ``Authorization: Bearer`` headers on
+mutations. Marking the cookie ``HttpOnly`` hides it from JavaScript and
+collapses the chrome to anonymous after a successful login; the symptom
+is "the login does not persist". A purely server-side cookie-auth path
+that the gate would honor without a Bearer header was considered and
+rejected as scope: it would require teaching ``require_api_key_or_bearer``
+to read the cookie, plus a CSRF token surface to preserve the protection
+``SameSite=Strict`` alone gives us with a Bearer header on every
+mutation. The realistic CSRF / network surface is still covered by
+``SameSite=Strict`` + ``Secure``; the JWT remains short-lived (30 day
+``exp``) and server-revocable via the ``user_session`` table.
 
 **4. Endpoint access map**
 

@@ -5,13 +5,30 @@ dict. AUTH.8 replaces that dict with a persistent ``user_session`` table
 so logout invalidates tokens server-wide across all replicas and an admin
 can revoke a user's sessions at any time.
 
-Cookie contract (ADR D37)
--------------------------
+Cookie contract (ADR D37, with FARM-AUTH.10 amendment)
+------------------------------------------------------
 
 * Name: ``protea_session``
 * Value: a signed HS256 JWT (same secret as the API-key JWT: ``PROTEA_JWT_SECRET``)
-* Attributes: ``HttpOnly``, ``Secure``, ``SameSite=strict``, ``Max-Age=2592000`` (30 days)
+* Attributes: ``Secure``, ``SameSite=strict``, ``Max-Age=2592000`` (30 days)
 * Payload: ``{sub, jti, role, status, exp, iat}``
+
+Note on ``HttpOnly``
+~~~~~~~~~~~~~~~~~~~~
+
+D37 originally specified ``HttpOnly``. The entire client (``lib/auth.ts``,
+``lib/api.ts``, ``useRole``, ``AuthChip``, sidebar admin gate, every
+mutation in ``lib/api.ts``) reads ``document.cookie`` to surface the
+session role and to mint the ``Authorization: Bearer`` header that the
+API gate accepts; ``HttpOnly`` hides the cookie from JavaScript and
+breaks all of those code paths (AuthChip stuck on anonymous after a
+successful login, admin sidebar group invisible, every POST/PATCH/DELETE
+silently 401s). The frontend has no equivalent to the cookie -> Bearer
+plumbing on the server side, so the only way to preserve a "login that
+persists across navigation" experience is to let JS read the cookie. The
+realistic CSRF surface is already covered by ``SameSite=strict`` and the
+transport surface by ``Secure``; the JWT is short-lived (30 days) and
+server-revocable via the ``user_session`` table.
 
 The ``jti`` (JWT ID) is a random UUID. On login a ``user_session`` row is
 inserted with ``token_hash = sha256(raw_jwt)``. On logout the row's
@@ -238,12 +255,22 @@ class LoginRequest(BaseModel):
 
 
 def _set_session_cookie(response: Response, token: str) -> None:
-    """Write the ``protea_session`` cookie with ADR D37 security attributes."""
+    """Write the ``protea_session`` cookie with ADR D37 security attributes.
+
+    ``httponly=False`` (FARM-AUTH.10 amendment): the chrome reads the
+    JWT via ``document.cookie`` so the AuthChip, useRole hook, sidebar
+    admin gate and every mutation in ``apps/web/lib/api.ts`` can
+    re-mint the ``Authorization: Bearer`` header on each call. Switching
+    this back to ``httponly=True`` strands the entire client (login
+    appears to "not persist" because every cookie-derived surface
+    silently falls back to anonymous). ``Secure`` + ``SameSite=strict``
+    remain the transport / CSRF defences.
+    """
     response.set_cookie(
         key=_COOKIE_NAME,
         value=token,
         max_age=_COOKIE_MAX_AGE,
-        httponly=True,
+        httponly=False,
         secure=True,
         samesite="strict",
     )
@@ -251,7 +278,7 @@ def _set_session_cookie(response: Response, token: str) -> None:
 
 def _clear_session_cookie(response: Response) -> None:
     """Delete the ``protea_session`` cookie."""
-    response.delete_cookie(key=_COOKIE_NAME, httponly=True, secure=True, samesite="strict")
+    response.delete_cookie(key=_COOKIE_NAME, httponly=False, secure=True, samesite="strict")
 
 
 # ---------------------------------------------------------------------------

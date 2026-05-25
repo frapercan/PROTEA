@@ -561,6 +561,38 @@ class TestLogin:
         assert data["status"] == "active"
         assert "protea_session" in resp.cookies
 
+    def test_login_cookie_is_readable_by_javascript(self, mem_client: TestClient):
+        """Regression guard for LOGIN-PERSIST-DEBUG (2026-05-25).
+
+        The session cookie MUST NOT carry ``HttpOnly``. The frontend
+        chrome (``apps/web/lib/auth.ts``, ``useRole``, ``AuthChip``,
+        sidebar admin gate, every mutation in ``apps/web/lib/api.ts``)
+        reads the JWT via ``document.cookie`` to render role-conditional
+        UI and to mint the ``Authorization: Bearer`` header. An HttpOnly
+        cookie strands all of those surfaces (login appears to "not
+        persist" across navigation; see ADR D37 amendment).
+        """
+        mem_client.post(
+            "/v1/auth/signup",
+            json={"email": "cookie@example.test", "username": "cookie_u", "password": "password123"},
+        )
+        _mem_approve(mem_client, "cookie@example.test")
+        resp = mem_client.post(
+            "/v1/auth/login",
+            json={"email": "cookie@example.test", "password": "password123"},
+        )
+        assert resp.status_code == 200
+        set_cookie = resp.headers.get("set-cookie", "")
+        assert "protea_session=" in set_cookie
+        # The two regression-critical attributes:
+        assert "httponly" not in set_cookie.lower(), (
+            "session cookie must NOT be HttpOnly so the chrome can mint "
+            f"Authorization: Bearer; got: {set_cookie!r}"
+        )
+        # And the surviving security attributes that replace it:
+        assert "samesite=strict" in set_cookie.lower()
+        assert "secure" in set_cookie.lower()
+
     def test_login_fails_wrong_password(self, mem_client: TestClient):
         mem_client.post(
             "/v1/auth/signup",
