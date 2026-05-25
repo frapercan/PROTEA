@@ -170,6 +170,46 @@ export default function EvaluationDetailPage() {
             </dl>
           </section>
 
+          {/* Highlighted-result quick-jump cards: when the page is reached
+              from the benchmark heatmap (?result=<id>) we surface two
+              shortcut links so the reviewer doesn't have to scan the table
+              to find the model and the prediction set behind the cell. */}
+          {highlightId && (() => {
+            const hr = sortedResults.find((r) => r.id === highlightId);
+            if (!hr) return null;
+            return (
+              <section
+                className="mb-6 flex flex-wrap gap-3"
+                aria-label={t("jumpToContext", { default: "Jump to context" })}
+              >
+                {hr.reranker_model_id && (
+                  <Link
+                    href={`/${params.locale}/reranker#${hr.reranker_model_id}`}
+                    className="group flex-1 min-w-[220px] rounded-lg border border-blue-200 bg-blue-50/60 px-4 py-3 hover:bg-blue-50 transition-colors"
+                  >
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-blue-700">
+                      {t("modelUsed", { default: "Reranker model used" })}
+                    </p>
+                    <p className="mt-1 text-sm font-mono text-slate-900 group-hover:text-blue-700">
+                      {shortId(hr.reranker_model_id)} <span aria-hidden>→</span>
+                    </p>
+                  </Link>
+                )}
+                <Link
+                  href={`/${params.locale}/functional-annotation/${hr.prediction_set_id}`}
+                  className="group flex-1 min-w-[220px] rounded-lg border border-blue-200 bg-blue-50/60 px-4 py-3 hover:bg-blue-50 transition-colors"
+                >
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-blue-700">
+                    {t("proteinExamples", { default: "Protein examples (prediction set)" })}
+                  </p>
+                  <p className="mt-1 text-sm font-mono text-slate-900 group-hover:text-blue-700">
+                    {shortId(hr.prediction_set_id)} <span aria-hidden>→</span>
+                  </p>
+                </Link>
+              </section>
+            );
+          })()}
+
           <section className="rounded-lg border bg-white shadow-sm">
             <header className="border-b px-4 py-3">
               <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600">
@@ -209,14 +249,41 @@ export default function EvaluationDetailPage() {
                         <td className="px-3 py-2 font-mono text-xs" title={r.id}>
                           {shortId(r.id)}
                         </td>
-                        <td className="px-3 py-2 font-mono text-xs" title={r.prediction_set_id}>
-                          {shortId(r.prediction_set_id)}
+                        {/* Forward link to the prediction set so reviewers can
+                            jump straight to the proteins+candidate-GO rows
+                            that this evaluation scored. Closes the audit's
+                            'no examples link from eval set' dead-end. */}
+                        <td className="px-3 py-2 font-mono text-xs">
+                          <Link
+                            href={`/${params.locale}/functional-annotation/${r.prediction_set_id}`}
+                            className="text-blue-600 hover:underline"
+                            title={`${r.prediction_set_id} — ${t("openPredictionSet", { default: "Open prediction set" })}`}
+                          >
+                            {shortId(r.prediction_set_id)}
+                          </Link>
                         </td>
                         <td className="px-3 py-2 font-mono text-xs">
                           {r.scoring_config_id ? shortId(r.scoring_config_id) : "—"}
                         </td>
+                        {/* Forward link to the reranker registry so reviewers
+                            can inspect the booster (provenance, metrics,
+                            feature importance) that produced this row.
+                            The detail page is the list view filtered/anchored
+                            by id since reranker has no /reranker/[id] route
+                            yet. Closes the audit's 'no link from eval to
+                            reranker model' dead-end. */}
                         <td className="px-3 py-2 font-mono text-xs">
-                          {r.reranker_model_id ? shortId(r.reranker_model_id) : "—"}
+                          {r.reranker_model_id ? (
+                            <Link
+                              href={`/${params.locale}/reranker#${r.reranker_model_id}`}
+                              className="text-blue-600 hover:underline"
+                              title={`${r.reranker_model_id} — ${t("openReranker", { default: "Open reranker model" })}`}
+                            >
+                              {shortId(r.reranker_model_id)}
+                            </Link>
+                          ) : (
+                            "—"
+                          )}
                         </td>
                         {CATEGORIES.flatMap((cat) =>
                           NAMESPACES.map((ns) => {
