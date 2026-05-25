@@ -125,6 +125,13 @@
     "annotateStepEmbed": "Embeddings",
     "annotateStepPredict": "Vorhersage"
   },
+  "benchmark": {
+    "loadingTitle": "Benchmark-Daten werden geladen…",
+    "loadingHint": "Auswertungsmatrix und Embedding-Katalog werden abgerufen. Der erste Aufruf füllt einen 60-Sekunden-Cache, damit weitere Filterwechsel sofort erfolgen.",
+    "loadingStepMatrix": "Auswertungsmatrix",
+    "loadingStepEmbeddings": "Embedding-Katalog",
+    "loadingRowsPreview": "Zeilenvorschau"
+  },
   "jobs": {
     "title": "Jobs",
     "allStatuses": "Alle Status",

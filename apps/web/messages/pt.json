@@ -125,6 +125,13 @@
     "annotateStepEmbed": "Embeddings",
     "annotateStepPredict": "Predicao"
   },
+  "benchmark": {
+    "loadingTitle": "Carregando dados do benchmark…",
+    "loadingHint": "Obtendo a matriz de avaliação e o catálogo de embeddings. A primeira chamada aquece um cache de 60 segundos para que mudanças de filtro posteriores sejam instantâneas.",
+    "loadingStepMatrix": "Matriz de avaliação",
+    "loadingStepEmbeddings": "Catálogo de embeddings",
+    "loadingRowsPreview": "Pré-visualização de linhas"
+  },
   "jobs": {
     "title": "Jobs",
     "allStatuses": "Todos os status",

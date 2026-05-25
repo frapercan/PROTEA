@@ -125,6 +125,13 @@
     "annotateStepEmbed": "嵌入向量",
     "annotateStepPredict": "预测"
   },
+  "benchmark": {
+    "loadingTitle": "正在加载基准测试数据…",
+    "loadingHint": "正在获取评估矩阵和嵌入向量目录。首次访问会预热 60 秒的缓存,后续筛选操作将瞬时响应。",
+    "loadingStepMatrix": "评估矩阵",
+    "loadingStepEmbeddings": "嵌入向量目录",
+    "loadingRowsPreview": "行预览"
+  },
   "jobs": {
     "title": "任务",
     "allStatuses": "所有状态",
