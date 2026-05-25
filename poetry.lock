@@ -2756,10 +2756,9 @@ files = [
 name = "minio"
 version = "7.2.20"
 description = "MinIO Python SDK for Amazon S3 Compatible Cloud Storage"
-optional = true
+optional = false
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"storage\""
 files = [
     {file = "minio-7.2.20-py3-none-any.whl", hash = "sha256:eb33dd2fb80e04c3726a76b13241c6be3c4c46f8d81e1d58e757786f6501897e"},
     {file = "minio-7.2.20.tar.gz", hash = "sha256:95898b7a023fbbfde375985aa77e2cd6a0762268db79cf886f002a9ea8e68598"},
@@ -4384,10 +4383,9 @@ files = [
 name = "pycryptodome"
 version = "3.23.0"
 description = "Cryptographic library for Python"
-optional = true
+optional = false
 python-versions = "!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,!=3.5.*,!=3.6.*,>=2.7"
 groups = ["main"]
-markers = "extra == \"storage\""
 files = [
     {file = "pycryptodome-3.23.0-cp27-cp27m-macosx_10_9_x86_64.whl", hash = "sha256:a176b79c49af27d7f6c12e4b178b0824626f40a7b9fed08f712291b6d54bf566"},
     {file = "pycryptodome-3.23.0-cp27-cp27m-manylinux2010_i686.whl", hash = "sha256:573a0b3017e06f2cffd27d92ef22e46aa3be87a2d317a5abf7cc0e84e321bd75"},
@@ -7032,10 +7030,7 @@ files = [
     {file = "zstd-1.5.7.3.tar.gz", hash = "sha256:403e5205f4ac04b92e6b0cda654be2f51de268228a0db0067bc087faacf2f495"},
 ]
 
-[extras]
-storage = ["minio"]
-
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "e546f3daa7469eb96fdd2e211cf6ab693cc17a51922152c05b0d1b719988569a"
+content-hash = "dfaaf6b1b3c2878a8cad3d5ac67b413fff42a3afaaff88e0de5f6b5a6c197698"
