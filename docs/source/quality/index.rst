@@ -134,8 +134,8 @@ Reproducibility and statistical regression
 iterations) comparing a champion prediction set against the KNN baseline.
 Slice LB.3 established that six of six NK+LK confidence intervals are
 strictly positive at 95 % on ``bench-v1-K5-v226-lineage``, providing a
-publishable statistical claim for Chapter 6. Slice v27-binary-multiseed
-(3 independent seeds) produced ``NK+LK cafaeval 0.7291 +/- 0.0028``,
+publishable statistical claim for Chapter 6. The multi-seed binary
+classifier recipe (3 independent seeds) produced ``NK+LK cafaeval 0.7291 +/- 0.0028``,
 confirming the benchmark is not a one-seed artefact.
 
 Code-smell budget
@@ -193,8 +193,8 @@ Dataset naming convention (FARM-EXP.6)
 The reranker-token-lint workflow (``.github/workflows/reranker-token-lint.yml``)
 delegates to the shared linter in
 ``frapercan/agent-farm/.github/workflows/reranker-token-lint.yml``.
-It blocks PRs that introduce shorthand version tokens (``v3``, ``v22``,
-etc.) in publishable prose under ``docs/`` and ``README.md``. Only the
+It blocks PRs that introduce shorthand reranker-recipe version tokens
+in publishable prose under ``docs/`` and ``README.md``. Only the
 nine canonical GOA snapshot tokens are allowed. CHANGELOG.md is
 structurally excluded (per ADR D36 and FARM-EXP.6 decision).
 
