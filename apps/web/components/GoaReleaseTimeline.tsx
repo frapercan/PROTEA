@@ -26,6 +26,12 @@ type GoaReleaseTimelineProps = {
   refreshing?: boolean;
   onRefresh?: () => void;
   selectedId?: string;
+  /**
+   * Heading level for the component title. Pick the level that keeps
+   * the surrounding page's heading order monotonic (no skipped levels).
+   * Defaults to `h3` for backward compatibility.
+   */
+  headingLevel?: "h2" | "h3";
 };
 
 type Positioned = {
@@ -92,7 +98,9 @@ export function GoaReleaseTimeline({
   refreshing = false,
   onRefresh,
   selectedId,
+  headingLevel = "h3",
 }: GoaReleaseTimelineProps) {
+  const Heading = headingLevel;
   const [hoverId, setHoverId] = useState<string | null>(null);
 
   const grouped = useMemo(() => {
@@ -157,9 +165,9 @@ export function GoaReleaseTimeline({
   return (
     <div className="rounded-lg border border-stone-200 bg-white p-4">
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-sm font-medium text-stone-800">
+        <Heading className="text-sm font-medium text-stone-800">
           Release timeline
-        </h3>
+        </Heading>
         {onRefresh && (
           <button
             type="button"
