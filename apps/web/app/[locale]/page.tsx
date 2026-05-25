@@ -36,6 +36,19 @@ const STAGE_I18N: Record<string, string> = {
   evaluations: "stageEvaluation",
 };
 
+// Short one-line story per pipeline stage, surfaced under the count so
+// first-time visitors understand what each tile actually represents.
+// Wording verified against PROTEA CLAUDE.md (KNN + GO transfer, LightGBM
+// reranker in lab) and existing i18n strings (knnBaseline, functional-
+// annotation/intro). Keys live under the "home" namespace.
+const STAGE_DESC_I18N: Record<string, string> = {
+  sequences: "stageSequencesDesc",
+  embeddings: "stageEmbeddingsDesc",
+  predictions: "stageKnnDesc",
+  reranker_models: "stageRerankerDesc",
+  evaluations: "stageEvaluationDesc",
+};
+
 const STAGE_LABELS: Record<string, string> = {
   baseline: "pipelineStageBaseline",
   alignment_weighted: "pipelineStageAlignmentWeighted",
@@ -335,7 +348,8 @@ export default function HomePage() {
                 )}
                 <button
                   onClick={() => router.push(stage.href)}
-                  className="group relative flex flex-col items-center justify-center w-32 sm:w-36 h-28 rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 hover:from-blue-50 hover:to-white hover:border-blue-300 hover:shadow-md transition-all cursor-pointer"
+                  aria-label={`${t(STAGE_I18N[stage.name] as any)} — ${t(STAGE_DESC_I18N[stage.name] as any)}`}
+                  className="group relative flex flex-col items-center justify-center w-40 sm:w-44 min-h-[10rem] px-3 py-3 rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 hover:from-blue-50 hover:to-white hover:border-blue-300 hover:shadow-md transition-all cursor-pointer text-center"
                 >
                   <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-500 text-sm font-bold group-hover:bg-blue-100 group-hover:text-blue-600 transition-colors">
                     {STAGE_ICONS[stage.name] ?? stage.name.slice(0, 2).toUpperCase()}
@@ -345,6 +359,13 @@ export default function HomePage() {
                   </span>
                   <span className="text-[11px] text-slate-600 tabular-nums mt-0.5 font-medium">
                     {stage.count.toLocaleString()}
+                  </span>
+                  <span className="text-[10px] text-slate-500 leading-snug mt-1.5 line-clamp-2">
+                    {t(STAGE_DESC_I18N[stage.name] as any)}
+                  </span>
+                  <span className="text-[10px] font-medium text-blue-600 mt-1.5 inline-flex items-center gap-0.5 group-hover:text-blue-800 transition-colors">
+                    {t("stageView" as any)}
+                    <span aria-hidden>→</span>
                   </span>
                 </button>
               </div>
