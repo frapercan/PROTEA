@@ -290,18 +290,18 @@ export function AnnotateForm() {
           className="w-full rounded-lg p-4 text-xs font-mono text-slate-700 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-300 resize-y disabled:opacity-50 disabled:cursor-not-allowed bg-transparent"
         />
         {!fasta && !isRunning && !isQueueBlocked && (
-          <div className="absolute bottom-3 right-3 flex gap-2">
+          <div className="absolute bottom-2 right-2 flex gap-1">
             <button
               type="button"
               onClick={() => setFasta(EXAMPLE_FASTA)}
-              className="text-xs text-blue-500 hover:text-blue-700 underline"
+              className="inline-flex min-h-[44px] items-center justify-center rounded-md px-3 py-2 text-xs font-medium text-blue-700 hover:text-blue-800 hover:bg-blue-50 underline transition-colors"
             >
               {t("annotateTryExample" as any)}
             </button>
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
-              className="text-xs text-slate-500 hover:text-slate-700 underline"
+              className="inline-flex min-h-[44px] items-center justify-center rounded-md px-3 py-2 text-xs font-medium text-slate-700 hover:text-slate-900 hover:bg-slate-50 underline transition-colors"
             >
               {t("annotateUploadFile" as any)}
             </button>

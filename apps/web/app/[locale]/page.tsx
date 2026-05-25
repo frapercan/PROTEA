@@ -229,10 +229,10 @@ export default function HomePage() {
                     <div className={`text-2xl sm:text-3xl font-bold tabular-nums ${color.text}`}>
                       {value != null ? value.toFixed(3) : "—"}
                     </div>
-                    <div className={`text-[10px] uppercase tracking-[0.14em] mt-1.5 font-semibold ${color.text} opacity-80`}>
+                    <div className={`text-xs uppercase tracking-[0.14em] mt-1.5 font-semibold ${color.text} opacity-80`}>
                       {aspect}
                     </div>
-                    <div className="text-[10px] text-slate-500 mt-0.5">
+                    <div className="text-xs text-slate-500 mt-0.5 truncate" title={ASPECT_LABELS[aspect]}>
                       {ASPECT_LABELS[aspect]}
                     </div>
                   </div>
