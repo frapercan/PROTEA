@@ -226,6 +226,10 @@ later revision).
      - :doc:`Single auth system, manual approvals, multi-instance (FEAT-AUTH) <D37-feat-auth-users-roles-multi-instance>`
      - Proposed
      - F-AUTH
+   * - D38
+     - :doc:`Defer neural-head champion; pivot to curated dataset packaging (F-DATA-PACK) <D38-neural-head-deferred-dataset-pack-pivot>`
+     - Accepted
+     - F-DATA-PACK
 
 .. toctree::
    :maxdepth: 1
@@ -275,3 +279,4 @@ later revision).
    D35-canonical-8plm-embedding-configs
    D36-plm-axis-explicit-in-dataset-naming
    D37-feat-auth-users-roles-multi-instance
+   D38-neural-head-deferred-dataset-pack-pivot
