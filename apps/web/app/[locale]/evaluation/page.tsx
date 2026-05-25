@@ -474,8 +474,9 @@ function EvaluationSetCard({
             <p className="text-xs font-medium text-slate-500">{t("evaluationSetCard.runCafaEvaluator")}</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className={labelClass}>{t("evaluationSetCard.predictionSetLabel")}</label>
+                <label htmlFor={`eval-pred-set-${e.id}`} className={labelClass}>{t("evaluationSetCard.predictionSetLabel")}</label>
                 <select
+                  id={`eval-pred-set-${e.id}`}
                   value={predSetId}
                   onChange={(ev) => setPredSetId(ev.target.value)}
                   className={selectClass}
@@ -487,8 +488,9 @@ function EvaluationSetCard({
                 </select>
               </div>
               <div>
-                <label className={labelClass}>{t("evaluationSetCard.maxDistanceLabel")}</label>
+                <label htmlFor={`eval-max-distance-${e.id}`} className={labelClass}>{t("evaluationSetCard.maxDistanceLabel")}</label>
                 <input
+                  id={`eval-max-distance-${e.id}`}
                   type="number" min="0" max="2" step="0.05" placeholder="no limit"
                   value={maxDistance}
                   onChange={(ev) => setMaxDistance(ev.target.value)}
@@ -499,13 +501,13 @@ function EvaluationSetCard({
 
             {/* Scoring method — 3×3 grid (category × aspect) */}
             <div>
-              <label className={labelClass}>
+              <p className={labelClass} id={`eval-rr-grid-label-${e.id}`}>
                 Re-ranker models
                 <InfoTooltip text="Select a trained LightGBM re-ranker for each cell (category × aspect). Cells left empty fall back to the scoring config or default 1 − distance/2. Models trained for a specific aspect are shown with their aspect badge." />
-              </label>
+              </p>
               {initialRerankers.length > 0 && (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-xs border-collapse">
+                  <table className="w-full text-xs border-collapse" aria-labelledby={`eval-rr-grid-label-${e.id}`}>
                     <thead>
                       <tr>
                         <th scope="col" className="px-2 py-1 text-left text-slate-500 font-medium"></th>
@@ -526,6 +528,7 @@ function EvaluationSetCard({
                             return (
                               <td key={asp} className="px-1 py-1">
                                 <select
+                                  aria-label={`${cat.toUpperCase()} ${asp.toUpperCase()} re-ranker`}
                                   value={rrGrid[cat]?.[asp] ?? ""}
                                   onChange={(ev) => { setRrCell(cat, asp, ev.target.value); if (ev.target.value) setScoringConfigId(""); }}
                                   className="w-full rounded border border-slate-300 px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
@@ -550,8 +553,9 @@ function EvaluationSetCard({
                 const hasAnyRr = Object.values(rrGrid).some((catMap) => Object.values(catMap).some(Boolean));
                 return scoringConfigs.length > 0 && !hasAnyRr ? (
                   <div className="mt-2">
-                    <label className="text-[13px] text-slate-500 mb-0.5 block">Scoring config (alternative to re-ranker)</label>
+                    <label htmlFor={`eval-scoring-config-${e.id}`} className="text-[13px] text-slate-500 mb-0.5 block">Scoring config (alternative to re-ranker)</label>
                     <select
+                      id={`eval-scoring-config-${e.id}`}
                       value={scoringConfigId}
                       onChange={(ev) => setScoringConfigId(ev.target.value)}
                       className={selectClass}
@@ -839,6 +843,7 @@ export default function EvaluationPage() {
         <section className="space-y-2">
           <GoaReleaseTimeline
             sets={annotationSets}
+            headingLevel="h2"
             selectedId={oldSetId || newSetId}
             onSelect={(s) => {
               if (!oldSetId) setOldSetId(s.id);
