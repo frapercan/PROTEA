@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import {
   createExperimentRun,
@@ -15,6 +15,7 @@ import {
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { SkeletonTableRow } from "@/components/Skeleton";
 import { useToast } from "@/components/Toast";
+import { useFocusTrap } from "@/lib/useFocusTrap";
 
 /**
  * Admin surface for ExperimentRun rows (the F-EXP campaign narrative
@@ -88,6 +89,8 @@ export default function ExperimentRunsPage() {
   const [statusFilter, setStatusFilter] = useState<ExperimentRunStatus | "all">("all");
   const [editing, setEditing] = useState<ExperimentRun | null>(null);
   const [showMint, setShowMint] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<ExperimentRun | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -118,15 +121,18 @@ export default function ExperimentRunsPage() {
     toast(t("toasts.updated", { name: run.name }), "success");
   }
 
-  async function handleDelete(run: ExperimentRun) {
-    if (!confirm(t("deleteConfirm", { name: run.name }))) return;
+  async function confirmDelete(run: ExperimentRun) {
+    setDeletingId(run.id);
     try {
       await deleteExperimentRun(run.id);
       setRuns((prev) => (prev ? prev.filter((r) => r.id !== run.id) : prev));
       toast(t("toasts.deleted", { name: run.name }), "info");
+      setDeleteTarget(null);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       toast(msg, "error");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -273,7 +279,7 @@ export default function ExperimentRunsPage() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => void handleDelete(r)}
+                            onClick={() => setDeleteTarget(r)}
                             className="rounded-md border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
                           >
                             {t("actions.delete")}
@@ -300,6 +306,14 @@ export default function ExperimentRunsPage() {
           run={editing}
           onClose={() => setEditing(null)}
           onUpdated={handleUpdated}
+        />
+      )}
+      {deleteTarget && (
+        <DeleteExperimentRunConfirmDialog
+          target={deleteTarget}
+          loading={deletingId === deleteTarget.id}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => void confirmDelete(deleteTarget)}
         />
       )}
     </>
@@ -648,33 +662,107 @@ function ModalShell({
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  const t = useTranslations("admin.experimentRuns");
+  const titleId = useId();
+  // Focus-trap mirrors the api-keys RevokeConfirmDialog pattern: focus
+  // moves into the dialog on open, Tab/Shift+Tab cycles within, Escape
+  // closes, and focus returns to the trigger on unmount.
+  const dialogRef = useFocusTrap<HTMLDivElement>(true, onClose);
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label={title}
+        aria-labelledby={titleId}
         onClick={(e) => e.stopPropagation()}
         className="w-full max-w-2xl rounded-xl border bg-white shadow-xl flex flex-col max-h-[92vh]"
       >
         <div className="flex items-start justify-between border-b px-5 py-4">
           <div>
-            <h2 className="text-base font-semibold text-slate-900">{title}</h2>
+            <h2 id={titleId} className="text-base font-semibold text-slate-900">{title}</h2>
             {subtitle && <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>}
           </div>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close"
+            aria-label={t("modal.close")}
             className="text-slate-500 hover:text-slate-900 text-xl leading-none"
           >
             ×
           </button>
         </div>
         <div className="flex-1 overflow-y-auto p-5">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function DeleteExperimentRunConfirmDialog({
+  target,
+  loading,
+  onCancel,
+  onConfirm,
+}: {
+  target: ExperimentRun;
+  loading: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const t = useTranslations("admin.experimentRuns");
+  const titleId = useId();
+
+  const handleClose = useCallback(() => {
+    if (!loading) onCancel();
+  }, [loading, onCancel]);
+
+  const dialogRef = useFocusTrap<HTMLDivElement>(true, handleClose);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={handleClose}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="w-full max-w-sm rounded-xl border border-stone-200 bg-white p-6 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 id={titleId} className="text-base font-semibold text-stone-900">
+          {t("deleteDialog.title")}
+        </h2>
+        <p className="mt-2 text-sm text-stone-600">{t("deleteDialog.body")}</p>
+        <div className="mt-3 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-xs">
+          <div className="font-mono text-stone-800 break-all">{target.name}</div>
+          <div className="mt-0.5 font-mono text-[11px] text-stone-500">{target.id}</div>
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={handleClose}
+            disabled={loading}
+            className="rounded-md border border-stone-300 px-4 py-2 text-sm text-stone-700 hover:bg-stone-50 disabled:opacity-50"
+          >
+            {t("actions.cancel")}
+          </button>
+          {/* Red destructive signal: deletion is irreversible (the row
+              is removed server-side, not just hidden), matching the
+              api-keys RevokeConfirmDialog convention. */}
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={loading}
+            className="rounded-md bg-rose-700 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-800 disabled:opacity-50"
+          >
+            {loading ? t("deleteDialog.confirming") : t("deleteDialog.confirm")}
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -1051,6 +1051,15 @@
       "emptyAll": "Noch keine Experiment-Runs. Erstelle den ersten, um eine Kampagnenerzählung zu starten.",
       "emptyFiltered": "Keine Runs passen zu diesem Status-Filter.",
       "deleteConfirm": "Experiment-Run \"{name}\" löschen? Das lässt sich nicht rückgängig machen.",
+      "deleteDialog": {
+        "title": "Experiment-Run löschen?",
+        "body": "Damit wird die Zeile auf dem Server entfernt. Narrative, Hypothese und Findings können nicht wiederhergestellt werden.",
+        "confirm": "Run löschen",
+        "confirming": "Wird gelöscht…"
+      },
+      "modal": {
+        "close": "Dialog schließen"
+      },
       "toasts": {
         "created": "Experiment-Run \"{name}\" angelegt",
         "updated": "Experiment-Run \"{name}\" aktualisiert",
@@ -1129,6 +1138,15 @@
       "emptyAll": "Noch keine Experiment-Runs. Erstelle den ersten, um eine Kampagnenerzählung zu starten.",
       "emptyFiltered": "Keine Runs passen zu diesem Status-Filter.",
       "deleteConfirm": "Experiment-Run \"{name}\" löschen? Das lässt sich nicht rückgängig machen.",
+      "deleteDialog": {
+        "title": "Experiment-Run löschen?",
+        "body": "Damit wird die Zeile auf dem Server entfernt. Narrative, Hypothese und Findings können nicht wiederhergestellt werden.",
+        "confirm": "Run löschen",
+        "confirming": "Wird gelöscht…"
+      },
+      "modal": {
+        "close": "Dialog schließen"
+      },
       "toasts": {
         "created": "Experiment-Run \"{name}\" angelegt",
         "updated": "Experiment-Run \"{name}\" aktualisiert",

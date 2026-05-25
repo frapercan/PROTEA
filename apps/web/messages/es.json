@@ -1050,6 +1050,15 @@
       "emptyAll": "Aún no hay ejecuciones de experimento. Crea la primera para iniciar una narrativa de campaña.",
       "emptyFiltered": "Ninguna ejecución coincide con este filtro de estado.",
       "deleteConfirm": "¿Eliminar la ejecución \"{name}\"? Esta acción no se puede deshacer.",
+      "deleteDialog": {
+        "title": "¿Eliminar ejecución de experimento?",
+        "body": "Esto elimina la fila del servidor. La narrativa, hipótesis y hallazgos no podrán recuperarse.",
+        "confirm": "Eliminar ejecución",
+        "confirming": "Eliminando…"
+      },
+      "modal": {
+        "close": "Cerrar diálogo"
+      },
       "toasts": {
         "created": "Ejecución \"{name}\" creada",
         "updated": "Ejecución \"{name}\" actualizada",
@@ -1128,6 +1137,15 @@
       "emptyAll": "Aún no hay ejecuciones de experimento. Crea la primera para iniciar una narrativa de campaña.",
       "emptyFiltered": "Ninguna ejecución coincide con este filtro de estado.",
       "deleteConfirm": "¿Eliminar la ejecución \"{name}\"? Esta acción no se puede deshacer.",
+      "deleteDialog": {
+        "title": "¿Eliminar ejecución de experimento?",
+        "body": "Esto elimina la fila del servidor. La narrativa, hipótesis y hallazgos no podrán recuperarse.",
+        "confirm": "Eliminar ejecución",
+        "confirming": "Eliminando…"
+      },
+      "modal": {
+        "close": "Cerrar diálogo"
+      },
       "toasts": {
         "created": "Ejecución \"{name}\" creada",
         "updated": "Ejecución \"{name}\" actualizada",

@@ -1051,6 +1051,15 @@
       "emptyAll": "Ainda não há execuções. Cria a primeira para iniciar uma narrativa de campanha.",
       "emptyFiltered": "Nenhuma execução corresponde a este filtro de estado.",
       "deleteConfirm": "Eliminar a execução \"{name}\"? Isto não pode ser desfeito.",
+      "deleteDialog": {
+        "title": "Eliminar execução de experimento?",
+        "body": "Remove a linha do servidor. A narrativa, hipótese e achados não poderão ser recuperados.",
+        "confirm": "Eliminar execução",
+        "confirming": "A eliminar…"
+      },
+      "modal": {
+        "close": "Fechar diálogo"
+      },
       "toasts": {
         "created": "Execução \"{name}\" criada",
         "updated": "Execução \"{name}\" atualizada",
@@ -1129,6 +1138,15 @@
       "emptyAll": "Ainda não há execuções. Cria a primeira para iniciar uma narrativa de campanha.",
       "emptyFiltered": "Nenhuma execução corresponde a este filtro de estado.",
       "deleteConfirm": "Eliminar a execução \"{name}\"? Isto não pode ser desfeito.",
+      "deleteDialog": {
+        "title": "Eliminar execução de experimento?",
+        "body": "Remove a linha do servidor. A narrativa, hipótese e achados não poderão ser recuperados.",
+        "confirm": "Eliminar execução",
+        "confirming": "A eliminar…"
+      },
+      "modal": {
+        "close": "Fechar diálogo"
+      },
       "toasts": {
         "created": "Execução \"{name}\" criada",
         "updated": "Execução \"{name}\" atualizada",
