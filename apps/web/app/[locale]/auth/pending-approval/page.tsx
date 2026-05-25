@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useLocale } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 
 /**
@@ -14,6 +14,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
  */
 export default function PendingApprovalPage() {
   const locale = useLocale();
+  const t = useTranslations("auth.pendingApproval");
   return (
     <>
       <Breadcrumbs />
@@ -35,31 +36,21 @@ export default function PendingApprovalPage() {
               />
             </svg>
           </div>
-          <h1 className="text-xl font-bold tracking-tight text-stone-950">
-            Account pending admin approval
-          </h1>
-          <p className="mt-2 text-sm text-stone-600">
-            Your account request has been recorded. An administrator will
-            review your intended use and activate the account. You will be
-            able to sign in once that happens.
-          </p>
-          <p className="mt-4 text-xs text-stone-500">
-            Approvals are usually processed within a working day. If you
-            have not heard back after that, please ping the project
-            maintainer through the documentation contact.
-          </p>
+          <h1 className="text-xl font-bold tracking-tight text-stone-950">{t("title")}</h1>
+          <p className="mt-2 text-sm text-stone-600">{t("body")}</p>
+          <p className="mt-4 text-xs text-stone-500">{t("note")}</p>
           <div className="mt-6 flex justify-center gap-3">
             <Link
               href={`/${locale}`}
               className="rounded-md border border-stone-300 bg-white px-4 py-2 text-sm font-semibold text-stone-700 transition-colors hover:bg-stone-50"
             >
-              Back home
+              {t("backHome")}
             </Link>
             <Link
               href={`/${locale}/login`}
               className="rounded-md bg-stone-900 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-stone-800"
             >
-              Go to sign in
+              {t("goSignIn")}
             </Link>
           </div>
         </div>

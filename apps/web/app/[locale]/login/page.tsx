@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useLocale } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { type FormEvent, useId, useState } from "react";
 import { AuthError, login } from "@/lib/authApi";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -23,6 +23,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
  */
 export default function LoginPage() {
   const locale = useLocale();
+  const t = useTranslations("auth.login");
   const search = useSearchParams();
   const next = search.get("next") ?? `/${locale}`;
   const formId = useId();
@@ -45,28 +46,24 @@ export default function LoginPage() {
     } catch (err) {
       if (err instanceof AuthError) {
         if (err.status === 401) {
-          setError({ tone: "error", text: "Invalid email or password." });
+          setError({ tone: "error", text: t("errors.invalidCredentials") });
         } else if (err.status === 403 && err.detail === "account_pending_approval") {
-          setError({
-            tone: "warn",
-            text:
-              "Your account is still pending admin approval. You will be able to sign in once it has been activated.",
-          });
+          setError({ tone: "warn", text: t("errors.pendingApproval") });
         } else if (err.status === 403 && err.detail === "account_deactivated") {
-          setError({
-            tone: "warn",
-            text: "This account has been deactivated. Contact an administrator to re-enable it.",
-          });
+          setError({ tone: "warn", text: t("errors.deactivated") });
         } else if (err.status === 503) {
+          setError({ tone: "error", text: t("errors.serverUnavailable") });
+        } else {
           setError({
             tone: "error",
-            text: "Sign-in is not available on this server (JWT secret is not configured).",
+            text: err.detail || t("errors.fallback", { status: err.status }),
           });
-        } else {
-          setError({ tone: "error", text: err.detail || `Sign in failed (HTTP ${err.status}).` });
         }
       } else {
-        setError({ tone: "error", text: err instanceof Error ? err.message : "Unexpected error." });
+        setError({
+          tone: "error",
+          text: err instanceof Error ? err.message : t("errors.unexpected"),
+        });
       }
     } finally {
       setSubmitting(false);
@@ -78,10 +75,8 @@ export default function LoginPage() {
       <Breadcrumbs />
       <div className="mx-auto max-w-md px-4 sm:px-6 py-8">
         <header className="text-center">
-          <h1 className="text-2xl font-bold tracking-tight text-stone-950">Sign in to PROTEA</h1>
-          <p className="mt-2 text-sm text-stone-600">
-            Use the email and password you registered with.
-          </p>
+          <h1 className="text-2xl font-bold tracking-tight text-stone-950">{t("title")}</h1>
+          <p className="mt-2 text-sm text-stone-600">{t("subtitle")}</p>
         </header>
 
         <form
@@ -95,7 +90,7 @@ export default function LoginPage() {
               htmlFor={`${formId}-email`}
               className="text-xs font-semibold uppercase tracking-wider text-stone-700"
             >
-              Email
+              {t("emailLabel")}
             </label>
             <input
               id={`${formId}-email`}
@@ -113,7 +108,7 @@ export default function LoginPage() {
               htmlFor={`${formId}-password`}
               className="text-xs font-semibold uppercase tracking-wider text-stone-700"
             >
-              Password
+              {t("passwordLabel")}
             </label>
             <input
               id={`${formId}-password`}
@@ -144,14 +139,14 @@ export default function LoginPage() {
             disabled={submitting}
             className="w-full rounded-md bg-blue-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-900 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {submitting ? "Signing in" : "Sign in"}
+            {submitting ? t("submitting") : t("submit")}
           </button>
         </form>
 
         <p className="mt-6 text-center text-sm text-stone-600">
-          Need an account?{" "}
+          {t("needAccount")}{" "}
           <Link href={`/${locale}/signup`} className="font-semibold text-blue-800 hover:text-blue-900">
-            Request one
+            {t("needAccountCta")}
           </Link>
         </p>
       </div>
