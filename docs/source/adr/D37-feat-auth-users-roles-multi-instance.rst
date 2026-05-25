@@ -1,8 +1,8 @@
 ADR-D37: Single auth system, manual approvals, multi-instance (FEAT-AUTH)
 =========================================================================
 
-:Status: Proposed
-:Date: 2026-05-24
+:Status: Accepted
+:Date: 2026-05-25
 :Author: Francisco Miguel Pérez Canales
 :Phase: F-AUTH
 

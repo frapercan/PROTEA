@@ -38,8 +38,9 @@ concern and links to the others where they intersect.
    for automated consumption.
 
 :doc:`auth`
-   API key authentication for the most sensitive POST endpoints
-   (T5.6a first iteration). Header format, key lifecycle, dev override.
+   Four-role authentication system (guest/researcher/operator/admin) shipped in
+   FARM-AUTH.1-11 (ADR D37). Human email+password login, API-key programmatic
+   access, session revocation, per-user quota, optional SMTP, and audit log.
 
 Architecture Decision Records
 -----------------------------
