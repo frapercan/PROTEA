@@ -233,6 +233,7 @@ function NewConfigForm({
   onCreated: (c: ScoringConfig) => void;
 }) {
   const t = useTranslations("scoring");
+  const tToast = useTranslations("toasts");
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [formula, setFormula] = useState("linear");
@@ -273,9 +274,9 @@ function NewConfigForm({
       onCreated(c);
       reset();
       setOpen(false);
-      toast("Scoring config created", "success");
+      toast(tToast("scoringConfigCreated"), "success");
     } catch (err: any) {
-      toast(err.message ?? "Failed to create config", "error");
+      toast(err.message ?? tToast("createConfigFailed"), "error");
     } finally {
       setSaving(false);
     }
@@ -524,6 +525,7 @@ function NewConfigForm({
 
 export default function ScoringPage() {
   const t = useTranslations("scoring");
+  const tToast = useTranslations("toasts");
   const [configs, setConfigs] = useState<ScoringConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingPresets, setLoadingPresets] = useState(false);
@@ -592,7 +594,7 @@ export default function ScoringPage() {
   useEffect(() => {
     listScoringConfigs()
       .then(setConfigs)
-      .catch(() => toast("Failed to load scoring configs", "error"))
+      .catch(() => toast(tToast("loadScoringConfigsFailed"), "error"))
       .finally(() => setLoading(false));
   }, []);
 
@@ -604,12 +606,12 @@ export default function ScoringPage() {
       setConfigs(updated);
       toast(
         result.created.length > 0
-          ? `Presets created: ${result.created.join(", ")}`
-          : "All presets already exist",
+          ? tToast("presetsCreated", { names: result.created.join(", ") })
+          : tToast("presetsAllExist"),
         result.created.length > 0 ? "success" : "info",
       );
     } catch (err: any) {
-      toast(err.message ?? "Failed to load presets", "error");
+      toast(err.message ?? tToast("loadPresetsFailed"), "error");
     } finally {
       setLoadingPresets(false);
     }

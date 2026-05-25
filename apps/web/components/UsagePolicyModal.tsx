@@ -43,6 +43,24 @@ export function UsagePolicyModal() {
   // back into the inert page underneath.
   const dialogRef = useFocusTrap<HTMLDivElement>(visible);
 
+  // Keyboard shortcut: Enter or Space accepts the policy. Helpful on
+  // mobile where the body scrolls long and on desktop for keyboard
+  // users (Escape stays disabled by design, see comment above).
+  useEffect(() => {
+    if (!visible) return;
+    function onKey(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === "A" || tag === "BUTTON") return;
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        accept();
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [visible, accept]);
+
   if (!visible) return null;
 
   const renderBody = (key: SectionKey) => {
@@ -94,7 +112,7 @@ export function UsagePolicyModal() {
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="relative mx-4 w-full max-w-lg rounded-xl bg-white shadow-2xl max-h-[90vh] flex flex-col"
+        className="relative mx-4 w-full max-w-lg rounded-xl bg-white shadow-2xl max-h-[85dvh] flex flex-col"
       >
         {/* Header */}
         <div className="border-b px-6 py-4 flex-shrink-0">
@@ -116,15 +134,23 @@ export function UsagePolicyModal() {
           ))}
         </div>
 
-        {/* Footer */}
-        <div className="border-t px-6 py-4 flex items-center justify-between gap-3 flex-shrink-0">
-          <span className="text-xs text-slate-500">{t("lastUpdated")}</span>
-          <button
-            onClick={accept}
-            className="rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
-          >
-            {t("accept")}
-          </button>
+        {/* Footer: sticky at the bottom of the flex column, with a
+            soft top shadow so it reads as anchored on mobile where the
+            body scrolls underneath. Keyboard hint sits above the button
+            row so the affordance is visible without scrolling. */}
+        <div className="border-t bg-white px-6 pt-3 pb-4 flex-shrink-0 shadow-[0_-6px_12px_-8px_rgba(15,23,42,0.18)]">
+          <p className="text-[11px] text-slate-500 text-center mb-2">
+            {t("keyboardHint")}
+          </p>
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs text-slate-500">{t("lastUpdated")}</span>
+            <button
+              onClick={accept}
+              className="rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+            >
+              {t("accept")}
+            </button>
+          </div>
         </div>
       </div>
     </div>

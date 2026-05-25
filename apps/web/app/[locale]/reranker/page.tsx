@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { useParams } from "next/navigation";
 import { ContextBanner } from "@/components/ContextBanner";
 import { SkeletonTableRow } from "@/components/Skeleton";
 import { Tooltip } from "@/components/Tooltip";
@@ -349,14 +351,18 @@ function RerankerCard({
   evaluationSets,
   annotationSets,
   onDelete,
+  locale,
+  initiallyExpanded = false,
 }: {
   model: RerankerModel;
   predictionSets: PredictionSet[];
   evaluationSets: EvaluationSet[];
   annotationSets: AnnotationSet[];
   onDelete: () => void;
+  locale: string;
+  initiallyExpanded?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(initiallyExpanded);
   const [metricsLoading, setMetricsLoading] = useState(false);
   const [metrics, setMetrics] = useState<Record<string, any> | null>(null);
   const [metricsError, setMetricsError] = useState<string | null>(null);
@@ -396,13 +402,16 @@ function RerankerCard({
   const m = model.metrics;
 
   return (
-    <div className="rounded-lg border bg-white shadow-sm overflow-hidden">
+    // id={model.id} so eval/[id]?result=… can deep-link via hash anchor
+    // (#<reranker_id>) from the new research-flow shortcut cards.
+    // scroll-mt offsets the sticky nav header on hash-jump.
+    <div id={model.id} className="rounded-lg border bg-white shadow-sm overflow-hidden scroll-mt-24">
       <div
         className="px-4 py-3 cursor-pointer hover:bg-slate-50 transition-colors"
         onClick={() => setExpanded(!expanded)}
       >
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <span className="font-semibold text-slate-900">{model.name}</span>
             <span className="rounded-full border px-2 py-0.5 text-xs font-medium bg-indigo-50 text-indigo-700 border-indigo-100 uppercase">
               {model.category}
@@ -411,6 +420,21 @@ function RerankerCard({
               <span className="rounded-full border px-2 py-0.5 text-xs font-medium bg-amber-50 text-amber-700 border-amber-100 uppercase">
                 {model.aspect}
               </span>
+            )}
+            {/* Dataset-name pill: lets researchers scan "which reranker used
+                which dataset" from the list view without opening each card.
+                Links straight to the Dataset detail page; stopPropagation
+                so the click doesn't toggle expand. */}
+            {model.dataset_name && model.dataset_id && (
+              <Link
+                href={`/${locale}/datasets/${model.dataset_id}`}
+                onClick={(e) => e.stopPropagation()}
+                title={model.dataset_name}
+                className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-700 hover:bg-blue-50 hover:border-blue-200 hover:text-blue-700 transition-colors"
+              >
+                <span aria-hidden className="text-slate-400">dataset:</span>
+                <span className="font-mono max-w-[260px] truncate">{model.dataset_name}</span>
+              </Link>
             )}
           </div>
           <div className="flex items-center gap-3">
@@ -504,8 +528,13 @@ function RerankerCard({
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 mb-2">Compute CAFA metrics</p>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-2">
               <div>
-                <label className="text-[13px] text-slate-500 mb-0.5 block">Prediction set</label>
-                <select value={metricsPsId} onChange={(e) => setMetricsPsId(e.target.value)} className={selectClass}>
+                <label htmlFor={`rr-metrics-ps-${model.id}`} className="text-[13px] text-slate-500 mb-0.5 block">Prediction set</label>
+                <select
+                  id={`rr-metrics-ps-${model.id}`}
+                  value={metricsPsId}
+                  onChange={(e) => setMetricsPsId(e.target.value)}
+                  className={selectClass}
+                >
                   <option value="">Select...</option>
                   {predictionSets.map((ps) => (
                     <option key={ps.id} value={ps.id}>{predLabel(ps)}</option>
@@ -513,8 +542,13 @@ function RerankerCard({
                 </select>
               </div>
               <div>
-                <label className="text-[13px] text-slate-500 mb-0.5 block">Evaluation set</label>
-                <select value={metricsEsId} onChange={(e) => setMetricsEsId(e.target.value)} className={selectClass}>
+                <label htmlFor={`rr-metrics-es-${model.id}`} className="text-[13px] text-slate-500 mb-0.5 block">Evaluation set</label>
+                <select
+                  id={`rr-metrics-es-${model.id}`}
+                  value={metricsEsId}
+                  onChange={(e) => setMetricsEsId(e.target.value)}
+                  className={selectClass}
+                >
                   <option value="">Select...</option>
                   {evaluationSets.map((es) => (
                     <option key={es.id} value={es.id}>{evalLabel(es, annotationSets)}</option>
@@ -522,8 +556,13 @@ function RerankerCard({
                 </select>
               </div>
               <div>
-                <label className="text-[13px] text-slate-500 mb-0.5 block">Category</label>
-                <select value={metricsCategory} onChange={(e) => setMetricsCategory(e.target.value)} className={selectClass}>
+                <label htmlFor={`rr-metrics-cat-${model.id}`} className="text-[13px] text-slate-500 mb-0.5 block">Category</label>
+                <select
+                  id={`rr-metrics-cat-${model.id}`}
+                  value={metricsCategory}
+                  onChange={(e) => setMetricsCategory(e.target.value)}
+                  className={selectClass}
+                >
                   <option value="nk">NK (No Knowledge)</option>
                   <option value="lk">LK (Limited Knowledge)</option>
                   <option value="pk">PK (Partial Knowledge)</option>
@@ -580,12 +619,21 @@ function RerankerCard({
 // ---------------------------------------------------------------------------
 
 export default function RerankerPage() {
+  const params = useParams<{ locale: string }>();
+  const locale = params?.locale ?? "en";
   const [rerankers, setRerankers] = useState<RerankerModel[]>([]);
   const [predictionSets, setPredictionSets] = useState<PredictionSet[]>([]);
   const [evaluationSets, setEvaluationSets] = useState<EvaluationSet[]>([]);
   const [annotationSets, setAnnotationSets] = useState<AnnotationSet[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Hash anchor (set by the eval/[id] shortcut card) selects which card
+  // auto-expands on mount and scrolls into view. Read once on first render
+  // so client-side navigation between rerankers doesn't re-toggle cards.
+  const targetHashRef = useRef<string | null>(null);
+  if (typeof window !== "undefined" && targetHashRef.current === null) {
+    targetHashRef.current = window.location.hash.replace(/^#/, "");
+  }
 
   // Dialog flags for the lab-bridge import paths (multipart upload +
   // register-by-reference). Both dialogs reload the reranker list on
@@ -619,6 +667,18 @@ export default function RerankerPage() {
   }
 
   useEffect(() => { loadAll(); }, []);
+
+  // After rerankers land, if the URL carries a hash anchor for one of them
+  // (set by the eval/[id] shortcut card), scroll the matching card into
+  // view. Browsers handle bare ``#<id>`` navigation on initial server-
+  // rendered pages, but here the list is hydrated client-side so we have
+  // to nudge the scroll once the targeted card actually exists in the DOM.
+  useEffect(() => {
+    const hash = targetHashRef.current;
+    if (!hash || rerankers.length === 0) return;
+    const el = document.getElementById(hash);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [rerankers]);
 
   return (
     <>
@@ -688,6 +748,8 @@ export default function RerankerPage() {
             evaluationSets={evaluationSets}
             annotationSets={annotationSets}
             onDelete={() => setRerankers((prev) => prev.filter((r) => r.id !== model.id))}
+            locale={locale}
+            initiallyExpanded={targetHashRef.current === model.id}
           />
         ))}
       </div>

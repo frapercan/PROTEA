@@ -13,6 +13,7 @@ function formatDate(iso?: string | null) {
 
 export default function QuerySetsPage() {
   const t = useTranslations("querySets");
+  const tToast = useTranslations("toasts");
   const toast = useToast();
   const [sets, setSets] = useState<QuerySet[]>([]);
   const [loading, setLoading] = useState(true);
@@ -64,7 +65,7 @@ export default function QuerySetsPage() {
       const created = await createQuerySet(uploadFile, uploadName.trim(), uploadDescription.trim() || undefined);
       setSets((prev) => [created, ...prev]);
       setShowModal(false);
-      toast(`Query set "${created.name}" uploaded — ${created.entry_count} sequences`, "success");
+      toast(tToast("querySetUploaded", { name: created.name, count: created.entry_count }), "success");
     } catch (err: any) {
       setUploadError(String(err));
     } finally {
@@ -77,7 +78,7 @@ export default function QuerySetsPage() {
     try {
       await deleteQuerySet(id);
       setSets((prev) => prev.filter((s) => s.id !== id));
-      toast(`Deleted "${name}"`, "info");
+      toast(tToast("querySetDeleted", { name }), "info");
     } catch (err: any) {
       setError(String(err));
       toast(String(err), "error");

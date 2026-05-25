@@ -64,6 +64,7 @@ function shortId(id: string) {
 
 export default function EmbeddingsPage() {
   const t = useTranslations("embeddings");
+  const tToast = useTranslations("toasts");
   const [activeTab, setActiveTab] = useState<Tab>("configs");
   const toast = useToast();
 
@@ -164,7 +165,7 @@ export default function EmbeddingsPage() {
       setCfgModelCustom("");
       setCfgLayerIndices("0");
       setCfgDescription("");
-      toast("Embedding config created", "success");
+      toast(tToast("embeddingConfigCreated"), "success");
     } catch (err: any) {
       setCfgError(String(err));
     } finally {
@@ -182,7 +183,7 @@ export default function EmbeddingsPage() {
     try {
       await deleteEmbeddingConfig(id);
       setConfigs((prev) => prev.filter((c) => c.id !== id));
-      toast("Config deleted", "info");
+      toast(tToast("configDeleted"), "info");
     } catch (err: any) {
       setError(String(err));
       toast(String(err), "error");
@@ -213,7 +214,7 @@ export default function EmbeddingsPage() {
         },
       });
       setCmpResult(result);
-      toast("Compute job queued", "success");
+      toast(tToast("computeJobQueued"), "success");
     } catch (err: any) {
       setCmpError(String(err));
       toast(String(err), "error");
@@ -608,7 +609,7 @@ export default function EmbeddingsPage() {
         initialConfigId={cmpConfigId || configs[0]?.id || null}
         onLaunched={(job) => {
           setCmpResult(job);
-          toast("Compute job queued", "success");
+          toast(tToast("computeJobQueued"), "success");
         }}
       />
 

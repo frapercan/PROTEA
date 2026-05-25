@@ -2,6 +2,7 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { useToast } from "@/components/Toast";
 import { SkeletonTableRow } from "@/components/Skeleton";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -789,6 +790,7 @@ function DownloadButton({ setId, scoringConfigId, customBlocked }: { setId: stri
 
 export default function PredictionSetDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: setId } = use(params);
+  const tToast = useTranslations("toasts");
   const toast = useToast();
   const [activeTab, setActiveTab] = useState<Tab>("proteins");
   const [annotationSetId, setAnnotationSetId] = useState<string | null>(null);
@@ -851,7 +853,7 @@ export default function PredictionSetDetailPage({ params }: { params: Promise<{ 
       setProteinTotal(res.total);
       setProteinOffset(offset);
     } catch (e: any) {
-      toast(e.message ?? "Failed to load proteins", "error");
+      toast(e.message ?? tToast("loadProteinsFailed"), "error");
     } finally {
       setLoadingProteins(false);
     }
@@ -862,7 +864,7 @@ export default function PredictionSetDetailPage({ params }: { params: Promise<{ 
     try {
       setDistribution(await getGoTermDistribution(setId));
     } catch (e: any) {
-      toast(e.message ?? "Failed to load distribution", "error");
+      toast(e.message ?? tToast("loadDistributionFailed"), "error");
     } finally {
       setLoadingDist(false);
     }
@@ -900,7 +902,7 @@ export default function PredictionSetDetailPage({ params }: { params: Promise<{ 
       setPredictions(preds);
       setKnownAnnotations(anns);
     } catch (e: any) {
-      toast(e.message ?? "Failed to load detail", "error");
+      toast(e.message ?? tToast("loadDetailFailed"), "error");
     } finally {
       setLoadingDetail(false);
     }
