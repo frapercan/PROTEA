@@ -144,6 +144,15 @@ The lab never reads PROTEA's database; PROTEA never reads the lab's
 ``runs/`` directory. The artefact store is the only shared substrate
 (MinIO in prod, local FS in dev).
 
+The methodological champion as of 2026-05-25 is the binary-label LightGBM
+booster trained on the ``bench-v1-K5-v226-lineage-prostt5`` dataset (axis
+tuple: plm=prostt5, k=5, rr=binary, feat=generalist, eval=v226, prop=lineage,
+ens=none; NK+LK Fmax 0.7291 +/- 0.0028, three-seed replication). The next
+active loop is F-DATA-PACK, which packages the 24-dataset grid produced by
+FARM-EXP.13 as FAIR-compliant research artefacts. See
+:doc:`/adr/D38-neural-head-deferred-dataset-pack-pivot` for the decision to
+defer the neural-head track and prioritise dataset packaging.
+
 
 Thesis manuscript boundary
 --------------------------

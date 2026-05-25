@@ -224,8 +224,8 @@ later revision).
      - F-EXP-RESET
    * - D37
      - :doc:`Single auth system, manual approvals, multi-instance (FEAT-AUTH) <D37-feat-auth-users-roles-multi-instance>`
-     - Proposed
-     - F-AUTH
+     - Accepted
+     - F-AUTH (complete, FARM-AUTH.1-11)
    * - D38
      - :doc:`Defer neural-head champion; pivot to curated dataset packaging (F-DATA-PACK) <D38-neural-head-deferred-dataset-pack-pivot>`
      - Accepted
