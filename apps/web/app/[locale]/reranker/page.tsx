@@ -594,7 +594,7 @@ function RerankerCard({
             >
               {metricsLoading ? "Computing... (this may take 30-60s)" : "Compute metrics"}
             </button>
-            {metricsError && <p className="text-xs text-red-500 mt-2">{metricsError}</p>}
+            {metricsError && <p className="text-xs text-red-600 mt-2">{metricsError}</p>}
             {metrics && (
               <div className="mt-3 rounded-md border bg-slate-50 p-3">
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
@@ -748,7 +748,7 @@ export default function RerankerPage() {
           ))}
         </div>
       )}
-      {error && <p className="text-sm text-red-500">{error}</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
 
       {!loading && rerankers.length === 0 && (
         <div className="rounded-lg border bg-white px-4 py-12 text-center text-sm text-slate-600 shadow-sm">

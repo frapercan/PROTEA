@@ -362,6 +362,11 @@
         "qualifier": "Qualifier",
         "source": "Source"
       }
+    },
+    "notFound": {
+      "title": "Protein not found",
+      "body": "No protein with accession {accession} exists in this dataset. The accession may be retired, mistyped, or filtered out of the current snapshot.",
+      "cta": "Back to protein search"
     }
   },
   "annotations": {
