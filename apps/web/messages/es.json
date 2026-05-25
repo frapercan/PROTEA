@@ -220,6 +220,7 @@
       "searchPlaceholder": "accesión, gen, organismo…",
       "search": "Buscar",
       "clear": "Limpiar",
+      "filterReviewedAria": "Filtrar proteínas por estado de revisión",
       "allProteins": "Todas las proteínas",
       "swissProt": "Solo Swiss-Prot",
       "trembl": "Solo TrEMBL",
