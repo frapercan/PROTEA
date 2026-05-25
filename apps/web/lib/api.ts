@@ -29,7 +29,16 @@ import { authHeaders } from "@/lib/auth";
 export function baseUrl(): string {
   const u = process.env.NEXT_PUBLIC_API_URL;
   if (!u) throw new Error("NEXT_PUBLIC_API_URL is not set");
-  return u.replace(/\/+$/, "");
+  const trimmed = u.replace(/\/+$/, "");
+  // Server-side (RSC) fetches bypass the Next.js rewrite, so a relative
+  // public URL like `/api-proxy` cannot be resolved by the Node runtime
+  // and would also double-prefix when FastAPI emits a 307 with
+  // `--root-path /api-proxy`. Fall back to a direct internal absolute
+  // URL on the server only; client fetches keep using the public path.
+  if (typeof window === "undefined" && trimmed.startsWith("/")) {
+    return (process.env.PROTEA_INTERNAL_API_URL ?? "http://127.0.0.1:8000").replace(/\/+$/, "");
+  }
+  return trimmed;
 }
 
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -945,7 +954,12 @@ export type ShowcaseData = {
 // navigation. Client-side callers can omit the flag to preserve
 // "no-store" semantics.
 export function getShowcase(options?: { cacheable?: boolean }) {
-  return http<ShowcaseData>("/showcase/", {
+  // Drop trailing slash: FastAPI emits a 307 redirect that bakes the
+  // uvicorn `--root-path /api-proxy` prefix into the Location header,
+  // which makes the server-side follow-redirect end at
+  // `/api-proxy/api-proxy/showcase` and 404. The route is registered
+  // both with and without the slash, so the slashless form is safe.
+  return http<ShowcaseData>("/showcase", {
     cacheable: options?.cacheable ?? false,
   });
 }
