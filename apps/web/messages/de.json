@@ -1252,6 +1252,9 @@
     },
     "languageSwitcher": {
       "label": "Sprache"
+    },
+    "floatingJobsWidget": {
+      "toggleLabel": "Laufende Jobs anzeigen ({count})"
     }
   },
   "stack": {

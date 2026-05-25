@@ -1255,6 +1255,9 @@
     },
     "languageSwitcher": {
       "label": "Idioma"
+    },
+    "floatingJobsWidget": {
+      "toggleLabel": "Ver trabajos en ejecución ({count})"
     }
   },
   "stack": {
