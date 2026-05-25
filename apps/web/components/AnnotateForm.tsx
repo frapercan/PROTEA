@@ -2,7 +2,8 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import Link from "next/link";
+import { useLocale, useTranslations } from "next-intl";
 import {
   annotateProteins,
   getJob,
@@ -44,6 +45,7 @@ GSRAHSSHLKSKKGQSTSRHKKLMFKTEGPDSD`;
 
 export function AnnotateForm() {
   const t = useTranslations("home");
+  const locale = useLocale();
   const router = useRouter();
 
   const [fasta, setFasta] = useState("");
@@ -62,6 +64,10 @@ export function AnnotateForm() {
   // embedding/prediction operation is queued or running, because our
   // single-GPU setup can't absorb another request in reasonable time.
   const [blockingJobs, setBlockingJobs] = useState<Job[] | null>(null);
+  // Whether the user has opened the technical-details disclosure of the
+  // queue-blocked banner. Default closed so first-time visitors do not
+  // see opaque operation names.
+  const [showQueueDetails, setShowQueueDetails] = useState(false);
 
   const handleFile = (file: File) => {
     const reader = new FileReader();
@@ -227,7 +233,11 @@ export function AnnotateForm() {
         {t("annotateDescription" as any)}
       </p>
 
-      {/* Queue-busy banner ─ blocks submission while the GPU pipeline is saturated */}
+      {/* Queue-busy banner — blocks submission while the GPU pipeline is
+          saturated. Designed to leave first-time visitors with somewhere
+          to go: friendly explanation, link to the benchmark (existing
+          public results), and a collapsed disclosure for the raw queue
+          state. */}
       {isQueueBlocked && (
         <div
           role="status"
@@ -235,28 +245,49 @@ export function AnnotateForm() {
         >
           <div className="flex items-start gap-2">
             <span aria-hidden className="text-base leading-none">⏳</span>
-            <div className="flex-1">
+            <div className="flex-1 min-w-0">
               <p className="font-semibold">
                 {t("annotateQueueBlockedTitle" as any)}
               </p>
               <p className="mt-1 text-amber-800">
-                {t("annotateQueueBlockedBody" as any)}
+                {t("annotateQueueBlockedFriendly" as any)}
               </p>
-              <ul className="mt-2 space-y-0.5 text-xs text-amber-800">
-                {runningJob && (
-                  <li>
-                    <span className="font-mono">{runningJob.operation}</span>
-                    {" — "}
-                    {t("annotateQueueRunningLabel" as any)}
-                    {runningPct != null ? ` (${runningPct}%)` : ""}
-                  </li>
-                )}
-                {queuedCount > 0 && (
-                  <li>
-                    {t("annotateQueueWaitingLabel" as any)}: {queuedCount}
-                  </li>
-                )}
-              </ul>
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <Link
+                  href={`/${locale}/benchmark`}
+                  className="inline-flex min-h-[40px] items-center gap-1 rounded-md bg-white px-3 py-2 text-xs font-semibold text-amber-900 ring-1 ring-inset ring-amber-200 hover:bg-amber-100 transition-colors"
+                >
+                  {t("annotateQueueViewResults" as any)}
+                  <span aria-hidden>→</span>
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => setShowQueueDetails((v) => !v)}
+                  aria-expanded={showQueueDetails}
+                  className="inline-flex min-h-[40px] items-center gap-1 rounded-md px-2 py-2 text-xs font-medium text-amber-800 underline hover:text-amber-900 transition-colors"
+                >
+                  {showQueueDetails
+                    ? t("annotateQueueHideDetails" as any)
+                    : t("annotateQueueShowDetails" as any)}
+                </button>
+              </div>
+              {showQueueDetails && (
+                <ul className="mt-3 space-y-0.5 text-xs text-amber-800 border-t border-amber-200 pt-2">
+                  {runningJob && (
+                    <li>
+                      <span className="font-mono break-all">{runningJob.operation}</span>
+                      {", "}
+                      {t("annotateQueueRunningLabel" as any)}
+                      {runningPct != null ? ` (${runningPct}%)` : ""}
+                    </li>
+                  )}
+                  {queuedCount > 0 && (
+                    <li>
+                      {t("annotateQueueWaitingLabel" as any)}: {queuedCount}
+                    </li>
+                  )}
+                </ul>
+              )}
             </div>
           </div>
         </div>
