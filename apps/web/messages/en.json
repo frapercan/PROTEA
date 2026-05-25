@@ -115,6 +115,7 @@
     "annotateInputAriaLabel": "Sequence input in FASTA format",
     "annotateTryExample": "Try example",
     "annotateUploadFile": "Upload file",
+    "annotateUseExample": "Use our example (KRAS + P53)",
     "annotateButton": "Annotate",
     "annotateUploading": "Uploading...",
     "annotateEmbedding": "Computing embeddings...",
@@ -126,7 +127,9 @@
     "annotateQueueBlockedTitle": "Annotation temporarily unavailable",
     "annotateQueueBlockedBody": "The embedding / prediction pipeline is currently busy processing a backlog of long-running jobs. New requests would not enter the queue in a reasonable time, so submissions are paused until the backlog clears.",
     "annotateQueueRunningLabel": "running",
-    "annotateQueueWaitingLabel": "Jobs waiting"
+    "annotateQueueWaitingLabel": "Jobs waiting",
+    "shareCopy": "Share",
+    "shareCopied": "Link copied"
   },
   "jobs": {
     "title": "Jobs",

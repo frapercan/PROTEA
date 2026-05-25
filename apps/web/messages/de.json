@@ -116,6 +116,7 @@
     "annotateInputAriaLabel": "Sequenzeingabe im FASTA-Format",
     "annotateTryExample": "Beispiel testen",
     "annotateUploadFile": "Datei hochladen",
+    "annotateUseExample": "Unser Beispiel verwenden (KRAS + P53)",
     "annotateButton": "Annotieren",
     "annotateUploading": "Hochladen...",
     "annotateEmbedding": "Embeddings berechnen...",
@@ -123,7 +124,9 @@
     "annotateDone": "Fertig! Weiterleitung zu Ergebnissen...",
     "annotateStepUpload": "Hochladen",
     "annotateStepEmbed": "Embeddings",
-    "annotateStepPredict": "Vorhersage"
+    "annotateStepPredict": "Vorhersage",
+    "shareCopy": "Teilen",
+    "shareCopied": "Link kopiert"
   },
   "jobs": {
     "title": "Jobs",

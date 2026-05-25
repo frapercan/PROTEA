@@ -116,6 +116,7 @@
     "annotateInputAriaLabel": "FASTA 格式的序列输入",
     "annotateTryExample": "试用示例",
     "annotateUploadFile": "上传文件",
+    "annotateUseExample": "使用我们的示例 (KRAS + P53)",
     "annotateButton": "注释",
     "annotateUploading": "上传中...",
     "annotateEmbedding": "计算嵌入向量中...",
@@ -123,7 +124,9 @@
     "annotateDone": "完成！正在跳转到结果页面...",
     "annotateStepUpload": "上传",
     "annotateStepEmbed": "嵌入向量",
-    "annotateStepPredict": "预测"
+    "annotateStepPredict": "预测",
+    "shareCopy": "分享",
+    "shareCopied": "链接已复制"
   },
   "jobs": {
     "title": "任务",
