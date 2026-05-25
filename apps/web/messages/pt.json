@@ -116,6 +116,7 @@
     "annotateInputAriaLabel": "Entrada de sequência no formato FASTA",
     "annotateTryExample": "Testar exemplo",
     "annotateUploadFile": "Enviar arquivo",
+    "annotateUseExample": "Usar nosso exemplo (KRAS + P53)",
     "annotateButton": "Anotar",
     "annotateUploading": "Enviando...",
     "annotateEmbedding": "Calculando embeddings...",
@@ -123,7 +124,9 @@
     "annotateDone": "Pronto! Redirecionando para resultados...",
     "annotateStepUpload": "Envio",
     "annotateStepEmbed": "Embeddings",
-    "annotateStepPredict": "Predicao"
+    "annotateStepPredict": "Predicao",
+    "shareCopy": "Compartilhar",
+    "shareCopied": "Link copiado"
   },
   "benchmark": {
     "loadingTitle": "Carregando dados do benchmark…",

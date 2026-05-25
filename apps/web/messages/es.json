@@ -115,6 +115,7 @@
     "annotateInputAriaLabel": "Entrada de secuencia en formato FASTA",
     "annotateTryExample": "Probar ejemplo",
     "annotateUploadFile": "Subir archivo",
+    "annotateUseExample": "Usar nuestro ejemplo (KRAS + P53)",
     "annotateButton": "Anotar",
     "annotateUploading": "Subiendo...",
     "annotateEmbedding": "Calculando embeddings...",
@@ -126,7 +127,9 @@
     "annotateQueueBlockedTitle": "Anotacion temporalmente no disponible",
     "annotateQueueBlockedBody": "El pipeline de embeddings / prediccion esta ocupado procesando una cola de trabajos de larga duracion. Las nuevas peticiones no entrarian en cola en un tiempo razonable, asi que el envio esta pausado hasta que la cola se vacie.",
     "annotateQueueRunningLabel": "en ejecucion",
-    "annotateQueueWaitingLabel": "Trabajos esperando"
+    "annotateQueueWaitingLabel": "Trabajos esperando",
+    "shareCopy": "Compartir",
+    "shareCopied": "Enlace copiado"
   },
   "benchmark": {
     "loadingTitle": "Cargando datos del benchmark…",

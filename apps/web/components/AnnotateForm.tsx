@@ -320,7 +320,7 @@ export function AnnotateForm() {
       />
 
       {/* Action row */}
-      <div className="mt-4 flex items-center gap-4">
+      <div className="mt-4 flex flex-wrap items-center gap-3 sm:gap-4">
         <button
           onClick={handleSubmit}
           disabled={!fasta.trim() || isRunning || isQueueBlocked}
@@ -356,6 +356,21 @@ export function AnnotateForm() {
             t("annotateButton" as any)
           )}
         </button>
+
+        {/* Inline "Use our example" promo: only when no sequence is loaded
+            yet, the local job isn't running, and the queue isn't blocked.
+            Gives first-time visitors a one-click path into the demo
+            without having to type or upload anything. */}
+        {!fasta && !isRunning && !isQueueBlocked && (
+          <button
+            type="button"
+            onClick={() => setFasta(EXAMPLE_FASTA)}
+            className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-blue-700 hover:text-blue-800 hover:bg-blue-50 underline transition-colors"
+          >
+            {t("annotateUseExample" as any)}
+            <span aria-hidden>→</span>
+          </button>
+        )}
 
         {isRunning && progress && (
           <span className="text-sm text-slate-500 tabular-nums">{progress}</span>

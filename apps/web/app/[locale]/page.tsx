@@ -67,10 +67,36 @@ export default function HomePage() {
   const router = useRouter();
   const [data, setData] = useState<ShowcaseData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Transient "Link copied" toast for the share-best button. Goes back
+  // to the default label after 2s so the affordance stays discoverable.
+  const [bestShareCopied, setBestShareCopied] = useState(false);
 
   useEffect(() => {
     getShowcase().then(setData).catch((e) => setError(e.message));
   }, []);
+
+  // Copy a deep-link to the highlighted best-result tile, including the
+  // evaluation_result_id as a hash so the URL reproduces the same view
+  // (and scrolls to the section). Falls back to a manual document.execCommand
+  // when navigator.clipboard isn't available (older browsers / non-HTTPS).
+  const copyBestShareLink = (evaluationResultId: string) => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    url.hash = `best-${evaluationResultId}`;
+    const value = url.toString();
+    const ok = (text: string) => {
+      setBestShareCopied(true);
+      void text;
+      setTimeout(() => setBestShareCopied(false), 2000);
+    };
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(value).then(() => ok(value)).catch(() => {
+        // ignore; user can still copy from the URL bar
+      });
+    } else {
+      ok(value);
+    }
+  };
 
   if (error) {
     return (
@@ -156,10 +182,16 @@ export default function HomePage() {
       </section>
 
       {/* ── Best result spotlight ─────────────────────────────────── */}
+      {/* id="best-<evaluation_result_id>" is the anchor the share button
+          embeds in the copied URL, so opening the link reproduces the
+          highlighted view and lands the user on this section. */}
       {best ? (
-        <section className="mx-auto max-w-5xl">
-          <div className="flex items-end justify-between mb-4">
-            <div>
+        <section
+          id={`best-${best.evaluation_result_id}`}
+          className="mx-auto max-w-5xl scroll-mt-24"
+        >
+          <div className="flex items-end justify-between gap-3 mb-4">
+            <div className="min-w-0">
               <h2 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-600">
                 {t("bestOverall")}
               </h2>
@@ -167,13 +199,38 @@ export default function HomePage() {
                 Top performing model across NK / LK / PK categories
               </p>
             </div>
-            <Link
-              href="/benchmark"
-              className="text-[13px] font-medium text-blue-600 hover:text-blue-800 transition-colors inline-flex items-center gap-1"
-            >
-              {t("viewBenchmark")}
-              <span aria-hidden>→</span>
-            </Link>
+            <div className="flex items-center gap-3 shrink-0">
+              <button
+                type="button"
+                onClick={() => copyBestShareLink(best.evaluation_result_id)}
+                aria-live="polite"
+                className="inline-flex min-h-[40px] items-center gap-1.5 rounded-md px-3 py-2 text-[13px] font-medium text-slate-700 ring-1 ring-inset ring-slate-200 bg-white hover:bg-slate-50 hover:ring-slate-300 transition-colors"
+              >
+                <svg
+                  aria-hidden
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.75"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="w-4 h-4"
+                >
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                </svg>
+                {bestShareCopied
+                  ? t("shareCopied" as any)
+                  : t("shareCopy" as any)}
+              </button>
+              <Link
+                href="/benchmark"
+                className="text-[13px] font-medium text-blue-600 hover:text-blue-800 transition-colors inline-flex items-center gap-1"
+              >
+                {t("viewBenchmark")}
+                <span aria-hidden>→</span>
+              </Link>
+            </div>
           </div>
 
           <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-sm">
