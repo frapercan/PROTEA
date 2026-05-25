@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { baseUrl } from "@/lib/api";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 
 type SupportData = {
   count: number;
@@ -12,6 +12,7 @@ type SupportData = {
 
 export function SupportButton() {
   const t = useTranslations("components.supportButton");
+  const locale = useLocale();
   const [data, setData] = useState<SupportData | null>(null);
   const [open, setOpen] = useState(false);
   const [comment, setComment] = useState("");
@@ -125,7 +126,7 @@ export function SupportButton() {
             <div className="border-t border-slate-100 px-4 py-3 space-y-2 max-h-48 overflow-y-auto">
               <div className="flex items-center justify-between">
                 <p className="text-xs font-medium text-slate-600 uppercase tracking-wide">{t("recentComments")}</p>
-                <Link href="/support" className="text-xs text-blue-500 hover:underline" onClick={() => setOpen(false)}>
+                <Link href={`/${locale}/support`} className="text-xs text-blue-500 hover:underline" onClick={() => setOpen(false)}>
                   {t("viewAll")}
                 </Link>
               </div>

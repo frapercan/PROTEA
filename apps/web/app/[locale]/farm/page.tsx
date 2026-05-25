@@ -27,7 +27,7 @@ import { listFarmTasks, FarmTask } from "@/lib/farmApi";
 import { StatusBadge } from "@/components/StatusBadge";
 import { SkeletonTableRow } from "@/components/Skeleton";
 import { useToast } from "@/components/Toast";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useUrlParam } from "@/lib/useUrlParam";
 
 const STATUS_CHIPS = [
@@ -71,6 +71,7 @@ function formatDuration(start?: string | null, end?: string | null): string {
 
 export default function FarmListPage() {
   const t = useTranslations("farm");
+  const locale = useLocale();
   const toast = useToast();
   const [tasks, setTasks] = useState<FarmTask[]>([]);
   const [loading, setLoading] = useState(true);
@@ -235,7 +236,7 @@ export default function FarmListPage() {
           tasks.map((task) => (
             <Link
               key={task.id}
-              href={`/farm/${task.id}`}
+              href={`/${locale}/farm/${task.id}`}
               className="block rounded-lg border bg-white p-3 shadow-sm hover:border-blue-200 hover:bg-blue-50 transition-colors"
               data-testid="farm-row"
             >
@@ -284,7 +285,7 @@ export default function FarmListPage() {
           tasks.map((task) => (
             <Link
               key={task.id}
-              href={`/farm/${task.id}`}
+              href={`/${locale}/farm/${task.id}`}
               className="grid grid-cols-[1fr_180px_140px_140px_140px_180px] gap-2 border-b px-4 py-3 text-sm hover:bg-blue-50 transition-colors last:border-0 items-center"
               data-testid="farm-row"
             >

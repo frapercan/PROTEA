@@ -8,7 +8,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { EventTimeline } from "@/components/EventTimeline";
 import { Skeleton, SkeletonTableRow } from "@/components/Skeleton";
 import { useToast } from "@/components/Toast";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CommentsThread } from "@/components/CommentsThread";
 
@@ -64,7 +64,8 @@ function ProgressBar({
 export default function JobDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id: jobId } = use(params);
   const t = useTranslations("jobs");
-  const tToast = useTranslations("toasts");
+const tToast = useTranslations("toasts");
+  const locale = useLocale();
   const [job, setJob] = useState<any>(null);
   const [events, setEvents] = useState<JobEvent[]>([]);
   const [children, setChildren] = useState<Job[]>([]);
@@ -128,7 +129,7 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
       setError("");
       await deleteJob(jobId);
       toast(tToast("jobDeleted"), "info");
-      router.push("/jobs");
+      router.push(`/${locale}/jobs`);
     } catch (e: any) {
       setError(String(e));
       toast(String(e), "error");
@@ -291,7 +292,7 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
               .map((c) => (
               <Link
                 key={c.id}
-                href={`/jobs/${c.id}`}
+                href={`/${locale}/jobs/${c.id}`}
                 className="grid grid-cols-[120px_1fr_160px] gap-2 border-b px-4 py-2.5 text-sm hover:bg-blue-50 transition-colors last:border-0"
               >
                 <div><StatusBadge status={c.status} /></div>

@@ -167,11 +167,11 @@ export function AnnotateForm() {
     if (stage === "done" && predictionSetId) {
       const timer = setTimeout(() => {
         const qs = rerankerId ? `?reranker_id=${rerankerId}` : "";
-        router.push(`/functional-annotation/${predictionSetId}${qs}`);
+        router.push(`/${locale}/functional-annotation/${predictionSetId}${qs}`);
       }, 1500);
       return () => clearTimeout(timer);
     }
-  }, [stage, predictionSetId, rerankerId, router]);
+  }, [stage, predictionSetId, rerankerId, router, locale]);
 
   // Cleanup on unmount
   useEffect(() => {

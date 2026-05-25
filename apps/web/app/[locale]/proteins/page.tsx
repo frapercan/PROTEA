@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useToast } from "@/components/Toast";
 import { SkeletonTableRow } from "@/components/Skeleton";
 import { ProteinsStatsAnalytics } from "@/components/ProteinsStatsAnalytics";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useUrlParam } from "@/lib/useUrlParam";
 import {
   getProteinStats,
@@ -42,7 +42,8 @@ function StatCard({ label, value, sub }: { label: string; value: number; sub?: s
 
 export default function ProteinsPage() {
   const t = useTranslations("proteins");
-  const tToast = useTranslations("toasts");
+const tToast = useTranslations("toasts");
+  const locale = useLocale();
   const toast = useToast();
   // URL-synced active tab — shareable links land on the right one.
   const [tabRaw, setTabRaw] = useUrlParam("tab", "browse");
@@ -262,7 +263,7 @@ export default function ProteinsPage() {
             {!loadingBrowse && proteins.map((p) => (
               <Link
                 key={p.accession}
-                href={`/proteins/${p.accession}`}
+                href={`/${locale}/proteins/${p.accession}`}
                 className="block rounded-lg border bg-white p-4 shadow-sm hover:bg-blue-50 transition-colors"
               >
                 <div className="flex items-center justify-between mb-1">
@@ -302,7 +303,7 @@ export default function ProteinsPage() {
               {!loadingBrowse && proteins.map((p) => (
                 <Link
                   key={p.accession}
-                  href={`/proteins/${p.accession}`}
+                  href={`/${locale}/proteins/${p.accession}`}
                   className="grid grid-cols-[130px_140px_120px_1fr_80px_110px] gap-2 border-b px-4 py-3 text-sm hover:bg-blue-50 transition-colors last:border-0 items-center"
                 >
                   <div className="font-mono text-xs text-blue-600">{p.accession}</div>
@@ -422,7 +423,7 @@ export default function ProteinsPage() {
               {insertResult && (
                 <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
                   {t("insertTab.jobQueuedPrefix")}
-                  <Link href={`/jobs/${insertResult.id}`} className="font-mono underline hover:text-green-900">{insertResult.id}</Link>
+                  <Link href={`/${locale}/jobs/${insertResult.id}`} className="font-mono underline hover:text-green-900">{insertResult.id}</Link>
                 </div>
               )}
               <div className="flex justify-end">
@@ -460,7 +461,7 @@ export default function ProteinsPage() {
               {metaResult && (
                 <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
                   {t("insertTab.jobQueuedPrefix")}
-                  <Link href={`/jobs/${metaResult.id}`} className="font-mono underline hover:text-green-900">{metaResult.id}</Link>
+                  <Link href={`/${locale}/jobs/${metaResult.id}`} className="font-mono underline hover:text-green-900">{metaResult.id}</Link>
                 </div>
               )}
               <div className="flex justify-end">

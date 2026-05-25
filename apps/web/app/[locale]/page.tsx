@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import Link from "next/link";
 import { getShowcase, type ShowcaseData } from "../../lib/api";
 import { AnnotateForm } from "../../components/AnnotateForm";
@@ -102,6 +102,7 @@ function formatParamCount(n: number | null): string {
 
 export default function HomePage() {
   const t = useTranslations("home");
+  const locale = useLocale();
   const router = useRouter();
   const [data, setData] = useState<ShowcaseData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -286,7 +287,7 @@ export default function HomePage() {
                   : t("shareCopy" as any)}
               </button>
               <Link
-                href="/benchmark"
+                href={`/${locale}/benchmark`}
                 className="text-[13px] font-medium text-blue-600 hover:text-blue-800 transition-colors inline-flex items-center gap-1"
               >
                 {t("viewBenchmark")}
@@ -367,7 +368,7 @@ export default function HomePage() {
         <section className="mx-auto max-w-3xl rounded-3xl border-2 border-dashed border-slate-200 bg-white/60 p-10 text-center">
           <p className="text-slate-500 text-base">{t("noDataYet")}</p>
           <Link
-            href="/proteins"
+            href={`/${locale}/proteins`}
             className="mt-5 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 transition-colors"
           >
             {t("getStarted")}
@@ -471,7 +472,7 @@ export default function HomePage() {
       {/* ── CTAs ──────────────────────────────────────────────────── */}
       <section className="mx-auto flex max-w-3xl flex-col sm:flex-row items-center justify-center gap-3 pt-2">
         <Link
-          href="/benchmark"
+          href={`/${locale}/benchmark`}
           className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-7 py-3 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 transition-colors"
         >
           {t("exploreResults")}
