@@ -7,7 +7,7 @@ import { SupportButton } from "@/components/SupportButton";
 import { ToastProvider } from "@/components/Toast";
 import { UsagePolicyModal } from "@/components/UsagePolicyModal";
 import { FloatingJobsWidget } from "@/components/FloatingJobsWidget";
-import { CommandPalette } from "@/components/CommandPalette";
+import { LazyCommandPalette } from "@/components/LazyCommandPalette";
 import { CommandPaletteTrigger } from "@/components/CommandPaletteTrigger";
 import { SystemStatusPill } from "@/components/SystemStatusPill";
 import { FarmChrome } from "@/components/FarmChrome";
@@ -138,7 +138,7 @@ export default async function LocaleLayout({
 
             <FloatingJobsWidget />
             <FarmChrome slot="widget" />
-            <CommandPalette />
+            <LazyCommandPalette />
           </ToastProvider>
         </NextIntlClientProvider>
       </body>

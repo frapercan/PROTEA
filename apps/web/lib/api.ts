@@ -939,8 +939,15 @@ export type ShowcaseData = {
   pipeline_stages: ShowcasePipelineStage[];
 };
 
-export function getShowcase() {
-  return http<ShowcaseData>("/showcase/");
+// `cacheable` opts the call into Next.js fetch revalidation (60s, the
+// shared http default) so server-side renders of the homepage share a
+// per-region cache rather than burning a fresh request on every
+// navigation. Client-side callers can omit the flag to preserve
+// "no-store" semantics.
+export function getShowcase(options?: { cacheable?: boolean }) {
+  return http<ShowcaseData>("/showcase/", {
+    cacheable: options?.cacheable ?? false,
+  });
 }
 
 // ─── Benchmark matrix ──────────────────────────────────────────────
