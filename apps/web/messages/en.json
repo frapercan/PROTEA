@@ -128,6 +128,9 @@
     "annotateQueueRunningLabel": "running",
     "annotateQueueWaitingLabel": "Jobs waiting"
   },
+  "benchmark": {
+    "backToHome": "Back to home"
+  },
   "jobs": {
     "title": "Jobs",
     "description": "Every action PROTEA executes — inserting proteins, computing embeddings, exporting datasets — runs as a background job. This page is the live audit trail: track progress, diagnose failures, and cancel work that is no longer needed.",

@@ -125,6 +125,9 @@
     "annotateStepEmbed": "Embeddings",
     "annotateStepPredict": "Predicao"
   },
+  "benchmark": {
+    "backToHome": "Voltar ao início"
+  },
   "jobs": {
     "title": "Jobs",
     "allStatuses": "Todos os status",

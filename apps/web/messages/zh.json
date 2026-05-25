@@ -125,6 +125,9 @@
     "annotateStepEmbed": "嵌入向量",
     "annotateStepPredict": "预测"
   },
+  "benchmark": {
+    "backToHome": "返回首页"
+  },
   "jobs": {
     "title": "任务",
     "allStatuses": "所有状态",

@@ -128,6 +128,9 @@
     "annotateQueueRunningLabel": "en ejecucion",
     "annotateQueueWaitingLabel": "Trabajos esperando"
   },
+  "benchmark": {
+    "backToHome": "Volver al inicio"
+  },
   "jobs": {
     "title": "Trabajos",
     "allStatuses": "Todos los estados",

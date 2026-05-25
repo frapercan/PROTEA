@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { BenchmarkHeatmap } from "@/components/BenchmarkHeatmap";
 import { Skeleton } from "@/components/Skeleton";
 import { Tooltip } from "@/components/Tooltip";
@@ -223,6 +224,7 @@ function downloadCsv(filename: string, content: string): void {
 export default function BenchmarkPage() {
   const params = useParams<{ locale: string }>();
   const locale = params?.locale ?? "en";
+  const t = useTranslations("benchmark");
   const [embeddings, setEmbeddings] = useState<BenchmarkEmbedding[] | null>(null);
   const [matrix, setMatrix] = useState<BenchmarkMatrixResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -425,8 +427,8 @@ export default function BenchmarkPage() {
           <p className="text-sm text-slate-500 mt-1">
             Per-embedding Fmax across categories and aspects for every evaluation
             run in the database.{" "}
-            <Link href="/" className="text-blue-600 hover:underline">
-              Back to home
+            <Link href={`/${locale}/`} className="text-blue-600 hover:underline">
+              {t("backToHome")}
             </Link>
           </p>
         </div>
