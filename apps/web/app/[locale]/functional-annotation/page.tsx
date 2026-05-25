@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { Telescope } from "lucide-react";
 import { useToast } from "@/components/Toast";
 import { SkeletonTableRow } from "@/components/Skeleton";
@@ -39,7 +39,8 @@ const labelClass = "block text-sm font-medium text-slate-700 mb-1";
 
 export default function FunctionalAnnotationPage() {
   const t = useTranslations("functionalAnnotation");
-  const tToast = useTranslations("toasts");
+const tToast = useTranslations("toasts");
+  const locale = useLocale();
   const toast = useToast();
   const [activeTab, setActiveTab] = useState<Tab>("predict");
 
@@ -589,7 +590,7 @@ export default function FunctionalAnnotationPage() {
                 {predResult && (
                   <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
                     Job queued:{" "}
-                    <Link href={`/jobs/${predResult.id}`} className="font-mono underline hover:text-green-900">
+                    <Link href={`/${locale}/jobs/${predResult.id}`} className="font-mono underline hover:text-green-900">
                       {predResult.id}
                     </Link>
                   </div>
@@ -657,7 +658,7 @@ export default function FunctionalAnnotationPage() {
                 </div>
                 <p className="mt-5 text-xs text-slate-500">
                   <Link
-                    href="/benchmark"
+                    href={`/${locale}/benchmark`}
                     className="text-blue-600 hover:text-blue-800 hover:underline"
                   >
                     {t("resultsTab.emptyHero.ctaSecondary")}
@@ -685,7 +686,7 @@ export default function FunctionalAnnotationPage() {
               >
                 <div className="flex items-start justify-between gap-2">
                   <Link
-                    href={`/functional-annotation/${ps.id}`}
+                    href={`/${locale}/functional-annotation/${ps.id}`}
                     className="font-mono text-sm text-blue-600 hover:underline truncate"
                     title={ps.id}
                   >
@@ -772,7 +773,7 @@ export default function FunctionalAnnotationPage() {
                   className="grid grid-cols-[80px_100px_100px_100px_90px_80px_50px_160px_60px] gap-2 border-b px-4 py-3 text-sm last:border-0 items-center"
                 >
                   <div className="font-mono text-xs">
-                    <Link href={`/functional-annotation/${ps.id}`} className="text-blue-600 hover:underline" title={ps.id}>
+                    <Link href={`/${locale}/functional-annotation/${ps.id}`} className="text-blue-600 hover:underline" title={ps.id}>
                       {shortId(ps.id)}…
                     </Link>
                   </div>

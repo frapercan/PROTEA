@@ -6,7 +6,7 @@ import { bulkCancelJobs, listJobs, Job } from "@/lib/api";
 import { StatusBadge } from "@/components/StatusBadge";
 import { SkeletonTableRow } from "@/components/Skeleton";
 import { useToast } from "@/components/Toast";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useUrlParam } from "@/lib/useUrlParam";
 
 const STATUS_OPTIONS = ["", "queued", "running", "succeeded", "failed", "cancelled"];
@@ -80,6 +80,7 @@ function useIsAuthenticated(): boolean {
 
 export default function JobsPage() {
   const t = useTranslations("jobs");
+  const locale = useLocale();
   const toast = useToast();
   const isAuthed = useIsAuthenticated();
 
@@ -355,7 +356,7 @@ export default function JobsPage() {
                     className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:opacity-30 disabled:cursor-not-allowed"
                   />
                 </div>
-                <Link href={`/jobs/${j.id}`} className="flex-1 min-w-0 -mt-0.5 -mr-1 -mb-1 rounded-md p-1 hover:bg-blue-50">
+                <Link href={`/${locale}/jobs/${j.id}`} className="flex-1 min-w-0 -mt-0.5 -mr-1 -mb-1 rounded-md p-1 hover:bg-blue-50">
                   <div className="flex items-start justify-between gap-2">
                     <StatusBadge status={j.status} />
                     <span className="text-xs text-slate-600">{formatDate(j.created_at)}</span>
@@ -432,7 +433,7 @@ export default function JobsPage() {
                   className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:opacity-30 disabled:cursor-not-allowed"
                 />
               </div>
-              <Link href={`/jobs/${j.id}`} className="contents">
+              <Link href={`/${locale}/jobs/${j.id}`} className="contents">
                 <div><StatusBadge status={j.status} /></div>
                 <div>
                   <span className="text-slate-700 font-medium block truncate">{j.operation}</span>

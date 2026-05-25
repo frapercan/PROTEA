@@ -3,7 +3,7 @@
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { useToast } from "@/components/Toast";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Skeleton } from "@/components/Skeleton";
 import { getProtein, getProteinAnnotations, getGoSubgraph, listOntologySnapshots, ProteinDetail, ProteinAnnotation, GoSubgraph } from "@/lib/api";
@@ -55,7 +55,8 @@ function Field({ label, value }: { label: string; value?: string | null }) {
 export default function ProteinDetailPage({ params }: { params: Promise<{ accession: string }> }) {
   const { accession } = use(params);
   const t = useTranslations("proteinDetail");
-  const tToast = useTranslations("toasts");
+const tToast = useTranslations("toasts");
+  const locale = useLocale();
   const toast = useToast();
   const [protein, setProtein] = useState<ProteinDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -232,7 +233,7 @@ export default function ProteinDetailPage({ params }: { params: Promise<{ access
                 {!protein.is_canonical && (
                   <div className="flex justify-between">
                     <span className="text-slate-500">{t("overviewTab.canonical")}</span>
-                    <Link href={`/proteins/${protein.canonical_accession}`} className="font-mono text-xs text-blue-600 hover:underline">
+                    <Link href={`/${locale}/proteins/${protein.canonical_accession}`} className="font-mono text-xs text-blue-600 hover:underline">
                       {protein.canonical_accession}
                     </Link>
                   </div>
@@ -270,7 +271,7 @@ export default function ProteinDetailPage({ params }: { params: Promise<{ access
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 mb-3">{t("overviewTab.isoforms")}</p>
                 <div className="space-y-1">
                   {protein.isoforms.map((iso) => (
-                    <Link key={iso} href={`/proteins/${iso}`} className="block font-mono text-xs text-blue-600 hover:underline">
+                    <Link key={iso} href={`/${locale}/proteins/${iso}`} className="block font-mono text-xs text-blue-600 hover:underline">
                       {iso}
                     </Link>
                   ))}

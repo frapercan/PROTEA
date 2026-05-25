@@ -13,7 +13,7 @@ import {
 } from "@/lib/api";
 import { useToast } from "@/components/Toast";
 import { SkeletonTableRow } from "@/components/Skeleton";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 
 type Tab = "sets" | "snapshots" | "load-snapshot" | "load-goa" | "load-quickgo";
 
@@ -32,6 +32,7 @@ function shortId(id: string) {
 export default function AnnotationsPage() {
   const t = useTranslations("annotations");
   const tToast = useTranslations("toasts");
+  const locale = useLocale();
   const toast = useToast();
   const [activeTab, setActiveTab] = useState<Tab>("sets");
 
@@ -263,7 +264,7 @@ export default function AnnotationsPage() {
                   <span className="font-mono">{shortId(a.id)}</span>
                   <span>{formatDate(a.created_at)}</span>
                   {a.job_id && (
-                    <Link href={`/jobs/${a.job_id}`} className="text-blue-400 hover:text-blue-600">↗</Link>
+                    <Link href={`/${locale}/jobs/${a.job_id}`} className="text-blue-400 hover:text-blue-600">↗</Link>
                   )}
                 </div>
               </div>
@@ -297,7 +298,7 @@ export default function AnnotationsPage() {
                 <div className="flex items-center gap-2 text-xs text-slate-600">
                   {formatDate(a.created_at)}
                   {a.job_id && (
-                    <Link href={`/jobs/${a.job_id}`} className="text-blue-400 hover:text-blue-600" title="View job">↗</Link>
+                    <Link href={`/${locale}/jobs/${a.job_id}`} className="text-blue-400 hover:text-blue-600" title="View job">↗</Link>
                   )}
                 </div>
                 <div className="flex justify-end">
@@ -472,7 +473,7 @@ export default function AnnotationsPage() {
               {snapResult && (
                 <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
                   Job queued:{" "}
-                  <Link href={`/jobs/${snapResult.id}`} className="font-mono underline hover:text-green-900">
+                  <Link href={`/${locale}/jobs/${snapResult.id}`} className="font-mono underline hover:text-green-900">
                     {snapResult.id}
                   </Link>
                 </div>
@@ -531,7 +532,7 @@ export default function AnnotationsPage() {
               {goaResult && (
                 <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
                   Job queued:{" "}
-                  <Link href={`/jobs/${goaResult.id}`} className="font-mono underline hover:text-green-900">
+                  <Link href={`/${locale}/jobs/${goaResult.id}`} className="font-mono underline hover:text-green-900">
                     {goaResult.id}
                   </Link>
                 </div>
@@ -579,7 +580,7 @@ export default function AnnotationsPage() {
               {qgoResult && (
                 <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
                   Job queued:{" "}
-                  <Link href={`/jobs/${qgoResult.id}`} className="font-mono underline hover:text-green-900">
+                  <Link href={`/${locale}/jobs/${qgoResult.id}`} className="font-mono underline hover:text-green-900">
                     {qgoResult.id}
                   </Link>
                 </div>

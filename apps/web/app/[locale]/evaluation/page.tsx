@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { ContextBanner } from "@/components/ContextBanner";
 import { GoaReleaseTimeline } from "@/components/GoaReleaseTimeline";
 import {
@@ -246,6 +246,7 @@ function EvaluationSetCard({
   onDeleted: () => void;
 }) {
   const t = useTranslations("evaluation");
+  const locale = useLocale();
   const [results, setResults] = useState<EvaluationResult[]>([]);
   const [loadingResults, setLoadingResults] = useState(false);
   const [predSetId, setPredSetId] = useState("");
@@ -584,7 +585,7 @@ function EvaluationSetCard({
                     : "Results will appear below when the job completes."}
                 </span>
                 <a
-                  href={`/jobs/${pendingJobId}`}
+                  href={`/${locale}/jobs/${pendingJobId}`}
                   className="shrink-0 rounded border border-blue-300 bg-white px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100 transition-colors"
                 >
                   {t("evaluationSetCard.viewJob")}

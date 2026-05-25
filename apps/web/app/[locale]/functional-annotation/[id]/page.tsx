@@ -2,7 +2,7 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useToast } from "@/components/Toast";
 import { SkeletonTableRow } from "@/components/Skeleton";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -348,6 +348,7 @@ function PredictionTable({ preds, knownByGoId, scoringConfig }: {
   knownByGoId: Map<string, GroupedAnnotation>;
   scoringConfig?: ScoringConfig;
 }) {
+  const locale = useLocale();
   const hasAlignment = preds.some((p) => p.identity_nw != null);
   const hasTaxonomy = preds.some((p) => p.taxonomic_relation != null);
   const hasReranker = preds.some((p) => p.vote_count != null);
@@ -407,7 +408,7 @@ function PredictionTable({ preds, knownByGoId, scoringConfig }: {
               <div className="flex flex-wrap items-center gap-2 text-[10px]">
                 <span className="text-slate-600">via</span>
                 <Link
-                  href={`/proteins/${pred.ref_protein_accession}`}
+                  href={`/${locale}/proteins/${pred.ref_protein_accession}`}
                   className="font-mono text-blue-500 hover:underline"
                   onClick={(e) => e.stopPropagation()}
                 >{pred.ref_protein_accession}</Link>
@@ -440,7 +441,7 @@ function PredictionTable({ preds, knownByGoId, scoringConfig }: {
               <span className="text-slate-700 leading-snug">{pred.name ?? "—"}</span>
               <div className="flex items-start gap-1">
                 <Link
-                  href={`/proteins/${pred.ref_protein_accession}`}
+                  href={`/${locale}/proteins/${pred.ref_protein_accession}`}
                   className="font-mono text-blue-500 hover:underline"
                   onClick={(e) => e.stopPropagation()}
                 >{pred.ref_protein_accession}</Link>
@@ -552,6 +553,7 @@ function ProteinDetail({
   ontologySnapshotId: string | null;
   scoringConfig?: ScoringConfig;
 }) {
+  const locale = useLocale();
   const [subgraph, setSubgraph] = useState<GoSubgraph | null>(null);
   const [loadingGraph, setLoadingGraph] = useState(false);
   const [showGraph, setShowGraph] = useState(false);
@@ -595,7 +597,7 @@ function ProteinDetail({
       <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-4">
         <span className="font-mono font-semibold text-slate-900">{accession}</span>
         {inDb && (
-          <Link href={`/proteins/${accession}`} className="text-xs text-blue-500 hover:underline">
+          <Link href={`/${locale}/proteins/${accession}`} className="text-xs text-blue-500 hover:underline">
             View protein →
           </Link>
         )}
@@ -790,7 +792,8 @@ function DownloadButton({ setId, scoringConfigId, customBlocked }: { setId: stri
 
 export default function PredictionSetDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: setId } = use(params);
-  const tToast = useTranslations("toasts");
+const tToast = useTranslations("toasts");
+  const locale = useLocale();
   const toast = useToast();
   const [activeTab, setActiveTab] = useState<Tab>("proteins");
   const [annotationSetId, setAnnotationSetId] = useState<string | null>(null);
@@ -1063,7 +1066,7 @@ export default function PredictionSetDetailPage({ params }: { params: Promise<{ 
                         : "bg-red-500"
                       }`} title={`min distance: ${p.min_distance?.toFixed(4) ?? "N/A"}`} />
                       {p.in_db ? (
-                        <Link href={`/proteins/${p.accession}`} className="font-mono text-sm text-blue-600 hover:underline" onClick={(e) => e.stopPropagation()}>
+                        <Link href={`/${locale}/proteins/${p.accession}`} className="font-mono text-sm text-blue-600 hover:underline" onClick={(e) => e.stopPropagation()}>
                           {p.accession}
                         </Link>
                       ) : (
@@ -1127,7 +1130,7 @@ export default function PredictionSetDetailPage({ params }: { params: Promise<{ 
                     }`} title={`min distance: ${p.min_distance?.toFixed(4) ?? "N/A"}`} />
                     {p.in_db ? (
                       <Link
-                        href={`/proteins/${p.accession}`}
+                        href={`/${locale}/proteins/${p.accession}`}
                         className="font-mono text-xs text-blue-600 hover:underline"
                         onClick={(e) => e.stopPropagation()}
                       >

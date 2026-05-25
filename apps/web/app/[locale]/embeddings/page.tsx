@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useToast } from "@/components/Toast";
 import { SkeletonTableRow } from "@/components/Skeleton";
 import { ContextBanner } from "@/components/ContextBanner";
@@ -64,7 +64,8 @@ function shortId(id: string) {
 
 export default function EmbeddingsPage() {
   const t = useTranslations("embeddings");
-  const tToast = useTranslations("toasts");
+const tToast = useTranslations("toasts");
+  const locale = useLocale();
   const [activeTab, setActiveTab] = useState<Tab>("configs");
   const toast = useToast();
 
@@ -736,7 +737,7 @@ export default function EmbeddingsPage() {
                 {cmpResult && (
                   <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
                     Job queued:{" "}
-                    <Link href={`/jobs/${cmpResult.id}`} className="font-mono underline hover:text-green-900">
+                    <Link href={`/${locale}/jobs/${cmpResult.id}`} className="font-mono underline hover:text-green-900">
                       {cmpResult.id}
                     </Link>
                   </div>
