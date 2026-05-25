@@ -12,7 +12,7 @@ test.describe("landing page", () => {
     await expect(page.getByRole("heading", { name: /PROTEA/i, level: 1 })).toBeVisible();
     // Best-overall card shows the mocked Fmax value to 3 dp.
     // Use getByText with exact match since the float formatting is stable.
-    await expect(page.locator("text=0.612")).first().toBeVisible();
+    await expect(page.locator("text=0.612").first()).toBeVisible();
     // ESM2 display name from mock pipes through.
     await expect(page.locator("text=ESM2 650M")).toBeVisible();
   });
@@ -23,8 +23,8 @@ test.describe("landing page", () => {
     // predictions) render the mocked counts. We assert by visible text
     // formatted with toLocaleString. waitFor handles the post-fetch
     // render gap when /showcase resolves.
-    await expect(page.locator("text=12,345")).first().toBeVisible();
-    await expect(page.locator("text=250,000")).first().toBeVisible();
+    await expect(page.locator("text=12,345").first()).toBeVisible();
+    await expect(page.locator("text=250,000").first()).toBeVisible();
   });
 
   test("pipeline tile navigates to its destination route", async ({ page }) => {
