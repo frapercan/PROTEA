@@ -1606,5 +1606,91 @@
     "loadEmbeddingStatsFailed": "Failed to load embedding stats",
     "vacuumFailed": "Vacuum failed",
     "createConfigFailed": "Failed to create config"
+  },
+  "auth": {
+    "login": {
+      "title": "Sign in to PROTEA",
+      "subtitle": "Use the email and password you registered with.",
+      "emailLabel": "Email",
+      "passwordLabel": "Password",
+      "submit": "Sign in",
+      "submitting": "Signing in",
+      "needAccount": "Need an account?",
+      "needAccountCta": "Request one",
+      "errors": {
+        "invalidCredentials": "Invalid email or password.",
+        "pendingApproval": "Your account is still pending admin approval. You will be able to sign in once it has been activated.",
+        "deactivated": "This account has been deactivated. Contact an administrator to re-enable it.",
+        "serverUnavailable": "Sign-in is not available on this server (JWT secret is not configured).",
+        "fallback": "Sign in failed (HTTP {status}).",
+        "unexpected": "Unexpected error."
+      }
+    },
+    "signup": {
+      "title": "Create a PROTEA account",
+      "subtitle": "Tell us a little about why you need access. An admin reviews every new account before activation.",
+      "emailLabel": "Email",
+      "usernameLabel": "Username",
+      "usernameHint": "Shown on shared resources (jobs, audit log). Letters, digits, dashes.",
+      "passwordLabel": "Password",
+      "passwordHint": "Minimum 8 characters.",
+      "displayNameLabel": "Display name",
+      "displayNameHint": "Optional human-readable name.",
+      "intendedUseLabel": "Intended use",
+      "intendedUseHint": "What you plan to do with PROTEA. Helps admins approve faster.",
+      "intendedUsePlaceholder": "e.g. Benchmarking GO-term predictors on CAFA-style splits.",
+      "optional": "optional",
+      "submit": "Request an account",
+      "submitting": "Submitting account request",
+      "haveAccount": "Already have an account?",
+      "haveAccountCta": "Sign in",
+      "errors": {
+        "emailTaken": "An account with this email already exists. Try signing in instead.",
+        "usernameTaken": "That username is already taken. Please pick another one.",
+        "conflict": "This account already exists.",
+        "fallback": "Signup failed (HTTP {status}).",
+        "unexpected": "Unexpected error."
+      }
+    },
+    "profile": {
+      "anonymousTitle": "Sign in to view your profile",
+      "anonymousBody": "Your account details, role and status appear here once you are signed in.",
+      "signIn": "Sign in",
+      "createAccount": "Create account",
+      "loadError": "Could not load your profile: {message}",
+      "title": "Your profile",
+      "subtitle": "Account details for {name}.",
+      "signOut": "Sign out",
+      "fields": {
+        "username": "Username",
+        "email": "Email",
+        "userId": "User ID",
+        "role": "Role"
+      },
+      "roles": {
+        "admin": "Admin",
+        "operator": "Operator",
+        "researcher": "Researcher",
+        "viewer": "Viewer"
+      },
+      "statuses": {
+        "active": "Active",
+        "pending": "Pending approval",
+        "deactivated": "Deactivated"
+      },
+      "displayNameHeading": "Display name",
+      "displayNameBody": "Shown next to your jobs, audit-log entries and shared resources.",
+      "displayNamePlaceholder": "(none set)",
+      "save": "Save",
+      "saveDisabledTitle": "The PATCH /auth/me endpoint is not yet wired. Display name edits land in a follow-up auth slice.",
+      "saveDisabledNote": "Editing is disabled in this build (no profile-update endpoint on the current server). It will activate automatically once the backend exposes the corresponding mutation."
+    },
+    "pendingApproval": {
+      "title": "Account pending admin approval",
+      "body": "Your account request has been recorded. An administrator will review your intended use and activate the account. You will be able to sign in once that happens.",
+      "note": "Approvals are usually processed within a working day. If you have not heard back after that, please ping the project maintainer through the documentation contact.",
+      "backHome": "Back home",
+      "goSignIn": "Go to sign in"
+    }
   }
 }

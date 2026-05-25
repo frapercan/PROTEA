@@ -1684,5 +1684,91 @@
     "loadEmbeddingStatsFailed": "加载 embedding 统计信息失败",
     "vacuumFailed": "清理失败",
     "createConfigFailed": "创建配置失败"
+  },
+  "auth": {
+    "login": {
+      "title": "登录 PROTEA",
+      "subtitle": "使用您注册时填写的邮箱和密码。",
+      "emailLabel": "邮箱",
+      "passwordLabel": "密码",
+      "submit": "登录",
+      "submitting": "正在登录",
+      "needAccount": "还没有账户？",
+      "needAccountCta": "申请一个",
+      "errors": {
+        "invalidCredentials": "邮箱或密码错误。",
+        "pendingApproval": "您的账户仍在等待管理员审核。审核通过并激活后即可登录。",
+        "deactivated": "此账户已被停用。请联系管理员重新启用。",
+        "serverUnavailable": "此服务器未启用登录功能（未配置 JWT_SECRET）。",
+        "fallback": "登录失败（HTTP {status}）。",
+        "unexpected": "未预期的错误。"
+      }
+    },
+    "signup": {
+      "title": "创建 PROTEA 账户",
+      "subtitle": "请简要说明您需要访问的原因。每个新账户都会由管理员在激活前审核。",
+      "emailLabel": "邮箱",
+      "usernameLabel": "用户名",
+      "usernameHint": "会显示在共享资源（任务、审计日志）上。允许字母、数字和短横线。",
+      "passwordLabel": "密码",
+      "passwordHint": "至少 8 个字符。",
+      "displayNameLabel": "显示名称",
+      "displayNameHint": "可选的可读名称。",
+      "intendedUseLabel": "用途说明",
+      "intendedUseHint": "您打算用 PROTEA 做什么。有助于管理员更快审核。",
+      "intendedUsePlaceholder": "例如：在 CAFA 风格的划分上对比 GO 术语预测器。",
+      "optional": "可选",
+      "submit": "申请账户",
+      "submitting": "正在提交申请",
+      "haveAccount": "已有账户？",
+      "haveAccountCta": "登录",
+      "errors": {
+        "emailTaken": "已存在使用该邮箱的账户。请尝试登录。",
+        "usernameTaken": "该用户名已被占用。请另选一个。",
+        "conflict": "该账户已存在。",
+        "fallback": "注册失败（HTTP {status}）。",
+        "unexpected": "未预期的错误。"
+      }
+    },
+    "profile": {
+      "anonymousTitle": "登录后查看您的个人资料",
+      "anonymousBody": "登录后，您的账户详情、角色和状态会显示在此处。",
+      "signIn": "登录",
+      "createAccount": "创建账户",
+      "loadError": "无法加载您的个人资料：{message}",
+      "title": "您的个人资料",
+      "subtitle": "{name} 的账户详情。",
+      "signOut": "退出登录",
+      "fields": {
+        "username": "用户名",
+        "email": "邮箱",
+        "userId": "用户 ID",
+        "role": "角色"
+      },
+      "roles": {
+        "admin": "管理员",
+        "operator": "运维",
+        "researcher": "研究员",
+        "viewer": "访客"
+      },
+      "statuses": {
+        "active": "已激活",
+        "pending": "待审核",
+        "deactivated": "已停用"
+      },
+      "displayNameHeading": "显示名称",
+      "displayNameBody": "会显示在您的任务、审计日志条目和共享资源旁边。",
+      "displayNamePlaceholder": "（未设置）",
+      "save": "保存",
+      "saveDisabledTitle": "PATCH /auth/me 接口尚未接入。显示名称的编辑将在后续 auth 切片中上线。",
+      "saveDisabledNote": "本次构建中编辑功能已禁用（当前服务器无个人资料更新接口）。后端提供对应变更接口后会自动启用。"
+    },
+    "pendingApproval": {
+      "title": "账户待管理员审核",
+      "body": "您的账户申请已记录。管理员将审核您的用途并激活账户。审核通过后即可登录。",
+      "note": "审核通常在一个工作日内完成。若超过该时限仍未收到回复，请通过文档中的联系方式联系项目维护者。",
+      "backHome": "返回首页",
+      "goSignIn": "前往登录"
+    }
   }
 }

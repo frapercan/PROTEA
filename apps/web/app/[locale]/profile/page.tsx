@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useLocale } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { AuthError, me, type UserMe } from "@/lib/authApi";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -24,32 +24,42 @@ type LoadState =
   | { kind: "error"; message: string }
   | { kind: "ready"; user: UserMe };
 
-function roleBadge(role: UserMe["role"]): { bg: string; text: string; ring: string; dot: string; label: string } {
+type RoleLabel = string;
+type StatusLabel = string;
+
+function roleBadge(
+  role: UserMe["role"],
+  label: RoleLabel,
+): { bg: string; text: string; ring: string; dot: string; label: string } {
   switch (role) {
     case "admin":
-      return { bg: "bg-amber-100", text: "text-amber-800", ring: "ring-amber-200", dot: "bg-amber-500", label: "Admin" };
+      return { bg: "bg-amber-100", text: "text-amber-800", ring: "ring-amber-200", dot: "bg-amber-500", label };
     case "operator":
-      return { bg: "bg-blue-100", text: "text-blue-800", ring: "ring-blue-200", dot: "bg-blue-500", label: "Operator" };
+      return { bg: "bg-blue-100", text: "text-blue-800", ring: "ring-blue-200", dot: "bg-blue-500", label };
     case "researcher":
-      return { bg: "bg-emerald-50", text: "text-emerald-800", ring: "ring-emerald-200", dot: "bg-emerald-500", label: "Researcher" };
+      return { bg: "bg-emerald-50", text: "text-emerald-800", ring: "ring-emerald-200", dot: "bg-emerald-500", label };
     default:
-      return { bg: "bg-stone-100", text: "text-stone-700", ring: "ring-stone-200", dot: "bg-stone-400", label: "Viewer" };
+      return { bg: "bg-stone-100", text: "text-stone-700", ring: "ring-stone-200", dot: "bg-stone-400", label };
   }
 }
 
-function statusBadge(status: UserMe["status"]): { bg: string; text: string; ring: string; dot: string; label: string } {
+function statusBadge(
+  status: UserMe["status"],
+  label: StatusLabel,
+): { bg: string; text: string; ring: string; dot: string; label: string } {
   switch (status) {
     case "active":
-      return { bg: "bg-emerald-50", text: "text-emerald-700", ring: "ring-emerald-200", dot: "bg-emerald-500", label: "Active" };
+      return { bg: "bg-emerald-50", text: "text-emerald-700", ring: "ring-emerald-200", dot: "bg-emerald-500", label };
     case "pending":
-      return { bg: "bg-amber-50", text: "text-amber-800", ring: "ring-amber-200", dot: "bg-amber-500", label: "Pending approval" };
+      return { bg: "bg-amber-50", text: "text-amber-800", ring: "ring-amber-200", dot: "bg-amber-500", label };
     case "deactivated":
-      return { bg: "bg-rose-50", text: "text-rose-800", ring: "ring-rose-200", dot: "bg-rose-500", label: "Deactivated" };
+      return { bg: "bg-rose-50", text: "text-rose-800", ring: "ring-rose-200", dot: "bg-rose-500", label };
   }
 }
 
 export default function ProfilePage() {
   const locale = useLocale();
+  const t = useTranslations("auth.profile");
   const [state, setState] = useState<LoadState>({ kind: "loading" });
 
   useEffect(() => {
@@ -90,22 +100,20 @@ export default function ProfilePage() {
         <Breadcrumbs />
         <div className="mx-auto max-w-md px-4 sm:px-6 py-12">
           <div className="rounded-xl border border-stone-200 bg-white p-6 text-center shadow-sm">
-            <h1 className="text-lg font-semibold text-stone-950">Sign in to view your profile</h1>
-            <p className="mt-2 text-sm text-stone-600">
-              Your account details, role and status appear here once you are signed in.
-            </p>
+            <h1 className="text-lg font-semibold text-stone-950">{t("anonymousTitle")}</h1>
+            <p className="mt-2 text-sm text-stone-600">{t("anonymousBody")}</p>
             <div className="mt-5 flex justify-center gap-3">
               <Link
                 href={`/${locale}/login?next=${encodeURIComponent(`/${locale}/profile`)}`}
                 className="rounded-md bg-blue-800 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-900"
               >
-                Sign in
+                {t("signIn")}
               </Link>
               <Link
                 href={`/${locale}/signup`}
                 className="rounded-md border border-stone-300 bg-white px-4 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-50"
               >
-                Create account
+                {t("createAccount")}
               </Link>
             </div>
           </div>
@@ -123,7 +131,7 @@ export default function ProfilePage() {
             role="alert"
             className="rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800"
           >
-            Could not load your profile: {state.message}
+            {t("loadError", { message: state.message })}
           </div>
         </div>
       </>
@@ -131,8 +139,22 @@ export default function ProfilePage() {
   }
 
   const u = state.user;
-  const role = roleBadge(u.role);
-  const status = statusBadge(u.status);
+  const roleLabel =
+    u.role === "admin"
+      ? t("roles.admin")
+      : u.role === "operator"
+        ? t("roles.operator")
+        : u.role === "researcher"
+          ? t("roles.researcher")
+          : t("roles.viewer");
+  const statusLabel =
+    u.status === "active"
+      ? t("statuses.active")
+      : u.status === "pending"
+        ? t("statuses.pending")
+        : t("statuses.deactivated");
+  const role = roleBadge(u.role, roleLabel);
+  const status = statusBadge(u.status, statusLabel);
 
   return (
     <>
@@ -140,16 +162,16 @@ export default function ProfilePage() {
       <div className="mx-auto max-w-3xl px-4 sm:px-6 py-8 space-y-8">
         <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-stone-950">Your profile</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-stone-950">{t("title")}</h1>
             <p className="mt-1 text-sm text-stone-600">
-              Account details for {u.display_name || u.username}.
+              {t("subtitle", { name: u.display_name || u.username })}
             </p>
           </div>
           <Link
             href={`/${locale}/logout`}
             className="self-start rounded-md border border-stone-300 bg-white px-3 py-1.5 text-sm font-semibold text-stone-700 transition-colors hover:bg-stone-50"
           >
-            Sign out
+            {t("signOut")}
           </Link>
         </header>
 
@@ -184,10 +206,10 @@ export default function ProfilePage() {
           </div>
 
           <dl className="grid grid-cols-1 gap-px bg-stone-200 sm:grid-cols-2">
-            <Field label="Username" value={u.username} mono />
-            <Field label="Email" value={u.email} />
-            <Field label="User ID" value={u.id} mono compact />
-            <Field label="Role" value={role.label} />
+            <Field label={t("fields.username")} value={u.username} mono />
+            <Field label={t("fields.email")} value={u.email} />
+            <Field label={t("fields.userId")} value={u.id} mono compact />
+            <Field label={t("fields.role")} value={role.label} />
           </dl>
         </section>
 
@@ -195,11 +217,9 @@ export default function ProfilePage() {
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-sm font-semibold uppercase tracking-wider text-stone-700">
-                Display name
+                {t("displayNameHeading")}
               </h2>
-              <p className="mt-1 text-sm text-stone-600">
-                Shown next to your jobs, audit-log entries and shared resources.
-              </p>
+              <p className="mt-1 text-sm text-stone-600">{t("displayNameBody")}</p>
             </div>
           </div>
           <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -209,22 +229,18 @@ export default function ProfilePage() {
               readOnly
               aria-readonly
               className="w-full rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-700 cursor-not-allowed"
-              placeholder="(none set)"
+              placeholder={t("displayNamePlaceholder")}
             />
             <button
               type="button"
               disabled
-              title="The PATCH /auth/me endpoint is not yet wired. Display name edits land in a follow-up auth slice."
+              title={t("saveDisabledTitle")}
               className="rounded-md border border-stone-300 bg-stone-100 px-4 py-2 text-sm font-semibold text-stone-500 cursor-not-allowed"
             >
-              Save
+              {t("save")}
             </button>
           </div>
-          <p className="mt-2 text-[11px] text-stone-500">
-            Editing is disabled in this build (no profile-update endpoint on the
-            current server). It will activate automatically once the backend
-            exposes the corresponding mutation.
-          </p>
+          <p className="mt-2 text-[11px] text-stone-500">{t("saveDisabledNote")}</p>
         </section>
       </div>
     </>

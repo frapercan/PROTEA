@@ -1685,5 +1685,91 @@
     "loadEmbeddingStatsFailed": "Falha ao carregar estatísticas de embeddings",
     "vacuumFailed": "Limpeza falhou",
     "createConfigFailed": "Falha ao criar a configuração"
+  },
+  "auth": {
+    "login": {
+      "title": "Inicie sessão no PROTEA",
+      "subtitle": "Use o email e a palavra-passe com que se registou.",
+      "emailLabel": "Email",
+      "passwordLabel": "Palavra-passe",
+      "submit": "Iniciar sessão",
+      "submitting": "A iniciar sessão",
+      "needAccount": "Precisa de uma conta?",
+      "needAccountCta": "Peça uma",
+      "errors": {
+        "invalidCredentials": "Email ou palavra-passe inválidos.",
+        "pendingApproval": "A sua conta continua a aguardar aprovação de um administrador. Poderá iniciar sessão assim que for ativada.",
+        "deactivated": "Esta conta foi desativada. Contacte um administrador para a reativar.",
+        "serverUnavailable": "O início de sessão não está disponível neste servidor (JWT_SECRET não está configurado).",
+        "fallback": "Falha ao iniciar sessão (HTTP {status}).",
+        "unexpected": "Erro inesperado."
+      }
+    },
+    "signup": {
+      "title": "Criar uma conta PROTEA",
+      "subtitle": "Conte-nos brevemente porque precisa de acesso. Um administrador revê cada nova conta antes da ativação.",
+      "emailLabel": "Email",
+      "usernameLabel": "Nome de utilizador",
+      "usernameHint": "Aparece nos recursos partilhados (jobs, log de auditoria). Letras, dígitos, hífens.",
+      "passwordLabel": "Palavra-passe",
+      "passwordHint": "Mínimo de 8 caracteres.",
+      "displayNameLabel": "Nome a apresentar",
+      "displayNameHint": "Nome legível opcional.",
+      "intendedUseLabel": "Utilização prevista",
+      "intendedUseHint": "O que pensa fazer com o PROTEA. Ajuda os administradores a aprovar mais depressa.",
+      "intendedUsePlaceholder": "ex. Avaliar preditores de termos GO em divisões do tipo CAFA.",
+      "optional": "opcional",
+      "submit": "Pedir conta",
+      "submitting": "A enviar pedido",
+      "haveAccount": "Já tem conta?",
+      "haveAccountCta": "Iniciar sessão",
+      "errors": {
+        "emailTaken": "Já existe uma conta com este email. Experimente iniciar sessão.",
+        "usernameTaken": "Esse nome de utilizador já está em uso. Escolha outro.",
+        "conflict": "Esta conta já existe.",
+        "fallback": "Pedido de conta falhou (HTTP {status}).",
+        "unexpected": "Erro inesperado."
+      }
+    },
+    "profile": {
+      "anonymousTitle": "Inicie sessão para ver o seu perfil",
+      "anonymousBody": "Os dados da sua conta, papel e estado aparecerão aqui assim que iniciar sessão.",
+      "signIn": "Iniciar sessão",
+      "createAccount": "Criar conta",
+      "loadError": "Não foi possível carregar o seu perfil: {message}",
+      "title": "O seu perfil",
+      "subtitle": "Dados da conta de {name}.",
+      "signOut": "Terminar sessão",
+      "fields": {
+        "username": "Nome de utilizador",
+        "email": "Email",
+        "userId": "ID de utilizador",
+        "role": "Papel"
+      },
+      "roles": {
+        "admin": "Administrador",
+        "operator": "Operador",
+        "researcher": "Investigador",
+        "viewer": "Leitor"
+      },
+      "statuses": {
+        "active": "Ativa",
+        "pending": "A aguardar aprovação",
+        "deactivated": "Desativada"
+      },
+      "displayNameHeading": "Nome a apresentar",
+      "displayNameBody": "Aparece junto dos seus jobs, entradas do log de auditoria e recursos partilhados.",
+      "displayNamePlaceholder": "(não definido)",
+      "save": "Guardar",
+      "saveDisabledTitle": "O endpoint PATCH /auth/me ainda não está ligado. A edição do nome a apresentar chega num slice de auth posterior.",
+      "saveDisabledNote": "A edição está desativada nesta build (sem endpoint de atualização de perfil no servidor atual). Ativa-se automaticamente assim que o backend expuser a mutação correspondente."
+    },
+    "pendingApproval": {
+      "title": "Conta a aguardar aprovação do administrador",
+      "body": "O seu pedido de conta foi registado. Um administrador irá rever a utilização prevista e ativar a conta. Poderá iniciar sessão assim que isso acontecer.",
+      "note": "As aprovações são habitualmente processadas dentro de um dia útil. Se passado esse prazo ainda não tiver resposta, contacte o mantenedor do projeto através da documentação.",
+      "backHome": "Voltar ao início",
+      "goSignIn": "Ir para iniciar sessão"
+    }
   }
 }
