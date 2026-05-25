@@ -120,6 +120,6 @@ test.describe("protein detail flow", () => {
 
     await page.goto("/en/proteins/GHOST");
 
-    await expect(page.getByText("Protein not found.")).toBeVisible();
+    await expect(page.getByText("Protein not found")).toBeVisible();
   });
 });
