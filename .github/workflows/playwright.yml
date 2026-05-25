@@ -60,12 +60,14 @@ jobs:
 
       - name: Build Next app
         env:
-          NEXT_PUBLIC_API_URL: http://localhost:8000
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:8000
+          NEXT_PUBLIC_E2E: "1"
         run: npm run build
 
       - name: Start Next server in background
         env:
-          NEXT_PUBLIC_API_URL: http://localhost:8000
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:8000
+          NEXT_PUBLIC_E2E: "1"
           PORT: "3000"
         run: |
           npm run start &
@@ -84,7 +86,8 @@ jobs:
       - name: Run Playwright flows
         env:
           PLAYWRIGHT_BASE_URL: http://localhost:3000
-          NEXT_PUBLIC_API_URL: http://localhost:8000
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:8000
+          MOCK_API_PORT: "8000"
         run: npx playwright test --project=flows --reporter=line
 
       - name: Stop Next server
