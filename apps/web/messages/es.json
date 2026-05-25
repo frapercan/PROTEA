@@ -33,8 +33,8 @@
     "swaggerHint": "Referencia REST interactiva",
     "thesis": "Tesis PDF",
     "thesisHint": "Manuscrito doctoral de PROTEA",
-    "support": "Apoyo",
-    "supportHint": "Comentarios públicos, dar las gracias",
+    "support": "Apoya el proyecto",
+    "supportHint": "Da las gracias, deja un comentario público",
     "farmSection": "Granja de agentes",
     "farmPlan": "Plan",
     "farmCost": "Coste",
@@ -1170,7 +1170,7 @@
     }
   },
   "support": {
-    "title": "Soporte",
+    "title": "Apoya el proyecto",
     "hero": {
       "supportCount": "{count} personas apoyan este proyecto",
       "withComments": "{count} con comentarios",
@@ -1179,6 +1179,14 @@
     "commentsSection": {
       "heading": "Lo que dice la gente",
       "noComments": "Sin comentarios aún. ¡Sé el primero!"
+    },
+    "helpSection": {
+      "heading": "¿Necesitas ayuda?",
+      "body": "Esta página es para votos y peticiones de funcionalidades, no para ayuda técnica. Si has encontrado un fallo o tienes una pregunta, utiliza los recursos siguientes.",
+      "docsLink": "Consulta la documentación",
+      "docsHint": "Manual Sphinx con arquitectura, colas y referencia del ORM",
+      "issuesLink": "Abre una incidencia en GitHub",
+      "issuesHint": "Reporta errores, haz preguntas, pide funcionalidades"
     }
   },
   "maintenance": {

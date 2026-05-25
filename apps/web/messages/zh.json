@@ -33,8 +33,8 @@
     "swaggerHint": "可交互 REST 参考",
     "thesis": "博士论文 PDF",
     "thesisHint": "PROTEA 博士论文手稿",
-    "support": "支持",
-    "supportHint": "公开留言、表达感谢",
+    "support": "支持本项目",
+    "supportHint": "表达感谢，留下公开留言",
     "farmSection": "智能体农场",
     "farmPlan": "计划",
     "farmCost": "费用",
@@ -1170,7 +1170,7 @@
     }
   },
   "support": {
-    "title": "支持",
+    "title": "支持本项目",
     "hero": {
       "supportCount": "{count} 人支持此项目",
       "withComments": "{count} 条含评论",
@@ -1179,6 +1179,14 @@
     "commentsSection": {
       "heading": "大家的评价",
       "noComments": "暂无评论。成为第一个！"
+    },
+    "helpSection": {
+      "heading": "需要帮助？",
+      "body": "本页面用于投票与功能建议，不提供技术支持。如遇到问题或有疑问，请使用下列资源。",
+      "docsLink": "查阅文档",
+      "docsHint": "Sphinx 手册，包含架构、队列与 ORM 参考",
+      "issuesLink": "在 GitHub 上提交 issue",
+      "issuesHint": "报告错误、提出问题、请求新功能"
     }
   },
   "maintenance": {

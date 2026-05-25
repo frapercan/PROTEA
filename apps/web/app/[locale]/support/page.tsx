@@ -5,6 +5,48 @@ import { baseUrl } from "@/lib/api";
 import { Skeleton } from "@/components/Skeleton";
 import { useTranslations } from "next-intl";
 
+const ISSUES_URL = "https://github.com/frapercan/PROTEA/issues";
+const DOCS_URL = "/sphinx/";
+
+function HelpSection({ t }: { t: ReturnType<typeof useTranslations> }) {
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white px-6 py-5 space-y-4">
+      <div className="space-y-1">
+        <h2 className="text-base font-semibold text-slate-900">
+          {t("helpSection.heading")}
+        </h2>
+        <p className="text-sm text-slate-600 leading-relaxed">
+          {t("helpSection.body")}
+        </p>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <a
+          href={DOCS_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="group flex flex-col gap-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 hover:border-blue-300 hover:bg-blue-50 transition-colors"
+        >
+          <span className="text-sm font-semibold text-slate-900 group-hover:text-blue-800">
+            {t("helpSection.docsLink")} ↗
+          </span>
+          <span className="text-xs text-slate-600">{t("helpSection.docsHint")}</span>
+        </a>
+        <a
+          href={ISSUES_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="group flex flex-col gap-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 hover:border-blue-300 hover:bg-blue-50 transition-colors"
+        >
+          <span className="text-sm font-semibold text-slate-900 group-hover:text-blue-800">
+            {t("helpSection.issuesLink")} ↗
+          </span>
+          <span className="text-xs text-slate-600">{t("helpSection.issuesHint")}</span>
+        </a>
+      </div>
+    </section>
+  );
+}
+
 type Comment = { id: string; comment: string; created_at: string };
 type SupportData = { count: number; comments: Comment[] };
 
@@ -47,6 +89,7 @@ export default function SupportPage() {
             </div>
           ))}
         </div>
+        <HelpSection t={t} />
       </div>
     );
   }
@@ -92,6 +135,8 @@ export default function SupportPage() {
       {data.comments.length === 0 && (
         <p className="text-center text-sm text-slate-600">{t("commentsSection.noComments")}</p>
       )}
+
+      <HelpSection t={t} />
     </div>
   );
 }

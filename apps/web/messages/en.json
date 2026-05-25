@@ -33,8 +33,8 @@
     "swaggerHint": "Interactive REST reference",
     "thesis": "Thesis PDF",
     "thesisHint": "PROTEA doctoral manuscript",
-    "support": "Support",
-    "supportHint": "Public comments, send thanks",
+    "support": "Back the project",
+    "supportHint": "Send thanks, leave a public comment",
     "farmSection": "Agent farm",
     "farmPlan": "Plan",
     "farmCost": "Cost",
@@ -1092,15 +1092,23 @@
     }
   },
   "support": {
-    "title": "Support",
+    "title": "Back the project",
     "hero": {
-      "supportCount": "{count} people support this project",
+      "supportCount": "{count} people back this project",
       "withComments": "{count} with comments",
       "anonymous": "{count} anonymous"
     },
     "commentsSection": {
       "heading": "What people are saying",
       "noComments": "No comments yet. Be the first!"
+    },
+    "helpSection": {
+      "heading": "Need help?",
+      "body": "This page is for upvotes and feature requests, not technical help. If you ran into a bug or have a question, please use the resources below.",
+      "docsLink": "Browse the documentation",
+      "docsHint": "Sphinx manual with architecture, queues and ORM reference",
+      "issuesLink": "Open an issue on GitHub",
+      "issuesHint": "Report bugs, ask questions, request features"
     }
   },
   "maintenance": {

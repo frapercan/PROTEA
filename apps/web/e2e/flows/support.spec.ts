@@ -36,7 +36,7 @@ test.describe("support flow", () => {
     await page.goto("/en/support/");
 
     await expect(
-      page.getByRole("heading", { name: "Support", level: 1 }),
+      page.getByRole("heading", { name: "Back the project", level: 1 }),
     ).toBeVisible();
     // toLocaleString on 137 renders as "137" (no thousands sep needed).
     await expect(page.getByText("137").first()).toBeVisible();
