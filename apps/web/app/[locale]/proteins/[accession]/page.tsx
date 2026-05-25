@@ -55,6 +55,7 @@ function Field({ label, value }: { label: string; value?: string | null }) {
 export default function ProteinDetailPage({ params }: { params: Promise<{ accession: string }> }) {
   const { accession } = use(params);
   const t = useTranslations("proteinDetail");
+  const tToast = useTranslations("toasts");
   const toast = useToast();
   const [protein, setProtein] = useState<ProteinDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -69,7 +70,7 @@ export default function ProteinDetailPage({ params }: { params: Promise<{ access
   useEffect(() => {
     getProtein(decodeURIComponent(accession))
       .then(setProtein)
-      .catch((e: any) => toast(e.message ?? "Failed to load protein", "error"))
+      .catch((e: any) => toast(e.message ?? tToast("loadProteinFailed"), "error"))
       .finally(() => setLoading(false));
   }, [accession]);
 
@@ -78,7 +79,7 @@ export default function ProteinDetailPage({ params }: { params: Promise<{ access
       setLoadingAnnotations(true);
       getProteinAnnotations(decodeURIComponent(accession))
         .then((data) => { setAnnotations(data); setAnnotationsLoaded(true); })
-        .catch((e: any) => toast(e.message ?? "Failed to load annotations", "error"))
+        .catch((e: any) => toast(e.message ?? tToast("loadAnnotationsFailed"), "error"))
         .finally(() => setLoadingAnnotations(false));
     }
     if (activeTab !== "annotations") { setShowGraph(false); setSubgraph(null); }
@@ -350,7 +351,7 @@ export default function ProteinDetailPage({ params }: { params: Promise<{ access
                       const snapshotId = snapshots[0].id;
                       setSubgraph(await getGoSubgraph(snapshotId, goIds, 3));
                     } catch (e: any) {
-                      toast(e.message ?? "Failed to load graph", "error");
+                      toast(e.message ?? tToast("loadGraphFailed"), "error");
                       setShowGraph(false);
                     } finally {
                       setLoadingGraph(false);

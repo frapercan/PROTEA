@@ -42,6 +42,7 @@ function StatCard({ label, value, sub }: { label: string; value: number; sub?: s
 
 export default function ProteinsPage() {
   const t = useTranslations("proteins");
+  const tToast = useTranslations("toasts");
   const toast = useToast();
   // URL-synced active tab — shareable links land on the right one.
   const [tabRaw, setTabRaw] = useUrlParam("tab", "browse");
@@ -94,7 +95,7 @@ export default function ProteinsPage() {
       setTotal(res.total);
       setOffset(currentOffset);
     } catch (e: any) {
-      toast(e.message ?? "Failed to load proteins", "error");
+      toast(e.message ?? tToast("loadProteinsFailed"), "error");
     } finally {
       setLoadingBrowse(false);
     }
@@ -105,7 +106,7 @@ export default function ProteinsPage() {
     try {
       setStats(await getProteinStats());
     } catch (e: any) {
-      toast(e.message ?? "Failed to load stats", "error");
+      toast(e.message ?? tToast("loadStatsFailed"), "error");
     } finally {
       setLoadingStats(false);
     }
@@ -137,7 +138,7 @@ export default function ProteinsPage() {
       if (totalLimit) payload.total_limit = parseInt(totalLimit, 10);
       const res = await createJob({ operation: "insert_proteins", queue_name: "protea.jobs", payload });
       setInsertResult(res);
-      toast("Job queued", "success");
+      toast(tToast("jobQueued"), "success");
     } catch (err: any) {
       toast(String(err), "error");
     } finally {
@@ -154,7 +155,7 @@ export default function ProteinsPage() {
       if (metaLimit) payload.total_limit = parseInt(metaLimit, 10);
       const res = await createJob({ operation: "fetch_uniprot_metadata", queue_name: "protea.jobs", payload });
       setMetaResult(res);
-      toast("Job queued", "success");
+      toast(tToast("jobQueued"), "success");
     } catch (err: any) {
       toast(String(err), "error");
     } finally {

@@ -64,6 +64,7 @@ function ProgressBar({
 export default function JobDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id: jobId } = use(params);
   const t = useTranslations("jobs");
+  const tToast = useTranslations("toasts");
   const [job, setJob] = useState<any>(null);
   const [events, setEvents] = useState<JobEvent[]>([]);
   const [children, setChildren] = useState<Job[]>([]);
@@ -87,9 +88,9 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
       setChildren(ch);
       // Notify when job reaches a terminal state
       if (prevStatusRef.current && prevStatusRef.current !== j.status) {
-        if (j.status === "succeeded") toast("Job succeeded", "success");
-        else if (j.status === "failed") toast("Job failed", "error");
-        else if (j.status === "cancelled") toast("Job cancelled", "info");
+        if (j.status === "succeeded") toast(tToast("jobSucceeded"), "success");
+        else if (j.status === "failed") toast(tToast("jobFailed"), "error");
+        else if (j.status === "cancelled") toast(tToast("jobCancelled"), "info");
       }
       prevStatusRef.current = j.status;
     } catch (e: any) {
@@ -126,7 +127,7 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
     try {
       setError("");
       await deleteJob(jobId);
-      toast("Job deleted", "info");
+      toast(tToast("jobDeleted"), "info");
       router.push("/jobs");
     } catch (e: any) {
       setError(String(e));
@@ -138,7 +139,7 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
     try {
       setError("");
       await cancelJob(jobId);
-      toast("Job cancelled", "info");
+      toast(tToast("jobCancelled"), "info");
       await refresh();
     } catch (e: any) {
       setError(String(e));

@@ -31,6 +31,7 @@ function shortId(id: string) {
 
 export default function AnnotationsPage() {
   const t = useTranslations("annotations");
+  const tToast = useTranslations("toasts");
   const toast = useToast();
   const [activeTab, setActiveTab] = useState<Tab>("sets");
 
@@ -52,7 +53,7 @@ export default function AnnotationsPage() {
         prev.map((s) => (s.id === snapshotId ? { ...s, ia_url: result.ia_url } : s))
       );
       setIaEditId(null);
-      toast("IA URL saved", "success");
+      toast(tToast("iaUrlSaved"), "success");
     } catch (err: any) {
       toast(String(err), "error");
     } finally {
@@ -83,7 +84,7 @@ export default function AnnotationsPage() {
     try {
       setSets(await listAnnotationSets());
     } catch (e: any) {
-      toast(e.message ?? "Failed to load annotation sets", "error");
+      toast(e.message ?? tToast("loadAnnotationSetsFailed"), "error");
     } finally {
       setLoadingSets(false);
     }
@@ -99,7 +100,7 @@ export default function AnnotationsPage() {
         setQgoSnapshotId(snaps[0].id);
       }
     } catch (e: any) {
-      toast(e.message ?? "Failed to load snapshots", "error");
+      toast(e.message ?? tToast("loadSnapshotsFailed"), "error");
     } finally {
       setLoadingSnaps(false);
     }
@@ -120,7 +121,7 @@ export default function AnnotationsPage() {
     try {
       const r = await deleteAnnotationSet(id);
       setSets((prev) => prev.filter((a) => a.id !== id));
-      toast(`Deleted (${r.annotations_deleted.toLocaleString()} annotations removed)`, "info");
+      toast(tToast("annotationsDeleted", { count: r.annotations_deleted.toLocaleString() }), "info");
     } catch (err: any) {
       toast(String(err), "error");
     }
@@ -137,7 +138,7 @@ export default function AnnotationsPage() {
         payload: { obo_url: oboUrl },
       });
       setSnapResult(res);
-      toast("Job queued", "success");
+      toast(tToast("jobQueued"), "success");
     } catch (err: any) {
       toast(String(err), "error");
     } finally {
@@ -160,7 +161,7 @@ export default function AnnotationsPage() {
         },
       });
       setGoaResult(res);
-      toast("Job queued", "success");
+      toast(tToast("jobQueued"), "success");
     } catch (err: any) {
       toast(String(err), "error");
     } finally {
@@ -179,7 +180,7 @@ export default function AnnotationsPage() {
       };
       const res = await createJob({ operation: "load_quickgo_annotations", queue_name: "protea.jobs", payload });
       setQgoResult(res);
-      toast("Job queued", "success");
+      toast(tToast("jobQueued"), "success");
     } catch (err: any) {
       toast(String(err), "error");
     } finally {
