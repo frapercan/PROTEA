@@ -116,6 +116,7 @@ function VacuumCard({
 
 export default function MaintenancePage() {
   const t = useTranslations("maintenance");
+  const tToast = useTranslations("toasts");
   const toast = useToast();
 
   const [seqPreview, setSeqPreview] = useState<VacuumSequencesPreview | null>(null);
@@ -131,7 +132,7 @@ export default function MaintenancePage() {
     try {
       setSeqPreview(await previewVacuumSequences());
     } catch (e: any) {
-      toast(e.message ?? "Failed to load sequence stats", "error");
+      toast(e.message ?? tToast("loadSequenceStatsFailed"), "error");
     } finally {
       setSeqLoading(false);
     }
@@ -142,7 +143,7 @@ export default function MaintenancePage() {
     try {
       setEmbPreview(await previewVacuumEmbeddings());
     } catch (e: any) {
-      toast(e.message ?? "Failed to load embedding stats", "error");
+      toast(e.message ?? tToast("loadEmbeddingStatsFailed"), "error");
     } finally {
       setEmbLoading(false);
     }
@@ -152,11 +153,11 @@ export default function MaintenancePage() {
     setSeqVacuuming(true);
     try {
       const r = await runVacuumSequences();
-      toast(`Deleted ${r.deleted_sequences.toLocaleString()} orphan sequence(s)`, "success");
+      toast(tToast("sequencesVacuumed", { count: r.deleted_sequences.toLocaleString() }), "success");
       await loadSeqPreview();
       await loadEmbPreview(); // seq deletion cascades to embeddings
     } catch (e: any) {
-      toast(e.message ?? "Vacuum failed", "error");
+      toast(e.message ?? tToast("vacuumFailed"), "error");
     } finally {
       setSeqVacuuming(false);
     }
@@ -166,10 +167,10 @@ export default function MaintenancePage() {
     setEmbVacuuming(true);
     try {
       const r = await runVacuumEmbeddings();
-      toast(`Deleted ${r.deleted_embeddings.toLocaleString()} unindexed embedding(s)`, "success");
+      toast(tToast("embeddingsVacuumed", { count: r.deleted_embeddings.toLocaleString() }), "success");
       await loadEmbPreview();
     } catch (e: any) {
-      toast(e.message ?? "Vacuum failed", "error");
+      toast(e.message ?? tToast("vacuumFailed"), "error");
     } finally {
       setEmbVacuuming(false);
     }

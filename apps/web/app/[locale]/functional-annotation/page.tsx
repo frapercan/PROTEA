@@ -39,6 +39,7 @@ const labelClass = "block text-sm font-medium text-slate-700 mb-1";
 
 export default function FunctionalAnnotationPage() {
   const t = useTranslations("functionalAnnotation");
+  const tToast = useTranslations("toasts");
   const toast = useToast();
   const [activeTab, setActiveTab] = useState<Tab>("predict");
 
@@ -121,7 +122,7 @@ export default function FunctionalAnnotationPage() {
       if (anns.length > 0) setPredAnnotationSetId(anns[0].id);
       if (snaps.length > 0) setPredSnapshotId(snaps[0].id);
     } catch (e: any) {
-      toast(e.message ?? "Failed to load data", "error");
+      toast(e.message ?? tToast("loadDataFailed"), "error");
     } finally {
       setLoading(false);
     }
@@ -131,7 +132,7 @@ export default function FunctionalAnnotationPage() {
     try {
       setPredictionSets(await listPredictionSets());
     } catch (e: any) {
-      toast(e.message ?? "Failed to load results", "error");
+      toast(e.message ?? tToast("loadResultsFailed"), "error");
     }
   }
 
@@ -184,7 +185,7 @@ export default function FunctionalAnnotationPage() {
     try {
       const r = await deletePredictionSet(id);
       setPredictionSets((prev) => prev.filter((p) => p.id !== id));
-      toast(`Deleted (${r.predictions_deleted.toLocaleString()} assignments removed)`, "info");
+      toast(tToast("predictionsDeleted", { count: r.predictions_deleted.toLocaleString() }), "info");
     } catch (err: any) {
       toast(String(err), "error");
     }
