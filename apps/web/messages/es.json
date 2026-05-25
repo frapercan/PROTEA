@@ -128,6 +128,13 @@
     "annotateQueueRunningLabel": "en ejecucion",
     "annotateQueueWaitingLabel": "Trabajos esperando"
   },
+  "benchmark": {
+    "loadingTitle": "Cargando datos del benchmark…",
+    "loadingHint": "Obteniendo la matriz de evaluación y el catálogo de embeddings. La primera carga calienta una caché de 60 segundos para que los cambios de filtro posteriores sean instantáneos.",
+    "loadingStepMatrix": "Matriz de evaluación",
+    "loadingStepEmbeddings": "Catálogo de embeddings",
+    "loadingRowsPreview": "Vista previa de filas"
+  },
   "jobs": {
     "title": "Trabajos",
     "allStatuses": "Todos los estados",
