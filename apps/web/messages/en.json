@@ -220,6 +220,7 @@
       "searchPlaceholder": "accession, gene, organism…",
       "search": "Search",
       "clear": "Clear",
+      "filterReviewedAria": "Filter proteins by review status",
       "allProteins": "All proteins",
       "swissProt": "Swiss-Prot only",
       "trembl": "TrEMBL only",

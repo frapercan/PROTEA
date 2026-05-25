@@ -217,6 +217,7 @@
       "searchPlaceholder": "Akzession, Gen, Organismus…",
       "search": "Suchen",
       "clear": "Zurücksetzen",
+      "filterReviewedAria": "Proteine nach Prüfstatus filtern",
       "allProteins": "Alle Proteine",
       "swissProt": "Nur Swiss-Prot",
       "trembl": "Nur TrEMBL",

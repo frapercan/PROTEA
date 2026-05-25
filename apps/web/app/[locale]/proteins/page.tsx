@@ -224,6 +224,7 @@ export default function ProteinsPage() {
             <select
               value={reviewedFilter}
               onChange={(e) => handleFilterChange(e.target.value as typeof reviewedFilter, canonicalOnly)}
+              aria-label={t("browseTab.filterReviewedAria")}
               className="rounded-md border bg-white px-3 py-1.5 text-sm focus:outline-none"
             >
               <option value="all">{t("browseTab.allProteins")}</option>

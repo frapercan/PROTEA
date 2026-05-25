@@ -217,6 +217,7 @@
       "searchPlaceholder": "accession, gene, organismo…",
       "search": "Buscar",
       "clear": "Limpar",
+      "filterReviewedAria": "Filtrar proteínas por estado de revisão",
       "allProteins": "Todas as proteínas",
       "swissProt": "Apenas Swiss-Prot",
       "trembl": "Apenas TrEMBL",

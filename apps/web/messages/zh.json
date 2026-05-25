@@ -217,6 +217,7 @@
       "searchPlaceholder": "登录号、基因、生物体…",
       "search": "搜索",
       "clear": "清除",
+      "filterReviewedAria": "按审阅状态筛选蛋白质",
       "allProteins": "所有蛋白质",
       "swissProt": "仅 Swiss-Prot",
       "trembl": "仅 TrEMBL",
