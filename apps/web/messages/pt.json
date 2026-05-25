@@ -149,6 +149,9 @@
     "loadingStepEmbeddings": "Catálogo de embeddings",
     "loadingRowsPreview": "Pré-visualização de linhas"
   },
+  "benchmark": {
+    "backToHome": "Voltar ao início"
+  },
   "jobs": {
     "title": "Jobs",
     "allStatuses": "Todos os status",

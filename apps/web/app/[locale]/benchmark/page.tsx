@@ -488,8 +488,8 @@ export default function BenchmarkPage() {
           <p className="text-sm text-slate-500 mt-1">
             Per-embedding Fmax across categories and aspects for every evaluation
             run in the database.{" "}
-            <Link href="/" className="text-blue-600 hover:underline">
-              Back to home
+            <Link href={`/${locale}/`} className="text-blue-600 hover:underline">
+              {t("backToHome")}
             </Link>
           </p>
         </div>

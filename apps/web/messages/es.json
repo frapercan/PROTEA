@@ -148,6 +148,9 @@
     "loadingStepEmbeddings": "Catálogo de embeddings",
     "loadingRowsPreview": "Vista previa de filas"
   },
+  "benchmark": {
+    "backToHome": "Volver al inicio"
+  },
   "jobs": {
     "title": "Trabajos",
     "allStatuses": "Todos los estados",
