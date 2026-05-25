@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { getShowcase, type ShowcaseData } from "../../lib/api";
 import { AnnotateForm } from "../../components/AnnotateForm";
+import { Tooltip } from "../../components/Tooltip";
 
 const ASPECTS = ["MFO", "BPO", "CCO"] as const;
 const ASPECT_LABELS: Record<string, string> = {
@@ -13,6 +14,30 @@ const ASPECT_LABELS: Record<string, string> = {
   BPO: "Biological Process",
   CCO: "Cellular Component",
 };
+
+// Tooltips for the GO aspects, written in plain English. Hover surfaces
+// the longer explanation so the short MFO / BPO / CCO acronyms stay
+// usable in tight grid cells (P1.2 + P1.9).
+const ASPECT_TOOLTIPS: Record<string, string> = {
+  MFO: "Molecular Function: what the protein does at the molecular level (binding, catalysis, transport).",
+  BPO: "Biological Process: the broader biological program the protein contributes to (cell cycle, signalling, metabolism).",
+  CCO: "Cellular Component: where in the cell the protein is active (membrane, nucleus, ribosome, organelle).",
+};
+
+// Mirror the CAFA-split tooltips already used on the benchmark page so
+// the NK / LK / PK acronyms in the 'Top performing model across NK /
+// LK / PK categories' subtitle are self-explaining (P1.9). Source of
+// truth lives on the benchmark page; copy is kept short here.
+const CATEGORY_TOOLTIPS: Record<string, string> = {
+  NK: "No Knowledge: the test protein has no experimental GO annotations of any aspect at the train cutoff. Strictest CAFA split.",
+  LK: "Limited Knowledge: the protein is annotated in other aspects but not the one under evaluation.",
+  PK: "Partial Knowledge: the protein is already annotated for the same aspect, so scoring only counts newly added terms.",
+};
+
+// Definition of the Fmax metric. Kept short so the dotted-underline
+// inline pattern stays readable.
+const FMAX_TOOLTIP =
+  "Fmax: the maximum F1 score across all decision thresholds. The standard CAFA metric for ranking GO-term predictions.";
 
 const ASPECT_COLORS: Record<string, { bg: string; text: string; ring: string }> = {
   MFO: { bg: "bg-blue-50", text: "text-blue-700", ring: "ring-blue-100" },
@@ -34,6 +59,19 @@ const STAGE_I18N: Record<string, string> = {
   predictions: "stageKnn",
   reranker_models: "stageReranker",
   evaluations: "stageEvaluation",
+};
+
+// Short one-line story per pipeline stage, surfaced under the count so
+// first-time visitors understand what each tile actually represents.
+// Wording verified against PROTEA CLAUDE.md (KNN + GO transfer, LightGBM
+// reranker in lab) and existing i18n strings (knnBaseline, functional-
+// annotation/intro). Keys live under the "home" namespace.
+const STAGE_DESC_I18N: Record<string, string> = {
+  sequences: "stageSequencesDesc",
+  embeddings: "stageEmbeddingsDesc",
+  predictions: "stageKnnDesc",
+  reranker_models: "stageRerankerDesc",
+  evaluations: "stageEvaluationDesc",
 };
 
 const STAGE_LABELS: Record<string, string> = {
@@ -67,10 +105,36 @@ export default function HomePage() {
   const router = useRouter();
   const [data, setData] = useState<ShowcaseData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Transient "Link copied" toast for the share-best button. Goes back
+  // to the default label after 2s so the affordance stays discoverable.
+  const [bestShareCopied, setBestShareCopied] = useState(false);
 
   useEffect(() => {
     getShowcase().then(setData).catch((e) => setError(e.message));
   }, []);
+
+  // Copy a deep-link to the highlighted best-result tile, including the
+  // evaluation_result_id as a hash so the URL reproduces the same view
+  // (and scrolls to the section). Falls back to a manual document.execCommand
+  // when navigator.clipboard isn't available (older browsers / non-HTTPS).
+  const copyBestShareLink = (evaluationResultId: string) => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    url.hash = `best-${evaluationResultId}`;
+    const value = url.toString();
+    const ok = (text: string) => {
+      setBestShareCopied(true);
+      void text;
+      setTimeout(() => setBestShareCopied(false), 2000);
+    };
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(value).then(() => ok(value)).catch(() => {
+        // ignore; user can still copy from the URL bar
+      });
+    } else {
+      ok(value);
+    }
+  };
 
   if (error) {
     return (
@@ -156,24 +220,79 @@ export default function HomePage() {
       </section>
 
       {/* ── Best result spotlight ─────────────────────────────────── */}
+      {/* id="best-<evaluation_result_id>" is the anchor the share button
+          embeds in the copied URL, so opening the link reproduces the
+          highlighted view and lands the user on this section. */}
       {best ? (
-        <section className="mx-auto max-w-5xl">
-          <div className="flex items-end justify-between mb-4">
-            <div>
+        <section
+          id={`best-${best.evaluation_result_id}`}
+          className="mx-auto max-w-5xl scroll-mt-24"
+        >
+          <div className="flex items-end justify-between gap-3 mb-4">
+            <div className="min-w-0">
               <h2 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-600">
                 {t("bestOverall")}
               </h2>
               <p className="text-sm text-slate-500 mt-1">
-                Top performing model across NK / LK / PK categories
+                Top{" "}
+                <Tooltip text={FMAX_TOOLTIP}>
+                  <span className="underline decoration-dotted decoration-slate-400 underline-offset-4 cursor-help">
+                    Fmax
+                  </span>
+                </Tooltip>
+                {" "}across the{" "}
+                <Tooltip text={CATEGORY_TOOLTIPS.NK}>
+                  <span className="underline decoration-dotted decoration-slate-400 underline-offset-4 cursor-help">
+                    NK
+                  </span>
+                </Tooltip>
+                {" / "}
+                <Tooltip text={CATEGORY_TOOLTIPS.LK}>
+                  <span className="underline decoration-dotted decoration-slate-400 underline-offset-4 cursor-help">
+                    LK
+                  </span>
+                </Tooltip>
+                {" / "}
+                <Tooltip text={CATEGORY_TOOLTIPS.PK}>
+                  <span className="underline decoration-dotted decoration-slate-400 underline-offset-4 cursor-help">
+                    PK
+                  </span>
+                </Tooltip>
+                {" "}CAFA splits
               </p>
             </div>
-            <Link
-              href="/benchmark"
-              className="text-[13px] font-medium text-blue-600 hover:text-blue-800 transition-colors inline-flex items-center gap-1"
-            >
-              {t("viewBenchmark")}
-              <span aria-hidden>→</span>
-            </Link>
+            <div className="flex items-center gap-3 shrink-0">
+              <button
+                type="button"
+                onClick={() => copyBestShareLink(best.evaluation_result_id)}
+                aria-live="polite"
+                className="inline-flex min-h-[40px] items-center gap-1.5 rounded-md px-3 py-2 text-[13px] font-medium text-slate-700 ring-1 ring-inset ring-slate-200 bg-white hover:bg-slate-50 hover:ring-slate-300 transition-colors"
+              >
+                <svg
+                  aria-hidden
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.75"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="w-4 h-4"
+                >
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                </svg>
+                {bestShareCopied
+                  ? t("shareCopied" as any)
+                  : t("shareCopy" as any)}
+              </button>
+              <Link
+                href="/benchmark"
+                className="text-[13px] font-medium text-blue-600 hover:text-blue-800 transition-colors inline-flex items-center gap-1"
+              >
+                {t("viewBenchmark")}
+                <span aria-hidden>→</span>
+              </Link>
+            </div>
           </div>
 
           <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-sm">
@@ -224,15 +343,18 @@ export default function HomePage() {
                   <div
                     key={aspect}
                     className={`rounded-2xl ${color.bg} p-4 text-center ring-1 ring-inset ${color.ring} transition-transform hover:-translate-y-0.5`}
-                    title={ASPECT_LABELS[aspect]}
                   >
                     <div className={`text-2xl sm:text-3xl font-bold tabular-nums ${color.text}`}>
                       {value != null ? value.toFixed(3) : "—"}
                     </div>
-                    <div className={`text-[10px] uppercase tracking-[0.14em] mt-1.5 font-semibold ${color.text} opacity-80`}>
-                      {aspect}
+                    <div className={`text-xs uppercase tracking-[0.14em] mt-1.5 font-semibold ${color.text} opacity-80`}>
+                      <Tooltip text={ASPECT_TOOLTIPS[aspect]}>
+                        <span className="underline decoration-dotted decoration-slate-400 underline-offset-4 cursor-help">
+                          {aspect}
+                        </span>
+                      </Tooltip>
                     </div>
-                    <div className="text-[10px] text-slate-500 mt-0.5">
+                    <div className="text-xs text-slate-500 mt-0.5 truncate" title={ASPECT_LABELS[aspect]}>
                       {ASPECT_LABELS[aspect]}
                     </div>
                   </div>
@@ -278,7 +400,8 @@ export default function HomePage() {
                 )}
                 <button
                   onClick={() => router.push(stage.href)}
-                  className="group relative flex flex-col items-center justify-center w-32 sm:w-36 h-28 rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 hover:from-blue-50 hover:to-white hover:border-blue-300 hover:shadow-md transition-all cursor-pointer"
+                  aria-label={`${t(STAGE_I18N[stage.name] as any)} — ${t(STAGE_DESC_I18N[stage.name] as any)}`}
+                  className="group relative flex flex-col items-center justify-center w-40 sm:w-44 min-h-[10rem] px-3 py-3 rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 hover:from-blue-50 hover:to-white hover:border-blue-300 hover:shadow-md transition-all cursor-pointer text-center"
                 >
                   <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-500 text-sm font-bold group-hover:bg-blue-100 group-hover:text-blue-600 transition-colors">
                     {STAGE_ICONS[stage.name] ?? stage.name.slice(0, 2).toUpperCase()}
@@ -288,6 +411,13 @@ export default function HomePage() {
                   </span>
                   <span className="text-[11px] text-slate-600 tabular-nums mt-0.5 font-medium">
                     {stage.count.toLocaleString()}
+                  </span>
+                  <span className="text-[10px] text-slate-500 leading-snug mt-1.5 line-clamp-2">
+                    {t(STAGE_DESC_I18N[stage.name] as any)}
+                  </span>
+                  <span className="text-[10px] font-medium text-blue-600 mt-1.5 inline-flex items-center gap-0.5 group-hover:text-blue-800 transition-colors">
+                    {t("stageView" as any)}
+                    <span aria-hidden>→</span>
                   </span>
                 </button>
               </div>

@@ -1067,7 +1067,11 @@ export function getBenchmarkMatrix(params?: {
   if (params?.stage) qs.set("stage", params.stage);
   if (params?.k !== undefined) qs.set("k", String(params.k));
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
-  return http<BenchmarkMatrixResponse>(`/benchmark/matrix/${suffix}`);
+  // Cacheable: the benchmark matrix only changes when a new evaluation result
+  // lands (rare, minutes-to-hours apart). A 60s revalidation window lets the
+  // first visitor warm the cache so subsequent navigations across stage / K /
+  // eval-set chips are instant instead of paying ~2-10s per round-trip.
+  return http<BenchmarkMatrixResponse>(`/benchmark/matrix/${suffix}`, { cacheable: true });
 }
 
 export type StackRepo = {

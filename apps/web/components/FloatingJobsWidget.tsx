@@ -2,11 +2,14 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import { useLocale, useTranslations } from "next-intl";
 import { listJobs, type Job } from "@/lib/api";
 
 const POLL_INTERVAL = 10_000;
 
 export function FloatingJobsWidget() {
+  const locale = useLocale();
+  const t = useTranslations("components.floatingJobsWidget");
   const [jobs, setJobs] = useState<Job[]>([]);
   const [expanded, setExpanded] = useState(false);
 
@@ -70,7 +73,7 @@ export function FloatingJobsWidget() {
               return (
                 <Link
                   key={job.id}
-                  href={`/jobs/${job.id}`}
+                  href={`/${locale}/jobs/${job.id}`}
                   className="block px-4 py-3 hover:bg-slate-50 transition-colors"
                 >
                   <div className="flex items-center justify-between gap-2">
@@ -105,6 +108,7 @@ export function FloatingJobsWidget() {
         onClick={() => setExpanded((v) => !v)}
         className="flex items-center gap-2.5 rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white pl-3.5 pr-4 py-2.5 text-sm font-semibold shadow-lg shadow-blue-600/30 hover:shadow-xl hover:shadow-blue-600/40 hover:-translate-y-0.5 transition-all"
         aria-expanded={expanded}
+        aria-label={t("toggleLabel", { count: jobs.length })}
       >
         <span className="relative flex h-2.5 w-2.5" aria-hidden="true">
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-70" />

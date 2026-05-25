@@ -108,6 +108,12 @@
     "stageReranker": "Re-ranker",
     "stageAnnotation": "Annotation",
     "stageEvaluation": "Evaluation",
+    "stageSequencesDesc": "Proteins indexed from UniProt with deduplicated FASTA",
+    "stageEmbeddingsDesc": "One vector per protein computed by 8 PLMs",
+    "stageKnnDesc": "k nearest neighbours transfer their GO terms",
+    "stageRerankerDesc": "LightGBM re-orders the candidates by learned features",
+    "stageEvaluationDesc": "CAFA-style Fmax / AuPRC scored per aspect",
+    "stageView": "view",
     "nkCategory": "NK category (No prior Knowledge) — most demanding evaluation setting",
     "annotateTitle": "Annotate Your Proteins",
     "annotateDescription": "Paste your protein sequences in FASTA format and get functional annotations automatically using the best available method.",
@@ -115,6 +121,7 @@
     "annotateInputAriaLabel": "Sequence input in FASTA format",
     "annotateTryExample": "Try example",
     "annotateUploadFile": "Upload file",
+    "annotateUseExample": "Use our example (KRAS + P53)",
     "annotateButton": "Annotate",
     "annotateUploading": "Uploading...",
     "annotateEmbedding": "Computing embeddings...",
@@ -125,8 +132,21 @@
     "annotateStepPredict": "Prediction",
     "annotateQueueBlockedTitle": "Annotation temporarily unavailable",
     "annotateQueueBlockedBody": "The embedding / prediction pipeline is currently busy processing a backlog of long-running jobs. New requests would not enter the queue in a reasonable time, so submissions are paused until the backlog clears.",
+    "annotateQueueBlockedFriendly": "The shared GPU is currently running a research export. Your annotation request would not be picked up in a reasonable time, so submissions are paused until the export finishes. In the meantime you can already explore the benchmark results.",
+    "annotateQueueViewResults": "View available results",
+    "annotateQueueShowDetails": "Technical details",
+    "annotateQueueHideDetails": "Hide technical details",
     "annotateQueueRunningLabel": "running",
-    "annotateQueueWaitingLabel": "Jobs waiting"
+    "annotateQueueWaitingLabel": "Jobs waiting",
+    "shareCopy": "Share",
+    "shareCopied": "Link copied"
+  },
+  "benchmark": {
+    "loadingTitle": "Loading benchmark data…",
+    "loadingHint": "Fetching the evaluation matrix and embedding catalog. The first hit warms a 60-second cache so subsequent filter changes are instant.",
+    "loadingStepMatrix": "Evaluation matrix",
+    "loadingStepEmbeddings": "Embedding catalog",
+    "loadingRowsPreview": "Rows preview"
   },
   "benchmark": {
     "backToHome": "Back to home"
@@ -223,6 +243,7 @@
       "searchPlaceholder": "accession, gene, organism…",
       "search": "Search",
       "clear": "Clear",
+      "filterReviewedAria": "Filter proteins by review status",
       "allProteins": "All proteins",
       "swissProt": "Swiss-Prot only",
       "trembl": "TrEMBL only",
@@ -1164,7 +1185,8 @@
         "heading": "Bug reports",
         "body": "If something breaks or behaves unexpectedly, <issues>file an issue on GitHub</issues>. Reports are appreciated."
       },
-      "lastUpdated": "Policy revision 2, 2026-05-23."
+      "lastUpdated": "Policy revision 2, 2026-05-23.",
+      "keyboardHint": "Press Enter or Space to accept"
     },
     "statusBadge": {
       "queued": "QUEUED",
@@ -1180,6 +1202,9 @@
     },
     "languageSwitcher": {
       "label": "Language"
+    },
+    "floatingJobsWidget": {
+      "toggleLabel": "View running jobs ({count})"
     }
   },
   "stack": {
@@ -1546,6 +1571,129 @@
       "cancel": "Cancel",
       "confirm": "Yes, revoke",
       "confirming": "Revoking..."
+    }
+  },
+  "toasts": {
+    "jobSucceeded": "Job succeeded",
+    "jobFailed": "Job failed",
+    "jobCancelled": "Job cancelled",
+    "jobDeleted": "Job deleted",
+    "jobQueued": "Job queued",
+    "computeJobQueued": "Compute job queued",
+    "iaUrlSaved": "IA URL saved",
+    "embeddingConfigCreated": "Embedding config created",
+    "configDeleted": "Config deleted",
+    "scoringConfigCreated": "Scoring config created",
+    "annotationsDeleted": "Deleted ({count} annotations removed)",
+    "predictionsDeleted": "Deleted ({count} assignments removed)",
+    "querySetDeleted": "Deleted \"{name}\"",
+    "querySetUploaded": "Query set \"{name}\" uploaded ({count} sequences)",
+    "sequencesVacuumed": "Deleted {count} orphan sequence(s)",
+    "embeddingsVacuumed": "Deleted {count} unindexed embedding(s)",
+    "presetsCreated": "Presets created: {names}",
+    "presetsAllExist": "All presets already exist",
+    "loadAnnotationSetsFailed": "Failed to load annotation sets",
+    "loadSnapshotsFailed": "Failed to load snapshots",
+    "loadProteinFailed": "Failed to load protein",
+    "loadProteinsFailed": "Failed to load proteins",
+    "loadStatsFailed": "Failed to load stats",
+    "loadAnnotationsFailed": "Failed to load annotations",
+    "loadGraphFailed": "Failed to load graph",
+    "loadDataFailed": "Failed to load data",
+    "loadResultsFailed": "Failed to load results",
+    "loadDistributionFailed": "Failed to load distribution",
+    "loadDetailFailed": "Failed to load detail",
+    "loadScoringConfigsFailed": "Failed to load scoring configs",
+    "loadPresetsFailed": "Failed to load presets",
+    "loadSequenceStatsFailed": "Failed to load sequence stats",
+    "loadEmbeddingStatsFailed": "Failed to load embedding stats",
+    "vacuumFailed": "Vacuum failed",
+    "createConfigFailed": "Failed to create config"
+  },
+  "auth": {
+    "login": {
+      "title": "Sign in to PROTEA",
+      "subtitle": "Use the email and password you registered with.",
+      "emailLabel": "Email",
+      "passwordLabel": "Password",
+      "submit": "Sign in",
+      "submitting": "Signing in",
+      "needAccount": "Need an account?",
+      "needAccountCta": "Request one",
+      "errors": {
+        "invalidCredentials": "Invalid email or password.",
+        "pendingApproval": "Your account is still pending admin approval. You will be able to sign in once it has been activated.",
+        "deactivated": "This account has been deactivated. Contact an administrator to re-enable it.",
+        "serverUnavailable": "Sign-in is not available on this server (JWT secret is not configured).",
+        "fallback": "Sign in failed (HTTP {status}).",
+        "unexpected": "Unexpected error."
+      }
+    },
+    "signup": {
+      "title": "Create a PROTEA account",
+      "subtitle": "Tell us a little about why you need access. An admin reviews every new account before activation.",
+      "emailLabel": "Email",
+      "usernameLabel": "Username",
+      "usernameHint": "Shown on shared resources (jobs, audit log). Letters, digits, dashes.",
+      "passwordLabel": "Password",
+      "passwordHint": "Minimum 8 characters.",
+      "displayNameLabel": "Display name",
+      "displayNameHint": "Optional human-readable name.",
+      "intendedUseLabel": "Intended use",
+      "intendedUseHint": "What you plan to do with PROTEA. Helps admins approve faster.",
+      "intendedUsePlaceholder": "e.g. Benchmarking GO-term predictors on CAFA-style splits.",
+      "optional": "optional",
+      "submit": "Request an account",
+      "submitting": "Submitting account request",
+      "haveAccount": "Already have an account?",
+      "haveAccountCta": "Sign in",
+      "errors": {
+        "emailTaken": "An account with this email already exists. Try signing in instead.",
+        "usernameTaken": "That username is already taken. Please pick another one.",
+        "conflict": "This account already exists.",
+        "fallback": "Signup failed (HTTP {status}).",
+        "unexpected": "Unexpected error."
+      }
+    },
+    "profile": {
+      "anonymousTitle": "Sign in to view your profile",
+      "anonymousBody": "Your account details, role and status appear here once you are signed in.",
+      "signIn": "Sign in",
+      "createAccount": "Create account",
+      "loadError": "Could not load your profile: {message}",
+      "title": "Your profile",
+      "subtitle": "Account details for {name}.",
+      "signOut": "Sign out",
+      "fields": {
+        "username": "Username",
+        "email": "Email",
+        "userId": "User ID",
+        "role": "Role"
+      },
+      "roles": {
+        "admin": "Admin",
+        "operator": "Operator",
+        "researcher": "Researcher",
+        "viewer": "Viewer"
+      },
+      "statuses": {
+        "active": "Active",
+        "pending": "Pending approval",
+        "deactivated": "Deactivated"
+      },
+      "displayNameHeading": "Display name",
+      "displayNameBody": "Shown next to your jobs, audit-log entries and shared resources.",
+      "displayNamePlaceholder": "(none set)",
+      "save": "Save",
+      "saveDisabledTitle": "The PATCH /auth/me endpoint is not yet wired. Display name edits land in a follow-up auth slice.",
+      "saveDisabledNote": "Editing is disabled in this build (no profile-update endpoint on the current server). It will activate automatically once the backend exposes the corresponding mutation."
+    },
+    "pendingApproval": {
+      "title": "Account pending admin approval",
+      "body": "Your account request has been recorded. An administrator will review your intended use and activate the account. You will be able to sign in once that happens.",
+      "note": "Approvals are usually processed within a working day. If you have not heard back after that, please ping the project maintainer through the documentation contact.",
+      "backHome": "Back home",
+      "goSignIn": "Go to sign in"
     }
   }
 }

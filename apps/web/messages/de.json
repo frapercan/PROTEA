@@ -109,6 +109,12 @@
     "stageReranker": "Re-Ranker",
     "stageAnnotation": "Annotation",
     "stageEvaluation": "Evaluierung",
+    "stageSequencesDesc": "Proteine aus UniProt indiziert mit deduplizierten FASTA",
+    "stageEmbeddingsDesc": "Ein Vektor pro Protein, berechnet von 8 PLMs",
+    "stageKnnDesc": "Die k naechsten Nachbarn uebertragen ihre GO-Begriffe",
+    "stageRerankerDesc": "LightGBM ordnet Kandidaten nach gelernten Merkmalen neu",
+    "stageEvaluationDesc": "CAFA-Stil Fmax / AuPRC pro Aspekt bewertet",
+    "stageView": "ansehen",
     "nkCategory": "NK-Kategorie (No Knowledge) — anspruchsvollste Evaluierungseinstellung",
     "annotateTitle": "Ihre Proteine annotieren",
     "annotateDescription": "Proteinsequenzen im FASTA-Format einfuegen und automatisch funktionelle Annotationen mit der besten verfuegbaren Methode erhalten.",
@@ -116,6 +122,7 @@
     "annotateInputAriaLabel": "Sequenzeingabe im FASTA-Format",
     "annotateTryExample": "Beispiel testen",
     "annotateUploadFile": "Datei hochladen",
+    "annotateUseExample": "Unser Beispiel verwenden (KRAS + P53)",
     "annotateButton": "Annotieren",
     "annotateUploading": "Hochladen...",
     "annotateEmbedding": "Embeddings berechnen...",
@@ -123,7 +130,24 @@
     "annotateDone": "Fertig! Weiterleitung zu Ergebnissen...",
     "annotateStepUpload": "Hochladen",
     "annotateStepEmbed": "Embeddings",
-    "annotateStepPredict": "Vorhersage"
+    "annotateStepPredict": "Vorhersage",
+    "annotateQueueBlockedTitle": "Annotation vorübergehend nicht verfügbar",
+    "annotateQueueBlockedBody": "Die Embedding- / Vorhersage-Pipeline verarbeitet derzeit einen Rückstand langlaufender Jobs. Neue Anfragen würden nicht in angemessener Zeit in die Warteschlange aufgenommen, daher sind Einreichungen pausiert, bis der Rückstand abgearbeitet ist.",
+    "annotateQueueBlockedFriendly": "Die gemeinsame GPU führt derzeit einen Forschungs-Export aus. Ihre Anfrage würde nicht in angemessener Zeit verarbeitet, daher sind Einreichungen pausiert, bis der Export fertig ist. In der Zwischenzeit können Sie bereits die Benchmark-Ergebnisse ansehen.",
+    "annotateQueueViewResults": "Verfügbare Ergebnisse ansehen",
+    "annotateQueueShowDetails": "Technische Details",
+    "annotateQueueHideDetails": "Technische Details ausblenden",
+    "annotateQueueRunningLabel": "läuft",
+    "annotateQueueWaitingLabel": "Jobs in der Warteschlange",
+    "shareCopy": "Teilen",
+    "shareCopied": "Link kopiert"
+  },
+  "benchmark": {
+    "loadingTitle": "Benchmark-Daten werden geladen…",
+    "loadingHint": "Auswertungsmatrix und Embedding-Katalog werden abgerufen. Der erste Aufruf füllt einen 60-Sekunden-Cache, damit weitere Filterwechsel sofort erfolgen.",
+    "loadingStepMatrix": "Auswertungsmatrix",
+    "loadingStepEmbeddings": "Embedding-Katalog",
+    "loadingRowsPreview": "Zeilenvorschau"
   },
   "benchmark": {
     "backToHome": "Zurück zur Startseite"
@@ -220,6 +244,7 @@
       "searchPlaceholder": "Akzession, Gen, Organismus…",
       "search": "Suchen",
       "clear": "Zurücksetzen",
+      "filterReviewedAria": "Proteine nach Prüfstatus filtern",
       "allProteins": "Alle Proteine",
       "swissProt": "Nur Swiss-Prot",
       "trembl": "Nur TrEMBL",
@@ -1239,7 +1264,8 @@
         "heading": "Fehlerberichte",
         "body": "Wenn etwas nicht funktioniert oder sich unerwartet verhält, <issues>melden Sie es als Issue auf GitHub</issues>. Berichte sind willkommen."
       },
-      "lastUpdated": "Richtlinienversion 2, 2026-05-23."
+      "lastUpdated": "Richtlinienversion 2, 2026-05-23.",
+      "keyboardHint": "Eingabetaste oder Leertaste zum Akzeptieren"
     },
     "statusBadge": {
       "queued": "WARTEND",
@@ -1255,6 +1281,9 @@
     },
     "languageSwitcher": {
       "label": "Sprache"
+    },
+    "floatingJobsWidget": {
+      "toggleLabel": "Laufende Jobs anzeigen ({count})"
     }
   },
   "stack": {
@@ -1621,6 +1650,129 @@
       "title": "Noch keine API-Schlüssel",
       "body": "Einen Schlüssel erstellen, um CI-Pipelines, dem Offline-Reranker-Labor oder anderen automatisierten Clients programmatischen Zugriff zu gewähren. Die engste benötigte Rolle wählen.",
       "cta": "Ersten Schlüssel erstellen"
+    }
+  },
+  "toasts": {
+    "jobSucceeded": "Job erfolgreich",
+    "jobFailed": "Job fehlgeschlagen",
+    "jobCancelled": "Job abgebrochen",
+    "jobDeleted": "Job gelöscht",
+    "jobQueued": "Job in Warteschlange",
+    "computeJobQueued": "Berechnungs-Job in Warteschlange",
+    "iaUrlSaved": "IA-URL gespeichert",
+    "embeddingConfigCreated": "Embedding-Konfiguration erstellt",
+    "configDeleted": "Konfiguration gelöscht",
+    "scoringConfigCreated": "Scoring-Konfiguration erstellt",
+    "annotationsDeleted": "Gelöscht ({count} Annotationen entfernt)",
+    "predictionsDeleted": "Gelöscht ({count} Zuordnungen entfernt)",
+    "querySetDeleted": "Gelöscht \"{name}\"",
+    "querySetUploaded": "Query-Set \"{name}\" hochgeladen ({count} Sequenzen)",
+    "sequencesVacuumed": "{count} verwaiste Sequenz(en) gelöscht",
+    "embeddingsVacuumed": "{count} nicht indizierte Embedding(s) gelöscht",
+    "presetsCreated": "Voreinstellungen erstellt: {names}",
+    "presetsAllExist": "Alle Voreinstellungen existieren bereits",
+    "loadAnnotationSetsFailed": "Annotationssätze konnten nicht geladen werden",
+    "loadSnapshotsFailed": "Snapshots konnten nicht geladen werden",
+    "loadProteinFailed": "Protein konnte nicht geladen werden",
+    "loadProteinsFailed": "Proteine konnten nicht geladen werden",
+    "loadStatsFailed": "Statistiken konnten nicht geladen werden",
+    "loadAnnotationsFailed": "Annotationen konnten nicht geladen werden",
+    "loadGraphFailed": "Graph konnte nicht geladen werden",
+    "loadDataFailed": "Daten konnten nicht geladen werden",
+    "loadResultsFailed": "Ergebnisse konnten nicht geladen werden",
+    "loadDistributionFailed": "Verteilung konnte nicht geladen werden",
+    "loadDetailFailed": "Details konnten nicht geladen werden",
+    "loadScoringConfigsFailed": "Scoring-Konfigurationen konnten nicht geladen werden",
+    "loadPresetsFailed": "Voreinstellungen konnten nicht geladen werden",
+    "loadSequenceStatsFailed": "Sequenzstatistiken konnten nicht geladen werden",
+    "loadEmbeddingStatsFailed": "Embedding-Statistiken konnten nicht geladen werden",
+    "vacuumFailed": "Aufräumen fehlgeschlagen",
+    "createConfigFailed": "Konfiguration konnte nicht erstellt werden"
+  },
+  "auth": {
+    "login": {
+      "title": "Bei PROTEA anmelden",
+      "subtitle": "Verwenden Sie die E-Mail und das Passwort Ihrer Registrierung.",
+      "emailLabel": "E-Mail",
+      "passwordLabel": "Passwort",
+      "submit": "Anmelden",
+      "submitting": "Anmeldung läuft",
+      "needAccount": "Noch kein Konto?",
+      "needAccountCta": "Konto anfordern",
+      "errors": {
+        "invalidCredentials": "Ungültige E-Mail oder falsches Passwort.",
+        "pendingApproval": "Ihr Konto wartet noch auf die Freigabe durch einen Administrator. Sobald es aktiviert ist, können Sie sich anmelden.",
+        "deactivated": "Dieses Konto wurde deaktiviert. Wenden Sie sich an einen Administrator, um es wieder zu aktivieren.",
+        "serverUnavailable": "Die Anmeldung ist auf diesem Server nicht verfügbar (JWT_SECRET ist nicht konfiguriert).",
+        "fallback": "Anmeldung fehlgeschlagen (HTTP {status}).",
+        "unexpected": "Unerwarteter Fehler."
+      }
+    },
+    "signup": {
+      "title": "PROTEA-Konto erstellen",
+      "subtitle": "Erläutern Sie kurz, warum Sie Zugriff benötigen. Jedes neue Konto wird vor der Aktivierung von einem Administrator geprüft.",
+      "emailLabel": "E-Mail",
+      "usernameLabel": "Benutzername",
+      "usernameHint": "Wird auf geteilten Ressourcen (Jobs, Audit-Log) angezeigt. Buchstaben, Ziffern, Bindestriche.",
+      "passwordLabel": "Passwort",
+      "passwordHint": "Mindestens 8 Zeichen.",
+      "displayNameLabel": "Anzeigename",
+      "displayNameHint": "Optionaler menschenlesbarer Name.",
+      "intendedUseLabel": "Geplante Nutzung",
+      "intendedUseHint": "Was Sie mit PROTEA vorhaben. Hilft Administratoren bei der schnellen Freigabe.",
+      "intendedUsePlaceholder": "z. B. Benchmarking von GO-Term-Vorhersagern auf CAFA-Splits.",
+      "optional": "optional",
+      "submit": "Konto anfordern",
+      "submitting": "Antrag wird gesendet",
+      "haveAccount": "Bereits ein Konto?",
+      "haveAccountCta": "Anmelden",
+      "errors": {
+        "emailTaken": "Es existiert bereits ein Konto mit dieser E-Mail. Versuchen Sie sich anzumelden.",
+        "usernameTaken": "Dieser Benutzername ist bereits vergeben. Bitte wählen Sie einen anderen.",
+        "conflict": "Dieses Konto existiert bereits.",
+        "fallback": "Registrierung fehlgeschlagen (HTTP {status}).",
+        "unexpected": "Unerwarteter Fehler."
+      }
+    },
+    "profile": {
+      "anonymousTitle": "Anmelden, um Ihr Profil zu sehen",
+      "anonymousBody": "Ihre Kontodaten, Rolle und Status erscheinen hier, sobald Sie angemeldet sind.",
+      "signIn": "Anmelden",
+      "createAccount": "Konto erstellen",
+      "loadError": "Profil konnte nicht geladen werden: {message}",
+      "title": "Ihr Profil",
+      "subtitle": "Kontodaten von {name}.",
+      "signOut": "Abmelden",
+      "fields": {
+        "username": "Benutzername",
+        "email": "E-Mail",
+        "userId": "Benutzer-ID",
+        "role": "Rolle"
+      },
+      "roles": {
+        "admin": "Administrator",
+        "operator": "Operator",
+        "researcher": "Forscher",
+        "viewer": "Betrachter"
+      },
+      "statuses": {
+        "active": "Aktiv",
+        "pending": "Wartet auf Freigabe",
+        "deactivated": "Deaktiviert"
+      },
+      "displayNameHeading": "Anzeigename",
+      "displayNameBody": "Wird neben Ihren Jobs, Audit-Log-Einträgen und geteilten Ressourcen angezeigt.",
+      "displayNamePlaceholder": "(nicht gesetzt)",
+      "save": "Speichern",
+      "saveDisabledTitle": "Der Endpoint PATCH /auth/me ist noch nicht angebunden. Die Bearbeitung des Anzeigenamens folgt in einem späteren Auth-Slice.",
+      "saveDisabledNote": "Die Bearbeitung ist in diesem Build deaktiviert (kein Profil-Update-Endpoint auf dem aktuellen Server). Sie aktiviert sich automatisch, sobald das Backend die entsprechende Mutation bereitstellt."
+    },
+    "pendingApproval": {
+      "title": "Konto wartet auf Administrator-Freigabe",
+      "body": "Ihr Kontoantrag wurde aufgenommen. Ein Administrator prüft die geplante Nutzung und aktiviert das Konto. Sobald das geschehen ist, können Sie sich anmelden.",
+      "note": "Freigaben werden in der Regel innerhalb eines Arbeitstags bearbeitet. Falls Sie danach nichts gehört haben, kontaktieren Sie bitte den Projekt-Maintainer über die Dokumentation.",
+      "backHome": "Zurück zur Startseite",
+      "goSignIn": "Zur Anmeldung"
     }
   }
 }

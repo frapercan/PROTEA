@@ -109,6 +109,12 @@
     "stageReranker": "重排序器",
     "stageAnnotation": "注释",
     "stageEvaluation": "评估",
+    "stageSequencesDesc": "从UniProt索引的蛋白质，FASTA去重",
+    "stageEmbeddingsDesc": "由8个PLM为每个蛋白质计算一个向量",
+    "stageKnnDesc": "k个最近邻居转移它们的GO术语",
+    "stageRerankerDesc": "LightGBM根据学习特征重新排列候选项",
+    "stageEvaluationDesc": "按方面评分的CAFA风格Fmax / AuPRC",
+    "stageView": "查看",
     "nkCategory": "NK类别（No Knowledge）— 最严格的评估设置",
     "annotateTitle": "注释您的蛋白质",
     "annotateDescription": "粘贴FASTA格式的蛋白质序列，使用最佳可用方法自动获取功能注释。",
@@ -116,6 +122,7 @@
     "annotateInputAriaLabel": "FASTA 格式的序列输入",
     "annotateTryExample": "试用示例",
     "annotateUploadFile": "上传文件",
+    "annotateUseExample": "使用我们的示例 (KRAS + P53)",
     "annotateButton": "注释",
     "annotateUploading": "上传中...",
     "annotateEmbedding": "计算嵌入向量中...",
@@ -123,7 +130,24 @@
     "annotateDone": "完成！正在跳转到结果页面...",
     "annotateStepUpload": "上传",
     "annotateStepEmbed": "嵌入向量",
-    "annotateStepPredict": "预测"
+    "annotateStepPredict": "预测",
+    "annotateQueueBlockedTitle": "注释暂时不可用",
+    "annotateQueueBlockedBody": "嵌入 / 预测流水线当前正在处理长时间运行的任务积压。新请求无法在合理时间内进入队列，因此提交已暂停，直到积压处理完毕。",
+    "annotateQueueBlockedFriendly": "共享GPU当前正在运行研究导出任务。您的请求无法在合理时间内被处理，因此提交已暂停，直到导出完成。同时，您已经可以浏览基准测试结果。",
+    "annotateQueueViewResults": "查看已有结果",
+    "annotateQueueShowDetails": "技术详情",
+    "annotateQueueHideDetails": "隐藏技术详情",
+    "annotateQueueRunningLabel": "运行中",
+    "annotateQueueWaitingLabel": "等待中的任务",
+    "shareCopy": "分享",
+    "shareCopied": "链接已复制"
+  },
+  "benchmark": {
+    "loadingTitle": "正在加载基准测试数据…",
+    "loadingHint": "正在获取评估矩阵和嵌入向量目录。首次访问会预热 60 秒的缓存,后续筛选操作将瞬时响应。",
+    "loadingStepMatrix": "评估矩阵",
+    "loadingStepEmbeddings": "嵌入向量目录",
+    "loadingRowsPreview": "行预览"
   },
   "benchmark": {
     "backToHome": "返回首页"
@@ -220,6 +244,7 @@
       "searchPlaceholder": "登录号、基因、生物体…",
       "search": "搜索",
       "clear": "清除",
+      "filterReviewedAria": "按审阅状态筛选蛋白质",
       "allProteins": "所有蛋白质",
       "swissProt": "仅 Swiss-Prot",
       "trembl": "仅 TrEMBL",
@@ -1238,7 +1263,8 @@
         "heading": "错误报告",
         "body": "若出现故障或异常行为，请<issues>在 GitHub 上提交 issue</issues>。感谢您的反馈。"
       },
-      "lastUpdated": "政策版本 2，2026-05-23。"
+      "lastUpdated": "政策版本 2，2026-05-23。",
+      "keyboardHint": "按 Enter 或空格键接受"
     },
     "statusBadge": {
       "queued": "QUEUED",
@@ -1254,6 +1280,9 @@
     },
     "languageSwitcher": {
       "label": "语言"
+    },
+    "floatingJobsWidget": {
+      "toggleLabel": "查看运行中的任务 ({count})"
     }
   },
   "stack": {
@@ -1620,6 +1649,129 @@
       "title": "暂无 API 密钥",
       "body": "创建密钥以向 CI 流水线、离线重排序实验室或任何自动化客户端授予程序化访问权限。选择客户端所需的最小权限角色。",
       "cta": "创建第一个密钥"
+    }
+  },
+  "toasts": {
+    "jobSucceeded": "任务已完成",
+    "jobFailed": "任务失败",
+    "jobCancelled": "任务已取消",
+    "jobDeleted": "任务已删除",
+    "jobQueued": "任务已入队",
+    "computeJobQueued": "计算任务已入队",
+    "iaUrlSaved": "IA URL 已保存",
+    "embeddingConfigCreated": "Embedding 配置已创建",
+    "configDeleted": "配置已删除",
+    "scoringConfigCreated": "Scoring 配置已创建",
+    "annotationsDeleted": "已删除（移除 {count} 条注释）",
+    "predictionsDeleted": "已删除（移除 {count} 条赋值）",
+    "querySetDeleted": "已删除 \"{name}\"",
+    "querySetUploaded": "查询集 \"{name}\" 已上传（{count} 条序列）",
+    "sequencesVacuumed": "已删除 {count} 条孤立序列",
+    "embeddingsVacuumed": "已删除 {count} 个未索引 embedding",
+    "presetsCreated": "已创建预设：{names}",
+    "presetsAllExist": "所有预设已存在",
+    "loadAnnotationSetsFailed": "加载注释集失败",
+    "loadSnapshotsFailed": "加载 snapshot 失败",
+    "loadProteinFailed": "加载蛋白质失败",
+    "loadProteinsFailed": "加载蛋白质列表失败",
+    "loadStatsFailed": "加载统计信息失败",
+    "loadAnnotationsFailed": "加载注释失败",
+    "loadGraphFailed": "加载图谱失败",
+    "loadDataFailed": "加载数据失败",
+    "loadResultsFailed": "加载结果失败",
+    "loadDistributionFailed": "加载分布失败",
+    "loadDetailFailed": "加载详情失败",
+    "loadScoringConfigsFailed": "加载 scoring 配置失败",
+    "loadPresetsFailed": "加载预设失败",
+    "loadSequenceStatsFailed": "加载序列统计信息失败",
+    "loadEmbeddingStatsFailed": "加载 embedding 统计信息失败",
+    "vacuumFailed": "清理失败",
+    "createConfigFailed": "创建配置失败"
+  },
+  "auth": {
+    "login": {
+      "title": "登录 PROTEA",
+      "subtitle": "使用您注册时填写的邮箱和密码。",
+      "emailLabel": "邮箱",
+      "passwordLabel": "密码",
+      "submit": "登录",
+      "submitting": "正在登录",
+      "needAccount": "还没有账户？",
+      "needAccountCta": "申请一个",
+      "errors": {
+        "invalidCredentials": "邮箱或密码错误。",
+        "pendingApproval": "您的账户仍在等待管理员审核。审核通过并激活后即可登录。",
+        "deactivated": "此账户已被停用。请联系管理员重新启用。",
+        "serverUnavailable": "此服务器未启用登录功能（未配置 JWT_SECRET）。",
+        "fallback": "登录失败（HTTP {status}）。",
+        "unexpected": "未预期的错误。"
+      }
+    },
+    "signup": {
+      "title": "创建 PROTEA 账户",
+      "subtitle": "请简要说明您需要访问的原因。每个新账户都会由管理员在激活前审核。",
+      "emailLabel": "邮箱",
+      "usernameLabel": "用户名",
+      "usernameHint": "会显示在共享资源（任务、审计日志）上。允许字母、数字和短横线。",
+      "passwordLabel": "密码",
+      "passwordHint": "至少 8 个字符。",
+      "displayNameLabel": "显示名称",
+      "displayNameHint": "可选的可读名称。",
+      "intendedUseLabel": "用途说明",
+      "intendedUseHint": "您打算用 PROTEA 做什么。有助于管理员更快审核。",
+      "intendedUsePlaceholder": "例如：在 CAFA 风格的划分上对比 GO 术语预测器。",
+      "optional": "可选",
+      "submit": "申请账户",
+      "submitting": "正在提交申请",
+      "haveAccount": "已有账户？",
+      "haveAccountCta": "登录",
+      "errors": {
+        "emailTaken": "已存在使用该邮箱的账户。请尝试登录。",
+        "usernameTaken": "该用户名已被占用。请另选一个。",
+        "conflict": "该账户已存在。",
+        "fallback": "注册失败（HTTP {status}）。",
+        "unexpected": "未预期的错误。"
+      }
+    },
+    "profile": {
+      "anonymousTitle": "登录后查看您的个人资料",
+      "anonymousBody": "登录后，您的账户详情、角色和状态会显示在此处。",
+      "signIn": "登录",
+      "createAccount": "创建账户",
+      "loadError": "无法加载您的个人资料：{message}",
+      "title": "您的个人资料",
+      "subtitle": "{name} 的账户详情。",
+      "signOut": "退出登录",
+      "fields": {
+        "username": "用户名",
+        "email": "邮箱",
+        "userId": "用户 ID",
+        "role": "角色"
+      },
+      "roles": {
+        "admin": "管理员",
+        "operator": "运维",
+        "researcher": "研究员",
+        "viewer": "访客"
+      },
+      "statuses": {
+        "active": "已激活",
+        "pending": "待审核",
+        "deactivated": "已停用"
+      },
+      "displayNameHeading": "显示名称",
+      "displayNameBody": "会显示在您的任务、审计日志条目和共享资源旁边。",
+      "displayNamePlaceholder": "（未设置）",
+      "save": "保存",
+      "saveDisabledTitle": "PATCH /auth/me 接口尚未接入。显示名称的编辑将在后续 auth 切片中上线。",
+      "saveDisabledNote": "本次构建中编辑功能已禁用（当前服务器无个人资料更新接口）。后端提供对应变更接口后会自动启用。"
+    },
+    "pendingApproval": {
+      "title": "账户待管理员审核",
+      "body": "您的账户申请已记录。管理员将审核您的用途并激活账户。审核通过后即可登录。",
+      "note": "审核通常在一个工作日内完成。若超过该时限仍未收到回复，请通过文档中的联系方式联系项目维护者。",
+      "backHome": "返回首页",
+      "goSignIn": "前往登录"
     }
   }
 }

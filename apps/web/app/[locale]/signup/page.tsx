@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useLocale } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { type FormEvent, useId, useState } from "react";
 import { AuthError, signup } from "@/lib/authApi";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -24,6 +24,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 
 export default function SignupPage() {
   const locale = useLocale();
+  const t = useTranslations("auth.signup");
   const router = useRouter();
   const formId = useId();
 
@@ -52,16 +53,16 @@ export default function SignupPage() {
     } catch (err) {
       if (err instanceof AuthError) {
         if (err.status === 409 && err.detail === "email_already_registered") {
-          setError("An account with this email already exists. Try signing in instead.");
+          setError(t("errors.emailTaken"));
         } else if (err.status === 409 && err.detail === "username_already_taken") {
-          setError("That username is already taken. Please pick another one.");
+          setError(t("errors.usernameTaken"));
         } else if (err.status === 409) {
-          setError("This account already exists.");
+          setError(t("errors.conflict"));
         } else {
-          setError(err.detail || `Signup failed (HTTP ${err.status}).`);
+          setError(err.detail || t("errors.fallback", { status: err.status }));
         }
       } else {
-        setError(err instanceof Error ? err.message : "Unexpected error.");
+        setError(err instanceof Error ? err.message : t("errors.unexpected"));
       }
     } finally {
       setSubmitting(false);
@@ -73,11 +74,8 @@ export default function SignupPage() {
       <Breadcrumbs />
       <div className="mx-auto max-w-md px-4 sm:px-6 py-8">
         <header className="text-center">
-          <h1 className="text-2xl font-bold tracking-tight text-stone-950">Create a PROTEA account</h1>
-          <p className="mt-2 text-sm text-stone-600">
-            Tell us a little about why you need access. An admin reviews every
-            new account before activation.
-          </p>
+          <h1 className="text-2xl font-bold tracking-tight text-stone-950">{t("title")}</h1>
+          <p className="mt-2 text-sm text-stone-600">{t("subtitle")}</p>
         </header>
 
         <form
@@ -86,7 +84,7 @@ export default function SignupPage() {
           className="mt-8 space-y-4 rounded-xl border border-stone-200 bg-white p-6 shadow-sm"
           noValidate
         >
-          <Field label="Email" htmlFor={`${formId}-email`} required>
+          <Field label={t("emailLabel")} optionalLabel={t("optional")} htmlFor={`${formId}-email`} required>
             <input
               id={`${formId}-email`}
               type="email"
@@ -99,10 +97,11 @@ export default function SignupPage() {
           </Field>
 
           <Field
-            label="Username"
+            label={t("usernameLabel")}
+            optionalLabel={t("optional")}
             htmlFor={`${formId}-username`}
             required
-            hint="Shown on shared resources (jobs, audit log). Letters, digits, dashes."
+            hint={t("usernameHint")}
           >
             <input
               id={`${formId}-username`}
@@ -117,7 +116,13 @@ export default function SignupPage() {
             />
           </Field>
 
-          <Field label="Password" htmlFor={`${formId}-password`} required hint="Minimum 8 characters.">
+          <Field
+            label={t("passwordLabel")}
+            optionalLabel={t("optional")}
+            htmlFor={`${formId}-password`}
+            required
+            hint={t("passwordHint")}
+          >
             <input
               id={`${formId}-password`}
               type="password"
@@ -130,7 +135,12 @@ export default function SignupPage() {
             />
           </Field>
 
-          <Field label="Display name" htmlFor={`${formId}-display`} hint="Optional human-readable name.">
+          <Field
+            label={t("displayNameLabel")}
+            optionalLabel={t("optional")}
+            htmlFor={`${formId}-display`}
+            hint={t("displayNameHint")}
+          >
             <input
               id={`${formId}-display`}
               type="text"
@@ -143,16 +153,17 @@ export default function SignupPage() {
           </Field>
 
           <Field
-            label="Intended use"
+            label={t("intendedUseLabel")}
+            optionalLabel={t("optional")}
             htmlFor={`${formId}-intent`}
-            hint="What you plan to do with PROTEA. Helps admins approve faster."
+            hint={t("intendedUseHint")}
           >
             <textarea
               id={`${formId}-intent`}
               rows={3}
               value={intendedUse}
               onChange={(e) => setIntendedUse(e.target.value)}
-              placeholder="e.g. Benchmarking GO-term predictors on CAFA-style splits."
+              placeholder={t("intendedUsePlaceholder")}
               className="w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-200"
             />
           </Field>
@@ -171,14 +182,14 @@ export default function SignupPage() {
             disabled={submitting}
             className="w-full rounded-md bg-blue-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-900 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {submitting ? "Submitting account request" : "Request an account"}
+            {submitting ? t("submitting") : t("submit")}
           </button>
         </form>
 
         <p className="mt-6 text-center text-sm text-stone-600">
-          Already have an account?{" "}
+          {t("haveAccount")}{" "}
           <Link href={`/${locale}/login`} className="font-semibold text-blue-800 hover:text-blue-900">
-            Sign in
+            {t("haveAccountCta")}
           </Link>
         </p>
       </div>
@@ -188,12 +199,14 @@ export default function SignupPage() {
 
 function Field({
   label,
+  optionalLabel,
   htmlFor,
   required,
   hint,
   children,
 }: {
   label: string;
+  optionalLabel: string;
   htmlFor: string;
   required?: boolean;
   hint?: string;
@@ -209,7 +222,9 @@ function Field({
           {label}
           {required && <span aria-hidden className="ml-0.5 text-rose-600">*</span>}
         </span>
-        {!required && <span className="text-[10px] font-normal normal-case text-stone-400">optional</span>}
+        {!required && (
+          <span className="text-[10px] font-normal normal-case text-stone-400">{optionalLabel}</span>
+        )}
       </label>
       {children}
       {hint && <p className="mt-1 text-[12px] leading-snug text-stone-500">{hint}</p>}

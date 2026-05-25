@@ -109,6 +109,12 @@
     "stageReranker": "Re-ranker",
     "stageAnnotation": "Anotação",
     "stageEvaluation": "Avaliação",
+    "stageSequencesDesc": "Proteinas indexadas do UniProt com FASTA deduplicado",
+    "stageEmbeddingsDesc": "Um vetor por proteina computado por 8 PLMs",
+    "stageKnnDesc": "k vizinhos mais proximos transferem seus termos GO",
+    "stageRerankerDesc": "LightGBM reordena candidatos com caracteristicas aprendidas",
+    "stageEvaluationDesc": "Fmax / AuPRC no estilo CAFA por aspecto",
+    "stageView": "ver",
     "nkCategory": "Categoria NK (No Knowledge) — configuração de avaliação mais exigente",
     "annotateTitle": "Anote suas proteinas",
     "annotateDescription": "Cole suas sequencias de proteinas em formato FASTA e obtenha anotacoes funcionais automaticamente com o melhor metodo disponivel.",
@@ -116,6 +122,7 @@
     "annotateInputAriaLabel": "Entrada de sequência no formato FASTA",
     "annotateTryExample": "Testar exemplo",
     "annotateUploadFile": "Enviar arquivo",
+    "annotateUseExample": "Usar nosso exemplo (KRAS + P53)",
     "annotateButton": "Anotar",
     "annotateUploading": "Enviando...",
     "annotateEmbedding": "Calculando embeddings...",
@@ -123,7 +130,24 @@
     "annotateDone": "Pronto! Redirecionando para resultados...",
     "annotateStepUpload": "Envio",
     "annotateStepEmbed": "Embeddings",
-    "annotateStepPredict": "Predicao"
+    "annotateStepPredict": "Predicao",
+    "annotateQueueBlockedTitle": "Anotacao temporariamente indisponivel",
+    "annotateQueueBlockedBody": "O pipeline de embeddings / predicao esta processando uma fila de trabalhos de longa duracao. Novas requisicoes nao entrariam em fila em tempo razoavel, entao envios estao pausados ate que a fila se esvazie.",
+    "annotateQueueBlockedFriendly": "A GPU compartilhada esta executando um export de pesquisa. Sua requisicao nao seria atendida em tempo razoavel, entao envios estao pausados ate o export terminar. Enquanto isso, voce ja pode explorar os resultados do benchmark.",
+    "annotateQueueViewResults": "Ver resultados ja disponiveis",
+    "annotateQueueShowDetails": "Detalhes tecnicos",
+    "annotateQueueHideDetails": "Ocultar detalhes tecnicos",
+    "annotateQueueRunningLabel": "executando",
+    "annotateQueueWaitingLabel": "Trabalhos aguardando",
+    "shareCopy": "Compartilhar",
+    "shareCopied": "Link copiado"
+  },
+  "benchmark": {
+    "loadingTitle": "Carregando dados do benchmark…",
+    "loadingHint": "Obtendo a matriz de avaliação e o catálogo de embeddings. A primeira chamada aquece um cache de 60 segundos para que mudanças de filtro posteriores sejam instantâneas.",
+    "loadingStepMatrix": "Matriz de avaliação",
+    "loadingStepEmbeddings": "Catálogo de embeddings",
+    "loadingRowsPreview": "Pré-visualização de linhas"
   },
   "benchmark": {
     "backToHome": "Voltar ao início"
@@ -220,6 +244,7 @@
       "searchPlaceholder": "accession, gene, organismo…",
       "search": "Buscar",
       "clear": "Limpar",
+      "filterReviewedAria": "Filtrar proteínas por estado de revisão",
       "allProteins": "Todas as proteínas",
       "swissProt": "Apenas Swiss-Prot",
       "trembl": "Apenas TrEMBL",
@@ -1239,7 +1264,8 @@
         "heading": "Relatórios de bugs",
         "body": "Se algo falhar ou se comportar de forma inesperada, <issues>abra uma issue no GitHub</issues>. Os relatórios são bem-vindos."
       },
-      "lastUpdated": "Revisão da política 2, 2026-05-23."
+      "lastUpdated": "Revisão da política 2, 2026-05-23.",
+      "keyboardHint": "Pressione Enter ou Espaço para aceitar"
     },
     "statusBadge": {
       "queued": "NA FILA",
@@ -1255,6 +1281,9 @@
     },
     "languageSwitcher": {
       "label": "Idioma"
+    },
+    "floatingJobsWidget": {
+      "toggleLabel": "Ver trabalhos em execução ({count})"
     }
   },
   "stack": {
@@ -1621,6 +1650,129 @@
       "title": "Ainda sem chaves API",
       "body": "Crie uma chave para dar a pipelines de CI, ao laboratório de reranker offline ou a qualquer cliente automatizado acesso programático. Escolha o papel mais restrito que o cliente necessite.",
       "cta": "Criar a primeira chave"
+    }
+  },
+  "toasts": {
+    "jobSucceeded": "Trabalho concluído",
+    "jobFailed": "Trabalho falhou",
+    "jobCancelled": "Trabalho cancelado",
+    "jobDeleted": "Trabalho eliminado",
+    "jobQueued": "Trabalho em fila",
+    "computeJobQueued": "Trabalho de computação em fila",
+    "iaUrlSaved": "URL de IA guardado",
+    "embeddingConfigCreated": "Configuração de embedding criada",
+    "configDeleted": "Configuração eliminada",
+    "scoringConfigCreated": "Configuração de scoring criada",
+    "annotationsDeleted": "Eliminado ({count} anotações removidas)",
+    "predictionsDeleted": "Eliminado ({count} atribuições removidas)",
+    "querySetDeleted": "Eliminado \"{name}\"",
+    "querySetUploaded": "Conjunto de consulta \"{name}\" carregado ({count} sequências)",
+    "sequencesVacuumed": "Eliminadas {count} sequências órfãs",
+    "embeddingsVacuumed": "Eliminados {count} embeddings sem índice",
+    "presetsCreated": "Predefinições criadas: {names}",
+    "presetsAllExist": "Todas as predefinições já existem",
+    "loadAnnotationSetsFailed": "Falha ao carregar conjuntos de anotações",
+    "loadSnapshotsFailed": "Falha ao carregar snapshots",
+    "loadProteinFailed": "Falha ao carregar a proteína",
+    "loadProteinsFailed": "Falha ao carregar as proteínas",
+    "loadStatsFailed": "Falha ao carregar estatísticas",
+    "loadAnnotationsFailed": "Falha ao carregar anotações",
+    "loadGraphFailed": "Falha ao carregar o grafo",
+    "loadDataFailed": "Falha ao carregar dados",
+    "loadResultsFailed": "Falha ao carregar resultados",
+    "loadDistributionFailed": "Falha ao carregar a distribuição",
+    "loadDetailFailed": "Falha ao carregar o detalhe",
+    "loadScoringConfigsFailed": "Falha ao carregar configurações de scoring",
+    "loadPresetsFailed": "Falha ao carregar predefinições",
+    "loadSequenceStatsFailed": "Falha ao carregar estatísticas de sequências",
+    "loadEmbeddingStatsFailed": "Falha ao carregar estatísticas de embeddings",
+    "vacuumFailed": "Limpeza falhou",
+    "createConfigFailed": "Falha ao criar a configuração"
+  },
+  "auth": {
+    "login": {
+      "title": "Inicie sessão no PROTEA",
+      "subtitle": "Use o email e a palavra-passe com que se registou.",
+      "emailLabel": "Email",
+      "passwordLabel": "Palavra-passe",
+      "submit": "Iniciar sessão",
+      "submitting": "A iniciar sessão",
+      "needAccount": "Precisa de uma conta?",
+      "needAccountCta": "Peça uma",
+      "errors": {
+        "invalidCredentials": "Email ou palavra-passe inválidos.",
+        "pendingApproval": "A sua conta continua a aguardar aprovação de um administrador. Poderá iniciar sessão assim que for ativada.",
+        "deactivated": "Esta conta foi desativada. Contacte um administrador para a reativar.",
+        "serverUnavailable": "O início de sessão não está disponível neste servidor (JWT_SECRET não está configurado).",
+        "fallback": "Falha ao iniciar sessão (HTTP {status}).",
+        "unexpected": "Erro inesperado."
+      }
+    },
+    "signup": {
+      "title": "Criar uma conta PROTEA",
+      "subtitle": "Conte-nos brevemente porque precisa de acesso. Um administrador revê cada nova conta antes da ativação.",
+      "emailLabel": "Email",
+      "usernameLabel": "Nome de utilizador",
+      "usernameHint": "Aparece nos recursos partilhados (jobs, log de auditoria). Letras, dígitos, hífens.",
+      "passwordLabel": "Palavra-passe",
+      "passwordHint": "Mínimo de 8 caracteres.",
+      "displayNameLabel": "Nome a apresentar",
+      "displayNameHint": "Nome legível opcional.",
+      "intendedUseLabel": "Utilização prevista",
+      "intendedUseHint": "O que pensa fazer com o PROTEA. Ajuda os administradores a aprovar mais depressa.",
+      "intendedUsePlaceholder": "ex. Avaliar preditores de termos GO em divisões do tipo CAFA.",
+      "optional": "opcional",
+      "submit": "Pedir conta",
+      "submitting": "A enviar pedido",
+      "haveAccount": "Já tem conta?",
+      "haveAccountCta": "Iniciar sessão",
+      "errors": {
+        "emailTaken": "Já existe uma conta com este email. Experimente iniciar sessão.",
+        "usernameTaken": "Esse nome de utilizador já está em uso. Escolha outro.",
+        "conflict": "Esta conta já existe.",
+        "fallback": "Pedido de conta falhou (HTTP {status}).",
+        "unexpected": "Erro inesperado."
+      }
+    },
+    "profile": {
+      "anonymousTitle": "Inicie sessão para ver o seu perfil",
+      "anonymousBody": "Os dados da sua conta, papel e estado aparecerão aqui assim que iniciar sessão.",
+      "signIn": "Iniciar sessão",
+      "createAccount": "Criar conta",
+      "loadError": "Não foi possível carregar o seu perfil: {message}",
+      "title": "O seu perfil",
+      "subtitle": "Dados da conta de {name}.",
+      "signOut": "Terminar sessão",
+      "fields": {
+        "username": "Nome de utilizador",
+        "email": "Email",
+        "userId": "ID de utilizador",
+        "role": "Papel"
+      },
+      "roles": {
+        "admin": "Administrador",
+        "operator": "Operador",
+        "researcher": "Investigador",
+        "viewer": "Leitor"
+      },
+      "statuses": {
+        "active": "Ativa",
+        "pending": "A aguardar aprovação",
+        "deactivated": "Desativada"
+      },
+      "displayNameHeading": "Nome a apresentar",
+      "displayNameBody": "Aparece junto dos seus jobs, entradas do log de auditoria e recursos partilhados.",
+      "displayNamePlaceholder": "(não definido)",
+      "save": "Guardar",
+      "saveDisabledTitle": "O endpoint PATCH /auth/me ainda não está ligado. A edição do nome a apresentar chega num slice de auth posterior.",
+      "saveDisabledNote": "A edição está desativada nesta build (sem endpoint de atualização de perfil no servidor atual). Ativa-se automaticamente assim que o backend expuser a mutação correspondente."
+    },
+    "pendingApproval": {
+      "title": "Conta a aguardar aprovação do administrador",
+      "body": "O seu pedido de conta foi registado. Um administrador irá rever a utilização prevista e ativar a conta. Poderá iniciar sessão assim que isso acontecer.",
+      "note": "As aprovações são habitualmente processadas dentro de um dia útil. Se passado esse prazo ainda não tiver resposta, contacte o mantenedor do projeto através da documentação.",
+      "backHome": "Voltar ao início",
+      "goSignIn": "Ir para iniciar sessão"
     }
   }
 }

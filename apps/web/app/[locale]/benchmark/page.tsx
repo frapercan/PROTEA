@@ -377,10 +377,71 @@ export default function BenchmarkPage() {
   }
 
   if (!embeddings || !matrix || stage === null) {
+    // Two-step progress hint: matrix fetch typically dominates (200-1200ms
+    // cold, instant when the Next.js 60s cache is warm); the embeddings
+    // catalog usually returns first. We surface both so users see motion
+    // even when one half is mid-flight, and a shimmer-row preview hints at
+    // the table structure (PLM rows x aspect/category columns) that's
+    // about to render. Memory feedback_no_blocking_slow_endpoints: the
+    // real fix is the cache on getBenchmarkMatrix, not a synchronous wait.
+    const matrixReady = matrix !== null;
+    const embeddingsReady = embeddings !== null;
     return (
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12 space-y-8">
-        <Skeleton className="h-8 w-64" />
-        <Skeleton className="h-96 rounded-lg" />
+      <div
+        className="max-w-6xl mx-auto px-4 sm:px-6 py-12 space-y-6"
+        role="status"
+        aria-live="polite"
+        aria-busy="true"
+      >
+        <div className="space-y-2">
+          <p className="text-sm font-semibold text-slate-700">{t("loadingTitle")}</p>
+          <p className="text-xs text-slate-500 max-w-2xl">{t("loadingHint")}</p>
+        </div>
+        <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+          <li className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2">
+            <span
+              aria-hidden
+              className={`inline-block h-2 w-2 rounded-full ${
+                matrixReady ? "bg-emerald-500" : "bg-blue-400 animate-pulse"
+              }`}
+            />
+            <span className={matrixReady ? "text-slate-700" : "text-slate-500"}>
+              {t("loadingStepMatrix")}
+            </span>
+          </li>
+          <li className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2">
+            <span
+              aria-hidden
+              className={`inline-block h-2 w-2 rounded-full ${
+                embeddingsReady ? "bg-emerald-500" : "bg-blue-400 animate-pulse"
+              }`}
+            />
+            <span className={embeddingsReady ? "text-slate-700" : "text-slate-500"}>
+              {t("loadingStepEmbeddings")}
+            </span>
+          </li>
+        </ul>
+        {/* Shimmer preview: two header rows (categories then aspects) and
+            four embedding rows hint at the table structure so the user
+            knows what's about to land. */}
+        <div className="rounded-lg border bg-white shadow-sm overflow-hidden">
+          <p className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500 border-b bg-slate-50">
+            {t("loadingRowsPreview")}
+          </p>
+          <div className="divide-y">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div
+                key={i}
+                className="grid grid-cols-[180px_repeat(9,minmax(0,1fr))] gap-2 px-4 py-2.5 items-center"
+              >
+                <Skeleton className="h-4 w-32" />
+                {Array.from({ length: 9 }).map((__, j) => (
+                  <Skeleton key={j} className="h-4 w-12 mx-auto" />
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     );
   }
