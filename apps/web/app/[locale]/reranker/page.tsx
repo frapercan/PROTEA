@@ -274,7 +274,7 @@ function ProvenanceStrip({ model }: { model: RerankerModel }) {
   );
 }
 
-function ProvenancePanel({ model }: { model: RerankerModel }) {
+function ProvenancePanel({ model, locale }: { model: RerankerModel; locale: string }) {
   const fs = model.feature_selection;
   const drop = fs?.drop_features ?? [];
   return (
@@ -287,7 +287,24 @@ function ProvenancePanel({ model }: { model: RerankerModel }) {
           <CopyableSha value={model.feature_schema_sha} />
         </ProvField>
         <ProvField label="Dataset">
-          {model.dataset_name ? (
+          {model.dataset_name && model.dataset_id ? (
+            // Link straight to /datasets/{id} so reviewers can jump into the
+            // dump that produced this booster (schema_sha + manifest_sha +
+            // artifact URIs live there). Memory
+            // feedback_ui_surface_provenance_not_hide_params: these fields
+            // are reproducibility-critical and stay visible by default.
+            <Link
+              href={`/${locale}/datasets/${model.dataset_id}`}
+              className="inline-flex items-center gap-1 text-blue-700 hover:underline"
+              title={`Open dataset ${model.dataset_name}`}
+            >
+              <span>{model.dataset_name}</span>
+              <span className="font-mono text-[11px] text-slate-400">
+                ({shortId(model.dataset_id)})
+              </span>
+              <span aria-hidden className="text-[11px]">→</span>
+            </Link>
+          ) : model.dataset_name ? (
             <span>
               {model.dataset_name}{" "}
               <span className="font-mono text-[11px] text-slate-400">
@@ -489,7 +506,7 @@ function RerankerCard({
           </div>
 
           {/* Provenance & feature selection (reproducibility) */}
-          <ProvenancePanel model={model} />
+          <ProvenancePanel model={model} locale={locale} />
 
           {/* Feature importance */}
           <div>
