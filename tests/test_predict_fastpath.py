@@ -224,7 +224,7 @@ class TestAspectKnnPreSearchParallel:
             limit_per_entry=3,
             distance_threshold=None,
             search_backend="numpy",
-            metric="euclidean",
+            metric="l2",
             faiss_index_type=None,
             faiss_nlist=None,
             faiss_nprobe=None,
