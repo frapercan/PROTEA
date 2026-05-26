@@ -5,7 +5,7 @@ PROTEA the platform is just one repository in a larger working tree.
 The same machine usually also hosts the LightGBM lab
 (``protea-reranker-lab``), the LaTeX manuscript (``thesis/``), and a
 parallel orchestration system that drives long-running engineering
-work via Claude Code agents (`agent-farm
+work via automated coding agents (`agent-farm
 <https://github.com/frapercan/agent-farm>`_).
 
 This page describes how those pieces relate to PROTEA at runtime: the
@@ -52,11 +52,11 @@ The agent-farm orchestration system
 
 `agent-farm <https://github.com/frapercan/agent-farm>`_ is a separate
 public repository, intentionally agnostic to PROTEA: it ships a
-prompt + yaml registry for a dozen Claude Code agents and a sqlite-backed
+prompt + yaml registry for a dozen automated coding agents and a sqlite-backed
 task / heartbeat / result state. The conductor session spawns subagents
 in natural language, persistent services run as headless tmux windows
-escalating to Claude only on failure, and one-shot batch jobs invoke
-the same code paths a human would call from the CLI.
+that escalate to a human operator only on failure, and one-shot batch
+jobs invoke the same code paths a human would call from the CLI.
 
 Why it lives outside PROTEA
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -99,8 +99,8 @@ Hard boundaries
 ~~~~~~~~~~~~~~~
 
 The orchestration system imposes the same hard constraints PROTEA does
-(no force push, no ``--no-verify``, no ``git stash``, no Claude
-co-author on commits). It additionally refuses to:
+(no force push, no ``--no-verify``, no ``git stash``, no third-party
+co-author trailers on commits). It additionally refuses to:
 
 - modify branch-protected refs (``main`` / ``develop``)
 - restart the dev stack without explicit user permission
