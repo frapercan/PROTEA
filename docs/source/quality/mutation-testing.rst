@@ -1,11 +1,15 @@
-Mutation Testing (F6.3)
-=======================
+Mutation Testing
+================
+
+.. note::
+   Implementation slice: F6.3. See :doc:`/quality/index` for the
+   companion property-test slice (F6.2).
 
 PROTEA's algorithmic core is exercised by Hypothesis property tests
-(F6.2) and by example-based unit tests. Both answer the question
-"do my tests pass?", but neither answers the deeper question
-"are my tests actually checking the behaviour I think they are?".
-Mutation testing closes that gap.
+and by example-based unit tests. Both answer the question "do my tests
+pass?", but neither answers the deeper question "are my tests actually
+checking the behaviour I think they are?". Mutation testing closes
+that gap.
 
 `Cosmic Ray <https://github.com/sixty-north/cosmic-ray>`_ rewrites a
 target module's AST one operator at a time (swap ``+`` for ``-``,
