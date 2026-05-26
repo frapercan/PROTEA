@@ -7,9 +7,15 @@
 # to the CUDA wheel after each ``poetry install`` / ``poetry update``.
 #
 # Usage:
-#   bash scripts/install_gpu_torch.sh                 # default cu121
+#   bash scripts/install_gpu_torch.sh                 # default cu128
+#   CUDA_VARIANT=cu121 bash scripts/install_gpu_torch.sh
 #   CUDA_VARIANT=cu118 bash scripts/install_gpu_torch.sh
 #   VENV_PATH=/tmp/torch-smoke bash scripts/install_gpu_torch.sh
+#
+# Default tracks the wheel set validated against the torch GPU KNN
+# backend in protea-method (feature/torch-gpu-knn). cu128 is compatible
+# with NVIDIA driver 570 and 580 series; older variants stay reachable
+# via the CUDA_VARIANT override above.
 #
 # Why no ``--no-deps``: torch on Linux ships its CUDA runtime through the
 # ``nvidia-*`` PyPI packages (nvidia-cudnn-cu12, nvidia-cublas-cu12,
@@ -23,7 +29,7 @@
 # permissive ranges declared in ``pyproject.toml``.
 set -euo pipefail
 
-CUDA_VARIANT="${CUDA_VARIANT:-cu121}"
+CUDA_VARIANT="${CUDA_VARIANT:-cu128}"
 INDEX_URL="https://download.pytorch.org/whl/${CUDA_VARIANT}"
 
 # Allow callers to point at a venv directly (smoke tests, CI) without
