@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.requests import Request
 
 from protea.api.bearer import BearerPrincipal
@@ -69,7 +69,12 @@ def reset_db(
 def get_dlq_summary(
     _principal: _AdminPrincipal,
     amqp_url: str = Depends(get_amqp_url),
-    max_peek: int = Query(default=500, ge=1, le=5000),
+    max_peek: int = Query(
+        default=500,
+        ge=1,
+        le=5000,
+        description="Upper bound on DLQ messages peeked for the summary; capped at 5000.",
+    ),
 ) -> dict[str, Any]:
     """Grouped count of dead-letter messages by operation, source queue, and age.
 
@@ -85,11 +90,26 @@ def get_dlq_summary(
 
 
 class DlqReplayRequest(BaseModel):
-    operation: str | None = None
-    first_death_queue: str | None = None
-    target_queue: str | None = None
-    dry_run: bool = False
-    max_messages: int = 1000
+    """Filter for DLQ messages to re-enqueue back onto their source queue."""
+
+    operation: str | None = Field(
+        default=None, description="Restrict to messages whose payload `operation` matches."
+    )
+    first_death_queue: str | None = Field(
+        default=None,
+        description="Restrict to messages originally dead-lettered from this queue.",
+    )
+    target_queue: str | None = Field(
+        default=None,
+        description="Override the destination queue. Defaults to the original source queue.",
+    )
+    dry_run: bool = Field(
+        default=False,
+        description="If true, count matches without re-enqueueing or acknowledging.",
+    )
+    max_messages: int = Field(
+        default=1000, description="Upper bound on messages processed in one call."
+    )
 
 
 @router.post("/dlq/replay")
@@ -121,10 +141,22 @@ def replay_dlq(
 
 
 class DlqPurgeRequest(BaseModel):
-    operation: str | None = None
-    first_death_queue: str | None = None
-    dry_run: bool = False
-    max_messages: int = 10000
+    """Filter for DLQ messages to permanently discard."""
+
+    operation: str | None = Field(
+        default=None, description="Restrict to messages whose payload `operation` matches."
+    )
+    first_death_queue: str | None = Field(
+        default=None,
+        description="Restrict to messages originally dead-lettered from this queue.",
+    )
+    dry_run: bool = Field(
+        default=False,
+        description="If true, count matches without removing anything from the DLQ.",
+    )
+    max_messages: int = Field(
+        default=10000, description="Upper bound on messages processed in one call."
+    )
 
 
 @router.post("/dlq/purge")

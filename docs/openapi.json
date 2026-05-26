@@ -485,9 +485,11 @@
         "type": "object"
       },
       "DlqPurgeRequest": {
+        "description": "Filter for DLQ messages to permanently discard.",
         "properties": {
           "dry_run": {
             "default": false,
+            "description": "If true, count matches without removing anything from the DLQ.",
             "title": "Dry Run",
             "type": "boolean"
           },
@@ -500,10 +502,12 @@
                 "type": "null"
               }
             ],
+            "description": "Restrict to messages originally dead-lettered from this queue.",
             "title": "First Death Queue"
           },
           "max_messages": {
             "default": 10000,
+            "description": "Upper bound on messages processed in one call.",
             "title": "Max Messages",
             "type": "integer"
           },
@@ -516,6 +520,7 @@
                 "type": "null"
               }
             ],
+            "description": "Restrict to messages whose payload `operation` matches.",
             "title": "Operation"
           }
         },
@@ -523,9 +528,11 @@
         "type": "object"
       },
       "DlqReplayRequest": {
+        "description": "Filter for DLQ messages to re-enqueue back onto their source queue.",
         "properties": {
           "dry_run": {
             "default": false,
+            "description": "If true, count matches without re-enqueueing or acknowledging.",
             "title": "Dry Run",
             "type": "boolean"
           },
@@ -538,10 +545,12 @@
                 "type": "null"
               }
             ],
+            "description": "Restrict to messages originally dead-lettered from this queue.",
             "title": "First Death Queue"
           },
           "max_messages": {
             "default": 1000,
+            "description": "Upper bound on messages processed in one call.",
             "title": "Max Messages",
             "type": "integer"
           },
@@ -554,6 +563,7 @@
                 "type": "null"
               }
             ],
+            "description": "Restrict to messages whose payload `operation` matches.",
             "title": "Operation"
           },
           "target_queue": {
@@ -565,6 +575,7 @@
                 "type": "null"
               }
             ],
+            "description": "Override the destination queue. Defaults to the original source queue.",
             "title": "Target Queue"
           }
         },
@@ -2218,11 +2229,13 @@
         "operationId": "get_dlq_summary_v1_admin_dlq_summary_get",
         "parameters": [
           {
+            "description": "Upper bound on DLQ messages peeked for the summary; capped at 5000.",
             "in": "query",
             "name": "max_peek",
             "required": false,
             "schema": {
               "default": 500,
+              "description": "Upper bound on DLQ messages peeked for the summary; capped at 5000.",
               "maximum": 5000,
               "minimum": 1,
               "title": "Max Peek",
