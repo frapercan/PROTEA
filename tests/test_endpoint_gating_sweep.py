@@ -116,8 +116,15 @@ _PUBLIC_POST_PATHS = {
 
 _ADMIN_ONLY_PATHS = {
     "/admin/reset-db",
+    "/admin/dlq/replay",
+    "/admin/dlq/purge",
     "/auth/api-keys",
     "/auth/api-keys/{key_id}",
+    "/auth/admin/revoke-sessions/{user_id}",
+    # Promoted from operator on 2026-05-26: destructive table mutations.
+    # See tests/test_admin_gating_sweep.py for the matching per-method sweep.
+    "/maintenance/vacuum-sequences",
+    "/maintenance/vacuum-embeddings",
 }
 
 # Paths that require at least operator (pipeline dispatch, mutations).
@@ -134,8 +141,6 @@ _OPERATOR_PATHS = {
     "/jobs/{job_id}",
     "/jobs/{job_id}/cancel",
     "/jobs/{job_id}/comments",
-    "/maintenance/vacuum-sequences",
-    "/maintenance/vacuum-embeddings",
     "/reranker-models/import",
     "/reranker-models/import-by-reference",
     "/scoring/configs",
@@ -286,7 +291,6 @@ class TestOperatorFloorRoutes:
             ("POST", "/embeddings/predict"),
             ("POST", "/experiment-runs"),
             ("POST", "/jobs"),
-            ("POST", "/maintenance/vacuum-sequences"),
             ("POST", "/scoring/configs"),
             ("POST", "/scoring/configs/presets"),
         ],
@@ -307,7 +311,6 @@ class TestOperatorFloorRoutes:
             ("POST", "/embeddings/predict"),
             ("POST", "/experiment-runs"),
             ("POST", "/jobs"),
-            ("POST", "/maintenance/vacuum-sequences"),
             ("POST", "/scoring/configs"),
             ("POST", "/scoring/configs/presets"),
         ],
