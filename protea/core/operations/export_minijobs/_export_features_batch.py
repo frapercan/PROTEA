@@ -42,6 +42,7 @@ from protea.infrastructure.storage import get_artifact_store
 _LOG = logging.getLogger(__name__)
 
 _WRITE_QUEUE = "protea.training.write"
+_EMPTY_SHARD_URI = "empty://no-knn-output"
 
 
 class ExportFeaturesBatchPayload(ProteaPayload, frozen=True):
@@ -120,15 +121,18 @@ class ExportFeaturesBatchOperation:
             "info",
         )
 
-        settings = _load_project_settings()
-        store = get_artifact_store(settings)
-        temp_key = f"temp/coordinator/{p.coordinator_job_id}/features/{p.pair_id}.parquet"
-
+        # Fast-path: null KNN URI means the upstream batch produced no output;
+        # we emit an empty-shard sentinel without touching the artifact store
+        # so this path is reachable in smoke tests that don't run MinIO.
         if p.temp_knn_uri is None:
             _LOG.warning(
                 "export_features_batch: no temp_knn_uri for pair %s; empty shard", p.pair_id
             )
-            return self._success(p, _write_empty_parquet(store, temp_key), 0, emit)
+            return self._success(p, _EMPTY_SHARD_URI, 0, emit)
+
+        settings = _load_project_settings()
+        store = get_artifact_store(settings)
+        temp_key = f"temp/coordinator/{p.coordinator_job_id}/features/{p.pair_id}.parquet"
 
         neighbors_by_aspect, query_accs_from_npz = _load_knn_npz(store, p.temp_knn_uri)
         if not query_accs_from_npz:
