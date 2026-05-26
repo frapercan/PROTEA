@@ -89,6 +89,7 @@ def test_dedup_key_allows_same_key_after_terminal(postgres_url: str):
         session.commit()
 
     # SUCCEEDED is not an active status, so the same dedup_key is allowed.
+    job2_id: int | None = None
     with Session(engine, future=True) as session:
         job2 = Job(
             operation="export_research_dataset",
@@ -99,9 +100,10 @@ def test_dedup_key_allows_same_key_after_terminal(postgres_url: str):
         )
         session.add(job2)
         session.commit()  # must not raise
+        job2_id = job2.id  # capture id before the session closes (expire_on_commit)
 
     with Session(engine, future=True) as session:
-        j2 = session.get(Job, job2.id)
+        j2 = session.get(Job, job2_id)
         assert j2 is not None
         assert j2.dedup_key == key
 

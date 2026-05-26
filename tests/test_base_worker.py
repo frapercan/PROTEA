@@ -681,7 +681,7 @@ class TestBaseWorkerTwoSessionPattern:
         # Confirm the UPDATE targets QUEUED → RUNNING and sets leased_until
         compiled = stmt.compile(compile_kwargs={"literal_binds": False})
         params = compiled.params
-        assert params.get("status_1") == JobStatus.RUNNING or "running" in str(params)
+        assert params.get("status_1") == JobStatus.RUNNING or "RUNNING" in str(params).upper()
         assert "leased_until" in compiled.params
         # Claim session must commit
         claim_session.commit.assert_called()
