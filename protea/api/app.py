@@ -320,11 +320,22 @@ def _mount_sibling_docs(app: FastAPI, docs_build_root: Path) -> None:
 
 
 def _mount_static_assets(app: FastAPI, project_root: Path) -> None:
-    sphinx_build = project_root / "docs" / "build" / "html"
-    if sphinx_build.exists():
+    # Canonical Sphinx output is `docs/build/html/` (produced by
+    # `make html` / `sphinx-build -M html`). Fall back to
+    # `docs/build/` when the canonical layout is absent and the
+    # flat layout (produced by `sphinx-build -b html src dst`)
+    # is present instead, so a deploy with either build flavour
+    # serves the docs.
+    docs_build_root = project_root / "docs" / "build"
+    canonical = docs_build_root / "html"
+    sphinx_build: Path | None = None
+    if (canonical / "index.html").exists():
+        sphinx_build = canonical
+    elif (docs_build_root / "index.html").exists():
+        sphinx_build = docs_build_root
+    if sphinx_build is not None:
         app.mount("/sphinx", StaticFiles(directory=sphinx_build, html=True), name="sphinx")
 
-    docs_build_root = project_root / "docs" / "build"
     if docs_build_root.exists():
         _mount_sibling_docs(app, docs_build_root)
 
