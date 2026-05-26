@@ -18,11 +18,19 @@ function classifyNode(
   predictedGoIds?: Set<string>,
 ): "both" | "predicted_only" | "known_only" | "ancestor" {
   if (!isQuery) return "ancestor";
-  const isKnown    = knownGoIds?.has(goId)    ?? false;
-  const isPredicted = predictedGoIds?.has(goId) ?? true;
+  // When the caller provides neither set, every query node represents a
+  // real annotation the protein already carries (the protein-detail view).
+  // Treat that case as "known_only". The previous default of true on
+  // isPredicted incorrectly painted known annotations as predictions.
+  const hasKnownSet = knownGoIds !== undefined;
+  const hasPredictedSet = predictedGoIds !== undefined;
+  if (!hasKnownSet && !hasPredictedSet) return "known_only";
+  const isKnown = hasKnownSet ? knownGoIds.has(goId) : false;
+  const isPredicted = hasPredictedSet ? predictedGoIds.has(goId) : false;
   if (isKnown && isPredicted) return "both";
   if (isKnown)                return "known_only";
-  return "predicted_only";
+  if (isPredicted)            return "predicted_only";
+  return "ancestor";
 }
 
 // ── constants ────────────────────────────────────────────────────────────────
