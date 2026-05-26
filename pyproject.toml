@@ -133,6 +133,15 @@ pytest-timeout = ">=2.3,<3"
 protea-reranker-lab = {git = "https://github.com/frapercan/protea-reranker-lab.git", branch = "main"}
 
 
+[tool.poetry.group.profiling]
+optional = true
+[tool.poetry.group.profiling.dependencies]
+# CPU + memory profiling; run via `scalene -- python -m <driver>`.
+scalene = ">=1.5.47"
+# Flamegraph capture on live processes; run via `py-spy record --pid <PID>`.
+py-spy = ">=0.3.14"
+
+
 [tool.poetry.group.docs]
 optional = true
 [tool.poetry.group.docs.dependencies]
