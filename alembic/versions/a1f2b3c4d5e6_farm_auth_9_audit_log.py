@@ -26,11 +26,13 @@ Schema
 
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+
 from alembic import op
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 
 # revision identifiers, used by Alembic.
 revision: str = "a1f2b3c4d5e6"
