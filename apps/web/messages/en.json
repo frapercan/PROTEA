@@ -1208,6 +1208,18 @@
       "refresh": "Refresh",
       "vacuum": "Vacuum",
       "cleaning": "Cleaning…"
+    },
+    "forbidden": {
+      "title": "Admin only",
+      "body": "Maintenance vacuums are reserved for accounts with the admin role.",
+      "roleLabel": "Your current role",
+      "backHome": "Back to home"
+    }
+  },
+  "adminUsers": {
+    "backendMissing": {
+      "title": "User management is coming soon",
+      "body": "User management features are coming soon. Check back later."
     }
   },
   "components": {
@@ -1319,6 +1331,11 @@
     "subtitle": "Tasks from the agent-farm orchestrator",
     "refresh": "Refresh",
     "emptyState": "No tasks match the current filters.",
+    "authGate": {
+      "title": "Sign in to view the farm",
+      "body": "Agent-farm tasks, plans and cost data are reserved for signed-in users. Sign in and you will be sent back here automatically.",
+      "signIn": "Sign in"
+    },
     "subnav": {
       "ariaLabel": "Agent farm section navigation",
       "tasks": "Tasks",
@@ -1372,6 +1389,8 @@
       "worktree": "Worktree",
       "ownerRepo": "Owner / repo",
       "spawnArgs": "Spawn args",
+      "spawnArgsAdmin": "Spawn args (admin only, raw payload)",
+      "spawnArgsRedacted": "Spawn args are hidden. Sign in with an admin account to view the raw payload.",
       "diffRange": "Commit range",
       "shaBefore": "Before",
       "shaAfter": "After",

@@ -1209,6 +1209,18 @@
       "refresh": "Aktualisieren",
       "vacuum": "Vacuum",
       "cleaning": "Wird bereinigt…"
+    },
+    "forbidden": {
+      "title": "Nur Admins",
+      "body": "Wartungs-Vacuums sind Konten mit der Rolle Admin vorbehalten.",
+      "roleLabel": "Deine aktuelle Rolle",
+      "backHome": "Zurück zur Startseite"
+    }
+  },
+  "adminUsers": {
+    "backendMissing": {
+      "title": "Nutzerverwaltung kommt bald",
+      "body": "Funktionen zur Nutzerverwaltung kommen bald. Schau später wieder vorbei."
     }
   },
   "components": {
@@ -1320,6 +1332,11 @@
     "subtitle": "Aufgaben des agent-farm Orchestrators",
     "refresh": "Aktualisieren",
     "emptyState": "Keine Aufgaben entsprechen den aktuellen Filtern.",
+    "authGate": {
+      "title": "Zum Ansehen der Farm anmelden",
+      "body": "Farm-Aufgaben, Pläne und Kostendaten sind angemeldeten Nutzern vorbehalten. Nach der Anmeldung kehrst du automatisch hierher zurück.",
+      "signIn": "Anmelden"
+    },
     "subnav": {
       "ariaLabel": "Agent-Farm-Bereichsnavigation",
       "tasks": "Aufgaben",
@@ -1373,6 +1390,8 @@
       "worktree": "Worktree",
       "ownerRepo": "Besitzer / Repository",
       "spawnArgs": "Spawn-Argumente",
+      "spawnArgsAdmin": "Spawn-Argumente (nur Admin, Rohdaten)",
+      "spawnArgsRedacted": "Spawn-Argumente sind verborgen. Melde dich mit einem Admin-Konto an, um die Rohdaten zu sehen.",
       "diffRange": "Commit-Bereich",
       "shaBefore": "Vorher",
       "shaAfter": "Nachher",
