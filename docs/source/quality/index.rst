@@ -26,7 +26,7 @@ store.
    mutation-testing
 
 Testing layers
-==============
+--------------
 
 Unit tests
 ~~~~~~~~~~
@@ -139,7 +139,7 @@ classifier recipe (3 independent seeds) produced ``NK+LK cafaeval 0.7291 +/- 0.0
 confirming the benchmark is not a one-seed artefact.
 
 Code-smell budget
-=================
+-----------------
 
 ``scripts/check_smells.py`` enforces four structural thresholds:
 
@@ -161,7 +161,7 @@ is "smell budget OK". The same script is distributed to all eight stack
 repos for cross-repo consistency.
 
 Lint and static analysis
-========================
+------------------------
 
 Python
 ~~~~~~
@@ -208,7 +208,7 @@ matches code", preventing the API spec from silently diverging from the
 implementation.
 
 Pre-commit hook bundle
-======================
+----------------------
 
 The project ships a ``.pre-commit-config.yaml`` that installs the
 following hooks:
@@ -242,7 +242,7 @@ on a WIP branch instead of stash (eight violations tracked across three
 sessions before the CI gate was added).
 
 CI gates (GitHub Actions)
-==========================
+--------------------------
 
 Required checks on ``develop``-targeted PRs:
 
@@ -282,7 +282,7 @@ Required checks on ``develop``-targeted PRs:
        non-draft PRs targeting develop
 
 Refactoring patterns applied
-=============================
+-----------------------------
 
 The following slices applied named refactoring patterns to reduce
 complexity and improve testability. Each is traceable to an ADR or plan
@@ -337,7 +337,7 @@ slice.
     annotation source, embedding backend, or runner implementation.
 
 Reproducibility guardrails
-===========================
+---------------------------
 
 SHA fingerprinting
 ~~~~~~~~~~~~~~~~~~
@@ -373,7 +373,7 @@ or writes ORM models, and is part of the disaster recovery runbook
 (:doc:`/runbooks/disaster-recovery`).
 
 Operational guardrails
-=======================
+-----------------------
 
 Pre-warm and serve-stale-on-error
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -405,7 +405,7 @@ line of defence against jobs whose workers died without sending a final
 state transition. Runbook: :doc:`/runbooks/stale-job-reaper`.
 
 Database and ORM patterns
-==========================
+--------------------------
 
 **3NF schema**
     The ORM models (``protea/infrastructure/orm/models/``) are in third
@@ -440,7 +440,7 @@ Database and ORM patterns
     :doc:`/adr/002-two-session-worker-pattern`.
 
 Architectural patterns
-=======================
+-----------------------
 
 **Repository pattern**
     ORM model classes in ``protea/infrastructure/orm/models/`` and
@@ -475,7 +475,7 @@ Architectural patterns
     ``importlib.metadata``.
 
 Security
-========
+--------
 
 **JWT + API key auth**
     ``protea/api/bearer.py`` implements JWT bearer authentication.
@@ -500,7 +500,7 @@ Security
     This satisfies bandit's ``B324`` rule without a ``# noqa`` suppression.
 
 Coverage gates
-==============
+--------------
 
 **pytest-cov** is wired into the unit-test workflow
 (``.github/workflows/test.yml``). Coverage is computed against
@@ -522,7 +522,7 @@ quality bar; the workflow runs on every PR that touches
 ``protea/core/`` modules but is informational, never blocking.
 
 Type checking with mypy
-========================
+------------------------
 
 The ``lint.yml`` workflow runs ``mypy --config-file pyproject.toml``
 against the full ``protea/`` package. Strict-mode is enabled module-
@@ -538,7 +538,7 @@ module. The escape hatch is logged in ``pyproject.toml`` rather than
 sprinkled as ``# type: ignore`` comments in source.
 
 Schema migration testing
-=========================
+-------------------------
 
 Alembic migrations under ``alembic/versions/`` are reversible by
 contract. Every migration must define both ``upgrade()`` and
@@ -554,7 +554,7 @@ The unique partial index added for the ``job.dedup_key`` column
 migration that ships a round-trip test in the same PR.
 
 Branch protection and auto-merge policy
-========================================
+----------------------------------------
 
 The ``develop`` branch is protected on GitHub with the following
 configuration:
@@ -587,7 +587,7 @@ Two notes about the auto-merge policy:
   merged by an operator.
 
 Observability and SLO
-======================
+----------------------
 
 Three observability surfaces are instrumented:
 
@@ -622,7 +622,7 @@ Three observability surfaces are instrumented:
     export.
 
 Definition of done and PR checklist
-====================================
+------------------------------------
 
 A PR is considered ready to merge when:
 
@@ -649,7 +649,7 @@ A PR is considered ready to merge when:
    runbook if operational.
 
 Documentation hygiene
-======================
+----------------------
 
 **ADR registry**
     ``docs/source/adr/`` contains 38+ Architecture Decision Records
@@ -681,7 +681,7 @@ Documentation hygiene
     resolve; orphaned RST files are detected.
 
 How to read this page
-======================
+----------------------
 
 **Link conventions used above:**
 
