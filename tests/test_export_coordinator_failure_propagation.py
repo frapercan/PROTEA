@@ -86,15 +86,15 @@ class TestPreflightFastFail:
     def test_unknown_search_backend_raises_before_dispatch(self) -> None:
         op = ExportCoordinatorOperation()
         events, emit = _capturing_emit()
-        payload = _make_payload(search_backend="torch")
+        payload = _make_payload(search_backend="annoy")
 
         with pytest.raises(ValueError) as exc_info:
             op.execute(MagicMock(), payload, emit=emit)
 
         msg = str(exc_info.value)
         assert "first child failed with non-retryable error" in msg
-        assert "search_backend='torch'" in msg
-        assert "numpy" in msg and "faiss" in msg
+        assert "search_backend='annoy'" in msg
+        assert "numpy" in msg and "faiss" in msg and "torch" in msg
 
         # No dispatching event must have been emitted before the failure.
         emitted_names = [e["event"] for e in events]
@@ -103,10 +103,10 @@ class TestPreflightFastFail:
         assert "export_coordinator.failed" in emitted_names
         failed = next(e for e in events if e["event"] == "export_coordinator.failed")
         assert failed["level"] == "error"
-        assert failed["fields"]["search_backend"] == "torch"
-        assert set(failed["fields"]["valid_search_backends"]) == {"numpy", "faiss"}
+        assert failed["fields"]["search_backend"] == "annoy"
+        assert set(failed["fields"]["valid_search_backends"]) == {"numpy", "faiss", "torch"}
 
-    @pytest.mark.parametrize("bad_backend", ["torch", "annoy", "", "FAISS", "Numpy"])
+    @pytest.mark.parametrize("bad_backend", ["annoy", "", "FAISS", "Numpy"])
     def test_only_numpy_and_faiss_are_accepted(self, bad_backend: str) -> None:
         op = ExportCoordinatorOperation()
         _, emit = _capturing_emit()
@@ -114,7 +114,7 @@ class TestPreflightFastFail:
         with pytest.raises(ValueError):
             op.execute(MagicMock(), payload, emit=emit)
 
-    @pytest.mark.parametrize("good_backend", ["numpy", "faiss"])
+    @pytest.mark.parametrize("good_backend", ["numpy", "faiss", "torch"])
     def test_valid_backends_dispatch_normally(self, good_backend: str) -> None:
         op = ExportCoordinatorOperation()
         events, emit = _capturing_emit()

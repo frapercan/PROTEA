@@ -40,6 +40,7 @@ from protea.api.routers.datasets_detail import (
 )
 from protea.core.schema_sha_v2 import maybe_v2
 from protea.core.utils import utcnow
+from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.embedding.dataset import Dataset
 from protea.infrastructure.orm.models.job import Job, JobEvent
 from protea.infrastructure.queue.publisher import publish_job
@@ -199,6 +200,24 @@ def _dataset_to_dict(d: Dataset) -> dict[str, Any]:
     }
 
 
+def _resolve_annotation_set_id(session: Session, source: str, train_cutoff: str) -> str:
+    """Return the AnnotationSet UUID for (source, train_cutoff) or raise 422."""
+    annot = (
+        session.query(AnnotationSet.id)
+        .filter(AnnotationSet.source == source, AnnotationSet.source_version == train_cutoff)
+        .first()
+    )
+    if annot is None:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"No {source!r} annotation_set found for train cutoff "
+                f"version {train_cutoff!r}; cannot build the coordinator payload."
+            ),
+        )
+    return str(annot[0])
+
+
 @router.post(
     "",
     summary="Enqueue a dataset export job",
@@ -228,17 +247,16 @@ def create_dataset(
             )
 
         queue_name = "protea.training"
-        payload = body.model_dump()
-        # When the minijob pipeline is enabled, route through the
-        # coordinator so the cell is partitioned into per-pair
-        # KNN/feature minijobs across protea.training.knn-batch and
-        # protea.training.features. Otherwise stay on the monolithic
-        # operation for back-compat.
         operation_name = (
             "export_coordinator"
             if os.environ.get("PROTEA_EXPORT_MINIJOBS", "0") == "1"
             else "export_research_dataset"
         )
+        payload = body.model_dump()
+        if operation_name == "export_coordinator":
+            payload["annotation_set_id"] = _resolve_annotation_set_id(
+                session, body.annotation_source, str(max(body.train_versions))
+            )
         job = Job(
             operation=operation_name,
             queue_name=queue_name,
