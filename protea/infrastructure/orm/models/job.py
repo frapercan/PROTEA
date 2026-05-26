@@ -22,6 +22,15 @@ class JobStatus(enum.StrEnum):
     CANCELLED = "cancelled"
 
 
+#: Statuses that are considered "active" for deduplication purposes.
+#: A new job with a matching dedup_key is rejected (409) only when an
+#: existing job is in one of these states.
+ACTIVE_STATUSES: tuple[str, ...] = (
+    JobStatus.QUEUED,
+    JobStatus.RUNNING,
+)
+
+
 class Job(Base):
     __tablename__ = "job"
 
@@ -67,6 +76,21 @@ class Job(Base):
         ARRAY(Text), nullable=False, default=list
     )
 
+    # F-OPS-JOBS.1: deduplication key.
+    # SHA-256[:16] of canonical(operation, payload). NULL on legacy rows.
+    # Partial unique index (below) enforces uniqueness only among active jobs
+    # (queued or running), so the same op+payload can be re-submitted once the
+    # previous instance reaches a terminal state.
+    dedup_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # F-OPS-JOBS.1: lease expiry timestamp.
+    # Set by the worker on claim and renewed every
+    # PROTEA_JOB_HEARTBEAT_INTERVAL_SECONDS. The stale-job reaper uses this
+    # instead of started_at so a live heartbeating job is never killed.
+    leased_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     events: Mapped[list[JobEvent]] = relationship(
         "JobEvent",
         back_populates="job",
@@ -78,6 +102,17 @@ class Job(Base):
         Index("ix_job_operation_created_at", "operation", "created_at"),
         Index("ix_job_status_created_at", "status", "created_at"),
         Index("ix_job_created_at", "created_at"),
+        # Partial unique index: dedup_key must be unique across active jobs.
+        # NULLS are excluded by the WHERE clause so legacy rows (dedup_key IS
+        # NULL) never block new submissions.
+        Index(
+            "uq_job_dedup_key_active",
+            "dedup_key",
+            unique=True,
+            postgresql_where=(
+                "status IN ('queued', 'running') AND dedup_key IS NOT NULL"
+            ),
+        ),
     )
 
 
