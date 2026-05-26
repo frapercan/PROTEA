@@ -15,6 +15,7 @@ from protea.config.tuning import get_tuning
 from protea.core.contracts.operation import EmitFn, RetryLaterError, make_safe_emit
 from protea.core.contracts.registry import OperationRegistry
 from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
+from protea.infrastructure.queue._failure_aggregation import maybe_aggregate_parent_failure
 from protea.infrastructure.queue.publisher import publish_operation
 from protea.infrastructure.telemetry import extract_trace_context, get_tracer
 from protea.workers.base_worker import BaseWorker
@@ -42,10 +43,9 @@ def _consumer_span(
 _DLX_NAME = "protea.dlx"
 _DLQ_NAME = "protea.dead-letter"
 
-# CUDA OOM retry policy for OperationConsumer.
-# Configured via QueueTuning (oom_max_retries / oom_base_delay /
-# oom_max_delay). Defaults: 5 retries, 5s base, 300s cap, backoff
-# 5/10/20/40/80s. ~155s wait budget before dead-letter.
+# CUDA OOM retry policy for OperationConsumer. Configured via QueueTuning
+# (oom_max_retries / oom_base_delay / oom_max_delay). Defaults: 5 retries,
+# 5s base, 300s cap, backoff 5/10/20/40/80s, ~155s budget before DLQ.
 _OOM_RETRY_HEADER = "x-oom-retry"
 
 
@@ -741,24 +741,23 @@ class OperationConsumer:
         decoded: _DecodedMessage,
         exc: BaseException,
     ) -> None:
-        """Non-OOM failure: emit ``child.failed`` and nack with the configured
-        requeue flag."""
-        operation_name = decoded.operation_name
-        logger.error("Operation failed. operation=%s error=%s", operation_name, exc)
+        """Non-OOM failure: emit ``child.failed``, aggregate, nack."""
+        op_name = decoded.operation_name
+        logger.error("Operation failed. operation=%s error=%s", op_name, exc)
         self._emit_parent_event(
             decoded.parent_job_id,
             "child.failed",
             str(exc)[:2000],
-            {
-                "operation": operation_name,
-                "error_code": exc.__class__.__name__,
-            },
+            {"operation": op_name, "error_code": exc.__class__.__name__},
             level="error",
         )
-        channel.basic_nack(
-            delivery_tag=method.delivery_tag,
-            requeue=self._requeue_on_failure,
+        # F-OPS-COORD-FAIL-PROPAGATE: transitions a coordinator parent to
+        # FAILED once every dispatched child has failed.
+        maybe_aggregate_parent_failure(
+            decoded.parent_job_id, exc,
+            session_factory=self._factory, make_raw_emit=self._make_raw_emit,
         )
+        channel.basic_nack(delivery_tag=method.delivery_tag, requeue=self._requeue_on_failure)
 
     def _emit_parent_event(
         self,
@@ -797,3 +796,5 @@ class OperationConsumer:
                 pass
         finally:
             session.close()
+
+
