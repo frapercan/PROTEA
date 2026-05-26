@@ -194,6 +194,63 @@ services:
         limits:
           memory: 1G
 
+  # Export minijob workers (F-EXPORT-MINIJOB): activated via
+  # `docker compose --profile export-minijobs up`.
+  # Requires PROTEA_EXPORT_MINIJOBS=1 in the worker environment.
+  worker-export-knn-batch:
+    build: .
+    profiles: [export-minijobs]
+    environment:
+      PROTEA_DB_URL: postgresql+psycopg://protea:protea@postgres/protea
+      PROTEA_AMQP_URL: amqp://guest:guest@rabbitmq/
+      PROTEA_EXPORT_MINIJOBS: "1"
+    command: python scripts/worker.py --queue protea.training.knn-batch
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
+  worker-export-features:
+    build: .
+    profiles: [export-minijobs]
+    environment:
+      PROTEA_DB_URL: postgresql+psycopg://protea:protea@postgres/protea
+      PROTEA_AMQP_URL: amqp://guest:guest@rabbitmq/
+      PROTEA_EXPORT_MINIJOBS: "1"
+    command: python scripts/worker.py --queue protea.training.features
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  worker-export-write:
+    build: .
+    profiles: [export-minijobs]
+    environment:
+      PROTEA_DB_URL: postgresql+psycopg://protea:protea@postgres/protea
+      PROTEA_AMQP_URL: amqp://guest:guest@rabbitmq/
+      PROTEA_EXPORT_MINIJOBS: "1"
+    command: python scripts/worker.py --queue protea.training.write
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
   worker-reaper:
     build: .
     environment:

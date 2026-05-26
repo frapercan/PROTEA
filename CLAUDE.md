@@ -76,7 +76,10 @@ logs/frontend.log               ← Next.js dev server
 - `protea.predictions.batch` → predict_go_terms_batch (KNN + GO transfer; OperationConsumer, no DB Job row)
 - `protea.predictions.write` → store_predictions (bulk GOPrediction insert; OperationConsumer)
 - `protea.evaluations` → run_cafa_evaluation (Fmax / AuPRC / coverage; isolated so long evals don't block the general jobs queue)
-- `protea.training` → export_research_dataset (serialized; GPU/RAM-intensive KNN + feature generation + artifact-store upload). Re-ranker *training* itself no longer runs in PROTEA: see "Re-ranker training decoupling" below.
+- `protea.training` → export_research_dataset (serialized; GPU/RAM-intensive KNN + feature generation + artifact-store upload) **or** export_coordinator (when `PROTEA_EXPORT_MINIJOBS=1`). Re-ranker *training* itself no longer runs in PROTEA: see "Re-ranker training decoupling" below.
+- `protea.training.knn-batch` → export_knn_batch (OperationConsumer, no DB Job row; env-gated `PROTEA_EXPORT_MINIJOBS=1`)
+- `protea.training.features` → export_features_batch (OperationConsumer; env-gated)
+- `protea.training.write` → export_write (OperationConsumer; env-gated)
 
 The frontend (`apps/web/`) is a Next.js 16 app with Tailwind v4. API URL is configured in `apps/web/.env.local` (`NEXT_PUBLIC_API_URL=http://127.0.0.1:8000`).
 
