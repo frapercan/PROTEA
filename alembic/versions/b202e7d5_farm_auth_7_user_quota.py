@@ -14,8 +14,9 @@ export_research_dataset, run_cafa_evaluation) on a given UTC calendar day.
 from __future__ import annotations
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects import postgresql
+
+from alembic import op
 
 revision: str = "b202e7d5"
 down_revision: str | None = "b201e6d4"
