@@ -4853,6 +4853,149 @@
         ]
       }
     },
+    "/v1/datasets/{dataset_id}/download": {
+      "get": {
+        "description": "Mint a presigned download URL (MinIO) or stream the file (local).\n\nFor ``storage_backend=minio`` the endpoint 302-redirects to a\n15-minute presigned GET URL. For ``storage_backend=local`` the\nartifact bytes are streamed inline. See :mod:`datasets_detail`.",
+        "operationId": "download_dataset_artifact_v1_datasets__dataset_id__download_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "One of: train, eval, manifest",
+            "in": "query",
+            "name": "artifact",
+            "required": true,
+            "schema": {
+              "description": "One of: train, eval, manifest",
+              "title": "Artifact",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download a dataset artifact (presigned URL or streamed)",
+        "tags": [
+          "datasets"
+        ]
+      }
+    },
+    "/v1/datasets/{dataset_id}/stats": {
+      "get": {
+        "description": "Return per-aspect protein / GO-term / annotation counts for a dataset.\n\nReads from ``dataset.meta['aspect_stats']`` when present (populated\nby backfill or a previous call). On a cache miss the counts are\ncomputed live and written back. See :mod:`datasets_detail` for the\nimplementation.",
+        "operationId": "get_dataset_stats_v1_datasets__dataset_id__stats_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Dataset Stats V1 Datasets  Dataset Id  Stats Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Aspect-level statistics for a dataset",
+        "tags": [
+          "datasets"
+        ]
+      }
+    },
     "/v1/datasets/{id_or_name}": {
       "get": {
         "description": "Resolve a dataset by UUID or by the ``name`` slug.\n\nTries the UUID path first; on ``ValueError`` (non-UUID input), falls\nback to the ``name`` column. Returns ``404`` if neither resolves.\nThe lab uses the name path so dump callers can refer to ``bench-v1-K5``\nwithout juggling UUIDs.",
