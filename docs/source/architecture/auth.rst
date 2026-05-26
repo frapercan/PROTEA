@@ -7,6 +7,71 @@ clients (API keys + JWT exchange), optional SMTP magic-link login, per-user
 quota enforcement, session revocation, and a structured audit log. The design
 is documented in :doc:`/adr/D37-feat-auth-users-roles-multi-instance`.
 
+.. rubric:: Public-viewer policy
+
+All ``GET`` endpoints that present read-only data are accessible without
+authentication (PR #562). The role hierarchy treats ``viewer`` as the
+default-deny baseline; unauthenticated requests carry effective role
+``viewer`` and may reach any route that does not carry a
+``require_role("operator")`` or ``require_role("admin")`` dependency.
+
+The canonical source of truth for which endpoints are gated vs anonymous
+is ``tests/test_endpoint_gating_sweep.py``. The sweep instantiates the
+real FastAPI app with mocked infrastructure and asserts:
+
+* Unauthenticated requests on every POST/PATCH/DELETE return 401 or 403
+  (never 200/201/204).
+* A ``viewer``-role JWT is rejected (403) on operator/admin-floor routes.
+* An ``operator``-role JWT is rejected (403) on admin-only routes.
+* An ``admin``-role JWT reaches the handler (response may be 4xx from the
+  handler's own domain logic, but not 401/403).
+
+.. list-table:: Gated vs anonymous surfaces
+   :header-rows: 1
+   :widths: 40 20 40
+
+   * - Endpoint surface
+     - Auth required
+     - Notes
+   * - ``GET /v1/proteins``, ``/v1/benchmark``, ``/v1/showcase``
+     - No
+     - Read-only dashboards; anonymous baseline for all visitors.
+   * - ``GET /v1/annotations/evaluation-sets``, ``/v1/datasets``, ``/v1/reranker-models``
+     - No
+     - Research results; public by policy.
+   * - ``GET /v1/scoring/configs``, ``/v1/stack``, ``/v1/docs``
+     - No
+     - Reference and stack-health surfaces; no credentials needed.
+   * - ``POST /v1/annotate?save_history=false``
+     - No (IP-hash quota)
+     - Anonymous quick-annotate; 10 sequences/day per IP hash.
+   * - ``POST /v1/annotate?save_history=true``
+     - Yes (``researcher``)
+     - Persistent annotation history requires an account.
+   * - ``POST /v1/datasets``, ``POST /v1/jobs`` (heavy ops)
+     - Yes (``operator``)
+     - Pipeline ops; API key or JWT with ``operator`` role.
+   * - ``POST /v1/admin/reset-db``, ``/v1/admin/maintenance/vacuum-sequences/run``
+     - Yes (``admin``)
+     - Destructive ops; ``admin`` role only. The full admin route set is
+       enumerated in ``tests/test_admin_gating_sweep.py``.
+   * - Swagger UI at ``/docs``
+     - No
+     - The Sidebar link uses ``publicBaseUrl()`` (``NEXT_PUBLIC_API_URL``)
+       to avoid SSR rendering the link as ``http://127.0.0.1:8000/docs``
+       on production builds.
+
+The frontend resolves the Swagger and API-chip hrefs via
+``publicBaseUrl()`` from ``apps/web/lib/api.ts``, which reads
+``NEXT_PUBLIC_API_URL`` and strips trailing slashes. Any SSR-rendered
+component that links to the API must use this helper rather than
+constructing the URL inline.
+
+When an anonymous ``GET`` unexpectedly returns 401 or 403, the
+``http()`` helper in ``api.ts`` silently returns an empty list and logs
+a warning rather than bubbling the auth error into the UI. This prevents
+a back-end mis-gate from breaking the anonymous landing page.
+
 .. rubric:: Auth surfaces at a glance
 
 Two independent credential flows coexist:
