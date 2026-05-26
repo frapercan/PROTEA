@@ -1208,6 +1208,18 @@
       "refresh": "刷新",
       "vacuum": "清理碎片",
       "cleaning": "清理中…"
+    },
+    "forbidden": {
+      "title": "仅限管理员",
+      "body": "维护清理操作仅限管理员角色账户。",
+      "roleLabel": "您当前的角色",
+      "backHome": "返回首页"
+    }
+  },
+  "adminUsers": {
+    "backendMissing": {
+      "title": "用户管理功能即将推出",
+      "body": "用户管理功能即将推出，请稍后再来。"
     }
   },
   "components": {
@@ -1319,6 +1331,11 @@
     "subtitle": "agent-farm 编排器中的任务",
     "refresh": "刷新",
     "emptyState": "没有任务符合当前筛选条件。",
+    "authGate": {
+      "title": "登录后查看农场",
+      "body": "农场任务、计划和成本数据仅限已登录用户。登录后将自动返回此处。",
+      "signIn": "登录"
+    },
     "subnav": {
       "ariaLabel": "智能体农场区段导航",
       "tasks": "任务",
@@ -1372,6 +1389,8 @@
       "worktree": "工作树",
       "ownerRepo": "所有者 / 仓库",
       "spawnArgs": "Spawn 参数",
+      "spawnArgsAdmin": "Spawn 参数（仅管理员，原始负载）",
+      "spawnArgsRedacted": "Spawn 参数已隐藏。请使用管理员账户登录以查看原始负载。",
       "diffRange": "提交范围",
       "shaBefore": "之前",
       "shaAfter": "之后",

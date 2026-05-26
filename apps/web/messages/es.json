@@ -1208,6 +1208,18 @@
       "refresh": "Actualizar",
       "vacuum": "Vacuum",
       "cleaning": "Limpiando…"
+    },
+    "forbidden": {
+      "title": "Sólo administradores",
+      "body": "Los vacuums de mantenimiento están reservados a cuentas con rol de administrador.",
+      "roleLabel": "Tu rol actual",
+      "backHome": "Volver al inicio"
+    }
+  },
+  "adminUsers": {
+    "backendMissing": {
+      "title": "La gestión de usuarios estará disponible pronto",
+      "body": "La gestión de usuarios estará disponible pronto. Vuelve más tarde."
     }
   },
   "components": {
@@ -1319,6 +1331,11 @@
     "subtitle": "Tareas del orquestador agent-farm",
     "refresh": "Actualizar",
     "emptyState": "Ninguna tarea coincide con los filtros actuales.",
+    "authGate": {
+      "title": "Inicia sesión para ver la granja",
+      "body": "Las tareas, planes y costes de la granja están reservados a usuarios autenticados. Si inicias sesión, volverás aquí automáticamente.",
+      "signIn": "Iniciar sesión"
+    },
     "subnav": {
       "ariaLabel": "Navegación de la sección de la granja de agentes",
       "tasks": "Tareas",
@@ -1372,6 +1389,8 @@
       "worktree": "Worktree",
       "ownerRepo": "Propietario / repositorio",
       "spawnArgs": "Argumentos de spawn",
+      "spawnArgsAdmin": "Argumentos de spawn (sólo admin, carga útil cruda)",
+      "spawnArgsRedacted": "Los argumentos de spawn están ocultos. Inicia sesión como administrador para ver la carga útil.",
       "diffRange": "Rango de commits",
       "shaBefore": "Antes",
       "shaAfter": "Después",

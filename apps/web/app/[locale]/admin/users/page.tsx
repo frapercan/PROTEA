@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useLocale } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AuthError,
@@ -168,8 +168,10 @@ export default function AdminUsersPage() {
       await load();
     } catch (e) {
       if (e instanceof AuthError && (e.status === 404 || e.status === 501)) {
+        // UX-ADMIN-AUDIT P0-USR-1: surface a neutral "not yet
+        // available" instead of the internal slice identifier.
         setActionError(
-          `The "${label}" endpoint is not implemented on this backend yet (HTTP ${e.status}). When the corresponding FARM-AUTH router merges this control will start working.`,
+          `The "${label}" action is not yet available on this server.`,
         );
       } else if (e instanceof AuthError) {
         setActionError(`${label} failed: HTTP ${e.status} ${e.detail}`);
@@ -220,7 +222,7 @@ export default function AdminUsersPage() {
         </header>
 
         {state.kind === "missing" && (
-          <BackendMissingPanel status={state.status} />
+          <BackendMissingPanel />
         )}
 
         {state.kind === "error" && (
@@ -479,7 +481,13 @@ function RoleSelect({
   );
 }
 
-function BackendMissingPanel({ status }: { status: number }) {
+function BackendMissingPanel() {
+  // UX-ADMIN-AUDIT P0-USR-1 (2026-05-26): the previous copy exposed
+  // internal slice identifiers (FARM-AUTH.4 / FARM-AUTH.5) and the
+  // raw HTTP path to every admin who opened the page. Replaced with
+  // a neutral "coming soon" panel; the HTTP status is no longer
+  // surfaced because it leaked the same architectural detail.
+  const t = useTranslations("adminUsers.backendMissing");
   return (
     <div className="rounded-xl border border-stone-200 bg-white p-6 shadow-sm">
       <div className="flex items-start gap-3">
@@ -493,20 +501,9 @@ function BackendMissingPanel({ status }: { status: number }) {
         </div>
         <div className="min-w-0">
           <h2 className="text-base font-semibold text-stone-950">
-            Admin user-management endpoints have not shipped yet
+            {t("title")}
           </h2>
-          <p className="mt-1 text-sm text-stone-600">
-            <code className="font-mono">GET /v1/admin/users</code> returned HTTP {status} on
-            this server. The FARM-AUTH.4 / FARM-AUTH.5 sweep ships the
-            FastAPI routers that back this page (list, approve,
-            deactivate, change role). Once they merge this page starts
-            working with no extra deploy.
-          </p>
-          <p className="mt-2 text-xs text-stone-500">
-            The frontend wiring is already complete — it just needs the
-            backend half. Sign-up, sign-in, profile and the sidebar gate
-            are functional today.
-          </p>
+          <p className="mt-1 text-sm text-stone-600">{t("body")}</p>
         </div>
       </div>
     </div>

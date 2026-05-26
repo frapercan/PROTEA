@@ -29,6 +29,7 @@ import { EventTimeline } from "@/components/EventTimeline";
 import { Skeleton } from "@/components/Skeleton";
 import { useToast } from "@/components/Toast";
 import { useLocale, useTranslations } from "next-intl";
+import { useHasRole } from "@/lib/useRole";
 
 function formatDate(iso?: string | null) {
   if (!iso) return "-";
@@ -84,6 +85,12 @@ export default function FarmTaskDetail({
   const t = useTranslations("farm");
   const locale = useLocale();
   const toast = useToast();
+  // UX-ADMIN-AUDIT P0-FRM-1: spawn_args may contain prompt content or
+  // file paths; only admins see the raw payload, others get a redacted
+  // placeholder. The auth gate at FarmLayout already blocks anonymous
+  // visitors entirely, so the role check here only differentiates
+  // signed-in viewer/operator vs admin.
+  const isAdmin = useHasRole("admin");
   const [task, setTask] = useState<FarmTask | null>(null);
   const [heartbeats, setHeartbeats] = useState<FarmHeartbeat[]>([]);
   const [result, setResult] = useState<FarmResult | null>(null);
@@ -243,14 +250,23 @@ export default function FarmTaskDetail({
           </div>
 
           {task.spawn_args && (
-            <details className="text-sm">
-              <summary className="cursor-pointer text-slate-600 hover:text-slate-700">
-                {t("detail.spawnArgs")}
-              </summary>
-              <pre className="mt-1 rounded bg-slate-50 p-2 text-xs overflow-auto whitespace-pre-wrap break-words">
-                {task.spawn_args}
-              </pre>
-            </details>
+            isAdmin ? (
+              <details className="text-sm" data-testid="farm-spawn-args">
+                <summary className="cursor-pointer text-slate-600 hover:text-slate-700">
+                  {t("detail.spawnArgsAdmin")}
+                </summary>
+                <pre className="mt-1 rounded bg-slate-50 p-2 text-xs overflow-auto whitespace-pre-wrap break-words">
+                  {task.spawn_args}
+                </pre>
+              </details>
+            ) : (
+              <p
+                className="text-xs text-slate-500"
+                data-testid="farm-spawn-args-redacted"
+              >
+                {t("detail.spawnArgsRedacted")}
+              </p>
+            )
           )}
         </div>
       )}

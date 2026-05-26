@@ -1209,6 +1209,18 @@
       "refresh": "Atualizar",
       "vacuum": "Vacuum",
       "cleaning": "Limpando…"
+    },
+    "forbidden": {
+      "title": "Apenas administradores",
+      "body": "Os vacuums de manutenção são reservados a contas com a função de administrador.",
+      "roleLabel": "A tua função atual",
+      "backHome": "Voltar ao início"
+    }
+  },
+  "adminUsers": {
+    "backendMissing": {
+      "title": "A gestão de utilizadores chega em breve",
+      "body": "Os recursos de gestão de utilizadores chegam em breve. Volta mais tarde."
     }
   },
   "components": {
@@ -1320,6 +1332,11 @@
     "subtitle": "Tarefas do orquestrador agent-farm",
     "refresh": "Atualizar",
     "emptyState": "Nenhuma tarefa corresponde aos filtros atuais.",
+    "authGate": {
+      "title": "Inicia sessão para ver a fazenda",
+      "body": "As tarefas, planos e custos da fazenda são reservados a utilizadores autenticados. Após iniciar sessão regressas aqui automaticamente.",
+      "signIn": "Iniciar sessão"
+    },
     "subnav": {
       "ariaLabel": "Navegação da secção da fazenda de agentes",
       "tasks": "Tarefas",
@@ -1373,6 +1390,8 @@
       "worktree": "Worktree",
       "ownerRepo": "Dono / repositório",
       "spawnArgs": "Argumentos do spawn",
+      "spawnArgsAdmin": "Argumentos do spawn (apenas admin, carga útil em bruto)",
+      "spawnArgsRedacted": "Os argumentos do spawn estão ocultos. Inicia sessão como administrador para ver a carga útil.",
       "diffRange": "Intervalo de commits",
       "shaBefore": "Antes",
       "shaAfter": "Depois",
