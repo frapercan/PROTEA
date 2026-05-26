@@ -110,7 +110,7 @@ class Job(Base):
             "dedup_key",
             unique=True,
             postgresql_where=(
-                "status IN ('queued', 'running') AND dedup_key IS NOT NULL"
+                "status IN ('QUEUED', 'RUNNING') AND dedup_key IS NOT NULL"
             ),
         ),
     )

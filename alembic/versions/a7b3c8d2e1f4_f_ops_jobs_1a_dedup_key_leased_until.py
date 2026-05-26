@@ -53,17 +53,21 @@ def upgrade() -> None:
     )
 
     # 3. Partial unique index: dedup_key must be unique among active jobs
-    #    (status IN ('queued', 'running')) where dedup_key IS NOT NULL.
-    #    Postgres partial indexes exclude NULLs from uniqueness enforcement,
-    #    but an explicit IS NOT NULL predicate makes the intent unmistakable
-    #    and guards against edge cases where a NULL might be stored.
+    #    (status IN ('QUEUED', 'RUNNING')) where dedup_key IS NOT NULL.
+    #    The literals match the Postgres ``job_status`` enum, whose members
+    #    are stored as uppercase identifiers (QUEUED, RUNNING, ...). Using
+    #    lowercase here triggers ``InvalidTextRepresentation`` at index
+    #    creation time because PG resolves the IN literals against the
+    #    declared enum type. Partial indexes exclude NULLs from uniqueness
+    #    enforcement, but the explicit IS NOT NULL predicate makes the
+    #    intent unmistakable.
     op.create_index(
         "uq_job_dedup_key_active",
         "job",
         ["dedup_key"],
         unique=True,
         postgresql_where=sa.text(
-            "status IN ('queued', 'running') AND dedup_key IS NOT NULL"
+            "status IN ('QUEUED', 'RUNNING') AND dedup_key IS NOT NULL"
         ),
     )
 

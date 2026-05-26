@@ -12,7 +12,7 @@
 --
 --   1. Check that no worker process holds the job:
 --        SELECT id, started_at, leased_until, error_code
---        FROM job WHERE status = 'running'
+--        FROM job WHERE status = 'RUNNING'
 --        ORDER BY started_at;
 --
 --   2. Cross-reference with `bash scripts/manage.sh status` to confirm
@@ -22,16 +22,21 @@
 --      the WHERE clause matches more rows than expected:
 --        BEGIN;
 --        <run script>
---        SELECT id, status, error_code FROM job WHERE status = 'failed'
+--        SELECT id, status, error_code FROM job WHERE status = 'FAILED'
 --          AND error_code = 'GhostJobRecovered' ORDER BY finished_at DESC;
 --        COMMIT;  -- or ROLLBACK;
 --
 -- Criteria for a ghost job:
---   * status = 'running'
+--   * status = 'RUNNING'
 --   * started_at older than 24 hours (no legitimately long job should
 --     exceed 24h; the production reaper catches them at 6h anyway)
 --   * leased_until IS NULL or leased_until < now()  (no active heartbeat)
 --   * no JobEvent in the last 2 hours  (no active progress reporting)
+--
+-- Note: the ``job_status`` Postgres enum stores values as uppercase
+-- identifiers (QUEUED, RUNNING, ...). Lowercase literals raise
+-- ``InvalidTextRepresentation`` when compared to a ``job_status``
+-- column.
 --
 -- Adjust the interval thresholds to match your deployment.
 
@@ -41,7 +46,7 @@ WITH ghost_candidates AS (
     SELECT j.id
     FROM job j
     WHERE
-        j.status = 'running'
+        j.status = 'RUNNING'
         AND j.started_at < now() - INTERVAL '24 hours'
         AND (j.leased_until IS NULL OR j.leased_until < now())
         AND NOT EXISTS (
@@ -52,7 +57,7 @@ WITH ghost_candidates AS (
 )
 UPDATE job
 SET
-    status       = 'failed',
+    status       = 'FAILED',
     finished_at  = now(),
     error_code   = 'GhostJobRecovered',
     error_message = 'Manually recovered by reap_ghost_e0fbdf5f.sql: '
@@ -62,7 +67,7 @@ WHERE id IN (SELECT id FROM ghost_candidates);
 -- Show how many rows were updated before you COMMIT or ROLLBACK.
 SELECT COUNT(*) AS rows_updated
 FROM job
-WHERE status = 'failed' AND error_code = 'GhostJobRecovered';
+WHERE status = 'FAILED' AND error_code = 'GhostJobRecovered';
 
 -- COMMIT;  -- uncomment once you have verified the count is correct
 ROLLBACK;   -- safe default: review output, then re-run with COMMIT
