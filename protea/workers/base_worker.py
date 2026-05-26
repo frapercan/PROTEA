@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy import func
 from sqlalchemy import update as sa_update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.core.contracts.operation import OperationResult, RetryLaterError, make_safe_emit
@@ -103,20 +105,41 @@ class BaseWorker:
             self._force_fail_job(job_id, exc)
             raise
 
-    def _claim_job(self, job_id: UUID) -> bool:
-        """Transition the job from QUEUED to RUNNING in its own session.
+    #: Initial lease duration. The worker extends it via heartbeat while the
+    #: job is running. Chosen to be safely larger than the heartbeat interval
+    #: (PROTEA_JOB_HEARTBEAT_INTERVAL_SECONDS, default 30s) so a single missed
+    #: heartbeat does not prematurely expire the lease.
+    _LEASE_SECONDS: int = 120
 
-        Returns True if claim succeeded; False if the job is missing or
-        already in a non-QUEUED state.
+    def _claim_job(self, job_id: UUID) -> bool:
+        """Transition the job from QUEUED to RUNNING via a conditional UPDATE.
+
+        Uses a single atomic UPDATE (WHERE id=:j AND status='queued') and
+        checks the affected rowcount to detect race conditions. Returns True
+        if the claim succeeded, False if the job is missing or already in a
+        non-QUEUED state (e.g. a duplicate consumer picked it up first).
+
+        Also sets ``started_at`` and the initial ``leased_until`` timestamp
+        so the stale-job reaper can track liveness without relying on
+        ``started_at`` alone.
         """
         session = self._factory()
         try:
-            job = session.get(Job, job_id)
-            if job is None or job.status != JobStatus.QUEUED:
+            now = utcnow()
+            result: CursorResult[Any] = session.execute(  # type: ignore[assignment]
+                sa_update(Job)
+                .where(Job.id == job_id, Job.status == JobStatus.QUEUED)
+                .values(
+                    status=JobStatus.RUNNING,
+                    started_at=now,
+                    leased_until=now + timedelta(seconds=self._LEASE_SECONDS),
+                )
+            )
+            if result.rowcount == 0:
+                # Job is missing or was already claimed by another consumer.
+                session.rollback()
                 return False
 
-            job.status = JobStatus.RUNNING
-            job.started_at = utcnow()
             self._emit(
                 session,
                 job_id,
@@ -127,6 +150,35 @@ class BaseWorker:
             )
             session.commit()
             return True
+        finally:
+            session.close()
+
+    def extend_lease(self, job_id: UUID) -> None:
+        """Extend the ``leased_until`` timestamp for a running job.
+
+        Called periodically by the consumer heartbeat loop while a job
+        is in progress. Uses a fresh session so the heartbeat never
+        interferes with the execute session's transaction. No-op when the
+        job is no longer in RUNNING state (e.g. already succeeded or was
+        externally cancelled).
+        """
+        session = self._factory()
+        try:
+            now = utcnow()
+            session.execute(
+                sa_update(Job)
+                .where(Job.id == job_id, Job.status == JobStatus.RUNNING)
+                .values(leased_until=now + timedelta(seconds=self._LEASE_SECONDS))
+            )
+            session.commit()
+        except Exception as exc:
+            logger.warning(
+                "Lease extension failed (non-fatal). job_id=%s error=%s", job_id, exc
+            )
+            try:
+                session.rollback()
+            except Exception:
+                pass
         finally:
             session.close()
 

@@ -164,6 +164,17 @@ class WorkerTuning(BaseModel):
             "tras un redeploy."
         ),
     )
+    job_heartbeat_interval_seconds: int = Field(
+        default=30,
+        ge=5,
+        description=(
+            "Intervalo en segundos entre heartbeats de lease para jobs en RUNNING "
+            "(F-OPS-JOBS.1). El worker renueva leased_until cada N segundos; "
+            "el reaper sólo mata jobs cuyo leased_until ha expirado. "
+            "Override: PROTEA_JOB_HEARTBEAT_INTERVAL_SECONDS o "
+            "PROTEA_TUNING__worker__job_heartbeat_interval_seconds."
+        ),
+    )
     api_cache_default_ttl_seconds: float = Field(
         default=300.0,
         ge=1.0,

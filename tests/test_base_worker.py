@@ -73,9 +73,19 @@ class TestBaseWorkerHandleJob:
         worker.handle_job(uuid4())  # should not raise
 
     def test_non_queued_job_is_skipped(self):
-        """A job that is already RUNNING is not executed again."""
+        """A job already claimed by another consumer (rowcount=0) is not executed again.
+
+        The new conditional-UPDATE _claim_job returns False when the DB
+        reports rowcount=0 (job was not in QUEUED state when the UPDATE
+        ran). We simulate that by returning a mock result with rowcount=0.
+        """
         job = _make_job(status=JobStatus.RUNNING)
-        factory, session = _make_factory(job)
+        session = MagicMock()
+        claim_result = MagicMock()
+        claim_result.rowcount = 0  # UPDATE found no QUEUED row
+        session.execute.return_value = claim_result
+        session.get.return_value = job
+        factory = MagicMock(return_value=session)
         registry, op = _make_registry()
 
         worker = BaseWorker(factory, registry, WorkerConfig(worker_name="test"))
@@ -634,23 +644,27 @@ class TestBaseWorkerTwoSessionPattern:
         sessions[0].close.assert_called_once()
         sessions[1].close.assert_called_once()
 
-    def test_claim_session_sets_running_before_execute(self):
-        """First session transitions to RUNNING; second session runs the operation."""
-        job = _make_job()
-        status_log = []
+    def test_claim_session_issues_conditional_update(self):
+        """First session issues a conditional UPDATE (WHERE status='queued').
 
-        call_count = [0]
+        After F-OPS-JOBS.1a the claim path uses an atomic UPDATE with a WHERE
+        clause instead of ORM read-then-write, so the in-memory ``job.status``
+        field is NOT mutated to RUNNING by the claim session. The invariant is
+        now: the claim session calls ``session.execute(sa_update(...))`` with
+        status='running' and ``leased_until``, then commits if rowcount > 0.
+        """
+        from sqlalchemy import update as sa_update
+
+        from protea.infrastructure.orm.models.job import Job
+
+        job = _make_job()
+        sessions = []
 
         def make_session():
             s = MagicMock()
             s.get.return_value = job
-            call_count[0] += 1
-            current_call = call_count[0]
-
-            def commit_side_effect():
-                status_log.append((current_call, job.status))
-
-            s.commit.side_effect = commit_side_effect
+            # Default rowcount is a truthy MagicMock; claim succeeds
+            sessions.append(s)
             return s
 
         factory = MagicMock(side_effect=make_session)
@@ -659,9 +673,18 @@ class TestBaseWorkerTwoSessionPattern:
         worker = BaseWorker(factory, registry, WorkerConfig(worker_name="test"))
         worker.handle_job(job.id)
 
-        # Session 1 should commit with RUNNING, session 2 with SUCCEEDED
-        assert status_log[0] == (1, JobStatus.RUNNING)
-        assert status_log[1] == (2, JobStatus.SUCCEEDED)
+        # Session 0 (claim) must have called execute with an UPDATE statement
+        claim_session = sessions[0]
+        claim_session.execute.assert_called_once()
+        stmt = claim_session.execute.call_args.args[0]
+        assert isinstance(stmt, type(sa_update(Job)))
+        # Confirm the UPDATE targets QUEUED → RUNNING and sets leased_until
+        compiled = stmt.compile(compile_kwargs={"literal_binds": False})
+        params = compiled.params
+        assert params.get("status_1") == JobStatus.RUNNING or "RUNNING" in str(params).upper()
+        assert "leased_until" in compiled.params
+        # Claim session must commit
+        claim_session.commit.assert_called()
 
 
 class TestBaseWorkerJobNotFoundOnExecute:
@@ -738,10 +761,12 @@ class TestBaseWorkerDeferredResult:
         worker = BaseWorker(factory, registry, WorkerConfig(worker_name="test"))
         worker.handle_job(job.id)
 
-        # Deferred: should NOT transition to SUCCEEDED
+        # Deferred: should NOT transition to SUCCEEDED.
+        # Since _claim_job now uses a SQL UPDATE (not ORM mutation), the
+        # in-memory mock job.status reflects whatever state the mock held before
+        # the test ran (QUEUED). The key assertion is that SUCCEEDED was never
+        # written to the job — not that the in-memory object became RUNNING.
         assert job.status != JobStatus.SUCCEEDED
-        # Should remain RUNNING (set in claim phase)
-        assert job.status == JobStatus.RUNNING
 
 
 class TestBaseWorkerPublishAfterCommit:
@@ -1035,9 +1060,13 @@ class TestBaseWorkerMaybeFailParent:
         After FIX-BASEWORKER-ROBUSTNESS ``_force_fail_job`` runs
         unconditionally on every non-RetryLater exception. That fallback
         emits one sa_update against the in-flight job (idempotent via
-        ``WHERE status=RUNNING``). The behavioural assertion is now:
-        the parent UPDATE (which would target ``Job.id == parent_id``)
-        does NOT fire; only the in-flight fallback UPDATE fires.
+        ``WHERE status=RUNNING``). After F-OPS-JOBS.1a the claim phase also
+        issues an sa_update (conditional claim), so the session sees 2 UPDATE
+        calls total: 1 for the claim + 1 for the fallback _force_fail_job.
+
+        The behavioural assertion is: the parent UPDATE does NOT fire; the
+        two observed UPDATEs are the claim and the fallback against the
+        in-flight job.
         """
         from sqlalchemy import update as sa_update
 
@@ -1057,24 +1086,19 @@ class TestBaseWorkerMaybeFailParent:
         with pytest.raises(RuntimeError, match="child failed"):
             worker.handle_job(job.id)
 
-        # The single ``execute`` call is the in-flight job's fallback
-        # UPDATE (idempotent), NOT a parent UPDATE — that would only
-        # happen via _maybe_fail_parent, which short-circuits when
-        # children are still running.
+        # Exactly 2 execute calls: claim UPDATE (session 1) + fallback UPDATE
+        # (_force_fail_job, session 3). No parent UPDATE because
+        # _maybe_fail_parent short-circuits when children are still running.
         execute_calls = session.execute.call_args_list
-        assert len(execute_calls) == 1
-        stmt = execute_calls[0].args[0]
-        # Sanity: the lone UPDATE targets the in-flight job's id, not
-        # the parent_id. Inspecting compiled WHERE params is overkill
-        # for a unit test; checking the bound values keeps it readable.
-        compiled = stmt.compile(compile_kwargs={"literal_binds": False})
+        assert len(execute_calls) == 2
+
+        # The fallback UPDATE (last call) targets the in-flight job, not parent.
+        fallback_stmt = execute_calls[-1].args[0]
+        assert isinstance(fallback_stmt, type(sa_update(Job)))
+        compiled = fallback_stmt.compile(compile_kwargs={"literal_binds": False})
         params = compiled.params
         assert job.id in params.values()
         assert parent_id not in params.values()
-        # The statement updates the Job table (parent UPDATE would too,
-        # so this is mainly a sanity check that we are still looking at
-        # the right SQL).
-        assert isinstance(stmt, type(sa_update(Job)))
 
 
 class TestBaseWorkerRebindJob:
@@ -1287,3 +1311,180 @@ class TestBaseWorkerRebindJob:
 
         assert fresh_job.status == JobStatus.FAILED
         assert fresh_job.error_code == "ValueError"
+
+
+# ---------------------------------------------------------------------------
+# F-OPS-JOBS.1a: conditional claim via rowcount + leased_until
+# ---------------------------------------------------------------------------
+
+
+class TestBaseWorkerConditionalClaim:
+    """F-OPS-JOBS.1a: _claim_job uses a conditional UPDATE, not ORM read-then-write.
+
+    The key invariant: if sa_update returns rowcount=0 (another consumer
+    already claimed the job, or the job was cancelled/missing), _claim_job
+    returns False without executing the job and without opening a second
+    session for the execute phase.
+    """
+
+    def test_claim_succeeds_when_update_affects_one_row(self):
+        """Normal path: rowcount=1 means the claim succeeded."""
+        job = _make_job(status=JobStatus.QUEUED)
+        session = MagicMock()
+        # Simulate rowcount=1 from the conditional UPDATE
+        result = MagicMock()
+        result.rowcount = 1
+        session.execute.return_value = result
+        session.get.return_value = job  # execute session still reads job
+        factory = MagicMock(return_value=session)
+        registry, op = _make_registry()
+
+        worker = BaseWorker(factory, registry, WorkerConfig(worker_name="test"))
+        claimed = worker._claim_job(job.id)
+
+        assert claimed is True
+        session.execute.assert_called_once()
+        session.commit.assert_called_once()
+        session.rollback.assert_not_called()
+
+    def test_claim_fails_when_update_affects_zero_rows(self):
+        """Duplicate consumer: rowcount=0 means the job was already claimed."""
+        job_id = uuid4()
+        session = MagicMock()
+        result = MagicMock()
+        result.rowcount = 0
+        session.execute.return_value = result
+        factory = MagicMock(return_value=session)
+        registry, op = _make_registry()
+
+        worker = BaseWorker(factory, registry, WorkerConfig(worker_name="test"))
+        claimed = worker._claim_job(job_id)
+
+        assert claimed is False
+        session.rollback.assert_called_once()
+        session.commit.assert_not_called()
+
+    def test_claim_sets_leased_until(self):
+        """_claim_job sets leased_until in the UPDATE statement."""
+        from sqlalchemy import update as sa_update
+
+        from protea.infrastructure.orm.models.job import Job
+
+        job_id = uuid4()
+        session = MagicMock()
+        result = MagicMock()
+        result.rowcount = 1
+        session.execute.return_value = result
+        job = _make_job(status=JobStatus.QUEUED)
+        session.get.return_value = job
+        factory = MagicMock(return_value=session)
+        registry, _ = _make_registry()
+
+        worker = BaseWorker(factory, registry, WorkerConfig(worker_name="test"))
+        worker._claim_job(job_id)
+
+        # Verify the UPDATE statement was issued
+        stmt = session.execute.call_args.args[0]
+        assert isinstance(stmt, type(sa_update(Job)))
+        # The compiled params should include leased_until
+        compiled = stmt.compile(compile_kwargs={"literal_binds": False})
+        assert "leased_until" in compiled.params
+
+    def test_handle_job_skips_execute_when_claim_returns_false(self):
+        """If _claim_job returns False, handle_job exits without running the op."""
+        job = _make_job(status=JobStatus.QUEUED)
+        session = MagicMock()
+        result = MagicMock()
+        result.rowcount = 0  # claim fails
+        session.execute.return_value = result
+        factory = MagicMock(return_value=session)
+        registry, op = _make_registry()
+
+        worker = BaseWorker(factory, registry, WorkerConfig(worker_name="test"))
+        worker.handle_job(job.id)
+
+        op.execute.assert_not_called()
+
+
+class TestBaseWorkerExtendLease:
+    """F-OPS-JOBS.1a: extend_lease renews leased_until on RUNNING jobs."""
+
+    def test_extend_lease_updates_running_job(self):
+        from sqlalchemy import update as sa_update
+
+        from protea.infrastructure.orm.models.job import Job
+
+        job_id = uuid4()
+        session = MagicMock()
+        factory = MagicMock(return_value=session)
+        registry, _ = _make_registry()
+
+        worker = BaseWorker(factory, registry, WorkerConfig(worker_name="test"))
+        worker.extend_lease(job_id)
+
+        session.execute.assert_called_once()
+        stmt = session.execute.call_args.args[0]
+        assert isinstance(stmt, type(sa_update(Job)))
+        compiled = stmt.compile(compile_kwargs={"literal_binds": False})
+        assert "leased_until" in compiled.params
+        session.commit.assert_called_once()
+        session.close.assert_called_once()
+
+    def test_extend_lease_is_nonfatal_on_db_error(self):
+        """A DB error during heartbeat must not propagate; the job continues."""
+        job_id = uuid4()
+        session = MagicMock()
+        session.execute.side_effect = RuntimeError("connection lost")
+        factory = MagicMock(return_value=session)
+        registry, _ = _make_registry()
+
+        worker = BaseWorker(factory, registry, WorkerConfig(worker_name="test"))
+        worker.extend_lease(job_id)  # must not raise
+
+        session.rollback.assert_called_once()
+        session.close.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# F-OPS-JOBS.1a: compute_dedup_key
+# ---------------------------------------------------------------------------
+
+
+class TestComputeDedupKey:
+    """Verify dedup_key is deterministic, stable, and operation-sensitive."""
+
+    def test_same_inputs_produce_same_key(self):
+        from protea.services.jobs_service import compute_dedup_key
+
+        k1 = compute_dedup_key("ping", {})
+        k2 = compute_dedup_key("ping", {})
+        assert k1 == k2
+
+    def test_different_operations_produce_different_keys(self):
+        from protea.services.jobs_service import compute_dedup_key
+
+        k1 = compute_dedup_key("ping", {})
+        k2 = compute_dedup_key("export_research_dataset", {})
+        assert k1 != k2
+
+    def test_different_payloads_produce_different_keys(self):
+        from protea.services.jobs_service import compute_dedup_key
+
+        k1 = compute_dedup_key("export", {"k": 5})
+        k2 = compute_dedup_key("export", {"k": 10})
+        assert k1 != k2
+
+    def test_key_length_is_16(self):
+        from protea.services.jobs_service import compute_dedup_key
+
+        key = compute_dedup_key("ping", {"x": 1})
+        assert len(key) == 16
+        assert all(c in "0123456789abcdef" for c in key)
+
+    def test_payload_key_order_is_irrelevant(self):
+        """Canonical JSON sort_keys=True so key is stable regardless of dict insertion order."""
+        from protea.services.jobs_service import compute_dedup_key
+
+        k1 = compute_dedup_key("op", {"b": 2, "a": 1})
+        k2 = compute_dedup_key("op", {"a": 1, "b": 2})
+        assert k1 == k2

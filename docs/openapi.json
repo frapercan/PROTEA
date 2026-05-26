@@ -6470,7 +6470,7 @@
         ]
       },
       "post": {
-        "description": "Create a Job row and publish its ID to the specified RabbitMQ queue.\n\nExpensive operations (``export_research_dataset``, ``run_cafa_evaluation``) are\nsubject to per-user daily quota limits (FARM-AUTH.7). Admins are exempt.",
+        "description": "Create a Job row and publish its ID to the specified RabbitMQ queue.\n\nExpensive operations (``export_research_dataset``, ``run_cafa_evaluation``) are\nsubject to per-user daily quota limits (FARM-AUTH.7). Admins are exempt.\nDuplicate POSTs (same operation + payload while the previous job is active)\nreturn 409 with the existing job_id (F-OPS-JOBS.1 dedup).",
         "operationId": "create_job_v1_jobs_post",
         "parameters": [
           {
