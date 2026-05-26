@@ -98,8 +98,10 @@ at ``http://localhost:3000``.
 
 ``deploy.sh`` auto-detects the presence of NVIDIA drivers via
 ``nvidia-smi``. When a GPU is available, it swaps the PyTorch wheel to
-the ``cu121`` build post-install. Override with
-``PROTEA_DEPLOY_GPU=1|0|auto`` (default ``auto``).
+the ``cu128`` build post-install. Override with
+``PROTEA_DEPLOY_GPU=1|0|auto`` (default ``auto``). Older CUDA wheels are
+still reachable via ``CUDA_VARIANT=cu121`` (or ``cu118``) when invoking
+``scripts/install_gpu_torch.sh`` directly.
 
 **Key environment variables** (override via shell or ``.env`` in the
 deploy slot):

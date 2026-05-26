@@ -21,7 +21,7 @@
 #   PROTEA_DEPLOY_REF    default ref when none given (default: origin/develop)
 #   PROTEA_DEPLOY_GPU    auto|1|0 (default auto = nvidia-smi -L decides). When the
 #                        host has GPU drivers loaded, torch is flipped to the
-#                        cu121 wheel after poetry install via install_gpu_torch.sh.
+#                        cu128 wheel after poetry install via install_gpu_torch.sh.
 #                        CI / slim Docker hosts have no nvidia-smi → stays CPU.
 
 set -euo pipefail
@@ -147,7 +147,7 @@ if [[ "$DO_DEPS" == "1" ]]; then
 
   # pyproject pins torch to the pytorch-cpu source so CI runners and the
   # slim Docker image do not pull the ~6 GB NVIDIA / triton stack. Hosts
-  # that actually have GPU drivers loaded need the cu121 wheels post
+  # that actually have GPU drivers loaded need the cu128 wheels post
   # install. Auto-detect via nvidia-smi; PROTEA_DEPLOY_GPU=0/1 forces.
   want_gpu="${PROTEA_DEPLOY_GPU:-auto}"
   if [[ "$want_gpu" == "auto" ]]; then
