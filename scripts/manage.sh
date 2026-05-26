@@ -132,6 +132,16 @@ cmd_start() {
     done
     _start_bg worker-predictions-write poetry run python scripts/worker.py --queue protea.predictions.write
 
+    # Export-minijob pipeline (active only when PROTEA_EXPORT_MINIJOBS=1)
+    if [[ "${PROTEA_EXPORT_MINIJOBS:-0}" == "1" ]]; then
+        printf "\n${BOLD}[7] Export-minijob pipeline${RESET}\n"
+        for i in $(seq 1 "$BATCH_WORKERS"); do
+            _start_bg "worker-export-knn-batch-${i}" \
+                poetry run python scripts/worker.py --queue protea.training.knn-batch
+        done
+        _start_bg worker-export-features  poetry run python scripts/worker.py --queue protea.training.features
+    fi
+
     # Evaluations pipeline
     printf "\n${BOLD}[7] Evaluations pipeline${RESET}\n"
     _start_bg worker-evaluations poetry run python scripts/worker.py --queue protea.evaluations

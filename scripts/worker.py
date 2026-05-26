@@ -67,6 +67,9 @@ def main() -> None:
         "protea.embeddings.write",
         "protea.predictions.batch",
         "protea.predictions.write",
+        # Export-minijob pipeline (env-gated: PROTEA_EXPORT_MINIJOBS=1)
+        "protea.training.knn-batch",
+        "protea.training.features",
     }
 
     # Special mode: stale job reaper (no queue, just periodic DB check).

@@ -53,6 +53,11 @@ from protea.core.operations.compute_embeddings import (
     ComputeEmbeddingsPayload,
     StoreEmbeddingsPayload,
 )
+from protea.core.operations.export_minijob._payloads import (
+    ExportCoordinatorPayload,
+    ExportFeaturesBatchPayload,
+    ExportKnnBatchPayload,
+)
 from protea.core.operations.export_research_dataset import (
     ExportResearchDatasetPayload,
 )
@@ -248,6 +253,52 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         RefreshGoaReleaseDatesPayload,
         {"timeout_seconds": 0},
         ("timeout_seconds",),
+    ),
+    # export_coordinator: missing output_name
+    (
+        "export_coordinator",
+        ExportCoordinatorPayload,
+        {
+            "embedding_config_id": "cfg",
+            "ontology_snapshot_id": "ont",
+            "annotation_set_id": "ann",
+            "train_versions": [220, 221],
+            "test_versions": [222],
+        },
+        ("output_name",),
+    ),
+    # export_knn_batch: missing pair_id
+    (
+        "export_knn_batch",
+        ExportKnnBatchPayload,
+        {
+            "coordinator_job_id": "coord",
+            "pair_type": "train",
+            "query_version": 221,
+            "ref_version": 220,
+            "embedding_config_id": "cfg",
+            "annotation_set_id": "ann",
+            "ontology_snapshot_id": "ont",
+            "output_name": "ds",
+        },
+        ("pair_id",),
+    ),
+    # export_features_batch: missing knn_temp_uri
+    (
+        "export_features_batch",
+        ExportFeaturesBatchPayload,
+        {
+            "coordinator_job_id": "coord",
+            "pair_id": "train_220_221",
+            "pair_type": "train",
+            "query_version": 221,
+            "ref_version": 220,
+            "embedding_config_id": "cfg",
+            "annotation_set_id": "ann",
+            "ontology_snapshot_id": "ont",
+            "output_name": "ds",
+        },
+        ("knn_temp_uri",),
     ),
 ]
 
