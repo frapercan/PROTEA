@@ -26,6 +26,10 @@ const nextConfig: NextConfig = {
         source: "/farm-api/:path*",
         destination: `${farmApiUrl}/:path*`,
       },
+      {
+        source: "/v1/:path*",
+        destination: `${apiUrl}/v1/:path*`,
+      },
     ];
   },
 };
