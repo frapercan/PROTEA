@@ -14,6 +14,12 @@ from protea.core.operations.compute_embeddings import (
     ComputeEmbeddingsOperation,
     StoreEmbeddingsOperation,
 )
+from protea.core.operations.export_minijobs import (
+    ExportCoordinatorOperation,
+    ExportFeaturesBatchOperation,
+    ExportKnnBatchOperation,
+    ExportWriteOperation,
+)
 from protea.core.operations.export_research_dataset import (
     ExportResearchDatasetOperation,
 )
@@ -68,4 +74,12 @@ def build_operation_registry() -> OperationRegistry:
     # ExportResearchDatasetOperation still uses TrainRerankerAutoOperation
     # in-process to run the dump-only pipeline.
     registry.register(ExportResearchDatasetOperation())
+    # Export minijob pipeline (env-gated: PROTEA_EXPORT_MINIJOBS=1).
+    # export_coordinator runs on protea.training (same queue as the monolithic
+    # export_research_dataset; only one of the two is dispatched per job).
+    # The three OperationConsumers run on dedicated sub-queues.
+    registry.register(ExportCoordinatorOperation())
+    registry.register(ExportKnnBatchOperation())
+    registry.register(ExportFeaturesBatchOperation())
+    registry.register(ExportWriteOperation())
     return registry
