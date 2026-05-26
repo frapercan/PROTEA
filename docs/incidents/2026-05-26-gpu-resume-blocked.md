@@ -75,7 +75,7 @@ is `poetry lock` followed by `git add poetry.lock` and `git commit -m
 If the pin is later moved to a tagged release (preferred for
 reproducibility), edit line 73 of `pyproject.toml` to
 `protea-method = { git = "https://github.com/frapercan/protea-method.git",
-tag = "v0.X.Y" }`, then run `poetry lock` and commit both files.
+tag = "<release-tag>" }`, then run `poetry lock` and commit both files.
 
 ### Step 3. Install the CUDA 12.8 torch wheel
 
