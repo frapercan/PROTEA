@@ -24,6 +24,7 @@ manually to force a reload after a model change.
 from __future__ import annotations
 
 import os
+import time
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -216,6 +217,28 @@ def _derive_reference_views(
     }
 
 
+def _is_cache_fresh(
+    embedding_config_id: uuid.UUID,
+    annotation_set_id: uuid.UUID,
+    freshness_seconds: int,
+) -> bool:
+    """Return True when both cache files exist and their oldest mtime is within
+    ``freshness_seconds`` of wall-clock now.
+
+    When ``freshness_seconds == 0`` the freshness check is disabled and the
+    function always returns False (COUNT(*) is always issued).  Callers use
+    this to skip the expensive COUNT(*)-over-JOIN validation when the disk
+    cache is known to be recent.
+    """
+    if freshness_seconds <= 0:
+        return False
+    emb_path, acc_path = _disk_cache_paths(embedding_config_id, annotation_set_id)
+    if not emb_path.exists() or not acc_path.exists():
+        return False
+    oldest_mtime = min(emb_path.stat().st_mtime, acc_path.stat().st_mtime)
+    return (time.time() - oldest_mtime) < freshness_seconds
+
+
 def _load_from_disk_cache(
     embedding_config_id: uuid.UUID,
     annotation_set_id: uuid.UUID,
@@ -254,40 +277,46 @@ def _save_to_disk_cache(
     np.save(acc_path, np.array(accessions))
 
 
-def _load_reference_pool_cached(
+def _emit_cache_hit(
+    emit: Callable[[str, dict[str, Any]], None] | None,
+    emb_path: Path,
+    cached: dict[str, Any],
+    *,
+    fresh: bool = False,
+    freshness_seconds: int = 0,
+) -> None:
+    """Emit a ``refpool.cache_hit`` or ``refpool.cache_hit_fresh`` audit event."""
+    if emit is None:
+        return
+    if fresh:
+        emit(
+            "refpool.cache_hit_fresh",
+            {
+                "path": str(emb_path),
+                "rows": len(cached["accessions"]),
+                "bytes": int(cached["embeddings"].nbytes),
+                "freshness_seconds": freshness_seconds,
+            },
+        )
+    else:
+        emit(
+            "refpool.cache_hit",
+            {
+                "path": str(emb_path),
+                "rows": len(cached["accessions"]),
+                "bytes": int(cached["embeddings"].nbytes),
+            },
+        )
+
+
+def _load_and_write_cache(
     embedding_config_id: uuid.UUID,
     annotation_set_id: uuid.UUID,
     db_loader: Callable[[], tuple[list[str], np.ndarray]],
-    *,
-    expected_count: int | None = None,
-    emit: Callable[[str, dict[str, Any]], None] | None = None,
+    emit: Callable[[str, dict[str, Any]], None] | None,
+    emb_path: Path,
 ) -> tuple[list[str], np.ndarray]:
-    """Return ``(accessions, embeddings)`` for the reference pool with disk-cache.
-
-    Cache layout matches :func:`_load_from_disk_cache` / :func:`_save_to_disk_cache`
-    so the same npy pair is shared between the predict path and the dump
-    pipeline. ``db_loader`` is invoked only on miss or when the cached row
-    count diverges from ``expected_count`` (light invalidation: a single
-    cheap ``COUNT(*)`` on the caller side is enough to detect a reference
-    re-ingest). ``emit`` receives ``refpool.cache_hit`` /
-    ``refpool.cache_stale`` / ``refpool.cache_write`` audit events with
-    sizes and paths; pass ``None`` to stay quiet.
-    """
-    emb_path, _ = _disk_cache_paths(embedding_config_id, annotation_set_id)
-    cached = _load_from_disk_cache(
-        embedding_config_id, annotation_set_id, expected_count=expected_count
-    )
-    if cached is not None:
-        if emit is not None:
-            emit(
-                "refpool.cache_hit",
-                {
-                    "path": str(emb_path),
-                    "rows": len(cached["accessions"]),
-                    "bytes": int(cached["embeddings"].nbytes),
-                },
-            )
-        return cached["accessions"], cached["embeddings"]
+    """Invoke ``db_loader``, persist to disk, emit ``cache_write`` audit event."""
     if emit is not None and emb_path.exists():
         emit("refpool.cache_stale", {"path": str(emb_path)})
     accessions, embeddings = db_loader()
@@ -301,6 +330,42 @@ def _load_reference_pool_cached(
     return accessions, embeddings
 
 
+def _load_reference_pool_cached(
+    embedding_config_id: uuid.UUID,
+    annotation_set_id: uuid.UUID,
+    db_loader: Callable[[], tuple[list[str], np.ndarray]],
+    *,
+    expected_count: int | None = None,
+    emit: Callable[[str, dict[str, Any]], None] | None = None,
+    freshness_seconds: int = 0,
+) -> tuple[list[str], np.ndarray]:
+    """Return ``(accessions, embeddings)`` for the reference pool with disk-cache.
+
+    ``db_loader`` is invoked only on miss or when the cached row count diverges
+    from ``expected_count``.  When ``freshness_seconds > 0`` and the cache
+    files are newer than that window, the COUNT(*) validation is skipped
+    entirely; a ``refpool.cache_hit_fresh`` audit event is emitted instead of
+    ``refpool.cache_hit``.  ``emit`` receives ``refpool.cache_hit`` /
+    ``refpool.cache_hit_fresh`` / ``refpool.cache_stale`` /
+    ``refpool.cache_write`` events; pass ``None`` to stay quiet.
+    """
+    emb_path, _ = _disk_cache_paths(embedding_config_id, annotation_set_id)
+    if freshness_seconds > 0 and _is_cache_fresh(
+        embedding_config_id, annotation_set_id, freshness_seconds
+    ):
+        cached = _load_from_disk_cache(embedding_config_id, annotation_set_id)
+        if cached is not None:
+            _emit_cache_hit(emit, emb_path, cached, fresh=True, freshness_seconds=freshness_seconds)
+            return cached["accessions"], cached["embeddings"]
+    cached = _load_from_disk_cache(
+        embedding_config_id, annotation_set_id, expected_count=expected_count
+    )
+    if cached is not None:
+        _emit_cache_hit(emit, emb_path, cached)
+        return cached["accessions"], cached["embeddings"]
+    return _load_and_write_cache(embedding_config_id, annotation_set_id, db_loader, emit, emb_path)
+
+
 __all__ = [
     "_DISK_CACHE_DIR",
     "_anno_disk_cache_paths",
@@ -309,6 +374,7 @@ __all__ = [
     "_csr_lookup",
     "_derive_reference_views",
     "_disk_cache_paths",
+    "_is_cache_fresh",
     "_load_anno_csr_from_disk",
     "_load_from_disk_cache",
     "_load_reference_pool_cached",
