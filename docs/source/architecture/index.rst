@@ -42,6 +42,17 @@ concern and links to the others where they intersect.
    FARM-AUTH.1-11 (ADR D37). Human email+password login, API-key programmatic
    access, session revocation, per-user quota, optional SMTP, and audit log.
 
+:doc:`multistage-pipeline`
+   Shared coordinator/fan-out/collect contract (``MultiStagePayload``,
+   ``StageArtifactStore``, ``PipelineStage``, ``Coordinator``) that the three
+   production pipelines will converge onto.
+
+:doc:`export-coordinator`
+   The minijob-based dataset export pipeline: ``PROTEA_EXPORT_MINIJOBS`` env gate,
+   fan-out into KNN batch minijobs, fast-fail pre-flight, aggregate failure
+   semantics, accepted search backends (numpy/faiss/torch), and
+   ``annotation_set_id`` auto-derivation.
+
 Architecture Decision Records
 -----------------------------
 
@@ -92,4 +103,5 @@ The full ADR index lives at :doc:`/adr/index`.
    orchestration
    auth
    multistage-pipeline
+   export-coordinator
    /adr/index

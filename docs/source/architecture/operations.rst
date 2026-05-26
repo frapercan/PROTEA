@@ -1670,6 +1670,60 @@ All feature-engineering columns declared in :class:`GOPrediction`
 (``identity_nw``, ``similarity_sw``, ``taxonomic_distance``, etc.) are written
 in the same insert when they are present in the payload.
 
+.. _gpu-torch-install:
+
+.. rubric:: GPU torch installation
+
+PROTEA's ``pyproject.toml`` pins torch to the ``pytorch-cpu`` PyPI source so
+that CI runners and the slim production Docker image do not pull the ~6 GB
+NVIDIA / triton wheel stack. Hosts that run GPU inference
+(``compute_embeddings_batch`` workers, or the ``torch`` KNN backend in the
+export pipeline) must override torch with a CUDA-capable wheel after every
+``poetry install`` or ``poetry update``.
+
+.. code-block:: bash
+
+   # Default: cu128 (NVIDIA driver 570+)
+   bash scripts/install_gpu_torch.sh
+
+   # Override for older drivers
+   CUDA_VARIANT=cu121 bash scripts/install_gpu_torch.sh
+   CUDA_VARIANT=cu118 bash scripts/install_gpu_torch.sh
+
+   # Point at an explicit venv (CI, smoke tests)
+   VENV_PATH=/tmp/torch-smoke bash scripts/install_gpu_torch.sh
+
+The ``CUDA_VARIANT`` default is ``cu128`` as of PR #564. The script
+validates compatibility against the ``protea-method`` torch-GPU KNN backend;
+cu128 is tested against NVIDIA driver 570 and 580 series.
+
+.. rubric:: Re-running after poetry sync
+
+Both ``poetry install`` (sync mode) and ``poetry update`` reinstall the CPU torch
+wheel from ``pytorch-cpu``, silently downgrading the CUDA build. You must
+re-run ``scripts/install_gpu_torch.sh`` after every sync to restore GPU
+capability. A quick self-check is included in the script output:
+
+.. code-block:: text
+
+   >>> import torch self-check:
+   torch 2.x.y+cu128 cuda_available=True
+
+If ``cuda_available=False`` after the script, the driver is too old for
+the selected variant or the CUDA runtime is not found. Try an older
+variant (``cu121``) or check that ``nvidia-smi`` shows a live device.
+
+.. rubric:: Why runtime deps are included
+
+Torch on Linux ships its CUDA runtime through the ``nvidia-*`` PyPI
+packages (``nvidia-cudnn-cu12``, ``nvidia-cublas-cu12``, etc.). Skipping
+dependency resolution (e.g. via ``pip install`` with the no-deps flag)
+leaves those absent and ``import torch`` fails at
+load time with a missing ``libcudnn.so`` error.
+The script lets pip resolve the runtime deps automatically; any unrelated
+version bumps (sympy, networkx, MarkupSafe) stay inside the permissive
+ranges declared in ``pyproject.toml``.
+
 Registering a new operation
 ----------------------------
 
