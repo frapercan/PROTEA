@@ -187,7 +187,7 @@ export const test = base.extend<{ mockApi: MockApi }>({
     // etc.) that require auth do not fail. The JWT payload is cosmetic
     // in the mock fixtures; the backend rejects the signature anyway.
     // We use a far-future expiry (year 2050) so it never expires during tests.
-    const testJwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0LXVzZXIiLCJleHAiOjI1MjQ2MDgwMDAsImlhdCI6MTcxNjU0MTUwMCwicm9sZSI6Im9wZXJhdG9yIn0.test";
+    const testJwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0LXVzZXIiLCJleHAiOjI1MjQ2MDgwMDAsImlhdCI6MTcxNjU0MTUwMCwicm9sZSI6ImFkbWluIn0.test";
     // Set the session cookie at the context level BEFORE any navigation
     // so the middleware sees it on the very first request. addInitScript
     // runs inside the page after navigation starts; by then the middleware
