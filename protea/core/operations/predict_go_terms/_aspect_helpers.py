@@ -6,6 +6,7 @@ Behaviour is unchanged.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -43,6 +44,39 @@ class _AspectKnnPreSearch:
     """
 
     @staticmethod
+    def _knn_one_aspect(
+        aspect: str,
+        valid_accessions: list[str],
+        query_embeddings: np.ndarray,
+        ref_data_by_aspect: dict[str, dict[str, Any]],
+        p: PredictGOTermsBatchPayload,
+        use_cos: bool,
+    ) -> tuple[str, list[list[tuple[str, float]]]]:
+        """Run KNN for one GO aspect and return ``(aspect, neighbors_list)``."""
+        aspect_refs = ref_data_by_aspect[aspect]
+        if not aspect_refs["accessions"]:
+            return aspect, [[] for _ in valid_accessions]
+        ref_f32 = (
+            aspect_refs["embeddings_f32_cos"] if use_cos else aspect_refs["embeddings_f32"]
+        )
+        result = search_knn(
+            query_embeddings,
+            ref_f32,
+            aspect_refs["accessions"],
+            k=p.limit_per_entry,
+            distance_threshold=p.distance_threshold,
+            backend=p.search_backend,
+            metric=p.metric,
+            pre_normalized=use_cos,
+            faiss_index_type=p.faiss_index_type,
+            faiss_nlist=p.faiss_nlist,
+            faiss_nprobe=p.faiss_nprobe,
+            faiss_hnsw_m=p.faiss_hnsw_m,
+            faiss_hnsw_ef_search=p.faiss_hnsw_ef_search,
+        )
+        return aspect, result
+
+    @staticmethod
     def run(
         valid_accessions: list[str],
         query_embeddings: np.ndarray,
@@ -51,43 +85,35 @@ class _AspectKnnPreSearch:
     ) -> tuple[dict[str, list[list[tuple[str, float]]]], set[str]]:
         """Return ``(neighbors_by_aspect, all_unique_neighbors)``.
 
-        ``all_unique_neighbors`` is the union across aspects so the
-        feature-engineering loaders run once per pair regardless of how
-        many aspects reference it.
+        Per-aspect KNN searches run in parallel via ``ThreadPoolExecutor``
+        when ``aspect_knn_workers > 1`` (default 3). numpy's BLAS routines
+        release the GIL for matrix ops so the three searches overlap on CPU.
         """
-        neighbors_by_aspect: dict[str, list[list[tuple[str, float]]]] = {}
-        all_unique_neighbors: set[str] = set()
+        from protea.config.tuning import get_tuning
 
+        n_workers = get_tuning().operation.aspect_knn_workers
         use_cos = p.metric == "cosine"
-        for aspect in _ASPECTS:
-            aspect_refs = ref_data_by_aspect[aspect]
-            if not aspect_refs["accessions"]:
-                neighbors_by_aspect[aspect] = [[] for _ in valid_accessions]
-                continue
 
-            ref_f32 = (
-                aspect_refs["embeddings_f32_cos"] if use_cos else aspect_refs["embeddings_f32"]
+        def _run_one(asp: str) -> tuple[str, list[list[tuple[str, float]]]]:
+            return _AspectKnnPreSearch._knn_one_aspect(
+                asp, valid_accessions, query_embeddings, ref_data_by_aspect, p, use_cos
             )
-            aspect_neighbors = search_knn(
-                query_embeddings,
-                ref_f32,
-                aspect_refs["accessions"],
-                k=p.limit_per_entry,
-                distance_threshold=p.distance_threshold,
-                backend=p.search_backend,
-                metric=p.metric,
-                pre_normalized=use_cos,
-                faiss_index_type=p.faiss_index_type,
-                faiss_nlist=p.faiss_nlist,
-                faiss_nprobe=p.faiss_nprobe,
-                faiss_hnsw_m=p.faiss_hnsw_m,
-                faiss_hnsw_ef_search=p.faiss_hnsw_ef_search,
-            )
-            neighbors_by_aspect[aspect] = aspect_neighbors
-            for top_refs in aspect_neighbors:
+
+        neighbors_by_aspect: dict[str, list[list[tuple[str, float]]]] = {}
+        if n_workers > 1 and len(_ASPECTS) > 1:
+            with ThreadPoolExecutor(max_workers=n_workers) as pool:
+                for asp, result in pool.map(_run_one, _ASPECTS):
+                    neighbors_by_aspect[asp] = result
+        else:
+            for aspect in _ASPECTS:
+                asp, result = _run_one(aspect)
+                neighbors_by_aspect[asp] = result
+
+        all_unique_neighbors: set[str] = set()
+        for top_refs_list in neighbors_by_aspect.values():
+            for top_refs in top_refs_list:
                 for ref_acc, _ in top_refs:
                     all_unique_neighbors.add(ref_acc)
-
         return neighbors_by_aspect, all_unique_neighbors
 
 

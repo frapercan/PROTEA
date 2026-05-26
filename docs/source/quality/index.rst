@@ -232,21 +232,6 @@ flag documentation must use inline backticks rather than fenced bash
 blocks. Prose in RST section underlines uses ``=``, ``~``, and ``^``
 throughout this page for that reason.
 
-Co-author Claude guard (three layers)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Three independent gates block "Co-Authored-By: Claude" from entering
-the repository:
-
-1. **pre-commit hook** (``commit-msg`` stage) rejects any commit whose
-   message body contains the co-author trailer.
-2. **commit-msg hook** runs the same check at the git level for
-   worktree-bootstrapped agents.
-3. **CI workflow** (``.github/workflows/coauthor-guard.yml``) scans
-   every commit in the PR diff against ``origin/develop`` and fails the
-   check if the trailer is present. This server-side layer catches
-   agents that bypass local hooks (FARM-1.1 incident, 2026-05-16).
-
 Stash audit
 ~~~~~~~~~~~
 
@@ -290,8 +275,6 @@ Required checks on ``develop``-targeted PRs:
      - Cosmic Ray on PR-touched core modules (informational, not blocking)
    * - ``reranker-token-lint.yml``
      - Dataset naming convention in docs and README prose
-   * - ``coauthor-guard.yml``
-     - No Claude co-author trailers in commits
    * - ``stash-audit.yml``
      - No git stash entries in the checked-out branch
    * - ``auto-merge.yml``
@@ -469,7 +452,8 @@ Architectural patterns
     is the single source of truth for which operations are available.
     Every ``POST /v1/jobs`` dispatch resolves the ``operation`` field
     through this registry. Ad-hoc endpoint calls outside the registry are
-    a hard constraint violation per ``CLAUDE.md``.
+    a hard constraint violation per the project's hard-constraints
+    document (``CLAUDE.md`` in the repo root).
 
 **Event-driven architecture**
     ``protea.jobs``, ``protea.embeddings``, ``protea.predictions``,
@@ -515,6 +499,155 @@ Security
     (``protea/core/reranker.py``, ``protea/core/_pair_feature_compute.py``).
     This satisfies bandit's ``B324`` rule without a ``# noqa`` suppression.
 
+Coverage gates
+==============
+
+**pytest-cov** is wired into the unit-test workflow
+(``.github/workflows/test.yml``). Coverage is computed against
+``protea/`` and emitted as ``coverage.xml`` for the GitHub Actions
+summary. The current target is **80 % branch coverage** for
+``protea/core`` and ``protea/api`` (the domain-critical layers); the
+overall repo target is **70 % statement coverage**. Coverage
+regressions on a PR diff are surfaced as a comment by the
+``coverage-comment`` action but are advisory: a drop alone does not
+block the merge. The hard requirement is the underlying test suite
+passing; coverage is the visible side-channel that prevents silent
+test-coverage erosion.
+
+**Mutation score** (cosmic-ray) is a complementary signal: it answers
+"are my tests actually killing bugs?" rather than "did my tests
+execute the line?". The 76 % / 83 % effective baseline on
+``protea/core/scoring.py`` (see :doc:`mutation-testing`) is the
+quality bar; the workflow runs on every PR that touches
+``protea/core/`` modules but is informational, never blocking.
+
+Type checking with mypy
+========================
+
+The ``lint.yml`` workflow runs ``mypy --config-file pyproject.toml``
+against the full ``protea/`` package. Strict-mode is enabled module-
+by-module (``[tool.mypy.overrides]`` in ``pyproject.toml``);
+new modules are added in strict mode as a default. SQLAlchemy 2.0
+mapped types are typed via ``Mapped[...]`` annotations across the ORM
+layer, so the static analysis catches refactors that would otherwise
+fail only at runtime when a relationship name changes.
+
+Third-party libraries without published stubs are stubbed in
+``stubs/`` (project-local) or marked ``ignore_missing_imports`` per
+module. The escape hatch is logged in ``pyproject.toml`` rather than
+sprinkled as ``# type: ignore`` comments in source.
+
+Schema migration testing
+=========================
+
+Alembic migrations under ``alembic/versions/`` are reversible by
+contract. Every migration must define both ``upgrade()`` and
+``downgrade()``, paired with an ``op.create_index`` / ``op.drop_index``
+or ``op.add_column`` / ``op.drop_column`` mirror. The integration
+workflow exercises this by performing a full ``alembic upgrade head``
+on a fresh Postgres container at the start of the run; selected PRs
+that touch schema additionally run ``alembic downgrade -1`` followed
+by ``alembic upgrade head`` to verify the round-trip.
+
+The unique partial index added for the ``job.dedup_key`` column
+(F-OPS-JOBS.1a, migration ``a7b3c8d2e1f4``) is a recent example of a
+migration that ships a round-trip test in the same PR.
+
+Branch protection and auto-merge policy
+========================================
+
+The ``develop`` branch is protected on GitHub with the following
+configuration:
+
+* **Required status checks**: every workflow listed in the
+  *CI gates* table above must pass before a PR can be merged. The
+  exact list is enforced by GitHub branch-protection rules and is
+  duplicated in ``.github/branch-protection.json`` for audit.
+* **Required approvals**: PRs must have at least one approving
+  review.
+* **Linear history**: merge commits are disabled; the merge button
+  squashes the PR commits into a single commit on develop.
+* **Dismiss stale approvals**: any push after an approval invalidates
+  it.
+
+The auto-merge workflow (``.github/workflows/auto-merge.yml``) enables
+GitHub's native auto-merge feature on non-draft PRs that target
+``develop``. Once all required status checks pass and any required
+reviews are submitted, the PR squash-merges automatically.
+
+Two notes about the auto-merge policy:
+
+* **Advisory checks** (bandit at low severity, reranker-token linter
+  on certain doc files, cosmic-ray mutation score) can be red without
+  blocking the merge. The required checks list is conservative on
+  purpose; advisory checks are visible signals that get fixed in
+  follow-up PRs.
+* **Hotfixes** to ``main`` (production) follow a separate flow:
+  cherry-picked from develop, gated by the same checks, manually
+  merged by an operator.
+
+Observability and SLO
+======================
+
+Three observability surfaces are instrumented:
+
+**Structured logs**
+    Every worker and the API emit JSON-line logs with structured
+    fields (``timestamp``, ``level``, ``logger``, ``job_id``,
+    ``operation``, ``stage``, ``fields``). Logs are written to
+    ``logs/`` locally and shipped to Loki via the
+    ``loki-docker-driver`` (T5.4) in deployed environments. The
+    queue-consumer middleware emits one event per state transition
+    and one per significant stage boundary inside an operation,
+    creating an audit trail that survives worker restarts.
+
+**Metrics**
+    A ``/metrics`` endpoint (T5.2) exposes Prometheus counters and
+    histograms: ``protea_job_state_transitions_total{from,to}``,
+    ``protea_operation_duration_seconds{op}``,
+    ``protea_queue_depth{queue}``, ``protea_http_requests_total``
+    plus latency histograms. The Grafana dashboards (T5.3) graph
+    these against an SLO of *95 % of jobs reach SUCCEEDED or FAILED
+    within 6 h of dispatch*, with a separate panel per long-running
+    operation (``export_research_dataset``, ``compute_embeddings``,
+    ``run_cafa_evaluation``).
+
+**Traces (OpenTelemetry)**
+    FastAPI + SQLAlchemy + pika are instrumented via OTel
+    auto-instrumentation (T5.1). Spans are emitted to an OTLP
+    collector; the collector is configured for Tempo in deployed
+    environments and stdout in dev. A request that crosses the
+    API → queue → worker → DB → artifact-store boundary produces a
+    single trace tree, which is essential when diagnosing a slow
+    export.
+
+Definition of done and PR checklist
+====================================
+
+A PR is considered ready to merge when:
+
+1. **All required CI checks are green** (the workflows listed in
+   *CI gates*).
+2. **Local CI was run before pushing** (``ruff``, ``mypy``,
+   ``pytest``, ``check_smells.py``). The pre-commit hook bundle
+   enforces the smallest set automatically; the full suite is the
+   author's responsibility.
+3. **The PR description references the slice id** (e.g.
+   ``F-OPS-JOBS.1a``) and includes a one-line summary of what
+   changed and why.
+4. **No new offenders** in the smell budget. If new offenders are
+   intentional (legitimate feature growth), the baseline is updated
+   in the same PR via ``python scripts/check_smells.py --write-baseline``.
+5. **OpenAPI is in sync** if the change touched router code:
+   ``poetry run python scripts/generate_openapi.py`` updates
+   ``docs/openapi.json``.
+6. **The plan store is updated** if the PR closes a slice: the
+   slice's status moves to ``done`` and the ``pr:`` field records
+   the PR number.
+7. **Documentation is updated** when the change introduces or
+   removes a public surface: Sphinx pages, ADR if architectural,
+   runbook if operational.
+
 Documentation hygiene
 ======================
 
@@ -527,12 +660,13 @@ Documentation hygiene
     dataset naming), D37 (auth users/roles multi-instance),
     D38 (neural head deferred, dataset-pack pivot).
 
-**CLAUDE.md hard constraints**
-    ``CLAUDE.md`` (repo root) and ``agent-farm/CLAUDE.md`` list
-    non-negotiable constraints for every automated session: no pgvector
+**Hard constraints document**
+    The repo-root ``CLAUDE.md`` and ``agent-farm/CLAUDE.md`` list
+    non-negotiable constraints for every session: no pgvector
     for KNN at scale, no direct push to main/develop, no stash, no
-    co-author trailers, no em-dashes in prose. Agents read these files
-    at session start.
+    em-dashes in prose, no force push, no skipping pre-commit hooks.
+    These are read by all contributors and any automated tooling at
+    session start.
 
 **Plan store**
     ``agent-farm/plans/<loop>/PLAN.md`` is the canonical slice catalog.

@@ -96,30 +96,14 @@ class _ReferenceMixin:
     ) -> dict[str, Any]:
         """Load reference accessions and embeddings (float16) into the process cache.
 
-        Disk cache first (survives worker restarts); falls back to a
-        streamed DB load on miss / count-mismatch. A cheap accession-only
-        ``COUNT(*)`` runs every call to detect drift after a reference
-        re-ingest. GO annotations are loaded lazily per batch elsewhere.
+        Disk cache first (survives worker restarts); falls back to a streamed DB
+        load on miss / count-mismatch. When the disk cache files are fresh (mtime
+        within ``ref_cache_freshness_seconds``), the expensive COUNT(*)-over-JOIN
+        is skipped entirely. GO annotations are loaded lazily per batch elsewhere.
         """
         emit("predict_go_terms_batch.load_references_start", None, {}, "info")
-        source = "disk_cache"
-        accession_q = self._reference_pool_query(
-            session, embedding_config_id, annotation_set_id
-        )
-
-        def _db_loader() -> tuple[list[str], np.ndarray]:
-            nonlocal source
-            source = "database"
-            return self._stream_reference_pool(accession_q)
-
-        accessions, embeddings = _load_reference_pool_cached(
-            embedding_config_id,
-            annotation_set_id,
-            _db_loader,
-            expected_count=accession_q.count(),
-            emit=lambda ev, fields: emit(
-                f"predict_go_terms_batch.{ev}", None, fields, "info"
-            ),
+        accessions, embeddings, source = self._load_ref_pool(
+            session, embedding_config_id, annotation_set_id, emit
         )
         emit(
             "predict_go_terms_batch.load_references_done",
@@ -132,6 +116,49 @@ class _ReferenceMixin:
             "info",
         )
         return _derive_reference_views(accessions, embeddings)
+
+    def _load_ref_pool(
+        self,
+        session: Session,
+        embedding_config_id: uuid.UUID,
+        annotation_set_id: uuid.UUID,
+        emit: EmitFn,
+    ) -> tuple[list[str], np.ndarray, str]:
+        """Fetch ``(accessions, embeddings, source)`` via disk cache or DB.
+
+        When the cache files are fresh (mtime within
+        ``ref_cache_freshness_seconds``), the COUNT(*)-over-JOIN is skipped
+        so the fast path requires zero DB round-trips. ``source`` is
+        ``"disk_cache"`` on hit and ``"database"`` on miss.
+        """
+        from protea.config.tuning import get_tuning
+        from protea.core.disk_cache import _is_cache_fresh
+
+        freshness_sec = get_tuning().operation.ref_cache_freshness_seconds
+        source = "disk_cache"
+        accession_q = self._reference_pool_query(session, embedding_config_id, annotation_set_id)
+
+        def _db_loader() -> tuple[list[str], np.ndarray]:
+            nonlocal source
+            source = "database"
+            return self._stream_reference_pool(accession_q)
+
+        if freshness_sec > 0 and _is_cache_fresh(
+            embedding_config_id, annotation_set_id, freshness_sec
+        ):
+            expected: int | None = None
+        else:
+            expected = accession_q.count()
+
+        accessions, embeddings = _load_reference_pool_cached(
+            embedding_config_id,
+            annotation_set_id,
+            _db_loader,
+            expected_count=expected,
+            emit=lambda ev, fields: emit(f"predict_go_terms_batch.{ev}", None, fields, "info"),
+            freshness_seconds=freshness_sec,
+        )
+        return accessions, embeddings, source
 
     def _reference_pool_query(
         self,

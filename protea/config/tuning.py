@@ -231,6 +231,27 @@ class OperationTuning(BaseModel):
             "distancias (500 x 500k x 4B ~ 1 GB)."
         ),
     )
+    ref_cache_freshness_seconds: int = Field(
+        default=300,
+        ge=0,
+        description=(
+            "Ventana de frescura del disco cache de reference pool en segundos. "
+            "Si los archivos .npy existen y su mtime es menor a este umbral, "
+            "se salta la COUNT(*) de validación (consulta cara sobre JOIN de "
+            "500k+ filas). 0 desactiva el skip y siempre ejecuta COUNT(*). "
+            "Override: PROTEA_TUNING__operation__ref_cache_freshness_seconds."
+        ),
+    )
+    aspect_knn_workers: int = Field(
+        default=3,
+        ge=1,
+        description=(
+            "Hilos del ThreadPoolExecutor para el KNN por aspecto cuando "
+            "aspect_separated_knn=true. 3 = un hilo por aspecto (MF/BP/CC) "
+            "en paralelo. numpy libera el GIL en operaciones matriciales "
+            "por lo que la ganancia es real. 1 desactiva la paralelización."
+        ),
+    )
 
 
 class APILimits(BaseModel):
