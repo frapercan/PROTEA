@@ -630,7 +630,9 @@
       "mLabel": "M",
       "efSearchLabel": "efSearch",
       "launchAnnotationJob": "Launch Annotation Job",
-      "launching": "Launching…"
+      "launching": "Launching…",
+      "openPage": "Open page",
+      "formInvalidHint": "Please fix the required fields above before launching."
     },
     "resultsTab": {
       "title": "Results",

@@ -631,7 +631,9 @@
       "mLabel": "M",
       "efSearchLabel": "efSearch",
       "launchAnnotationJob": "启动注释任务",
-      "launching": "启动中…"
+      "launching": "启动中…",
+      "openPage": "打开页面",
+      "formInvalidHint": "请先修正上方必填字段，再提交。"
     },
     "resultsTab": {
       "title": "结果",
@@ -1014,95 +1016,6 @@
       "body": "当 export_research_dataset 任务完成时，Dataset 行会自动创建。从上方按钮调度，或通过引用注册现有实验室转储。",
       "ctaDispatch": "调度新导出",
       "ctaImport": "通过引用导入"
-    }
-  },
-  "admin": {
-    "experimentRuns": {
-      "title": "实验运行",
-      "subtitle": "F-EXP 活动的叙述主线：每次研究运行都带有描述、假设、结构化配置、来源覆盖层与发现。按名称与 Job / EvaluationResult / RerankerModel 行关联。",
-      "adminBadge": "管理",
-      "adminBadgeTooltip": "写操作由部署中配置的 API key / bearer 鉴权模式保护。",
-      "newRun": "新运行",
-      "refresh": "刷新",
-      "refreshing": "刷新中…",
-      "filterAriaLabel": "按状态过滤运行",
-      "filters": {
-        "all": "全部"
-      },
-      "status": {
-        "planned": "已规划",
-        "running": "进行中",
-        "done": "已完成",
-        "abandoned": "已放弃"
-      },
-      "cols": {
-        "name": "名称",
-        "status": "状态",
-        "tags": "标签",
-        "created": "创建于",
-        "actions": "操作"
-      },
-      "actions": {
-        "edit": "编辑",
-        "delete": "删除",
-        "cancel": "取消"
-      },
-      "emptyAll": "暂无实验运行。新建第一个以启动一段活动叙述。",
-      "emptyFiltered": "没有运行符合当前状态筛选。",
-      "deleteConfirm": "删除实验运行 \"{name}\"？此操作不可撤销。",
-      "deleteDialog": {
-        "title": "删除实验运行？",
-        "body": "这将从服务器删除该行。叙述、假设和发现将无法恢复。",
-        "confirm": "删除运行",
-        "confirming": "正在删除…"
-      },
-      "modal": {
-        "close": "关闭对话框"
-      },
-      "toasts": {
-        "created": "已创建实验运行 \"{name}\"",
-        "updated": "已更新实验运行 \"{name}\"",
-        "deleted": "已删除实验运行 \"{name}\""
-      },
-      "mint": {
-        "title": "创建新的实验运行",
-        "subtitle": "默认处于已规划状态。运行开始后，通过编辑模态切换状态。",
-        "submit": "创建运行",
-        "submitting": "正在创建…"
-      },
-      "edit": {
-        "title": "编辑运行：{name}",
-        "subtitle": "可修改叙述、状态、标签、配置或来源。状态切换会在服务端自动标记 started_at / finished_at。",
-        "submit": "保存修改",
-        "submitting": "正在保存…"
-      },
-      "fields": {
-        "name": "名称",
-        "status": "状态",
-        "statusHelp": "首次切到“进行中”会标记 started_at。首次切到“已完成”或“已放弃”会标记 finished_at。再次进入同一状态是幂等的。",
-        "description": "描述",
-        "descriptionPlaceholder": "在详情页面显示的自由格式意图文本。",
-        "hypothesis": "假设",
-        "hypothesisPlaceholder": "此次运行试图验证或推翻的内容。",
-        "findings": "发现",
-        "findingsHelp": "在切换到“已完成”时填写以记录总结。",
-        "tags": "标签",
-        "tagsHelp": "以逗号或空格分隔的分组令牌（例如 ablation、K-sweep）。",
-        "config": "配置 (JSON)",
-        "configHelp": "自由格式的 JSON 对象：超参数、特性开关、数据集别名。留空可清除。",
-        "provenance": "来源覆盖层 (JSON)",
-        "provenanceHelp": "自由格式的 JSON 对象，会与服务器基础来源（git sha、主机名、时间戳）合并。留空可清除。"
-      },
-      "readonly": {
-        "id": "ID",
-        "startedAt": "开始于",
-        "finishedAt": "完成于"
-      },
-      "errors": {
-        "nameRequired": "名称为必填。",
-        "configInvalid": "配置 JSON 无效：{reason}",
-        "provenanceInvalid": "来源 JSON 无效：{reason}"
-      }
     }
   },
   "admin": {
