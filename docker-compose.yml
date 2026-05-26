@@ -2,6 +2,7 @@ services:
 
   postgres:
     image: pgvector/pgvector:pg16
+    shm_size: 2gb
     environment:
       POSTGRES_USER: protea
       POSTGRES_PASSWORD: protea
