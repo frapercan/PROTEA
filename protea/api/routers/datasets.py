@@ -28,15 +28,22 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session, sessionmaker
 
-from protea.api.deps import get_amqp_url, get_session_factory
+from protea.api.deps import get_amqp_url, get_session_factory, get_settings
 from protea.api.rate_limit import datasets_limit, limiter
 from protea.api.roles import ROLE_OPERATOR, require_role
+from protea.api.routers.datasets_detail import (
+    _ARTIFACT_FILENAME,
+    compute_aspect_stats,
+    presigned_redirect,
+    stream_local_file,
+)
 from protea.core.schema_sha_v2 import maybe_v2
 from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.embedding.dataset import Dataset
 from protea.infrastructure.orm.models.job import Job, JobEvent
 from protea.infrastructure.queue.publisher import publish_job
 from protea.infrastructure.session import session_scope
+from protea.infrastructure.settings import Settings
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
@@ -669,3 +676,81 @@ def get_dataset(
         if row is None:
             raise HTTPException(status_code=404, detail=f"Dataset {id_or_name!r} not found")
         return _dataset_to_dict(row)
+
+
+def _resolve_dataset_by_id(dataset_id: str, session: Session) -> Dataset:
+    """Resolve a Dataset by UUID; raise 404 when not found."""
+    try:
+        row = session.get(Dataset, UUID(dataset_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="dataset_id must be a UUID") from exc
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Dataset {dataset_id!r} not found")
+    return row
+
+
+@router.get(
+    "/{dataset_id}/stats",
+    summary="Aspect-level statistics for a dataset",
+)
+def get_dataset_stats(
+    dataset_id: str,
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+) -> dict[str, Any]:
+    """Return per-aspect protein / GO-term / annotation counts for a dataset.
+
+    Reads from ``dataset.meta['aspect_stats']`` when present (populated
+    by backfill or a previous call). On a cache miss the counts are
+    computed live and written back. See :mod:`datasets_detail` for the
+    implementation.
+    """
+    with session_scope(factory) as session:
+        row = _resolve_dataset_by_id(dataset_id, session)
+        return compute_aspect_stats(row, session)
+
+
+@router.get(
+    "/{dataset_id}/download",
+    summary="Download a dataset artifact (presigned URL or streamed)",
+    dependencies=[Depends(require_role(ROLE_OPERATOR))],
+)
+def download_dataset_artifact(
+    dataset_id: str,
+    artifact: str = Query(..., description="One of: train, eval, manifest"),
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    """Mint a presigned download URL (MinIO) or stream the file (local).
+
+    For ``storage_backend=minio`` the endpoint 302-redirects to a
+    15-minute presigned GET URL. For ``storage_backend=local`` the
+    artifact bytes are streamed inline. See :mod:`datasets_detail`.
+    """
+    if artifact not in _ARTIFACT_FILENAME:
+        raise HTTPException(
+            status_code=422,
+            detail=f"artifact must be one of: {', '.join(sorted(_ARTIFACT_FILENAME))}",
+        )
+    filename = _ARTIFACT_FILENAME[artifact]
+
+    with session_scope(factory) as session:
+        row = _resolve_dataset_by_id(dataset_id, session)
+
+        if artifact == "train":
+            uri = row.train_uri
+        elif artifact == "eval":
+            uri = row.eval_uri
+        else:
+            uri = row.manifest_uri
+
+        if not uri:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Dataset {dataset_id!r} has no {artifact!r} artifact registered",
+            )
+
+        backend = (row.storage_backend or "local").lower()
+
+    if backend == "minio":
+        return presigned_redirect(uri, filename, settings)
+    return stream_local_file(uri, filename)

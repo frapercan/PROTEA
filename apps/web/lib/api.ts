@@ -1216,6 +1216,32 @@ export function createDataset(body: CreateDatasetPayload) {
   });
 }
 
+export type AspectStat = {
+  proteins: number;
+  go_terms: number;
+  annotations: number;
+};
+
+export type DatasetAspectStats = {
+  aspect_stats: Record<string, AspectStat>;
+};
+
+export function getDatasetStats(datasetId: string) {
+  return http<DatasetAspectStats>(`/datasets/${encodeURIComponent(datasetId)}/stats`);
+}
+
+/**
+ * Returns the download URL for a dataset artifact. The backend
+ * 302-redirects to a presigned MinIO URL (MinIO backend) or streams
+ * the file directly (local backend). The frontend uses this URL in an
+ * ``<a href=...>`` element so the browser drives the redirect.
+ *
+ * Artifact must be one of: train, eval, manifest.
+ */
+export function getDatasetDownloadUrl(datasetId: string, artifact: "train" | "eval" | "manifest"): string {
+  return `${baseUrl()}/datasets/${encodeURIComponent(datasetId)}/download?artifact=${artifact}`;
+}
+
 // ─── API keys (admin) ──────────────────────────────────────────────
 //
 // Mirrors ``protea/api/routers/auth_api_keys.py``. Mint/list/revoke
