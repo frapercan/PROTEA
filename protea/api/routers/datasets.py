@@ -19,6 +19,7 @@ for the lab's ``pull_dataset.py`` and for UI consumers.
 
 from __future__ import annotations
 
+import os
 import uuid
 from datetime import datetime
 from typing import Any
@@ -228,8 +229,18 @@ def create_dataset(
 
         queue_name = "protea.training"
         payload = body.model_dump()
+        # When the minijob pipeline is enabled, route through the
+        # coordinator so the cell is partitioned into per-pair
+        # KNN/feature minijobs across protea.training.knn-batch and
+        # protea.training.features. Otherwise stay on the monolithic
+        # operation for back-compat.
+        operation_name = (
+            "export_coordinator"
+            if os.environ.get("PROTEA_EXPORT_MINIJOBS", "0") == "1"
+            else "export_research_dataset"
+        )
         job = Job(
-            operation="export_research_dataset",
+            operation=operation_name,
             queue_name=queue_name,
             payload=payload,
             meta={"created_at_iso": utcnow().isoformat()},
@@ -242,7 +253,7 @@ def create_dataset(
                 job_id=job_id,
                 event="job.created",
                 fields={
-                    "operation": "export_research_dataset",
+                    "operation": operation_name,
                     "queue": queue_name,
                     "output_name": body.output_name,
                 },
