@@ -70,6 +70,6 @@ export default function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!api|_next|_vercel|sphinx|docs|static|api-proxy|.*\\..*).*)",
+    "/((?!api|_next|_vercel|sphinx|docs|static|api-proxy|v1|farm-api|.*\\..*).*)",
   ],
 };
