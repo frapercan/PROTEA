@@ -136,6 +136,17 @@ cmd_start() {
     printf "\n${BOLD}[7] Evaluations pipeline${RESET}\n"
     _start_bg worker-evaluations poetry run python scripts/worker.py --queue protea.evaluations
 
+    # Export minijob pipeline (only when PROTEA_EXPORT_MINIJOBS=1)
+    if [[ "${PROTEA_EXPORT_MINIJOBS:-0}" == "1" ]]; then
+        printf "\n${BOLD}[8a] Export minijob workers (PROTEA_EXPORT_MINIJOBS=1)${RESET}\n"
+        _start_bg worker-export-knn-batch \
+            poetry run python scripts/worker.py --queue protea.training.knn-batch
+        _start_bg worker-export-features \
+            poetry run python scripts/worker.py --queue protea.training.features
+        _start_bg worker-export-write \
+            poetry run python scripts/worker.py --queue protea.training.write
+    fi
+
     # Stale job reaper
     printf "\n${BOLD}[8] Stale job reaper${RESET}\n"
     _start_bg worker-reaper poetry run python scripts/worker.py --queue reaper

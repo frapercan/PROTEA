@@ -53,6 +53,18 @@ from protea.core.operations.compute_embeddings import (
     ComputeEmbeddingsPayload,
     StoreEmbeddingsPayload,
 )
+from protea.core.operations.export_minijobs._export_features_batch import (
+    ExportFeaturesBatchPayload,
+)
+from protea.core.operations.export_minijobs._export_knn_batch import (
+    ExportKnnBatchPayload,
+)
+from protea.core.operations.export_minijobs._export_write import (
+    ExportWritePayload,
+)
+from protea.core.operations.export_minijobs.export_coordinator import (
+    ExportCoordinatorPayload,
+)
 from protea.core.operations.export_research_dataset import (
     ExportResearchDatasetPayload,
 )
@@ -248,6 +260,58 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         RefreshGoaReleaseDatesPayload,
         {"timeout_seconds": 0},
         ("timeout_seconds",),
+    ),
+    # missing-required: output_name
+    (
+        "export_coordinator",
+        ExportCoordinatorPayload,
+        {
+            "embedding_config_id": "cfg",
+            "annotation_set_id": "ann",
+            "ontology_snapshot_id": "ont",
+            "train_versions": [220, 221],
+            "test_versions": [222],
+        },
+        ("output_name",),
+    ),
+    # missing-required: pair_id
+    (
+        "export_knn_batch",
+        ExportKnnBatchPayload,
+        {
+            "coordinator_job_id": "coord",
+            "train_snapshot_id": 220,
+            "test_snapshot_id": 220,
+            "embedding_config_id": "cfg",
+            "annotation_set_id": "ann",
+            "ontology_snapshot_id": "ont",
+        },
+        ("pair_id",),
+    ),
+    # missing-required: coordinator_job_id
+    (
+        "export_features_batch",
+        ExportFeaturesBatchPayload,
+        {
+            "pair_id": "train-220",
+            "temp_knn_uri": None,
+            "embedding_config_id": "cfg",
+            "annotation_set_id": "ann",
+            "ontology_snapshot_id": "ont",
+        },
+        ("coordinator_job_id",),
+    ),
+    # missing-required: output_name
+    (
+        "export_write",
+        ExportWritePayload,
+        {
+            "coordinator_job_id": "coord",
+            "embedding_config_id": "cfg",
+            "ontology_snapshot_id": "ont",
+            "annotation_set_id": "ann",
+        },
+        ("output_name",),
     ),
 ]
 
