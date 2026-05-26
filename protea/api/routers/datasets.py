@@ -712,7 +712,6 @@ def get_dataset_stats(
 @router.get(
     "/{dataset_id}/download",
     summary="Download a dataset artifact (presigned URL or streamed)",
-    dependencies=[Depends(require_role(ROLE_OPERATOR))],
 )
 def download_dataset_artifact(
     dataset_id: str,

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import Link from "next/link";
-import { baseUrl } from "@/lib/api";
+import { publicBaseUrl } from "@/lib/api";
 import { logout as logoutCall } from "@/lib/authApi";
 import {
   SESSION_COOKIE_NAME,
@@ -215,7 +215,7 @@ export function AuthChip() {
                 </Link>
               )}
               <a
-                href={`${baseUrl()}/docs#/auth`}
+                href={`${publicBaseUrl()}/docs#/auth`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-slate-600 hover:bg-slate-50 hover:text-slate-800"

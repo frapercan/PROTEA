@@ -86,11 +86,16 @@ class StaleJobReaper:
         stall_cutoff = now - self._stall
         session = self._factory()
         try:
+            # F-OPS-JOBS.1: jobs that set leased_until are considered alive
+            # as long as the lease has not expired. Only consider candidates
+            # where the lease is also expired (or NULL, for legacy rows that
+            # pre-date the leasing column).
             candidates = (
                 session.query(Job)
                 .filter(
                     Job.status == JobStatus.RUNNING,
                     Job.started_at < cutoff,
+                    (Job.leased_until.is_(None)) | (Job.leased_until < now),
                 )
                 .all()
             )

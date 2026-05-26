@@ -709,13 +709,22 @@ class TestOperationConsumerEmit:
 
         # Should nack (not requeue by default)
         channel.basic_nack.assert_called_once()
-        # Should have created a session to write the error event
-        # At least: 1 execution session + 1 error event session
+        # Should have created at least: 1 execution session + 1 error event
+        # session (the F-OPS-COORD-FAIL-PROPAGATE aggregate-failure pass may
+        # additionally open a third session to look up the parent row;
+        # since the mocked parent does not match status==RUNNING that
+        # session returns without writing).
         assert len(sessions) >= 2
-        # The error event session should have had .add() called with a JobEvent
-        error_session = sessions[-1]
-        error_session.add.assert_called_once()
-        error_session.commit.assert_called_once()
+        # Across all sessions, the JobEvent add for ``child.failed`` must
+        # have happened exactly once and have been committed.
+        adds_with_commit = [
+            s for s in sessions if s.add.called and s.commit.called
+        ]
+        assert len(adds_with_commit) == 1, (
+            f"expected exactly one session with .add()+.commit() (the "
+            f"child.failed event session), got {len(adds_with_commit)}"
+        )
+        adds_with_commit[0].add.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -1008,10 +1017,13 @@ class TestOperationConsumerOnMessage:
 
         consumer._on_message(channel, method, MagicMock(), self._body(job_id=parent_id))
 
-        # Find the error event session (last one created besides execution session)
-        # sessions: [0]=execution, [1]=error event
-        assert len(sessions) >= 2
-        err_session = sessions[-1]
+        # Identify the error-event session by the JobEvent it adds.
+        # The failure path may open additional sessions (e.g. the
+        # F-OPS-COORD-FAIL-PROPAGATE aggregate-failure probe), so we
+        # locate the writer rather than indexing by position.
+        err_sessions = [s for s in sessions if s.add.called]
+        assert len(err_sessions) == 1
+        err_session = err_sessions[0]
         err_session.add.assert_called_once()
         added_event = err_session.add.call_args[0][0]
         assert added_event.job_id == parent_id
@@ -1053,8 +1065,12 @@ class TestOperationConsumerOnMessage:
         def make_session():
             s = MagicMock()
             sessions_created.append(s)
-            # Sessions are: [1]=cancellation check, [2]=execution, [3]=error
-            # event. Trigger commit failure on the error-event session.
+            # Sessions opened along the failure path:
+            #   [1] cancellation check (no add)
+            #   [2] execution (no add; raises)
+            #   [3] error-event session (calls .add(JobEvent) + .commit)
+            #   [4] F-OPS-COORD-FAIL-PROPAGATE aggregate-failure probe
+            # Trigger commit failure on the error-event session.
             if len(sessions_created) == 3:
                 s.commit.side_effect = RuntimeError("DB gone")
             return s

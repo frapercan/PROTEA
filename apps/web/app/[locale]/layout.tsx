@@ -35,13 +35,105 @@ const newsreader = Newsreader({
   display: "swap",
 });
 
-export const metadata: Metadata = {
-  title: {
-    template: "%s | PROTEA",
-    default: "PROTEA — Functional Annotation",
-  },
-  description: "Protein Functional Embedding-based Annotation, job queue and pipeline management",
+// SEO baseline. Root metadata block is the source of truth for the
+// page <head> on every locale-prefixed route; per-page layouts may
+// override individual fields via their own generateMetadata().
+//
+// metadataBase pins relative URLs (OG images, canonicals) to the
+// public ngrok host. When the production domain locks this should
+// flip to that origin (single line change).
+//
+// description is intentionally a real product sentence rather than a
+// keyword stuffing. Twitter handle is left unset until the project
+// owns one (Next will fall back to the page title/description, which
+// is the right behavior).
+const SITE_URL = "https://protea.ngrok.app";
+const SITE_TITLE = "PROTEA, Protein functional Embedding-based Annotation";
+const SITE_DESCRIPTION =
+  "PROTEA predicts Gene Ontology functions for protein sequences using protein language model embeddings, KNN transfer, and a learning to rank reranker. Open research platform.";
+
+// Map next-intl locales to BCP-47 + OpenGraph locale tags.
+const OG_LOCALE_MAP: Record<string, string> = {
+  en: "en_US",
+  es: "es_ES",
+  de: "de_DE",
+  pt: "pt_PT",
+  zh: "zh_CN",
 };
+
+// Single metadata factory. Next forbids exporting both a static
+// `metadata` and a `generateMetadata` from the same file, so all the
+// locale-aware fields (canonical, hreflang, openGraph.locale) and the
+// site-wide ones share one function.
+export async function generateMetadata(
+  { params }: { params: Promise<{ locale: string }> },
+): Promise<Metadata> {
+  const { locale } = await params;
+  const ogLocale = OG_LOCALE_MAP[locale] ?? OG_LOCALE_MAP.en;
+  const languages: Record<string, string> = {};
+  for (const code of Object.keys(OG_LOCALE_MAP)) {
+    languages[code] = `/${code}`;
+  }
+  return {
+    metadataBase: new URL(SITE_URL),
+    title: {
+      template: "%s | PROTEA",
+      default: SITE_TITLE,
+    },
+    description: SITE_DESCRIPTION,
+    applicationName: "PROTEA",
+    keywords: [
+      "PROTEA",
+      "Gene Ontology",
+      "GO term prediction",
+      "protein function",
+      "protein language model",
+      "CAFA",
+      "bioinformatics",
+      "ESM",
+      "ProstT5",
+      "ESMC",
+      "LightGBM reranker",
+    ],
+    authors: [{ name: "Francisco Miguel Perez Canales" }],
+    creator: "Francisco Miguel Perez Canales",
+    robots: {
+      index: true,
+      follow: true,
+      googleBot: {
+        index: true,
+        follow: true,
+        "max-image-preview": "large",
+        "max-snippet": -1,
+      },
+    },
+    alternates: {
+      canonical: `/${locale}`,
+      languages: {
+        ...languages,
+        "x-default": "/en",
+      },
+    },
+    openGraph: {
+      type: "website",
+      url: `/${locale}`,
+      siteName: "PROTEA",
+      title: SITE_TITLE,
+      description: SITE_DESCRIPTION,
+      locale: ogLocale,
+      alternateLocale: Object.values(OG_LOCALE_MAP).filter((l) => l !== ogLocale),
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: SITE_TITLE,
+      description: SITE_DESCRIPTION,
+    },
+    icons: {
+      icon: "/favicon.ico",
+      apple: "/apple-icon.png",
+    },
+  };
+}
 
 // Ensure mobile browsers render at natural scale (no zoom-out from any
 // stray horizontal overflow). width=device-width, initialScale=1.

@@ -22,9 +22,16 @@ from protea.api.roles import ROLE_ADMIN, ROLE_OPERATOR, require_role, role_of
 from protea.core.contracts.registry import OperationRegistry
 from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.api_key import ApiKey
-from protea.infrastructure.orm.models.job import Job, JobComment, JobEvent, JobStatus
+from protea.infrastructure.orm.models.job import (
+    ACTIVE_STATUSES,
+    Job,
+    JobComment,
+    JobEvent,
+    JobStatus,
+)
 from protea.infrastructure.queue.publisher import publish_job
 from protea.infrastructure.session import session_scope
+from protea.services.jobs_service import compute_dedup_key
 
 
 class JobListFilters(NamedTuple):
@@ -264,6 +271,63 @@ def _maybe_enforce_user_quota(
         )
 
 
+def _check_dedup(session: Session, dedup_key: str) -> None:
+    """Raise HTTP 409 if an active job with the same dedup_key already exists.
+
+    F-OPS-JOBS.1: uses ``WITH FOR UPDATE SKIP LOCKED`` so concurrent requests
+    do not race each other past this guard. ``SKIP LOCKED`` avoids a deadlock
+    when two requests arrive simultaneously; the second one finds no locked
+    row and proceeds to the insert which will then fail at the DB unique index
+    level (giving a clean 500 on the very rare concurrent path rather than a
+    silent duplicate — acceptable given the index is the hard enforcement).
+    """
+    existing = (
+        session.query(Job)
+        .filter(Job.dedup_key == dedup_key, Job.status.in_(ACTIVE_STATUSES))
+        .with_for_update(skip_locked=True)
+        .first()
+    )
+    if existing is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "duplicate_active_job",
+                "existing_job_id": str(existing.id),
+                "message": "An active job with the same operation and payload already exists.",
+            },
+        )
+
+
+def _insert_job_and_event(
+    session: Session, body: CreateJobRequest, dedup_key: str
+) -> Any:
+    """Insert Job + JobEvent rows and return the new job_id.
+
+    Flushed but not committed; the caller's ``session_scope`` context manager
+    owns the commit boundary.
+    """
+    job = Job(
+        operation=body.operation,
+        queue_name=body.queue_name,
+        payload=body.payload,
+        meta=body.meta,
+        description=body.description,
+        tags=list(body.tags),
+        dedup_key=dedup_key,
+    )
+    session.add(job)
+    session.flush()
+    job_id = job.id
+    session.add(
+        JobEvent(
+            job_id=job_id,
+            event="job.created",
+            fields={"operation": body.operation, "queue": body.queue_name},
+        )
+    )
+    return job_id
+
+
 @router.post(
     "",
     summary="Create and enqueue a job",
@@ -281,33 +345,17 @@ def create_job(
 
     Expensive operations (``export_research_dataset``, ``run_cafa_evaluation``) are
     subject to per-user daily quota limits (FARM-AUTH.7). Admins are exempt.
+    Duplicate POSTs (same operation + payload while the previous job is active)
+    return 409 with the existing job_id (F-OPS-JOBS.1 dedup).
     """
-    factory = deps.factory
-    amqp_url = deps.amqp_url
-    quota_map = deps.quota_map
-    _maybe_enforce_user_quota(principal, body, quota_map, factory)
-    with session_scope(factory) as session:
-        job = Job(
-            operation=body.operation,
-            queue_name=body.queue_name,
-            payload=body.payload,
-            meta=body.meta,
-            description=body.description,
-            tags=list(body.tags),
-        )
-        session.add(job)
-        session.flush()
-        job_id = job.id
-        session.add(
-            JobEvent(
-                job_id=job_id,
-                event="job.created",
-                fields={"operation": body.operation, "queue": body.queue_name},
-            )
-        )
+    _maybe_enforce_user_quota(principal, body, deps.quota_map, deps.factory)
+    dedup_key = compute_dedup_key(body.operation, body.payload)
+    with session_scope(deps.factory) as session:
+        _check_dedup(session, dedup_key)
+        job_id = _insert_job_and_event(session, body, dedup_key)
 
     # Publish after commit so the worker always finds the row.
-    publish_job(amqp_url, body.queue_name, job_id)
+    publish_job(deps.amqp_url, body.queue_name, job_id)
     return {"id": str(job_id), "status": "queued"}
 
 
