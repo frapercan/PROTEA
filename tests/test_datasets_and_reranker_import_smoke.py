@@ -496,6 +496,113 @@ class TestRerankerModelsImport:
 
 
 # ---------------------------------------------------------------------------
+# GET /datasets/{id}/stats  and  GET /datasets/{id}/download
+# ---------------------------------------------------------------------------
+
+
+@contextmanager
+def _scope_ctx(session):
+    yield session
+
+
+@pytest.fixture()
+def datasets_detail_client():
+    """Client fixture that includes app.state.settings for download/stats endpoints."""
+    session = MagicMock()
+
+    fake_settings = MagicMock()
+    fake_settings.storage_backend = "local"
+    fake_settings.minio_endpoint = None
+
+    app = FastAPI()
+    app.state.session_factory = MagicMock()
+    app.state.amqp_url = "amqp://stub"
+    app.state.settings = fake_settings
+    app.include_router(datasets_router)
+
+    with patch(
+        "protea.api.routers.datasets.session_scope",
+        side_effect=lambda _: _scope_ctx(session),
+    ), patch(
+        "protea.api.routers.datasets.publish_job"
+    ):
+        yield TestClient(app, raise_server_exceptions=True), session, fake_settings
+
+
+class TestDatasetStats:
+    def _make_ds(self, snap_id=None):
+        ds = _make_dataset_row()
+        ds.ontology_snapshot_id = snap_id or uuid.uuid4()
+        ds.meta = {"aspect_stats": {"bpo": {"proteins": 100, "go_terms": 50, "annotations": 200}}}
+        return ds
+
+    def test_stats_served_from_meta_cache(self, datasets_detail_client):
+        client, session, _ = datasets_detail_client
+        ds = self._make_ds()
+        session.get.return_value = ds
+
+        resp = client.get(f"/datasets/{ds.id}/stats")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["aspect_stats"]["bpo"]["proteins"] == 100
+
+    def test_stats_empty_when_no_snapshot(self, datasets_detail_client):
+        client, session, _ = datasets_detail_client
+        ds = _make_dataset_row()
+        ds.ontology_snapshot_id = None
+        ds.meta = {}
+        session.get.return_value = ds
+
+        resp = client.get(f"/datasets/{ds.id}/stats")
+        assert resp.status_code == 200
+        assert resp.json()["aspect_stats"] == {}
+
+    def test_stats_404_for_unknown_id(self, datasets_detail_client):
+        client, session, _ = datasets_detail_client
+        session.get.return_value = None
+
+        resp = client.get(f"/datasets/{uuid.uuid4()}/stats")
+        assert resp.status_code == 404
+
+
+class TestDatasetDownload:
+    def test_download_422_for_bad_artifact(self, datasets_detail_client):
+        client, session, _ = datasets_detail_client
+        ds = _make_dataset_row()
+        session.get.return_value = ds
+
+        resp = client.get(f"/datasets/{ds.id}/download?artifact=bad")
+        assert resp.status_code == 422
+
+    def test_download_local_streams_file(self, datasets_detail_client, tmp_path):
+        client, session, fake_settings = datasets_detail_client
+        fake_settings.storage_backend = "local"
+
+        content = b"PAR1 fake parquet bytes"
+        p = tmp_path / "manifest.json"
+        p.write_bytes(content)
+
+        ds = _make_dataset_row()
+        ds.storage_backend = "local"
+        ds.manifest_uri = f"file://{p.as_posix()}"
+        session.get.return_value = ds
+
+        resp = client.get(f"/datasets/{ds.id}/download?artifact=manifest")
+        assert resp.status_code == 200
+        assert resp.content == content
+        assert "manifest.json" in resp.headers.get("content-disposition", "")
+
+    def test_download_404_when_artifact_missing(self, datasets_detail_client):
+        client, session, _ = datasets_detail_client
+        ds = _make_dataset_row(train_uri=None)
+        ds.storage_backend = "local"
+        session.get.return_value = ds
+
+        resp = client.get(f"/datasets/{ds.id}/download?artifact=train")
+        assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
 # End-to-end wiring: both routers coexist + the export operation is in the
 # registry; TrainReranker* are *not*.
 # ---------------------------------------------------------------------------

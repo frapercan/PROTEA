@@ -435,6 +435,7 @@ def create_app(project_root: Path | None = None) -> FastAPI:
     app.state.session_factory = factory
     app.state.amqp_url = settings.amqp_url
     app.state.artifacts_dir = settings.artifacts_dir
+    app.state.settings = settings
     app.state.operation_registry = build_operation_registry()
     app.state.benchmark_config = load_benchmark_config(project_root)
     # FARM-AUTH.7: expose quota limits so the dependency can read them

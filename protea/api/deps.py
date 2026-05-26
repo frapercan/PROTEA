@@ -9,6 +9,7 @@ from starlette.requests import Request
 
 from protea.core.contracts.registry import OperationRegistry
 from protea.infrastructure.benchmark_config import BenchmarkConfig
+from protea.infrastructure.settings import Settings
 
 
 def get_session_factory(request: Request) -> sessionmaker[Session]:
@@ -43,6 +44,14 @@ def get_benchmark_config(request: Request) -> BenchmarkConfig:
     cfg = getattr(request.app.state, "benchmark_config", None)
     if cfg is None:
         raise RuntimeError("app.state.benchmark_config is not set")
+    return cfg  # type: ignore[no-any-return]
+
+
+def get_settings(request: Request) -> Settings:
+    """Return the application-level Settings from app state."""
+    cfg = getattr(request.app.state, "settings", None)
+    if cfg is None:
+        raise RuntimeError("app.state.settings is not set")
     return cfg  # type: ignore[no-any-return]
 
 
