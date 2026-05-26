@@ -142,13 +142,11 @@
     "shareCopied": "Link copied"
   },
   "benchmark": {
-    "loadingTitle": "Loading benchmark data…",
-    "loadingHint": "Fetching the evaluation matrix and embedding catalog. The first hit warms a 60-second cache so subsequent filter changes are instant.",
-    "loadingStepMatrix": "Evaluation matrix",
-    "loadingStepEmbeddings": "Embedding catalog",
-    "loadingRowsPreview": "Rows preview"
-  },
-  "benchmark": {
+    "loadingTitle": "Loading benchmark…",
+    "loadingHint": "Resolving embeddings and matrix.",
+    "loadingStepMatrix": "Matrix",
+    "loadingStepEmbeddings": "Embeddings",
+    "loadingRowsPreview": "Rows preview",
     "backToHome": "Back to home"
   },
   "jobs": {

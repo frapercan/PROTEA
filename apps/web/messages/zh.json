@@ -143,13 +143,11 @@
     "shareCopied": "链接已复制"
   },
   "benchmark": {
-    "loadingTitle": "正在加载基准测试数据…",
-    "loadingHint": "正在获取评估矩阵和嵌入向量目录。首次访问会预热 60 秒的缓存,后续筛选操作将瞬时响应。",
-    "loadingStepMatrix": "评估矩阵",
-    "loadingStepEmbeddings": "嵌入向量目录",
-    "loadingRowsPreview": "行预览"
-  },
-  "benchmark": {
+    "loadingTitle": "正在加载基准…",
+    "loadingHint": "正在解析嵌入向量和矩阵。",
+    "loadingStepMatrix": "矩阵",
+    "loadingStepEmbeddings": "嵌入向量",
+    "loadingRowsPreview": "行预览",
     "backToHome": "返回首页"
   },
   "jobs": {

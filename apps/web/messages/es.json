@@ -142,13 +142,11 @@
     "shareCopied": "Enlace copiado"
   },
   "benchmark": {
-    "loadingTitle": "Cargando datos del benchmark…",
-    "loadingHint": "Obteniendo la matriz de evaluación y el catálogo de embeddings. La primera carga calienta una caché de 60 segundos para que los cambios de filtro posteriores sean instantáneos.",
-    "loadingStepMatrix": "Matriz de evaluación",
-    "loadingStepEmbeddings": "Catálogo de embeddings",
-    "loadingRowsPreview": "Vista previa de filas"
-  },
-  "benchmark": {
+    "loadingTitle": "Cargando benchmark…",
+    "loadingHint": "Resolviendo embeddings y matriz.",
+    "loadingStepMatrix": "Matriz",
+    "loadingStepEmbeddings": "Embeddings",
+    "loadingRowsPreview": "Previsualización de filas",
     "backToHome": "Volver al inicio"
   },
   "jobs": {
