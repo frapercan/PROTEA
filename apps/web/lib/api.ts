@@ -1469,3 +1469,69 @@ export function deleteExperimentRun(id: string) {
     method: "DELETE",
   });
 }
+
+// ---------------------------------------------------------------------------
+// DLQ management (F-OPS-JOBS.3)
+// ---------------------------------------------------------------------------
+
+export type DlqGroup = {
+  operation: string;
+  first_death_queue: string;
+  age_bucket: string;
+  count: number;
+};
+
+export type DlqSummary = {
+  total_peeked: number;
+  queue_message_count: number;
+  groups: DlqGroup[];
+};
+
+export function getDlqSummary(maxPeek = 500) {
+  return http<DlqSummary>(`/v1/admin/dlq/summary?max_peek=${maxPeek}`);
+}
+
+export type DlqReplayRequest = {
+  operation?: string | null;
+  first_death_queue?: string | null;
+  target_queue?: string | null;
+  dry_run?: boolean;
+  max_messages?: number;
+};
+
+export type DlqReplayResult = {
+  replayed: number;
+  would_replay: number;
+  skipped: number;
+  dry_run: boolean;
+};
+
+export function replayDlq(body: DlqReplayRequest) {
+  return http<DlqReplayResult>(`/v1/admin/dlq/replay`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export type DlqPurgeRequest = {
+  operation?: string | null;
+  first_death_queue?: string | null;
+  dry_run?: boolean;
+  max_messages?: number;
+};
+
+export type DlqPurgeResult = {
+  purged: number;
+  would_purge: number;
+  skipped: number;
+  dry_run: boolean;
+};
+
+export function purgeDlq(body: DlqPurgeRequest) {
+  return http<DlqPurgeResult>(`/v1/admin/dlq/purge`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
