@@ -16,6 +16,8 @@ to a single try/except.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import uuid
 from typing import Any
 
@@ -39,6 +41,27 @@ class InvalidJobPayloadError(Exception):
         super().__init__("invalid job payload")
 
 
+def compute_dedup_key(operation: str, payload: dict[str, Any]) -> str:
+    """Return a 16-hex-char deduplication key for ``(operation, payload)``.
+
+    The key is the first 16 hex digits of the SHA-256 of a canonical
+    JSON serialisation of ``{"operation": ..., "payload": ...}`` (keys
+    sorted, ASCII-safe). Truncated to 16 chars (64-bit prefix) — collision
+    probability is negligible for the expected job volume.
+
+    The 16-char length fits comfortably in ``VARCHAR(64)`` and keeps the
+    partial unique index compact.
+    """
+    canonical = json.dumps(
+        {"operation": operation, "payload": payload},
+        sort_keys=True,
+        ensure_ascii=True,
+        separators=(",", ":"),
+    )
+    digest = hashlib.sha256(canonical.encode(), usedforsecurity=False).hexdigest()
+    return digest[:16]
+
+
 def enqueue_job(
     session: Session,
     *,
@@ -57,7 +80,8 @@ def enqueue_job(
     Both rows are flushed but not committed; the caller's
     ``session_scope`` context manager owns the transaction.
     """
-    job = Job(operation=operation, queue_name=queue_name, payload=payload)
+    dedup_key = compute_dedup_key(operation, payload)
+    job = Job(operation=operation, queue_name=queue_name, payload=payload, dedup_key=dedup_key)
     session.add(job)
     session.flush()
     job_id = job.id
@@ -105,6 +129,7 @@ def dispatch_validated_job(
 
 __all__ = [
     "InvalidJobPayloadError",
+    "compute_dedup_key",
     "dispatch_validated_job",
     "enqueue_job",
 ]

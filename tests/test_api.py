@@ -60,6 +60,11 @@ def _mock_scope(session):
 @pytest.fixture()
 def session():
     s = MagicMock()
+    # F-OPS-JOBS.1a: the dedup check in create_job calls
+    # session.query(Job).filter(...).with_for_update(skip_locked=True).first()
+    # and expects None to mean "no active duplicate". Configure the chain so
+    # it returns None by default so existing tests don't hit the 409 path.
+    s.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = None
     return s
 
 
