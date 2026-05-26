@@ -36,10 +36,10 @@ real FastAPI app with mocked infrastructure and asserts:
    * - ``GET /v1/proteins``, ``/v1/benchmark``, ``/v1/showcase``
      - No
      - Read-only dashboards; anonymous baseline for all visitors.
-   * - ``GET /v1/evaluation/*``, ``/v1/datasets``, ``/v1/reranker-models``
+   * - ``GET /v1/annotations/evaluation-sets``, ``/v1/datasets``, ``/v1/reranker-models``
      - No
      - Research results; public by policy.
-   * - ``GET /v1/scoring/*``, ``/v1/stack``, ``/v1/docs``
+   * - ``GET /v1/scoring/configs``, ``/v1/stack``, ``/v1/docs``
      - No
      - Reference and stack-health surfaces; no credentials needed.
    * - ``POST /v1/annotate?save_history=false``
@@ -51,9 +51,10 @@ real FastAPI app with mocked infrastructure and asserts:
    * - ``POST /v1/datasets``, ``POST /v1/jobs`` (heavy ops)
      - Yes (``operator``)
      - Pipeline ops; API key or JWT with ``operator`` role.
-   * - ``POST /v1/admin/*``, ``DELETE /v1/users/*``
+   * - ``POST /v1/admin/reset-db``, ``/v1/admin/maintenance/vacuum-sequences/run``
      - Yes (``admin``)
-     - Destructive ops; ``admin`` role only.
+     - Destructive ops; ``admin`` role only. The full admin route set is
+       enumerated in ``tests/test_admin_gating_sweep.py``.
    * - Swagger UI at ``/docs``
      - No
      - The Sidebar link uses ``publicBaseUrl()`` (``NEXT_PUBLIC_API_URL``)
