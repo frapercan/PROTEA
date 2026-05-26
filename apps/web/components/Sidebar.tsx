@@ -39,7 +39,7 @@ import {
   UserCircle2,
   type LucideIcon,
 } from "lucide-react";
-import { baseUrl } from "@/lib/api";
+import { publicBaseUrl } from "@/lib/api";
 import { useHasRole, useIsAuthenticated } from "@/lib/useRole";
 
 /**
@@ -265,7 +265,11 @@ export function Sidebar({
   const annotateHref = onHome
     ? `/${locale}#annotate-form`
     : `/${locale}/functional-annotation`;
-  const swaggerHref = `${baseUrl()}/docs`;
+  // AUTH-PUBLIC-VIEWER: the Swagger href is rendered into HTML and
+  // clicked by the user, so it must use the public ingress (e.g.
+  // ``/api-proxy``) rather than the SSR-only ``127.0.0.1`` fallback
+  // from ``baseUrl()``.
+  const swaggerHref = `${publicBaseUrl()}/docs`;
 
   const NAV_GROUPS: NavGroup[] = [
     {

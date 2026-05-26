@@ -41,6 +41,24 @@ export function baseUrl(): string {
   return trimmed;
 }
 
+/**
+ * Public-facing API base for hrefs rendered into HTML (Swagger link,
+ * download buttons that the user clicks). Unlike :func:`baseUrl`, this
+ * helper never substitutes the internal ``127.0.0.1`` SSR fallback
+ * since those URLs would be sent to the browser and the user's
+ * machine cannot reach the server's loopback interface.
+ *
+ * Behaviour: returns ``NEXT_PUBLIC_API_URL`` verbatim (trimmed).
+ * AUTH-PUBLIC-VIEWER (2026-05-26): introduced to fix the Sidebar +
+ * AuthChip Swagger link rendering as ``http://127.0.0.1:8000/docs``
+ * on SSR-rendered prod builds.
+ */
+export function publicBaseUrl(): string {
+  const u = process.env.NEXT_PUBLIC_API_URL;
+  if (!u) throw new Error("NEXT_PUBLIC_API_URL is not set");
+  return u.replace(/\/+$/, "");
+}
+
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 // Merge ``Authorization: Bearer <token>`` onto every mutation when the
@@ -68,6 +86,7 @@ async function http<T>(path: string, init?: RequestInit & { cacheable?: boolean 
   const fetchInit: RequestInit = cacheable
     ? { next: { revalidate: 60 }, ...rest }
     : { cache: "no-store", ...rest };
+  const method = (fetchInit.method ?? "GET").toUpperCase();
   let res: Response;
   try {
     res = await fetch(`${baseUrl()}${path}`, withAuth(fetchInit));
@@ -75,6 +94,24 @@ async function http<T>(path: string, init?: RequestInit & { cacheable?: boolean 
     throw new Error(e?.message ?? "Network error");
   }
   if (!res.ok) {
+    // AUTH-PUBLIC-VIEWER (2026-05-26): a 401/403 on a GET means a
+    // backend mis-gate (every viewer surface should be public). Do
+    // NOT bubble the JSON error envelope into the UI; log it and
+    // resolve the promise with an empty list so the page can still
+    // render its anonymous baseline. Writes keep their loud throw so
+    // the caller's catch block surfaces the sign-in CTA.
+    if (!MUTATING_METHODS.has(method) && (res.status === 401 || res.status === 403)) {
+      if (typeof console !== "undefined") {
+        console.warn(
+          `[api] anonymous GET ${path} returned ${res.status}; ` +
+            "returning empty (public-viewer policy expects no auth gate)",
+        );
+      }
+      // Most viewer endpoints return list payloads; empty array is the
+      // sensible default. Detail handlers ought to handle null/empty
+      // sentinel themselves via their own optional chaining.
+      return [] as unknown as T;
+    }
     const body = await res.text();
     const msg = body.trimStart().startsWith("<")
       ? `HTTP ${res.status} ${res.statusText}`

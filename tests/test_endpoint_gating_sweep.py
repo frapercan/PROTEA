@@ -418,6 +418,69 @@ class TestPublicGetRoutes:
             f"GET {path}: public route should not require auth, got {resp.status_code}"
         )
 
+
+# Per AUTH-PUBLIC-VIEWER (2026-05-26): every read surface listed below
+# is part of the public viewer contract; anonymous callers MUST be able
+# to GET them without an Authorization header. We intentionally include
+# both real handler paths and path-parameter ``/{id}`` shapes (the
+# latter may legitimately 404 in the test rig, but must never 401).
+_PUBLIC_VIEWER_GETS: list[str] = [
+    "/health",
+    "/health/ready",
+    "/metrics",
+    "/jobs",
+    "/jobs/00000000-0000-0000-0000-000000000001",
+    "/jobs/00000000-0000-0000-0000-000000000001/events",
+    "/datasets",
+    "/datasets/00000000-0000-0000-0000-000000000001",
+    "/datasets/00000000-0000-0000-0000-000000000001/download",
+    "/proteins",
+    "/proteins/stats",
+    "/predictions",
+    "/prediction-sets",
+    "/annotations/evaluation-sets",
+    "/annotations/sets",
+    "/annotations/snapshots",
+    "/annotations/go-terms/GO:0008150",
+    "/embeddings/configs",
+    "/embeddings/prediction-sets",
+    "/scoring/configs",
+    "/scoring/rerankers/",
+    "/benchmark",
+    "/experiment-runs",
+    "/stack",
+    "/registry/operations",
+]
+
+
+class TestPublicViewerSurfaceAnonymous:
+    """AUTH-PUBLIC-VIEWER: walk every viewer GET anonymously.
+
+    The test asserts that no listed surface returns 401 or 403 to an
+    anonymous caller. Handlers may legitimately return 404 (missing
+    row), 422 (validation), or 500 (mocked deps) when the test rig has
+    no real DB row to resolve, but they must never demand a token.
+    """
+
+    @pytest.mark.parametrize("path", _PUBLIC_VIEWER_GETS)
+    def test_anonymous_get_returns_no_auth_challenge(
+        self, monkeypatch, client, path: str
+    ) -> None:
+        monkeypatch.setenv("PROTEA_AUTHN_REQUIRED", "true")
+        monkeypatch.setenv("PROTEA_JWT_SECRET", _SECRET)
+        resp = client.get(path)
+        assert resp.status_code not in (401, 403), (
+            f"GET {path}: public viewer surface returned {resp.status_code}; "
+            "anonymous reads must not be challenged."
+        )
+        # When the handler does respond with 401 (handler-level, not gate),
+        # it must not include the ApiKey or Bearer WWW-Authenticate header.
+        www_auth = resp.headers.get("www-authenticate", "")
+        assert "ApiKey" not in www_auth and "Bearer" not in www_auth, (
+            f"GET {path}: surfaced an ApiKey/Bearer challenge "
+            f"(www-authenticate={www_auth!r}); expected no auth gate."
+        )
+
     def test_login_endpoint_has_no_bearer_gate(self, monkeypatch, client):
         """POST /auth/api-key-login has no role gate dependency (any 401 comes
         from business logic inside the handler, not from require_role).
