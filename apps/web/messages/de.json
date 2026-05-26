@@ -143,13 +143,11 @@
     "shareCopied": "Link kopiert"
   },
   "benchmark": {
-    "loadingTitle": "Benchmark-Daten werden geladen…",
-    "loadingHint": "Auswertungsmatrix und Embedding-Katalog werden abgerufen. Der erste Aufruf füllt einen 60-Sekunden-Cache, damit weitere Filterwechsel sofort erfolgen.",
-    "loadingStepMatrix": "Auswertungsmatrix",
-    "loadingStepEmbeddings": "Embedding-Katalog",
-    "loadingRowsPreview": "Zeilenvorschau"
-  },
-  "benchmark": {
+    "loadingTitle": "Benchmark wird geladen…",
+    "loadingHint": "Embeddings und Matrix werden aufgelöst.",
+    "loadingStepMatrix": "Matrix",
+    "loadingStepEmbeddings": "Embeddings",
+    "loadingRowsPreview": "Zeilenvorschau",
     "backToHome": "Zurück zur Startseite"
   },
   "jobs": {

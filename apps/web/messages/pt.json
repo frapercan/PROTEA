@@ -143,13 +143,11 @@
     "shareCopied": "Link copiado"
   },
   "benchmark": {
-    "loadingTitle": "Carregando dados do benchmark…",
-    "loadingHint": "Obtendo a matriz de avaliação e o catálogo de embeddings. A primeira chamada aquece um cache de 60 segundos para que mudanças de filtro posteriores sejam instantâneas.",
-    "loadingStepMatrix": "Matriz de avaliação",
-    "loadingStepEmbeddings": "Catálogo de embeddings",
-    "loadingRowsPreview": "Pré-visualização de linhas"
-  },
-  "benchmark": {
+    "loadingTitle": "Carregando benchmark…",
+    "loadingHint": "Resolvendo embeddings e matriz.",
+    "loadingStepMatrix": "Matriz",
+    "loadingStepEmbeddings": "Embeddings",
+    "loadingRowsPreview": "Pré-visualização de linhas",
     "backToHome": "Voltar ao início"
   },
   "jobs": {
