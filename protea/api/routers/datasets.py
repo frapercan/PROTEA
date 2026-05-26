@@ -40,6 +40,7 @@ from protea.api.routers.datasets_detail import (
 )
 from protea.core.schema_sha_v2 import maybe_v2
 from protea.core.utils import utcnow
+from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.embedding.dataset import Dataset
 from protea.infrastructure.orm.models.job import Job, JobEvent
 from protea.infrastructure.queue.publisher import publish_job
@@ -239,6 +240,30 @@ def create_dataset(
             if os.environ.get("PROTEA_EXPORT_MINIJOBS", "0") == "1"
             else "export_research_dataset"
         )
+        if operation_name == "export_coordinator":
+            # Coordinator requires annotation_set_id; derive it from
+            # annotation_source + max(train_versions) which is the
+            # train cutoff snapshot semantics used by every existing
+            # v226-lineage cell.
+            train_cutoff = str(max(body.train_versions))
+            annot = (
+                session.query(AnnotationSet.id)
+                .filter(
+                    AnnotationSet.source == body.annotation_source,
+                    AnnotationSet.source_version == train_cutoff,
+                )
+                .first()
+            )
+            if annot is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"No {body.annotation_source!r} annotation_set found "
+                        f"for train cutoff version {train_cutoff!r}; cannot "
+                        f"build the coordinator payload."
+                    ),
+                )
+            payload["annotation_set_id"] = str(annot[0])
         job = Job(
             operation=operation_name,
             queue_name=queue_name,

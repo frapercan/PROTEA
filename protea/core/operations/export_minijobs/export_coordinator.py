@@ -50,10 +50,10 @@ _FEATURES_QUEUE = "protea.training.features"
 _WRITE_QUEUE = "protea.training.write"
 
 #: Backends the export pipeline actually implements end-to-end.
-#: ``protea_method.knn_search`` historically advertised a ``torch``
-#: backend but the export pipeline only exercises numpy + faiss; we
-#: refuse to dispatch jobs that would crash every child.
-_VALID_SEARCH_BACKENDS = frozenset({"numpy", "faiss"})
+#: ``protea_method.knn_search`` ships numpy, faiss and torch backends;
+#: the torch path was re-enabled in protea-method 5dd737d (PR #564)
+#: alongside the cu128 wheel default in scripts/install_gpu_torch.sh.
+_VALID_SEARCH_BACKENDS = frozenset({"numpy", "faiss", "torch"})
 
 
 class ExportCoordinatorPayload(ProteaPayload, frozen=True):
