@@ -1,10 +1,10 @@
-"""Smoke tests for the export minijob pipeline (F-EXPORT-MINIJOB.1 + .2).
+"""Smoke tests for the export minijob pipeline (F-EXPORT-MINIJOB.1 + .2 + .3).
 
 F-EXPORT-MINIJOB.1 acceptance:
 - All four operations import without error.
 - All four operations are registered in the OperationRegistry returned by
   build_operation_registry().
-- Each stub handler can be invoked (no DB access needed for stubs).
+- Each handler can be invoked with minimal/stub inputs.
 
 F-EXPORT-MINIJOB.2 acceptance:
 - export_coordinator.execute() with PROTEA_EXPORT_MINIJOBS=1 dispatches
@@ -69,31 +69,33 @@ def _stub_session() -> MagicMock:
     return MagicMock()
 
 
-class TestExportKnnBatchStub:
-    def test_execute_returns_stub_result(self) -> None:
+class TestExportKnnBatchSmoke:
+    """Smoke test: operation instantiates; summarize_payload works without DB."""
+
+    def test_name_and_description(self) -> None:
         from protea.core.operations.export_minijobs._export_knn_batch import (
             ExportKnnBatchOperation,
         )
 
         op = ExportKnnBatchOperation()
-        payload = {
-            "coordinator_job_id": str(uuid.uuid4()),
-            "pair_id": "train-220",
-            "train_snapshot_id": 220,
-            "test_snapshot_id": 220,
-            "embedding_config_id": str(uuid.uuid4()),
-            "annotation_set_id": str(uuid.uuid4()),
-            "ontology_snapshot_id": str(uuid.uuid4()),
-            "k": 5,
-            "search_backend": "faiss",
-        }
-        result = op.execute(_stub_session(), payload, emit=_noop_emit)
-        assert result.result["stub"] is True
-        assert result.result["pair_id"] == "train-220"
+        assert op.name == "export_knn_batch"
+        assert "KNN" in op.description or "knn" in op.description.lower()
+
+    def test_summarize_payload(self) -> None:
+        from protea.core.operations.export_minijobs._export_knn_batch import (
+            ExportKnnBatchOperation,
+        )
+
+        op = ExportKnnBatchOperation()
+        summary = op.summarize_payload({"pair_id": "train-220", "k": 5})
+        assert "train-220" in summary
+        assert "k=5" in summary
 
 
-class TestExportFeaturesBatchStub:
-    def test_execute_returns_stub_result(self) -> None:
+class TestExportFeaturesBatchSmoke:
+    """Smoke test: null URI path returns empty shard without DB access."""
+
+    def test_null_uri_returns_empty_shard(self) -> None:
         from protea.core.operations.export_minijobs._export_features_batch import (
             ExportFeaturesBatchOperation,
         )
@@ -108,7 +110,8 @@ class TestExportFeaturesBatchStub:
             "ontology_snapshot_id": str(uuid.uuid4()),
         }
         result = op.execute(_stub_session(), payload, emit=_noop_emit)
-        assert result.result["stub"] is True
+        assert result.result["pair_id"] == "train-220"
+        assert result.result["n_rows"] == 0
 
     def test_summarize_payload(self) -> None:
         from protea.core.operations.export_minijobs._export_features_batch import (
