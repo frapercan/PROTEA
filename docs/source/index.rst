@@ -45,6 +45,15 @@ metadata enrichment, and job orchestration.
       :bdg-secondary:`autodoc` Symbol-level documentation for ``protea.core``,
       ``protea.infrastructure``, the FastAPI routers, and every worker class.
 
+   .. grid-item-card:: Complexity
+      :link: complexity/index
+      :link-type: doc
+      :shadow: md
+      :text-align: left
+
+      :bdg-warning:`Performance` Big-O profile per pipeline stage, measured
+      hot paths, and a guide to profiling with scalene and pyinstrument.
+
    .. grid-item-card:: Results
       :link: results
       :link-type: doc
@@ -74,6 +83,7 @@ metadata enrichment, and job orchestration.
    introduction
    related_work
    architecture/index
+   complexity/index
    guides/plugin-authoring/index
    results
    appendix/index
