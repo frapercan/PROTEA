@@ -91,4 +91,5 @@ The full ADR index lives at :doc:`/adr/index`.
    evaluation
    orchestration
    auth
+   multistage-pipeline
    /adr/index
