@@ -227,62 +227,32 @@ def publish_next_stage(
     key: str = "next",
     size_threshold_kb: float = 64.0,
 ) -> tuple[str, dict[str, Any]]:
-    """Build a ``publish_operations`` entry choosing inline vs artifact-store.
+    """Return ``(queue, body)`` for ``OperationResult.publish_operations``.
 
-    When the serialised payload exceeds *size_threshold_kb* kilobytes and
-    an *artifact_store* is provided, the payload bytes are uploaded and
-    the returned message body is ``{"_artifact_uri": "<uri>"}`` so the
-    receiving worker can fetch it.  Otherwise the full payload dict is
-    inlined.
-
-    Parameters
-    ----------
-    queue:
-        RabbitMQ queue name.
-    payload:
-        Pydantic model or plain dict to transmit.
-    artifact_store:
-        Optional :class:`StageArtifactStore` used for the overflow path.
-        If ``None``, large payloads are still inlined (with a warning).
-    stage / key:
-        Path components used when writing to the artifact store.
-    size_threshold_kb:
-        Payload byte size above which the artifact-store path is taken.
-
-    Returns
-    -------
-    tuple[str, dict[str, Any]]
-        A ``(queue_name, body_dict)`` pair suitable for appending to
-        ``OperationResult.publish_operations``.
+    When the serialised body exceeds ``size_threshold_kb`` and an
+    ``artifact_store`` is provided, the payload is uploaded and the body
+    becomes ``{"_artifact_uri": "<uri>"}``.
     """
-    if isinstance(payload, ProteaPayload):
-        body = payload.model_dump()
-    else:
-        body = dict(payload)
-
+    body = payload.model_dump() if isinstance(payload, ProteaPayload) else dict(payload)
     raw = json.dumps(body).encode()
-    threshold_bytes = size_threshold_kb * 1024
-
-    if len(raw) > threshold_bytes:
-        if artifact_store is not None:
-            uri = artifact_store.write_intermediate(stage, key, raw)
-            logger.debug(
-                "publish_next_stage: payload %.1f KB exceeds %.0f KB threshold; "
-                "stored at %s",
-                len(raw) / 1024,
-                size_threshold_kb,
-                uri,
-            )
-            return (queue, {"_artifact_uri": uri})
-        else:
-            logger.warning(
-                "publish_next_stage: payload %.1f KB exceeds %.0f KB threshold "
-                "but no artifact_store provided; inlining anyway",
-                len(raw) / 1024,
-                size_threshold_kb,
-            )
-
-    return (queue, body)
+    if len(raw) <= size_threshold_kb * 1024:
+        return (queue, body)
+    if artifact_store is None:
+        logger.warning(
+            "publish_next_stage: payload %.1f KB exceeds %.0f KB threshold "
+            "but no artifact_store provided; inlining anyway",
+            len(raw) / 1024,
+            size_threshold_kb,
+        )
+        return (queue, body)
+    uri = artifact_store.write_intermediate(stage, key, raw)
+    logger.debug(
+        "publish_next_stage: payload %.1f KB exceeds %.0f KB threshold; stored at %s",
+        len(raw) / 1024,
+        size_threshold_kb,
+        uri,
+    )
+    return (queue, {"_artifact_uri": uri})
 
 
 # ---------------------------------------------------------------------------
