@@ -15,11 +15,11 @@ from protea.infrastructure.orm.base import Base
 
 
 class JobStatus(enum.StrEnum):
-    QUEUED = "queued"
-    RUNNING = "running"
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
+    QUEUED = "QUEUED"
+    RUNNING = "RUNNING"
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
 
 
 #: Statuses that are considered "active" for deduplication purposes.
