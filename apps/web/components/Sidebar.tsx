@@ -363,6 +363,7 @@ export function Sidebar({
         { href: "/admin/users", label: "Users", hint: "Approve sign-ups, change roles, deactivate accounts", icon: Users },
         { href: "/admin/api-keys", label: t("apiKeys"), hint: t("apiKeysHint"), icon: KeyRound },
         { href: "/admin/experiment-runs", label: t("experimentRuns"), hint: "F-EXP campaign narrative: hypothesis / config / findings per run", icon: GraduationCap },
+        { href: "/admin/dlq", label: t("dlq"), hint: t("dlqHint"), icon: Archive },
       ],
     });
   }
