@@ -7,7 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.deps import get_session_factory
-from protea.api.roles import ROLE_OPERATOR, require_role
+from protea.api.roles import ROLE_ADMIN, require_role
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
 from protea.infrastructure.session import session_scope
@@ -48,15 +48,19 @@ def preview_orphan_sequences(
 
 @router.post(
     "/vacuum-sequences",
-    dependencies=[Depends(require_role(ROLE_OPERATOR))],
+    dependencies=[Depends(require_role(ROLE_ADMIN))],
 )
 def vacuum_sequences(
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
     """Delete sequences not referenced by any Protein or QuerySetEntry.
 
-    Safe to run at any time: orphan sequences have no embeddings that
-    can be reached from any active protein or query set.
+    Destructive: removes rows from ``sequence``. Gated to ``admin`` so a
+    compromised operator key cannot reduce the corpus. Orphan sequences
+    have no embeddings reachable from any active protein or query set,
+    but the deletion is permanent and feeds into downstream foreign
+    keys, so it stays on the admin floor with the other DB-mutating
+    housekeeping operations.
     """
     with session_scope(factory) as session:
         # Collect IDs first to do a targeted delete (avoids full-table lock)
@@ -118,15 +122,18 @@ def preview_unindexed_embeddings(
 
 @router.post(
     "/vacuum-embeddings",
-    dependencies=[Depends(require_role(ROLE_OPERATOR))],
+    dependencies=[Depends(require_role(ROLE_ADMIN))],
 )
 def vacuum_embeddings(
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
     """Delete embeddings for sequences not referenced by any Protein.
 
-    Safe to run after predictions have been generated; query protein
-    embeddings are only needed during the prediction job itself.
+    Destructive: removes rows from ``sequence_embedding``. Gated to
+    ``admin`` so the embedding corpus (expensive to recompute on GPUs)
+    cannot be wiped by an operator key. Safe to run once predictions
+    have been generated; query-protein embeddings are only needed
+    during the prediction job itself.
     """
     with session_scope(factory) as session:
         unindexed_ids = [

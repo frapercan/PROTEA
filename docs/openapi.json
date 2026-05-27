@@ -7412,7 +7412,7 @@
     },
     "/v1/maintenance/vacuum-embeddings": {
       "post": {
-        "description": "Delete embeddings for sequences not referenced by any Protein.\n\nSafe to run after predictions have been generated; query protein\nembeddings are only needed during the prediction job itself.",
+        "description": "Delete embeddings for sequences not referenced by any Protein.\n\nDestructive: removes rows from ``sequence_embedding``. Gated to\n``admin`` so the embedding corpus (expensive to recompute on GPUs)\ncannot be wiped by an operator key. Safe to run once predictions\nhave been generated; query-protein embeddings are only needed\nduring the prediction job itself.",
         "operationId": "vacuum_embeddings_v1_maintenance_vacuum_embeddings_post",
         "parameters": [
           {
@@ -7513,7 +7513,7 @@
     },
     "/v1/maintenance/vacuum-sequences": {
       "post": {
-        "description": "Delete sequences not referenced by any Protein or QuerySetEntry.\n\nSafe to run at any time: orphan sequences have no embeddings that\ncan be reached from any active protein or query set.",
+        "description": "Delete sequences not referenced by any Protein or QuerySetEntry.\n\nDestructive: removes rows from ``sequence``. Gated to ``admin`` so a\ncompromised operator key cannot reduce the corpus. Orphan sequences\nhave no embeddings reachable from any active protein or query set,\nbut the deletion is permanent and feeds into downstream foreign\nkeys, so it stays on the admin floor with the other DB-mutating\nhousekeeping operations.",
         "operationId": "vacuum_sequences_v1_maintenance_vacuum_sequences_post",
         "parameters": [
           {

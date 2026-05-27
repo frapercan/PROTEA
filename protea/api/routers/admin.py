@@ -25,6 +25,15 @@ _AdminPrincipal = Annotated[
     Depends(require_role("admin")),
 ]
 
+# Read-only observation of the dead-letter queue (no message mutation, no DB
+# write) does not need the admin floor; operators legitimately use it to
+# triage backlog before deciding whether to escalate to a destructive
+# replay/purge.
+_OperatorPrincipal = Annotated[
+    ApiKey | BearerPrincipal | None,
+    Depends(require_role("operator")),
+]
+
 
 @router.post("/reset-db")
 def reset_db(
@@ -67,7 +76,7 @@ def reset_db(
 
 @router.get("/dlq/summary")
 def get_dlq_summary(
-    _principal: _AdminPrincipal,
+    _principal: _OperatorPrincipal,
     amqp_url: str = Depends(get_amqp_url),
     max_peek: int = Query(
         default=500,

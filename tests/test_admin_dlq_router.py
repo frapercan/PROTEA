@@ -49,13 +49,19 @@ class TestDlqSummaryEndpoint:
         resp = TestClient(app).get("/admin/dlq/summary")
         assert resp.status_code == 401
 
-    def test_operator_rejected(self, monkeypatch):
+    @patch("protea.api.routers.admin.dlq_summary")
+    def test_operator_allowed_for_read_only_summary(self, mock_summary, monkeypatch):
+        # /admin/dlq/summary is a read-only observation endpoint;
+        # the role floor was downgraded from admin to operator so
+        # the on-call rotation can triage backlog before deciding to
+        # escalate to a destructive replay/purge (which stay admin).
+        mock_summary.return_value = {"total_peeked": 0, "queue_message_count": 0, "groups": []}
         app = _make_app(monkeypatch)
         resp = TestClient(app).get(
             "/admin/dlq/summary",
             headers={"Authorization": f"Bearer {_mint('operator')}"},
         )
-        assert resp.status_code == 403
+        assert resp.status_code == 200
 
     @patch("protea.api.routers.admin.dlq_summary")
     def test_admin_gets_summary(self, mock_summary, monkeypatch):
