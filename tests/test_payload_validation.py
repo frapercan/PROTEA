@@ -301,17 +301,18 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         },
         ("coordinator_job_id",),
     ),
-    # missing-required: output_name
+    # missing-required: pair_id (per-pair assembly contract since F-EXPORT-MINIJOB.4)
     (
         "export_write",
         ExportWritePayload,
         {
             "coordinator_job_id": "coord",
+            "temp_features_uri": "s3://bucket/temp/x.parquet",
             "embedding_config_id": "cfg",
             "ontology_snapshot_id": "ont",
             "annotation_set_id": "ann",
         },
-        ("output_name",),
+        ("pair_id",),
     ),
 ]
 

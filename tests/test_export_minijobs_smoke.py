@@ -123,23 +123,31 @@ class TestExportFeaturesBatchSmoke:
         assert "eval-230" in summary
 
 
-class TestExportWriteStub:
-    def test_execute_returns_stub_result(self) -> None:
+class TestExportWriteSmoke:
+    """Smoke: payload validation + summarize behaviour without DB."""
+
+    def test_summarize_payload(self) -> None:
         from protea.core.operations.export_minijobs._export_write import (
             ExportWriteOperation,
         )
 
         op = ExportWriteOperation()
-        payload = {
-            "coordinator_job_id": str(uuid.uuid4()),
-            "output_name": "bench-v1-K5-v226-lineage",
-            "embedding_config_id": str(uuid.uuid4()),
-            "ontology_snapshot_id": str(uuid.uuid4()),
-            "annotation_set_id": str(uuid.uuid4()),
-        }
-        result = op.execute(_stub_session(), payload, emit=_noop_emit)
-        assert result.result["stub"] is True
-        assert result.result["output_name"] == "bench-v1-K5-v226-lineage"
+        summary = op.summarize_payload(
+            {"output_name": "bench-v1-K5-v226-lineage", "pair_id": "train-220"}
+        )
+        assert "bench-v1-K5-v226-lineage" in summary
+        assert "train-220" in summary
+
+    def test_payload_rejects_missing_required_fields(self) -> None:
+        import pytest
+        from pydantic import ValidationError
+
+        from protea.core.operations.export_minijobs._export_write import (
+            ExportWritePayload,
+        )
+
+        with pytest.raises(ValidationError):
+            ExportWritePayload.model_validate({"output_name": "x"})
 
 
 # ---------------------------------------------------------------------------
