@@ -26,6 +26,34 @@ from protea.infrastructure.orm.models.job import Job, JobStatus
 logger = logging.getLogger(__name__)
 
 
+def build_child_failed_fields(
+    operation_name: str,
+    payload: Any,
+    exc: BaseException,
+    error_message: str,
+) -> dict[str, Any]:
+    """Assemble the structured ``child.failed`` JobEvent fields.
+
+    F-OPS-CHILD-FAILED-EMIT (2026-05-27). ``error_code`` is a
+    back-compat alias of ``error_class`` so dashboards filtering on
+    the historical key keep working after the field rename. Lives in
+    ``_failure_aggregation`` so ``consumer.py`` stays under the §3
+    file-LOC ceiling.
+    """
+    error_class = type(exc).__name__
+    fields: dict[str, Any] = {
+        "operation": operation_name,
+        "error_class": error_class,
+        "error_message": error_message,
+        "error_code": error_class,
+    }
+    if isinstance(payload, dict):
+        raw_pair_id = payload.get("pair_id")
+        if raw_pair_id is not None:
+            fields["pair_id"] = str(raw_pair_id)
+    return fields
+
+
 def maybe_aggregate_parent_failure(
     parent_job_id: UUID | None,
     exc: BaseException,

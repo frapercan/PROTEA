@@ -15,7 +15,7 @@ from protea.config.tuning import get_tuning
 from protea.core.contracts.operation import EmitFn, RetryLaterError, make_safe_emit
 from protea.core.contracts.registry import OperationRegistry
 from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
-from protea.infrastructure.queue._failure_aggregation import maybe_aggregate_parent_failure
+from protea.infrastructure.queue import _failure_aggregation as _agg
 from protea.infrastructure.queue.publisher import publish_operation
 from protea.infrastructure.telemetry import extract_trace_context, get_tracer
 from protea.workers.base_worker import BaseWorker
@@ -39,6 +39,7 @@ def _consumer_span(
     ctx = extract_trace_context(properties.headers)
     span_name = f"amqp.process {operation}" if operation else f"amqp.process {queue_name}"
     return _TRACER.start_as_current_span(span_name, context=ctx)
+
 
 _DLX_NAME = "protea.dlx"
 _DLQ_NAME = "protea.dead-letter"
@@ -216,8 +217,7 @@ class QueueConsumer:
             return job is not None and job.status == JobStatus.CANCELLED
         except Exception as exc:
             logger.warning(
-                "Cancellation check failed; proceeding with dispatch. "
-                "job_id=%s error=%s",
+                "Cancellation check failed; proceeding with dispatch. job_id=%s error=%s",
                 job_id,
                 exc,
             )
@@ -253,9 +253,7 @@ class QueueConsumer:
         # that survived a restart so prefetch=1 cannot deadlock on a queue
         # of orphaned cancellations.
         if self._is_job_cancelled(job_id):
-            logger.info(
-                "Skipping cancelled job. job_id=%s queue=%s", job_id, self._queue_name
-            )
+            logger.info("Skipping cancelled job. job_id=%s queue=%s", job_id, self._queue_name)
             channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
             return
 
@@ -301,9 +299,7 @@ class QueueConsumer:
                 self._worker.handle_job(job_id)
             except RetryLaterError as exc:
                 delay = exc.delay_seconds
-                logger.info(
-                    "Job will retry in %ss. job_id=%s reason=%s", delay, job_id, exc
-                )
+                logger.info("Job will retry in %ss. job_id=%s reason=%s", delay, job_id, exc)
                 channel.connection.sleep(delay)
                 channel.basic_publish(
                     exchange="",
@@ -311,9 +307,7 @@ class QueueConsumer:
                     body=json.dumps({"job_id": str(job_id)}).encode(),
                     properties=pika.BasicProperties(delivery_mode=2),
                 )
-                logger.info(
-                    "Job re-published. job_id=%s queue=%s", job_id, self._queue_name
-                )
+                logger.info("Job re-published. job_id=%s queue=%s", job_id, self._queue_name)
             except Exception as exc:
                 span.record_exception(exc)
                 logger.error("Job failed. job_id=%s error=%s", job_id, exc)
@@ -448,8 +442,7 @@ class OperationConsumer:
         # backlog of cancelled-job deliveries.
         if self._is_parent_job_cancelled(decoded.parent_job_id):
             logger.info(
-                "Skipping operation for cancelled parent job. "
-                "operation=%s parent_job_id=%s",
+                "Skipping operation for cancelled parent job. operation=%s parent_job_id=%s",
                 decoded.operation_name,
                 decoded.parent_job_id,
             )
@@ -483,9 +476,7 @@ class OperationConsumer:
         # the operation span chains under the dispatching HTTP/worker
         # span. ``decoded.operation_name`` is part of the span name so
         # OTel UIs can filter directly by op.
-        with _consumer_span(
-            self._queue_name, properties, operation=decoded.operation_name
-        ) as span:
+        with _consumer_span(self._queue_name, properties, operation=decoded.operation_name) as span:
             span.set_attribute("messaging.system", "rabbitmq")
             span.set_attribute("messaging.destination", self._queue_name)
             span.set_attribute("messaging.operation", "process")
@@ -548,9 +539,7 @@ class OperationConsumer:
         channel.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
 
     @staticmethod
-    def _decode_message(
-        body: bytes, properties: BasicProperties
-    ) -> _DecodedMessage | None:
+    def _decode_message(body: bytes, properties: BasicProperties) -> _DecodedMessage | None:
         """Parse the AMQP delivery into a validated bundle.
 
         Returns ``None`` when the body is not valid JSON or is missing
@@ -561,9 +550,7 @@ class OperationConsumer:
             operation_name: str = data["operation"]
             payload: dict[str, Any] = data["payload"]
         except Exception as exc:
-            logger.error(
-                "Unparseable operation message, discarding. body=%r error=%s", body, exc
-            )
+            logger.error("Unparseable operation message, discarding. body=%r error=%s", body, exc)
             return None
         parent_job_id: UUID | None = None
         raw_job_id = data.get("job_id")
@@ -710,7 +697,8 @@ class OperationConsumer:
         except Exception as republish_exc:
             logger.error(
                 "Failed to republish OOM message; dead-lettering. operation=%s error=%s",
-                operation_name, republish_exc,
+                operation_name,
+                republish_exc,
             )
             return False
 
@@ -741,21 +729,29 @@ class OperationConsumer:
         decoded: _DecodedMessage,
         exc: BaseException,
     ) -> None:
-        """Non-OOM failure: emit ``child.failed``, aggregate, nack."""
-        op_name = decoded.operation_name
-        logger.error("Operation failed. operation=%s error=%s", op_name, exc)
+        """F-OPS-CHILD-FAILED-EMIT (2026-05-27): emit structured
+        ``child.failed`` (pair_id + error_class + truncated message)
+        on a fresh session via ``self._factory``, aggregate, nack."""
+        logger.error("Operation failed. operation=%s error=%s", decoded.operation_name, exc)
+        error_message = str(exc)[:500]
+        fields = _agg.build_child_failed_fields(
+            decoded.operation_name,
+            decoded.payload,
+            exc,
+            error_message,
+        )
         self._emit_parent_event(
             decoded.parent_job_id,
             "child.failed",
-            str(exc)[:2000],
-            {"operation": op_name, "error_code": exc.__class__.__name__},
+            error_message,
+            fields,
             level="error",
         )
-        # F-OPS-COORD-FAIL-PROPAGATE: transitions a coordinator parent to
-        # FAILED once every dispatched child has failed.
-        maybe_aggregate_parent_failure(
-            decoded.parent_job_id, exc,
-            session_factory=self._factory, make_raw_emit=self._make_raw_emit,
+        _agg.maybe_aggregate_parent_failure(
+            decoded.parent_job_id,
+            exc,
+            session_factory=self._factory,
+            make_raw_emit=self._make_raw_emit,
         )
         channel.basic_nack(delivery_tag=method.delivery_tag, requeue=self._requeue_on_failure)
 
@@ -796,5 +792,3 @@ class OperationConsumer:
                 pass
         finally:
             session.close()
-
-
