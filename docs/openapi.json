@@ -484,6 +484,104 @@
         "title": "CreateJobRequest",
         "type": "object"
       },
+      "DlqPurgeRequest": {
+        "description": "Filter for DLQ messages to permanently discard.",
+        "properties": {
+          "dry_run": {
+            "default": false,
+            "description": "If true, count matches without removing anything from the DLQ.",
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "first_death_queue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Restrict to messages originally dead-lettered from this queue.",
+            "title": "First Death Queue"
+          },
+          "max_messages": {
+            "default": 10000,
+            "description": "Upper bound on messages processed in one call.",
+            "title": "Max Messages",
+            "type": "integer"
+          },
+          "operation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Restrict to messages whose payload `operation` matches.",
+            "title": "Operation"
+          }
+        },
+        "title": "DlqPurgeRequest",
+        "type": "object"
+      },
+      "DlqReplayRequest": {
+        "description": "Filter for DLQ messages to re-enqueue back onto their source queue.",
+        "properties": {
+          "dry_run": {
+            "default": false,
+            "description": "If true, count matches without re-enqueueing or acknowledging.",
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "first_death_queue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Restrict to messages originally dead-lettered from this queue.",
+            "title": "First Death Queue"
+          },
+          "max_messages": {
+            "default": 1000,
+            "description": "Upper bound on messages processed in one call.",
+            "title": "Max Messages",
+            "type": "integer"
+          },
+          "operation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Restrict to messages whose payload `operation` matches.",
+            "title": "Operation"
+          },
+          "target_queue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Override the destination queue. Defaults to the original source queue.",
+            "title": "Target Queue"
+          }
+        },
+        "title": "DlqReplayRequest",
+        "type": "object"
+      },
       "ExperimentRunStatus": {
         "description": "Lifecycle states for an ``ExperimentRun``.\n\nMirrors ``JobStatus`` semantically but with ``planned`` as the\ninitial state (Jobs default to QUEUED; experiments often live as\ndrafts before any compute kicks off) and ``abandoned`` instead of\n``failed`` (a research run can be stopped without a hard error).",
         "enum": [
@@ -1948,6 +2046,271 @@
         "summary": "Readiness Check",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/v1/admin/dlq/purge": {
+      "post": {
+        "description": "Discard DLQ messages matching the filter.\n\nMatching messages are acked (permanently removed from the DLQ).\nNon-matching messages remain in the DLQ.\n\n``dry_run=True`` reports how many messages *would* be purged without\nremoving them.  Always prefer a dry-run first.",
+        "operationId": "purge_dlq_v1_admin_dlq_purge_post",
+        "parameters": [
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DlqPurgeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Purge Dlq V1 Admin Dlq Purge Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Purge Dlq",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/dlq/replay": {
+      "post": {
+        "description": "Re-enqueue DLQ messages matching the filter.\n\nMatching messages are published back to their original source queue (or\n``target_queue`` if specified) and acked from the DLQ.  Non-matching\nmessages remain in the DLQ.\n\n``dry_run=True`` reports how many messages *would* be replayed without\nactually moving them.",
+        "operationId": "replay_dlq_v1_admin_dlq_replay_post",
+        "parameters": [
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DlqReplayRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Replay Dlq V1 Admin Dlq Replay Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Replay Dlq",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/dlq/summary": {
+      "get": {
+        "description": "Grouped count of dead-letter messages by operation, source queue, and age.\n\nPeeks up to ``max_peek`` messages from ``protea.dead-letter`` without\nconsuming them, groups them by ``{operation, first_death_queue, age_bucket}``,\nand re-queues all peeked messages before returning.  The DLQ depth is\nunchanged after this call.",
+        "operationId": "get_dlq_summary_v1_admin_dlq_summary_get",
+        "parameters": [
+          {
+            "description": "Upper bound on DLQ messages peeked for the summary; capped at 5000.",
+            "in": "query",
+            "name": "max_peek",
+            "required": false,
+            "schema": {
+              "default": 500,
+              "description": "Upper bound on DLQ messages peeked for the summary; capped at 5000.",
+              "maximum": 5000,
+              "minimum": 1,
+              "title": "Max Peek",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Dlq Summary V1 Admin Dlq Summary Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Dlq Summary",
+        "tags": [
+          "admin"
         ]
       }
     },
@@ -4853,6 +5216,113 @@
         ]
       }
     },
+    "/v1/datasets/{dataset_id}/download": {
+      "get": {
+        "description": "Mint a presigned download URL (MinIO) or stream the file (local).\n\nFor ``storage_backend=minio`` the endpoint 302-redirects to a\n15-minute presigned GET URL. For ``storage_backend=local`` the\nartifact bytes are streamed inline. See :mod:`datasets_detail`.",
+        "operationId": "download_dataset_artifact_v1_datasets__dataset_id__download_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "One of: train, eval, manifest",
+            "in": "query",
+            "name": "artifact",
+            "required": true,
+            "schema": {
+              "description": "One of: train, eval, manifest",
+              "title": "Artifact",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download a dataset artifact (presigned URL or streamed)",
+        "tags": [
+          "datasets"
+        ]
+      }
+    },
+    "/v1/datasets/{dataset_id}/stats": {
+      "get": {
+        "description": "Return per-aspect protein / GO-term / annotation counts for a dataset.\n\nReads from ``dataset.meta['aspect_stats']`` when present (populated\nby backfill or a previous call). On a cache miss the counts are\ncomputed live and written back. See :mod:`datasets_detail` for the\nimplementation.",
+        "operationId": "get_dataset_stats_v1_datasets__dataset_id__stats_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Dataset Stats V1 Datasets  Dataset Id  Stats Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Aspect-level statistics for a dataset",
+        "tags": [
+          "datasets"
+        ]
+      }
+    },
     "/v1/datasets/{id_or_name}": {
       "get": {
         "description": "Resolve a dataset by UUID or by the ``name`` slug.\n\nTries the UUID path first; on ``ValueError`` (non-UUID input), falls\nback to the ``name`` column. Returns ``404`` if neither resolves.\nThe lab uses the name path so dump callers can refer to ``bench-v1-K5``\nwithout juggling UUIDs.",
@@ -6363,7 +6833,7 @@
         ]
       },
       "post": {
-        "description": "Create a Job row and publish its ID to the specified RabbitMQ queue.\n\nExpensive operations (``export_research_dataset``, ``run_cafa_evaluation``) are\nsubject to per-user daily quota limits (FARM-AUTH.7). Admins are exempt.",
+        "description": "Create a Job row and publish its ID to the specified RabbitMQ queue.\n\nExpensive operations (``export_research_dataset``, ``run_cafa_evaluation``) are\nsubject to per-user daily quota limits (FARM-AUTH.7). Admins are exempt.\nDuplicate POSTs (same operation + payload while the previous job is active)\nreturn 409 with the existing job_id (F-OPS-JOBS.1 dedup).",
         "operationId": "create_job_v1_jobs_post",
         "parameters": [
           {
