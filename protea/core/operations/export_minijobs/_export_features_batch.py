@@ -351,12 +351,15 @@ def _uri_to_key(uri: str) -> str:
     for prefix in ("file://", "s3://", "local://"):
         if uri.startswith(prefix):
             stripped = uri[len(prefix):]
-            if prefix in ("file://", "local://"):
-                path = Path(stripped)
-                for i, part in enumerate(path.parts):
-                    if part in ("datasets", "temp"):
-                        return "/".join(path.parts[i:])
-                return stripped
+            if prefix == "s3://":
+                # s3://bucket/key/path → key/path (skip bucket, keep rest)
+                parts = stripped.split("/", 1)
+                return parts[1] if len(parts) > 1 else stripped
+            # file:// and local:// keep the legacy "first datasets/temp" trim.
+            path = Path(stripped)
+            for i, part in enumerate(path.parts):
+                if part in ("datasets", "temp"):
+                    return "/".join(path.parts[i:])
             return stripped
     if uri.startswith("/"):
         path = Path(uri)
