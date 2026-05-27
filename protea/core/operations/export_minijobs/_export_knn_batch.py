@@ -281,9 +281,17 @@ def _build_features_msg(
     p: ExportKnnBatchPayload,
     temp_uri: str,
 ) -> dict[str, Any]:
-    """Build the follow-on features-batch dispatch payload."""
+    """Build the follow-on features-batch dispatch payload.
+
+    The top-level ``job_id`` is what ``OperationConsumer._decode_message``
+    reads to populate ``decoded.parent_job_id``; without it the consumer
+    emits every progress/done event to a None target and the coordinator
+    never sees the features stage finish (silent emit loss, leads to a
+    reaper kill at 6h instead of timely completion).
+    """
     return {
         "operation": "export_features_batch",
+        "job_id": p.coordinator_job_id,
         "payload": {
             "coordinator_job_id": p.coordinator_job_id,
             "pair_id": p.pair_id,
