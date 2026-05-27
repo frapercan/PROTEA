@@ -357,14 +357,19 @@ class TestAdminRouteDiscovery:
         assert not (o & v), f"overlap operator/viewer: {o & v}"
 
     def test_catalog_paths_unique(self) -> None:
-        """A path may only appear once across all buckets (idempotent gate)."""
-        paths = (
-            [p for _, p in _ADMIN_DESTRUCTIVE_ROUTES]
-            + [p for _, p in _OPERATOR_READS]
-            + [p for _, p in _VIEWER_OPEN_READS]
+        """A (method, path) tuple may only appear once across all buckets.
+
+        Some paths legitimately appear under multiple methods (e.g.
+        ``/auth/api-keys`` is both POST=create and GET=list); the
+        idempotent gate is on the full (method, path) tuple.
+        """
+        tuples = (
+            list(_ADMIN_DESTRUCTIVE_ROUTES)
+            + list(_OPERATOR_READS)
+            + list(_VIEWER_OPEN_READS)
         )
-        duplicates = {p for p in paths if paths.count(p) > 1}
-        assert not duplicates, f"path appears in multiple buckets: {duplicates}"
+        duplicates = {t for t in tuples if tuples.count(t) > 1}
+        assert not duplicates, f"(method, path) appears in multiple buckets: {duplicates}"
         # _all_catalog_paths is the canonical flattened set used by other
-        # callers / future tests; ensure it stays in sync.
-        assert len(_all_catalog_paths()) == len(set(paths))
+        # callers / future tests; ensure it stays in sync with the tuples.
+        assert len(_all_catalog_paths()) == len({p for _, p in tuples})
