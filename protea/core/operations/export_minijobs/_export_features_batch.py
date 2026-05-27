@@ -395,9 +395,17 @@ def _build_write_msg(
     temp_uri: str,
     n_rows: int,
 ) -> dict[str, Any]:
-    """Build the follow-on write-batch dispatch payload."""
+    """Build the follow-on write-batch dispatch payload.
+
+    See ``_build_features_msg`` in ``_export_knn_batch.py`` for the
+    rationale on the top-level ``job_id`` field. Without it the
+    ``OperationConsumer`` cannot route the write stage's progress events
+    back to the coordinator's job_event row, so the coord stays RUNNING
+    even after every pair has been written and the reaper kills it.
+    """
     return {
         "operation": "export_write",
+        "job_id": p.coordinator_job_id,
         "payload": {
             "coordinator_job_id": p.coordinator_job_id,
             "pair_id": p.pair_id,
