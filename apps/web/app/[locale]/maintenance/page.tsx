@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
   previewVacuumSequences,
@@ -10,7 +11,8 @@ import {
   type VacuumEmbeddingsPreview,
 } from "@/lib/api";
 import { useToast } from "@/components/Toast";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
+import { useHasRole, useRole } from "@/lib/useRole";
 
 function StatRow({ label, value, highlight }: { label: string; value: number | null; highlight?: boolean }) {
   return (
@@ -118,6 +120,21 @@ export default function MaintenancePage() {
   const t = useTranslations("maintenance");
   const tToast = useTranslations("toasts");
   const toast = useToast();
+  const locale = useLocale();
+
+  // UX-ADMIN-AUDIT P0-MNT-2 (2026-05-26): vacuum operations are
+  // destructive (drop orphan sequences + unindexed embeddings). The
+  // middleware already gates this route to ``operator``, but the
+  // audit asks for an explicit admin client gate so viewer and
+  // operator users see a 403 panel instead of the controls. Backend
+  // endpoints (POST /v1/admin/maintenance/*) gate by role as well
+  // per the auth contract.
+  const role = useRole();
+  const isAdmin = useHasRole("admin");
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
 
   const [seqPreview, setSeqPreview] = useState<VacuumSequencesPreview | null>(null);
   const [seqLoading, setSeqLoading] = useState(false);
@@ -177,6 +194,10 @@ export default function MaintenancePage() {
   }
 
   useEffect(() => {
+    // Only fetch previews after hydration confirms an admin session.
+    // Otherwise the vacuum endpoints would 403 the viewer's first paint
+    // and clutter the console with auth errors.
+    if (!hydrated || !isAdmin) return;
     async function init() {
       setSeqLoading(true);
       setEmbLoading(true);
@@ -191,7 +212,25 @@ export default function MaintenancePage() {
       setEmbLoading(false);
     }
     init();
-  }, []);
+  }, [hydrated, isAdmin]);
+
+  if (!hydrated) {
+    return (
+      <main
+        className="max-w-2xl mx-auto px-4 py-8 space-y-4"
+        aria-busy
+        data-testid="maintenance-loading"
+      >
+        <div className="h-7 w-48 animate-pulse rounded bg-slate-200" />
+        <div className="h-4 w-80 animate-pulse rounded bg-slate-200/70" />
+        <div className="h-48 animate-pulse rounded-xl bg-slate-100" />
+      </main>
+    );
+  }
+
+  if (!isAdmin) {
+    return <ForbiddenPanel locale={locale} role={role} />;
+  }
 
   return (
     <main className="max-w-2xl mx-auto px-4 py-8 space-y-6">
@@ -250,3 +289,40 @@ export default function MaintenancePage() {
     </main>
   );
 }
+
+function ForbiddenPanel({ locale, role }: { locale: string; role: string }) {
+  // UX-ADMIN-AUDIT P0-MNT-2: mirrors the api-keys / dlq ForbiddenPanel
+  // shape so non-admins consistently land on a "Admin only" message
+  // with a Back-home affordance, instead of being shown vacuum buttons
+  // that will 403 on click.
+  const t = useTranslations("maintenance.forbidden");
+  return (
+    <main
+      className="mx-auto max-w-xl px-4 sm:px-6 py-12"
+      data-testid="maintenance-forbidden"
+    >
+      <div
+        role="alert"
+        className="rounded-xl border border-slate-200 bg-white p-6 text-center shadow-sm"
+      >
+        <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-600">
+          <svg className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+          </svg>
+        </div>
+        <h1 className="text-lg font-semibold text-slate-900">{t("title")}</h1>
+        <p className="mt-1 text-sm text-slate-600">{t("body")}</p>
+        <p className="mt-2 text-xs text-slate-500">
+          {t("roleLabel")}: <span className="font-mono">{role}</span>
+        </p>
+        <Link
+          href={`/${locale}`}
+          className="mt-5 inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+        >
+          {t("backHome")}
+        </Link>
+      </div>
+    </main>
+  );
+}
+
