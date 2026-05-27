@@ -347,16 +347,26 @@ def _load_knn_npz(
 
 
 def _uri_to_key(uri: str) -> str:
-    """Strip any scheme prefix to get the raw store key."""
+    """Strip any scheme prefix to get the raw store key.
+
+    For ``s3://<bucket>/<key>`` the bucket is the first path segment
+    after the scheme; ``MinioArtifactStore.get(key)`` takes only the
+    key portion. Returning the bucket inside the key produced
+    ``protea/temp/...`` lookups against bucket ``protea`` and a
+    NoSuchKey on every features-batch dispatch.
+    """
     for prefix in ("file://", "s3://", "local://"):
         if uri.startswith(prefix):
             stripped = uri[len(prefix):]
-            if prefix in ("file://", "local://"):
-                path = Path(stripped)
-                for i, part in enumerate(path.parts):
-                    if part in ("datasets", "temp"):
-                        return "/".join(path.parts[i:])
-                return stripped
+            if prefix == "s3://":
+                # s3://bucket/key/path → key/path
+                bucket_and_key = stripped.split("/", 1)
+                return bucket_and_key[1] if len(bucket_and_key) > 1 else stripped
+            # file:// and local:// keep the legacy "first datasets/temp" trim.
+            path = Path(stripped)
+            for i, part in enumerate(path.parts):
+                if part in ("datasets", "temp"):
+                    return "/".join(path.parts[i:])
             return stripped
     if uri.startswith("/"):
         path = Path(uri)
