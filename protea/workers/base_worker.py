@@ -172,9 +172,7 @@ class BaseWorker:
             )
             session.commit()
         except Exception as exc:
-            logger.warning(
-                "Lease extension failed (non-fatal). job_id=%s error=%s", job_id, exc
-            )
+            logger.warning("Lease extension failed (non-fatal). job_id=%s error=%s", job_id, exc)
             try:
                 session.rollback()
             except Exception:
@@ -256,9 +254,7 @@ class BaseWorker:
 
         return raw_emit
 
-    def _cancel_if_parent_cancelled(
-        self, session: Session, job: Job, job_id: UUID
-    ) -> bool:
+    def _cancel_if_parent_cancelled(self, session: Session, job: Job, job_id: UUID) -> bool:
         if job.parent_job_id is None:
             return False
         parent = session.get(Job, job.parent_job_id)
@@ -405,6 +401,61 @@ class BaseWorker:
             )
         finally:
             fallback.close()
+
+    def requeue_on_shutdown(self, job_id: UUID) -> bool:
+        """Transition a RUNNING job back to QUEUED so it can be re-dispatched.
+
+        Called by the queue consumer when SIGTERM/SIGINT arrives mid-job:
+        rather than force-failing the in-flight job (which loses work and
+        requires manual re-dispatch), flip it back to QUEUED with a cleared
+        ``leased_until`` and ``started_at`` so the next consumer can claim
+        it. The accompanying delivery is republished by the caller, mirroring
+        the spec's "NACK-requeue + UPDATE job back to PLANNED" semantics
+        under the pre-ack consumer pattern (the original delivery has already
+        been acked to avoid AMQP ``consumer_timeout``).
+
+        Returns ``True`` on a successful re-queue, ``False`` when the job
+        is no longer RUNNING (already finished naturally) or the UPDATE
+        could not commit. Idempotent on terminal states.
+        """
+        session = self._factory()
+        try:
+            result: CursorResult[Any] = session.execute(  # type: ignore[assignment]
+                sa_update(Job)
+                .where(Job.id == job_id, Job.status == JobStatus.RUNNING)
+                .values(
+                    status=JobStatus.QUEUED,
+                    started_at=None,
+                    leased_until=None,
+                )
+            )
+            if result.rowcount == 0:
+                session.rollback()
+                return False
+            self._emit(
+                session,
+                job_id,
+                "job.requeued_on_shutdown",
+                None,
+                {"worker": self._config.worker_name},
+                level="info",
+            )
+            session.commit()
+            logger.info("Re-queued in-flight job on shutdown. job_id=%s", job_id)
+            return True
+        except Exception as exc:
+            logger.error(
+                "Re-queue-on-shutdown failed; job may remain RUNNING. job_id=%s error=%s",
+                job_id,
+                exc,
+            )
+            try:
+                session.rollback()
+            except Exception:
+                pass
+            return False
+        finally:
+            session.close()
 
     def _maybe_fail_parent(self, session: Session, parent_job_id: UUID) -> None:
         """Mark parent FAILED if all its children are in terminal states and none succeeded."""

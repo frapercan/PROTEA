@@ -121,9 +121,7 @@ class WorkerTuning(BaseModel):
     model_cache_max: int = Field(
         default=1,
         ge=1,
-        description=(
-            "Modelos PLM en cache por proceso de embeddings. >1 acumula GB en GPU."
-        ),
+        description=("Modelos PLM en cache por proceso de embeddings. >1 acumula GB en GPU."),
     )
     ref_cache_max: int = Field(
         default=1,
@@ -148,9 +146,7 @@ class WorkerTuning(BaseModel):
     reaper_stall_seconds: int = Field(
         default=1800,
         ge=60,
-        description=(
-            "Tiempo sin JobEvent antes de considerar un job stalled candidato a reapear."
-        ),
+        description=("Tiempo sin JobEvent antes de considerar un job stalled candidato a reapear."),
     )
     worker_shutdown_grace_seconds: int = Field(
         default=30,
@@ -173,6 +169,16 @@ class WorkerTuning(BaseModel):
             "el reaper sólo mata jobs cuyo leased_until ha expirado. "
             "Override: PROTEA_JOB_HEARTBEAT_INTERVAL_SECONDS o "
             "PROTEA_TUNING__worker__job_heartbeat_interval_seconds."
+        ),
+    )
+    max_lease_requeues: int = Field(
+        default=3,
+        ge=0,
+        description=(
+            "Número máximo de re-enqueues que el StaleJobReaper concede a "
+            "un job cuyo leased_until ha expirado antes de marcarlo FAILED "
+            "con error_code=lease_expired (F-OPS-JOBS.1). 0 desactiva el "
+            "re-enqueue (comportamiento legacy: directamente FAILED)."
         ),
     )
     api_cache_default_ttl_seconds: float = Field(
@@ -329,7 +335,7 @@ def _apply_env_overrides(merged: dict[str, Any]) -> dict[str, Any]:
     for key, value in os.environ.items():
         if not key.startswith(ENV_PREFIX):
             continue
-        path = key[len(ENV_PREFIX):].split("__")
+        path = key[len(ENV_PREFIX) :].split("__")
         if len(path) < 2:
             continue
         group, field = path[0].lower(), "__".join(path[1:]).lower()
