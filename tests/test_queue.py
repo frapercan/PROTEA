@@ -265,12 +265,58 @@ class TestConsumerShutdownGrace:
         assert consumer._stop is True
         mock_arm.assert_not_called()
 
-    def test_force_fail_in_flight_invokes_worker_and_exits(self):
-        """Watchdog fires: force-fail through worker, then os._exit(143)."""
+    def test_watchdog_requeues_in_flight_job_first(self):
+        """F-OPS-JOBS.1: watchdog must try the non-destructive re-queue path
+        before falling back to ``force_fail``. On success the job is flipped
+        back to QUEUED and the delivery is re-published, with no FAILED row."""
+        job_id = uuid4()
+        worker = MagicMock()
+        worker.requeue_on_shutdown.return_value = True
+        consumer = _consumer(worker)
+        consumer._guard.track(job_id)
+        republish_calls: list[UUID] = []
+        consumer._guard._on_requeue = republish_calls.append
+
+        with patch("protea.workers.shutdown.os._exit") as mock_exit:
+            consumer._guard._fire(job_id)
+
+        worker.requeue_on_shutdown.assert_called_once_with(job_id)
+        assert republish_calls == [job_id]
+        worker._force_fail_job.assert_not_called()
+        mock_exit.assert_called_once_with(143)
+
+    def test_watchdog_force_fails_when_requeue_returns_false(self):
+        """If ``requeue_on_shutdown`` returns False (row already terminal /
+        UPDATE failed) the watchdog must still force-fail so the row never
+        stays in RUNNING and the process still exits."""
         from protea.workers.base_worker import WorkerShutdown
 
         job_id = uuid4()
         worker = MagicMock()
+        worker.requeue_on_shutdown.return_value = False
+        consumer = _consumer(worker)
+        consumer._guard.track(job_id)
+
+        republish_calls: list[UUID] = []
+        consumer._guard._on_requeue = republish_calls.append
+
+        with patch("protea.workers.shutdown.os._exit") as mock_exit:
+            consumer._guard._fire(job_id)
+
+        worker.requeue_on_shutdown.assert_called_once_with(job_id)
+        assert republish_calls == []
+        worker._force_fail_job.assert_called_once()
+        call_args = worker._force_fail_job.call_args
+        assert call_args.args[0] == job_id
+        assert isinstance(call_args.args[1], WorkerShutdown)
+        mock_exit.assert_called_once_with(143)
+
+    def test_watchdog_force_fails_when_requeue_raises(self):
+        """Requeue callable raising must not crash the guard; force-fail is
+        the safety net."""
+        job_id = uuid4()
+        worker = MagicMock()
+        worker.requeue_on_shutdown.side_effect = RuntimeError("db down")
         consumer = _consumer(worker)
         consumer._guard.track(job_id)
 
@@ -278,9 +324,6 @@ class TestConsumerShutdownGrace:
             consumer._guard._fire(job_id)
 
         worker._force_fail_job.assert_called_once()
-        call_args = worker._force_fail_job.call_args
-        assert call_args.args[0] == job_id
-        assert isinstance(call_args.args[1], WorkerShutdown)
         mock_exit.assert_called_once_with(143)
 
     def test_force_fail_in_flight_skips_when_job_finished(self):
@@ -295,6 +338,7 @@ class TestConsumerShutdownGrace:
             consumer._guard._fire(job_id)
 
         worker._force_fail_job.assert_not_called()
+        worker.requeue_on_shutdown.assert_not_called()
         mock_exit.assert_not_called()
 
     def test_arm_shutdown_timer_uses_tuning_grace(self):
@@ -323,9 +367,7 @@ class TestConsumerShutdownGrace:
             assert consumer._guard.timer is fake_timer
         finally:
             if prev is None:
-                os.environ.pop(
-                    "PROTEA_TUNING__WORKER__WORKER_SHUTDOWN_GRACE_SECONDS", None
-                )
+                os.environ.pop("PROTEA_TUNING__WORKER__WORKER_SHUTDOWN_GRACE_SECONDS", None)
             else:
                 os.environ["PROTEA_TUNING__WORKER__WORKER_SHUTDOWN_GRACE_SECONDS"] = prev
             get_tuning.cache_clear()
@@ -548,9 +590,7 @@ class TestPublishJob:
                 "protea.infrastructure.queue.publisher.inject_trace_context",
                 side_effect=fake_inject,
             ),
-            patch(
-                "protea.infrastructure.queue.publisher._local", threading.local()
-            ),
+            patch("protea.infrastructure.queue.publisher._local", threading.local()),
         ):
             publish_job("amqp://localhost/", "q", uuid4())
 
@@ -599,9 +639,7 @@ class TestPublishJob:
                 "protea.infrastructure.queue.publisher.inject_trace_context",
                 side_effect=lambda h: h,
             ),
-            patch(
-                "protea.infrastructure.queue.publisher._local", threading.local()
-            ),
+            patch("protea.infrastructure.queue.publisher._local", threading.local()),
         ):
             publish_job("amqp://localhost/", "q", uuid4())
 
@@ -717,9 +755,7 @@ class TestOperationConsumerEmit:
         assert len(sessions) >= 2
         # Across all sessions, the JobEvent add for ``child.failed`` must
         # have happened exactly once and have been committed.
-        adds_with_commit = [
-            s for s in sessions if s.add.called and s.commit.called
-        ]
+        adds_with_commit = [s for s in sessions if s.add.called and s.commit.called]
         assert len(adds_with_commit) == 1, (
             f"expected exactly one session with .add()+.commit() (the "
             f"child.failed event session), got {len(adds_with_commit)}"
@@ -1258,9 +1294,7 @@ class TestOperationConsumerCancellationAndRetryNack:
         registry.get.return_value = op
 
         fake_parent = MagicMock()
-        fake_parent.status = (
-            JobStatus.CANCELLED if status == "cancelled" else JobStatus.RUNNING
-        )
+        fake_parent.status = JobStatus.CANCELLED if status == "cancelled" else JobStatus.RUNNING
 
         sessions = []
 
@@ -1284,9 +1318,7 @@ class TestOperationConsumerCancellationAndRetryNack:
         return consumer, sessions, op
 
     def _body(self, job_id):
-        return json.dumps(
-            {"operation": "test_op", "job_id": str(job_id), "payload": {}}
-        ).encode()
+        return json.dumps({"operation": "test_op", "job_id": str(job_id), "payload": {}}).encode()
 
     def test_cancelled_parent_nacks_without_requeue_and_skips_execute(self):
         """Acceptance: CANCELLED parent → basic_nack(requeue=False); op not run."""
@@ -1322,9 +1354,7 @@ class TestOperationConsumerCancellationAndRetryNack:
 
         op = MagicMock()
         op.execute.side_effect = RetryLaterError("GPU busy", delay_seconds=10)
-        consumer, sessions, _ = self._make_consumer_with_parent_status(
-            "running", op=op
-        )
+        consumer, sessions, _ = self._make_consumer_with_parent_status("running", op=op)
         channel = MagicMock()
         method = _make_method(202)
 
@@ -1366,3 +1396,130 @@ class TestOperationConsumerRun:
         channel.basic_qos.assert_called_once_with(prefetch_count=4)
         channel.basic_consume.assert_called_once()
         channel.start_consuming.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# F-OPS-JOBS.1 — Heartbeat loop
+# ---------------------------------------------------------------------------
+
+
+class TestHeartbeatLoop:
+    """``HeartbeatLoop`` periodically extends ``leased_until`` for a job.
+
+    The loop spawns a daemon thread that calls ``extend_lease`` every
+    ``interval_seconds``. Stopping the loop must release the thread
+    cleanly so the consumer can dispatch the next message without
+    accumulating dangling heartbeat workers.
+    """
+
+    def test_loop_extends_lease_after_interval(self):
+        from protea.workers.shutdown import HeartbeatLoop
+
+        job_id = uuid4()
+        calls: list[UUID] = []
+        gate = threading.Event()
+
+        def extend(jid: UUID) -> None:
+            calls.append(jid)
+            gate.set()
+
+        loop = HeartbeatLoop(extend, interval_seconds=1)
+        loop.start(job_id)
+        try:
+            assert gate.wait(timeout=3), "heartbeat did not fire within 3s"
+        finally:
+            loop.stop()
+        assert calls and calls[0] == job_id
+
+    def test_stop_joins_thread_quickly(self):
+        from protea.workers.shutdown import HeartbeatLoop
+
+        loop = HeartbeatLoop(lambda _jid: None, interval_seconds=60)
+        loop.start(uuid4())
+        loop.stop()
+        # After stop, internal handles are cleared so a new start works.
+        assert loop._thread is None
+        assert loop._stop_event is None
+
+    def test_start_is_idempotent(self):
+        from protea.workers.shutdown import HeartbeatLoop
+
+        loop = HeartbeatLoop(lambda _jid: None, interval_seconds=60)
+        loop.start(uuid4())
+        first = loop._thread
+        loop.start(uuid4())  # second start while one is running -> no-op
+        assert loop._thread is first
+        loop.stop()
+
+    def test_extend_failure_does_not_kill_loop(self):
+        """An exception inside ``extend_lease`` must be swallowed; the
+        loop keeps heartbeating so a transient DB blip does not cause
+        the reaper to immediately kill the job."""
+        from protea.workers.shutdown import HeartbeatLoop
+
+        job_id = uuid4()
+        attempts = []
+        gate = threading.Event()
+
+        def flaky(jid: UUID) -> None:
+            attempts.append(jid)
+            if len(attempts) == 1:
+                raise RuntimeError("db blip")
+            gate.set()
+
+        loop = HeartbeatLoop(flaky, interval_seconds=1)
+        loop.start(job_id)
+        try:
+            assert gate.wait(timeout=4), "loop should have retried after the first failure"
+        finally:
+            loop.stop()
+        assert len(attempts) >= 2
+
+
+class TestDispatchHeartbeatWiring:
+    """The dispatch path must start the heartbeat before invoking the
+    worker and stop it after, so the reaper sees a live lease for the
+    full duration of the job (and only the duration of the job)."""
+
+    def test_dispatch_starts_and_stops_heartbeat(self):
+        job_id = uuid4()
+        worker = MagicMock()
+        consumer = _consumer(worker)
+        channel = MagicMock()
+        properties = MagicMock()
+        properties.headers = None
+
+        # Observe heartbeat lifecycle around handle_job.
+        events: list[str] = []
+
+        def _track_start(jid):  # pragma: no cover - trivial
+            events.append(f"start:{jid}")
+
+        def _track_stop():  # pragma: no cover - trivial
+            events.append("stop")
+
+        def _track_handle(jid):
+            events.append(f"handle:{jid}")
+
+        with (
+            patch.object(consumer._heartbeat, "start", side_effect=_track_start),
+            patch.object(consumer._heartbeat, "stop", side_effect=_track_stop),
+        ):
+            worker.handle_job.side_effect = _track_handle
+            consumer._dispatch_job(channel, _make_method(11), properties, job_id)
+
+        # Heartbeat must start before handle_job runs and stop after.
+        assert events == [f"start:{job_id}", f"handle:{job_id}", "stop"]
+
+    def test_dispatch_stops_heartbeat_on_exception(self):
+        worker = MagicMock()
+        worker.handle_job.side_effect = RuntimeError("boom")
+        consumer = _consumer(worker)
+        channel = MagicMock()
+        properties = MagicMock()
+        properties.headers = None
+
+        with patch.object(consumer._heartbeat, "stop") as mock_stop:
+            consumer._dispatch_job(channel, _make_method(12), properties, uuid4())
+
+        mock_stop.assert_called_once()

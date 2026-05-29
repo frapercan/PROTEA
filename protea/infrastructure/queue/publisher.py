@@ -126,6 +126,25 @@ def publish_job(amqp_url: str, queue_name: str, job_id: UUID) -> None:
     _publish(amqp_url, queue_name, json.dumps({"job_id": str(job_id)}).encode("utf-8"))
 
 
+def safe_republish_job(amqp_url: str, queue_name: str, job_id: UUID) -> None:
+    """Re-publish a re-queued job; logs but does NOT raise on failure.
+
+    Used by the SIGTERM grace watchdog after
+    :meth:`BaseWorker.requeue_on_shutdown` flips the row back to QUEUED.
+    Failures fall through to the StaleJobReaper via the lease-expiry
+    path so a flaky RabbitMQ never leaves the row stranded.
+    """
+    try:
+        publish_job(amqp_url, queue_name, job_id)
+    except Exception as exc:
+        logger.error(
+            "Re-publish after shutdown re-queue failed; reaper will "
+            "recover via lease expiry. job_id=%s error=%s",
+            job_id,
+            exc,
+        )
+
+
 def publish_operation(amqp_url: str, queue_name: str, payload: dict[str, Any]) -> None:
     """Publish an ephemeral operation message to a queue.
 

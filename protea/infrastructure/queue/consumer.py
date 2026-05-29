@@ -16,10 +16,10 @@ from protea.core.contracts.operation import EmitFn, RetryLaterError, make_safe_e
 from protea.core.contracts.registry import OperationRegistry
 from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
 from protea.infrastructure.queue import _failure_aggregation as _agg
-from protea.infrastructure.queue.publisher import publish_operation
+from protea.infrastructure.queue.publisher import publish_operation, safe_republish_job
 from protea.infrastructure.telemetry import extract_trace_context, get_tracer
 from protea.workers.base_worker import BaseWorker
-from protea.workers.shutdown import ShutdownGuard
+from protea.workers.shutdown import HeartbeatLoop, ShutdownGuard
 
 logger = logging.getLogger(__name__)
 _TRACER = get_tracer(__name__)
@@ -110,12 +110,18 @@ class QueueConsumer:
         self._requeue_on_failure = options.requeue_on_failure
         self._stop = False
         self._channel: BlockingChannel | None = None
-        # ShutdownGuard tracks the in-flight job and arms a watchdog
-        # timer when SIGTERM arrives mid-callback. Grace seconds are
-        # read lazily so test overrides of get_tuning() are honoured.
+        # F-OPS-JOBS.1: SIGTERM mid-job re-queues + republishes;
+        # heartbeat keeps the lease alive while the worker is healthy.
+        wt = get_tuning().worker
         self._guard = ShutdownGuard(
             self._worker._force_fail_job,
-            grace_seconds=get_tuning().worker.worker_shutdown_grace_seconds,
+            grace_seconds=wt.worker_shutdown_grace_seconds,
+            requeue=self._worker.requeue_on_shutdown,
+            on_requeue=lambda jid: safe_republish_job(self._amqp_url, self._queue_name, jid),
+        )
+        self._heartbeat = HeartbeatLoop(
+            self._worker.extend_lease,
+            interval_seconds=wt.job_heartbeat_interval_seconds,
         )
 
     def run(self) -> None:
@@ -290,11 +296,9 @@ class QueueConsumer:
             channel.basic_ack(delivery_tag=method.delivery_tag)
             logger.info("Job acked. job_id=%s", job_id)
 
-            # Track the in-flight job so the SIGTERM handler can force-
-            # fail it through the fresh-session fallback if the process
-            # is killed mid-callback. Cleared in ``finally`` below so
-            # idle consumers do not look like they have a job pending.
+            # F-OPS-JOBS.1: track in-flight + start the lease heartbeat.
             self._guard.track(job_id)
+            self._heartbeat.start(job_id)
             try:
                 self._worker.handle_job(job_id)
             except RetryLaterError as exc:
@@ -312,6 +316,7 @@ class QueueConsumer:
                 span.record_exception(exc)
                 logger.error("Job failed. job_id=%s error=%s", job_id, exc)
             finally:
+                self._heartbeat.stop()
                 self._guard.untrack()
 
 
