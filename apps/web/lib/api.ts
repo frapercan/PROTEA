@@ -61,14 +61,27 @@ export function publicBaseUrl(): string {
 
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
-// Merge ``Authorization: Bearer <token>`` onto every mutation when the
-// ``protea_session`` cookie is present. GETs stay unauthenticated so
-// public dashboards keep serving anonymous visitors. The helper is
-// idempotent: if the caller passed an explicit Authorization header,
-// it wins.
+// Merge ``Authorization: Bearer <token>`` onto every request when the
+// ``protea_session`` cookie is present.
+//
+// LOGIN-PERSIST-DEBUG (2026-05-29). Earlier revisions of this helper
+// skipped the Bearer header for GET requests so anonymous dashboards
+// kept working without a cookie. That contract is preserved for the
+// no-cookie path (we still short-circuit when ``authHeaders()`` returns
+// an empty object), but skipping the header on GETs ALSO stranded
+// role-gated GET endpoints (``GET /v1/admin/dlq/summary``,
+// ``GET /v1/admin/users``, the bootstrap-admin sweep PR #569 surface)
+// for logged-in users: the backend ``require_role`` gate sees no
+// principal, returns 401, and the 401 catcher below silently swallows
+// the failure into an empty list, leaving the user staring at an
+// "empty admin page" that they perceive as "my login isn't persisting".
+//
+// Sending the Bearer header whenever the cookie is present is safe:
+// public endpoints ignore unknown principals, role-gated endpoints
+// now resolve the JWT, and the cookie itself only carries a JWT minted
+// for the active user. The helper stays idempotent (explicit
+// Authorization header wins).
 function withAuth(init: RequestInit | undefined): RequestInit | undefined {
-  const method = (init?.method ?? "GET").toUpperCase();
-  if (!MUTATING_METHODS.has(method)) return init;
   const extra = authHeaders();
   if (Object.keys(extra).length === 0) return init;
   const headers = new Headers(init?.headers);
