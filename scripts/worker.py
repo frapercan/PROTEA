@@ -6,6 +6,7 @@ Usage:
     poetry run python scripts/worker.py
     poetry run python scripts/worker.py --queue protea.jobs
 """
+
 from __future__ import annotations
 
 import argparse
@@ -86,10 +87,14 @@ def main() -> None:
         from protea.config.tuning import get_tuning
 
         worker_settings = get_tuning().worker
+        # F-OPS-JOBS.1: pass the AMQP URL so lease-expired jobs can be
+        # re-enqueued onto their source queue instead of marked FAILED.
         reaper = StaleJobReaper(
             factory,
             timeout_seconds=worker_settings.reaper_main_timeout_seconds,
             stall_seconds=worker_settings.reaper_stall_seconds,
+            amqp_url=settings.amqp_url,
+            max_lease_requeues=worker_settings.max_lease_requeues,
         )
         logging.info(
             "Stale job reaper started. timeout=%ds stall=%ds interval=60s",
@@ -109,7 +114,9 @@ def main() -> None:
             options=options,
         )
     else:
-        worker = BaseWorker(factory, registry, WorkerConfig(worker_name="queue-worker"), amqp_url=settings.amqp_url)
+        worker = BaseWorker(
+            factory, registry, WorkerConfig(worker_name="queue-worker"), amqp_url=settings.amqp_url
+        )
         consumer = QueueConsumer(
             amqp_url=settings.amqp_url,
             queue_name=args.queue,
