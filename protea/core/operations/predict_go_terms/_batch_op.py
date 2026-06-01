@@ -24,6 +24,7 @@ from typing import Any, NamedTuple
 from uuid import UUID
 
 import numpy as np
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult
@@ -175,6 +176,7 @@ class PredictGOTermsBatchOperation(
             prediction_set_id=ctx.prediction_set_id,
             prediction_dicts=prediction_dicts,
         )
+        self._finalize_parent_if_last(session, ctx.parent_job_id, emit)
         return OperationResult(
             result={
                 "predictions": len(prediction_dicts),
@@ -182,6 +184,51 @@ class PredictGOTermsBatchOperation(
             },
             publish_operations=store_messages,
         )
+
+    @staticmethod
+    def _finalize_parent_if_last(session: Session, parent_job_id: UUID, emit: EmitFn) -> None:
+        """Atomically bump ``meta.batches_completed`` and mark the parent
+        ``predict_go_terms`` Job ``SUCCEEDED`` when the count reaches
+        ``meta.expected_batches`` (FIX-PREDICT-COORD-CLAIM, 2026-06-01).
+
+        Without this, the coord job returns ``deferred=True`` and stays
+        ``RUNNING`` forever; the stale-job reaper eventually kills it as
+        ``lease_expired`` even though every batch has succeeded.
+        """
+        row = session.execute(
+            text(
+                "UPDATE job SET "
+                "  meta = jsonb_set("
+                "    COALESCE(meta, '{}'::jsonb),"
+                "    '{batches_completed}',"
+                "    to_jsonb(COALESCE((meta->>'batches_completed')::int, 0) + 1)"
+                "  ),"
+                "  status = CASE"
+                "    WHEN COALESCE((meta->>'batches_completed')::int, 0) + 1"
+                "         >= COALESCE((meta->>'expected_batches')::int, 2147483647)"
+                "    THEN 'SUCCEEDED'::job_status"
+                "    ELSE status"
+                "  END,"
+                "  finished_at = CASE"
+                "    WHEN COALESCE((meta->>'batches_completed')::int, 0) + 1"
+                "         >= COALESCE((meta->>'expected_batches')::int, 2147483647)"
+                "    THEN NOW()"
+                "    ELSE finished_at"
+                "  END "
+                "WHERE id = :pid AND status = 'RUNNING'::job_status "
+                "RETURNING (status = 'SUCCEEDED'::job_status) AS finalized, "
+                "          (meta->>'batches_completed')::int AS done, "
+                "          (meta->>'expected_batches')::int AS expected"
+            ),
+            {"pid": parent_job_id},
+        ).first()
+        if row is not None and row.finalized:
+            emit(
+                "predict_go_terms.coord_finalized",
+                None,
+                {"batches_completed": row.done, "expected_batches": row.expected},
+                "info",
+            )
 
     @staticmethod
     def _should_skip_for_parent(session: Session, parent_job_id: UUID, emit: EmitFn) -> bool:

@@ -9,6 +9,7 @@ import uuid
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult
@@ -129,6 +130,15 @@ class PredictGOTermsOperation:
         ]
         n_batches = len(batches)
         self._emit_dispatching(emit, len(query_accessions), n_batches, prediction_set.id)
+        session.execute(
+            text(
+                "UPDATE job SET meta = jsonb_set("
+                "  jsonb_set(COALESCE(meta, '{}'::jsonb), '{expected_batches}', to_jsonb(:n)),"
+                "  '{batches_completed}', to_jsonb(0)"
+                ") WHERE id = :jid"
+            ),
+            {"n": n_batches, "jid": parent_job_id},
+        )
         operations = [
             (_BATCH_QUEUE, self._build_batch_message(p, prediction_set.id, parent_job_id, accs, binding))
             for accs in batches

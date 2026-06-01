@@ -383,7 +383,7 @@ def list_jobs(
 
         if filters.status is not None:
             try:
-                st = JobStatus(filters.status)
+                st = JobStatus(filters.status.upper())
             except Exception as exc:
                 raise HTTPException(
                     status_code=400, detail=f"Unknown status: {filters.status}"
