@@ -31,7 +31,7 @@ def _reset_router_cache():
 # ---------------------------------------------------------------------------
 
 
-def _make_app(factory):
+def _make_app(factory, hidden_embeddings=frozenset()):
     from protea.infrastructure.benchmark_config import BenchmarkConfig
 
     app = FastAPI()
@@ -40,6 +40,7 @@ def _make_app(factory):
         preferred_default_stages=("alignment_weighted", "reranker"),
         baseline_scoring_name="alignment_weighted",
         hidden_stages=frozenset(),
+        hidden_embeddings=hidden_embeddings,
         stage_labels={"alignment_weighted": "Alignment-weighted", "reranker": "Reranker"},
         eval_set_labels={},
         categories=("NK", "LK", "PK"),
@@ -187,6 +188,36 @@ class TestListBenchmarkEmbeddings:
             assert "param_count" in e
             assert "model_name" in e
             assert "model_backend" in e
+
+    def test_hidden_embeddings_are_suppressed(self, session, factory):
+        # Configs whose UUID is listed in benchmark.yaml: hidden_embeddings
+        # are omitted from the response (reversible, no data deletion).
+        from protea.api.cache import invalidate
+
+        hidden = _make_cfg("esmc_300m", "esm3c", display_name="ESMC-300M", family="esmc")
+        visible = _make_cfg(
+            "facebook/esm2_t33_650M_UR50D", "esm", display_name="ESM2-650M", family="esm2"
+        )
+        exec_result = MagicMock()
+        exec_result.scalars.return_value.all.return_value = [hidden, visible]
+        session.execute.return_value = exec_result
+
+        # Case-insensitive match: store the UUID uppercased in the config to
+        # prove normalisation works.
+        app = _make_app(factory, hidden_embeddings=frozenset({str(hidden.id).lower()}))
+        invalidate()  # cached() is module-scoped; clear cross-test leakage
+        with patch(
+            "protea.api.routers.benchmark.session_scope",
+            side_effect=lambda _: _mock_scope(session),
+        ):
+            with TestClient(app) as c:
+                resp = c.get("/benchmark/embeddings")
+        invalidate()
+        data = resp.json()
+        assert data["total"] == 1
+        ids = [e["id"] for e in data["embeddings"]]
+        assert str(visible.id) in ids
+        assert str(hidden.id) not in ids
 
 
 # ---------------------------------------------------------------------------

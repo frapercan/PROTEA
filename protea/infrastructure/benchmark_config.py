@@ -22,6 +22,7 @@ class BenchmarkConfig:
     preferred_default_stages: tuple[str, ...]
     baseline_scoring_name: str | None
     hidden_stages: frozenset[str]
+    hidden_embeddings: frozenset[str]
     stage_labels: dict[str, str]
     eval_set_labels: dict[str, str]
     categories: tuple[str, ...]
@@ -74,6 +75,9 @@ def load_benchmark_config(project_root: Path) -> BenchmarkConfig:
     baseline = stages_raw.get("baseline_scoring_name")
     baseline_name = str(baseline) if baseline else None
     hidden = frozenset(_as_str_tuple(stages_raw.get("hidden"), ()))
+    # UUIDs normalised to lowercase so comparison against str(uuid) is stable
+    # regardless of how the YAML author cased them.
+    hidden_emb = frozenset(v.lower() for v in _as_str_tuple(raw.get("hidden_embeddings"), ()))
     labels = _as_str_dict(stages_raw.get("labels"))
 
     eval_labels = _as_str_dict(raw.get("eval_set_labels"))
@@ -84,6 +88,7 @@ def load_benchmark_config(project_root: Path) -> BenchmarkConfig:
         preferred_default_stages=preferred,
         baseline_scoring_name=baseline_name,
         hidden_stages=hidden,
+        hidden_embeddings=hidden_emb,
         stage_labels=labels,
         eval_set_labels=eval_labels,
         categories=cats,

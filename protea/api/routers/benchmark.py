@@ -186,11 +186,14 @@ def _eval_set_label(
 
 def _compute_benchmark_embeddings(
     factory: sessionmaker[Session],
+    hidden_embeddings: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     """Run the ``EmbeddingConfig`` SELECT and shape the response payload.
 
     Module-scope so the prewarm hook can share the exact same producer
-    the route caches under.
+    the route caches under. ``hidden_embeddings`` (lowercase UUID strings
+    from ``benchmark.yaml``) are omitted so the matrix shows only the
+    canonical PLMs without empty / duplicate rows.
     """
     with session_scope(factory) as session:
         cfgs = (
@@ -198,7 +201,9 @@ def _compute_benchmark_embeddings(
             .scalars()
             .all()
         )
-        out = [_embedding_display(cfg) for cfg in cfgs]
+        out = [
+            _embedding_display(cfg) for cfg in cfgs if str(cfg.id).lower() not in hidden_embeddings
+        ]
         return {"embeddings": out, "total": len(out)}
 
 
@@ -208,19 +213,21 @@ def _compute_benchmark_embeddings(
 )
 def list_benchmark_embeddings(
     factory: sessionmaker[Session] = Depends(get_session_factory),
+    cfg: BenchmarkConfig = Depends(get_benchmark_config),
 ) -> dict[str, Any]:
     """Return every ``EmbeddingConfig`` with its persisted display metadata.
 
     The metadata lives in ``embedding_config.display_name / family /
     param_count``: filled at creation time by the seed scripts. No
-    heuristic inference happens here. Cached for 5 min; the benchmark
-    page is the first router touch on a fresh deploy so cold pg pages
-    push this past several seconds without the cache.
+    heuristic inference happens here. Configs listed in
+    ``benchmark.yaml: hidden_embeddings`` are suppressed. Cached for 5 min;
+    the benchmark page is the first router touch on a fresh deploy so cold
+    pg pages push this past several seconds without the cache.
     """
     return cached(
         BENCHMARK_EMBEDDINGS_CACHE_KEY,
         BENCHMARK_EMBEDDINGS_TTL_SECONDS,
-        lambda: _compute_benchmark_embeddings(factory),
+        lambda: _compute_benchmark_embeddings(factory, cfg.hidden_embeddings),
         serve_stale_on_error=True,
     )
 
@@ -230,11 +237,17 @@ def prewarm_benchmark_embeddings(
 ) -> dict[str, Any]:
     """Recompute and store ``benchmark:embeddings`` for the lifespan
     prewarm hook + background refresh loop."""
+    from pathlib import Path
+
+    from protea.infrastructure.benchmark_config import load_benchmark_config
+
+    project_root = Path(__file__).resolve().parents[3]
+    cfg = load_benchmark_config(project_root)
     invalidate(BENCHMARK_EMBEDDINGS_CACHE_KEY)
     return cached(
         BENCHMARK_EMBEDDINGS_CACHE_KEY,
         BENCHMARK_EMBEDDINGS_TTL_SECONDS,
-        lambda: _compute_benchmark_embeddings(factory),
+        lambda: _compute_benchmark_embeddings(factory, cfg.hidden_embeddings),
     )
 
 
@@ -400,13 +413,15 @@ def _aggregate_benchmark_matrix(
     stages_seen: set[str] = set()
     ks_seen: set[int] = set()
     for er, embedding_config_id, row_k, scoring_name in session.execute(stmt).all():
+        eid = str(embedding_config_id)
+        if eid.lower() in cfg.hidden_embeddings:
+            continue
         st = _stage_of(er, scoring_name)
         if st is None or st in cfg.hidden_stages:
             continue
         stages_seen.add(st)
         ks_seen.add(int(row_k))
         passes_filter = (stage is None or st == stage) and (k is None or int(row_k) == k)
-        eid = str(embedding_config_id)
         esid = str(er.evaluation_set_id)
         embedding_ids.add(eid)
         eval_set_ids.add(esid)
