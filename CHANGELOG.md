@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/frapercan/PROTEA/compare/v0.9.0...v0.9.1) (2026-06-03)
+
+
+### Bug Fixes
+
+* **containers:** pin protea-method to main (unbreak v0.9.0 image builds) ([#587](https://github.com/frapercan/PROTEA/issues/587)) ([15bbabc](https://github.com/frapercan/PROTEA/commit/15bbabc680dc7a384df28a31b82a0df05c9b59cc))
+
 ## [0.9.0](https://github.com/frapercan/PROTEA/compare/v0.8.0...v0.9.0) (2026-06-03)
 
 
