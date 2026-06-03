@@ -34,9 +34,13 @@ def _mint(role: str | None, *, ttl: int = 60) -> str:
     return jwt.encode(payload, _SECRET, algorithm=_ALG)
 
 
-def _make_app(monkeypatch) -> FastAPI:
+def _make_app(monkeypatch, *, allow_reset: bool = True) -> FastAPI:
     monkeypatch.setenv("PROTEA_AUTHN_REQUIRED", "true")
     monkeypatch.setenv("PROTEA_JWT_SECRET", _SECRET)
+    if allow_reset:
+        monkeypatch.setenv("PROTEA_ALLOW_DB_RESET", "1")
+    else:
+        monkeypatch.delenv("PROTEA_ALLOW_DB_RESET", raising=False)
     app = FastAPI()
     app.state.session_factory = MagicMock()
     app.include_router(router)
@@ -99,6 +103,33 @@ class TestResetDBAuth:
         )
         assert resp.status_code == 401
 
+    def test_none_principal_dev_fallback_rejected_with_401(self, monkeypatch):
+        """With auth disabled the principal is None (role_of(None)==admin).
+
+        That dev convenience must NOT authorize a DROP SCHEMA: reset-db
+        rejects a None principal with 401 even though the sentinel is set.
+        """
+        monkeypatch.setenv("PROTEA_AUTHN_REQUIRED", "false")
+        monkeypatch.setenv("PROTEA_ALLOW_DB_RESET", "1")
+        app = FastAPI()
+        app.state.session_factory = MagicMock()
+        app.include_router(router)
+        client = TestClient(app)
+        resp = client.post("/admin/reset-db")
+        assert resp.status_code == 401
+        assert "real authenticated admin" in resp.json()["detail"]
+
+    def test_admin_jwt_rejected_when_sentinel_unset_with_403(self, monkeypatch):
+        """A genuine admin is still blocked unless PROTEA_ALLOW_DB_RESET=1."""
+        app = _make_app(monkeypatch, allow_reset=False)
+        client = TestClient(app)
+        resp = client.post(
+            "/admin/reset-db",
+            headers={"Authorization": f"Bearer {_mint('admin')}"},
+        )
+        assert resp.status_code == 403
+        assert "PROTEA_ALLOW_DB_RESET" in resp.json()["detail"]
+
 
 # ---------------------------------------------------------------------------
 # POST /admin/reset-db -- success path (admin role)
@@ -130,7 +161,9 @@ class TestResetDB:
     @patch("protea.api.routers.admin.build_session_factory")
     @patch("protea.api.routers.admin.subprocess.run")
     @patch("protea.api.routers.admin.load_settings")
-    def test_reset_db_migration_failure(self, mock_settings, mock_run, mock_build, monkeypatch, mock_psycopg):
+    def test_reset_db_migration_failure(
+        self, mock_settings, mock_run, mock_build, monkeypatch, mock_psycopg
+    ):
         mock_psycopg_mod, conn_ctx = mock_psycopg
         app = _make_app(monkeypatch)
         settings = MagicMock()
@@ -152,7 +185,9 @@ class TestResetDB:
     @patch("protea.api.routers.admin.build_session_factory")
     @patch("protea.api.routers.admin.subprocess.run")
     @patch("protea.api.routers.admin.load_settings")
-    def test_reset_db_drops_and_recreates_schema(self, mock_settings, mock_run, mock_build, monkeypatch, mock_psycopg):
+    def test_reset_db_drops_and_recreates_schema(
+        self, mock_settings, mock_run, mock_build, monkeypatch, mock_psycopg
+    ):
         mock_psycopg_mod, conn_ctx = mock_psycopg
         app = _make_app(monkeypatch)
         settings = MagicMock()
@@ -172,7 +207,9 @@ class TestResetDB:
     @patch("protea.api.routers.admin.build_session_factory")
     @patch("protea.api.routers.admin.subprocess.run")
     @patch("protea.api.routers.admin.load_settings")
-    def test_reset_db_replaces_psycopg_in_url(self, mock_settings, mock_run, mock_build, monkeypatch, mock_psycopg):
+    def test_reset_db_replaces_psycopg_in_url(
+        self, mock_settings, mock_run, mock_build, monkeypatch, mock_psycopg
+    ):
         mock_psycopg_mod, conn_ctx = mock_psycopg
         app = _make_app(monkeypatch)
         settings = MagicMock()

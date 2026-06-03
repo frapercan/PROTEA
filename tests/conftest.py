@@ -114,6 +114,52 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     )
 
 
+# Database names that are known dev/prod stores. The *_pg integration tests
+# run ``Base.metadata.drop_all(); create_all()`` against whatever URL this
+# fixture yields, so an externally-supplied DB pointed at any of these would
+# silently wipe a real schema (the live DB has been wiped four times this way).
+_PROTECTED_DB_NAMES = frozenset({"protea", "biodata"})
+
+# The dev Postgres listens here. Refuse to run destructive integration tests
+# against it unless the operator explicitly opts in.
+_DEV_HOST_PORT = ("localhost", "5432")
+_DEV_HOST_ALIASES = frozenset({"localhost", "127.0.0.1", "::1", ""})
+
+
+def _guard_external_db(user: str, host: str, port: str, db: str) -> None:
+    """Abort the session if an external DB looks like a real dev/prod store.
+
+    The ``*_pg.py`` integration suite drops and recreates the schema, so a
+    misconfigured ``PROTEA_PG_*`` env (e.g. inherited from a sourced ``.env``
+    that points at the live Postgres) would destroy a real database. We
+    default-deny: refuse when the DB name is a known prod/dev name, or when
+    the target is the dev Postgres host:port, unless the operator sets the
+    explicit opt-in sentinel ``PROTEA_ALLOW_DESTRUCTIVE_TESTS=1``.
+    """
+    if os.getenv("PROTEA_ALLOW_DESTRUCTIVE_TESTS") == "1":
+        return
+
+    reasons: list[str] = []
+    if db.strip().lower() in _PROTECTED_DB_NAMES:
+        reasons.append(f"database name {db!r} is a known dev/prod store")
+    if host.strip().lower() in _DEV_HOST_ALIASES and port.strip() == _DEV_HOST_PORT[1]:
+        reasons.append(
+            f"target {host}:{port} is the dev Postgres ({_DEV_HOST_PORT[0]}:{_DEV_HOST_PORT[1]})"
+        )
+
+    if reasons:
+        pytest.fail(
+            "Refusing to run destructive integration tests against what looks "
+            "like a real database: "
+            + "; ".join(reasons)
+            + f" (user={user!r}, db={db!r}, host={host!r}, port={port!r}). "
+            "These tests run Base.metadata.drop_all()/create_all() and would "
+            "wipe the schema. Point PROTEA_PG_* at a disposable Postgres, or "
+            "set PROTEA_ALLOW_DESTRUCTIVE_TESTS=1 to override this guard.",
+            pytrace=False,
+        )
+
+
 @pytest.fixture(scope="session")
 def postgres_url(pytestconfig: pytest.Config) -> str:
     if not pytestconfig.getoption("--with-postgres"):
@@ -138,6 +184,7 @@ def postgres_url(pytestconfig: pytest.Config) -> str:
     )
 
     if external_db:
+        _guard_external_db(user=user, host="localhost", port=str(host_port), db=db)
         url = f"postgresql+psycopg://{user}:{password}@localhost:{host_port}/{db}"
         yield url
         return

@@ -179,54 +179,45 @@ class TestAdminDestructiveRoutes:
     """Every destructive admin route must require ``require_role('admin')``."""
 
     @pytest.mark.parametrize("method,path", _ADMIN_DESTRUCTIVE_ROUTES)
-    def test_unauthenticated_rejected(
-        self, monkeypatch, client, method: str, path: str
-    ) -> None:
+    def test_unauthenticated_rejected(self, monkeypatch, client, method: str, path: str) -> None:
         monkeypatch.setenv("PROTEA_AUTHN_REQUIRED", "true")
         monkeypatch.setenv("PROTEA_JWT_SECRET", _SECRET)
         resp = _call(client, method, path)
         assert resp.status_code in (401, 403), (
-            f"{method} {path}: expected 401/403 for unauthenticated caller, "
-            f"got {resp.status_code}"
+            f"{method} {path}: expected 401/403 for unauthenticated caller, got {resp.status_code}"
         )
 
     @pytest.mark.parametrize("method,path", _ADMIN_DESTRUCTIVE_ROUTES)
-    def test_viewer_jwt_rejected(
-        self, monkeypatch, client, method: str, path: str
-    ) -> None:
+    def test_viewer_jwt_rejected(self, monkeypatch, client, method: str, path: str) -> None:
         monkeypatch.setenv("PROTEA_AUTHN_REQUIRED", "true")
         monkeypatch.setenv("PROTEA_JWT_SECRET", _SECRET)
         resp = _call(client, method, path, headers=_bearer(_VIEWER))
         assert resp.status_code == 403, (
-            f"{method} {path}: viewer JWT should be 403 at admin floor, "
-            f"got {resp.status_code}"
+            f"{method} {path}: viewer JWT should be 403 at admin floor, got {resp.status_code}"
         )
 
     @pytest.mark.parametrize("method,path", _ADMIN_DESTRUCTIVE_ROUTES)
-    def test_operator_jwt_rejected(
-        self, monkeypatch, client, method: str, path: str
-    ) -> None:
+    def test_operator_jwt_rejected(self, monkeypatch, client, method: str, path: str) -> None:
         monkeypatch.setenv("PROTEA_AUTHN_REQUIRED", "true")
         monkeypatch.setenv("PROTEA_JWT_SECRET", _SECRET)
         resp = _call(client, method, path, headers=_bearer(_OPERATOR))
         assert resp.status_code == 403, (
-            f"{method} {path}: operator JWT should be 403 at admin floor, "
-            f"got {resp.status_code}"
+            f"{method} {path}: operator JWT should be 403 at admin floor, got {resp.status_code}"
         )
 
     @pytest.mark.parametrize("method,path", _ADMIN_DESTRUCTIVE_ROUTES)
-    def test_admin_jwt_passes_gate(
-        self, monkeypatch, client, method: str, path: str
-    ) -> None:
+    def test_admin_jwt_passes_gate(self, monkeypatch, client, method: str, path: str) -> None:
         """Admin JWT must clear the role gate. Handlers may still 4xx/5xx
         for business reasons (missing body, mocked DB) but never 401/403.
         """
         monkeypatch.setenv("PROTEA_AUTHN_REQUIRED", "true")
         monkeypatch.setenv("PROTEA_JWT_SECRET", _SECRET)
+        # reset-db carries an extra destructive-op sentinel on top of the
+        # role gate; opt in so the role-gate assertion below is exercised.
+        monkeypatch.setenv("PROTEA_ALLOW_DB_RESET", "1")
         resp = _call(client, method, path, headers=_bearer(_ADMIN))
         assert resp.status_code not in (401, 403), (
-            f"{method} {path}: admin JWT was blocked by role gate "
-            f"({resp.status_code})"
+            f"{method} {path}: admin JWT was blocked by role gate ({resp.status_code})"
         )
 
 
@@ -234,27 +225,21 @@ class TestOperatorFloorReads:
     """Read-only admin observation: viewer rejected, operator passes."""
 
     @pytest.mark.parametrize("method,path", _OPERATOR_READS)
-    def test_viewer_jwt_rejected(
-        self, monkeypatch, client, method: str, path: str
-    ) -> None:
+    def test_viewer_jwt_rejected(self, monkeypatch, client, method: str, path: str) -> None:
         monkeypatch.setenv("PROTEA_AUTHN_REQUIRED", "true")
         monkeypatch.setenv("PROTEA_JWT_SECRET", _SECRET)
         resp = _call(client, method, path, headers=_bearer(_VIEWER))
         assert resp.status_code == 403, (
-            f"{method} {path}: viewer JWT should be 403 at operator floor, "
-            f"got {resp.status_code}"
+            f"{method} {path}: viewer JWT should be 403 at operator floor, got {resp.status_code}"
         )
 
     @pytest.mark.parametrize("method,path", _OPERATOR_READS)
-    def test_operator_jwt_passes_gate(
-        self, monkeypatch, client, method: str, path: str
-    ) -> None:
+    def test_operator_jwt_passes_gate(self, monkeypatch, client, method: str, path: str) -> None:
         monkeypatch.setenv("PROTEA_AUTHN_REQUIRED", "true")
         monkeypatch.setenv("PROTEA_JWT_SECRET", _SECRET)
         resp = _call(client, method, path, headers=_bearer(_OPERATOR))
         assert resp.status_code not in (401, 403), (
-            f"{method} {path}: operator JWT was blocked by role gate "
-            f"({resp.status_code})"
+            f"{method} {path}: operator JWT was blocked by role gate ({resp.status_code})"
         )
 
 
@@ -262,9 +247,7 @@ class TestViewerOpenReads:
     """Non-destructive previews are intentionally open to viewers."""
 
     @pytest.mark.parametrize("method,path", _VIEWER_OPEN_READS)
-    def test_viewer_jwt_not_blocked(
-        self, monkeypatch, client, method: str, path: str
-    ) -> None:
+    def test_viewer_jwt_not_blocked(self, monkeypatch, client, method: str, path: str) -> None:
         monkeypatch.setenv("PROTEA_AUTHN_REQUIRED", "true")
         monkeypatch.setenv("PROTEA_JWT_SECRET", _SECRET)
         resp = _call(client, method, path, headers=_bearer(_VIEWER))
@@ -321,9 +304,7 @@ class TestAdminRouteDiscovery:
         # Normalise concrete UUIDs in the catalog to ``{id}`` paths so we
         # compare against FastAPI's path-param shape.
         catalogued: set[tuple[str, str]] = set()
-        for method, path in (
-            _ADMIN_DESTRUCTIVE_ROUTES + _OPERATOR_READS + _VIEWER_OPEN_READS
-        ):
+        for method, path in _ADMIN_DESTRUCTIVE_ROUTES + _OPERATOR_READS + _VIEWER_OPEN_READS:
             # Rewrite the concrete UUID into the path-param shape FastAPI uses.
             if _FAKE_UUID in path:
                 if path.endswith(_FAKE_UUID):
@@ -363,11 +344,7 @@ class TestAdminRouteDiscovery:
         ``/auth/api-keys`` is both POST=create and GET=list); the
         idempotent gate is on the full (method, path) tuple.
         """
-        tuples = (
-            list(_ADMIN_DESTRUCTIVE_ROUTES)
-            + list(_OPERATOR_READS)
-            + list(_VIEWER_OPEN_READS)
-        )
+        tuples = list(_ADMIN_DESTRUCTIVE_ROUTES) + list(_OPERATOR_READS) + list(_VIEWER_OPEN_READS)
         duplicates = {t for t in tuples if tuples.count(t) > 1}
         assert not duplicates, f"(method, path) appears in multiple buckets: {duplicates}"
         # _all_catalog_paths is the canonical flattened set used by other

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 from typing import Annotated, Any
@@ -35,6 +36,38 @@ _OperatorPrincipal = Annotated[
 ]
 
 
+def _authorize_reset_db(principal: ApiKey | BearerPrincipal | None) -> None:
+    """Defense-in-depth gate for the irreversible ``DROP SCHEMA`` reset.
+
+    The live DB has been wiped four times, so the destructive reset carries
+    two extra checks on top of ``require_role("admin")``:
+
+    1. Reject a ``None`` principal. The dev convenience that maps ``None`` to
+       ``admin`` (``role_of(None) == ROLE_ADMIN``) is deliberately not
+       accepted here, so a stack with auth disabled cannot drop the schema.
+       A genuine admin is always an ``ApiKey`` or a ``BearerPrincipal``.
+    2. Require the explicit opt-in sentinel ``PROTEA_ALLOW_DB_RESET=1``;
+       return 403 when unset, even for a real admin.
+    """
+    if principal is None:
+        raise HTTPException(
+            status_code=401,
+            detail=(
+                "reset-db requires a real authenticated admin principal; "
+                "the dev no-auth fallback is not accepted for this "
+                "destructive operation"
+            ),
+        )
+    if os.getenv("PROTEA_ALLOW_DB_RESET") != "1":
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "reset-db is disabled; set PROTEA_ALLOW_DB_RESET=1 on the API "
+                "process to permit DROP SCHEMA public CASCADE"
+            ),
+        )
+
+
 @router.post("/reset-db")
 def reset_db(
     request: Request,
@@ -42,8 +75,11 @@ def reset_db(
 ) -> dict:
     """Drop and recreate the public schema, then re-apply all Alembic migrations.
 
-    Requires an authenticated principal with the ``admin`` role (FARM-AUTH.4).
+    Requires an authenticated ``admin`` principal (FARM-AUTH.4) plus the
+    extra destructive-op guards in :func:`_authorize_reset_db`.
     """
+    _authorize_reset_db(_principal)
+
     settings = load_settings(_PROJECT_ROOT)
 
     # 1. Drop + recreate schema using a raw connection (outside SQLAlchemy pool)

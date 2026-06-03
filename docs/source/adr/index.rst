@@ -280,3 +280,4 @@ later revision).
    D36-plm-axis-explicit-in-dataset-naming
    D37-feat-auth-users-roles-multi-instance
    D38-neural-head-deferred-dataset-pack-pivot
+   D39-destructive-op-guards
