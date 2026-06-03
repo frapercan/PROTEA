@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/frapercan/PROTEA/compare/v0.8.0...v0.9.0) (2026-06-03)
+
+
+### Features
+
+* release v0.9.0 - LAFA submission system + ProtT5 encoder fix + stack hardening ([e98a386](https://github.com/frapercan/PROTEA/commit/e98a386377299dfe441376d1e27bf7b8e0697bdc))
+
 ## [0.8.0](https://github.com/frapercan/PROTEA/compare/v0.7.2...v0.8.0) (2026-05-07)
 
 
