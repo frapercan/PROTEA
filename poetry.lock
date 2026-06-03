@@ -4063,8 +4063,8 @@ t5 = ["protea-backends @ git+https://github.com/frapercan/protea-backends.git@ma
 [package.source]
 type = "git"
 url = "https://github.com/frapercan/protea-method.git"
-reference = "fix/torch-knn-empty-cache"
-resolved_reference = "0c19a10fab4d2e685a3188816ff6b8302be78ebd"
+reference = "main"
+resolved_reference = "db03c5fd343897d71c9802b06bb6f83be9d952de"
 
 [[package]]
 name = "protea-reranker-lab"
@@ -7128,4 +7128,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "4c73b3edce2b30937d4d6fc07946d0a6f0cb938f76b1ec16914681e9fc62ccd5"
+content-hash = "4f99daed363b13c055102e1d3209d2b333dcc5d4dba5087d83d0295dd395f8d7"
