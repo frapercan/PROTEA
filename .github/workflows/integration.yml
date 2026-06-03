@@ -71,4 +71,8 @@ jobs:
           PROTEA_PG_PASSWORD: protea
           PROTEA_PG_DB: protea_test
           PROTEA_PG_PORT: 5432
+          # CI Postgres is a disposable service container; opt past the
+          # destructive-test guard added in this PR (which otherwise refuses
+          # drop_all/create_all against a loopback:5432 target).
+          PROTEA_ALLOW_DESTRUCTIVE_TESTS: "1"
         run: poetry run pytest --with-postgres -q

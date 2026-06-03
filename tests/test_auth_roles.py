@@ -228,6 +228,9 @@ def admin_app(monkeypatch):
     """Minimal FastAPI app that includes the admin router, no real DB."""
     monkeypatch.setenv("PROTEA_AUTHN_REQUIRED", "true")
     monkeypatch.setenv("PROTEA_JWT_SECRET", _SECRET)
+    # reset-db now requires the destructive-op sentinel (this PR's hardening);
+    # enable it so these tests exercise the role gate, not the sentinel guard.
+    monkeypatch.setenv("PROTEA_ALLOW_DB_RESET", "1")
     from protea.api.routers import admin as admin_router
 
     app = FastAPI()
