@@ -13,7 +13,6 @@ method-runtime suite is deliberately torch-free).
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -22,9 +21,17 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("transformers")
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "apps" / "method_runtime"))
+# Load the method-runtime encoder by explicit path under a unique module name.
+# A plain ``import prott5_encoder`` collides with the identically-named module
+# in ``apps/lafa_container`` (module caching in the shared test session would
+# otherwise hand back whichever was imported first).
+import importlib.util  # noqa: E402
 
-import prott5_encoder  # noqa: E402
+_ENC_PATH = Path(__file__).resolve().parents[1] / "apps" / "method_runtime" / "prott5_encoder.py"
+_spec = importlib.util.spec_from_file_location("method_runtime_prott5_encoder", _ENC_PATH)
+assert _spec is not None and _spec.loader is not None
+prott5_encoder = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(prott5_encoder)
 
 
 def test_embed_sequences_passes_truncation_and_max_length() -> None:
