@@ -48,7 +48,7 @@ RUN apt-get update \
 # Install Python deps. protea-method pulls numpy, pandas, lightgbm,
 # faiss-cpu, protea-contracts. The remaining packages cover the ProtT5
 # query encoder and the parquet bundle reader.
-ARG PROTEA_METHOD_REF=master
+ARG PROTEA_METHOD_REF=main
 RUN pip install \
     "protea-method @ git+https://github.com/frapercan/protea-method.git@${PROTEA_METHOD_REF}" \
     "pyarrow>=14" \
