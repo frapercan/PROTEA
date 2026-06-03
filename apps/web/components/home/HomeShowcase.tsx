@@ -3,6 +3,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { getShowcase, type ShowcaseData } from "@/lib/api";
 import { Tooltip } from "@/components/Tooltip";
 import { ShareBestLinkButton } from "./ShareBestLinkButton";
+import { stageBadgeClass, stageLabelKey } from "@/lib/stageBadge";
 
 /**
  * Async server component that hydrates the homepage best-result
@@ -78,17 +79,6 @@ const STAGE_DESC_I18N: Record<string, string> = {
   evaluations: "stageEvaluationDesc",
 };
 
-const STAGE_LABELS: Record<string, string> = {
-  baseline: "pipelineStageBaseline",
-  alignment_weighted: "pipelineStageAlignmentWeighted",
-  reranker: "pipelineStageReranker",
-};
-
-const STAGE_BADGE: Record<string, string> = {
-  baseline: "bg-slate-100 text-slate-700 ring-1 ring-inset ring-slate-200",
-  alignment_weighted: "bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200",
-  reranker: "bg-blue-50 text-blue-800 ring-1 ring-inset ring-blue-200",
-};
 
 const STAT_ACCENTS: Record<string, string> = {
   proteins: "from-blue-500/10 to-blue-500/0 text-blue-700",
@@ -235,9 +225,13 @@ export async function HomeShowcase() {
                     </span>
                   )}
                   <span
-                    className={`rounded-full px-2.5 py-1 text-xs font-semibold ${STAGE_BADGE[best.stage]}`}
+                    className={`rounded-full px-2.5 py-1 text-xs font-semibold ${stageBadgeClass(
+                      best.stage,
+                    )}`}
                   >
-                    {t(STAGE_LABELS[best.stage] as never)}
+                    {stageLabelKey(best.stage)
+                      ? t(stageLabelKey(best.stage) as never)
+                      : best.stage}
                   </span>
                 </div>
                 <div className="text-[12px] text-slate-600 mt-2 font-mono break-all">
