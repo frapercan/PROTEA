@@ -51,3 +51,5 @@ jobs:
             exit 1
           fi
           echo "OK: no forbidden attribution found in PR body."
+
+# (re-trigger CI after PR-body cleanup)
