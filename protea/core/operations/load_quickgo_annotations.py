@@ -3,7 +3,8 @@ from __future__ import annotations
 import time
 import uuid
 from collections.abc import Iterator
-from typing import Annotated, Any
+from dataclasses import dataclass
+from typing import Annotated, Any, NamedTuple
 
 from protea_contracts import (
     EcoMappingPayload,
@@ -24,11 +25,30 @@ from protea.infrastructure.orm.models.protein.protein import Protein
 PositiveInt = Annotated[int, Field(gt=0)]
 
 
+class _QuickGoStoreCtx(NamedTuple):
+    """Immutable per-stream context handed to ``_store_buffer`` / ``_flush_page``."""
+
+    annotation_set_id: uuid.UUID
+    protein_accessions: set[str]
+    go_term_map: dict[str, int]
+    eco_map: dict[str, str]
+
+
+@dataclass
+class _QuickGoPageTotals:
+    """Mutable accumulator for the QuickGO page loop."""
+
+    pages: int = 0
+    lines: int = 0
+    inserted: int = 0
+    skipped: int = 0
+
+
 class LoadQuickGOAnnotationsPayload(ProteaPayload, frozen=True):
     """Payload for loading GO annotations from the QuickGO bulk download endpoint.
 
     QuickGO returns a single streamed TSV filtered by the canonical accessions
-    already present in the DB — no external accession list is needed.
+    already present in the DB; no external accession list is needed.
 
     ``eco_mapping_url`` (optional) points to a GAF-ECO mapping file
     (space-separated: ``ECO:XXXXXXX  CODE``). When provided, ECO IDs are
@@ -60,7 +80,7 @@ class LoadQuickGOAnnotationsOperation:
     """Streams GO annotations from the QuickGO bulk download API.
 
     Proteins to annotate are determined by the canonical accessions already
-    present in the DB — no external FASTA or accession list is needed.
+    present in the DB; no external FASTA or accession list is needed.
 
     The QuickGO TSV columns used:
       GENE PRODUCT ID → protein accession
@@ -114,38 +134,68 @@ class LoadQuickGOAnnotationsOperation:
             return OperationResult(result={"annotations_inserted": 0})
 
         effective_gp_ids = list(canonical_accessions) if p.use_db_accessions else p.gene_product_ids
-
         go_term_map = self._load_go_term_map(session, snapshot_id, emit)
         eco_map = self._load_eco_mapping(p, emit)
+        annotation_set = self._create_annotation_set(session, p, snapshot_id, emit)
+        store_ctx = _QuickGoStoreCtx(
+            annotation_set_id=annotation_set.id,
+            protein_accessions=protein_accessions,
+            go_term_map=go_term_map,
+            eco_map=eco_map,
+        )
+        totals = self._stream_and_store(session, p, store_ctx, effective_gp_ids, emit)
 
+        result = {
+            "annotation_set_id": str(annotation_set.id),
+            "pages": totals.pages,
+            "total_lines_read": totals.lines,
+            "annotations_inserted": totals.inserted,
+            "annotations_skipped": totals.skipped,
+            "elapsed_seconds": time.perf_counter() - t0,
+        }
+        emit("load_quickgo_annotations.done", None, result, "info")
+        return OperationResult(result=result)
+
+    def _create_annotation_set(
+        self,
+        session: Session,
+        p: LoadQuickGOAnnotationsPayload,
+        snapshot_id: uuid.UUID,
+        emit: EmitFn,
+    ) -> AnnotationSet:
         annotation_set = AnnotationSet(
             source="quickgo",
             source_version=p.source_version,
             ontology_snapshot_id=snapshot_id,
-            meta={
-                "quickgo_base_url": p.quickgo_base_url,
-            },
+            meta={"quickgo_base_url": p.quickgo_base_url},
         )
         session.add(annotation_set)
         session.flush()
-
         emit(
             "load_quickgo_annotations.annotation_set_created",
             None,
             {"annotation_set_id": str(annotation_set.id)},
             "info",
         )
+        return annotation_set
 
-        total_lines = 0
-        total_inserted = 0
-        total_skipped = 0
-        pages = 0
+    def _stream_and_store(
+        self,
+        session: Session,
+        p: LoadQuickGOAnnotationsPayload,
+        store_ctx: _QuickGoStoreCtx,
+        effective_gp_ids: list[str] | None,
+        emit: EmitFn,
+    ) -> _QuickGoPageTotals:
+        """Stream QuickGO records, page-flush via ``_flush_page``, return totals.
+
+        Honours ``p.total_limit`` (early break) and ``p.commit_every_page``.
+        """
+        totals = _QuickGoPageTotals()
         buffer: list[QuickGoAnnotationRecord] = []
-
         for record in self._stream_quickgo(p, emit, gene_product_ids=effective_gp_ids):
-            total_lines += 1
-
-            if p.total_limit is not None and total_inserted >= p.total_limit:
+            totals.lines += 1
+            if p.total_limit is not None and totals.inserted >= p.total_limit:
                 emit(
                     "load_quickgo_annotations.limit_reached",
                     None,
@@ -153,71 +203,54 @@ class LoadQuickGOAnnotationsOperation:
                     "warning",
                 )
                 break
-
             buffer.append(record)
-
             if len(buffer) >= p.page_size:
-                pages += 1
-                inserted, skipped = self._store_buffer(
-                    session,
-                    buffer,
-                    annotation_set.id,
-                    protein_accessions,
-                    go_term_map,
-                    eco_map,
-                )
-                total_inserted += inserted
-                total_skipped += skipped
-                buffer.clear()
-
-                emit(
-                    "load_quickgo_annotations.page_done",
-                    None,
-                    {
-                        "page": pages,
-                        "total_lines": total_lines,
-                        "total_inserted": total_inserted,
-                        "total_skipped": total_skipped,
-                    },
-                    "info",
-                )
-
+                self._flush_page(session, buffer, store_ctx, totals, emit)
                 if p.commit_every_page:
                     session.commit()
-
         if buffer:
-            pages += 1
-            inserted, skipped = self._store_buffer(
-                session,
-                buffer,
-                annotation_set.id,
-                protein_accessions,
-                go_term_map,
-                eco_map,
-            )
-            total_inserted += inserted
-            total_skipped += skipped
+            self._flush_page(session, buffer, store_ctx, totals, emit=None)
+        return totals
 
-        elapsed = time.perf_counter() - t0
-        result = {
-            "annotation_set_id": str(annotation_set.id),
-            "pages": pages,
-            "total_lines_read": total_lines,
-            "annotations_inserted": total_inserted,
-            "annotations_skipped": total_skipped,
-            "elapsed_seconds": elapsed,
-        }
-        emit("load_quickgo_annotations.done", None, result, "info")
-        return OperationResult(result=result)
+    def _flush_page(
+        self,
+        session: Session,
+        buffer: list[QuickGoAnnotationRecord],
+        store_ctx: _QuickGoStoreCtx,
+        totals: _QuickGoPageTotals,
+        emit: EmitFn | None,
+    ) -> None:
+        """Flush the current buffer into the DB and bump ``totals``.
+
+        Final flush after the loop passes ``emit=None`` to skip the per-page
+        progress event; in-loop flushes pass the real emit.
+        """
+        inserted, skipped = self._store_buffer(session, buffer, store_ctx)
+        totals.pages += 1
+        totals.inserted += inserted
+        totals.skipped += skipped
+        buffer.clear()
+        if emit is not None:
+            emit(
+                "load_quickgo_annotations.page_done",
+                None,
+                {
+                    "page": totals.pages,
+                    "total_lines": totals.lines,
+                    "total_inserted": totals.inserted,
+                    "total_skipped": totals.skipped,
+                },
+                "info",
+            )
 
     # ── helpers ──────────────────────────────────────────────────────────────
 
     def _load_accessions(self, session: Session, emit: EmitFn) -> tuple[set[str], set[str]]:
         """Returns (canonical_accessions, protein_accessions).
 
-        canonical_accessions — used to build the QuickGO geneProductId filter.
-        protein_accessions   — actual protein.accession values; used for FK-safe
-                               filtering before insertion.
+        canonical_accessions: used to build the QuickGO geneProductId filter.
+        protein_accessions:   actual protein.accession values; used for FK-safe
+                              filtering before insertion.
         """
         emit("load_quickgo_annotations.load_accessions_start", None, {}, "info")
         canonical_accessions = set(session.scalars(select(distinct(Protein.canonical_accession))))
@@ -297,31 +330,28 @@ class LoadQuickGOAnnotationsOperation:
         self,
         session: Session,
         records: list[QuickGoAnnotationRecord],
-        annotation_set_id: uuid.UUID,
-        valid_accessions: set[str],
-        go_term_map: dict[str, int],
-        eco_map: dict[str, str],
+        store_ctx: _QuickGoStoreCtx,
     ) -> tuple[int, int]:
         to_add: list[dict] = []
         skipped = 0
 
         for rec in records:
-            if rec.accession not in valid_accessions:
+            if rec.accession not in store_ctx.protein_accessions:
                 skipped += 1
                 continue
 
-            go_term_id = go_term_map.get(rec.go_id)
+            go_term_id = store_ctx.go_term_map.get(rec.go_id)
             if go_term_id is None:
                 skipped += 1
                 continue
 
             evidence_code = (
-                eco_map.get(rec.eco_id, rec.eco_id) if rec.eco_id else None
+                store_ctx.eco_map.get(rec.eco_id, rec.eco_id) if rec.eco_id else None
             )
 
             to_add.append(
                 {
-                    "annotation_set_id": annotation_set_id,
+                    "annotation_set_id": store_ctx.annotation_set_id,
                     "protein_accession": rec.accession,
                     "go_term_id": go_term_id,
                     "qualifier": rec.qualifier,

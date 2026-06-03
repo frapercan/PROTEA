@@ -83,28 +83,17 @@ class GenerateEvaluationSetOperation:
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
         p = GenerateEvaluationSetPayload.model_validate(payload)
-
         old_set_id = uuid.UUID(p.old_annotation_set_id)
         new_set_id = uuid.UUID(p.new_annotation_set_id)
-
-        old_set = session.get(AnnotationSet, old_set_id)
-        if old_set is None:
-            raise ValueError(f"AnnotationSet {old_set_id} not found")
-        new_set = session.get(AnnotationSet, new_set_id)
-        if new_set is None:
-            raise ValueError(f"AnnotationSet {new_set_id} not found")
-
-        if p.pivot_ontology_snapshot_id is not None:
-            pivot_id = uuid.UUID(p.pivot_ontology_snapshot_id)
-            if session.get(OntologySnapshot, pivot_id) is None:
-                raise ValueError(f"OntologySnapshot {pivot_id} not found")
-        else:
-            pivot_id = new_set.ontology_snapshot_id
-
+        old_set, new_set, pivot_id = self._resolve_eval_inputs(session, p, old_set_id, new_set_id)
         same_snapshot = (
             old_set.ontology_snapshot_id == new_set.ontology_snapshot_id == pivot_id
         )
         mode = "same_snapshot" if same_snapshot else "reconciled"
+
+        reuse = self._maybe_reuse_existing(session, old_set_id, new_set_id, emit)
+        if reuse is not None:
+            return reuse
 
         emit(
             "generate_evaluation_set.start",
@@ -119,18 +108,13 @@ class GenerateEvaluationSetOperation:
             },
             "info",
         )
-
         emit("generate_evaluation_set.computing_delta", None, {"mode": mode}, "info")
         if same_snapshot:
             data = compute_evaluation_data(session, old_set_id, new_set_id, pivot_id)
         else:
             data = compute_evaluation_data_reconciled(
-                session,
-                old_set_id,
-                new_set_id,
-                old_set.ontology_snapshot_id,
-                new_set.ontology_snapshot_id,
-                pivot_id,
+                session, old_set_id, new_set_id,
+                old_set.ontology_snapshot_id, new_set.ontology_snapshot_id, pivot_id,
             )
 
         stats = data.stats()
@@ -145,10 +129,90 @@ class GenerateEvaluationSetOperation:
         )
         session.add(eval_set)
         session.flush()
+        uri = self._persist_groundtruth(eval_set, data, emit)
+        result = {"evaluation_set_id": str(eval_set.id), "groundtruth_uri": uri, **stats}
+        emit("generate_evaluation_set.done", None, result, "info")
+        return OperationResult(result=result)
 
-        # Persist the full ground-truth (nk/lk/pk/known/pk_known) to the artifact
-        # store. Downstream consumers (the dump helper, cafaeval) read this
-        # parquet via load_evaluation_data_for_set instead of recomputing.
+    def _maybe_reuse_existing(
+        self,
+        session: Session,
+        old_set_id: uuid.UUID,
+        new_set_id: uuid.UUID,
+        emit: EmitFn,
+    ) -> OperationResult | None:
+        """Return the existing EvaluationSet's result, or None if absent.
+
+        Idempotency: if an EvaluationSet already exists for this
+        ``(old, new)`` pair, return its summary instead of computing and
+        inserting a duplicate. The DB-level UNIQUE constraint enforces
+        this at the schema layer (alembic
+        ``b8e3f1a7c2d9_evaluation_set_pair_unique``); this short-circuit
+        avoids paying the delta compute cost on a re-submission and keeps
+        the operation idempotent from the caller's perspective.
+        """
+        existing = (
+            session.query(EvaluationSet)
+            .filter_by(
+                old_annotation_set_id=old_set_id,
+                new_annotation_set_id=new_set_id,
+            )
+            .one_or_none()
+        )
+        if existing is None:
+            return None
+        stats = dict(existing.stats or {})
+        result = {
+            "evaluation_set_id": str(existing.id),
+            "groundtruth_uri": existing.groundtruth_uri,
+            **stats,
+        }
+        emit(
+            "generate_evaluation_set.idempotent_reuse",
+            None,
+            {
+                "evaluation_set_id": str(existing.id),
+                "old_annotation_set_id": str(old_set_id),
+                "new_annotation_set_id": str(new_set_id),
+            },
+            "info",
+        )
+        return OperationResult(result=result)
+
+    def _resolve_eval_inputs(
+        self,
+        session: Session,
+        p: GenerateEvaluationSetPayload,
+        old_set_id: uuid.UUID,
+        new_set_id: uuid.UUID,
+    ) -> tuple[AnnotationSet, AnnotationSet, uuid.UUID]:
+        """Validate the two annotation sets exist + resolve pivot snapshot."""
+        old_set = session.get(AnnotationSet, old_set_id)
+        if old_set is None:
+            raise ValueError(f"AnnotationSet {old_set_id} not found")
+        new_set = session.get(AnnotationSet, new_set_id)
+        if new_set is None:
+            raise ValueError(f"AnnotationSet {new_set_id} not found")
+        if p.pivot_ontology_snapshot_id is not None:
+            pivot_id = uuid.UUID(p.pivot_ontology_snapshot_id)
+            if session.get(OntologySnapshot, pivot_id) is None:
+                raise ValueError(f"OntologySnapshot {pivot_id} not found")
+        else:
+            pivot_id = new_set.ontology_snapshot_id
+        return old_set, new_set, pivot_id
+
+    def _persist_groundtruth(
+        self,
+        eval_set: EvaluationSet,
+        data: Any,
+        emit: EmitFn,
+    ) -> str:
+        """Serialise the full ground-truth parquet to the artifact store.
+
+        Downstream consumers (the dump helper, cafaeval) read this
+        parquet via ``load_evaluation_data_for_set`` instead of
+        recomputing the delta.
+        """
         project_root = Path(__file__).resolve().parents[3]
         store = get_artifact_store(load_settings(project_root))
         key = groundtruth_key_for(eval_set.id)
@@ -157,14 +221,10 @@ class GenerateEvaluationSetOperation:
             serialize_evaluation_data_to_parquet(data, local_path)
             uri = store.put(key, local_path)
         eval_set.groundtruth_uri = uri
-        session.flush()
         emit(
             "generate_evaluation_set.groundtruth_persisted",
             None,
             {"evaluation_set_id": str(eval_set.id), "uri": uri, "key": key},
             "info",
         )
-
-        result = {"evaluation_set_id": str(eval_set.id), "groundtruth_uri": uri, **stats}
-        emit("generate_evaluation_set.done", None, result, "info")
-        return OperationResult(result=result)
+        return uri

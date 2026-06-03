@@ -13,7 +13,6 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
-
 from protea_contracts import ALL_FEATURES
 
 
@@ -51,26 +50,31 @@ def _call_export(
     train_rows: list[dict[str, object]],
     eval_rows: list[dict[str, object]],
 ) -> dict[str, object]:
-    from protea.core.parquet_export import export_reranker_parquets
+    from protea.core.parquet_export import (
+        ParquetExportContext,
+        export_reranker_parquets,
+    )
 
     train_shard = _write_shard(stage_dir / "_train_nk.parquet", train_rows)
     eval_shard = _write_shard(stage_dir / "_eval_nk.parquet", eval_rows)
     return export_reranker_parquets(
-        stage_dir=stage_dir,
-        split_files={"nk": [train_shard]},
-        valid_split_versions=[(220, 221)],
-        test_files={"nk": eval_shard},
-        test_old_v=221,
-        test_new_v=222,
-        name="t18-test",
-        k=5,
-        embedding_config_id="00000000-0000-0000-0000-000000000001",
-        ontology_snapshot_id="00000000-0000-0000-0000-000000000002",
-        annotation_source="goa",
-        store=None,
-        producer_version="t18",
-        producer_git_sha=None,
-        validate_with_contracts=False,
+        ParquetExportContext(
+            stage_dir=stage_dir,
+            split_files={"nk": [train_shard]},
+            valid_split_versions=[(220, 221)],
+            test_files={"nk": eval_shard},
+            test_old_v=221,
+            test_new_v=222,
+            name="t18-test",
+            k=5,
+            embedding_config_id="00000000-0000-0000-0000-000000000001",
+            ontology_snapshot_id="00000000-0000-0000-0000-000000000002",
+            annotation_source="goa",
+            store=None,
+            producer_version="t18",
+            producer_git_sha=None,
+            validate_with_contracts=False,
+        )
     )
 
 

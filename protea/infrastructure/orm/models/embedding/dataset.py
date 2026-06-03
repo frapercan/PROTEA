@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -31,10 +31,18 @@ class Dataset(Base):
     """
 
     __tablename__ = "dataset"
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    __table_args__ = (
+        # T3.5: list endpoints order by ``created_at DESC``.
+        Index("ix_dataset_created_at", "created_at"),
+        # T1.6 (ADR D10): parallel ``schema_sha_v2`` is queried by inference
+        # routers to validate booster compatibility, so it carries its own
+        # index. Nullable until backfill completes; populated by
+        # ``scripts/backfill_schema_sha_v2.py`` from
+        # ``protea_contracts.compute_schema_sha``.
+        Index("ix_dataset_schema_sha_v2", "schema_sha_v2"),
     )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
 
     # Where the dump came from.
@@ -55,6 +63,12 @@ class Dataset(Base):
 
     # Content fingerprints.
     schema_sha: Mapped[str] = mapped_column(String(16), nullable=False)
+    # T1.6 (ADR D10): parallel column carrying the canonical
+    # ``protea_contracts.compute_schema_sha`` digest. Nullable until the
+    # backfill script populates legacy rows; new exporters dual-write
+    # both columns. Text (not String(16)) so future hash widenings
+    # do not require a column type migration.
+    schema_sha_v2: Mapped[str | None] = mapped_column(Text, nullable=True)
     manifest_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
     n_train_rows: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     n_eval_rows: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
@@ -76,9 +90,7 @@ class Dataset(Base):
     )
 
     # List of "v{old}-v{new}" strings — one per training shard.
-    train_snapshot_pairs: Mapped[list[str]] = mapped_column(
-        JSONB, nullable=False, default=list
-    )
+    train_snapshot_pairs: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     eval_snapshot_pair: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     # Reproducibility.

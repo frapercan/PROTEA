@@ -173,6 +173,28 @@ class TestDatasetsRouter:
         assert payload[0]["storage_backend"] == "local"
         assert payload[0]["k"] == 5
 
+    def test_after_cursor_filters_by_created_at(self, datasets_client):
+        """T4.2: ``after`` query param adds a ``created_at < after`` clause."""
+        client, session, _ = datasets_client
+        rows = [_make_dataset_row(name="bench-A")]
+        q = session.query.return_value
+        q.filter.return_value = q
+        q.order_by.return_value.limit.return_value.all.return_value = rows
+
+        cursor = "2026-04-01T10:00:00Z"
+        resp = client.get(f"/datasets?after={cursor}")
+
+        assert resp.status_code == 200
+        # The handler calls filter() once for the cursor (no name_like /
+        # embedding_config_id filters in this test) so call_count is 1.
+        assert q.filter.call_count == 1
+
+    def test_invalid_after_cursor_returns_422(self, datasets_client):
+        client, _, _ = datasets_client
+        c = TestClient(client.app, raise_server_exceptions=False)
+        resp = c.get("/datasets?after=not-a-datetime")
+        assert resp.status_code == 422
+
     def test_get_by_name_resolves_non_uuid(self, datasets_client):
         client, session, _ = datasets_client
         row = _make_dataset_row(name="bench-by-name")
@@ -191,6 +213,146 @@ class TestDatasetsRouter:
 
         resp = client.get("/datasets/missing")
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# /datasets/import-by-reference — lab side dump registration without job
+# ---------------------------------------------------------------------------
+
+
+class TestDatasetsImportByReference:
+    """LB.1: pre-staged datasets register via the by-reference endpoint.
+
+    Unlike ``POST /datasets`` (which enqueues
+    ``export_research_dataset``), the by-reference path inserts a
+    Dataset row directly. No Job is created and ``publish_job`` is
+    never called.
+    """
+
+    def _valid_body(self, **overrides):
+        body = {
+            "name": "bench-v1-K5-v226-lineage-prostt5",
+            "storage_backend": "local",
+            "key_prefix": "datasets/bench-v1-K5-v226-lineage-prostt5/",
+            "train_uri": "file:///tmp/bench/train.parquet",
+            "eval_uri": "file:///tmp/bench/eval.parquet",
+            "manifest_uri": "file:///tmp/bench/manifest.json",
+            "schema_sha": "6d97a624b8a7",
+            "manifest_sha": "f" * 64,
+            "k": 5,
+            "annotation_source": "goa",
+            "n_train_rows": 24351779,
+            "n_eval_rows": 1066859,
+            "embedding_config_id": str(uuid.uuid4()),
+            "ontology_snapshot_id": str(uuid.uuid4()),
+            "train_snapshot_pairs": ["v220-v226"],
+            "eval_snapshot_pair": "v226-v230",
+            "producer_version": "0.8.0",
+            "producer_git_sha": "059db1907c5208a965238e8e6682184fb83537be",
+            "external_source": "protea-reranker-lab@059db19",
+            "force": False,
+        }
+        body.update(overrides)
+        return body
+
+    def test_post_persists_row_without_enqueueing(self, datasets_client):
+        client, session, publish = datasets_client
+        # The handler issues three reads: duplicate-name check (None),
+        # embedding_config FK (resolves to a row), ontology_snapshot FK
+        # (resolves to a row). Use a side_effect cycle to feed those.
+        first_returns = iter(
+            [None, MagicMock(), MagicMock()]
+        )
+        session.query.return_value.filter.return_value.first.side_effect = (
+            lambda: next(first_returns)
+        )
+
+        resp = client.post(
+            "/datasets/import-by-reference", json=self._valid_body()
+        )
+        assert resp.status_code == 201, resp.text
+
+        body = resp.json()
+        assert body["name"] == "bench-v1-K5-v226-lineage-prostt5"
+        assert body["schema_sha"] == "6d97a624b8a7"
+        uuid.UUID(body["id"])
+
+        # No queue interaction
+        publish.assert_not_called()
+        # The Dataset row was added
+        assert session.add.called
+
+    def test_post_rejects_duplicate_name_without_force(self, datasets_client):
+        client, session, publish = datasets_client
+        # First query is the duplicate name check, returns an existing row.
+        session.query.return_value.filter.return_value.first.return_value = MagicMock(
+            id=uuid.uuid4()
+        )
+
+        resp = client.post(
+            "/datasets/import-by-reference",
+            json=self._valid_body(force=False),
+        )
+        assert resp.status_code == 409
+        assert "already exists" in resp.json()["detail"]
+        publish.assert_not_called()
+
+    def test_post_with_force_evicts_existing(self, datasets_client):
+        client, session, publish = datasets_client
+        existing = MagicMock(id=uuid.uuid4())
+        # Duplicate check returns the existing row; FK lookups return
+        # arbitrary MagicMocks (non-None) so the FKs are kept.
+        first_returns = iter([existing, MagicMock(), MagicMock()])
+        session.query.return_value.filter.return_value.first.side_effect = (
+            lambda: next(first_returns)
+        )
+
+        resp = client.post(
+            "/datasets/import-by-reference",
+            json=self._valid_body(force=True),
+        )
+        assert resp.status_code == 201, resp.text
+        # Existing row was deleted; new row added.
+        session.delete.assert_called_once_with(existing)
+        assert session.add.called
+        publish.assert_not_called()
+
+    def test_post_rejects_missing_required_fields(self, datasets_client):
+        client, _, publish = datasets_client
+        body = self._valid_body()
+        del body["schema_sha"]
+
+        resp = client.post("/datasets/import-by-reference", json=body)
+        assert resp.status_code == 422
+        publish.assert_not_called()
+
+    def test_post_rejects_invalid_uuid_for_fk(self, datasets_client):
+        client, session, _ = datasets_client
+        # Duplicate-name check returns None so we reach FK resolution.
+        session.query.return_value.filter.return_value.first.return_value = None
+
+        c = TestClient(client.app, raise_server_exceptions=False)
+        resp = c.post(
+            "/datasets/import-by-reference",
+            json=self._valid_body(embedding_config_id="not-a-uuid"),
+        )
+        assert resp.status_code == 422
+
+    def test_post_nulls_optional_fks_when_missing(self, datasets_client):
+        client, session, publish = datasets_client
+        # All filter().first() lookups (duplicate check + both FK lookups)
+        # return None; the handler must still insert the row but with
+        # NULL FKs.
+        session.query.return_value.filter.return_value.first.return_value = None
+
+        resp = client.post(
+            "/datasets/import-by-reference",
+            json=self._valid_body(),
+        )
+        assert resp.status_code == 201, resp.text
+        publish.assert_not_called()
+        # Row should still be added even though FKs resolved to None
+        assert session.add.called
 
 
 # ---------------------------------------------------------------------------
@@ -288,6 +450,34 @@ class TestRerankerModelsImport:
         store.put.assert_not_called()
         assert session.add.call_count == 1
 
+    def test_import_persists_feature_selection_block(self, reranker_client):
+        client, session, _ = reranker_client
+        resp = client.post(
+            "/reranker-models/import-by-reference",
+            json={
+                "artifact_uri": "s3://protea/rerankers/run-fs/model.txt",
+                "spec_yaml": self._spec_yaml(),
+                "run": {
+                    "run_id": "run-fs",
+                    "features": {
+                        "families_enabled": None,
+                        "families_available": ["knn", "lineage"],
+                        "drop_features": ["length"],
+                        "feature_count": 55,
+                    },
+                    "dataset": {"name": "bench-v1-K5"},
+                    "feature_importance": {"distance": 0.5},
+                },
+            },
+        )
+        assert resp.status_code == 201, resp.text
+        added_model = session.add.call_args[0][0]
+        fs = added_model.metrics["__feature_selection__"]
+        assert fs["families_enabled"] is None
+        assert fs["families_available"] == ["knn", "lineage"]
+        assert fs["drop_features"] == ["length"]
+        assert fs["feature_count"] == 55
+
     def test_duplicate_name_conflicts_without_force(self, reranker_client):
         client, session, _ = reranker_client
         session.query.return_value.filter.return_value.first.return_value = MagicMock(
@@ -303,6 +493,113 @@ class TestRerankerModelsImport:
         )
         assert resp.status_code == 409
         assert "already exists" in resp.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# GET /datasets/{id}/stats  and  GET /datasets/{id}/download
+# ---------------------------------------------------------------------------
+
+
+@contextmanager
+def _scope_ctx(session):
+    yield session
+
+
+@pytest.fixture()
+def datasets_detail_client():
+    """Client fixture that includes app.state.settings for download/stats endpoints."""
+    session = MagicMock()
+
+    fake_settings = MagicMock()
+    fake_settings.storage_backend = "local"
+    fake_settings.minio_endpoint = None
+
+    app = FastAPI()
+    app.state.session_factory = MagicMock()
+    app.state.amqp_url = "amqp://stub"
+    app.state.settings = fake_settings
+    app.include_router(datasets_router)
+
+    with patch(
+        "protea.api.routers.datasets.session_scope",
+        side_effect=lambda _: _scope_ctx(session),
+    ), patch(
+        "protea.api.routers.datasets.publish_job"
+    ):
+        yield TestClient(app, raise_server_exceptions=True), session, fake_settings
+
+
+class TestDatasetStats:
+    def _make_ds(self, snap_id=None):
+        ds = _make_dataset_row()
+        ds.ontology_snapshot_id = snap_id or uuid.uuid4()
+        ds.meta = {"aspect_stats": {"bpo": {"proteins": 100, "go_terms": 50, "annotations": 200}}}
+        return ds
+
+    def test_stats_served_from_meta_cache(self, datasets_detail_client):
+        client, session, _ = datasets_detail_client
+        ds = self._make_ds()
+        session.get.return_value = ds
+
+        resp = client.get(f"/datasets/{ds.id}/stats")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["aspect_stats"]["bpo"]["proteins"] == 100
+
+    def test_stats_empty_when_no_snapshot(self, datasets_detail_client):
+        client, session, _ = datasets_detail_client
+        ds = _make_dataset_row()
+        ds.ontology_snapshot_id = None
+        ds.meta = {}
+        session.get.return_value = ds
+
+        resp = client.get(f"/datasets/{ds.id}/stats")
+        assert resp.status_code == 200
+        assert resp.json()["aspect_stats"] == {}
+
+    def test_stats_404_for_unknown_id(self, datasets_detail_client):
+        client, session, _ = datasets_detail_client
+        session.get.return_value = None
+
+        resp = client.get(f"/datasets/{uuid.uuid4()}/stats")
+        assert resp.status_code == 404
+
+
+class TestDatasetDownload:
+    def test_download_422_for_bad_artifact(self, datasets_detail_client):
+        client, session, _ = datasets_detail_client
+        ds = _make_dataset_row()
+        session.get.return_value = ds
+
+        resp = client.get(f"/datasets/{ds.id}/download?artifact=bad")
+        assert resp.status_code == 422
+
+    def test_download_local_streams_file(self, datasets_detail_client, tmp_path):
+        client, session, fake_settings = datasets_detail_client
+        fake_settings.storage_backend = "local"
+
+        content = b"PAR1 fake parquet bytes"
+        p = tmp_path / "manifest.json"
+        p.write_bytes(content)
+
+        ds = _make_dataset_row()
+        ds.storage_backend = "local"
+        ds.manifest_uri = f"file://{p.as_posix()}"
+        session.get.return_value = ds
+
+        resp = client.get(f"/datasets/{ds.id}/download?artifact=manifest")
+        assert resp.status_code == 200
+        assert resp.content == content
+        assert "manifest.json" in resp.headers.get("content-disposition", "")
+
+    def test_download_404_when_artifact_missing(self, datasets_detail_client):
+        client, session, _ = datasets_detail_client
+        ds = _make_dataset_row(train_uri=None)
+        ds.storage_backend = "local"
+        session.get.return_value = ds
+
+        resp = client.get(f"/datasets/{ds.id}/download?artifact=train")
+        assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------

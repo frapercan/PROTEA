@@ -32,19 +32,37 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     info:    "ℹ",
   };
 
+  const politeToasts = toasts.filter((t) => t.type !== "error");
+  const assertiveToasts = toasts.filter((t) => t.type === "error");
+
   return (
     <ToastContext.Provider value={add}>
       {children}
       <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
-        {toasts.map((t) => (
-          <div
-            key={t.id}
-            className={`pointer-events-auto flex items-center gap-2.5 rounded-lg border px-4 py-3 text-sm shadow-lg ${STYLES[t.type]}`}
-          >
-            <span className="font-semibold">{ICONS[t.type]}</span>
-            {t.message}
-          </div>
-        ))}
+        {/* Non-error toasts: announced when the screen reader is idle. */}
+        <div role="status" aria-live="polite" aria-atomic="true" className="flex flex-col gap-2">
+          {politeToasts.map((t) => (
+            <div
+              key={t.id}
+              className={`pointer-events-auto flex items-center gap-2.5 rounded-lg border px-4 py-3 text-sm shadow-lg ${STYLES[t.type]}`}
+            >
+              <span className="font-semibold" aria-hidden="true">{ICONS[t.type]}</span>
+              {t.message}
+            </div>
+          ))}
+        </div>
+        {/* Error toasts: interrupt the screen reader. role=alert implies aria-live=assertive. */}
+        <div role="alert" aria-atomic="true" className="flex flex-col gap-2">
+          {assertiveToasts.map((t) => (
+            <div
+              key={t.id}
+              className={`pointer-events-auto flex items-center gap-2.5 rounded-lg border px-4 py-3 text-sm shadow-lg ${STYLES[t.type]}`}
+            >
+              <span className="font-semibold" aria-hidden="true">{ICONS[t.type]}</span>
+              {t.message}
+            </div>
+          ))}
+        </div>
       </div>
     </ToastContext.Provider>
   );

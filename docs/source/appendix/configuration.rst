@@ -4,8 +4,8 @@ Configuration Reference
 PROTEA loads its configuration from two sources, merged in this order
 (later entries win):
 
-1. ``protea/config/system.yaml`` — file-based defaults
-2. Environment variables — runtime overrides
+1. ``protea/config/system.yaml`` (file-based defaults)
+2. Environment variables (runtime overrides)
 
 YAML structure
 --------------
@@ -40,7 +40,7 @@ startup.
 The ``storage`` block drives the ``ArtifactStore`` abstraction described
 in :doc:`/reference/infrastructure`. With ``backend: local`` (default)
 all blobs land under ``storage/artifacts/`` on the API host. Setting
-``backend: minio`` activates the S3-compatible path — requires the
+``backend: minio`` activates the S3-compatible path; requires the
 ``[storage]`` extra (``pip install 'protea[storage]'``) and a running
 MinIO instance (see ``docker compose --profile storage up``). Paths
 under ``storage.*`` are resolved relative to the project root when not
@@ -64,7 +64,7 @@ Environment variable overrides
      - Overrides ``storage.artifacts_dir`` (the ``cafaeval`` artefacts
        directory used by ``run_cafa_evaluation``).
    * - ``PROTEA_STORAGE_BACKEND``
-     - Overrides ``storage.backend`` — ``local`` (default) or ``minio``.
+     - Overrides ``storage.backend``: ``local`` (default) or ``minio``.
    * - ``PROTEA_STORAGE_ROOT``
      - Overrides ``storage.root`` (local backend root directory).
    * - ``PROTEA_MINIO_ENDPOINT``
@@ -76,9 +76,69 @@ Environment variable overrides
    * - ``PROTEA_MINIO_SECRET_KEY``
      - Overrides ``storage.minio.secret_key``.
    * - ``PROTEA_MINIO_SECURE``
-     - Overrides ``storage.minio.secure`` — truthy enables HTTPS.
-   * - ``PROTEA_ADMIN_TOKEN``
-     - Overrides ``admin.token``.
+     - Overrides ``storage.minio.secure``: truthy enables HTTPS.
+   * - ``PROTEA_AUTHN_REQUIRED``
+     - When ``false``, the authentication gate is disabled (useful for local
+       development without minted API keys). Default is ``true``, so
+       production deployments stay safe by accident. Accepted truthy values:
+       ``1``, ``true``, ``yes``, ``on`` (case-insensitive).
+   * - ``PROTEA_JWT_SECRET``
+     - Shared HS256 secret used to sign and verify ``Authorization: Bearer
+       <jwt>`` tokens (T5.6b). Must be set when ``PROTEA_AUTHN_REQUIRED=true``;
+       the API process will refuse to start if the secret is absent and
+       authentication is enabled. Minimum length: 32 bytes of randomness.
+   * - ``PROTEA_RATELIMIT_JOBS``
+     - slowapi rate-limit rule for ``POST /v1/jobs``. Default ``10/minute``.
+       Accepts any slowapi syntax, e.g. ``"100/minute"`` or
+       ``"1000/hour;200/minute"`` (T5.6b).
+   * - ``PROTEA_RATELIMIT_DATASETS``
+     - slowapi rate-limit rule for ``POST /v1/datasets``. Default
+       ``5/minute`` (T5.6b).
+   * - ``PROTEA_RATELIMIT_API_KEYS``
+     - slowapi rate-limit rule for ``POST /v1/auth/api-keys``. Default
+       ``5/hour`` (T5.6b).
+   * - ``PROTEA_REF_CACHE_DIR``
+     - Directory for the on-disk KNN reference cache (embedding +
+       annotation matrices keyed by ``(embedding_config_id,
+       annotation_set_id)``). Defaults to ``data/ref_cache``. Read by
+       :mod:`protea.core.disk_cache`.
+   * - ``PROTEA_PCA_ARTIFACTS_DIR``
+     - Directory for per-PLM PCA projection states (``.npz``) used to
+       pre-compute the ``emb_pca`` feature family. Defaults to
+       ``protea/artifacts/pca``. Read by :mod:`protea.core.pca_cache`.
+   * - ``PROTEA_GITHUB_TOKEN``
+     - GitHub token used by ``GET /stack/pulls`` to lift the
+       unauthenticated 60 req/h rate limit to 5000 req/h. ``GITHUB_TOKEN``
+       and ``GH_TOKEN`` are honoured as fallbacks (in that order). Any
+       value is accepted as long as the GitHub REST API recognises it.
+   * - ``PROTEA_METHOD_NUMPY_QUERY_CHUNK``
+     - Per-chunk query count for the numpy KNN backend (forwarded to
+       ``protea-method``). PROTEA auto-syncs this from
+       ``OperationTuning.numpy_query_chunk`` (set via
+       ``PROTEA_TUNING__OPERATION__NUMPY_QUERY_CHUNK`` or
+       ``system.yaml``); set the env var directly only as an escape
+       hatch; it short-circuits the tuning sync.
+   * - ``PROTEA_ALLOWED_ORIGINS``
+     - Comma-separated CORS allowlist for the FastAPI app (T5.5).
+       Priority: this env var overrides ``cors.allowed_origins`` in
+       ``system.yaml``, which in turn overrides the built-in default
+       ``http://localhost:3000, http://127.0.0.1:3000,
+       https://protea.ngrok.app``. Empty values are stripped; the
+       resolved tuple is read by
+       ``protea.api.app._register_middlewares`` at startup.
+   * - ``PROTEA_PAIR_FEATURE_WORKERS``
+     - Number of parallel worker processes for pairwise alignment feature
+       computation inside ``export_research_dataset`` (PR #421). Defaults
+       to the host CPU count. Set to ``1`` to force serial execution
+       (useful for debugging or memory-constrained hosts). Read by
+       :mod:`protea.core._pair_feature_compute`.
+   * - ``PROTEA_ALIGN_CACHE_DIR``
+     - Directory for the persistent SQLite alignment cache used by
+       ``export_research_dataset`` to avoid redundant NW/SW computations
+       across K-slices of the same PLM (PR #421). Defaults to
+       ``protea/artifacts/align_cache`` inside the project root. Set to
+       an empty string to disable caching entirely. Read by
+       :mod:`protea.core._pair_feature_compute`.
 
 Frontend
 --------
@@ -87,9 +147,17 @@ Frontend
 
    # apps/web/.env.local
    NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
+   # NEXT_PUBLIC_FARM_API_URL=http://localhost:8801  # override only for non-standard deployments
 
-This is the only configuration the Next.js frontend needs. It is injected
-at build time by Next.js and embedded in the client bundle.
+``NEXT_PUBLIC_API_URL`` is the only variable required for normal
+operation. It is injected at build time by Next.js and embedded in the
+client bundle.
+
+``NEXT_PUBLIC_FARM_API_URL`` overrides the farm dashboard API origin
+when the Next.js app cannot reach it through the default same-origin
+proxy (``/farm-api/*`` rewrites to ``http://localhost:8801`` server-side).
+Setting this variable is only necessary in non-standard deployments where
+the farm API runs on a different host or port (PR #443).
 
 Integration test environment variables
 ---------------------------------------
@@ -126,7 +194,7 @@ RabbitMQ management
 -------------------
 
 The RabbitMQ management UI is available at http://localhost:15672 (default
-credentials ``guest`` / ``guest``). The seven PROTEA queues are:
+credentials ``guest`` / ``guest``). The ten PROTEA queues are:
 
 .. list-table::
    :header-rows: 1
@@ -141,8 +209,7 @@ credentials ``guest`` / ``guest``). The seven PROTEA queues are:
      - QueueConsumer
      - ``insert_proteins``, ``fetch_uniprot_metadata``, ``load_ontology_snapshot``,
        ``load_goa_annotations``, ``load_quickgo_annotations``,
-       ``compute_embeddings`` (coordinator), ``predict_go_terms`` (coordinator),
-       ``generate_evaluation_set``, ``run_cafa_evaluation``
+       ``generate_evaluation_set``
    * - ``protea.training``
      - QueueConsumer
      - ``export_research_dataset`` (serialised; GPU/RAM-intensive)
@@ -151,16 +218,22 @@ credentials ``guest`` / ``guest``). The seven PROTEA queues are:
      - ``compute_embeddings`` coordinator (serialised, one at a time)
    * - ``protea.embeddings.batch``
      - OperationConsumer
-     - ``compute_embeddings_batch`` — GPU inference (ephemeral)
+     - ``compute_embeddings_batch``: GPU inference (ephemeral)
    * - ``protea.embeddings.write``
      - OperationConsumer
-     - ``store_embeddings`` — bulk pgvector insert (ephemeral)
+     - ``store_embeddings``: bulk pgvector insert (ephemeral)
+   * - ``protea.predictions``
+     - QueueConsumer
+     - ``predict_go_terms`` coordinator
    * - ``protea.predictions.batch``
      - OperationConsumer
-     - ``predict_go_terms_batch`` — KNN + GO transfer (ephemeral)
+     - ``predict_go_terms_batch``: KNN + GO transfer (ephemeral)
    * - ``protea.predictions.write``
      - OperationConsumer
-     - ``store_predictions`` — bulk GOPrediction insert (ephemeral)
+     - ``store_predictions``: bulk GOPrediction insert (ephemeral)
+   * - ``protea.evaluations``
+     - QueueConsumer
+     - ``run_cafa_evaluation``
 
 Queues are declared at worker startup and survive broker restarts.
 
@@ -178,7 +251,7 @@ underscore is the path separator (matches pydantic-settings'
 underscores inside field names.
 
 Categories are derived from ``docs/CONFIG_INVENTORY.md`` (T-CONF.1
-of master plan v3) and migrated incrementally in T-CONF.2.
+of master plan revision 3) and migrated incrementally in T-CONF.2.
 
 QueueTuning
 ~~~~~~~~~~~
@@ -247,8 +320,8 @@ Pool sizes, in-process caches, reaper timeouts, HTTP cache TTL.
      - 1
      - Reference data sets en cache por proceso predict.
    * - ``reaper_main_timeout_seconds``
-     - 86400
-     - Timeout duro antes de marcar jobs FAILED en producción (24h).
+     - 21600
+     - Timeout duro antes de marcar jobs FAILED en producción (6h).
    * - ``reaper_default_timeout_seconds``
      - 3600
      - Default constructor de StaleJobReaper.

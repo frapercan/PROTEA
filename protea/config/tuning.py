@@ -77,6 +77,19 @@ class QueueTuning(BaseModel):
         ge=1,
         description="Cap del backoff OOM en segundos (5 min default).",
     )
+    amqp_heartbeat: int = Field(
+        default=600,
+        ge=0,
+        description=(
+            "Heartbeat AMQP en segundos para BlockingConnection (consumer "
+            "y publisher). Pika usa I/O bloqueante; durante un cómputo "
+            "largo el worker no cede al loop select() y el broker cierra "
+            "la conexión con el default de 60s. 600s da un margen 10x "
+            "manteniendo detección de peers muertos en pocos minutos. "
+            "0 desactiva heartbeats. Override por env: "
+            "PROTEA_AMQP_HEARTBEAT o PROTEA_TUNING__queue__amqp_heartbeat."
+        ),
+    )
 
 
 class WorkerTuning(BaseModel):
@@ -108,9 +121,7 @@ class WorkerTuning(BaseModel):
     model_cache_max: int = Field(
         default=1,
         ge=1,
-        description=(
-            "Modelos PLM en cache por proceso de embeddings. >1 acumula GB en GPU."
-        ),
+        description=("Modelos PLM en cache por proceso de embeddings. >1 acumula GB en GPU."),
     )
     ref_cache_max: int = Field(
         default=1,
@@ -118,12 +129,13 @@ class WorkerTuning(BaseModel):
         description="Reference data sets en cache por proceso predict.",
     )
     reaper_main_timeout_seconds: int = Field(
-        default=86400,
+        default=21600,
         ge=300,
         description=(
-            "Timeout duro antes de marcar jobs FAILED en producción (default 24h). "
-            "Coordinator jobs como compute_embeddings pueden correr <1d en datasets "
-            "grandes; este es el corte global."
+            "Timeout duro antes de marcar jobs FAILED en producción (default 6h). "
+            "Coordinator jobs como compute_embeddings pueden correr 2-3h en datasets "
+            "grandes con 100% headroom; este es el corte global para capturar "
+            "jobs stalled dentro de una jornada laboral (replaces 24h backstop)."
         ),
     )
     reaper_default_timeout_seconds: int = Field(
@@ -134,8 +146,39 @@ class WorkerTuning(BaseModel):
     reaper_stall_seconds: int = Field(
         default=1800,
         ge=60,
+        description=("Tiempo sin JobEvent antes de considerar un job stalled candidato a reapear."),
+    )
+    worker_shutdown_grace_seconds: int = Field(
+        default=30,
+        ge=1,
         description=(
-            "Tiempo sin JobEvent antes de considerar un job stalled candidato a reapear."
+            "Ventana en segundos que el QueueConsumer concede a un job en vuelo "
+            "tras recibir SIGTERM/SIGINT antes de marcarlo FAILED con "
+            "error_code=WorkerShutdown via fallback session. 30s permite que "
+            "callbacks cortos terminen naturalmente; jobs largos quedan "
+            "registrados como FAILED en vez de quedarse colgados en RUNNING "
+            "tras un redeploy."
+        ),
+    )
+    job_heartbeat_interval_seconds: int = Field(
+        default=30,
+        ge=5,
+        description=(
+            "Intervalo en segundos entre heartbeats de lease para jobs en RUNNING "
+            "(F-OPS-JOBS.1). El worker renueva leased_until cada N segundos; "
+            "el reaper sólo mata jobs cuyo leased_until ha expirado. "
+            "Override: PROTEA_JOB_HEARTBEAT_INTERVAL_SECONDS o "
+            "PROTEA_TUNING__worker__job_heartbeat_interval_seconds."
+        ),
+    )
+    max_lease_requeues: int = Field(
+        default=3,
+        ge=0,
+        description=(
+            "Número máximo de re-enqueues que el StaleJobReaper concede a "
+            "un job cuyo leased_until ha expirado antes de marcarlo FAILED "
+            "con error_code=lease_expired (F-OPS-JOBS.1). 0 desactiva el "
+            "re-enqueue (comportamiento legacy: directamente FAILED)."
         ),
     )
     api_cache_default_ttl_seconds: float = Field(
@@ -194,6 +237,27 @@ class OperationTuning(BaseModel):
             "distancias (500 x 500k x 4B ~ 1 GB)."
         ),
     )
+    ref_cache_freshness_seconds: int = Field(
+        default=300,
+        ge=0,
+        description=(
+            "Ventana de frescura del disco cache de reference pool en segundos. "
+            "Si los archivos .npy existen y su mtime es menor a este umbral, "
+            "se salta la COUNT(*) de validación (consulta cara sobre JOIN de "
+            "500k+ filas). 0 desactiva el skip y siempre ejecuta COUNT(*). "
+            "Override: PROTEA_TUNING__operation__ref_cache_freshness_seconds."
+        ),
+    )
+    aspect_knn_workers: int = Field(
+        default=3,
+        ge=1,
+        description=(
+            "Hilos del ThreadPoolExecutor para el KNN por aspecto cuando "
+            "aspect_separated_knn=true. 3 = un hilo por aspecto (MF/BP/CC) "
+            "en paralelo. numpy libera el GIL en operaciones matriciales "
+            "por lo que la ganancia es real. 1 desactiva la paralelización."
+        ),
+    )
 
 
 class APILimits(BaseModel):
@@ -248,6 +312,14 @@ def _load_yaml_tuning(project_root: Path) -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
+_SHORT_ALIASES: dict[str, tuple[str, str]] = {
+    # Short alias -> (group, field). Kept for high-traffic ops knobs
+    # that deserve a one-liner env var instead of the full
+    # PROTEA_TUNING__group__field path.
+    "PROTEA_AMQP_HEARTBEAT": ("queue", "amqp_heartbeat"),
+}
+
+
 def _apply_env_overrides(merged: dict[str, Any]) -> dict[str, Any]:
     """Merge env vars of the form PROTEA_TUNING__<group>__<field>=<value>.
 
@@ -255,15 +327,28 @@ def _apply_env_overrides(merged: dict[str, Any]) -> dict[str, Any]:
     pydantic-settings env_nested_delimiter) so we don't collide with
     legitimate single underscores inside field names like
     ``publisher_max_attempts``.
+
+    Also honours a small set of short aliases in :data:`_SHORT_ALIASES`
+    so high-traffic knobs (heartbeat, pool sizes) can be tuned with a
+    one-liner env var instead of the full nested path.
     """
     for key, value in os.environ.items():
         if not key.startswith(ENV_PREFIX):
             continue
-        path = key[len(ENV_PREFIX):].split("__")
+        path = key[len(ENV_PREFIX) :].split("__")
         if len(path) < 2:
             continue
         group, field = path[0].lower(), "__".join(path[1:]).lower()
         merged.setdefault(group, {})[field] = _coerce(value)
+    for alias, (group, field) in _SHORT_ALIASES.items():
+        raw = os.environ.get(alias)
+        if raw is None:
+            continue
+        # Nested path wins over short alias when both are set so the
+        # canonical form remains authoritative.
+        if field in merged.get(group, {}):
+            continue
+        merged.setdefault(group, {})[field] = _coerce(raw)
     return merged
 
 

@@ -2,7 +2,7 @@ Workers
 =======
 
 The worker layer bridges the message queue and the domain layer. Workers
-are long-running Python processes — one per RabbitMQ queue — that consume
+are long-running Python processes (one per RabbitMQ queue) that consume
 messages and delegate execution to registered operations. They are
 transport-agnostic with respect to domain logic: operations are resolved
 by name from the ``OperationRegistry`` and receive only a database session
@@ -14,13 +14,13 @@ Base worker
 ``BaseWorker`` is the core execution engine. It implements the two-session
 pattern that decouples job claiming from job execution:
 
-**Session 1 — Claim**
+**Session 1. Claim.**
    Loads the job, asserts it is in ``QUEUED`` status, transitions it to
    ``RUNNING``, writes a ``job.started`` event, and commits. After this
    commit the job is visible as running to any monitoring tool or frontend.
    The session is then closed.
 
-**Session 2 — Execute**
+**Session 2. Execute.**
    Opens a fresh session, resolves the operation from the registry, and
    calls ``operation.execute(session, payload, emit=emit)``. On success,
    transitions the job to ``SUCCEEDED`` (or marks it as deferred if the
@@ -30,7 +30,7 @@ pattern that decouples job claiming from job execution:
 
 The two-session design ensures durability: a crash in the execute phase
 leaves the claim committed (``RUNNING`` is visible) while the result is
-not — which is the correct observable state. No session is held open across
+not, which is the correct observable state. No session is held open across
 a long-running GPU inference call.
 
 Three exceptional flows are handled explicitly:
@@ -80,9 +80,14 @@ selected by the queue configuration in ``scripts/worker.py``:
    transitions and a ``JobEvent`` audit log. Used for queues where
    observability and traceability matter:
 
-   - ``protea.ping`` — smoke test
-   - ``protea.jobs`` — all coordinator operations
-   - ``protea.embeddings`` — serialised embedding coordinator
+   - ``protea.ping``: smoke test
+   - ``protea.jobs``: ingestion, ontology / annotation loaders, and
+     ``generate_evaluation_set``
+   - ``protea.embeddings``: serialised embedding coordinator
+   - ``protea.predictions``: serialised prediction coordinator
+   - ``protea.training``: serialised dataset-export coordinator
+     (``export_research_dataset``)
+   - ``protea.evaluations``: ``run_cafa_evaluation`` runner
 
 **OperationConsumer**
    Reads a raw serialised operation payload from the queue and executes it
@@ -92,10 +97,23 @@ selected by the queue configuration in ``scripts/worker.py``:
    exclusively through atomic increments to the parent job's
    ``progress_current`` counter:
 
-   - ``protea.embeddings.batch`` — GPU inference per batch
-   - ``protea.embeddings.write`` — bulk pgvector insert
-   - ``protea.predictions.batch`` — KNN search + GO transfer
-   - ``protea.predictions.write`` — bulk GOPrediction insert
+   - ``protea.embeddings.batch``: GPU inference per batch
+   - ``protea.embeddings.write``: bulk pgvector insert
+   - ``protea.predictions.batch``: KNN search + GO transfer
+   - ``protea.predictions.write``: bulk GOPrediction insert
+
+.. rubric:: Graceful shutdown
+
+``protea.workers.shutdown`` provides the signal-handler setup that
+enables graceful shutdown of long-running worker processes. It installs
+handlers for ``SIGTERM`` and ``SIGINT`` that set a shared ``stop_event``,
+allowing the main worker loop to drain the current batch and exit cleanly
+rather than being killed mid-operation.
+
+.. automodule:: protea.workers.shutdown
+   :members:
+   :undoc-members:
+   :show-inheritance:
 
 Stale job reaper
 ----------------
@@ -113,9 +131,9 @@ seconds = 6 hours). It marks them as ``FAILED`` with error code
 
 .. seealso::
 
-   - :doc:`/architecture/job_lifecycle` — the two-session lifecycle and
+   - :doc:`/architecture/job_lifecycle`: the two-session lifecycle and
      parent-child coordinator pattern that ``BaseWorker`` implements.
-   - :doc:`/architecture/operations` — what these workers actually run.
-   - :doc:`/adr/002-two-session-worker-pattern` — design rationale.
-   - :doc:`/adr/003-queue-consumer-vs-operation-consumer` — when each
+   - :doc:`/architecture/operations`: what these workers actually run.
+   - :doc:`/adr/002-two-session-worker-pattern`: design rationale.
+   - :doc:`/adr/003-queue-consumer-vs-operation-consumer`: when each
      consumer subclass applies.

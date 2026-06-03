@@ -127,12 +127,37 @@ def factory(session):
     return MagicMock()
 
 
+_ANN_SUBMODULES = (
+    "protea.api.routers.annotations._common",
+    "protea.api.routers.annotations.snapshots",
+    "protea.api.routers.annotations.sets",
+    "protea.api.routers.annotations.evaluation_sets",
+    "protea.api.routers.annotations.evaluation_results",
+)
+
+
+def _patch_session_scope_everywhere(session):
+    """Stack patches for every annotations submodule's ``session_scope``."""
+    from contextlib import ExitStack
+
+    stack = ExitStack()
+    for mod in _ANN_SUBMODULES:
+        stack.enter_context(
+            patch(f"{mod}.session_scope", side_effect=lambda _, s=session: _mock_scope(s))
+        )
+    stack.enter_context(
+        patch(
+            "protea.services.jobs_service.session_scope",
+            side_effect=lambda _, s=session: _mock_scope(s),
+        )
+    )
+    return stack
+
+
 @pytest.fixture()
 def client(session, factory):
     app = _make_app(factory)
-    with patch(
-        "protea.api.routers.annotations.session_scope", side_effect=lambda _: _mock_scope(session)
-    ):
+    with _patch_session_scope_everywhere(session):
         with TestClient(app) as c:
             yield c, session
 
@@ -140,9 +165,7 @@ def client(session, factory):
 @pytest.fixture()
 def client_with_artifacts(session, factory, tmp_path):
     app = _make_app(factory, artifacts_dir=tmp_path)
-    with patch(
-        "protea.api.routers.annotations.session_scope", side_effect=lambda _: _mock_scope(session)
-    ):
+    with _patch_session_scope_everywhere(session):
         with TestClient(app) as c:
             yield c, session, tmp_path
 
@@ -234,7 +257,7 @@ class TestLoadOntologySnapshot:
 
         session.add.side_effect = add_side
 
-        with patch("protea.api.routers.annotations.publish_job"):
+        with patch("protea.services.jobs_service.publish_job"):
             resp = c.post(
                 "/annotations/snapshots/load",
                 json={"obo_url": "http://example.com/go.obo"},
@@ -342,7 +365,7 @@ class TestLoadGOAAnnotations:
 
         session.add.side_effect = add_side
 
-        with patch("protea.api.routers.annotations.publish_job"):
+        with patch("protea.services.jobs_service.publish_job"):
             resp = c.post(
                 "/annotations/sets/load-goa",
                 json={
@@ -377,7 +400,7 @@ class TestLoadQuickGOAnnotations:
 
         session.add.side_effect = add_side
 
-        with patch("protea.api.routers.annotations.publish_job"):
+        with patch("protea.services.jobs_service.publish_job"):
             resp = c.post(
                 "/annotations/sets/load-quickgo",
                 json={
@@ -412,10 +435,7 @@ class TestDependencyGuards:
         app.state.session_factory = MagicMock()
         # no amqp_url set
         app.include_router(router)
-        with patch(
-            "protea.api.routers.annotations.session_scope",
-            side_effect=lambda _: _mock_scope(session),
-        ):
+        with _patch_session_scope_everywhere(session):
             with TestClient(app, raise_server_exceptions=False) as c:
                 resp = c.post(
                     "/annotations/snapshots/load", json={"obo_url": "http://example.com/go.obo"}
@@ -531,7 +551,7 @@ class TestGenerateEvaluationSet:
 
         session.add.side_effect = add_side
 
-        with patch("protea.api.routers.annotations.publish_job"):
+        with patch("protea.services.jobs_service.publish_job"):
             resp = c.post(
                 "/annotations/evaluation-sets/generate",
                 json={"old_annotation_set_id": old_id, "new_annotation_set_id": new_id},
@@ -691,7 +711,7 @@ class TestDownloadGroundTruthNK:
 
         fake_data = _EvalData(nk={"P12345": {"GO:0003674", "GO:0008150"}})
         with patch(
-            "protea.api.routers.annotations.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services.annotations_service.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/ground-truth-NK.tsv")
         assert resp.status_code == 200
@@ -728,7 +748,7 @@ class TestDownloadGroundTruthLK:
 
         fake_data = _EvalData(lk={"Q99999": {"GO:0005575"}})
         with patch(
-            "protea.api.routers.annotations.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services.annotations_service.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/ground-truth-LK.tsv")
         assert resp.status_code == 200
@@ -757,7 +777,7 @@ class TestDownloadGroundTruthPK:
 
         fake_data = _EvalData(pk={"A00001": {"GO:0003674"}})
         with patch(
-            "protea.api.routers.annotations.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services.annotations_service.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/ground-truth-PK.tsv")
         assert resp.status_code == 200
@@ -784,7 +804,7 @@ class TestDownloadKnownTerms:
 
         fake_data = _EvalData(known={"P12345": {"GO:0003674"}, "Q99999": {"GO:0005575"}})
         with patch(
-            "protea.api.routers.annotations.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services.annotations_service.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/known-terms.tsv")
         assert resp.status_code == 200
@@ -831,7 +851,7 @@ class TestDownloadDeltaFasta:
         self._setup_session(session, ev, ann_old, fake_data, protein_rows=[(protein, seq)])
 
         with patch(
-            "protea.api.routers.annotations.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services._annotations_method_helpers.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/delta-proteins.fasta")
         assert resp.status_code == 200
@@ -856,7 +876,7 @@ class TestDownloadDeltaFasta:
         self._setup_session(session, ev, ann_old, fake_data, protein_rows=[(protein, seq)])
 
         with patch(
-            "protea.api.routers.annotations.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services._annotations_method_helpers.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/delta-proteins.fasta?category=nk")
         assert resp.status_code == 200
@@ -871,7 +891,7 @@ class TestDownloadDeltaFasta:
         self._setup_session(session, ev, ann_old, fake_data, protein_rows=[])
 
         with patch(
-            "protea.api.routers.annotations.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services._annotations_method_helpers.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/delta-proteins.fasta")
         assert resp.status_code == 200
@@ -894,7 +914,7 @@ class TestDownloadDeltaFasta:
         self._setup_session(session, ev, ann_old, fake_data, protein_rows=[(protein, seq)])
 
         with patch(
-            "protea.api.routers.annotations.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services._annotations_method_helpers.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/delta-proteins.fasta")
         lines = resp.text.strip().split("\n")
@@ -920,7 +940,7 @@ class TestDownloadDeltaFasta:
         self._setup_session(session, ev, ann_old, fake_data, protein_rows=[(protein, seq)])
 
         with patch(
-            "protea.api.routers.annotations.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services._annotations_method_helpers.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/delta-proteins.fasta?category=pk")
         assert resp.status_code == 200
@@ -944,7 +964,7 @@ class TestDownloadDeltaFasta:
         self._setup_session(session, ev, ann_old, fake_data, protein_rows=[(protein, seq)])
 
         with patch(
-            "protea.api.routers.annotations.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
+            "protea.services._annotations_method_helpers.load_evaluation_data_for_set", return_value=(fake_data, uuid4())
         ):
             resp = c.get(f"/annotations/evaluation-sets/{ev.id}/delta-proteins.fasta?category=all")
         assert resp.status_code == 200
@@ -972,7 +992,7 @@ class TestRunCafaEvaluation:
 
         session.add.side_effect = add_side
 
-        with patch("protea.api.routers.annotations.publish_job"):
+        with patch("protea.api.routers.annotations.evaluation_sets.publish_job"):
             resp = c.post(
                 f"/annotations/evaluation-sets/{eval_id}/run",
                 json={"prediction_set_id": pred_set_id},
@@ -993,7 +1013,7 @@ class TestRunCafaEvaluation:
         pred_set_id = str(uuid4())
         session.get.return_value = None
 
-        with patch("protea.api.routers.annotations.publish_job"):
+        with patch("protea.api.routers.annotations.evaluation_sets.publish_job"):
             resp = c.post(
                 f"/annotations/evaluation-sets/{eval_id}/run",
                 json={"prediction_set_id": pred_set_id},

@@ -3,7 +3,8 @@ from __future__ import annotations
 import time
 import uuid
 from collections.abc import Iterator
-from typing import Annotated, Any
+from dataclasses import dataclass
+from typing import Annotated, Any, NamedTuple
 
 from protea_contracts import GoaAnnotationRecord, GoaStreamPayload
 from pydantic import Field, field_validator
@@ -22,6 +23,24 @@ from protea.infrastructure.orm.models.protein.protein import Protein
 _AUTO_EVAL_QUEUE = "protea.jobs"
 
 PositiveInt = Annotated[int, Field(gt=0)]
+
+
+class _GoaStoreCtx(NamedTuple):
+    """Immutable per-stream context handed to ``_store_buffer`` / ``_flush_page``."""
+
+    annotation_set_id: uuid.UUID
+    canonical_accessions: set[str]
+    go_term_map: dict[str, int]
+
+
+@dataclass
+class _GoaPageTotals:
+    """Mutable accumulator for the GAF page loop."""
+
+    pages: int = 0
+    lines: int = 0
+    inserted: int = 0
+    skipped: int = 0
 
 
 class LoadGOAAnnotationsPayload(ProteaPayload, frozen=True):
@@ -44,7 +63,7 @@ class LoadGOAAnnotationsPayload(ProteaPayload, frozen=True):
 class LoadGOAAnnotationsOperation:
     """Streams a GOA GAF file (gzip or plain) and upserts ProteinGOAnnotation rows.
 
-    The GAF file is streamed line by line from ``gaf_url`` — it is never fully
+    The GAF file is streamed line by line from ``gaf_url``; it is never fully
     loaded into memory, making it suitable for the full UniProt GAF (hundreds
     of millions of lines).
 
@@ -111,84 +130,21 @@ class LoadGOAAnnotationsOperation:
             return OperationResult(result={"annotations_inserted": 0})
 
         go_term_map = self._load_go_term_map(session, snapshot_id, emit)
-
-        annotation_set = AnnotationSet(
-            source="goa",
-            source_version=p.source_version,
-            ontology_snapshot_id=snapshot_id,
-            meta={"gaf_url": p.gaf_url},
+        annotation_set = self._create_annotation_set(session, p, snapshot_id, emit)
+        store_ctx = _GoaStoreCtx(
+            annotation_set_id=annotation_set.id,
+            canonical_accessions=canonical_accessions,
+            go_term_map=go_term_map,
         )
-        session.add(annotation_set)
-        session.flush()
+        totals = self._stream_and_store(session, p, store_ctx, emit)
 
-        emit(
-            "load_goa_annotations.annotation_set_created",
-            None,
-            {"annotation_set_id": str(annotation_set.id)},
-            "info",
-        )
-
-        total_lines = 0
-        total_inserted = 0
-        total_skipped = 0
-        pages = 0
-        buffer: list[GoaAnnotationRecord] = []
-
-        for record in self._stream_gaf(p, emit):
-            total_lines += 1
-
-            if p.total_limit is not None and total_inserted >= p.total_limit:
-                emit(
-                    "load_goa_annotations.limit_reached",
-                    None,
-                    {"total_limit": p.total_limit},
-                    "warning",
-                )
-                break
-
-            buffer.append(record)
-
-            if len(buffer) >= p.page_size:
-                pages += 1
-                inserted, skipped = self._store_buffer(
-                    session, buffer, annotation_set.id, canonical_accessions, go_term_map
-                )
-                total_inserted += inserted
-                total_skipped += skipped
-                buffer.clear()
-
-                emit(
-                    "load_goa_annotations.page_done",
-                    None,
-                    {
-                        "page": pages,
-                        "total_lines": total_lines,
-                        "total_inserted": total_inserted,
-                        "total_skipped": total_skipped,
-                    },
-                    "info",
-                )
-
-                if p.commit_every_page:
-                    session.commit()
-
-        # flush remaining
-        if buffer:
-            pages += 1
-            inserted, skipped = self._store_buffer(
-                session, buffer, annotation_set.id, canonical_accessions, go_term_map
-            )
-            total_inserted += inserted
-            total_skipped += skipped
-
-        elapsed = time.perf_counter() - t0
-        result = {
+        result: dict[str, Any] = {
             "annotation_set_id": str(annotation_set.id),
-            "pages": pages,
-            "total_lines_read": total_lines,
-            "annotations_inserted": total_inserted,
-            "annotations_skipped": total_skipped,
-            "elapsed_seconds": elapsed,
+            "pages": totals.pages,
+            "total_lines_read": totals.lines,
+            "annotations_inserted": totals.inserted,
+            "annotations_skipped": totals.skipped,
+            "elapsed_seconds": time.perf_counter() - t0,
         }
 
         # Auto-trigger an atomic generate_evaluation_set against the latest
@@ -203,6 +159,98 @@ class LoadGOAAnnotationsOperation:
 
         emit("load_goa_annotations.done", None, result, "info")
         return OperationResult(result=result, publish_after_commit=publish_after_commit)
+
+    def _create_annotation_set(
+        self,
+        session: Session,
+        p: LoadGOAAnnotationsPayload,
+        snapshot_id: uuid.UUID,
+        emit: EmitFn,
+    ) -> AnnotationSet:
+        annotation_set = AnnotationSet(
+            source="goa",
+            source_version=p.source_version,
+            ontology_snapshot_id=snapshot_id,
+            meta={"gaf_url": p.gaf_url},
+        )
+        session.add(annotation_set)
+        session.flush()
+        emit(
+            "load_goa_annotations.annotation_set_created",
+            None,
+            {"annotation_set_id": str(annotation_set.id)},
+            "info",
+        )
+        return annotation_set
+
+    def _stream_and_store(
+        self,
+        session: Session,
+        p: LoadGOAAnnotationsPayload,
+        store_ctx: _GoaStoreCtx,
+        emit: EmitFn,
+    ) -> _GoaPageTotals:
+        """Stream GAF records, page-flush via ``_flush_page``, return totals.
+
+        Honours ``p.total_limit`` (early break) and ``p.commit_every_page``.
+        """
+        totals = _GoaPageTotals()
+        buffer: list[GoaAnnotationRecord] = []
+        for record in self._stream_gaf(p, emit):
+            totals.lines += 1
+            if p.total_limit is not None and totals.inserted >= p.total_limit:
+                emit(
+                    "load_goa_annotations.limit_reached",
+                    None,
+                    {"total_limit": p.total_limit},
+                    "warning",
+                )
+                break
+            buffer.append(record)
+            if len(buffer) >= p.page_size:
+                self._flush_page(session, buffer, store_ctx, totals, emit)
+                if p.commit_every_page:
+                    session.commit()
+        if buffer:
+            self._flush_page(session, buffer, store_ctx, totals, emit=None)
+        return totals
+
+    def _flush_page(
+        self,
+        session: Session,
+        buffer: list[GoaAnnotationRecord],
+        store_ctx: _GoaStoreCtx,
+        totals: _GoaPageTotals,
+        emit: EmitFn | None,
+    ) -> None:
+        """Flush the current buffer into the DB and bump ``totals``.
+
+        Final flush after the loop passes ``emit=None`` to skip the per-page
+        progress event; in-loop flushes pass the real emit.
+        """
+        inserted, skipped = self._store_buffer(
+            session,
+            buffer,
+            store_ctx.annotation_set_id,
+            store_ctx.canonical_accessions,
+            store_ctx.go_term_map,
+        )
+        totals.pages += 1
+        totals.inserted += inserted
+        totals.skipped += skipped
+        buffer.clear()
+        if emit is not None:
+            emit(
+                "load_goa_annotations.page_done",
+                None,
+                {
+                    "page": totals.pages,
+                    "total_lines": totals.lines,
+                    "total_inserted": totals.inserted,
+                    "total_skipped": totals.skipped,
+                },
+                "info",
+            )
 
     @staticmethod
     def _numeric_version_key(v: str | None) -> tuple[int, str]:
@@ -221,20 +269,8 @@ class LoadGOAAnnotationsOperation:
         new_set: AnnotationSet,
         emit: EmitFn,
     ) -> uuid.UUID | None:
-        candidates = (
-            session.query(AnnotationSet)
-            .filter(
-                AnnotationSet.source == "goa",
-                AnnotationSet.id != new_set.id,
-            )
-            .all()
-        )
-        prior_candidates = [
-            s for s in candidates
-            if self._numeric_version_key(s.source_version)
-            < self._numeric_version_key(new_set.source_version)
-        ]
-        if not prior_candidates:
+        prior = self._select_prior_annotation_set(session, new_set)
+        if prior is None:
             emit(
                 "load_goa_annotations.auto_eval_skipped",
                 None,
@@ -242,9 +278,49 @@ class LoadGOAAnnotationsOperation:
                 "info",
             )
             return None
-        prior = max(prior_candidates, key=lambda s: self._numeric_version_key(s.source_version))
+        existing_id = self._existing_evaluation_set_id(session, prior, new_set)
+        if existing_id is not None:
+            emit(
+                "load_goa_annotations.auto_eval_skipped",
+                None,
+                {
+                    "reason": "evaluation_set_exists",
+                    "existing_evaluation_set_id": str(existing_id),
+                    "old_annotation_set_id": str(prior.id),
+                    "new_annotation_set_id": str(new_set.id),
+                },
+                "info",
+            )
+            return None
+        return self._enqueue_auto_eval_job(session, prior, new_set, emit)
 
-        existing = (
+    def _select_prior_annotation_set(
+        self,
+        session: Session,
+        new_set: AnnotationSet,
+    ) -> AnnotationSet | None:
+        """Return the most recent ``goa`` set strictly older than ``new_set``."""
+        candidates = (
+            session.query(AnnotationSet)
+            .filter(AnnotationSet.source == "goa", AnnotationSet.id != new_set.id)
+            .all()
+        )
+        new_key = self._numeric_version_key(new_set.source_version)
+        prior_candidates = [
+            s for s in candidates if self._numeric_version_key(s.source_version) < new_key
+        ]
+        if not prior_candidates:
+            return None
+        return max(prior_candidates, key=lambda s: self._numeric_version_key(s.source_version))
+
+    def _existing_evaluation_set_id(
+        self,
+        session: Session,
+        prior: AnnotationSet,
+        new_set: AnnotationSet,
+    ) -> uuid.UUID | None:
+        """Look up an EvaluationSet already covering this (old, new) pair."""
+        row = (
             session.query(EvaluationSet.id)
             .filter(
                 EvaluationSet.old_annotation_set_id == prior.id,
@@ -252,20 +328,16 @@ class LoadGOAAnnotationsOperation:
             )
             .first()
         )
-        if existing is not None:
-            emit(
-                "load_goa_annotations.auto_eval_skipped",
-                None,
-                {
-                    "reason": "evaluation_set_exists",
-                    "existing_evaluation_set_id": str(existing[0]),
-                    "old_annotation_set_id": str(prior.id),
-                    "new_annotation_set_id": str(new_set.id),
-                },
-                "info",
-            )
-            return None
+        return row[0] if row is not None else None
 
+    def _enqueue_auto_eval_job(
+        self,
+        session: Session,
+        prior: AnnotationSet,
+        new_set: AnnotationSet,
+        emit: EmitFn,
+    ) -> uuid.UUID:
+        """Create a ``generate_evaluation_set`` child job + audit trail."""
         payload = {
             "old_annotation_set_id": str(prior.id),
             "new_annotation_set_id": str(new_set.id),

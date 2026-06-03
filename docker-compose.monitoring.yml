@@ -1,16 +1,36 @@
-# Grafana sidecar for PROTEA — Level A (visitor analytics only).
+# Grafana + Loki + Prometheus sidecar for PROTEA (Level A, visitor
+# analytics, logs, and metrics).
 #
-# Runs Grafana in a bridge network and publishes 3001 on the host. Postgres
-# lives in the `pgvectorsql` bridge container which publishes 5432 on the
-# host, so Grafana reaches it via the docker0 gateway (host.docker.internal).
+# Runs Grafana, Loki, and Prometheus on the same `protea_monitoring`
+# bridge network so Grafana reaches Loki at http://loki:3100 and
+# Prometheus at http://prometheus:9090 by container name. Grafana
+# publishes 3001 on the host; Loki publishes 3100 on the host so the
+# loki-docker-driver running on the application stack can push logs to
+# it without a shared compose network (the driver lives outside any
+# compose context, so it has to talk to a host-published port).
+# Prometheus publishes 9090 on the host because the Grafana
+# `protea-prometheus` datasource is provisioned to reach it via
+# host.docker.internal:9090 (same host-gateway convention used for
+# Postgres), and so an operator can hit the Prometheus UI directly.
 #
-# `network_mode: host` was tried first but this host's Docker puts "host"
-# containers in a netns that's not actually the real init netns, so the
-# listener was invisible from the outside. Bridge + published port works.
+# Postgres and RabbitMQ live in the `protea_default` bridge network
+# (compose project "protea", docker-compose.yml). Prometheus is joined
+# to that network as a read-only observer so it can reach
+# `protea-rabbitmq-1:15692` and `protea-postgres-exporter:9187` by
+# container name without requiring either service to publish those ports
+# on the host. The `protea_default` network is declared external here
+# because it is owned by the application compose project; this compose
+# file only attaches prometheus to it, it never creates or removes it.
 #
 # Usage:
 #   docker compose -f docker-compose.monitoring.yml up -d
 #   open http://localhost:3001   (admin / admin on first login)
+#
+# Configuring the application stack to ship logs to Loki is a separate
+# step that involves installing the `loki-docker-driver` plugin and
+# adding a `logging:` block to the api / worker services in
+# docker-compose.yml. See docs/source/runbooks/loki.rst for the
+# step-by-step procedure.
 
 services:
   grafana:
@@ -27,11 +47,129 @@ services:
       - GF_AUTH_ANONYMOUS_ENABLED=false
       - GF_ANALYTICS_REPORTING_ENABLED=false
       - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+      # FARM-UI.7: Slack webhook URL for the agent-farm-errors contact
+      # point provisioned under deploy/grafana/provisioning/alerting/.
+      # Set this in the operator's local environment (.env or shell)
+      # before `docker compose up`. When unset, Grafana still boots
+      # fine; the contact point just sends to an empty URL (no 4xx
+      # storm, the alerting subsystem treats unset URLs as a bootstrap
+      # state). Grafana 11 expands ${SLACK_WEBHOOK_URL} inside the
+      # provisioned contact-point YAML at startup so the secret never
+      # has to land in grafana_data.
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
     volumes:
       - grafana_data:/var/lib/grafana
       - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - protea_monitoring
+    depends_on:
+      - loki
+      - prometheus
     restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: protea-prometheus
+    # Scrapes the PROTEA API /metrics endpoint via host.docker.internal
+    # and the RabbitMQ + postgres-exporter targets by container name over
+    # the shared `protea_default` network (see top-level networks section).
+    # Published on 9090 so the Grafana datasource (uid protea-prometheus,
+    # url host.docker.internal:9090) and an operator's browser both reach it.
+    ports:
+      - "9090:9090"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - protea_monitoring
+      - protea_default
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider --quiet http://localhost:9090/-/ready || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:3.2.1
+    container_name: protea-loki
+    command: -config.file=/etc/loki/loki-config.yml
+    ports:
+      # Published so the loki-docker-driver plugin (which runs in the
+      # host's docker daemon namespace, not in this compose project) can
+      # push to http://localhost:3100.
+      - "3100:3100"
+    volumes:
+      - ./deploy/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki_data:/loki
+    networks:
+      - protea_monitoring
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider --quiet http://localhost:3100/ready || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:3.2.1
+    container_name: protea-promtail
+    # Tails the process-stack log files written by uvicorn, workers, and
+    # the Next.js frontend into ./logs/ on the host.  The bind mount is
+    # read-only so promtail can never modify application log files.
+    # promtail connects to Loki by container name on the shared bridge
+    # network; no host-published port is needed.
+    command: -config.file=/etc/promtail/promtail.yml
+    volumes:
+      - ./deploy/promtail/promtail.yml:/etc/promtail/promtail.yml:ro
+      - ./logs:/var/log/protea:ro
+    networks:
+      - protea_monitoring
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: protea-postgres-exporter
+    # Connects to the host-published Postgres instance (same host-gateway
+    # convention used for the Prometheus protea-api job). The dev creds
+    # match docker-compose.yml and the on-host dev stack: user=protea /
+    # password=protea / db=protea on port 5432.
+    #
+    # Override via POSTGRES_EXPORTER_DATA_SOURCE_NAME in the environment if
+    # the operator runs Postgres under different credentials.
+    environment:
+      - DATA_SOURCE_NAME=${POSTGRES_EXPORTER_DATA_SOURCE_NAME:-postgresql://protea:protea@host.docker.internal:5432/protea?sslmode=disable}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "9187:9187"
+    networks:
+      - protea_monitoring
+    restart: unless-stopped
+
+networks:
+  protea_monitoring:
+    driver: bridge
+  # External network owned by the application compose project (docker-compose.yml,
+  # compose project "protea"). Prometheus joins it so it can reach
+  # protea-rabbitmq-1:15692 and protea-postgres-exporter:9187 by container
+  # name without those ports needing to be published on the host.
+  protea_default:
+    external: true
 
 volumes:
   grafana_data:
+  loki_data:
+  prometheus_data:

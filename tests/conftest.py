@@ -2,10 +2,49 @@ from __future__ import annotations
 
 import os
 import subprocess
-import time
 import uuid
 
 import pytest
+
+from tests.helpers.wait import wait_until
+
+# ---------------------------------------------------------------------------
+# Hypothesis profiles (F6.2)
+# ---------------------------------------------------------------------------
+# Property-based tests live under tests/property/. The profile picked here
+# applies to every Hypothesis run in this pytest session.
+#
+#   default : interactive runs (small example count, randomized seed).
+#   ci      : CI runs (derandomize=True, fixed seed, deadline disabled so
+#             slow integration boxes do not flake on a Hypothesis timeout).
+#
+# The CI profile activates when either PROTEA_HYPOTHESIS_PROFILE=ci or the
+# generic CI=true env var is set, so GitHub Actions and any local
+# ``CI=1 pytest`` invocation get bit-stable property tests.
+try:
+    from hypothesis import HealthCheck, settings
+except ImportError:  # pragma: no cover - hypothesis is a test-only dep
+    settings = None  # type: ignore[assignment]
+
+if settings is not None:
+    settings.register_profile(
+        "ci",
+        max_examples=200,
+        derandomize=True,
+        deadline=None,
+        print_blob=True,
+        suppress_health_check=[HealthCheck.too_slow],
+    )
+    settings.register_profile(
+        "dev",
+        max_examples=50,
+        deadline=None,
+        suppress_health_check=[HealthCheck.too_slow],
+    )
+    _profile = os.getenv("PROTEA_HYPOTHESIS_PROFILE")
+    if _profile is None and os.getenv("CI", "").lower() in {"1", "true", "yes"}:
+        _profile = "ci"
+    settings.load_profile(_profile or "dev")
 
 
 def _run(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -21,27 +60,49 @@ def _docker_exists() -> bool:
 
 
 def _wait_ready(container: str, user: str, db: str, timeout_s: int = 60) -> None:
-    start = time.time()
-    while True:
-        proc = subprocess.run(
+    last_proc: subprocess.CompletedProcess[str] | None = None
+
+    def _ready() -> bool:
+        nonlocal last_proc
+        last_proc = subprocess.run(
             ["docker", "exec", container, "pg_isready", "-U", user, "-d", db],
             text=True,
             capture_output=True,
         )
-        if proc.returncode == 0:
-            return
-        if time.time() - start > timeout_s:
-            logs = subprocess.run(["docker", "logs", container], text=True, capture_output=True)
-            raise RuntimeError(
-                f"Postgres not ready after {timeout_s}s.\n\npg_isready:\n{proc.stdout}\n{proc.stderr}\n\nlogs:\n{logs.stdout}\n{logs.stderr}"
-            )
-        time.sleep(1)
+        return last_proc.returncode == 0
+
+    try:
+        wait_until(_ready, timeout=float(timeout_s), interval=0.25, msg=f"pg_isready {container}")
+    except AssertionError as err:
+        logs = subprocess.run(["docker", "logs", container], text=True, capture_output=True)
+        stdout = last_proc.stdout if last_proc else ""
+        stderr = last_proc.stderr if last_proc else ""
+        raise RuntimeError(
+            f"Postgres not ready after {timeout_s}s.\n\npg_isready:\n{stdout}\n{stderr}\n\nlogs:\n{logs.stdout}\n{logs.stderr}"
+        ) from err
 
 
 @pytest.fixture()
 def noop_emit():
     """Shared no-op emit callback for operation tests."""
     return lambda *_args, **_kwargs: None
+
+
+@pytest.fixture(autouse=True)
+def _disable_authn_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Disable the T5.6a API-key gate for the test session by default.
+
+    Routes wired with ``require_api_key`` (``POST /jobs``, ``/datasets``,
+    ``/reranker-models/import*``) would otherwise 401 every smoke-test.
+    Tests that want to exercise the gate explicitly re-enable it with
+    ``monkeypatch.setenv("PROTEA_AUTHN_REQUIRED", "true")``.
+
+    Also sets the environment to "test" so that slowapi rate limits are
+    effectively disabled (9999/hour) to avoid hitting quota walls during
+    integration test setup and assertions.
+    """
+    monkeypatch.setenv("PROTEA_AUTHN_REQUIRED", "false")
+    monkeypatch.setenv("PROTEA_ENVIRONMENT", "test")
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -51,6 +112,52 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="Start a temporary Postgres (pgvector) container for integration tests.",
     )
+
+
+# Database names that are known dev/prod stores. The *_pg integration tests
+# run ``Base.metadata.drop_all(); create_all()`` against whatever URL this
+# fixture yields, so an externally-supplied DB pointed at any of these would
+# silently wipe a real schema (the live DB has been wiped four times this way).
+_PROTECTED_DB_NAMES = frozenset({"protea", "biodata"})
+
+# The dev Postgres listens here. Refuse to run destructive integration tests
+# against it unless the operator explicitly opts in.
+_DEV_HOST_PORT = ("localhost", "5432")
+_DEV_HOST_ALIASES = frozenset({"localhost", "127.0.0.1", "::1", ""})
+
+
+def _guard_external_db(user: str, host: str, port: str, db: str) -> None:
+    """Abort the session if an external DB looks like a real dev/prod store.
+
+    The ``*_pg.py`` integration suite drops and recreates the schema, so a
+    misconfigured ``PROTEA_PG_*`` env (e.g. inherited from a sourced ``.env``
+    that points at the live Postgres) would destroy a real database. We
+    default-deny: refuse when the DB name is a known prod/dev name, or when
+    the target is the dev Postgres host:port, unless the operator sets the
+    explicit opt-in sentinel ``PROTEA_ALLOW_DESTRUCTIVE_TESTS=1``.
+    """
+    if os.getenv("PROTEA_ALLOW_DESTRUCTIVE_TESTS") == "1":
+        return
+
+    reasons: list[str] = []
+    if db.strip().lower() in _PROTECTED_DB_NAMES:
+        reasons.append(f"database name {db!r} is a known dev/prod store")
+    if host.strip().lower() in _DEV_HOST_ALIASES and port.strip() == _DEV_HOST_PORT[1]:
+        reasons.append(
+            f"target {host}:{port} is the dev Postgres ({_DEV_HOST_PORT[0]}:{_DEV_HOST_PORT[1]})"
+        )
+
+    if reasons:
+        pytest.fail(
+            "Refusing to run destructive integration tests against what looks "
+            "like a real database: "
+            + "; ".join(reasons)
+            + f" (user={user!r}, db={db!r}, host={host!r}, port={port!r}). "
+            "These tests run Base.metadata.drop_all()/create_all() and would "
+            "wipe the schema. Point PROTEA_PG_* at a disposable Postgres, or "
+            "set PROTEA_ALLOW_DESTRUCTIVE_TESTS=1 to override this guard.",
+            pytrace=False,
+        )
 
 
 @pytest.fixture(scope="session")
@@ -77,6 +184,7 @@ def postgres_url(pytestconfig: pytest.Config) -> str:
     )
 
     if external_db:
+        _guard_external_db(user=user, host="localhost", port=str(host_port), db=db)
         url = f"postgresql+psycopg://{user}:{password}@localhost:{host_port}/{db}"
         yield url
         return

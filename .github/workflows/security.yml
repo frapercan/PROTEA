@@ -2,16 +2,21 @@ name: Security
 
 on:
   push:
+    branches: [develop, main]
   pull_request:
   schedule:
     # Weekly Monday 06:00 UTC: catches new CVEs against pinned deps
     # even if no PR has landed.
     - cron: "0 6 * * 1"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   audit:
     name: pip-audit
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -32,23 +37,45 @@ jobs:
       - name: Add poetry to PATH
         run: echo "$HOME/.local/bin" >> $GITHUB_PATH
 
+      - name: Use in-project virtualenv
+        run: poetry config virtualenvs.in-project true
+
+      - name: Restore venv cache
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py${{ matrix.python-version }}-poetry${{ matrix.poetry-version }}-main-${{ hashFiles('**/poetry.lock') }}
+
       - name: Install production deps in the poetry venv
         # poetry 2.x removed `poetry export`; install with the main group
         # only and then audit the resolved environment in-place.
         run: poetry install --only main
 
-      - name: Install pip-audit
-        run: pip install pip-audit
+      - name: Install pip-audit (latest pip first so we audit a fresh env)
+        # T5.7 of master plan v3.2: pip-audit is now blocking. We bump
+        # ``pip`` itself before installing pip-audit so the version
+        # under audit isn't shadowed by stale CVEs unrelated to PROTEA's
+        # declared deps. Any remaining advisories must either be ignored
+        # explicitly here (with a tracked ADR follow-up) or fixed.
+        run: |
+          pip install --upgrade pip
+          pip install pip-audit
 
-      - name: pip-audit (non-blocking in F0; blocking once F-OPS T-OPS.7 lands)
-        # F0 stance: surface findings without breaking the pipeline so
-        # the team can triage. F-OPS T-OPS.7 of master plan v3 will
-        # flip this to fail on severity HIGH.
-        run: poetry run pip-audit --strict --vulnerability-service osv || true
+      - name: pip-audit (BLOCKING — T5.7)
+        # ``--ignore-vuln`` carries a per-advisory escape hatch when an
+        # upstream fix is unavailable (track each in `docs/adr/security.rst`).
+        # CVE-2026-3219: pip ``--index-url`` redirect handling, no upstream
+        # fix as of 2026-05-09; PROTEA's CI never points at user-supplied
+        # indices so the practical risk is zero.
+        run: >
+          poetry run pip-audit
+          --strict
+          --vulnerability-service osv
+          --ignore-vuln CVE-2026-3219
 
   bandit:
     name: bandit (security static analysis)
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -64,7 +91,9 @@ jobs:
       - name: Install bandit
         run: pip install "bandit[toml]"
 
-      - name: Run bandit on protea/
-        # Severity HIGH and confidence HIGH only at F0; tighten in F-OPS.
-        # Bandit reads its config from pyproject.toml ([tool.bandit]).
-        run: bandit --severity-level high --confidence-level high -r protea/ -c pyproject.toml || true
+      - name: Run bandit on protea/ (BLOCKING — T5.7)
+        # Severity HIGH and confidence HIGH only — tightening to MEDIUM
+        # is tracked in `docs/adr/security.rst` once the existing 14
+        # MEDIUM findings get triaged. Bandit reads its config from
+        # pyproject.toml ([tool.bandit]).
+        run: bandit --severity-level high --confidence-level high -r protea/ -c pyproject.toml

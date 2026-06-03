@@ -3,9 +3,10 @@ ADR-004: Dead letter queue and retries
 
 :Date: 2026-03-18
 :Author: frapercan
+:Status: Accepted
 
-The problem
------------
+Context
+-------
 
 Two related messaging problems:
 
@@ -17,33 +18,33 @@ Two related messaging problems:
    were retried immediately, amplifying load on the service that was
    already struggling.
 
-What we do
-----------
+Decision
+--------
 
-**Dead letter queue** — all queues are declared with
+**Dead letter queue.** All queues are declared with
 ``x-dead-letter-exchange: protea.dlx``.  Rejected messages
 (``nack`` without ``requeue``) end up in ``protea.dead-letter``, a durable
 queue where they can be inspected, fixed, and republished.
 
-**Publisher retries** — exponential backoff: 5 attempts with delays of
+**Publisher retries.** Exponential backoff: 5 attempts with delays of
 1, 2, 4, 8, 16s (capped at 30s).  If the connection is broken, it is
 discarded and a new one is created.
 
-**Worker retries** — operations can raise
+**Worker retries.** Operations can raise
 ``RetryLaterError("GPU busy", delay_seconds=60)``.  The worker calculates
 adaptive backoff based on how many previous retries have occurred:
 ``delay = min(base * 2^retries, 600s)``.  The job goes back to ``QUEUED``
 and is republished after the wait.
 
-Trade-offs
-----------
+Consequences
+------------
 
-- The DLQ grows if nobody inspects it — it must be monitored (see runbook).
+- The DLQ grows if nobody inspects it; it must be monitored (see runbook).
 - Adaptive backoff makes one DB query per retry to count previous
   ``job.retry_later`` events.  Negligible cost.
 
-Rejected
---------
+Rejected alternatives
+---------------------
 
 - **TTL + delay queue in RabbitMQ**: more complex to set up and debug than
   an application-level ``sleep()``.

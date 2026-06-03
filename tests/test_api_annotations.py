@@ -82,7 +82,20 @@ def client(session):
     factory = MagicMock()
     app = _make_app(factory)
     with patch(
-        "protea.api.routers.annotations.session_scope", side_effect=lambda _: _mock_scope(session)
+        "protea.api.routers.annotations.snapshots.session_scope",
+        side_effect=lambda _: _mock_scope(session),
+    ), patch(
+        "protea.api.routers.annotations.sets.session_scope",
+        side_effect=lambda _: _mock_scope(session),
+    ), patch(
+        "protea.api.routers.annotations.evaluation_sets.session_scope",
+        side_effect=lambda _: _mock_scope(session),
+    ), patch(
+        "protea.api.routers.annotations.evaluation_results.session_scope",
+        side_effect=lambda _: _mock_scope(session),
+    ), patch(
+        "protea.api.routers.annotations._common.session_scope",
+        side_effect=lambda _: _mock_scope(session),
     ):
         yield TestClient(app, raise_server_exceptions=True)
 
@@ -103,7 +116,7 @@ class TestListSnapshots:
         factory = MagicMock()
         app = _make_app(factory)
         with patch(
-            "protea.api.routers.annotations.session_scope",
+            "protea.api.routers.annotations.snapshots.session_scope",
             side_effect=lambda _: _mock_scope(session),
         ):
             resp = TestClient(app).get("/annotations/snapshots")
@@ -119,7 +132,7 @@ class TestListSnapshots:
         factory = MagicMock()
         app = _make_app(factory)
         with patch(
-            "protea.api.routers.annotations.session_scope",
+            "protea.api.routers.annotations.snapshots.session_scope",
             side_effect=lambda _: _mock_scope(session),
         ):
             resp = TestClient(app).get("/annotations/snapshots")
@@ -142,7 +155,7 @@ class TestGetSnapshot:
         factory = MagicMock()
         app = _make_app(factory)
         with patch(
-            "protea.api.routers.annotations.session_scope",
+            "protea.api.routers.annotations.snapshots.session_scope",
             side_effect=lambda _: _mock_scope(session),
         ):
             resp = TestClient(app).get(f"/annotations/snapshots/{_SNAPSHOT_ID}")
@@ -158,7 +171,7 @@ class TestGetSnapshot:
         factory = MagicMock()
         app = _make_app(factory)
         with patch(
-            "protea.api.routers.annotations.session_scope",
+            "protea.api.routers.annotations.snapshots.session_scope",
             side_effect=lambda _: _mock_scope(session),
         ):
             resp = TestClient(app, raise_server_exceptions=False).get(
@@ -182,11 +195,11 @@ class TestLoadOntologySnapshot:
         app = _make_app(factory)
         with (
             patch(
-                "protea.api.routers.annotations.session_scope",
+                "protea.api.routers.annotations.snapshots.session_scope",
                 side_effect=lambda _: _mock_scope(session),
             ),
-            patch("protea.api.routers.annotations.publish_job"),
-            patch("protea.api.routers.annotations.Job", return_value=job),
+            patch("protea.services.jobs_service.publish_job"),
+            patch("protea.services.jobs_service.Job", return_value=job),
         ):
             resp = TestClient(app).post(
                 "/annotations/snapshots/load",
@@ -202,7 +215,7 @@ class TestLoadOntologySnapshot:
         factory = MagicMock()
         app = _make_app(factory)
         with patch(
-            "protea.api.routers.annotations.session_scope",
+            "protea.api.routers.annotations.snapshots.session_scope",
             side_effect=lambda _: _mock_scope(session),
         ):
             resp = TestClient(app, raise_server_exceptions=False).post(
@@ -220,11 +233,11 @@ class TestLoadOntologySnapshot:
         app = _make_app(factory)
         with (
             patch(
-                "protea.api.routers.annotations.session_scope",
+                "protea.api.routers.annotations.snapshots.session_scope",
                 side_effect=lambda _: _mock_scope(session),
             ),
-            patch("protea.api.routers.annotations.publish_job") as mock_publish,
-            patch("protea.api.routers.annotations.Job", return_value=job),
+            patch("protea.services.jobs_service.publish_job") as mock_publish,
+            patch("protea.services.jobs_service.Job", return_value=job),
         ):
             TestClient(app).post(
                 "/annotations/snapshots/load",
@@ -250,7 +263,7 @@ class TestListAnnotationSets:
         factory = MagicMock()
         app = _make_app(factory)
         with patch(
-            "protea.api.routers.annotations.session_scope",
+            "protea.api.routers.annotations.sets.session_scope",
             side_effect=lambda _: _mock_scope(session),
         ):
             resp = TestClient(app).get("/annotations/sets")
@@ -268,7 +281,7 @@ class TestListAnnotationSets:
         factory = MagicMock()
         app = _make_app(factory)
         with patch(
-            "protea.api.routers.annotations.session_scope",
+            "protea.api.routers.annotations.sets.session_scope",
             side_effect=lambda _: _mock_scope(session),
         ):
             resp = TestClient(app).get("/annotations/sets?source=goa")
@@ -291,7 +304,7 @@ class TestGetAnnotationSet:
         factory = MagicMock()
         app = _make_app(factory)
         with patch(
-            "protea.api.routers.annotations.session_scope",
+            "protea.api.routers.annotations.sets.session_scope",
             side_effect=lambda _: _mock_scope(session),
         ):
             resp = TestClient(app).get(f"/annotations/sets/{_SET_ID}")
@@ -306,7 +319,7 @@ class TestGetAnnotationSet:
         factory = MagicMock()
         app = _make_app(factory)
         with patch(
-            "protea.api.routers.annotations.session_scope",
+            "protea.api.routers.annotations.sets.session_scope",
             side_effect=lambda _: _mock_scope(session),
         ):
             resp = TestClient(app, raise_server_exceptions=False).get(
@@ -336,11 +349,11 @@ class TestLoadGOAAnnotations:
         app = _make_app(factory)
         with (
             patch(
-                "protea.api.routers.annotations.session_scope",
+                "protea.api.routers.annotations.sets.session_scope",
                 side_effect=lambda _: _mock_scope(session),
             ),
-            patch("protea.api.routers.annotations.publish_job"),
-            patch("protea.api.routers.annotations.Job", return_value=job),
+            patch("protea.services.jobs_service.publish_job"),
+            patch("protea.services.jobs_service.Job", return_value=job),
         ):
             resp = TestClient(app).post("/annotations/sets/load-goa", json=self._VALID_PAYLOAD)
 
@@ -351,7 +364,7 @@ class TestLoadGOAAnnotations:
         factory = MagicMock()
         app = _make_app(factory)
         with patch(
-            "protea.api.routers.annotations.session_scope",
+            "protea.api.routers.annotations.sets.session_scope",
             side_effect=lambda _: _mock_scope(session),
         ):
             resp = TestClient(app, raise_server_exceptions=False).post(
@@ -383,11 +396,11 @@ class TestLoadQuickGOAnnotations:
         app = _make_app(factory)
         with (
             patch(
-                "protea.api.routers.annotations.session_scope",
+                "protea.api.routers.annotations.sets.session_scope",
                 side_effect=lambda _: _mock_scope(session),
             ),
-            patch("protea.api.routers.annotations.publish_job"),
-            patch("protea.api.routers.annotations.Job", return_value=job),
+            patch("protea.services.jobs_service.publish_job"),
+            patch("protea.services.jobs_service.Job", return_value=job),
         ):
             resp = TestClient(app).post("/annotations/sets/load-quickgo", json=self._VALID_PAYLOAD)
 
@@ -398,7 +411,7 @@ class TestLoadQuickGOAnnotations:
         factory = MagicMock()
         app = _make_app(factory)
         with patch(
-            "protea.api.routers.annotations.session_scope",
+            "protea.api.routers.annotations.sets.session_scope",
             side_effect=lambda _: _mock_scope(session),
         ):
             resp = TestClient(app, raise_server_exceptions=False).post(
@@ -416,11 +429,11 @@ class TestLoadQuickGOAnnotations:
         app = _make_app(factory)
         with (
             patch(
-                "protea.api.routers.annotations.session_scope",
+                "protea.api.routers.annotations.sets.session_scope",
                 side_effect=lambda _: _mock_scope(session),
             ),
-            patch("protea.api.routers.annotations.publish_job") as mock_publish,
-            patch("protea.api.routers.annotations.Job", return_value=job),
+            patch("protea.services.jobs_service.publish_job") as mock_publish,
+            patch("protea.services.jobs_service.Job", return_value=job),
         ):
             TestClient(app).post("/annotations/sets/load-quickgo", json=self._VALID_PAYLOAD)
 

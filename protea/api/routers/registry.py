@@ -3,15 +3,15 @@
 Three read-only endpoints listing the plugins discovered at runtime
 via :mod:`importlib.metadata.entry_points`:
 
-  * ``GET /backends`` — embedding backend plugins (``protea.backends``)
-  * ``GET /sources`` — annotation source plugins (``protea.sources``)
-  * ``GET /runners`` — experiment runner plugins (``protea.runners``)
+  * ``GET /backends``: embedding backend plugins (``protea.backends``)
+  * ``GET /sources``: annotation source plugins (``protea.sources``)
+  * ``GET /runners``: experiment runner plugins (``protea.runners``)
 
 Each response is a flat list of :class:`PluginInfo` records describing
 the entry-point name, class, module path, and any plugin-specific
 metadata exposed via attributes (e.g. :attr:`AnnotationSource.version`).
 
-The endpoints are intentionally stateless — they re-scan
+The endpoints are intentionally stateless: they re-scan
 ``entry_points`` on every call rather than caching, so a worker
 that's just been restarted with a newly-installed extra surfaces in
 the next request without an API restart. The scan is cheap (sub-ms
@@ -24,7 +24,7 @@ from importlib.metadata import entry_points
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 router = APIRouter(tags=["registry"])
 
@@ -39,31 +39,49 @@ _KNOWN_GROUPS = {
 class PluginInfo(BaseModel):
     """Metadata for one discovered plugin."""
 
-    name: str
-    """Entry-point name (e.g. ``"esm"``, ``"goa"``, ``"lightgbm"``).
-    Matches the plugin's ``name`` class attribute by convention."""
-
-    cls: str
-    """Plugin class name (e.g. ``"EsmBackend"``, ``"GoaSource"``)."""
-
-    module: str
-    """Fully-qualified entry-point value
-    (e.g. ``"protea_backends.esm:plugin"``)."""
-
-    extra: dict[str, Any] = {}
-    """Plugin-specific metadata read from the loaded instance. Today
-    carries ``version`` for sources; empty for backends and runners."""
+    name: str = Field(
+        ...,
+        description=(
+            "Entry-point name (e.g. ``esm``, ``goa``, ``lightgbm``); "
+            "matches the plugin's ``name`` class attribute by "
+            "convention."
+        ),
+    )
+    cls: str = Field(
+        ...,
+        description="Plugin class name (e.g. ``EsmBackend``, ``GoaSource``).",
+    )
+    module: str = Field(
+        ...,
+        description=(
+            "Fully-qualified entry-point value "
+            "(e.g. ``protea_backends.esm:plugin``)."
+        ),
+    )
+    extra: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Plugin-specific metadata read from the loaded instance. "
+            "Today carries ``version`` for sources; empty for backends "
+            "and runners."
+        ),
+    )
 
 
 class PluginListResponse(BaseModel):
     """Response shape for the three registry endpoints."""
 
-    group: str
-    """The ``entry_points`` group queried
-    (e.g. ``"protea.backends"``)."""
-
-    plugins: list[PluginInfo]
-    """Sorted (by ``name``) list of discovered plugins."""
+    group: str = Field(
+        ...,
+        description=(
+            "The ``entry_points`` group queried "
+            "(e.g. ``protea.backends``)."
+        ),
+    )
+    plugins: list[PluginInfo] = Field(
+        ...,
+        description="Discovered plugins, sorted alphabetically by ``name``.",
+    )
 
 
 def _discover(group: str) -> list[PluginInfo]:
@@ -73,7 +91,7 @@ def _discover(group: str) -> list[PluginInfo]:
     effects but should not raise for any first-party plugin (the
     bootstrapping pattern keeps top-level imports cheap). If a
     third-party plugin's load raises, the caller surfaces it as a
-    500 — better to fail loud than silently hide a broken install.
+    500: better to fail loud than silently hide a broken install.
     """
     discovered: list[PluginInfo] = []
     for ep in entry_points(group=group):
@@ -95,7 +113,7 @@ def _discover(group: str) -> list[PluginInfo]:
 
 
 def _list_for(slug: str) -> PluginListResponse:
-    """Shared body for the three endpoints — looks up the canonical
+    """Shared body for the three endpoints; looks up the canonical
     ``entry_points`` group from ``_KNOWN_GROUPS`` and returns the
     discovered plugins.
     """

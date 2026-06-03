@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from protea.infrastructure.queue.consumer import QueueConsumer
+from protea.infrastructure.queue.consumer import ConsumerOptions, QueueConsumer
 from protea.infrastructure.queue.publisher import publish_job
 
 # ---------------------------------------------------------------------------
@@ -42,7 +42,7 @@ def _consumer(worker=None, requeue_on_failure=False):
         amqp_url="amqp://guest:guest@localhost/",
         queue_name="test.jobs",
         worker=worker or _make_worker(),
-        requeue_on_failure=requeue_on_failure,
+        options=ConsumerOptions(requeue_on_failure=requeue_on_failure),
     )
 
 
@@ -185,6 +185,279 @@ class TestConsumerRun:
         assert consumer._stop is True
 
 
+class TestConsumerShutdownGrace:
+    """FIX-BASEWORKER-ROBUSTNESS — Bug #3.
+
+    SIGTERM / SIGINT during an in-flight job must arm a watchdog (via
+    :class:`protea.workers.shutdown.ShutdownGuard`) that force-fails
+    the job after ``worker_shutdown_grace_seconds`` so the DB row never
+    gets stuck in RUNNING after deploy-keeper kills the process.
+    """
+
+    def test_dispatch_job_sets_and_clears_in_flight_id(self):
+        """The guard tracks the in-flight job during handle_job and clears it after."""
+        job_id = uuid4()
+        observed: list[UUID | None] = []
+        worker = MagicMock()
+        consumer = _consumer(worker)
+
+        # Pre-condition: idle consumer reports no in-flight job.
+        assert consumer._guard.current_job_id is None
+
+        def _inspect(jid):
+            observed.append(consumer._guard.current_job_id)
+
+        worker.handle_job.side_effect = _inspect
+        channel = MagicMock()
+        properties = MagicMock()
+        properties.headers = None
+
+        consumer._dispatch_job(channel, _make_method(7), properties, job_id)
+
+        # Worker was called with the right tracker visible.
+        assert observed == [job_id]
+        # Post-condition: tracker cleared so a SIGTERM after this point
+        # does not try to force-fail a finished job.
+        assert consumer._guard.current_job_id is None
+
+    def test_dispatch_job_clears_in_flight_id_on_exception(self):
+        """The tracker must be cleared even when handle_job raises."""
+        worker = MagicMock()
+        worker.handle_job.side_effect = RuntimeError("boom")
+        consumer = _consumer(worker)
+        channel = MagicMock()
+        properties = MagicMock()
+        properties.headers = None
+
+        consumer._dispatch_job(channel, _make_method(8), properties, uuid4())
+
+        assert consumer._guard.current_job_id is None
+
+    def test_handle_stop_with_in_flight_job_arms_watchdog(self):
+        """When SIGTERM arrives mid-callback, the grace timer is armed."""
+        consumer = _consumer()
+        in_flight = uuid4()
+        consumer._guard.track(in_flight)
+        # Pretend the consumer has an open channel so the safe-stop
+        # callback gets a chance to run.
+        consumer._channel = MagicMock()
+
+        with patch.object(consumer._guard, "arm") as mock_arm:
+            consumer._handle_stop(15, None)
+
+        assert consumer._stop is True
+        mock_arm.assert_called_once_with(in_flight)
+        # Second invocation is idempotent (deploy-keeper can resend the
+        # signal; we must not arm two timers).
+        with patch.object(consumer._guard, "arm") as mock_arm2:
+            consumer._handle_stop(15, None)
+        mock_arm2.assert_not_called()
+
+    def test_handle_stop_with_no_in_flight_job_skips_watchdog(self):
+        """Idle consumers do not arm the grace timer on SIGTERM."""
+        consumer = _consumer()
+        consumer._channel = MagicMock()
+        assert consumer._guard.current_job_id is None
+
+        with patch.object(consumer._guard, "arm") as mock_arm:
+            consumer._handle_stop(15, None)
+
+        assert consumer._stop is True
+        mock_arm.assert_not_called()
+
+    def test_watchdog_requeues_in_flight_job_first(self):
+        """F-OPS-JOBS.1: watchdog must try the non-destructive re-queue path
+        before falling back to ``force_fail``. On success the job is flipped
+        back to QUEUED and the delivery is re-published, with no FAILED row."""
+        job_id = uuid4()
+        worker = MagicMock()
+        worker.requeue_on_shutdown.return_value = True
+        consumer = _consumer(worker)
+        consumer._guard.track(job_id)
+        republish_calls: list[UUID] = []
+        consumer._guard._on_requeue = republish_calls.append
+
+        with patch("protea.workers.shutdown.os._exit") as mock_exit:
+            consumer._guard._fire(job_id)
+
+        worker.requeue_on_shutdown.assert_called_once_with(job_id)
+        assert republish_calls == [job_id]
+        worker._force_fail_job.assert_not_called()
+        mock_exit.assert_called_once_with(143)
+
+    def test_watchdog_force_fails_when_requeue_returns_false(self):
+        """If ``requeue_on_shutdown`` returns False (row already terminal /
+        UPDATE failed) the watchdog must still force-fail so the row never
+        stays in RUNNING and the process still exits."""
+        from protea.workers.base_worker import WorkerShutdown
+
+        job_id = uuid4()
+        worker = MagicMock()
+        worker.requeue_on_shutdown.return_value = False
+        consumer = _consumer(worker)
+        consumer._guard.track(job_id)
+
+        republish_calls: list[UUID] = []
+        consumer._guard._on_requeue = republish_calls.append
+
+        with patch("protea.workers.shutdown.os._exit") as mock_exit:
+            consumer._guard._fire(job_id)
+
+        worker.requeue_on_shutdown.assert_called_once_with(job_id)
+        assert republish_calls == []
+        worker._force_fail_job.assert_called_once()
+        call_args = worker._force_fail_job.call_args
+        assert call_args.args[0] == job_id
+        assert isinstance(call_args.args[1], WorkerShutdown)
+        mock_exit.assert_called_once_with(143)
+
+    def test_watchdog_force_fails_when_requeue_raises(self):
+        """Requeue callable raising must not crash the guard; force-fail is
+        the safety net."""
+        job_id = uuid4()
+        worker = MagicMock()
+        worker.requeue_on_shutdown.side_effect = RuntimeError("db down")
+        consumer = _consumer(worker)
+        consumer._guard.track(job_id)
+
+        with patch("protea.workers.shutdown.os._exit") as mock_exit:
+            consumer._guard._fire(job_id)
+
+        worker._force_fail_job.assert_called_once()
+        mock_exit.assert_called_once_with(143)
+
+    def test_force_fail_in_flight_skips_when_job_finished(self):
+        """If the callback finished between SIGTERM and watchdog fire,
+        the watchdog must NOT force-fail anyone."""
+        job_id = uuid4()
+        worker = MagicMock()
+        consumer = _consumer(worker)
+        consumer._guard.untrack()  # job already finished
+
+        with patch("protea.workers.shutdown.os._exit") as mock_exit:
+            consumer._guard._fire(job_id)
+
+        worker._force_fail_job.assert_not_called()
+        worker.requeue_on_shutdown.assert_not_called()
+        mock_exit.assert_not_called()
+
+    def test_arm_shutdown_timer_uses_tuning_grace(self):
+        """Grace period must come from WorkerTuning.worker_shutdown_grace_seconds."""
+        import os
+
+        from protea.config.tuning import get_tuning
+
+        prev = os.environ.get("PROTEA_TUNING__WORKER__WORKER_SHUTDOWN_GRACE_SECONDS")
+        os.environ["PROTEA_TUNING__WORKER__WORKER_SHUTDOWN_GRACE_SECONDS"] = "7"
+        get_tuning.cache_clear()
+        try:
+            consumer = _consumer()
+            job_id = uuid4()
+
+            with patch("protea.workers.shutdown.threading.Timer") as mock_timer_cls:
+                fake_timer = MagicMock()
+                mock_timer_cls.return_value = fake_timer
+                consumer._guard.arm(job_id)
+
+            mock_timer_cls.assert_called_once()
+            grace_arg = mock_timer_cls.call_args.args[0]
+            assert grace_arg == 7
+            assert fake_timer.daemon is True
+            fake_timer.start.assert_called_once()
+            assert consumer._guard.timer is fake_timer
+        finally:
+            if prev is None:
+                os.environ.pop("PROTEA_TUNING__WORKER__WORKER_SHUTDOWN_GRACE_SECONDS", None)
+            else:
+                os.environ["PROTEA_TUNING__WORKER__WORKER_SHUTDOWN_GRACE_SECONDS"] = prev
+            get_tuning.cache_clear()
+
+    def test_arm_shutdown_timer_is_idempotent(self):
+        """Two SIGTERMs in quick succession must not arm a second timer."""
+        consumer = _consumer()
+        first_timer = MagicMock()
+        consumer._guard._timer = first_timer
+
+        with patch("protea.workers.shutdown.threading.Timer") as mock_timer_cls:
+            consumer._guard.arm(uuid4())
+
+        mock_timer_cls.assert_not_called()
+        assert consumer._guard.timer is first_timer
+
+    def test_run_cancels_pending_timer_on_clean_exit(self):
+        """Clean shutdown (start_consuming returned) cancels the timer."""
+        consumer = _consumer()
+        timer = MagicMock()
+        consumer._guard._timer = timer
+
+        conn = MagicMock()
+        channel = MagicMock()
+        conn.channel.return_value = channel
+        conn.is_open = False
+
+        with patch(
+            "protea.infrastructure.queue.consumer.pika.BlockingConnection",
+            return_value=conn,
+        ):
+            consumer.run()
+
+        timer.cancel.assert_called_once()
+        assert consumer._guard.timer is None
+
+    def test_run_sets_amqp_heartbeat_from_tuning(self):
+        """ConnectionParameters must carry heartbeat=600 by default so
+        pika does not close the channel during long blocking ops."""
+        from protea.config.tuning import get_tuning
+
+        consumer = _consumer()
+        conn = MagicMock()
+        channel = MagicMock()
+        conn.channel.return_value = channel
+        conn.is_open = False
+
+        with patch(
+            "protea.infrastructure.queue.consumer.pika.BlockingConnection",
+            return_value=conn,
+        ) as mock_conn_cls:
+            consumer.run()
+
+        # First positional arg is the URLParameters object configured
+        # with the tuning-provided heartbeat (default 600).
+        params = mock_conn_cls.call_args.args[0]
+        assert params.heartbeat == get_tuning().queue.amqp_heartbeat
+        assert params.heartbeat == 600
+
+    def test_run_honours_env_override_for_heartbeat(self):
+        """PROTEA_AMQP_HEARTBEAT must override the default at load time."""
+        import os
+
+        from protea.config.tuning import get_tuning
+
+        consumer = _consumer()
+        conn = MagicMock()
+        channel = MagicMock()
+        conn.channel.return_value = channel
+        conn.is_open = False
+
+        prev = os.environ.get("PROTEA_AMQP_HEARTBEAT")
+        os.environ["PROTEA_AMQP_HEARTBEAT"] = "1800"
+        try:
+            get_tuning.cache_clear()
+            with patch(
+                "protea.infrastructure.queue.consumer.pika.BlockingConnection",
+                return_value=conn,
+            ) as mock_conn_cls:
+                consumer.run()
+            params = mock_conn_cls.call_args.args[0]
+            assert params.heartbeat == 1800
+        finally:
+            if prev is None:
+                os.environ.pop("PROTEA_AMQP_HEARTBEAT", None)
+            else:
+                os.environ["PROTEA_AMQP_HEARTBEAT"] = prev
+            get_tuning.cache_clear()
+
+
 # ---------------------------------------------------------------------------
 # publish_job
 # ---------------------------------------------------------------------------
@@ -293,6 +566,87 @@ class TestPublishJob:
         # Exponential up to attempt 5 (16s); capped at 30s for the rest.
         assert sleep_calls == [1, 2, 4, 8, 16, 30, 30, 30, 30, 30, 30]
 
+    def test_publish_injects_traceparent_header(self):
+        """T5.1b: ``inject_trace_context`` runs inside ``_publish``; even
+        without an active OTel context the publisher must still hand a
+        usable ``headers=`` value (None or {}) so AMQP delivery succeeds.
+        Here we stub the injector so the test exercises the real call
+        path and asserts that whatever the injector wrote ends up on
+        ``BasicProperties``."""
+        conn = MagicMock()
+        channel = MagicMock()
+        conn.channel.return_value = channel
+        conn.is_open = True
+
+        def fake_inject(headers):
+            headers["traceparent"] = "00-trace-span-01"
+
+        with (
+            patch(
+                "protea.infrastructure.queue.publisher.pika.BlockingConnection",
+                return_value=conn,
+            ),
+            patch(
+                "protea.infrastructure.queue.publisher.inject_trace_context",
+                side_effect=fake_inject,
+            ),
+            patch("protea.infrastructure.queue.publisher._local", threading.local()),
+        ):
+            publish_job("amqp://localhost/", "q", uuid4())
+
+        channel.basic_publish.assert_called_once()
+        props = channel.basic_publish.call_args.kwargs["properties"]
+        assert props.headers == {"traceparent": "00-trace-span-01"}
+
+    def test_publish_applies_amqp_heartbeat_on_connection(self):
+        """The publisher's reused connection must be opened with the
+        configured heartbeat so long idle windows don't drop the channel."""
+        from protea.config.tuning import get_tuning
+
+        conn = MagicMock()
+        channel = MagicMock()
+        conn.channel.return_value = channel
+        conn.is_open = True
+
+        with (
+            patch(
+                "protea.infrastructure.queue.publisher.pika.BlockingConnection",
+                return_value=conn,
+            ) as mock_conn_cls,
+            patch("protea.infrastructure.queue.publisher._local", threading.local()),
+        ):
+            publish_job("amqp://localhost/", "q", uuid4())
+
+        params = mock_conn_cls.call_args.args[0]
+        assert params.heartbeat == get_tuning().queue.amqp_heartbeat
+        assert params.heartbeat == 600
+
+    def test_publish_omits_headers_when_injector_writes_nothing(self):
+        """When OTel is disabled the injector leaves the header dict
+        empty; the publisher should pass ``headers=None`` so pika emits
+        a header-less AMQP frame (existing wire-compatible behaviour)."""
+        conn = MagicMock()
+        channel = MagicMock()
+        conn.channel.return_value = channel
+        conn.is_open = True
+
+        with (
+            patch(
+                "protea.infrastructure.queue.publisher.pika.BlockingConnection",
+                return_value=conn,
+            ),
+            patch(
+                "protea.infrastructure.queue.publisher.inject_trace_context",
+                side_effect=lambda h: h,
+            ),
+            patch("protea.infrastructure.queue.publisher._local", threading.local()),
+        ):
+            publish_job("amqp://localhost/", "q", uuid4())
+
+        channel.basic_publish.assert_called_once()
+        props = channel.basic_publish.call_args.kwargs["properties"]
+        assert props.headers is None
+
 
 # ---------------------------------------------------------------------------
 # OperationConsumer — emit writes to parent job
@@ -393,13 +747,20 @@ class TestOperationConsumerEmit:
 
         # Should nack (not requeue by default)
         channel.basic_nack.assert_called_once()
-        # Should have created a session to write the error event
-        # At least: 1 execution session + 1 error event session
+        # Should have created at least: 1 execution session + 1 error event
+        # session (the F-OPS-COORD-FAIL-PROPAGATE aggregate-failure pass may
+        # additionally open a third session to look up the parent row;
+        # since the mocked parent does not match status==RUNNING that
+        # session returns without writing).
         assert len(sessions) >= 2
-        # The error event session should have had .add() called with a JobEvent
-        error_session = sessions[-1]
-        error_session.add.assert_called_once()
-        error_session.commit.assert_called_once()
+        # Across all sessions, the JobEvent add for ``child.failed`` must
+        # have happened exactly once and have been committed.
+        adds_with_commit = [s for s in sessions if s.add.called and s.commit.called]
+        assert len(adds_with_commit) == 1, (
+            f"expected exactly one session with .add()+.commit() (the "
+            f"child.failed event session), got {len(adds_with_commit)}"
+        )
+        adds_with_commit[0].add.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -438,7 +799,7 @@ class TestOperationConsumerOnMessage:
             queue_name="test.ops",
             registry=registry,
             session_factory=factory,
-            requeue_on_failure=requeue_on_failure,
+            options=ConsumerOptions(requeue_on_failure=requeue_on_failure),
         )
         return consumer, sessions, factory, op
 
@@ -586,9 +947,9 @@ class TestOperationConsumerOnMessage:
 
         consumer._on_message(channel, method, MagicMock(), self._body(job_id=parent_id))
 
-        # sessions: [0]=execution session, [1]=emit event session
-        assert len(sessions) >= 2
-        emit_session = sessions[1]
+        # sessions: [0]=cancellation check, [1]=execution session, [2]=emit event session
+        assert len(sessions) >= 3
+        emit_session = sessions[2]
         emit_session.add.assert_called_once()
         emit_session.commit.assert_called_once()
         emit_session.close.assert_called_once()
@@ -633,8 +994,9 @@ class TestOperationConsumerOnMessage:
         def make_session():
             s = MagicMock()
             sessions_created.append(s)
-            # Make the second session (emit session) fail on commit
-            if len(sessions_created) == 2:
+            # Sessions are: [1]=cancellation check, [2]=execution, [3]=emit.
+            # Make the emit-event session fail on commit.
+            if len(sessions_created) == 3:
                 s.commit.side_effect = RuntimeError("DB down")
             return s
 
@@ -691,10 +1053,13 @@ class TestOperationConsumerOnMessage:
 
         consumer._on_message(channel, method, MagicMock(), self._body(job_id=parent_id))
 
-        # Find the error event session (last one created besides execution session)
-        # sessions: [0]=execution, [1]=error event
-        assert len(sessions) >= 2
-        err_session = sessions[-1]
+        # Identify the error-event session by the JobEvent it adds.
+        # The failure path may open additional sessions (e.g. the
+        # F-OPS-COORD-FAIL-PROPAGATE aggregate-failure probe), so we
+        # locate the writer rather than indexing by position.
+        err_sessions = [s for s in sessions if s.add.called]
+        assert len(err_sessions) == 1
+        err_session = err_sessions[0]
         err_session.add.assert_called_once()
         added_event = err_session.add.call_args[0][0]
         assert added_event.job_id == parent_id
@@ -736,8 +1101,13 @@ class TestOperationConsumerOnMessage:
         def make_session():
             s = MagicMock()
             sessions_created.append(s)
-            # Make the error event session (3rd: exec + err_event) fail
-            if len(sessions_created) == 2:
+            # Sessions opened along the failure path:
+            #   [1] cancellation check (no add)
+            #   [2] execution (no add; raises)
+            #   [3] error-event session (calls .add(JobEvent) + .commit)
+            #   [4] F-OPS-COORD-FAIL-PROPAGATE aggregate-failure probe
+            # Trigger commit failure on the error-event session.
+            if len(sessions_created) == 3:
                 s.commit.side_effect = RuntimeError("DB gone")
             return s
 
@@ -761,7 +1131,7 @@ class TestOperationConsumerOnMessage:
         consumer._on_message(channel, method, MagicMock(), self._body(job_id=parent_id))
 
         # Error event session should have rollback called
-        err_session = sessions_created[1]
+        err_session = sessions_created[2]
         err_session.rollback.assert_called_once()
         err_session.close.assert_called_once()
 
@@ -774,7 +1144,7 @@ class TestOperationConsumerOnMessage:
 class TestQueueConsumerRetryLater:
     """Cover RetryLaterError handling in QueueConsumer._on_message (lines 142-151)."""
 
-    def test_retry_later_sleeps_and_republishes(self):
+    def test_retry_later_delays_and_republishes(self):
         from protea.core.contracts.operation import RetryLaterError
 
         job_id = uuid4()
@@ -833,8 +1203,167 @@ class TestOperationConsumerHandleStop:
 
 
 # ---------------------------------------------------------------------------
-# OperationConsumer.run (pika fully mocked)
+# T-INFRA.NACK: cancellation + RetryLaterError regression tests
 # ---------------------------------------------------------------------------
+
+
+class TestQueueConsumerCancellationNack:
+    """Regression for T-INFRA.NACK on QueueConsumer.
+
+    Reproduces the queue-deadlock bug: a CANCELLED Job arriving on the
+    queue must be nack'd with requeue=False so prefetch=1 cannot wedge
+    on a backlog of cancellations awaiting the 30 min consumer_timeout.
+    """
+
+    def _make_consumer_with_status(self, status):
+        from protea.infrastructure.orm.models.job import JobStatus
+
+        worker = MagicMock()
+        fake_job = MagicMock()
+        # JobStatus.CANCELLED is a StrEnum so equality to the real enum works.
+        fake_job.status = JobStatus.CANCELLED if status == "cancelled" else JobStatus.QUEUED
+        session = MagicMock()
+        session.get.return_value = fake_job
+        worker._factory.return_value = session
+        return _consumer(worker), worker, session
+
+    def test_cancelled_job_is_nacked_without_requeue_and_not_dispatched(self):
+        """Acceptance: CANCELLED → basic_nack(requeue=False); basic_ack not called.
+
+        Mirrors the integration assertion 'queue depth returns to zero
+        within 5 s without manual purge' — the message exits the queue
+        immediately without a worker pull-cycle.
+        """
+        consumer, worker, _ = self._make_consumer_with_status("cancelled")
+        channel = MagicMock()
+        method = _make_method(123)
+
+        consumer._on_message(channel, method, MagicMock(), _encode(uuid4()))
+
+        channel.basic_nack.assert_called_once_with(delivery_tag=123, requeue=False)
+        channel.basic_ack.assert_not_called()
+        # Worker.handle_job MUST NOT be called for cancelled jobs.
+        worker.handle_job.assert_not_called()
+
+    def test_queued_job_passes_cancellation_check_and_dispatches(self):
+        """Sanity: a QUEUED job still acks and dispatches normally."""
+        consumer, worker, _ = self._make_consumer_with_status("queued")
+        channel = MagicMock()
+        method = _make_method(124)
+
+        consumer._on_message(channel, method, MagicMock(), _encode(uuid4()))
+
+        channel.basic_ack.assert_called_once_with(delivery_tag=124)
+        worker.handle_job.assert_called_once()
+
+    def test_cancellation_check_db_failure_falls_through_to_dispatch(self):
+        """A transient DB error must not block dispatch; the worker's own
+        claim path is the authoritative gate."""
+        worker = MagicMock()
+        session = MagicMock()
+        session.get.side_effect = RuntimeError("postgres unreachable")
+        worker._factory.return_value = session
+        consumer = _consumer(worker)
+        channel = MagicMock()
+        method = _make_method(125)
+
+        consumer._on_message(channel, method, MagicMock(), _encode(uuid4()))
+
+        # Pre-ack pattern preserved; handle_job still called.
+        channel.basic_ack.assert_called_once_with(delivery_tag=125)
+        worker.handle_job.assert_called_once()
+        session.close.assert_called_once()
+
+
+class TestOperationConsumerCancellationAndRetryNack:
+    """Regression for T-INFRA.NACK on OperationConsumer.
+
+    Cancelled parent-job: nack(requeue=False) and skip dispatch.
+    RetryLaterError: nack(requeue=True) so the broker reschedules.
+    """
+
+    def _make_consumer_with_parent_status(self, status, op=None):
+        from protea.core.contracts.operation import OperationResult
+        from protea.infrastructure.orm.models.job import JobStatus
+        from protea.infrastructure.queue.consumer import OperationConsumer
+
+        if op is None:
+            op = MagicMock()
+            op.execute.return_value = OperationResult()
+        registry = MagicMock()
+        registry.get.return_value = op
+
+        fake_parent = MagicMock()
+        fake_parent.status = JobStatus.CANCELLED if status == "cancelled" else JobStatus.RUNNING
+
+        sessions = []
+
+        def make_session():
+            s = MagicMock()
+            # The first session is the cancellation check; subsequent
+            # sessions are execution + emit/error sessions.
+            if not sessions:
+                s.get.return_value = fake_parent
+            sessions.append(s)
+            return s
+
+        factory = MagicMock(side_effect=make_session)
+
+        consumer = OperationConsumer(
+            amqp_url="amqp://localhost/",
+            queue_name="test.ops",
+            registry=registry,
+            session_factory=factory,
+        )
+        return consumer, sessions, op
+
+    def _body(self, job_id):
+        return json.dumps({"operation": "test_op", "job_id": str(job_id), "payload": {}}).encode()
+
+    def test_cancelled_parent_nacks_without_requeue_and_skips_execute(self):
+        """Acceptance: CANCELLED parent → basic_nack(requeue=False); op not run."""
+        consumer, sessions, op = self._make_consumer_with_parent_status("cancelled")
+        channel = MagicMock()
+        method = _make_method(200)
+
+        consumer._on_message(channel, method, MagicMock(), self._body(uuid4()))
+
+        channel.basic_nack.assert_called_once_with(delivery_tag=200, requeue=False)
+        channel.basic_ack.assert_not_called()
+        op.execute.assert_not_called()
+        # Only the cancellation-check session was opened.
+        assert len(sessions) == 1
+        sessions[0].close.assert_called_once()
+
+    def test_running_parent_proceeds_to_execute(self):
+        """Sanity: a non-cancelled parent dispatches normally and acks."""
+        consumer, sessions, op = self._make_consumer_with_parent_status("running")
+        channel = MagicMock()
+        method = _make_method(201)
+
+        consumer._on_message(channel, method, MagicMock(), self._body(uuid4()))
+
+        op.execute.assert_called_once()
+        channel.basic_ack.assert_called_once_with(delivery_tag=201)
+        channel.basic_nack.assert_not_called()
+
+    def test_retry_later_nacks_with_requeue_true(self):
+        """RetryLaterError is an explicit retry signal: nack(requeue=True),
+        no manual republish, no dead-letter."""
+        from protea.core.contracts.operation import RetryLaterError
+
+        op = MagicMock()
+        op.execute.side_effect = RetryLaterError("GPU busy", delay_seconds=10)
+        consumer, sessions, _ = self._make_consumer_with_parent_status("running", op=op)
+        channel = MagicMock()
+        method = _make_method(202)
+
+        consumer._on_message(channel, method, MagicMock(), self._body(uuid4()))
+
+        channel.basic_nack.assert_called_once_with(delivery_tag=202, requeue=True)
+        channel.basic_ack.assert_not_called()
+        # No republish on RetryLaterError — the broker handles redelivery.
+        channel.basic_publish.assert_not_called()
 
 
 class TestOperationConsumerRun:
@@ -846,7 +1375,7 @@ class TestOperationConsumerRun:
             queue_name="test.ops",
             registry=MagicMock(),
             session_factory=MagicMock(),
-            prefetch_count=4,
+            options=ConsumerOptions(prefetch_count=4),
         )
 
         conn = MagicMock()
@@ -867,3 +1396,130 @@ class TestOperationConsumerRun:
         channel.basic_qos.assert_called_once_with(prefetch_count=4)
         channel.basic_consume.assert_called_once()
         channel.start_consuming.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# F-OPS-JOBS.1 — Heartbeat loop
+# ---------------------------------------------------------------------------
+
+
+class TestHeartbeatLoop:
+    """``HeartbeatLoop`` periodically extends ``leased_until`` for a job.
+
+    The loop spawns a daemon thread that calls ``extend_lease`` every
+    ``interval_seconds``. Stopping the loop must release the thread
+    cleanly so the consumer can dispatch the next message without
+    accumulating dangling heartbeat workers.
+    """
+
+    def test_loop_extends_lease_after_interval(self):
+        from protea.workers.shutdown import HeartbeatLoop
+
+        job_id = uuid4()
+        calls: list[UUID] = []
+        gate = threading.Event()
+
+        def extend(jid: UUID) -> None:
+            calls.append(jid)
+            gate.set()
+
+        loop = HeartbeatLoop(extend, interval_seconds=1)
+        loop.start(job_id)
+        try:
+            assert gate.wait(timeout=3), "heartbeat did not fire within 3s"
+        finally:
+            loop.stop()
+        assert calls and calls[0] == job_id
+
+    def test_stop_joins_thread_quickly(self):
+        from protea.workers.shutdown import HeartbeatLoop
+
+        loop = HeartbeatLoop(lambda _jid: None, interval_seconds=60)
+        loop.start(uuid4())
+        loop.stop()
+        # After stop, internal handles are cleared so a new start works.
+        assert loop._thread is None
+        assert loop._stop_event is None
+
+    def test_start_is_idempotent(self):
+        from protea.workers.shutdown import HeartbeatLoop
+
+        loop = HeartbeatLoop(lambda _jid: None, interval_seconds=60)
+        loop.start(uuid4())
+        first = loop._thread
+        loop.start(uuid4())  # second start while one is running -> no-op
+        assert loop._thread is first
+        loop.stop()
+
+    def test_extend_failure_does_not_kill_loop(self):
+        """An exception inside ``extend_lease`` must be swallowed; the
+        loop keeps heartbeating so a transient DB blip does not cause
+        the reaper to immediately kill the job."""
+        from protea.workers.shutdown import HeartbeatLoop
+
+        job_id = uuid4()
+        attempts = []
+        gate = threading.Event()
+
+        def flaky(jid: UUID) -> None:
+            attempts.append(jid)
+            if len(attempts) == 1:
+                raise RuntimeError("db blip")
+            gate.set()
+
+        loop = HeartbeatLoop(flaky, interval_seconds=1)
+        loop.start(job_id)
+        try:
+            assert gate.wait(timeout=4), "loop should have retried after the first failure"
+        finally:
+            loop.stop()
+        assert len(attempts) >= 2
+
+
+class TestDispatchHeartbeatWiring:
+    """The dispatch path must start the heartbeat before invoking the
+    worker and stop it after, so the reaper sees a live lease for the
+    full duration of the job (and only the duration of the job)."""
+
+    def test_dispatch_starts_and_stops_heartbeat(self):
+        job_id = uuid4()
+        worker = MagicMock()
+        consumer = _consumer(worker)
+        channel = MagicMock()
+        properties = MagicMock()
+        properties.headers = None
+
+        # Observe heartbeat lifecycle around handle_job.
+        events: list[str] = []
+
+        def _track_start(jid):  # pragma: no cover - trivial
+            events.append(f"start:{jid}")
+
+        def _track_stop():  # pragma: no cover - trivial
+            events.append("stop")
+
+        def _track_handle(jid):
+            events.append(f"handle:{jid}")
+
+        with (
+            patch.object(consumer._heartbeat, "start", side_effect=_track_start),
+            patch.object(consumer._heartbeat, "stop", side_effect=_track_stop),
+        ):
+            worker.handle_job.side_effect = _track_handle
+            consumer._dispatch_job(channel, _make_method(11), properties, job_id)
+
+        # Heartbeat must start before handle_job runs and stop after.
+        assert events == [f"start:{job_id}", f"handle:{job_id}", "stop"]
+
+    def test_dispatch_stops_heartbeat_on_exception(self):
+        worker = MagicMock()
+        worker.handle_job.side_effect = RuntimeError("boom")
+        consumer = _consumer(worker)
+        channel = MagicMock()
+        properties = MagicMock()
+        properties.headers = None
+
+        with patch.object(consumer._heartbeat, "stop") as mock_stop:
+            consumer._dispatch_job(channel, _make_method(12), properties, uuid4())
+
+        mock_stop.assert_called_once()

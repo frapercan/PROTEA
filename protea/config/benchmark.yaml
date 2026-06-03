@@ -43,6 +43,22 @@ stages:
 # versions + delta stats.
 eval_set_labels: {}
 
+# Hidden embeddings --------------------------------------------------------
+# embedding_config UUIDs to suppress from the benchmark UI entirely. The
+# rows still exist in the DB (no data is deleted), they are simply omitted
+# from `/benchmark/embeddings` and `/benchmark/matrix` so the matrix shows
+# only the canonical PLMs without empty / duplicate rows. Reversible: drop a
+# UUID from this list to bring its row back.
+#
+# Current entries are the 3 orphan configs classified in ADR D35:
+#   - c85d1afe-... esmc_300m            (superseded by esmc_600m)
+#   - c2868c1a-... ElnaggarLab/ankh-base (duplicate config, no display_name)
+#   - db4db5ed-... Rostlab/prot_t5_xl_uniref50 (full uniref50, vs canonical half)
+hidden_embeddings:
+  - c85d1afe-3f49-4ead-82d9-faaa6efe7a2c
+  - c2868c1a-0966-47a0-9941-2213fe6d22fa
+  - db4db5ed-e34a-47af-a9ab-cc0f230b0a8c
+
 # GO namespace metadata ----------------------------------------------------
 # These are ontological constants, but exposing them here keeps the frontend
 # fully driven by the API response and allows non-standard evaluation splits

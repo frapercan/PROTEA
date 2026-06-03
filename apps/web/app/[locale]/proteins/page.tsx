@@ -4,7 +4,9 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useToast } from "@/components/Toast";
 import { SkeletonTableRow } from "@/components/Skeleton";
-import { useTranslations } from "next-intl";
+import { ProteinsStatsAnalytics } from "@/components/ProteinsStatsAnalytics";
+import { useLocale, useTranslations } from "next-intl";
+import { useUrlParam } from "@/lib/useUrlParam";
 import {
   getProteinStats,
   listProteins,
@@ -16,7 +18,7 @@ import {
 type Tab = "browse" | "stats" | "insert" | "metadata";
 
 const inputClass = "w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
-const labelClass = "block text-sm font-medium text-gray-700 mb-1";
+const labelClass = "block text-sm font-medium text-slate-700 mb-1";
 const PAGE_SIZE = 50;
 
 function ReviewedBadge({ reviewed }: { reviewed?: boolean | null }) {
@@ -24,24 +26,32 @@ function ReviewedBadge({ reviewed }: { reviewed?: boolean | null }) {
   if (reviewed === true)
     return <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 border border-blue-100">{t("sourceSwissProt")}</span>;
   if (reviewed === false)
-    return <span className="rounded-full bg-gray-50 px-2 py-0.5 text-xs font-medium text-gray-500 border border-gray-200">{t("sourceTrembl")}</span>;
-  return <span className="text-gray-300 text-xs">—</span>;
+    return <span className="rounded-full bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-500 border border-slate-200">{t("sourceTrembl")}</span>;
+  return <span className="text-slate-300 text-xs">—</span>;
 }
 
 function StatCard({ label, value, sub }: { label: string; value: number; sub?: string }) {
   return (
     <div className="rounded-lg border bg-white p-4 shadow-sm">
-      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">{label}</p>
-      <p className="mt-1 text-2xl font-bold text-gray-900">{value.toLocaleString()}</p>
-      {sub && <p className="mt-0.5 text-xs text-gray-400">{sub}</p>}
+      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
+      <p className="mt-1 text-2xl font-bold text-slate-900">{value.toLocaleString()}</p>
+      {sub && <p className="mt-0.5 text-xs text-slate-600">{sub}</p>}
     </div>
   );
 }
 
 export default function ProteinsPage() {
   const t = useTranslations("proteins");
+const tToast = useTranslations("toasts");
+  const locale = useLocale();
   const toast = useToast();
-  const [activeTab, setActiveTab] = useState<Tab>("browse");
+  // URL-synced active tab — shareable links land on the right one.
+  const [tabRaw, setTabRaw] = useUrlParam("tab", "browse");
+  const validTabs: Tab[] = ["browse", "stats", "insert", "metadata"];
+  const activeTab: Tab = (validTabs.includes((tabRaw ?? "browse") as Tab)
+    ? (tabRaw ?? "browse")
+    : "browse") as Tab;
+  const setActiveTab = (t: Tab) => setTabRaw(t === "browse" ? null : t);
 
   // Browse state
   const [proteins, setProteins] = useState<ProteinItem[]>([]);
@@ -86,7 +96,7 @@ export default function ProteinsPage() {
       setTotal(res.total);
       setOffset(currentOffset);
     } catch (e: any) {
-      toast(e.message ?? "Failed to load proteins", "error");
+      toast(e.message ?? tToast("loadProteinsFailed"), "error");
     } finally {
       setLoadingBrowse(false);
     }
@@ -97,7 +107,7 @@ export default function ProteinsPage() {
     try {
       setStats(await getProteinStats());
     } catch (e: any) {
-      toast(e.message ?? "Failed to load stats", "error");
+      toast(e.message ?? tToast("loadStatsFailed"), "error");
     } finally {
       setLoadingStats(false);
     }
@@ -129,7 +139,7 @@ export default function ProteinsPage() {
       if (totalLimit) payload.total_limit = parseInt(totalLimit, 10);
       const res = await createJob({ operation: "insert_proteins", queue_name: "protea.jobs", payload });
       setInsertResult(res);
-      toast("Job queued", "success");
+      toast(tToast("jobQueued"), "success");
     } catch (err: any) {
       toast(String(err), "error");
     } finally {
@@ -146,7 +156,7 @@ export default function ProteinsPage() {
       if (metaLimit) payload.total_limit = parseInt(metaLimit, 10);
       const res = await createJob({ operation: "fetch_uniprot_metadata", queue_name: "protea.jobs", payload });
       setMetaResult(res);
-      toast("Job queued", "success");
+      toast(tToast("jobQueued"), "success");
     } catch (err: any) {
       toast(String(err), "error");
     } finally {
@@ -178,7 +188,7 @@ export default function ProteinsPage() {
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               activeTab === tab.key
                 ? "border-blue-600 text-blue-600"
-                : "border-transparent text-gray-500 hover:text-gray-700"
+                : "border-transparent text-slate-500 hover:text-slate-700"
             }`}
           >
             {tab.label}
@@ -199,14 +209,14 @@ export default function ProteinsPage() {
                 placeholder={t("browseTab.searchPlaceholder")}
                 className="rounded-md border px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-full sm:w-64"
               />
-              <button type="submit" className="rounded-md border bg-white px-3 py-1.5 text-sm hover:bg-gray-50">
+              <button type="submit" className="rounded-md border bg-white px-3 py-1.5 text-sm hover:bg-slate-50">
                 {t("browseTab.search")}
               </button>
               {search && (
                 <button
                   type="button"
                   onClick={() => { setSearchInput(""); setSearch(""); loadProteins(0, "", reviewedFilter, canonicalOnly); }}
-                  className="rounded-md border bg-white px-3 py-1.5 text-sm hover:bg-gray-50 text-gray-500"
+                  className="rounded-md border bg-white px-3 py-1.5 text-sm hover:bg-slate-50 text-slate-500"
                 >
                   {t("browseTab.clear")}
                 </button>
@@ -216,6 +226,7 @@ export default function ProteinsPage() {
             <select
               value={reviewedFilter}
               onChange={(e) => handleFilterChange(e.target.value as typeof reviewedFilter, canonicalOnly)}
+              aria-label={t("browseTab.filterReviewedAria")}
               className="rounded-md border bg-white px-3 py-1.5 text-sm focus:outline-none"
             >
               <option value="all">{t("browseTab.allProteins")}</option>
@@ -223,7 +234,7 @@ export default function ProteinsPage() {
               <option value="unreviewed">{t("browseTab.trembl")}</option>
             </select>
 
-            <label className="flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer select-none">
+            <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer select-none">
               <input
                 type="checkbox"
                 checked={canonicalOnly}
@@ -233,35 +244,35 @@ export default function ProteinsPage() {
               {t("browseTab.canonicalOnly")}
             </label>
 
-            <span className="ml-auto text-sm text-gray-400">{t("browseTab.totalProteins", { count: total.toLocaleString() })}</span>
+            <span className="ml-auto text-sm text-slate-600">{t("browseTab.totalProteins", { count: total.toLocaleString() })}</span>
           </div>
 
           {/* Mobile card list */}
           <div className="lg:hidden space-y-2">
             {loadingBrowse && Array.from({ length: 4 }).map((_, i) => (
               <div key={i} className="rounded-lg border bg-white p-4 shadow-sm animate-pulse">
-                <div className="h-4 bg-gray-200 rounded w-1/3 mb-2" />
-                <div className="h-3 bg-gray-100 rounded w-2/3" />
+                <div className="h-4 bg-slate-200 rounded w-1/3 mb-2" />
+                <div className="h-3 bg-slate-100 rounded w-2/3" />
               </div>
             ))}
             {!loadingBrowse && proteins.length === 0 && (
-              <div className="rounded-lg border bg-white px-4 py-12 text-center text-sm text-gray-400 shadow-sm">
+              <div className="rounded-lg border bg-white px-4 py-12 text-center text-sm text-slate-600 shadow-sm">
                 {t("browseTab.noProteinsCta")}
               </div>
             )}
             {!loadingBrowse && proteins.map((p) => (
               <Link
                 key={p.accession}
-                href={`/proteins/${p.accession}`}
+                href={`/${locale}/proteins/${p.accession}`}
                 className="block rounded-lg border bg-white p-4 shadow-sm hover:bg-blue-50 transition-colors"
               >
                 <div className="flex items-center justify-between mb-1">
                   <span className="font-mono text-sm text-blue-600">{p.accession}</span>
                   <ReviewedBadge reviewed={p.reviewed} />
                 </div>
-                <p className="text-sm font-medium text-gray-800 truncate">{p.gene_name ?? "—"}</p>
-                <p className="text-xs text-gray-500 truncate">{p.organism ?? "—"}</p>
-                <div className="mt-1 flex gap-3 text-xs text-gray-400">
+                <p className="text-sm font-medium text-slate-800 truncate">{p.gene_name ?? "—"}</p>
+                <p className="text-xs text-slate-500 truncate">{p.organism ?? "—"}</p>
+                <div className="mt-1 flex gap-3 text-xs text-slate-600">
                   <span>{p.entry_name ?? "—"}</span>
                   {p.length != null && <span>{p.length.toLocaleString()} aa</span>}
                 </div>
@@ -270,8 +281,8 @@ export default function ProteinsPage() {
           </div>
 
           {/* Desktop table */}
-          <div className="hidden lg:block overflow-x-auto rounded-lg border bg-white shadow-sm">
-            <div className="grid grid-cols-[130px_140px_120px_1fr_80px_110px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
+          <div className="hidden lg:block rounded-lg border bg-white shadow-sm">
+            <div className="protea-thead-sticky grid grid-cols-[130px_140px_120px_1fr_80px_110px] gap-2 border-b bg-slate-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
               <div>{t("browseTab.tableHeaders.accession")}</div>
               <div>{t("browseTab.tableHeaders.entryName")}</div>
               <div>{t("browseTab.tableHeaders.gene")}</div>
@@ -280,46 +291,48 @@ export default function ProteinsPage() {
               <div>{t("browseTab.tableHeaders.source")}</div>
             </div>
 
-            {loadingBrowse && Array.from({ length: 8 }).map((_, i) => <SkeletonTableRow key={i} cols={6} />)}
+            <div className="overflow-x-auto protea-scroll-shadow">
+              {loadingBrowse && Array.from({ length: 8 }).map((_, i) => <SkeletonTableRow key={i} cols={6} />)}
 
-            {!loadingBrowse && proteins.length === 0 && (
-              <div className="px-4 py-12 text-center text-sm text-gray-400">
-                {t("browseTab.noProteinsCta")}
-              </div>
-            )}
+              {!loadingBrowse && proteins.length === 0 && (
+                <div className="px-4 py-12 text-center text-sm text-slate-600">
+                  {t("browseTab.noProteinsCta")}
+                </div>
+              )}
 
-            {!loadingBrowse && proteins.map((p) => (
-              <Link
-                key={p.accession}
-                href={`/proteins/${p.accession}`}
-                className="grid grid-cols-[130px_140px_120px_1fr_80px_110px] gap-2 border-b px-4 py-3 text-sm hover:bg-blue-50 transition-colors last:border-0 items-center"
-              >
-                <div className="font-mono text-xs text-blue-600">{p.accession}</div>
-                <div className="text-gray-700 truncate text-xs">{p.entry_name ?? "—"}</div>
-                <div className="font-medium text-gray-800 truncate">{p.gene_name ?? "—"}</div>
-                <div className="text-xs text-gray-500 truncate">{p.organism ?? "—"}</div>
-                <div className="text-xs text-gray-600">{p.length?.toLocaleString() ?? "—"}</div>
-                <div><ReviewedBadge reviewed={p.reviewed} /></div>
-              </Link>
-            ))}
+              {!loadingBrowse && proteins.map((p) => (
+                <Link
+                  key={p.accession}
+                  href={`/${locale}/proteins/${p.accession}`}
+                  className="grid grid-cols-[130px_140px_120px_1fr_80px_110px] gap-2 border-b px-4 py-3 text-sm hover:bg-blue-50 transition-colors last:border-0 items-center"
+                >
+                  <div className="font-mono text-xs text-blue-600">{p.accession}</div>
+                  <div className="text-slate-700 truncate text-xs">{p.entry_name ?? "—"}</div>
+                  <div className="font-medium text-slate-800 truncate">{p.gene_name ?? "—"}</div>
+                  <div className="text-xs text-slate-500 truncate">{p.organism ?? "—"}</div>
+                  <div className="text-xs text-slate-600">{p.length?.toLocaleString() ?? "—"}</div>
+                  <div><ReviewedBadge reviewed={p.reviewed} /></div>
+                </Link>
+              ))}
+            </div>
           </div>
 
           {/* Pagination */}
           {totalPages > 1 && (
-            <div className="mt-4 flex items-center justify-between text-sm text-gray-500">
+            <div className="mt-4 flex items-center justify-between text-sm text-slate-500">
               <span>{t("browseTab.pagination.page", { current: currentPage, total: totalPages })}</span>
               <div className="flex gap-2">
                 <button
                   onClick={() => loadProteins(offset - PAGE_SIZE)}
                   disabled={offset === 0}
-                  className="rounded-md border bg-white px-3 py-1.5 hover:bg-gray-50 disabled:opacity-40"
+                  className="rounded-md border bg-white px-3 py-1.5 hover:bg-slate-50 disabled:opacity-40"
                 >
                   {t("browseTab.pagination.previous")}
                 </button>
                 <button
                   onClick={() => loadProteins(offset + PAGE_SIZE)}
                   disabled={offset + PAGE_SIZE >= total}
-                  className="rounded-md border bg-white px-3 py-1.5 hover:bg-gray-50 disabled:opacity-40"
+                  className="rounded-md border bg-white px-3 py-1.5 hover:bg-slate-50 disabled:opacity-40"
                 >
                   {t("browseTab.pagination.next")}
                 </button>
@@ -333,44 +346,51 @@ export default function ProteinsPage() {
       {activeTab === "stats" && (
         <div>
           <div className="flex justify-end mb-4">
-            <button onClick={loadStats} className="rounded-md border bg-white px-3 py-1.5 text-sm hover:bg-gray-50">
+            <button onClick={loadStats} className="rounded-md border bg-white px-3 py-1.5 text-sm hover:bg-slate-50">
               {t("statsTab.refresh")}
             </button>
           </div>
-          {loadingStats && <p className="text-sm text-gray-400">{t("statsTab.loading")}</p>}
-          {stats && (
-            <div className="space-y-6">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">{t("statsTab.overview")}</p>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  <StatCard label={t("statsTab.totalProteins")} value={stats.total} />
-                  <StatCard label={t("statsTab.canonical")} value={stats.canonical} sub={t("statsTab.isoforms", { count: stats.isoforms.toLocaleString() })} />
-                  <StatCard label={t("statsTab.reviewed")} value={stats.reviewed} sub={t("statsTab.reviewedSub")} />
-                  <StatCard label={t("statsTab.unreviewed")} value={stats.unreviewed} sub={t("statsTab.unreviewedSub")} />
-                </div>
-              </div>
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">{t("statsTab.coverage")}</p>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  <StatCard
-                    label={t("statsTab.withMetadata")}
-                    value={stats.with_metadata}
-                    sub={stats.canonical > 0 ? t("statsTab.metadataSub", { percent: Math.round((stats.with_metadata / stats.canonical) * 100) }) : undefined}
-                  />
-                  <StatCard
-                    label={t("statsTab.withEmbeddings")}
-                    value={stats.with_embeddings}
-                    sub={stats.total > 0 ? t("statsTab.embeddingsSub", { percent: Math.round((stats.with_embeddings / stats.total) * 100) }) : undefined}
-                  />
-                  <StatCard
-                    label={t("statsTab.withGoAnnotations")}
-                    value={stats.with_go_annotations}
-                    sub={stats.total > 0 ? t("statsTab.goAnnotationsSub", { percent: Math.round((stats.with_go_annotations / stats.total) * 100) }) : undefined}
-                  />
-                </div>
-              </div>
+          {loadingStats && !stats && <p className="text-sm text-slate-600">{t("statsTab.loading")}</p>}
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-4">
+            {/* Left column: fast summary cards. The misleading "with-embeddings"
+                and TrEMBL-zero cards are dropped per design feedback; the
+                per-PLM coverage card on the right replaces them with the
+                actually-interesting breakdown. */}
+            <div className="space-y-4">
+              {stats && (
+                <>
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 mb-3">{t("statsTab.overview")}</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <StatCard label={t("statsTab.totalProteins")} value={stats.total} />
+                      <StatCard label={t("statsTab.canonical")} value={stats.canonical} sub={t("statsTab.isoforms", { count: stats.isoforms.toLocaleString() })} />
+                      <StatCard label={t("statsTab.reviewed")} value={stats.reviewed} sub={t("statsTab.reviewedSub")} />
+                      <StatCard
+                        label={t("statsTab.withGoAnnotations")}
+                        value={stats.with_go_annotations}
+                        sub={stats.total > 0 ? t("statsTab.goAnnotationsSub", { percent: Math.round((stats.with_go_annotations / stats.total) * 100) }) : undefined}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 mb-3">{t("statsTab.coverage")}</p>
+                    <div className="grid grid-cols-1 gap-3">
+                      <StatCard
+                        label={t("statsTab.withMetadata")}
+                        value={stats.with_metadata}
+                        sub={stats.canonical > 0 ? t("statsTab.metadataSub", { percent: Math.round((stats.with_metadata / stats.canonical) * 100) }) : undefined}
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
-          )}
+            {/* Right column: lazy-loaded analytical breakdowns. Each card
+                fetches its endpoint on first viewport entry. */}
+            <div className="min-w-0">
+              <ProteinsStatsAnalytics />
+            </div>
+          </div>
         </div>
       )}
 
@@ -379,12 +399,12 @@ export default function ProteinsPage() {
         <div className="max-w-2xl">
           <div className="rounded-lg border bg-white p-6 shadow-sm">
             <h2 className="text-base font-semibold mb-1">{t("insertTab.title")}</h2>
-            <p className="text-sm text-gray-500 mb-4">{t("insertTab.description")}</p>
+            <p className="text-sm text-slate-500 mb-4">{t("insertTab.description")}</p>
             <form onSubmit={handleInsertSubmit} className="space-y-4">
               <div>
                 <label className={labelClass}>{t("insertTab.searchCriteriaLabel")}</label>
                 <input type="text" value={searchCriteria} onChange={(e) => setSearchCriteria(e.target.value)} required className={inputClass} placeholder="organism_id:9606 AND reviewed:true" />
-                <p className="mt-1 text-xs text-gray-400">{t("insertTab.searchCriteriaHelper")}</p>
+                <p className="mt-1 text-xs text-slate-600">{t("insertTab.searchCriteriaHelper")}</p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
@@ -392,7 +412,7 @@ export default function ProteinsPage() {
                   <input type="number" value={pageSize} onChange={(e) => setPageSize(parseInt(e.target.value, 10))} min={1} className={inputClass} />
                 </div>
                 <div>
-                  <label className={labelClass}>{t("insertTab.totalLimitLabel")} <span className="font-normal text-gray-400">{t("insertTab.totalLimitOptional")}</span></label>
+                  <label className={labelClass}>{t("insertTab.totalLimitLabel")} <span className="font-normal text-slate-600">{t("insertTab.totalLimitOptional")}</span></label>
                   <input type="number" value={totalLimit} onChange={(e) => setTotalLimit(e.target.value)} placeholder="all" className={inputClass} />
                 </div>
               </div>
@@ -403,7 +423,7 @@ export default function ProteinsPage() {
               {insertResult && (
                 <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
                   {t("insertTab.jobQueuedPrefix")}
-                  <Link href={`/jobs/${insertResult.id}`} className="font-mono underline hover:text-green-900">{insertResult.id}</Link>
+                  <Link href={`/${locale}/jobs/${insertResult.id}`} className="font-mono underline hover:text-green-900">{insertResult.id}</Link>
                 </div>
               )}
               <div className="flex justify-end">
@@ -421,12 +441,12 @@ export default function ProteinsPage() {
         <div className="max-w-2xl">
           <div className="rounded-lg border bg-white p-6 shadow-sm">
             <h2 className="text-base font-semibold mb-1">{t("metadataTab.title")}</h2>
-            <p className="text-sm text-gray-500 mb-4">{t("metadataTab.description")}</p>
+            <p className="text-sm text-slate-500 mb-4">{t("metadataTab.description")}</p>
             <form onSubmit={handleMetaSubmit} className="space-y-4">
               <div>
                 <label className={labelClass}>{t("metadataTab.searchCriteriaLabel")}</label>
                 <input type="text" value={metaCriteria} onChange={(e) => setMetaCriteria(e.target.value)} required className={inputClass} placeholder="organism_id:9606 AND reviewed:true" />
-                <p className="mt-1 text-xs text-gray-400">{t("metadataTab.searchCriteriaHelper")}</p>
+                <p className="mt-1 text-xs text-slate-600">{t("metadataTab.searchCriteriaHelper")}</p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
@@ -434,14 +454,14 @@ export default function ProteinsPage() {
                   <input type="number" value={metaPageSize} onChange={(e) => setMetaPageSize(parseInt(e.target.value, 10))} min={1} className={inputClass} />
                 </div>
                 <div>
-                  <label className={labelClass}>{t("metadataTab.totalLimitLabel")} <span className="font-normal text-gray-400">{t("metadataTab.totalLimitOptional")}</span></label>
+                  <label className={labelClass}>{t("metadataTab.totalLimitLabel")} <span className="font-normal text-slate-600">{t("metadataTab.totalLimitOptional")}</span></label>
                   <input type="number" value={metaLimit} onChange={(e) => setMetaLimit(e.target.value)} placeholder="all" className={inputClass} />
                 </div>
               </div>
               {metaResult && (
                 <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
                   {t("insertTab.jobQueuedPrefix")}
-                  <Link href={`/jobs/${metaResult.id}`} className="font-mono underline hover:text-green-900">{metaResult.id}</Link>
+                  <Link href={`/${locale}/jobs/${metaResult.id}`} className="font-mono underline hover:text-green-900">{metaResult.id}</Link>
                 </div>
               )}
               <div className="flex justify-end">

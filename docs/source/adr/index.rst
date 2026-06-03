@@ -12,50 +12,68 @@ ADRs come in two layers:
   PROTEA. They explain trade-offs of concrete code paths (KNN
   algorithm choice, queue topology, deduplication strategy, retries,
   etc.).
-- **Strategic decisions** (``D1``-``D30``): plan-level decisions
-  taken in the master plan v3 (2026-05-05). They drive the structure
+- **Strategic decisions** (``D1``-``D31``): plan-level decisions
+  taken in the master plan revision 3 (2026-05-05). They drive the structure
   of the project, the deployment story, and the thesis writing
   cadence.
 
 Implementation decisions
 ------------------------
 
+All implementation ADRs (001-008) follow the MADR template (Status / Context /
+Decision / Consequences sections). They are numbered in discovery order, not
+superseded by the D-series, and remain the authoritative record for the
+runtime, data model, and operational choices described.
+
 .. list-table::
    :header-rows: 1
-   :widths: 8 50 42
+   :widths: 6 10 46 38
 
    * - ADR
+     - Status
      - Decision
      - Problem it solves
    * - 001
+     - Accepted
      - :doc:`KNN on CPU, not pgvector or GPU <001-knn-without-pgvector>`
      - pgvector does not scale to 500K+ vectors; GPU must be reserved for inference
    * - 002
+     - Accepted
      - :doc:`Two-session worker pattern <002-two-session-worker-pattern>`
      - A mid-operation crash left the job invisible to monitoring
    * - 003
+     - Accepted
      - :doc:`Two types of consumer <003-queue-consumer-vs-operation-consumer>`
      - Thousands of batch jobs per pipeline flooded the jobs table
    * - 004
+     - Accepted
      - :doc:`Dead letter queue and retries <004-dead-letter-queue-and-retry-strategy>`
      - Failed messages were lost; retries without backoff amplified failures
    * - 005
+     - Accepted
      - :doc:`Reusable RabbitMQ connections <005-thread-local-rabbitmq-connections>`
      - A coordinator dispatching 500 batches opened 500 TCP connections
    * - 006
+     - Accepted
      - :doc:`Sequence deduplication by MD5 <006-sequence-deduplication-by-md5>`
      - 30K duplicate sequences in Swiss-Prot waste hours of GPU time
    * - 007
+     - Accepted
      - :doc:`Contract-first integration with protea-reranker-lab <007-contract-first-lab-integration>`
      - Re-ranker iteration cadence would contaminate the production dependency tree
    * - 008
+     - Accepted
      - :doc:`PK coverage fix in cafaeval fork <008-cafaeval-pk-coverage-fix>`
      - Upstream cafaeval reports coverage > 1 in PK; precision is under-divided
+   * - 009
+     - Accepted
+     - :doc:`Pre-dispatch cancellation nack in QueueConsumer <009-cancellation-nack-before-dispatch>`
+     - Cancelled messages held a prefetch slot and could deadlock the predictions queue
 
 Strategic decisions
 -------------------
 
-Decisions taken in the master plan v3 (2026-05-05). Statuses:
+Decisions taken in the master plan revision 3 (2026-05-05). Statuses:
 *Accepted*, *Pending* (gate opens at the indicated phase), *Deferred*
 (scheduled later in the timeline) or *Obsolete* (superseded by a
 later revision).
@@ -105,7 +123,7 @@ later revision).
      - Obsolete
      - superseded by D1
    * - D10
-     - :doc:`schema_sha v2 migration <D10-schema-sha-v2>`
+     - :doc:`schema_sha_v2 migration <D10-schema-sha-parallel-migration>`
      - Pending
      - T1.6 (requires_human)
    * - D11
@@ -188,6 +206,30 @@ later revision).
      - :doc:`Insights appendix <D30-insights-appendix>`
      - Accepted
      - F7
+   * - D31
+     - :doc:`T2B.5 Method Object reframe (sub-cluster granularity) <D31-t2b5-method-object-reframe>`
+     - Accepted
+     - F2C / §24
+   * - D34
+     - :doc:`Selective rerank resurrection, recompute not archaeology <D34-selective-rerank-resurrection>`
+     - Accepted
+     - F-EXP-RESET
+   * - D35
+     - :doc:`Canonical 8-PLM embedding config IDs <D35-canonical-8plm-embedding-configs>`
+     - Accepted
+     - F-EXP-RESET
+   * - D36
+     - :doc:`PLM axis explicit in dataset naming <D36-plm-axis-explicit-in-dataset-naming>`
+     - Accepted
+     - F-EXP-RESET
+   * - D37
+     - :doc:`Single auth system, manual approvals, multi-instance (FEAT-AUTH) <D37-feat-auth-users-roles-multi-instance>`
+     - Accepted
+     - F-AUTH (complete, FARM-AUTH.1-11)
+   * - D38
+     - :doc:`Defer neural-head champion; pivot to curated dataset packaging (F-DATA-PACK) <D38-neural-head-deferred-dataset-pack-pivot>`
+     - Accepted
+     - F-DATA-PACK
 
 .. toctree::
    :maxdepth: 1
@@ -201,6 +243,7 @@ later revision).
    006-sequence-deduplication-by-md5
    007-contract-first-lab-integration
    008-cafaeval-pk-coverage-fix
+   009-cancellation-nack-before-dispatch
    D01-project-structure
    D02-export-research-dataset-location
    D03-goprediction-features-jsonb
@@ -210,7 +253,7 @@ later revision).
    D07-observability-stack
    D08-ui-components
    D09-obsolete-lab-runtime-dep
-   D10-schema-sha-v2
+   D10-schema-sha-parallel-migration
    D11-job-narrative-model
    D12-fexp-qa-reproduction
    D13-early-ui-track
@@ -231,3 +274,10 @@ later revision).
    D28-secrets-management
    D29-release-pipeline
    D30-insights-appendix
+   D31-t2b5-method-object-reframe
+   D34-selective-rerank-resurrection
+   D35-canonical-8plm-embedding-configs
+   D36-plm-axis-explicit-in-dataset-naming
+   D37-feat-auth-users-roles-multi-instance
+   D38-neural-head-deferred-dataset-pack-pivot
+   D39-destructive-op-guards

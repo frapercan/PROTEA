@@ -17,6 +17,7 @@ import pytest
 from pydantic import ValidationError
 
 from protea.core.evaluation import EvaluationData
+from protea.core.operations._run_cafa_artifacts import WritePredictionsContext
 from protea.core.operations.run_cafa_evaluation import (
     _NS_LABELS,
     _NS_SHORT,
@@ -420,7 +421,7 @@ class TestDownloadObo:
     def setup_method(self):
         self.op = RunCafaEvaluationOperation()
 
-    @patch("protea.core.operations.run_cafa_evaluation.requests.get")
+    @patch("protea.core.operations._run_cafa_artifacts.requests.get")
     def test_download_plain(self, mock_get):
         mock_resp = MagicMock()
         mock_resp.text = "format-version: 1.2\n"
@@ -436,7 +437,7 @@ class TestDownloadObo:
         finally:
             os.unlink(path)
 
-    @patch("protea.core.operations.run_cafa_evaluation.requests.get")
+    @patch("protea.core.operations._run_cafa_artifacts.requests.get")
     def test_download_gzip(self, mock_get):
         original = b"format-version: 1.2\n"
         compressed = gzip.compress(original)
@@ -507,7 +508,7 @@ class TestDownloadTsv:
             os.unlink(src_path)
             os.unlink(dst_path)
 
-    @patch("protea.core.operations.run_cafa_evaluation.requests.get")
+    @patch("protea.core.operations._run_cafa_artifacts.requests.get")
     def test_http_download(self, mock_get):
         mock_resp = MagicMock()
         mock_resp.text = "GO:0004\t0.9\n"
@@ -523,7 +524,7 @@ class TestDownloadTsv:
         finally:
             os.unlink(dst_path)
 
-    @patch("protea.core.operations.run_cafa_evaluation.requests.get")
+    @patch("protea.core.operations._run_cafa_artifacts.requests.get")
     def test_http_gzip_download(self, mock_get):
         original = b"GO:0005\t0.6\n"
         mock_resp = MagicMock()
@@ -573,7 +574,15 @@ class TestWritePredictions:
         with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
             path = f.name
         try:
-            self.op._write_predictions(session, uuid.uuid4(), {"P1"}, None, path, None)
+            self.op._write_predictions(
+                session,
+                WritePredictionsContext(
+                    pred_set_id=uuid.uuid4(),
+                    delta_proteins={"P1"},
+                    max_distance=None,
+                    path=path,
+                ),
+            )
             with open(path) as f:
                 line = f.read().strip()
             # score = max(0, 1 - 0.4/2) = 0.8
@@ -604,7 +613,15 @@ class TestWritePredictions:
         with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
             path = f.name
         try:
-            self.op._write_predictions(session, uuid.uuid4(), {"P1"}, None, path, None)
+            self.op._write_predictions(
+                session,
+                WritePredictionsContext(
+                    pred_set_id=uuid.uuid4(),
+                    delta_proteins={"P1"},
+                    max_distance=None,
+                    path=path,
+                ),
+            )
             with open(path) as f:
                 lines = f.read().strip().split("\n")
             # Only the first (closest) prediction should be written
@@ -612,7 +629,7 @@ class TestWritePredictions:
         finally:
             os.unlink(path)
 
-    @patch("protea.core.operations.run_cafa_evaluation.compute_score")
+    @patch("protea.core.operations._run_cafa_artifacts.compute_score")
     def test_write_predictions_with_scoring_config(self, mock_compute_score):
         mock_compute_score.return_value = 0.75
 
@@ -640,7 +657,16 @@ class TestWritePredictions:
         with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
             path = f.name
         try:
-            self.op._write_predictions(session, uuid.uuid4(), {"P1"}, None, path, scoring_config)
+            self.op._write_predictions(
+                session,
+                WritePredictionsContext(
+                    pred_set_id=uuid.uuid4(),
+                    delta_proteins={"P1"},
+                    max_distance=None,
+                    path=path,
+                ),
+                scoring_config=scoring_config,
+            )
             with open(path) as f:
                 line = f.read().strip()
             assert line == "P1\tGO:0000001\t0.7500"
@@ -667,7 +693,15 @@ class TestWritePredictions:
         with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
             path = f.name
         try:
-            self.op._write_predictions(session, uuid.uuid4(), {"P1"}, None, path, None)
+            self.op._write_predictions(
+                session,
+                WritePredictionsContext(
+                    pred_set_id=uuid.uuid4(),
+                    delta_proteins={"P1"},
+                    max_distance=None,
+                    path=path,
+                ),
+            )
             with open(path) as f:
                 line = f.read().strip()
             # score = max(0, 1 - 0/2) = 1.0
@@ -695,7 +729,15 @@ class TestWritePredictions:
         with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
             path = f.name
         try:
-            self.op._write_predictions(session, uuid.uuid4(), {"P1"}, 0.5, path, None)
+            self.op._write_predictions(
+                session,
+                WritePredictionsContext(
+                    pred_set_id=uuid.uuid4(),
+                    delta_proteins={"P1"},
+                    max_distance=0.5,
+                    path=path,
+                ),
+            )
             with open(path) as f:
                 line = f.read().strip()
             assert line == "P1\tGO:0000001\t0.8500"
@@ -724,7 +766,15 @@ class TestWritePredictions:
         with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
             path = f.name
         try:
-            self.op._write_predictions(session, uuid.uuid4(), {"P1"}, None, path, None)
+            self.op._write_predictions(
+                session,
+                WritePredictionsContext(
+                    pred_set_id=uuid.uuid4(),
+                    delta_proteins={"P1"},
+                    max_distance=None,
+                    path=path,
+                ),
+            )
             with open(path) as f:
                 line = f.read().strip()
             # score = max(0, 1 - 0/2) = 1.0 (None → 0.0)
@@ -858,7 +908,7 @@ class TestExecuteHappyPath:
 
         dfs_best = _dfs_best_fixture()
 
-        with patch.object(self.op, "_download_obo"):
+        with patch("protea.core.operations._run_cafa_artifacts.download_obo"):
             with patch(
                 "cafaeval.evaluation.cafa_eval",
                 return_value=(MagicMock(), dfs_best),
@@ -896,7 +946,7 @@ class TestExecuteHappyPath:
 
         dfs_best = _dfs_best_fixture()
 
-        with patch.object(self.op, "_download_obo"):
+        with patch("protea.core.operations._run_cafa_artifacts.download_obo"):
             with patch(
                 "cafaeval.evaluation.cafa_eval",
                 return_value=(MagicMock(), dfs_best),
@@ -937,7 +987,7 @@ class TestExecuteHappyPath:
         query.order_by.return_value = query
         query.yield_per.return_value = []
 
-        with patch.object(self.op, "_download_obo"):
+        with patch("protea.core.operations._run_cafa_artifacts.download_obo"):
             with patch(
                 "cafaeval.evaluation.cafa_eval",
                 side_effect=RuntimeError("cafa_eval exploded"),
@@ -976,7 +1026,7 @@ class TestExecuteHappyPath:
         query.order_by.return_value = query
         query.yield_per.return_value = []
 
-        with patch.object(self.op, "_download_obo"):
+        with patch("protea.core.operations._run_cafa_artifacts.download_obo"):
             with patch(
                 "cafaeval.evaluation.cafa_eval",
                 return_value=(MagicMock(), _dfs_best_fixture()),
@@ -1009,8 +1059,8 @@ class TestExecuteHappyPath:
         query.yield_per.return_value = []
 
         with (
-            patch.object(self.op, "_download_obo"),
-            patch.object(self.op, "_download_tsv") as mock_dl_tsv,
+            patch("protea.core.operations._run_cafa_artifacts.download_obo"),
+            patch("protea.core.operations._run_cafa_artifacts.download_tsv") as mock_dl_tsv,
             patch(
                 "cafaeval.evaluation.cafa_eval",
                 return_value=(MagicMock(), _dfs_best_fixture()),
@@ -1048,8 +1098,8 @@ class TestExecuteHappyPath:
         query.yield_per.return_value = []
 
         with (
-            patch.object(self.op, "_download_obo"),
-            patch.object(self.op, "_download_tsv") as mock_dl_tsv,
+            patch("protea.core.operations._run_cafa_artifacts.download_obo"),
+            patch("protea.core.operations._run_cafa_artifacts.download_tsv") as mock_dl_tsv,
             patch(
                 "cafaeval.evaluation.cafa_eval",
                 return_value=(MagicMock(), _dfs_best_fixture()),
@@ -1093,7 +1143,7 @@ class TestExecuteHappyPath:
         call_order = []
         session.commit.side_effect = lambda: call_order.append("commit")
 
-        with patch.object(self.op, "_download_obo"):
+        with patch("protea.core.operations._run_cafa_artifacts.download_obo"):
             with patch(
                 "cafaeval.evaluation.cafa_eval",
                 side_effect=lambda *a, **kw: (
@@ -1135,7 +1185,7 @@ class TestExecuteHappyPath:
         dfs_best = _dfs_best_fixture()
 
         with (
-            patch.object(self.op, "_download_obo"),
+            patch("protea.core.operations._run_cafa_artifacts.download_obo"),
             patch(
                 "cafaeval.evaluation.cafa_eval",
                 return_value=(df_mock, dfs_best),
@@ -1180,7 +1230,7 @@ class TestExecuteHappyPath:
         query.yield_per.return_value = []
 
         with (
-            patch.object(self.op, "_download_obo"),
+            patch("protea.core.operations._run_cafa_artifacts.download_obo"),
             patch(
                 "cafaeval.evaluation.cafa_eval",
                 return_value=(MagicMock(), _dfs_best_fixture()),
@@ -1219,3 +1269,38 @@ class TestConstants:
 
     def test_ns_short_set(self):
         assert _NS_SHORT == {"BPO", "MFO", "CCO"}
+
+
+# ---------------------------------------------------------------------------
+# LOC regression guard (T2B.5 closure)
+# ---------------------------------------------------------------------------
+
+
+class TestSmellBudgetGuard:
+    """Ratchet tests: assert no method in RunCafaEvaluationOperation exceeds
+    the master-plan v3.2 §3 ceiling of 60 LOC. If a future edit pushes a
+    method over the limit, this test fails before check_smells.py runs in CI,
+    giving the author an early, targeted signal."""
+
+    def test_all_methods_under_60_loc(self):
+        import ast
+        from pathlib import Path
+
+        src_path = (
+            Path(__file__).resolve().parents[1]
+            / "protea"
+            / "core"
+            / "operations"
+            / "run_cafa_evaluation.py"
+        )
+        tree = ast.parse(src_path.read_text())
+        offenders: list[tuple[str, int]] = []
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                loc = (node.end_lineno or node.lineno) - node.lineno + 1
+                if loc > 60:
+                    offenders.append((node.name, loc))
+        assert not offenders, (
+            f"Methods exceed 60-LOC ceiling (T2B.5): {offenders}. "
+            "Extract the body or apply the Method Object pattern."
+        )

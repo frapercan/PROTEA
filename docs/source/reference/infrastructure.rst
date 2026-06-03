@@ -10,6 +10,17 @@ layer. It is the only package that imports SQLAlchemy, psycopg2, or aio-pika
 directly. All other layers interact with the database through the session
 factory and with the queue through the publisher interface.
 
+.. rubric:: Database engine
+
+``protea.infrastructure.database.engine`` creates the SQLAlchemy engine
+from the configured database URL. The engine is constructed once at
+application startup and shared across all session factories.
+
+.. automodule:: protea.infrastructure.database.engine
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Settings
 --------
 
@@ -45,6 +56,30 @@ state.
    :undoc-members:
    :show-inheritance:
 
+.. rubric:: Telemetry
+
+``protea.infrastructure.telemetry`` configures OpenTelemetry tracing and
+Prometheus metrics collection. It instruments the FastAPI application,
+SQLAlchemy engine, and aio-pika AMQP client, emitting spans and counters
+for every request, query, and queue publish.
+
+.. automodule:: protea.infrastructure.telemetry
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. rubric:: Benchmark configuration
+
+``protea.infrastructure.benchmark_config`` loads the
+``protea/config/benchmark.yaml`` file that drives the ``/benchmark``
+router. It maps scoring-config display names, GO categories, and the
+baseline tag used in the Fmax comparison grid.
+
+.. automodule:: protea.infrastructure.benchmark_config
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 ORM models
 ----------
 
@@ -52,7 +87,17 @@ All models use SQLAlchemy 2.x declarative style with ``Mapped[]`` type
 annotations. The schema is managed by Alembic; migrations are generated via
 ``alembic revision --autogenerate`` and stored under ``alembic/versions/``.
 
-**Job and JobEvent**
+The ORM declarative base is defined in ``protea.infrastructure.orm.base``.
+All models inherit from this base, which applies the default naming
+convention (snake-case table names, consistent constraint prefixes).
+
+.. automodule:: protea.infrastructure.orm.base
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :exclude-members: metadata
+
+**Job, JobEvent, and JobComment**
 
 ``Job`` is the central entity of the job queue. It implements a five-state
 machine (``QUEUED → RUNNING → SUCCEEDED | FAILED``, or ``QUEUED →
@@ -60,11 +105,21 @@ CANCELLED``). The ``parent_job_id`` foreign key links batch child jobs to
 their coordinator parent. ``payload`` and ``meta`` are PostgreSQL JSONB
 columns, allowing arbitrary structured data without schema migrations for
 new operation types. ``progress_current`` and ``progress_total`` are updated
-atomically by write workers to drive the frontend progress bar.
+atomically by write workers to drive the frontend progress bar. The
+narrative columns ``description`` / ``findings`` (Text, nullable) and
+``tags`` (``Text[]``, default empty) carry operator-supplied context
+and never affect dispatch (T3.9 / D11).
 
 ``JobEvent`` is an append-only audit log: rows are written by the ``emit``
 callback during execution and are never updated or deleted. The frontend
 renders them as a chronological event timeline.
+
+``JobComment`` is the human-authored note thread attached to a ``Job``
+(T3.10 / D11). One row per comment with ``author`` (Text, nullable),
+``body`` (Text, required), and ``created_at`` (Timestamptz). Foreign
+key to ``job(id)`` cascades on delete. Written via
+``POST /jobs/{job_id}/comments`` and read chronologically via
+``GET /jobs/{job_id}/comments``.
 
 .. automodule:: protea.infrastructure.orm.models.job
    :members:
@@ -124,6 +179,23 @@ these edges to return ancestor subgraphs for a given set of GO term IDs.
    :undoc-members:
    :show-inheritance:
 
+**InterPro Annotations**
+
+``InterproAnnotation`` stores the domain signature results returned by
+the EBI InterProScan API for each protein. ``InterproGoMapping`` stores
+the static mapping from InterPro domain entries to their associated GO
+terms, as distributed by InterPro's ``interpro2go`` file.
+
+.. automodule:: protea.infrastructure.orm.models.annotation.interpro_annotation
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.infrastructure.orm.models.annotation.interpro_go_mapping
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 **Annotation Sets**
 
 ``AnnotationSet`` groups a batch of protein GO annotations by source
@@ -148,9 +220,13 @@ annotation date.
 
 ``EvaluationSet`` stores the CAFA-style temporal holdout delta between two
 annotation sets (old → new). Contains summary statistics (NK/LK/PK protein and
-annotation counts) in a JSONB ``stats`` column. ``EvaluationResult`` stores the
-output of running ``cafaeval`` against a prediction set: per-namespace Fmax,
-precision, recall, τ, and coverage for NK, LK, and PK settings.
+annotation counts) in a JSONB ``stats`` column. A DB-level
+``UNIQUE(old_annotation_set_id, new_annotation_set_id)`` constraint (alembic
+revision ``b8e3f1a7c2d9``) enforces that each (old, new) pair can have at most
+one ``EvaluationSet``, making ``generate_evaluation_set`` idempotent at the
+schema layer. ``EvaluationResult`` stores the output of running ``cafaeval``
+against a prediction set: per-namespace Fmax, precision, recall, τ, and
+coverage for NK, LK, and PK settings.
 
 .. automodule:: protea.infrastructure.orm.models.annotation.evaluation_set
    :members:
@@ -182,6 +258,19 @@ neighbour queries are performed in Python via ``protea.core.knn_search``.
    :show-inheritance:
 
 .. automodule:: protea.infrastructure.orm.models.embedding.sequence_embedding
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+**GO Prediction Features**
+
+``GOPredictionFeatures`` stores the per-prediction feature vector used
+by the re-ranker as a separate table, normalised away from
+``GOPrediction`` to keep the hot predictions table slim. Each row
+carries the full 56-column feature set produced by the feature-enrichment
+pipeline.
+
+.. automodule:: protea.infrastructure.orm.models.embedding.go_prediction_features
    :members:
    :undoc-members:
    :show-inheritance:
@@ -240,6 +329,44 @@ to any prediction set to produce a composite score per prediction row.
    :undoc-members:
    :show-inheritance:
 
+**Datasets**
+
+``Dataset`` is the durable handle for a frozen re-ranker training dataset
+published to the artifact store. One row per ``export_research_dataset``
+run that completes successfully; ``protea-reranker-lab``'s
+``pull_dataset.py`` resolves either a UUID or a human ``name`` against
+this table to fetch the exact ``train.parquet`` / ``eval.parquet`` /
+``manifest.json`` triple that produced a given booster.
+
+Storage is backend-agnostic: ``train_uri`` / ``eval_uri`` /
+``manifest_uri`` are opaque URIs (``file://…`` for the local backend,
+``s3://bucket/key`` for MinIO) resolved through the
+:class:`ArtifactStore` interface; callers never need to know which
+backend is active. Two content fingerprints provide drift detection:
+``schema_sha`` (16-char) records the feature-set version (must match
+the booster's ``feature_schema_sha`` at inference time) and
+``manifest_sha`` (64-char) is the sha256 of the serialized manifest
+bytes. Provenance lives in ``producer_version`` / ``producer_git_sha``
+so any registered booster can be traced back to the PROTEA HEAD that
+emitted its dataset.
+
+.. automodule:: protea.infrastructure.orm.models.embedding.dataset
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+**API Keys**
+
+``APIKey`` stores hashed API keys together with an optional ``name``
+label and ``last_used_at`` timestamp. The raw key is never stored; only
+the SHA-256 hex digest is persisted. The ``is_active`` flag allows
+revocation without deletion.
+
+.. automodule:: protea.infrastructure.orm.models.api_key
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 **Support Entries**
 
 ``SupportEntry`` stores community feedback: a thumbs-up with an optional
@@ -259,6 +386,44 @@ already exists in the database, the existing ``Sequence`` row is reused,
 avoiding redundant embedding computation.
 
 .. automodule:: protea.infrastructure.orm.models.query.query_set
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+**Visitor Events**
+
+``VisitorEvent`` is the append-only log used by the Grafana
+"unique visitors" dashboard. One row is written per HTTP GET to a
+non-asset path. The schema deliberately omits IP addresses: each row
+stores only ``visitor_hash``, the first 16 hex chars of
+``sha256(daily_salt || client_ip)`` where ``daily_salt`` is a 32-byte
+random value held in process memory and rotated every calendar day.
+Once the day rolls over the salt is gone, so cross-day correlation of a
+visitor becomes cryptographically infeasible. This is the same
+no-PII model used by Plausible and Fathom.
+
+.. automodule:: protea.infrastructure.orm.models.visitor_event
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+**Experiment Runs**
+
+``ExperimentRun`` is the per-research-run narrative + provenance
+anchor introduced in T3.8 (Fase 4). A single row aggregates multiple
+``Job`` / ``EvaluationResult`` / ``RerankerModel`` rows under one
+human ``name`` (unique). The narrative trio
+(``description`` / ``hypothesis`` / ``findings``) mirrors ``Job``'s
+T3.9 D11 columns, and the JSONB ``config`` + ``provenance`` bags
+are designed to receive snapshots from
+:func:`protea.core.provenance.capture_provenance`. The
+``ExperimentRunStatus`` enum is ``planned`` →  ``running`` → ``done``
+or ``abandoned``; ``planned`` (rather than queued) reflects the
+draft-first lifecycle of a research run, and ``abandoned`` (rather
+than failed) covers stops without a hard error. Linkage to sibling
+rows lands in T4.7-T4.9.
+
+.. automodule:: protea.infrastructure.orm.models.experiment_run
    :members:
    :undoc-members:
    :show-inheritance:
@@ -287,12 +452,12 @@ consumed by ``run_cafa_evaluation``.
 
 ``ArtifactStore`` is a ``typing.Protocol`` with four methods:
 
-- ``put(key: str, src: Path | bytes) -> str`` — store a blob under
+- ``put(key: str, src: Path | bytes) -> str``: store a blob under
   ``key`` and return its URI.
-- ``get(key: str) -> bytes`` — fetch raw bytes stored at ``key``.
-- ``url(key: str) -> str`` — return the backend-specific URI for
+- ``get(key: str) -> bytes``: fetch raw bytes stored at ``key``.
+- ``url(key: str) -> str``: return the backend-specific URI for
   ``key`` without performing I/O.
-- ``exists(key: str) -> bool`` — check whether ``key`` is present.
+- ``exists(key: str) -> bool``: check whether ``key`` is present.
 
 URIs are always persisted verbatim in the database so consumers can
 resolve them without knowing the concrete backend:
@@ -301,7 +466,7 @@ resolve them without knowing the concrete backend:
 - ``MinioArtifactStore`` emits ``s3://<bucket>/<key>`` URIs.
 
 The ``MinioArtifactStore`` client is imported lazily so PROTEA can be
-installed without the ``minio`` package — the constructor raises a
+installed without the ``minio`` package; the constructor raises a
 clear ``ImportError`` pointing at the ``[storage]`` extra when the
 dependency is missing.
 
@@ -344,7 +509,11 @@ The queue layer provides two classes: ``QueueConsumer`` and
 ``QueueConsumer`` reads a job UUID from a RabbitMQ queue and delegates to
 ``BaseWorker.handle_job()``. It is used for queues where every message
 corresponds to a tracked ``Job`` row: ``protea.ping``, ``protea.jobs``, and
-``protea.embeddings``.
+``protea.embeddings``. Before dispatching, ``QueueConsumer`` checks whether the
+``Job`` row is already in ``CANCELLED`` state and, if so, nacks the delivery
+with ``requeue=False``. This prevents pointless worker execution on stale
+pre-queued messages and avoids a prefetch=1 deadlock on queues full of orphaned
+cancellations (T-INFRA.NACK, PR #373).
 
 ``OperationConsumer`` reads a raw serialised operation payload from the
 queue and executes it directly, without creating a ``Job`` row. It is used
@@ -370,9 +539,9 @@ guaranteeing that workers always find the DB row before they try to claim it.
 
 .. seealso::
 
-   - :doc:`/architecture/data_model` — the conceptual model behind every
+   - :doc:`/architecture/data_model`: the conceptual model behind every
      ORM class above.
-   - :doc:`workers` — how ``BaseWorker`` and the consumer classes use the
+   - :doc:`workers`: how ``BaseWorker`` and the consumer classes use the
      publisher and session helpers documented here.
-   - :doc:`/adr/005-thread-local-rabbitmq-connections` — why the publisher
+   - :doc:`/adr/005-thread-local-rabbitmq-connections`: why the publisher
      reuses one connection per thread.

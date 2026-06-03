@@ -1,0 +1,78 @@
+{{/*
+Worker Deployments. Each entry in .Values.workers maps to a worker-* compose
+service running `python scripts/worker.py --queue <queue>`. The
+embeddingsBatch worker may run with GPU resources when
+.Values.workers.embeddingsBatch.gpu.enabled is true.
+*/}}
+{{- range $key, $worker := .Values.workers }}
+{{- if $worker.enabled }}
+{{- $component := printf "worker-%s" ($key | kebabcase) -}}
+{{- $name := include "protea.componentName" (dict "ctx" $ "component" $component) -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "protea.componentLabels" (dict "ctx" $ "component" $component) | nindent 4 }}
+spec:
+  replicas: {{ $worker.replicaCount | default 1 }}
+  selector:
+    matchLabels:
+      {{- include "protea.selectorLabels" (dict "ctx" $ "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "protea.componentLabels" (dict "ctx" $ "component" $component) | nindent 8 }}
+      {{- with $.Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- include "protea.imagePullSecrets" $ | nindent 6 }}
+      {{- if $worker.runtimeClassName }}
+      runtimeClassName: {{ $worker.runtimeClassName | quote }}
+      {{- end }}
+      {{- with $worker.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- else }}
+      {{- with $.Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- end }}
+      {{- with $worker.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- else }}
+      {{- with $.Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- end }}
+      {{- with $.Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: worker
+          image: {{ include "protea.image" $ | quote }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          command:
+            - python
+            - scripts/worker.py
+            - --queue
+            - {{ $worker.queue | quote }}
+          env:
+            {{- include "protea.commonEnv" $ | nindent 12 }}
+          resources:
+            {{- $resources := $worker.resources | default dict -}}
+            {{- if and $worker.gpu $worker.gpu.enabled }}
+            {{- $limits := default dict $resources.limits -}}
+            {{- $_ := set $limits "nvidia.com/gpu" ($worker.gpu.count | default 1) -}}
+            {{- $_ := set $resources "limits" $limits -}}
+            {{- end }}
+            {{- toYaml $resources | nindent 12 }}
+{{- end }}
+{{- end }}

@@ -7,28 +7,74 @@ Requirements and design goals
 The design of PROTEA is governed by five requirements derived from the
 limitations of its predecessors (PIS and FANTASIA):
 
-**R1 — Reproducibility**
+**R1. Reproducibility.**
    A prediction produced today must be exactly reproducible in the future.
    This requires recording the ontology version, reference annotation set, and
    embedding model configuration used for every prediction run.
 
-**R2 — Scalability**
+**R2. Scalability.**
    The system must handle reference sets of hundreds of thousands of proteins
    and query sets of thousands without holding all data in memory simultaneously.
 
-**R3 — Separation of concerns**
+**R3. Separation of concerns.**
    Domain logic (what to compute), execution flow (how jobs are dispatched and
    tracked), and infrastructure (database, message queue) must be independently
    replaceable.
 
-**R4 — Observability**
+**R4. Observability.**
    Every job must produce a structured audit trail so that failures can be
    diagnosed without replaying the computation.
 
-**R5 — Accessibility**
+**R5. Accessibility.**
    Researchers without machine-learning infrastructure expertise must be able
    to submit sequences and retrieve predictions through a web interface or a
    REST API.
+
+Four-layer architecture
+-----------------------
+
+PROTEA is structured in four horizontal layers with strict downward dependency:
+
+.. code-block:: text
+
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │  PRESENTATION LAYER                                                      │
+   │  Next.js SPA (port 3000)   ·   REST clients   ·   LAFA containers       │
+   │  (lafa_knn_v1, lafa_knn_8plm, lafa_v18 — each wraps protea-predict)     │
+   └──────────────────────────────────────┬──────────────────────────────────┘
+                                          │  HTTP (port 8000)
+   ┌──────────────────────────────────────▼──────────────────────────────────┐
+   │  API LAYER                                                               │
+   │  FastAPI   /v1/jobs   /v1/datasets   /v1/reranker-models     │
+   │  /v1/scoring   /v1/auth   /v1/stack   + 11 more routers      │
+   │  Auth gate: email+password cookie · ApiKey header · Bearer JWT (ADR D37) │
+   │  Roles: guest < researcher < operator < admin (require_role dependency)  │
+   │  Rate limiting: slowapi per-principal (FARM-AUTH.7)                      │
+   └──────────────────────────────────────┬──────────────────────────────────┘
+                                          │  publishes job UUID to queue
+   ┌──────────────────────────────────────▼──────────────────────────────────┐
+   │  WORKER LAYER                                                            │
+   │  RabbitMQ queues                     Worker processes (one+ per queue)   │
+   │  ┌──────────────────────────┐        BaseWorker (QueueConsumer) or       │
+   │  │ protea.ping              │        OperationConsumer                   │
+   │  │ protea.jobs              │                                            │
+   │  │ protea.training          │ coord  predict_go_terms_batch delegates to │
+   │  │ protea.embeddings        │ coord  protea_method.pipeline.predict()    │
+   │  │ protea.embeddings.batch  │ eph.   (pure inference library, F2C.5b)    │
+   │  │ protea.embeddings.write  │ eph.                                       │
+   │  │ protea.predictions       │ coord  OperationRegistry (live list in     │
+   │  │ protea.predictions.batch │ eph.   protea.core.operation_catalog)      │
+   │  │ protea.predictions.write │ eph.                                       │
+   │  │ protea.evaluations       │                                            │
+   │  └──────────────────────────┘                                            │
+   └──────────────────────────────────────┬──────────────────────────────────┘
+                                          │  SQLAlchemy 2.x ORM
+   ┌──────────────────────────────────────▼──────────────────────────────────┐
+   │  DATA LAYER                                                              │
+   │  PostgreSQL 16 + pgvector (embeddings storage only; KNN on CPU)          │
+   │  ArtifactStore: local FS (file://) or MinIO (s3://) for blobs            │
+   │  (train.parquet, eval.parquet, manifest.json, booster model.txt)         │
+   └─────────────────────────────────────────────────────────────────────────┘
 
 Runtime stack
 -------------
@@ -49,15 +95,21 @@ PROTEA runs as a set of cooperative processes managed by ``scripts/manage.sh``:
    │                         ┌─────────────────────────┐                 │
    │                         │  protea.ping            │                 │
    │                         │  protea.jobs            │                 │
+   │                         │  protea.training        │ coordinator     │
    │                         │  protea.embeddings      │ coordinator     │
    │                         │  protea.embeddings.batch│ ephemeral       │
    │                         │  protea.embeddings.write│ ephemeral       │
+   │                         │  protea.predictions     │ coordinator     │
    │                         │  protea.predictions.batch│ ephemeral      │
    │                         │  protea.predictions.write│ ephemeral      │
+   │                         │  protea.evaluations     │                 │
    │                         └───────────┬─────────────┘                 │
    │                                     │                               │
    │                             Worker processes                        │
    │                          (one or more per queue)                    │
+   │                          predict_go_terms_batch delegates           │
+   │                          KNN + feature compute to                   │
+   │                          protea_method.pipeline.predict() (F2C.5b)  │
    │                                     │                               │
    │                                     ▼                               │
    │                                PostgreSQL + pgvector                │
@@ -75,7 +127,7 @@ Services and data stores
 
 **RabbitMQ (port 5672 / 15672)**
 
-   Message broker. Standard queues carry the job UUID — all state lives in PostgreSQL.
+   Message broker. Standard queues carry the job UUID; all state lives in PostgreSQL.
    Ephemeral batch queues carry the full operation payload (no DB row per message).
    Durable queues ensure messages survive broker restarts.
 
@@ -92,11 +144,10 @@ Services and data stores
         - QueueConsumer
         - ``insert_proteins``, ``fetch_uniprot_metadata``, ``load_ontology_snapshot``,
           ``load_goa_annotations``, ``load_quickgo_annotations``,
-          ``compute_embeddings`` (coordinator), ``predict_go_terms`` (coordinator),
-          ``generate_evaluation_set``, ``run_cafa_evaluation``
+          ``generate_evaluation_set``
       * - ``protea.training``
         - QueueConsumer
-        - ``export_research_dataset`` — serialised, GPU/RAM-intensive KNN + feature
+        - ``export_research_dataset``: serialised, GPU/RAM-intensive KNN + feature
           generation + artifact-store upload. LightGBM training itself has been
           moved to ``protea-reranker-lab`` and no longer runs inside PROTEA.
       * - ``protea.embeddings``
@@ -104,24 +155,32 @@ Services and data stores
         - ``compute_embeddings`` coordinator (serialised: one at a time, 60 s retry delay if GPU busy)
       * - ``protea.embeddings.batch``
         - OperationConsumer
-        - ``compute_embeddings_batch`` — GPU inference per batch (ephemeral, no DB Job row)
+        - ``compute_embeddings_batch``: GPU inference per batch (ephemeral, no DB Job row)
       * - ``protea.embeddings.write``
         - OperationConsumer
-        - ``store_embeddings`` — bulk pgvector insert (ephemeral, no DB Job row)
+        - ``store_embeddings``: bulk pgvector insert (ephemeral, no DB Job row)
+      * - ``protea.predictions``
+        - QueueConsumer
+        - ``predict_go_terms`` coordinator (serialised; fans out KNN batches)
       * - ``protea.predictions.batch``
         - OperationConsumer
-        - ``predict_go_terms_batch`` — KNN search + GO transfer (ephemeral, no DB Job row)
+        - ``predict_go_terms_batch``: KNN search + GO transfer (ephemeral, no DB Job row)
       * - ``protea.predictions.write``
         - OperationConsumer
-        - ``store_predictions`` — bulk GOPrediction insert (ephemeral, no DB Job row)
+        - ``store_predictions``: bulk GOPrediction insert (ephemeral, no DB Job row)
+      * - ``protea.evaluations``
+        - QueueConsumer
+        - ``run_cafa_evaluation``: runs ``cafaeval`` for NK/LK/PK against a
+          prediction set; serialised because cafaeval is single-process and
+          each run can take minutes
 
 **QueueConsumer vs OperationConsumer**
 
    Two consumer patterns exist in ``protea/infrastructure/queue/consumer.py``:
 
-   - **QueueConsumer** — reads a job UUID from the queue, delegates to ``BaseWorker.handle_job()``.
+   - **QueueConsumer.** Reads a job UUID from the queue, delegates to ``BaseWorker.handle_job()``.
      Creates a full Job row with status transitions and event log.
-   - **OperationConsumer** — reads a raw operation payload from the queue and executes it directly.
+   - **OperationConsumer.** Reads a raw operation payload from the queue and executes it directly.
      Used for high-throughput batch workers where creating thousands of child Job rows would cause
      queue bloat. Progress is tracked at the parent level only.
 
@@ -147,8 +206,8 @@ Services and data stores
 
 **Artifact store (local FS by default, optional MinIO)**
 
-   Large produced blobs — re-ranker boosters, exported research datasets
-   (``train.parquet`` / ``eval.parquet`` / ``manifest.json``) — do not live
+   Large produced blobs (re-ranker boosters, exported research datasets
+   ``train.parquet`` / ``eval.parquet`` / ``manifest.json``) do not live
    in PostgreSQL. They are written through the ``ArtifactStore`` protocol
    defined in ``protea/infrastructure/storage/``. Two backends are
    available:
@@ -164,14 +223,14 @@ Services and data stores
    Both backends satisfy the same four-method protocol (``put``, ``get``,
    ``url``, ``exists``), so operation code is agnostic of which backend
    is active. If MinIO is configured but unreachable at startup the
-   factory logs a warning and degrades to the local FS — a missing
+   factory logs a warning and degrades to the local FS; a missing
    optional service never crashes the stack.
 
 **Next.js frontend (port 3000)**
 
    Single-page application for job management. Displays job list with status filtering,
    live auto-refresh (2 s polling while a job is active), progress bar, and structured
-   event timeline. Built with React 19 and Tailwind CSS v4.
+   event timeline. Built with React 19 and Tailwind CSS 4.x.
 
 Stack management
 ----------------
@@ -197,10 +256,12 @@ Code layout
      api/                 FastAPI application and routers
        routers/           jobs, proteins, annotations, embeddings,
                           query_sets, maintenance, admin, scoring,
-                          annotate, showcase, support
+                          annotate, showcase, support, benchmark,
+                          datasets, registry, reranker_models, stack,
+                          experiment_runs   (17 routers total)
      core/
        contracts/         Operation protocol, ProteaPayload, OperationResult
-       operations/        Domain logic (12 operation modules, 17 registered instances)
+       operations/        Domain logic (11 operation modules, 15 registered instances)
        knn_search.py      KNN backends: numpy brute-force and FAISS (Flat/IVFFlat/HNSW)
        feature_engineering.py  Alignment (parasail NW/SW) and taxonomy (ete3 NCBITaxa)
        scoring.py         Scoring engine (weighted formulas, composite scores)
@@ -208,10 +269,11 @@ Code layout
        evidence_codes.py  ECO→GO evidence code mapping
        evaluation.py      CAFA5 evaluation protocol (NK/LK/PK delta)
        reranker.py        LightGBM binary classifier for re-ranking predictions
-       utils.py           UniProtHttpMixin, chunks(), utcnow()
+       utils.py           chunks(), utcnow() (the old UniProtHttpMixin was inlined into its callers)
      infrastructure/
        orm/models/        SQLAlchemy 2.x ORM models (protein, sequence, annotation,
-                          embedding, prediction, query, job, evaluation, scoring, support)
+                          embedding, prediction, query, job, evaluation, scoring,
+                          dataset, reranker_model, support, experiment_run, visitor_event)
        queue/             RabbitMQ consumer (QueueConsumer, OperationConsumer) and publisher
        logging.py         Structured JSON logging
        session.py         session_scope context manager
@@ -223,7 +285,7 @@ Code layout
      web/                 Next.js frontend
    scripts/
      manage.sh            Unified stack manager (start/stop/status/logs/scale)
-     worker.py            Worker entry point (registers all 16 operations)
+     worker.py            Worker entry point (registers every operation in the catalog)
      init_db.py           Schema initialisation
 
 Technology stack
@@ -248,7 +310,7 @@ Technology stack
      - RabbitMQ + aio-pika
      - 3.x / 9.x
    * - Data validation
-     - Pydantic v2
+     - Pydantic (2.x line)
      - 2.x
    * - Protein LM inference
      - Hugging Face Transformers
@@ -261,7 +323,7 @@ Technology stack
      - 3.x
    * - ANN search
      - NumPy / FAISS
-     - —
+     - n/a
    * - Frontend
      - Next.js + React + Tailwind
      - 16 / 19 / 4
@@ -283,7 +345,7 @@ code at runtime, and the lab does not import PROTEA session or queue
 code. The coupling is mediated by three files:
 
 - **Frozen dataset**: PROTEA writes ``train.parquet``, ``eval.parquet``,
-  and ``manifest.json`` (schema version ``v2``) to the configured
+  and ``manifest.json`` (schema version 2) to the configured
   ``ArtifactStore`` via the ``export_research_dataset`` operation.
 - **Booster artefact**: the lab produces ``runs/<name>/model.txt``
   (LightGBM ``Booster``) together with ``run.json`` and ``spec.yaml``.
@@ -298,7 +360,7 @@ code. The coupling is mediated by three files:
    ┌──────────────────────┐        export_research_dataset        ┌────────────────────────┐
    │       PROTEA         │───────────────────────────────────────▶│       Artifact          │
    │ (KNN + features)     │     train.parquet / eval.parquet        │       Store             │
-   │                      │     manifest.json (schema_version=v2)   │  (local FS or MinIO)    │
+   │                      │     manifest.json (schema_version=2)    │  (local FS or MinIO)    │
    └──────────┬───────────┘                                         └──────────┬──────────────┘
               │                                                                 │
               │                                                                 ▼
@@ -352,7 +414,7 @@ The test suite is split into two categories:
 
 .. seealso::
 
-   - :doc:`job_lifecycle` — how a single job moves through the worker layer.
-   - :doc:`data_model` — the relational tables that back every layer above.
-   - :doc:`operations` — the units of domain logic dispatched by workers.
-   - :doc:`/adr/index` — design decisions behind the layering above.
+   - :doc:`job_lifecycle`: how a single job moves through the worker layer.
+   - :doc:`data_model`: the relational tables that back every layer above.
+   - :doc:`operations`: the units of domain logic dispatched by workers.
+   - :doc:`/adr/index`: design decisions behind the layering above.

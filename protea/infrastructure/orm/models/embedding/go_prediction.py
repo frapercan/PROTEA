@@ -4,7 +4,7 @@ import uuid
 from typing import TYPE_CHECKING
 
 from sqlalchemy import BigInteger, Float, ForeignKey, Index, Integer, String, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from protea.infrastructure.orm.base import Base
@@ -107,6 +107,22 @@ class GOPrediction(Base):
     tax_voters_same_frac: Mapped[float | None] = mapped_column(Float, nullable=True)
     tax_voters_close_frac: Mapped[float | None] = mapped_column(Float, nullable=True)
     tax_voters_mean_common_ancestors: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # --- T3.1a dual-write target: every feature column above is also
+    # mirrored into this JSONB blob (see ``build_feature_jsonb``).
+    # Readers stay on the typed columns until T3.1b cuts them over;
+    # the column is nullable because legacy rows predate the dual-write.
+    features: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+    # --- T3.1 dual-write target: the prediction tuple itself
+    # (``go_term_id``, score, evidence) mirrored into a compact JSONB
+    # blob via ``protea.core.jsonb_dual_write.maybe_jsonb``. Gated by
+    # ``PROTEA_GO_PREDICTION_JSONB_WRITE_ENABLED``; off by default so
+    # the scaffolding lands without touching production writers.
+    # Readers stay on the typed columns until T3.3. The column is
+    # nullable because legacy rows predate the dual-write; a GIN
+    # index (``ix_go_prediction_jsonb_gin``) supports JSONB lookups.
+    predictions_jsonb: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     # --- Sequence-embedding PCA: per-query projection (16 components) ---
     emb_pca_query_0: Mapped[float | None] = mapped_column(Float, nullable=True)

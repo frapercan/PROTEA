@@ -1,0 +1,15 @@
+# Notification policy: all alerts route to the built-in
+# grafana-default-email no-op receiver, viewed in the Grafana Alerting UI.
+# This matches the observability stance: Loki sees errors, operator looks
+# at them in Grafana.
+#
+# group_by collapses bursts per task; the alert rule itself has a 5min
+# evaluation window so the per-burst rate limit comes from the rule
+# instead of from `repeat_interval` here.
+
+apiVersion: 1
+
+policies:
+  - orgId: 1
+    receiver: grafana-default-email
+    group_by: ["grafana_folder", "alertname"]

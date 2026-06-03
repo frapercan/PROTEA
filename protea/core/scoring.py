@@ -98,87 +98,67 @@ def evidence_weight(
 # ---------------------------------------------------------------------------
 
 
+def _resolve_signal_values(
+    pred: dict[str, Any],
+    evidence_w: float,
+) -> list[tuple[str, float | None]]:
+    """Map raw prediction fields to ``(signal_key, normalised_value)`` pairs.
+
+    Each entry is fed through ``compute_score``'s weighted-average loop;
+    ``None`` values mean the corresponding feature-engineering flag was
+    off at prediction time and the signal must drop out of both
+    numerator and denominator.
+
+    Recognised pred keys:
+
+    - ``distance`` (float): cosine distance in [0, 2] → similarity 1 - d/2.
+    - ``identity_nw`` / ``identity_sw`` (float | None): NW / SW identity in [0, 1].
+    - ``taxonomic_distance`` (float | None): mapped via 1 / (1 + d).
+    - ``neighbor_vote_fraction`` (float | None): already in [0, 1].
+    """
+    distance = pred.get("distance")
+    embedding_sim = 1.0 - float(distance) / 2.0 if distance is not None else None
+    tax_dist = pred.get("taxonomic_distance")
+    tax_proximity = 1.0 / (1.0 + float(tax_dist)) if tax_dist is not None else None
+    return [
+        ("embedding_similarity", embedding_sim),
+        ("identity_nw", pred.get("identity_nw")),
+        ("identity_sw", pred.get("identity_sw")),
+        ("evidence_weight", evidence_w),
+        ("taxonomic_proximity", tax_proximity),
+        ("neighbor_vote_fraction", pred.get("neighbor_vote_fraction")),
+    ]
+
+
 def compute_score(pred: dict[str, Any], config: ScoringConfig) -> float:
     """Compute a [0, 1] confidence score for a single GOPrediction dict.
 
-    All signals are normalised to [0, 1] before weighting.  Signals whose
-    value is ``None`` (because the corresponding feature-engineering flag was
-    not enabled at prediction time) are *silently excluded* from both the
-    numerator and the denominator, so the remaining signals still produce a
-    valid normalised score.
-
-    Parameters
-    ----------
-    pred:
-        Dict with raw prediction fields.  Recognised keys:
-
-        - ``distance`` (float): cosine distance in [0, 2].
-        - ``identity_nw`` (float | None): NW global identity in [0, 1].
-        - ``identity_sw`` (float | None): SW local identity in [0, 1].
-        - ``evidence_code`` (str | None): GO or ECO evidence code.
-        - ``taxonomic_distance`` (float | None): raw taxonomic distance.
-        - ``neighbor_vote_fraction`` (float | None): fraction of K neighbours
-          that voted for this GO term, in [0, 1].
-
-    config:
-        A :class:`ScoringConfig` instance defining the formula, signal
-        weights, and optional per-code evidence weight overrides.
-
-    Returns
-    -------
-    float in [0, 1].  Higher values indicate higher predicted confidence.
-    The result is rounded to 6 decimal places.
+    Signals are normalised to [0, 1] then weighted-averaged. Signals
+    whose value is ``None`` (feature-engineering flag off at predict
+    time) drop from both numerator and denominator. Returns
+    ``round(base_score, 6)``; ``FORMULA_EVIDENCE_WEIGHTED`` multiplies
+    the average by the resolved evidence weight even when the
+    evidence_weight signal carries weight 0 — so IEA / ND annotations
+    get down-ranked regardless of feature configuration.
     """
     signal_weights = config.weights
-    ev_overrides: dict[str, float] | None = config.evidence_weights or None
-
+    ev_overrides = config.evidence_weights or None
+    ev_w = evidence_weight(pred.get("evidence_code"), overrides=ev_overrides)
     total_w = 0.0
     weighted_sum = 0.0
-
-    def _add(key: str, value: float | None) -> None:
-        """Add one signal's contribution to the running weighted average."""
-        nonlocal total_w, weighted_sum
+    for key, value in _resolve_signal_values(pred, ev_w):
+        if value is None:
+            continue
         w = float(signal_weights.get(key, 0.0))
-        if w == 0.0 or value is None:
-            return
+        if w == 0.0:
+            continue
         total_w += w
         weighted_sum += w * max(0.0, min(1.0, value))
-
-    # 1. Embedding similarity: cosine distance [0, 2] → similarity [0, 1].
-    distance = pred.get("distance")
-    if distance is not None:
-        _add("embedding_similarity", 1.0 - distance / 2.0)
-
-    # 2. Global sequence identity (Needleman-Wunsch).
-    _add("identity_nw", pred.get("identity_nw"))
-
-    # 3. Local sequence identity (Smith-Waterman).
-    _add("identity_sw", pred.get("identity_sw"))
-
-    # 4. Evidence code quality — resolved with per-config overrides.
-    ev_w = evidence_weight(pred.get("evidence_code"), overrides=ev_overrides)
-    _add("evidence_weight", ev_w)
-
-    # 5. Taxonomic proximity: 1 / (1 + d) maps [0, ∞) → (0, 1].
-    tax_dist = pred.get("taxonomic_distance")
-    if tax_dist is not None:
-        _add("taxonomic_proximity", 1.0 / (1.0 + float(tax_dist)))
-
-    # 6. Neighbour vote fraction: already in [0, 1] — no transformation.
-    _add("neighbor_vote_fraction", pred.get("neighbor_vote_fraction"))
-
     if total_w == 0.0:
         return 0.0
-
     base_score = weighted_sum / total_w
-
-    # evidence_weighted formula: multiply the final score by the resolved
-    # evidence quality so that low-confidence annotations (IEA, ND) are
-    # down-ranked even when other signals are strong — and regardless of
-    # whether the evidence_weight signal is active (its signal weight may be 0).
     if config.formula == FORMULA_EVIDENCE_WEIGHTED:
         base_score *= ev_w
-
     return round(base_score, 6)
 
 

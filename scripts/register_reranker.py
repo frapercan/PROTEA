@@ -30,6 +30,7 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from protea.core.schema_sha_v2 import maybe_v2
 from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
 from protea.infrastructure.session import build_session_factory, session_scope
 from protea.infrastructure.settings import load_settings
@@ -47,16 +48,35 @@ except Exception as exc:  # pragma: no cover — dev-time dep must be installed
 
 def _args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--run-dir", required=True, type=Path,
-                   help="Path to runs/<name>/ containing run.json + spec.yaml + model.txt")
-    p.add_argument("--prediction-set-id", type=str, default=None,
-                   help="Optional UUID of an existing PredictionSet to link")
-    p.add_argument("--evaluation-set-id", type=str, default=None,
-                   help="Optional UUID of an existing EvaluationSet to link")
-    p.add_argument("--name-override", type=str, default=None,
-                   help="Override the RerankerModel.name (default: run_id from run.json)")
-    p.add_argument("--force", action="store_true",
-                   help="If a RerankerModel with the same name exists, delete+replace it")
+    p.add_argument(
+        "--run-dir",
+        required=True,
+        type=Path,
+        help="Path to runs/<name>/ containing run.json + spec.yaml + model.txt",
+    )
+    p.add_argument(
+        "--prediction-set-id",
+        type=str,
+        default=None,
+        help="Optional UUID of an existing PredictionSet to link",
+    )
+    p.add_argument(
+        "--evaluation-set-id",
+        type=str,
+        default=None,
+        help="Optional UUID of an existing EvaluationSet to link",
+    )
+    p.add_argument(
+        "--name-override",
+        type=str,
+        default=None,
+        help="Override the RerankerModel.name (default: run_id from run.json)",
+    )
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help="If a RerankerModel with the same name exists, delete+replace it",
+    )
     return p.parse_args()
 
 
@@ -81,7 +101,7 @@ def _load_manifest(run_dir: Path, run_json: dict[str, Any]) -> dict[str, Any]:
     if not rel:
         return {}
     candidates = [
-        run_dir.parents[1] / rel,   # <lab>/runs/<name>/ → <lab>
+        run_dir.parents[1] / rel,  # <lab>/runs/<name>/ → <lab>
         run_dir / rel,
         Path(rel),
     ]
@@ -121,10 +141,9 @@ def main() -> None:
 
     # Feature schema sha — family-aware fingerprint. Falls back to the
     # dataset's schema_sha when families aren't recorded (older runs).
-    feature_families: list[str] | None = (
-        run.get("features", {}).get("families_enabled")
-        or run.get("dataset", {}).get("feature_families")
-    )
+    feature_families: list[str] | None = run.get("features", {}).get("families_enabled") or run.get(
+        "dataset", {}
+    ).get("feature_families")
     drop_features: list[str] = run.get("features", {}).get("drop_features") or []
     if feature_families:
         feature_schema_sha = compute_feature_schema_sha(feature_families, drop_features or None)
@@ -169,6 +188,9 @@ def main() -> None:
             model_data=None,
             artifact_uri=artifact_uri,
             feature_schema_sha=feature_schema_sha,
+            # T1.6 (ADR D10) dual-write gated by
+            # ``PROTEA_SCHEMA_SHA_V2_WRITE_ENABLED``.
+            schema_sha_v2=maybe_v2(feature_schema_sha),
             embedding_config_id=uuid.UUID(embedding_config_id) if embedding_config_id else None,
             ontology_snapshot_id=uuid.UUID(ontology_snapshot_id) if ontology_snapshot_id else None,
             producer_version=producer_version,

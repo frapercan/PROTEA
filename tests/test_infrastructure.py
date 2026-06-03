@@ -100,6 +100,49 @@ class TestBuildEngine:
         )
         assert engine is mock_create.return_value
 
+    def test_passes_pool_pre_ping_true(self):
+        """SQLA pre-ping is mandatory to detect server-side idle
+        connection drops before checkout (Postgres
+        idle_in_transaction_session_timeout, broker-level firewalls)."""
+        from protea.infrastructure.database.engine import build_engine
+
+        with patch("protea.infrastructure.database.engine.create_engine") as mock_create:
+            mock_create.return_value = MagicMock()
+            build_engine("sqlite:///:memory:")
+
+        kwargs = mock_create.call_args.kwargs
+        assert kwargs["pool_pre_ping"] is True
+
+    def test_passes_pool_recycle(self):
+        """pool_recycle forces SQLA to drop connections older than the
+        configured window so Postgres-side idle kills don't surface to
+        callers."""
+        from protea.infrastructure.database.engine import build_engine
+
+        with patch("protea.infrastructure.database.engine.create_engine") as mock_create:
+            mock_create.return_value = MagicMock()
+            build_engine("sqlite:///:memory:")
+
+        kwargs = mock_create.call_args.kwargs
+        assert kwargs["pool_recycle"] == 3600
+
+
+class TestBuildSessionFactoryPrePing:
+    """End-to-end check that ``build_session_factory`` ends up calling
+    ``create_engine`` with ``pool_pre_ping=True``. Covers the PR-B
+    invariant directly at the public entry point."""
+
+    def test_session_factory_routes_pre_ping_to_create_engine(self):
+        from protea.infrastructure.session import build_session_factory
+
+        with patch("protea.infrastructure.database.engine.create_engine") as mock_create:
+            mock_create.return_value = MagicMock()
+            build_session_factory("sqlite:///:memory:")
+
+        kwargs = mock_create.call_args.kwargs
+        assert kwargs["pool_pre_ping"] is True
+        assert kwargs["pool_recycle"] == 3600
+
 
 # ---------------------------------------------------------------------------
 # create_app
@@ -154,6 +197,30 @@ class TestCreateApp:
 
         routes = [r.path for r in app.routes]
         assert any("/jobs" in p for p in routes)
+
+    def test_routers_mounted_under_v1_prefix(self):
+        """T4.1: every router shows up under ``/v1/`` (canonical) AND at
+        the unprefixed legacy alias for the deprecation window."""
+        from protea.api.app import create_app
+
+        mock_settings = MagicMock()
+        mock_settings.db_url = "sqlite:///:memory:"
+        mock_settings.amqp_url = "amqp://guest:guest@localhost/"
+
+        with (
+            patch("protea.api.app.load_settings", return_value=mock_settings),
+            patch("protea.api.app.build_session_factory", return_value=MagicMock()),
+        ):
+            app = create_app(Path("/fake/root"))
+
+        routes = [r.path for r in app.routes]
+        # Canonical and legacy mounts both present.
+        assert any(p.startswith("/v1/jobs") for p in routes)
+        assert "/jobs" in routes  # legacy alias retained
+        # OpenAPI must only advertise the canonical path.
+        schema_paths = set(app.openapi().get("paths", {}).keys())
+        assert any(p.startswith("/v1/jobs") for p in schema_paths)
+        assert not any(p.startswith("/jobs") and not p.startswith("/v1/") for p in schema_paths)
 
     def test_health_endpoint_registered(self):
         from protea.api.app import create_app
@@ -281,6 +348,66 @@ class TestCreateApp:
         assert isinstance(called_root, Path)
         assert called_root.is_absolute()
 
+    def test_lifespan_prewarms_protein_stats_on_startup(self):
+        """The startup hook must call prewarm_protein_stats(factory) so the
+        first /v1/proteins/stats request never hits the 30s cold compute."""
+        from fastapi.testclient import TestClient
+
+        from protea.api.app import create_app
+
+        mock_settings = MagicMock()
+        mock_settings.db_url = "sqlite:///:memory:"
+        mock_settings.amqp_url = "amqp://guest:guest@localhost/"
+        mock_factory = MagicMock()
+
+        with (
+            patch("protea.api.app.load_settings", return_value=mock_settings),
+            patch("protea.api.app.build_session_factory", return_value=mock_factory),
+            patch("protea.api.app.prewarm_protein_stats") as prewarm,
+        ):
+            app = create_app(Path("/fake/root"))
+            with TestClient(app):
+                pass  # entering the context fires the lifespan startup
+
+        prewarm.assert_called_once_with(mock_factory)
+
+    def test_lifespan_prewarms_all_slow_aggregates_on_startup(self):
+        """The startup hook must fire every prewarm target so the first user
+        request finds proteins:stats, embeddings:prediction-sets,
+        embeddings:configs, annotations:snapshots and annotations:sets all
+        already warm. Mirrors the prediction-sets cold-cache fix (was 115s)."""
+        from fastapi.testclient import TestClient
+
+        from protea.api.app import create_app
+
+        mock_settings = MagicMock()
+        mock_settings.db_url = "sqlite:///:memory:"
+        mock_settings.amqp_url = "amqp://guest:guest@localhost/"
+        mock_factory = MagicMock()
+
+        with (
+            patch("protea.api.app.load_settings", return_value=mock_settings),
+            patch("protea.api.app.build_session_factory", return_value=mock_factory),
+            patch("protea.api.app.prewarm_protein_stats") as prewarm_stats,
+            patch("protea.api.app.prewarm_prediction_sets") as prewarm_ps,
+            patch("protea.api.app.prewarm_embedding_configs") as prewarm_configs,
+            patch("protea.api.app.prewarm_snapshots") as prewarm_snapshots,
+            patch("protea.api.app.prewarm_annotation_sets") as prewarm_asets,
+            patch("protea.api.app.prewarm_benchmark_embeddings") as prewarm_bench_emb,
+            patch("protea.api.app.prewarm_benchmark_matrix") as prewarm_bench_mtx,
+        ):
+            app = create_app(Path("/fake/root"))
+            with TestClient(app):
+                pass  # entering the context fires the lifespan startup
+
+        prewarm_stats.assert_called_once_with(mock_factory)
+        prewarm_ps.assert_called_once_with(mock_factory)
+        prewarm_configs.assert_called_once_with(mock_factory)
+        prewarm_snapshots.assert_called_once_with(mock_factory)
+        prewarm_asets.assert_called_once_with(mock_factory)
+        prewarm_bench_emb.assert_called_once_with(mock_factory)
+        prewarm_bench_mtx.assert_called_once_with(mock_factory)
+
     def test_sphinx_mount_when_directory_exists(self, tmp_path):
         """When docs/build/html exists, /sphinx is mounted."""
         from protea.api.app import create_app
@@ -301,24 +428,3 @@ class TestCreateApp:
 
         route_paths = [r.path for r in app.routes]
         assert any("/sphinx" in p for p in route_paths)
-
-    def test_static_mount_when_directory_exists(self, tmp_path):
-        """When static/ exists, /static is mounted."""
-        from protea.api.app import create_app
-
-        static_dir = tmp_path / "static"
-        static_dir.mkdir()
-        (static_dir / "test.txt").write_text("hello")
-
-        mock_settings = MagicMock()
-        mock_settings.db_url = "sqlite:///:memory:"
-        mock_settings.amqp_url = "amqp://guest:guest@localhost/"
-
-        with (
-            patch("protea.api.app.load_settings", return_value=mock_settings),
-            patch("protea.api.app.build_session_factory", return_value=MagicMock()),
-        ):
-            app = create_app(project_root=tmp_path)
-
-        route_paths = [r.path for r in app.routes]
-        assert any("/static" in p for p in route_paths)

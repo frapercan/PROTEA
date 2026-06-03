@@ -15,14 +15,23 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from protea.api.cache import invalidate as _cache_invalidate
 from protea.api.routers.benchmark import _stage_of, router
+
+
+@pytest.fixture(autouse=True)
+def _reset_router_cache():
+    _cache_invalidate()
+    yield
+    _cache_invalidate()
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _make_app(factory):
+def _make_app(factory, hidden_embeddings=frozenset()):
     from protea.infrastructure.benchmark_config import BenchmarkConfig
 
     app = FastAPI()
@@ -31,6 +40,7 @@ def _make_app(factory):
         preferred_default_stages=("alignment_weighted", "reranker"),
         baseline_scoring_name="alignment_weighted",
         hidden_stages=frozenset(),
+        hidden_embeddings=hidden_embeddings,
         stage_labels={"alignment_weighted": "Alignment-weighted", "reranker": "Reranker"},
         eval_set_labels={},
         categories=("NK", "LK", "PK"),
@@ -179,6 +189,36 @@ class TestListBenchmarkEmbeddings:
             assert "model_name" in e
             assert "model_backend" in e
 
+    def test_hidden_embeddings_are_suppressed(self, session, factory):
+        # Configs whose UUID is listed in benchmark.yaml: hidden_embeddings
+        # are omitted from the response (reversible, no data deletion).
+        from protea.api.cache import invalidate
+
+        hidden = _make_cfg("esmc_300m", "esm3c", display_name="ESMC-300M", family="esmc")
+        visible = _make_cfg(
+            "facebook/esm2_t33_650M_UR50D", "esm", display_name="ESM2-650M", family="esm2"
+        )
+        exec_result = MagicMock()
+        exec_result.scalars.return_value.all.return_value = [hidden, visible]
+        session.execute.return_value = exec_result
+
+        # Case-insensitive match: store the UUID uppercased in the config to
+        # prove normalisation works.
+        app = _make_app(factory, hidden_embeddings=frozenset({str(hidden.id).lower()}))
+        invalidate()  # cached() is module-scoped; clear cross-test leakage
+        with patch(
+            "protea.api.routers.benchmark.session_scope",
+            side_effect=lambda _: _mock_scope(session),
+        ):
+            with TestClient(app) as c:
+                resp = c.get("/benchmark/embeddings")
+        invalidate()
+        data = resp.json()
+        assert data["total"] == 1
+        ids = [e["id"] for e in data["embeddings"]]
+        assert str(visible.id) in ids
+        assert str(hidden.id) not in ids
+
 
 # ---------------------------------------------------------------------------
 # GET /benchmark/matrix
@@ -304,6 +344,53 @@ class TestBenchmarkMatrix:
         resp = c.get("/benchmark/matrix?stage=unknown_stage_xyz")
         assert resp.status_code == 200
         assert resp.json()["total"] == 0
+
+    def test_best_per_cell_global_ignores_stage_and_k_filters(self, client):
+        """best_per_cell_global must surface the absolute champion per cell
+        even when the user's stage/K filters would hide it from the main table.
+        """
+        c, session = client
+        emb_a = uuid4()
+        emb_b = uuid4()
+        eval_set_id = uuid4()
+
+        # alignment_weighted at K=5 is the dataset champion (fmax=0.85)
+        er_aw = _make_eval({"NK": {"BPO": {"fmax": 0.85}}}, scoring_config_id=uuid4())
+        # reranker at K=10 is weaker (fmax=0.55) but matches the active filters
+        er_reranker = _make_eval(
+            {"NK": {"BPO": {"fmax": 0.55}}},
+            reranker_model_id=uuid4(),
+        )
+        er_aw.evaluation_set_id = eval_set_id
+        er_reranker.evaluation_set_id = eval_set_id
+
+        self._dual_execute(
+            session,
+            matrix_rows=[
+                self._row(er_aw, emb_a, k=5),
+                self._row(er_reranker, emb_b, k=10),
+            ],
+            eval_set_rows=[self._eval_set_row(eval_set_id)],
+        )
+
+        resp = c.get("/benchmark/matrix?stage=reranker&k=10")
+        data = resp.json()
+
+        # Filtered table reflects the user's selection: only the reranker row
+        assert data["total"] == 1
+        assert data["best_per_cell"][0]["fmax"] == 0.55
+        assert data["best_per_cell"][0]["stage"] == "reranker"
+        assert data["best_per_cell"][0]["k"] == 10
+
+        # Global champion is the alignment_weighted K=5 winner — independent
+        # of the stage=reranker, k=10 filter the user picked.
+        assert "best_per_cell_global" in data
+        assert len(data["best_per_cell_global"]) == 1
+        global_winner = data["best_per_cell_global"][0]
+        assert global_winner["fmax"] == 0.85
+        assert global_winner["stage"] == "alignment_weighted"
+        assert global_winner["k"] == 5
+        assert global_winner["embedding_config_id"] == str(emb_a)
 
     def test_missing_fmax_cells_are_skipped(self, client):
         c, session = client

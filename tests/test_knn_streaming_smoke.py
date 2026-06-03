@@ -17,7 +17,11 @@ import numpy as np
 import pyarrow.parquet as pq
 import pytest
 
-from protea.core.training_dump_helpers import StreamOutput, _knn_transfer_and_label
+from protea.core.training_dump_helpers import (
+    KnnTransferContext,
+    StreamOutput,
+    _knn_transfer_and_label,
+)
 
 
 class _StubAnc2Vec:
@@ -123,33 +127,34 @@ def _run(mode: str, tmp_path: Path | None = None, *, expand: bool, pivot=None):
     session = MagicMock()
     p = _mk_payload(expand=expand)
 
-    kwargs: dict = {
-        "query_known_gos": None,
-        "parent_map_str": parent_map_str if expand else None,
-        "ia_weights": None,
-        "pca_state": None,
-    }
-    kwargs["pivot_go_ids"] = pivot
-    if mode == "stream":
-        kwargs["stream_output"] = StreamOutput(
-            output_parquet=tmp_path / "out.parquet",
-            chunk_rows=3,  # tiny to force multiple flushes
-        )
+    ctx = KnnTransferContext(
+        valid_queries=valid_queries,
+        query_emb=query_emb,
+        ref_by_aspect=ref_by_aspect,
+        go_id_map=go_id_map,
+        aspect_map=aspect_map,
+        gt_pairs=gt_pairs,
+        query_known_gos=None,
+        parent_map_str=parent_map_str if expand else None,
+        ia_weights=None,
+        pca_state=None,
+        pivot_go_ids=pivot,
+    )
+    stream_output = (
+        StreamOutput(output_parquet=tmp_path / "out.parquet", chunk_rows=3)
+        if mode == "stream"
+        else None
+    )
 
     with patch(
-        "protea.core.training_dump_helpers.get_anc2vec_index",
+        "protea.core._anc2vec_phases.get_anc2vec_index",
         return_value=_StubAnc2Vec(),
     ):
         return _knn_transfer_and_label(
             session,
-            valid_queries,
-            query_emb,
-            ref_by_aspect,
-            go_id_map,
-            aspect_map,
-            gt_pairs,
             p,
-            **kwargs,
+            ctx,
+            stream_output=stream_output,
         )
 
 
@@ -210,3 +215,58 @@ def test_streaming_empty_result_is_safe(tmp_path):
     assert info["n_rows"] == 0
     # Writer never opened → no file.
     assert not (tmp_path / "out.parquet").exists()
+
+
+_LINEAGE_KEYS = (
+    "lineage_is_ancestor_of_known",
+    "lineage_is_descendant_of_known",
+    "lineage_ancestor_of_count",
+    "lineage_descendant_of_count",
+)
+
+
+@pytest.mark.parametrize("expand", [False, True])
+def test_lineage_columns_always_emitted_with_defaults(tmp_path, expand):
+    """Regression: T-RES.1b added the 4 lineage columns to
+    ``ALL_FEATURES``; without zero-filled defaults on every emitted
+    record the parquet_export canonical-column invariant fails the
+    eval-shard write after hours of compute.
+
+    Whether or not ancestor expansion is on, every leaf and every
+    synthetic record must carry the 4 lineage keys with default
+    ``0.0``.
+    """
+    list_records = _run("list", expand=expand)
+    stream_info = _run("stream", tmp_path=tmp_path, expand=expand)
+    stream_records = _read_parquet_records(tmp_path / "out.parquet")
+    assert list_records, "fixture produced no records"
+    assert stream_info["n_rows"] == len(list_records)
+
+    for rec in list_records:
+        for key in _LINEAGE_KEYS:
+            assert key in rec, f"list record missing {key}"
+            assert rec[key] == 0.0, f"list record {key} expected 0.0, got {rec[key]!r}"
+    for rec in stream_records:
+        for key in _LINEAGE_KEYS:
+            assert key in rec, f"stream record missing {key}"
+            assert rec[key] == 0.0, f"stream record {key} expected 0.0, got {rec[key]!r}"
+
+
+def test_streaming_shard_schema_contains_full_canonical_feature_set(tmp_path):
+    """End-to-end: every column in ``ALL_FEATURES`` must appear in the
+    streamed parquet shard so the downstream
+    ``parquet_export._assert_canonical_columns`` invariant passes.
+    Guards against any future canonical column being added to
+    ``ALL_FEATURES`` without a corresponding default in the record
+    builder.
+    """
+    from protea_contracts import ALL_FEATURES
+
+    info = _run("stream", tmp_path=tmp_path, expand=False)
+    assert info["n_rows"] > 0
+    table = pq.read_table(str(tmp_path / "out.parquet"))
+    shard_cols = set(table.column_names)
+    missing = [c for c in ALL_FEATURES if c not in shard_cols]
+    assert missing == [], (
+        f"streamed shard missing canonical feature columns: {missing!r}"
+    )

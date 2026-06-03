@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import DateTime, ForeignKey, String, func
+from sqlalchemy import DateTime, ForeignKey, Index, String, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -31,6 +31,10 @@ class AnnotationSet(Base):
     """
 
     __tablename__ = "annotation_set"
+    __table_args__ = (
+        # T3.5: list endpoints order by ``created_at DESC``.
+        Index("ix_annotation_set_created_at", "created_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     source: Mapped[str] = mapped_column(String, nullable=False, index=True)
@@ -49,6 +53,13 @@ class AnnotationSet(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    # Upstream publication date (e.g. EBI FTP timestamp for GOA releases).
+    # Populated by the ``refresh_goa_release_dates`` operation so the
+    # evaluation-page timeline can place each release at its true date
+    # instead of the local ``created_at``.
+    source_published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
     meta: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
 

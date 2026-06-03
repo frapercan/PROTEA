@@ -18,6 +18,20 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
+## Environment variables
+
+`NEXT_PUBLIC_API_URL` (required): PROTEA HTTP API origin.
+
+`NEXT_PUBLIC_FARM_API_URL` (default `/farm-api`): agent-farm metrics
+origin, proxied in production.
+
+`NEXT_PUBLIC_ENABLE_DB_RESET` (default `0`): set to `1` to surface the
+developer "Reset DB" button in the sidebar footer. The backend route
+`/admin/reset-db` is Bearer-gated and returns 401 to anonymous
+visitors, so without an auth flow the button only produces error
+toasts for public clients; keep the gate off until a sign-in flow
+lands.
+
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
 ## Learn More

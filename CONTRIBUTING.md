@@ -22,10 +22,10 @@ All contributions go through `develop` first. `develop` is merged into `main` fo
    git checkout develop
    git checkout -b feature/my-feature
    ```
-3. **Make your changes** — follow the code style (ruff + flake8 + mypy enforced in CI)
+3. **Make your changes**: follow the code style (ruff + mypy enforced in CI)
 4. **Run checks locally** before pushing:
    ```bash
-   poetry run task lint       # ruff + flake8
+   poetry run task lint       # ruff (incl. flake8-bugbear B-rules)
    poetry run mypy protea     # type checking
    poetry run pytest          # unit tests
    ```
@@ -35,8 +35,13 @@ All contributions go through `develop` first. `develop` is merged into `main` fo
 ## Development Setup
 
 ```bash
-# Install dependencies
-poetry install
+# Install runtime + the dev groups you actually need.
+# Groups are opt-in (`optional = true`); `poetry install` alone gets only
+# main runtime dependencies.
+poetry install --with lint,test,docs
+
+# (GPU embedding worker only) flip torch from CPU to CUDA build:
+bash scripts/install_gpu_torch.sh
 
 # Start the full stack (requires PostgreSQL and RabbitMQ)
 bash scripts/manage.sh start
@@ -50,8 +55,8 @@ poetry run pytest --with-postgres
 
 ## Code Style
 
-- **Python**: ruff (formatter + linter) + flake8 + mypy
-- **Line length**: 130 characters
+- **Python**: ruff (formatter + linter, incl. ported flake8-bugbear B-rules) + mypy
+- **Line length**: 100 characters (ruff ignores E501; flake8 with 130-char limit was retired)
 - **Type hints**: required for all public functions
 - **Docstrings**: NumPy style preferred
 

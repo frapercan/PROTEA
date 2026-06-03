@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Iterator, Sequence
+from dataclasses import dataclass
 from typing import Annotated, Any
 
 from protea_contracts import (
@@ -19,6 +20,16 @@ from protea.infrastructure.orm.models.protein.protein_metadata import ProteinUni
 
 PositiveInt = Annotated[int, Field(gt=0)]
 NonNegativeFloat = Annotated[float, Field(ge=0.0)]
+
+
+@dataclass
+class _PageTotals:
+    """Mutable counters shared across the per-page flush loop."""
+
+    pages: int = 0
+    rows: int = 0
+    touched: int = 0
+    upserted: int = 0
 
 
 class FetchUniProtMetadataPayload(ProteaPayload, frozen=True):
@@ -136,7 +147,6 @@ class FetchUniProtMetadataOperation:
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
         p = FetchUniProtMetadataPayload.model_validate(payload)
-
         t0 = time.perf_counter()
         emit(
             "fetch_uniprot_metadata.start",
@@ -145,17 +155,10 @@ class FetchUniProtMetadataOperation:
             "info",
         )
 
-        pages = 0
-        total_rows = 0
-        proteins_touched = 0
-        metadata_upserted = 0
-
-        # Buffer per-record into operation-controlled pages of size
-        # ``p.page_size``. Plugin yields one record at a time; operation
-        # owns batching policy + commits.
+        totals = _PageTotals()
         buffer: list[UniProtMetadataRecord] = []
         for record in self._stream_metadata(p, emit):
-            if p.total_limit is not None and total_rows >= p.total_limit:
+            if p.total_limit is not None and totals.rows >= p.total_limit:
                 emit(
                     "fetch_uniprot_metadata.limit_reached",
                     None,
@@ -163,61 +166,59 @@ class FetchUniProtMetadataOperation:
                     "warning",
                 )
                 break
-
             buffer.append(record)
-            total_rows += 1
-
+            totals.rows += 1
             if len(buffer) >= p.page_size:
-                pages += 1
-                touched, upserted = self._store_rows(session, buffer, p, emit)
-                proteins_touched += touched
-                metadata_upserted += upserted
+                self._flush_page(session, buffer, p, emit, totals)
                 buffer.clear()
 
-                http_req, http_ret = self._uniprot_plugin.http_counters
-                emit(
-                    "fetch_uniprot_metadata.page_done",
-                    None,
-                    {
-                        "page": pages,
-                        "rows_total": total_rows,
-                        "proteins_touched_total": proteins_touched,
-                        "metadata_upserted_total": metadata_upserted,
-                        "http_requests": http_req,
-                        "http_retries": http_ret,
-                        "_progress_current": total_rows,
-                        **(
-                            {"_progress_total": p.total_limit}
-                            if p.total_limit
-                            else {}
-                        ),
-                    },
-                    "info",
-                )
-
-                if p.commit_every_page:
-                    session.commit()
-
-        # Flush remaining buffer.
         if buffer:
-            pages += 1
+            totals.pages += 1
             touched, upserted = self._store_rows(session, buffer, p, emit)
-            proteins_touched += touched
-            metadata_upserted += upserted
+            totals.touched += touched
+            totals.upserted += upserted
 
-        elapsed = time.perf_counter() - t0
         http_req, http_ret = self._uniprot_plugin.http_counters
         result = {
-            "pages": pages,
-            "rows": total_rows,
-            "proteins_touched": proteins_touched,
-            "metadata_upserted": metadata_upserted,
+            "pages": totals.pages,
+            "rows": totals.rows,
+            "proteins_touched": totals.touched,
+            "metadata_upserted": totals.upserted,
             "http_requests": http_req,
             "http_retries": http_ret,
-            "elapsed_seconds": elapsed,
+            "elapsed_seconds": time.perf_counter() - t0,
         }
         emit("fetch_uniprot_metadata.done", None, result, "info")
         return OperationResult(result=result)
+
+    def _flush_page(
+        self,
+        session: Session,
+        buffer: list[UniProtMetadataRecord],
+        p: FetchUniProtMetadataPayload,
+        emit: EmitFn,
+        totals: _PageTotals,
+    ) -> None:
+        """Persist one page worth of buffered metadata + emit progress."""
+        totals.pages += 1
+        touched, upserted = self._store_rows(session, buffer, p, emit)
+        totals.touched += touched
+        totals.upserted += upserted
+        http_req, http_ret = self._uniprot_plugin.http_counters
+        fields: dict[str, Any] = {
+            "page": totals.pages,
+            "rows_total": totals.rows,
+            "proteins_touched_total": totals.touched,
+            "metadata_upserted_total": totals.upserted,
+            "http_requests": http_req,
+            "http_retries": http_ret,
+            "_progress_current": totals.rows,
+        }
+        if p.total_limit:
+            fields["_progress_total"] = p.total_limit
+        emit("fetch_uniprot_metadata.page_done", None, fields, "info")
+        if p.commit_every_page:
+            session.commit()
 
     def _stream_metadata(
         self, p: FetchUniProtMetadataPayload, emit: EmitFn
@@ -288,40 +289,8 @@ class FetchUniProtMetadataOperation:
 
             if p.update_protein_core:
                 pr = protein_map.get(record.accession)
-                if pr is not None:
-                    core_changed = False
-
-                    reviewed = row.get("Reviewed", "").strip().lower()
-                    if pr.reviewed is None and reviewed:
-                        if reviewed == "reviewed":
-                            pr.reviewed = True
-                            core_changed = True
-                        elif reviewed == "unreviewed":
-                            pr.reviewed = False
-                            core_changed = True
-
-                    entry_name = row.get("Entry Name", "").strip()
-                    if pr.entry_name is None and entry_name:
-                        pr.entry_name = entry_name
-                        core_changed = True
-
-                    organism = row.get("Organism", "").strip()
-                    if pr.organism is None and organism:
-                        pr.organism = organism
-                        core_changed = True
-
-                    gene_names = row.get("Gene Names", "").strip()
-                    if pr.gene_name is None and gene_names:
-                        pr.gene_name = gene_names.split()[0]
-                        core_changed = True
-
-                    length = row.get("Length", "").strip()
-                    if pr.length is None and length.isdigit():
-                        pr.length = int(length)
-                        core_changed = True
-
-                    if core_changed:
-                        touched += 1
+                if pr is not None and _backfill_protein_core(pr, row):
+                    touched += 1
 
         return touched, upserted
 
@@ -341,3 +310,45 @@ class FetchUniProtMetadataOperation:
             for m in rows:
                 existing[m.canonical_accession] = m
         return existing
+
+
+def _backfill_protein_core(pr: Protein, row: dict[str, str]) -> bool:
+    """Fill missing ``Protein`` core columns from a UniProt TSV row.
+
+    Only NULL columns are touched; the goal is to backfill rows that
+    came in via the streaming embeddings pipeline (which only knows
+    accession + sequence) with the human-readable fields UniProt
+    publishes alongside. Returns ``True`` if any column was changed.
+    """
+    changed = False
+
+    reviewed = row.get("Reviewed", "").strip().lower()
+    if pr.reviewed is None and reviewed:
+        if reviewed == "reviewed":
+            pr.reviewed = True
+            changed = True
+        elif reviewed == "unreviewed":
+            pr.reviewed = False
+            changed = True
+
+    entry_name = row.get("Entry Name", "").strip()
+    if pr.entry_name is None and entry_name:
+        pr.entry_name = entry_name
+        changed = True
+
+    organism = row.get("Organism", "").strip()
+    if pr.organism is None and organism:
+        pr.organism = organism
+        changed = True
+
+    gene_names = row.get("Gene Names", "").strip()
+    if pr.gene_name is None and gene_names:
+        pr.gene_name = gene_names.split()[0]
+        changed = True
+
+    length = row.get("Length", "").strip()
+    if pr.length is None and length.isdigit():
+        pr.length = int(length)
+        changed = True
+
+    return changed

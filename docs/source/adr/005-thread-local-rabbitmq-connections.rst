@@ -3,9 +3,10 @@ ADR-005: Reusable RabbitMQ connections
 
 :Date: 2026-03-18
 :Author: frapercan
+:Status: Accepted
 
-The problem
------------
+Context
+-------
 
 When a coordinator (``compute_embeddings``) dispatches 500 batches, the
 publisher opened and closed a TCP connection for each ``publish_operation()``
@@ -15,28 +16,28 @@ call.  This caused:
 - ``EMFILE`` (too many open files) errors on the worker.
 - Broker-side resource exhaustion (each connection costs RabbitMQ memory).
 
-What we do
-----------
+Decision
+--------
 
 Each thread keeps **a single connection** stored in ``threading.local()``.
 ``_get_connection()`` returns the existing connection if it is open, or
 creates a new one.  If a publish fails, ``_close_cached_connection()``
 discards the broken connection so the next attempt reconnects.
 
-Result: from O(messages) connections down to O(threads) — in practice,
+Result: from O(messages) connections down to O(threads); in practice,
 1-4 connections total.
 
-Trade-offs
-----------
+Consequences
+------------
 
 - ``pika.BlockingConnection`` is not thread-safe, which is why
   ``threading.local()`` isolation is mandatory.
-- Connections are never proactively closed — they live until the thread
+- Connections are never proactively closed; they live until the thread
   dies or a publish fails.  If RabbitMQ restarts, the first publish after
   restart always fails once (and reconnects automatically).
 
-Rejected
---------
+Rejected alternatives
+---------------------
 
 - **Connection pool** (``pika_pool``): external dependency for something
   ``threading.local()`` solves in 15 lines.

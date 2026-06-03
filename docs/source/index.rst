@@ -1,7 +1,7 @@
 PROTEA
 ======
 
-**Protein Research and Operations Technology for Enriched Analysis**
+**PROtein funcTional Embedding-based Annotation**
 
 PROTEA is the target platform for the progressive consolidation of the
 `Protein Information System (PIS) <https://github.com/CBBIO/protein-information-system>`_
@@ -32,8 +32,9 @@ metadata enrichment, and job orchestration.
       :shadow: md
       :text-align: left
 
-      :bdg-info:`Design` System layers, job lifecycle, data model, all 16
-      operations, the CAFA evaluation protocol, and the ADRs that explain *why*.
+      :bdg-info:`Design` System layers, job lifecycle, data model, the full
+      operation catalogue, the CAFA evaluation protocol, and the ADRs that
+      explain *why*.
 
    .. grid-item-card:: API Reference
       :link: reference/index
@@ -43,6 +44,15 @@ metadata enrichment, and job orchestration.
 
       :bdg-secondary:`autodoc` Symbol-level documentation for ``protea.core``,
       ``protea.infrastructure``, the FastAPI routers, and every worker class.
+
+   .. grid-item-card:: Complexity
+      :link: complexity/index
+      :link-type: doc
+      :shadow: md
+      :text-align: left
+
+      :bdg-warning:`Performance` Big-O profile per pipeline stage, measured
+      hot paths, and a guide to profiling with scalene and pyinstrument.
 
    .. grid-item-card:: Results
       :link: results
@@ -61,9 +71,9 @@ metadata enrichment, and job orchestration.
    :class: tip
 
    A platform for protein functional annotation: from sequence ingestion through
-   GPU embedding computation (ESM-2, ESM3c, T5) and KNN-based GO term prediction
-   to CAFA evaluation and LightGBM re-ranking — with clean separation of
-   infrastructure, execution flow, and domain logic.
+   GPU embedding computation (ESM-2, ESM-C, T5/ProstT5, Ankh) and KNN-based GO
+   term prediction to CAFA evaluation and LightGBM re-ranking, with clean
+   separation of infrastructure, execution flow, and domain logic.
 
 .. toctree::
    :caption: Documentation
@@ -73,9 +83,13 @@ metadata enrichment, and job orchestration.
    introduction
    related_work
    architecture/index
-   plugin-authoring
+   complexity/index
+   guides/plugin-authoring/index
    results
    appendix/index
+   runbooks/index
+   quality/index
+   insights
    glossary
    references
 

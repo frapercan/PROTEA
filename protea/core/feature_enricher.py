@@ -13,14 +13,53 @@ which is pure compute but PROTEA-internal) stay here.
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, NamedTuple
 
 import numpy as np
 from protea_method.feature_enricher import NEW_V6_FEATURE_KEYS
 from protea_method.feature_enricher import enrich_v6_features as _lib_enrich_v6_features
 from sqlalchemy.orm import Session
 
+from protea.core._feature_enricher_helpers import (
+    LabelConfig,
+    compute_ia_weight,
+    make_ancestor_closure,
+    merge_into_existing_leaf,
+    update_synth_entry,
+)
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
+
+
+class AncestorLabelConfig(NamedTuple):
+    """Caller-supplied label-injection knobs for ancestor expansion.
+
+    The training-dump path passes a populated ``gt_pairs`` set so synthetic
+    ancestor rows get a 0/1 label; the live ``predict_go_terms`` path uses
+    the empty default and skips label injection. The per-query
+    :class:`LabelConfig` (with ``q_acc``) is built internally per group.
+    """
+
+    gt_pairs: set[tuple[str, str]] | None = None
+    column: str = "label"
+    present: bool = False
+
+
+@dataclass(frozen=True)
+class KnnEnrichmentContext:
+    """Bundle of KNN-side inputs consumed by :func:`enrich_v6_features`.
+
+    Groups the six per-call inputs that came out of the same KNN /
+    aspect-pivot pipeline upstream (``predict_go_terms_batch``) so the
+    enrichment signature stays under flake8-bugbear's parameter ceiling.
+    """
+
+    valid_accessions: list[str]
+    query_embeddings: np.ndarray
+    neighbors_by_aspect: dict[str, list[list[tuple[str, float]]]]
+    go_map_by_aspect: dict[str, dict[str, list[dict[str, Any]]]]
+    pair_features: dict[tuple[str, str], dict[str, Any]]
+    pca_state: tuple[np.ndarray, np.ndarray] | None
 
 
 def _load_go_term_metadata(
@@ -76,12 +115,7 @@ def enrich_v6_features(
     predictions: list[dict[str, Any]],
     *,
     session: Session,
-    valid_accessions: list[str],
-    query_embeddings: np.ndarray,
-    neighbors_by_aspect: dict[str, list[list[tuple[str, float]]]],
-    go_map_by_aspect: dict[str, dict[str, list[dict[str, Any]]]],
-    pair_features: dict[tuple[str, str], dict[str, Any]],
-    pca_state: tuple[np.ndarray, np.ndarray] | None,
+    ctx: KnnEnrichmentContext,
     compute_taxonomy: bool,
 ) -> None:
     """Compute the 25 v6 features and merge them into each ``pred`` dict in place.
@@ -96,19 +130,19 @@ def enrich_v6_features(
     if not predictions:
         return
 
-    gtids_in_play = _collect_gtids_in_play(predictions, go_map_by_aspect)
+    gtids_in_play = _collect_gtids_in_play(predictions, ctx.go_map_by_aspect)
     go_id_map, go_aspect_map = _load_go_term_metadata(session, gtids_in_play)
 
     _lib_enrich_v6_features(
         predictions,
         go_id_map=go_id_map,
         go_aspect_map=go_aspect_map,
-        valid_accessions=valid_accessions,
-        query_embeddings=query_embeddings,
-        neighbors_by_aspect=neighbors_by_aspect,
-        go_map_by_aspect=go_map_by_aspect,
-        pair_features=pair_features,
-        pca_state=pca_state,
+        valid_accessions=ctx.valid_accessions,
+        query_embeddings=ctx.query_embeddings,
+        neighbors_by_aspect=ctx.neighbors_by_aspect,
+        go_map_by_aspect=ctx.go_map_by_aspect,
+        pair_features=ctx.pair_features,
+        pca_state=ctx.pca_state,
         compute_taxonomy=compute_taxonomy,
     )
 
@@ -119,62 +153,25 @@ def expand_predictions_to_ancestors(
     parent_map: dict[str, set[str]] | dict[str, list[str]],
     k_limit: int,
     ia_weights: dict[str, float] | None = None,
-    gt_pairs: set[tuple[str, str]] | None = None,
-    label_column: str = "label",
-    label_field_present: bool = False,
+    labels: AncestorLabelConfig = AncestorLabelConfig(),
 ) -> list[dict[str, Any]]:
     """Expand each leaf prediction to its is_a / part_of ancestor closure.
 
     Mirrors the in-loop expansion in
     ``protea.core.training_dump_helpers._knn_transfer_and_label`` so
     the live ``predict_go_terms`` path and the offline dump helper
-    share a single canonical implementation. Without it the
-    candidate sets diverge: the lab dump expanded to ancestors, live
-    KNN didn't, and v9 / v10 boosters scored LK / PK candidates on a
-    feature distribution they never saw at training time.
+    share a single canonical implementation.
 
-    Per ``(protein_accession, aspect)`` group, adds the ancestor
-    closure of each leaf go_id. When an ancestor is itself already
-    a leaf candidate, votes merge into the existing record (bumping
-    ``neighbor_vote_fraction`` / ``neighbor_min_distance``).
-    Otherwise a synthetic record clones the closest leaf and
-    overrides ``go_id``. Synthetic records inherit the leaf's
-    per-pair features verbatim (alignment, taxonomy, anc2vec,
-    emb_pca) which matches the train-side convention.
+    Per ``(protein_accession, aspect)`` group, ancestor go_ids merge
+    into existing leaves (bumping vote / min-distance) or land as
+    synthetic rows that clone the closest leaf and override ``go_id``.
+    ``labels`` carries the training-dump-only (gt_pairs, column,
+    present) triple; the live path leaves the default.
     """
     if not predictions:
         return predictions
 
-    pm: dict[str, frozenset[str]] = {
-        c: frozenset(parents) for c, parents in (parent_map or {}).items()
-    }
-    closure: dict[str, frozenset[str]] = {}
-
-    def _ancestors(gid: str) -> frozenset[str]:
-        cached = closure.get(gid)
-        if cached is not None:
-            return cached
-        seen: set[str] = set()
-        stack = [gid]
-        while stack:
-            node = stack.pop()
-            for parent in pm.get(node, ()):
-                if parent not in seen:
-                    seen.add(parent)
-                    stack.append(parent)
-        result = frozenset(seen)
-        closure[gid] = result
-        return result
-
-    def _ia_weight(anc_gid: str, leaf_gid: str) -> float:
-        if not ia_weights:
-            return 1.0
-        anc_w = float(ia_weights.get(anc_gid, 0.0))
-        leaf_w = float(ia_weights.get(leaf_gid, 0.0))
-        if leaf_w <= 0.0:
-            return 1.0
-        return anc_w / leaf_w
-
+    ancestors = make_ancestor_closure(parent_map)
     k_limit_f = float(k_limit) if k_limit > 0 else 1.0
 
     groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
@@ -184,45 +181,24 @@ def expand_predictions_to_ancestors(
 
     out: list[dict[str, Any]] = []
     for (q_acc, _aspect), recs in groups.items():
+        label_ctx = LabelConfig(
+            q_acc=q_acc,
+            gt_pairs=labels.gt_pairs,
+            column=labels.column,
+            present=labels.present,
+        )
         leaf_by_gid: dict[str, dict[str, Any]] = {r["go_id"]: r for r in recs}
         synth: dict[str, dict[str, Any]] = {}
         for leaf_gid, leaf_rec in list(leaf_by_gid.items()):
             leaf_d = float(leaf_rec.get("distance", 1.0))
-            for anc in _ancestors(leaf_gid):
-                w = _ia_weight(anc, leaf_gid)
+            for anc in ancestors(leaf_gid):
+                vote_increment = compute_ia_weight(anc, leaf_gid, ia_weights) / k_limit_f
                 if anc in leaf_by_gid:
-                    leaf_anc = leaf_by_gid[anc]
-                    leaf_anc["neighbor_vote_fraction"] = min(
-                        1.0,
-                        float(leaf_anc.get("neighbor_vote_fraction", 0.0))
-                        + w / k_limit_f,
+                    merge_into_existing_leaf(
+                        leaf_by_gid[anc], leaf_rec, vote_increment, leaf_d
                     )
-                    lmd = float(leaf_rec.get("neighbor_min_distance", leaf_d))
-                    cur_md = float(leaf_anc.get("neighbor_min_distance", leaf_d))
-                    if lmd < cur_md:
-                        leaf_anc["neighbor_min_distance"] = lmd
                     continue
-                entry = synth.get(anc)
-                if entry is None or leaf_d < float(entry.get("distance", float("inf"))):
-                    base = dict(leaf_rec)
-                    base["go_id"] = anc
-                    if label_field_present:
-                        base[label_column] = (
-                            1 if (gt_pairs and (q_acc, anc) in gt_pairs) else 0
-                        )
-                    prior_frac = (
-                        float(entry["neighbor_vote_fraction"])
-                        if entry is not None
-                        else 0.0
-                    )
-                    base["neighbor_vote_fraction"] = min(1.0, prior_frac + w / k_limit_f)
-                    synth[anc] = base
-                else:
-                    entry["neighbor_vote_fraction"] = min(
-                        1.0,
-                        float(entry["neighbor_vote_fraction"]) + w / k_limit_f,
-                    )
-
+                update_synth_entry(synth, anc, leaf_rec, leaf_d, vote_increment, label_ctx)
         out.extend(leaf_by_gid.values())
         out.extend(synth.values())
     return out
@@ -255,6 +231,7 @@ def load_parent_map(session: Session, snapshot_id: uuid.UUID) -> dict[str, set[s
 
 __all__ = [
     "NEW_V6_FEATURE_KEYS",
+    "AncestorLabelConfig",
     "enrich_v6_features",
     "expand_predictions_to_ancestors",
     "load_parent_map",

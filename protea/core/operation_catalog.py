@@ -14,6 +14,12 @@ from protea.core.operations.compute_embeddings import (
     ComputeEmbeddingsOperation,
     StoreEmbeddingsOperation,
 )
+from protea.core.operations.export_minijobs import (
+    ExportCoordinatorOperation,
+    ExportFeaturesBatchOperation,
+    ExportKnnBatchOperation,
+    ExportWriteOperation,
+)
 from protea.core.operations.export_research_dataset import (
     ExportResearchDatasetOperation,
 )
@@ -21,6 +27,9 @@ from protea.core.operations.fetch_uniprot_metadata import FetchUniProtMetadataOp
 from protea.core.operations.generate_evaluation_set import GenerateEvaluationSetOperation
 from protea.core.operations.insert_proteins import InsertProteinsOperation
 from protea.core.operations.load_goa_annotations import LoadGOAAnnotationsOperation
+from protea.core.operations.load_interpro_go_mapping import (
+    LoadInterProGoMappingOperation,
+)
 from protea.core.operations.load_ontology_snapshot import LoadOntologySnapshotOperation
 from protea.core.operations.load_quickgo_annotations import LoadQuickGOAnnotationsOperation
 from protea.core.operations.ping import PingOperation
@@ -29,7 +38,14 @@ from protea.core.operations.predict_go_terms import (
     PredictGOTermsOperation,
     StorePredictionsOperation,
 )
+from protea.core.operations.predict_go_terms_from_interpro import (
+    PredictGOTermsFromInterProOperation,
+)
+from protea.core.operations.refresh_goa_release_dates import (
+    RefreshGoaReleaseDatesOperation,
+)
 from protea.core.operations.run_cafa_evaluation import RunCafaEvaluationOperation
+from protea.core.operations.run_interproscan_batch import RunInterProScanBatchOperation
 
 
 def build_operation_registry() -> OperationRegistry:
@@ -40,6 +56,8 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(LoadOntologySnapshotOperation())
     registry.register(LoadQuickGOAnnotationsOperation())
     registry.register(LoadGOAAnnotationsOperation())
+    registry.register(LoadInterProGoMappingOperation())
+    registry.register(RunInterProScanBatchOperation())
     registry.register(GenerateEvaluationSetOperation())
     registry.register(RunCafaEvaluationOperation())
     registry.register(ComputeEmbeddingsOperation())
@@ -48,10 +66,20 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(PredictGOTermsOperation())
     registry.register(PredictGOTermsBatchOperation())
     registry.register(StorePredictionsOperation())
+    registry.register(PredictGOTermsFromInterProOperation())
+    registry.register(RefreshGoaReleaseDatesOperation())
     # TrainRerankerOperation / TrainRerankerAutoOperation are no longer
     # publicly registered: all re-ranker training moves to
     # protea-reranker-lab. They remain importable as internal helpers —
     # ExportResearchDatasetOperation still uses TrainRerankerAutoOperation
     # in-process to run the dump-only pipeline.
     registry.register(ExportResearchDatasetOperation())
+    # Export minijob pipeline (env-gated: PROTEA_EXPORT_MINIJOBS=1).
+    # export_coordinator runs on protea.training (same queue as the monolithic
+    # export_research_dataset; only one of the two is dispatched per job).
+    # The three OperationConsumers run on dedicated sub-queues.
+    registry.register(ExportCoordinatorOperation())
+    registry.register(ExportKnnBatchOperation())
+    registry.register(ExportFeaturesBatchOperation())
+    registry.register(ExportWriteOperation())
     return registry

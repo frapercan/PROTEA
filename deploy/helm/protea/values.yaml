@@ -1,0 +1,289 @@
+# Default values for the PROTEA chart.
+# The chart mirrors the service set declared in docker-compose.yml so that a
+# single source of truth describes the system locally (compose) and on
+# Kubernetes (helm). Every configurable knob below has a stable shape; tune
+# resources, replicas, images, and credentials per environment.
+
+# --- Global settings -------------------------------------------------------
+global:
+  # Pull policy applied to every PROTEA-owned image (api / workers / frontend).
+  imagePullPolicy: IfNotPresent
+  imagePullSecrets: []
+  # Cluster-internal DNS suffix; rarely needs overriding.
+  clusterDomain: cluster.local
+
+# --- PROTEA shared image ---------------------------------------------------
+# api + migrate + workers all share this image (built from the repo root
+# Dockerfile and published to ghcr.io by the docker-compose.prod.yml flow).
+image:
+  repository: ghcr.io/frapercan/protea
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# Frontend (apps/web) image; built separately because it ships the Next.js
+# bundle and not the python runtime.
+frontendImage:
+  repository: ghcr.io/frapercan/protea-frontend
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# --- Connection strings ----------------------------------------------------
+# Both URLs are derived inside each Deployment template from the embedded
+# secret (see templates/secrets.yaml). Override here only when pointing the
+# stack at an external database or broker.
+database:
+  # When `internal: true`, the chart deploys postgres as a StatefulSet. When
+  # false, the chart skips postgres and uses `externalUrl` verbatim.
+  internal: true
+  user: protea
+  password: protea
+  name: protea
+  host: protea-postgres
+  port: 5432
+  externalUrl: ""
+
+amqp:
+  internal: true
+  user: guest
+  password: guest
+  host: protea-rabbitmq
+  port: 5672
+  externalUrl: ""
+
+objectStore:
+  # MinIO is profile-gated in compose; here it is opt-in via `enabled`.
+  enabled: false
+  rootUser: minioadmin
+  rootPassword: minioadmin
+
+# --- Postgres (pgvector) ---------------------------------------------------
+postgres:
+  image:
+    repository: pgvector/pgvector
+    tag: pg16
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 5432
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+  resources:
+    limits:
+      memory: 2Gi
+      cpu: "2"
+    requests:
+      memory: 512Mi
+      cpu: "200m"
+  # Optional init SQL (mirrors docker/init.sql). When non-empty it is mounted
+  # at /docker-entrypoint-initdb.d/init.sql via a ConfigMap.
+  initSql: |
+    CREATE EXTENSION IF NOT EXISTS vector;
+
+# --- RabbitMQ --------------------------------------------------------------
+rabbitmq:
+  image:
+    repository: rabbitmq
+    tag: 3-management
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    amqpPort: 5672
+    managementPort: 15672
+  resources:
+    limits:
+      memory: 512Mi
+      cpu: "1"
+    requests:
+      memory: 256Mi
+      cpu: "100m"
+
+# --- MinIO -----------------------------------------------------------------
+minio:
+  image:
+    repository: minio/minio
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    apiPort: 9000
+    consolePort: 9001
+  persistence:
+    enabled: true
+    size: 50Gi
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+  resources:
+    limits:
+      memory: 512Mi
+      cpu: "1"
+    requests:
+      memory: 128Mi
+      cpu: "100m"
+
+# --- Migrations job --------------------------------------------------------
+# Runs `alembic upgrade head` as a pre-install / pre-upgrade hook so api and
+# workers start against an up-to-date schema. Mirrors the `migrate` compose
+# service.
+migrations:
+  enabled: true
+  resources:
+    limits:
+      memory: 512Mi
+      cpu: "500m"
+    requests:
+      memory: 128Mi
+      cpu: "100m"
+  backoffLimit: 3
+
+# --- API -------------------------------------------------------------------
+api:
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 8000
+  resources:
+    limits:
+      memory: 1Gi
+      cpu: "1"
+    requests:
+      memory: 256Mi
+      cpu: "200m"
+  # Optional ingress (off by default; cluster operators tend to plug their own).
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: protea.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+  # Extra env values applied to every PROTEA-owned pod (api + workers).
+  extraEnv: []
+
+# --- Workers ---------------------------------------------------------------
+# Each entry maps 1:1 to a worker-* compose service. Override per-worker
+# replicaCount, resources, or extraArgs as needed.
+workers:
+  jobs:
+    enabled: true
+    queue: protea.jobs
+    replicaCount: 1
+    resources:
+      limits:
+        memory: 2Gi
+        cpu: "1"
+      requests:
+        memory: 256Mi
+        cpu: "200m"
+  embeddings:
+    enabled: true
+    queue: protea.embeddings
+    replicaCount: 1
+    resources:
+      limits:
+        memory: 2Gi
+        cpu: "2"
+      requests:
+        memory: 512Mi
+        cpu: "200m"
+  embeddingsBatch:
+    enabled: true
+    queue: protea.embeddings.batch
+    replicaCount: 1
+    # GPU-capable worker; populate the runtimeClassName / nodeSelector /
+    # tolerations on clusters that expose nvidia.com/gpu.
+    runtimeClassName: ""
+    nodeSelector: {}
+    tolerations: []
+    resources:
+      limits:
+        memory: 4Gi
+        cpu: "4"
+      requests:
+        memory: 1Gi
+        cpu: "500m"
+    gpu:
+      enabled: false
+      count: 1
+  embeddingsWrite:
+    enabled: true
+    queue: protea.embeddings.write
+    replicaCount: 1
+    resources:
+      limits:
+        memory: 1Gi
+        cpu: "1"
+      requests:
+        memory: 128Mi
+        cpu: "100m"
+  predictionsBatch:
+    enabled: true
+    queue: protea.predictions.batch
+    replicaCount: 1
+    resources:
+      limits:
+        memory: 4Gi
+        cpu: "2"
+      requests:
+        memory: 512Mi
+        cpu: "200m"
+  predictionsWrite:
+    enabled: true
+    queue: protea.predictions.write
+    replicaCount: 1
+    resources:
+      limits:
+        memory: 1Gi
+        cpu: "1"
+      requests:
+        memory: 128Mi
+        cpu: "100m"
+  reaper:
+    enabled: true
+    queue: reaper
+    replicaCount: 1
+    resources:
+      limits:
+        memory: 256Mi
+        cpu: "200m"
+      requests:
+        memory: 64Mi
+        cpu: "50m"
+
+# --- Frontend (Next.js) ----------------------------------------------------
+frontend:
+  enabled: true
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 3000
+  resources:
+    limits:
+      memory: 512Mi
+      cpu: "1"
+    requests:
+      memory: 128Mi
+      cpu: "100m"
+  # Proxied API URL exposed to the browser. Defaults match docker-compose.yml.
+  publicApiUrl: /api-proxy
+
+# --- Pod-level extras ------------------------------------------------------
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Service accounts: chart-level toggle. Off by default; flip when the
+# cluster enforces non-default SAs.
+serviceAccount:
+  create: false
+  name: ""
+  annotations: {}

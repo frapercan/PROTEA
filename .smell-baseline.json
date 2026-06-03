@@ -1,0 +1,19 @@
+{
+  "thresholds": {
+    "file_loc": 800,
+    "class_loc": 500,
+    "method_loc": 60,
+    "param_count": 6
+  },
+  "offenders": [
+    {
+      "key": "method::protea/api/routers/annotate.py::annotate",
+      "kind": "method",
+      "path": "protea/api/routers/annotate.py",
+      "name": "annotate",
+      "line": 99,
+      "metric": 61,
+      "threshold": 60
+    }
+  ]
+}

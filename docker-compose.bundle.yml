@@ -1,0 +1,214 @@
+# docker-compose.bundle.yml
+#
+# The protea-bundle. A single self-contained compose file that brings up
+# the full PROTEA stack for local smoke runs from pre-built images
+# published on ghcr.io (no local build context required).
+#
+# Use it when you want to reproduce the production-shaped wiring on a
+# laptop without cloning every plugin repo or running `manage.sh`.
+#
+# Quick start:
+#   docker compose -f docker-compose.bundle.yml --env-file .env.bundle up -d
+#   curl -s http://localhost:8000/health   # {"status":"ok"}
+#   docker compose -f docker-compose.bundle.yml down -v
+#
+# Companion files:
+#   - .env.bundle.example           sample env (copy to .env.bundle)
+#   - docker/init.sql               postgres bootstrap (enables pgvector)
+#   - docker/README.md              full quickstart + smoke recipe
+#
+# Differences vs docker-compose.yml + docker-compose.prod.yml:
+#   - Standalone (no second `-f` override), self-documenting service set.
+#   - Pulls ghcr.io/frapercan/protea images by tag, no local Dockerfile build.
+#   - Trimmed worker set (one per logical queue family) so the bundle fits
+#     comfortably on a 16 GB laptop. The full prod set lives in
+#     docker-compose.yml + docker-compose.prod.yml.
+#   - Explicit network so monitoring stacks can attach via external network.
+
+name: protea-bundle
+
+services:
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: protea-bundle-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-protea}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-protea}
+      POSTGRES_DB: ${POSTGRES_DB:-protea}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-protea} -d ${POSTGRES_DB:-protea}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - protea-bundle
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: protea-bundle-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-guest}
+    ports:
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_MGMT_PORT:-15672}:15672"
+      # rabbitmq_prometheus plugin metrics endpoint.
+      - "${RABBITMQ_PROMETHEUS_PORT:-15692}:15692"
+    volumes:
+      - ./docker/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks:
+      - protea-bundle
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+
+  migrate:
+    image: ghcr.io/frapercan/protea:${PROTEA_IMAGE_TAG:-latest}
+    container_name: protea-bundle-migrate
+    environment:
+      PROTEA_DB_URL: postgresql+psycopg://${POSTGRES_USER:-protea}:${POSTGRES_PASSWORD:-protea}@postgres:5432/${POSTGRES_DB:-protea}
+      PROTEA_AMQP_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672/
+      PROTEA_STORAGE_BACKEND: local
+    command: alembic upgrade head
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - protea-bundle
+
+  api:
+    image: ghcr.io/frapercan/protea:${PROTEA_IMAGE_TAG:-latest}
+    container_name: protea-bundle-api
+    environment:
+      PROTEA_DB_URL: postgresql+psycopg://${POSTGRES_USER:-protea}:${POSTGRES_PASSWORD:-protea}@postgres:5432/${POSTGRES_DB:-protea}
+      PROTEA_AMQP_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672/
+      PROTEA_STORAGE_BACKEND: local
+      PROTEA_ADMIN_TOKEN: ${PROTEA_ADMIN_TOKEN:-protea-admin}
+      PROTEA_ALLOWED_ORIGINS: ${PROTEA_ALLOWED_ORIGINS:-http://localhost:3000}
+    ports:
+      - "${PROTEA_API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health',timeout=3).status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - protea-bundle
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  worker-jobs:
+    image: ghcr.io/frapercan/protea:${PROTEA_IMAGE_TAG:-latest}
+    container_name: protea-bundle-worker-jobs
+    environment:
+      PROTEA_DB_URL: postgresql+psycopg://${POSTGRES_USER:-protea}:${POSTGRES_PASSWORD:-protea}@postgres:5432/${POSTGRES_DB:-protea}
+      PROTEA_AMQP_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672/
+      PROTEA_STORAGE_BACKEND: local
+    command: python scripts/worker.py --queue protea.jobs
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - protea-bundle
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  worker-ping:
+    image: ghcr.io/frapercan/protea:${PROTEA_IMAGE_TAG:-latest}
+    container_name: protea-bundle-worker-ping
+    environment:
+      PROTEA_DB_URL: postgresql+psycopg://${POSTGRES_USER:-protea}:${POSTGRES_PASSWORD:-protea}@postgres:5432/${POSTGRES_DB:-protea}
+      PROTEA_AMQP_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672/
+      PROTEA_STORAGE_BACKEND: local
+    command: python scripts/worker.py --queue protea.ping
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - protea-bundle
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  worker-embeddings:
+    image: ghcr.io/frapercan/protea:${PROTEA_IMAGE_TAG:-latest}
+    container_name: protea-bundle-worker-embeddings
+    environment:
+      PROTEA_DB_URL: postgresql+psycopg://${POSTGRES_USER:-protea}:${POSTGRES_PASSWORD:-protea}@postgres:5432/${POSTGRES_DB:-protea}
+      PROTEA_AMQP_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672/
+      PROTEA_STORAGE_BACKEND: local
+    command: python scripts/worker.py --queue protea.embeddings
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - protea-bundle
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  web:
+    image: ghcr.io/frapercan/protea-frontend:${PROTEA_FRONTEND_TAG:-latest}
+    container_name: protea-bundle-web
+    environment:
+      PROTEA_API_URL: http://api:8000
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api-proxy}
+    ports:
+      - "${PROTEA_WEB_PORT:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - protea-bundle
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+networks:
+  protea-bundle:
+    name: protea-bundle
+    driver: bridge
+
+volumes:
+  postgres_data:
+    name: protea-bundle-postgres-data

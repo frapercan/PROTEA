@@ -23,10 +23,8 @@ from __future__ import annotations
 
 import importlib
 
-import pytest
-
 import protea_contracts
-
+import pytest
 
 # ---------------------------------------------------------------------------
 # Re-export identity (active)
@@ -108,8 +106,11 @@ class TestShaConsistency:
         # column forces a SemVer major bump on protea-contracts AND a
         # re-train of every downstream LightGBM booster. Pinned here
         # too so PROTEA's CI fails before the booster cache invalidates.
+        # T-RES.1b rolled this forward to v0.3.0 of protea-contracts,
+        # which added the four ``lineage_*`` columns; prior golden
+        # ``"145592ed186c"`` is superseded.
         sha = protea_contracts.compute_schema_sha(protea_contracts.ALL_FEATURES)
-        assert sha == "145592ed186c"
+        assert sha == "5dc696be2f18"
 
 
 # ---------------------------------------------------------------------------

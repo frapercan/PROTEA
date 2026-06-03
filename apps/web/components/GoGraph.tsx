@@ -18,11 +18,19 @@ function classifyNode(
   predictedGoIds?: Set<string>,
 ): "both" | "predicted_only" | "known_only" | "ancestor" {
   if (!isQuery) return "ancestor";
-  const isKnown    = knownGoIds?.has(goId)    ?? false;
-  const isPredicted = predictedGoIds?.has(goId) ?? true;
+  // When the caller provides neither set, every query node represents a
+  // real annotation the protein already carries (the protein-detail view).
+  // Treat that case as "known_only". The previous default of true on
+  // isPredicted incorrectly painted known annotations as predictions.
+  const hasKnownSet = knownGoIds !== undefined;
+  const hasPredictedSet = predictedGoIds !== undefined;
+  if (!hasKnownSet && !hasPredictedSet) return "known_only";
+  const isKnown = hasKnownSet ? knownGoIds.has(goId) : false;
+  const isPredicted = hasPredictedSet ? predictedGoIds.has(goId) : false;
   if (isKnown && isPredicted) return "both";
   if (isKnown)                return "known_only";
-  return "predicted_only";
+  if (isPredicted)            return "predicted_only";
+  return "ancestor";
 }
 
 // ── constants ────────────────────────────────────────────────────────────────
@@ -263,7 +271,7 @@ export default function GoGraph({ subgraph, knownGoIds, predictedGoIds, height =
 
   if (subgraph.nodes.length === 0) {
     return (
-      <div className="flex items-center justify-center h-24 text-sm text-gray-400">
+      <div className="flex items-center justify-center h-24 text-sm text-slate-600">
         No graph data available.
       </div>
     );
@@ -281,7 +289,7 @@ export default function GoGraph({ subgraph, knownGoIds, predictedGoIds, height =
               className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
                 activeAspect === asp
                   ? (ASPECT_TAB_COLORS[asp] ?? "border-blue-600 text-blue-600")
-                  : "border-transparent text-gray-400 hover:text-gray-600"
+                  : "border-transparent text-slate-600 hover:text-slate-600"
               }`}
             >
               {ASPECT_LABELS[asp] ?? asp}
@@ -300,15 +308,15 @@ export default function GoGraph({ subgraph, knownGoIds, predictedGoIds, height =
             style={{ left: tooltip.x + 12, top: tooltip.y + 12 }}
           >
             <p className="font-mono font-semibold text-blue-600">{tooltip.goId}</p>
-            {tooltip.name && <p className="text-gray-700 mt-0.5">{tooltip.name}</p>}
-            <p className="mt-1 text-gray-400 capitalize">{tooltip.kind.replace(/_/g, " ")}</p>
+            {tooltip.name && <p className="text-slate-700 mt-0.5">{tooltip.name}</p>}
+            <p className="mt-1 text-slate-600 capitalize">{tooltip.kind.replace(/_/g, " ")}</p>
           </div>
         )}
       </div>
 
       {/* Legend */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 border-t bg-gray-50 text-xs text-gray-500">
-        <span className="font-medium text-gray-600">Nodes:</span>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 border-t bg-slate-50 text-xs text-slate-500">
+        <span className="font-medium text-slate-600">Nodes:</span>
         {NODE_LEGEND.map(({ kind, label, bg, border }) => (
           <span key={kind} className="flex items-center gap-1.5">
             <span className="inline-block w-3 h-3 rounded-sm border"
@@ -318,7 +326,7 @@ export default function GoGraph({ subgraph, knownGoIds, predictedGoIds, height =
         ))}
         <span className="ml-auto flex items-center gap-3">
           <span className="flex items-center gap-1">
-            <span className="inline-block w-4 h-0.5 bg-gray-400 rounded" /> is_a
+            <span className="inline-block w-4 h-0.5 bg-slate-400 rounded" /> is_a
           </span>
           <span className="flex items-center gap-1">
             <span className="inline-block w-4 border-t border-dashed border-yellow-400" /> part_of

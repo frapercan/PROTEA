@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, func
+from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -27,6 +27,11 @@ class PredictionSet(Base):
     """
 
     __tablename__ = "prediction_set"
+    __table_args__ = (
+        # T3.5: list endpoints order by ``created_at DESC``; Postgres
+        # walks an ASC b-tree backwards just as efficiently.
+        Index("ix_prediction_set_created_at", "created_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     embedding_config_id: Mapped[uuid.UUID] = mapped_column(

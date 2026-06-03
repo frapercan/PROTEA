@@ -4,7 +4,7 @@ ADR-D1: Project structure (7 code repositories plus thesis)
 :Status: Accepted
 :Date: 2026-05-05
 :Phase: F0 (closed); enacted across F0-F2
-:Supersedes: earlier monolith assumption in plan v1
+:Supersedes: earlier monolith assumption in plan revision 1
 
 Context
 -------
@@ -19,7 +19,7 @@ Decision
 Structure C: seven code repositories plus the thesis manuscript. Plugins
 are discovered via Python ``entry_points``. Granularity is per group
 (sources, runners, backends), not per individual plugin. Thesis lives at
-``~/Thesis/thesis/``.
+``~/Thesis2/thesis/``.
 
 Repos: ``protea-core``, ``protea-contracts``, ``protea-method``,
 ``protea-cafaeval``, ``protea-sources``, ``protea-runners``,
@@ -35,4 +35,4 @@ Consequences
 
 Resolution
 ----------
-Closed in master plan v3, 2026-05-05.
+Closed in master plan revision 3, 2026-05-05.

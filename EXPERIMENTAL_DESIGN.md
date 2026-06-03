@@ -1,6 +1,6 @@
-# PROTEA — Experimental Design
+# PROTEA: Experimental Design
 
-**Version**: 1.0 — 2026-04-10
+**Version**: 1.0 (2026-04-10)
 **Status**: Active
 **Scope**: Protein language model (PLM) benchmark for GO term prediction via KNN + learned reranking
 
@@ -61,8 +61,8 @@ H1–H3 are confirmatory; H4 is exploratory and carries forward the **F2 finding
 
 | Scale | BERT-like encoder | T5 encoder (sequence-only) | T5 encoder (structure-aware) |
 |---|---|---|---|
-| **Small (~300–650M)** | ESMC-300M, ESMC-600M, ESM2-650M | Ankh-base (~450M) | — |
-| **Medium (~1–2B)** | — | Ankh-large (~1.9B) | — |
+| **Small (~300–650M)** | ESMC-300M, ESMC-600M, ESM2-650M | Ankh-base (~450M) | n/a |
+| **Medium (~1–2B)** | n/a | Ankh-large (~1.9B) | n/a |
 | **Large (~3B)** | ESM2-3B | ProtT5-XL | ProstT5-XL |
 
 ### Planned pairwise comparisons
@@ -92,17 +92,17 @@ Identical to the ESMC/ProstT5 preliminary experiments in `EXPERIMENTS.md` to pre
 
 ---
 
-## 6. Pipeline protocol — pinned hyperparameters
+## 6. Pipeline protocol (pinned hyperparameters)
 
 Every model is put through the same three-stage pipeline with **identical hyperparameters**. No per-model tuning. Fair comparison requires this invariance.
 
-### 6.1 Embeddings — `compute_embeddings`
+### 6.1 Embeddings: `compute_embeddings`
 - Pooling: `mean` over residue representations
 - Precision: fp32 at storage (cast to fp16 at KNN load time via `_REF_CACHE`)
 - Storage: pgvector `VECTOR(dim)` per `(sequence, config, chunk)`
 - Full reference set (~527k sequences) + evaluation set query embeddings
 
-### 6.2 KNN retrieval — `predict_go_terms`
+### 6.2 KNN retrieval: `predict_go_terms`
 - `k = 5`
 - `metric = cosine`
 - `backend = faiss`, `faiss_index_type = IVFFlat`, `nlist = 256`, `nprobe = 32`
@@ -110,7 +110,7 @@ Every model is put through the same three-stage pipeline with **identical hyperp
 - `compute_alignments = true` (NW + SW via parasail/BLOSUM62)
 - `compute_taxonomy = true` (NCBI taxonomy LCA via ete3)
 
-### 6.3 Reranker training — `train_reranker_auto` (v4 budget)
+### 6.3 Reranker training: `train_reranker_auto` (v4 budget)
 - `num_boost_round = 5000`
 - `early_stopping_rounds = 100`
 - `val_fraction = 0.2`
@@ -119,11 +119,11 @@ Every model is put through the same three-stage pipeline with **identical hyperp
 - `test_versions = [229]`
 - `compute_alignments = true`, `compute_taxonomy = true`
 - `ia_file = data/benchmarks/IA_cafa6.tsv` (IA-weighted sample weighting: `sample_weight = IA(go_term)`)
-- **3 models per embedding (NK / LK / PK)** — per-category, not per-aspect (justified in `RERANKER.md` §6.3)
+- **3 models per embedding (NK / LK / PK)**: per-category, not per-aspect (justified in `RERANKER.md` §6.3)
 - Objective: **binary cross-entropy (LightGBM `objective=binary`)**, early stopping on validation AUC. IA weights enter through `sample_weight`, not through the objective. See `RERANKER.md` §6.1 for rationale and the known limitation that a pairwise/listwise rank loss is future work.
 - Name convention: `lgbm_v4_converged_<model_slug>-{nk,lk,pk}`
 
-### 6.4 Evaluation — `run_cafa_evaluation`
+### 6.4 Evaluation: `run_cafa_evaluation`
 - Library: `cafaeval` (integrated via the `run_cafa_evaluation` operation)
 - Metric: **F<sub>max</sub> with IA weighting**, computed per (tier × aspect) cell → 9-dimensional output vector per model×pipeline-stage
 - Pipeline stages reported: `baseline` (embedding only), `alignment_weighted` (best heuristic from Exp 3), `reranker` (v4 LightGBM)
@@ -141,7 +141,7 @@ Pre-registered to prevent post-hoc test-shopping.
 | **Multiple comparisons** | Holm–Bonferroni correction across the planned comparisons in §4 (6 RQ1/RQ2/RQ3 tests) |
 | **Effect size** | Mean F<sub>max</sub> delta ± 95% bootstrap CI (1000 resamples over cells) |
 | **H4 regression** | For each (model, tier): `weight_compensatory = Σ importance(feature)` over features in `{alignment_score_*, similarity_*, identity_*, gaps_pct_*, alignment_length_*, taxonomic_*}`. Fit `weight_compensatory ~ baseline_Fmax` across the 8 models via OLS; report slope, p-value, R² |
-| **Reporting convention** | All numbers from `cafaeval` with IA weighting. **Never** use the internal `test_evaluation` field from `train_reranker_auto` for thesis claims — it is unweighted and biased (see `project_reranker_benchmark.md`) |
+| **Reporting convention** | All numbers from `cafaeval` with IA weighting. **Never** use the internal `test_evaluation` field from `train_reranker_auto` for thesis claims (it is unweighted and biased; see `project_reranker_benchmark.md`) |
 
 ---
 
@@ -152,15 +152,15 @@ Ordered so each stage produces usable partial results; no stage blocks on the ne
 | Step | Action | Depends on | Compute estimate |
 |---|---|---|---|
 | 1 | Wait for v4 rerankers (ESMC-300M, ProstT5-XL) to finish | running | ~4h total (sequential) |
-| 2 | Create 6 `EmbeddingConfig` rows with pinned pooling/precision | — | minutes |
+| 2 | Create 6 `EmbeddingConfig` rows with pinned pooling/precision | n/a | minutes |
 | 3 | Run `compute_embeddings` for the 6 new models over ref+eval sets | step 2 | 2–10h per model; ~1.5–2 days total sequential |
 | 4 | Run `predict_go_terms` (with alignments + taxonomy) for the 6 new models | step 3 | 1–2h per model |
 | 5 | Run `train_reranker_auto` v4 for the 6 new models in `protea.training` queue | step 4 | 2–4h per model; ~1 day total sequential |
 | 6 | Run `run_cafa_evaluation` for all 8 models × 3 stages = 24 evals | step 5 + existing | ~10 min per eval; ~4h total |
 | 7 | Extract feature importance from all 24 (model × tier) rerankers | step 5 | minutes (script) |
-| 8 | Apply the statistical protocol in §7 to the aggregated results | steps 6–7 | — |
-| 9 | Update `EXPERIMENTS.md` with the per-model result tables | step 8 | — |
-| 10 | Compile results into thesis chapter / appendix | step 9 | — |
+| 8 | Apply the statistical protocol in §7 to the aggregated results | steps 6–7 | n/a |
+| 9 | Update `EXPERIMENTS.md` with the per-model result tables | step 8 | n/a |
+| 10 | Compile results into thesis chapter / appendix | step 9 | n/a |
 
 **Total wall-clock (pessimistic, fully serial):** ~3–4 days of compute. Can be compressed with overlapping embedding/training workers if GPU capacity allows.
 
@@ -182,7 +182,7 @@ Ordered so each stage produces usable partial results; no stage blocks on the ne
 1. **Not training-data matched.** Each PLM was pretrained on different corpora (UniRef50 subsets at different points in time, sometimes Big Fantastic Database for ProtT5, etc.). Perfect controlled comparison is impossible without re-pretraining, which is out of scope.
 2. **Architecture is not a clean isolated variable.** T5 encoders and BERT-style encoders differ in depth, attention masking, objective (span corruption vs MLM), and training data. RQ1's conclusion will be **correlational**, not causal.
 3. **Scale is coarse.** Three tiers (~300M / ~1.5B / ~3B) is the maximum granularity this compute budget allows. Smooth scaling curves are out of reach.
-4. **Ankh backend.** Ankh is exposed in PROTEA as a **dedicated backend** (`model_backend = "ankh"`), not as an alias of `t5`. Internally it reuses the T5 batched pipeline via `_embed_t5(..., use_aa2fold=False)` but uses `AutoTokenizer` instead of `T5Tokenizer` and never injects the `<AA2fold>` prefix — ensuring clean separation in the benchmark tables. The distinction matters for RQ1: Ankh results are reported under their own family row, not merged into "T5 encoder".
+4. **Ankh backend.** Ankh is exposed in PROTEA as a **dedicated backend** (`model_backend = "ankh"`), not as an alias of `t5`. Internally it reuses the T5 batched pipeline via `_embed_t5(..., use_aa2fold=False)` but uses `AutoTokenizer` instead of `T5Tokenizer` and never injects the `<AA2fold>` prefix, ensuring clean separation in the benchmark tables. The distinction matters for RQ1: Ankh results are reported under their own family row, not merged into "T5 encoder".
 5. **ESMC-600M availability.** EvolutionaryScale's public ESMC release must be confirmed to include the 600M variant at time of execution. If unavailable at that scale, substitute with the closest public ESMC size and document the deviation in step 2.
 6. **No seed-variance analysis.** LightGBM training (with fixed seed), KNN retrieval, and embeddings are all deterministic under PROTEA's default config. Variance across re-runs for the same config should be zero; we do not budget compute for confirming this.
 7. **Single evaluation delta.** Only the GOA 220 → 229 delta is used. A multi-delta sensitivity analysis (e.g. 215 → 229, 220 → 225) is a candidate for future work but not planned here.

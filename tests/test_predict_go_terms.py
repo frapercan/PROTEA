@@ -277,100 +277,6 @@ class TestSearchKnn:
 
 
 # ---------------------------------------------------------------------------
-# _predict_batch
-# ---------------------------------------------------------------------------
-
-
-class TestPredictBatch:
-    def _op(self) -> PredictGOTermsBatchOperation:
-        return PredictGOTermsBatchOperation()
-
-    def _payload(self, **kwargs):
-        defaults = {
-            "embedding_config_id": str(uuid.uuid4()),
-            "annotation_set_id": _ANN_SET_ID,
-            "ontology_snapshot_id": _SNAPSHOT_ID,
-            "prediction_set_id": str(uuid.uuid4()),
-            "parent_job_id": str(uuid.uuid4()),
-            "query_accessions": [],
-            "limit_per_entry": 2,
-            # Opt out of features that require sequences/taxonomy: the mock
-            # ref_data in this class never provides them.
-            "compute_alignments": False,
-            "compute_taxonomy": False,
-            "compute_reranker_features": False,
-        }
-        defaults.update(kwargs)
-        return PredictGOTermsBatchPayload.model_validate(defaults)
-
-    def _ref_data(self):
-        return {
-            "accessions": ["P12345", "Q67890"],
-            "embeddings": np.array(
-                [
-                    [1.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0],
-                ],
-                dtype=np.float32,
-            ),
-            "go_map": {
-                "P12345": [{"go_term_id": 1, "qualifier": "enables", "evidence_code": "IDA"}],
-                "Q67890": [{"go_term_id": 2, "qualifier": "involved_in", "evidence_code": "IEA"}],
-            },
-        }
-
-    def test_transfers_go_annotations_from_nearest_neighbor(self) -> None:
-        op = self._op()
-        p = self._payload()
-        ref = self._ref_data()
-        pred_set_id = uuid.uuid4()
-
-        query_embs = np.array([[0.99, 0.01, 0.0]], dtype=np.float32)
-        preds, _, _ = op._predict_batch(["RQUERY"], query_embs, ref, pred_set_id, p)
-
-        assert len(preds) >= 1
-        go_ids = {pr["go_term_id"] for pr in preds}
-        assert 1 in go_ids
-
-    def test_includes_self_as_first_reference(self) -> None:
-        """A query protein that is also a reference should appear as its own
-        nearest neighbor (distance ≈ 0) when it has annotations."""
-        op = self._op()
-        p = self._payload()
-        ref = self._ref_data()
-        pred_set_id = uuid.uuid4()
-        query_embs = np.array([[1.0, 0.0, 0.0]], dtype=np.float32)
-        preds, _, _ = op._predict_batch(["P12345"], query_embs, ref, pred_set_id, p)
-
-        ref_accs = [pr["ref_protein_accession"] for pr in preds]
-        assert "P12345" in ref_accs, "Self should be included as a reference neighbor"
-        # Self-hit must be the first (closest) neighbor
-        assert ref_accs[0] == "P12345"
-
-    def test_distance_threshold_filters_far_neighbors(self) -> None:
-        op = self._op()
-        p = self._payload(distance_threshold=0.01)
-        ref = self._ref_data()
-        pred_set_id = uuid.uuid4()
-
-        query_embs = np.array([[0.0, 0.0, 1.0]], dtype=np.float32)
-        preds, _, _ = op._predict_batch(["RQUERY"], query_embs, ref, pred_set_id, p)
-        assert preds == []
-
-    def test_limit_per_entry_caps_neighbors(self) -> None:
-        op = self._op()
-        p = self._payload(limit_per_entry=1)
-        ref = self._ref_data()
-        pred_set_id = uuid.uuid4()
-
-        query_embs = np.array([[0.7, 0.7, 0.0]], dtype=np.float32)
-        preds, _, _ = op._predict_batch(["RQUERY"], query_embs, ref, pred_set_id, p)
-
-        ref_accs = {pr["ref_protein_accession"] for pr in preds}
-        assert len(ref_accs) == 1
-
-
-# ---------------------------------------------------------------------------
 # execute() — mocked session
 # ---------------------------------------------------------------------------
 
@@ -734,19 +640,19 @@ class TestCsrLookup:
             "P1": [{"go_term_id": 10, "qualifier": "enables", "evidence_code": "IDA"}],
             "P2": [{"go_term_id": 20, "qualifier": None, "evidence_code": "IEA"}],
         }
-        gtids, quals, ecodes, offsets = _build_anno_csr(accessions, go_map)
+        csr = _build_anno_csr(accessions, go_map)
         acc_to_anno_idx = {acc: i for i, acc in enumerate(accessions)}
 
-        result = _csr_lookup({"P1"}, accessions, acc_to_anno_idx, gtids, quals, ecodes, offsets)
+        result = _csr_lookup({"P1"}, acc_to_anno_idx, csr)
         assert "P1" in result
         assert len(result["P1"]) == 1
         assert result["P1"][0]["go_term_id"] == 10
 
     def test_missing_accession_ignored(self) -> None:
-        gtids, quals, ecodes, offsets = _build_anno_csr(["P1"], {"P1": [{"go_term_id": 10}]})
+        csr = _build_anno_csr(["P1"], {"P1": [{"go_term_id": 10}]})
         acc_to_anno_idx = {"P1": 0}
 
-        result = _csr_lookup({"UNKNOWN"}, ["P1"], acc_to_anno_idx, gtids, quals, ecodes, offsets)
+        result = _csr_lookup({"UNKNOWN"}, acc_to_anno_idx, csr)
         assert result == {}
 
 
@@ -801,77 +707,6 @@ class TestPredictGOTermsBatchPayload:
         assert p.compute_alignments is True
         assert p.compute_taxonomy is True
         assert p.compute_reranker_features is True
-
-
-# ---------------------------------------------------------------------------
-# _predict_batch — reranker features
-# ---------------------------------------------------------------------------
-
-
-class TestPredictBatchRerankerFeatures:
-    def _op(self) -> PredictGOTermsBatchOperation:
-        return PredictGOTermsBatchOperation()
-
-    def _payload(self, **kwargs):
-        defaults = {
-            "embedding_config_id": str(uuid.uuid4()),
-            "annotation_set_id": _ANN_SET_ID,
-            "ontology_snapshot_id": _SNAPSHOT_ID,
-            "prediction_set_id": str(uuid.uuid4()),
-            "parent_job_id": str(uuid.uuid4()),
-            "query_accessions": [],
-            "limit_per_entry": 2,
-            # Reranker features ON, alignments/taxonomy OFF: this suite only
-            # exercises voting/neighbor-stat features, not NW/SW or taxonomy.
-            "compute_alignments": False,
-            "compute_taxonomy": False,
-            "compute_reranker_features": True,
-        }
-        defaults.update(kwargs)
-        return PredictGOTermsBatchPayload.model_validate(defaults)
-
-    def test_reranker_features_included_when_enabled(self) -> None:
-        op = self._op()
-        p = self._payload()
-        pred_set_id = uuid.uuid4()
-
-        ref_data = {
-            "accessions": ["REF1", "REF2"],
-            "embeddings": np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32),
-            "go_map": {
-                "REF1": [{"go_term_id": 1, "qualifier": "enables", "evidence_code": "IDA"}],
-                "REF2": [{"go_term_id": 2, "qualifier": None, "evidence_code": "IEA"}],
-            },
-        }
-        query_embs = np.array([[0.9, 0.1]], dtype=np.float32)
-        preds, _, _ = op._predict_batch(["Q1"], query_embs, ref_data, pred_set_id, p)
-
-        assert len(preds) >= 1
-        for pred in preds:
-            assert "vote_count" in pred
-            assert "k_position" in pred
-            assert "go_term_frequency" in pred
-            assert "ref_annotation_density" in pred
-            assert "neighbor_distance_std" in pred
-
-    def test_reranker_features_excluded_when_disabled(self) -> None:
-        op = self._op()
-        p = self._payload(compute_reranker_features=False)
-        pred_set_id = uuid.uuid4()
-
-        ref_data = {
-            "accessions": ["REF1"],
-            "embeddings": np.array([[1.0, 0.0]], dtype=np.float32),
-            "go_map": {
-                "REF1": [{"go_term_id": 1, "qualifier": "enables", "evidence_code": "IDA"}],
-            },
-        }
-        query_embs = np.array([[0.9, 0.1]], dtype=np.float32)
-        preds, _, _ = op._predict_batch(["Q1"], query_embs, ref_data, pred_set_id, p)
-
-        for pred in preds:
-            assert "vote_count" not in pred
-            assert "k_position" not in pred
 
 
 # ---------------------------------------------------------------------------
@@ -1007,13 +842,21 @@ class TestPredictGOTermsBatchReranker:
         dicts = [{"protein_accession": "Q1", "go_term_id": 1, "distance": 0.1}]
         emit, events = self._emit_capture()
 
-        stats = op._apply_reranker_if_aligned(MagicMock(), dicts, p, emit)
+        stats = op._reranker_scorer.apply_if_aligned(MagicMock(), dicts, p, emit)
 
         assert stats is None
         assert any(name == "reranker.skipped" for name, _ in events)
         assert "reranker_score" not in dicts[0]
 
-    def test_schema_mismatch_falls_back(self) -> None:
+    def test_schema_mismatch_raises_hard_failure(self) -> None:
+        """FARM-EXP.5: a stale recorded sha must NOT silently fall
+        back. The scorer raises :class:`SchemaShaMismatchError`
+        which the base worker translates into ``Job.status=failed``.
+        The legacy soft-skip return shape is gone."""
+        from protea.core.operations.predict_go_terms._reranker_scorer import (
+            SchemaShaMismatchError,
+        )
+
         op = self._op()
         p = self._payload(
             reranker_model_id=str(uuid.uuid4()),
@@ -1026,11 +869,11 @@ class TestPredictGOTermsBatchReranker:
         dicts = [{"protein_accession": "Q1", "go_term_id": 1, "distance": 0.1}]
         emit, events = self._emit_capture()
 
-        stats = op._apply_reranker_if_aligned(MagicMock(), dicts, p, emit)
+        with pytest.raises(SchemaShaMismatchError) as excinfo:
+            op._reranker_scorer.apply_if_aligned(MagicMock(), dicts, p, emit)
 
-        assert stats is not None
-        assert stats["applied"] is False
-        assert stats["skipped_reason"] == "schema_mismatch"
+        assert excinfo.value.reason == "schema_sha_mismatch"
+        assert excinfo.value.expected_sha == "not_matching"
         assert any(name == "reranker.schema_mismatch" for name, _ in events)
         assert "reranker_score" not in dicts[0]
 
@@ -1056,25 +899,31 @@ class TestPredictGOTermsBatchReranker:
         session = MagicMock()
         # GOTerm aspect lookup returns (id, aspect) tuples.
         session.query.return_value.filter.return_value.all.return_value = [
-            (10, "P"), (11, "F"),
+            (10, "P"),
+            (11, "F"),
         ]
         emit, events = self._emit_capture()
 
         fake_scores = np.array([0.8, 0.2], dtype=np.float32)
-        with patch(
-            "protea.core.operations.predict_go_terms.load_reranker",
-            return_value=MagicMock(name="booster"),
-        ), patch(
-            "protea.core.operations.predict_go_terms.apply_reranker",
-            return_value=fake_scores,
-        ), patch(
-            "protea.core.operations.predict_go_terms.get_artifact_store",
-            return_value=MagicMock(),
-        ), patch(
-            "protea.core.operations.predict_go_terms.load_settings",
-            return_value=MagicMock(),
+        with (
+            patch(
+                "protea.core.operations.predict_go_terms._batch_op_reranker.load_reranker",
+                return_value=MagicMock(name="booster"),
+            ),
+            patch(
+                "protea.core.operations.predict_go_terms._batch_op_reranker.apply_reranker",
+                return_value=fake_scores,
+            ),
+            patch(
+                "protea.core.operations.predict_go_terms._batch_op_reranker.get_artifact_store",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "protea.core.operations.predict_go_terms._batch_op_reranker.load_settings",
+                return_value=MagicMock(),
+            ),
         ):
-            stats = op._apply_reranker_if_aligned(session, dicts, p, emit)
+            stats = op._reranker_scorer.apply_if_aligned(session, dicts, p, emit)
 
         assert stats is not None
         assert stats["applied"] is True
@@ -1099,3 +948,268 @@ class TestPredictGOTermsBatchReranker:
         # this is a static payload check (coord happy path already covered
         # elsewhere). Here we just assert the baseline invariant on dicts.
         assert "reranker_score" not in dicts[0]
+
+
+# ---------------------------------------------------------------------------
+# F2C.5b regression: PROTEA aspect-separated delegation == direct
+# ``pipeline.predict(aspect_separated=True)`` on the same fixture.
+# ---------------------------------------------------------------------------
+
+
+def _toy_aspect_separated_fixture() -> dict[str, object]:
+    """Deterministic 3-aspect fixture: 2 queries, 4 refs across P / F / C.
+
+    Q1 is closest to R1 (which carries one P + one F annotation), then R2
+    (F only). Q2 is closest to R3 (C only) then R4 (P only). The pool
+    has one ref per aspect plus the cross-aspect R1, which exercises
+    the ``_partition_refs_by_aspect`` semantics protea-method runs on
+    the delegated path.
+    """
+    qe = np.array(
+        [[1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]],
+        dtype=np.float32,
+    )
+    re_ = np.array(
+        [
+            [0.99, 0.01, 0.0, 0.0],  # R1 close to Q1
+            [0.95, 0.05, 0.0, 0.0],  # R2 close to Q1
+            [0.0, 0.0, 0.99, 0.01],  # R3 close to Q2
+            [0.5, 0.0, 0.5, 0.0],  # R4 mid
+        ],
+        dtype=np.float32,
+    )
+    # GO term ids and aspects:
+    #   gtid 101 -> P, 102 -> F, 103 -> C, 104 -> P
+    annotations: dict[str, list[dict[str, object]]] = {
+        "R1": [
+            {"go_term_id": 101, "qualifier": "", "evidence_code": "IEA"},
+            {"go_term_id": 102, "qualifier": "", "evidence_code": "IEA"},
+        ],
+        "R2": [{"go_term_id": 102, "qualifier": "", "evidence_code": "IEA"}],
+        "R3": [{"go_term_id": 103, "qualifier": "", "evidence_code": "IEA"}],
+        "R4": [{"go_term_id": 104, "qualifier": "", "evidence_code": "IEA"}],
+    }
+    go_id_map = {101: "GO:0000101", 102: "GO:0000102", 103: "GO:0000103", 104: "GO:0000104"}
+    go_aspect_map = {101: "P", 102: "F", 103: "C", 104: "P"}
+    return {
+        "qa": ["Q1", "Q2"],
+        "qe": qe,
+        "ra": ["R1", "R2", "R3", "R4"],
+        "re_": re_,
+        "annotations": annotations,
+        "go_id_map": go_id_map,
+        "go_aspect_map": go_aspect_map,
+    }
+
+
+def _row_key(row: dict[str, object]) -> tuple[str, int, str]:
+    """Sort key for bit-exact comparison: ``(protein, gtid, donor_ref)``."""
+    return (
+        str(row["protein_accession"]),
+        int(row["go_term_id"]),
+        str(row.get("ref_protein_accession", "")),
+    )
+
+
+class TestAspectSeparatedDelegation:
+    """F2C.5b: PROTEA's ``_run_aspect_separated_knn`` delegates to
+    ``protea_method.pipeline.predict(aspect_separated=True)``.
+
+    Bit-exactness gate: the orchestrator must produce the SAME prediction
+    rows the pure ``pipeline.predict`` produces on the SAME inputs. The
+    test isolates the wire by mocking the DB loaders so the orchestrator
+    runs purely against the in-memory fixture; any drift in the wire
+    (extra rows, missing fields, drifted aggregates) shows up as a key
+    mismatch on the row diff.
+    """
+
+    def _payload(self, **kw) -> PredictGOTermsBatchPayload:
+        defaults = {
+            "embedding_config_id": str(uuid.uuid4()),
+            "annotation_set_id": _ANN_SET_ID,
+            "ontology_snapshot_id": _SNAPSHOT_ID,
+            "prediction_set_id": str(uuid.uuid4()),
+            "parent_job_id": str(uuid.uuid4()),
+            "query_accessions": ["Q1", "Q2"],
+            "limit_per_entry": 2,
+            "metric": "l2",
+            "search_backend": "numpy",
+            "compute_alignments": False,
+            "compute_taxonomy": False,
+            "compute_v6_features": False,
+            "compute_reranker_features": True,
+            "aspect_separated_knn": True,
+        }
+        defaults.update(kw)
+        return PredictGOTermsBatchPayload.model_validate(defaults)
+
+    def _build_ctx(self, fixture, payload):
+        from protea.core.operations.predict_go_terms import (
+            AspectSeparatedKnnContext,
+        )
+
+        # Build per-aspect ref pool views (one slice per aspect, refs
+        # included iff they have at least one annotation in that aspect).
+        re_ = fixture["re_"]
+        ra = fixture["ra"]
+        annotations = fixture["annotations"]
+        aspect_map = fixture["go_aspect_map"]
+        per_aspect_idx: dict[str, list[int]] = {"P": [], "F": [], "C": []}
+        for i, acc in enumerate(ra):
+            seen: set[str] = set()
+            for ann in annotations.get(acc, []):
+                asp = aspect_map.get(int(ann["go_term_id"]), "")
+                if asp in per_aspect_idx and asp not in seen:
+                    per_aspect_idx[asp].append(i)
+                    seen.add(asp)
+
+        def _norm(v):
+            n = np.linalg.norm(v, axis=1, keepdims=True)
+            n = np.where(n == 0, 1.0, n)
+            return v / n
+
+        ref_data_by_aspect: dict[str, dict[str, object]] = {}
+        for asp in ("P", "F", "C"):
+            idx = per_aspect_idx[asp]
+            slice_re = re_[idx] if idx else np.zeros((0, re_.shape[1]), dtype=np.float32)
+            ref_data_by_aspect[asp] = {
+                "accessions": [ra[i] for i in idx],
+                "embeddings_f32": slice_re.astype(np.float32, copy=False),
+                "embeddings_f32_cos": _norm(slice_re.astype(np.float32, copy=False)),
+            }
+        # Unified pool sentinel (used by the delegation to run the
+        # partitioned KNN inside protea-method).
+        ref_data_by_aspect["__unified__"] = {
+            "accessions": list(ra),
+            "embeddings_f32": re_.astype(np.float32, copy=False),
+            "embeddings_f32_cos": _norm(re_.astype(np.float32, copy=False)),
+        }
+        return AspectSeparatedKnnContext(
+            valid_accessions=list(fixture["qa"]),
+            query_embeddings=fixture["qe"],
+            ref_data_by_aspect=ref_data_by_aspect,
+            annotation_set_id=uuid.UUID(payload.annotation_set_id),
+            prediction_set_id=uuid.UUID(payload.prediction_set_id),
+            payload=payload,
+        )
+
+    def _patch_db_loaders(self, op, fixture):
+        annotations = fixture["annotations"]
+        go_id_map = fixture["go_id_map"]
+        go_aspect_map = fixture["go_aspect_map"]
+
+        def fake_load_annotations_for(_session, _ann_set_id, accessions, aspect=None):
+            out: dict[str, list[dict[str, object]]] = {}
+            for acc in accessions:
+                for ann in annotations.get(acc, []):
+                    gtid = int(ann["go_term_id"])
+                    if aspect is not None and go_aspect_map.get(gtid) != aspect:
+                        continue
+                    out.setdefault(acc, []).append(dict(ann))
+            return out
+
+        def fake_load_go_term_metadata(_session, anns):
+            id_map: dict[int, str] = {}
+            asp_map: dict[int, str] = {}
+            for items in anns.values():
+                for ann in items:
+                    gtid = int(ann["go_term_id"])
+                    id_map[gtid] = go_id_map[gtid]
+                    asp_map[gtid] = go_aspect_map[gtid]
+            return id_map, asp_map
+
+        def fake_load_feature_engineering_data(_s, _p, _valid, _hits):
+            return ({}, {}, {}, {})
+
+        op._load_annotations_for = fake_load_annotations_for  # type: ignore[assignment]
+        op._load_go_term_metadata = fake_load_go_term_metadata  # type: ignore[assignment]
+        op._load_feature_engineering_data = fake_load_feature_engineering_data  # type: ignore[assignment]
+
+    def test_bit_exact_vs_pipeline_predict_aspect_separated(self) -> None:
+        """Wire test: PROTEA's orchestrator and a direct call to
+        ``pipeline.predict(aspect_separated=True)`` produce the SAME row
+        list (after sort on ``(protein_accession, go_term_id,
+        ref_protein_accession)``) and IDENTICAL values on every shared
+        field — donor ref, distances, vote count, k_position,
+        go_term_frequency, ref_annotation_density, neighbor_*."""
+        from protea_method.pipeline import PredictConfig
+        from protea_method.pipeline import predict as pipeline_predict
+
+        fixture = _toy_aspect_separated_fixture()
+        payload = self._payload()
+        op = PredictGOTermsBatchOperation()
+        self._patch_db_loaders(op, fixture)
+        ctx = self._build_ctx(fixture, payload)
+
+        # PROTEA delegated path
+        predictions, _nbya, _gmbya, _pf = op._run_aspect_separated_knn(MagicMock(), ctx)
+
+        # Direct pipeline.predict() call on the same data
+        cfg = PredictConfig(
+            k=payload.limit_per_entry,
+            metric=payload.metric,
+            backend=payload.search_backend,
+            aspect_separated=True,
+            compute_v6_features=False,
+            pre_normalized=False,
+            prediction_set_id=str(ctx.prediction_set_id),
+        )
+        direct = pipeline_predict(
+            query_accessions=list(fixture["qa"]),
+            query_embeddings=fixture["qe"],
+            reference_accessions=list(fixture["ra"]),
+            reference_embeddings=fixture["re_"],
+            annotations=fixture["annotations"],
+            go_id_map=fixture["go_id_map"],
+            go_aspect_map=fixture["go_aspect_map"],
+            config=cfg,
+        )
+
+        # Bit-exact gate (sorted).
+        pred_sorted = sorted(predictions, key=_row_key)
+        direct_sorted = sorted(direct, key=_row_key)
+        assert [_row_key(r) for r in pred_sorted] == [_row_key(r) for r in direct_sorted]
+        shared_keys = (
+            "protein_accession",
+            "go_term_id",
+            "vote_count",
+            "min_distance",
+            "mean_distance",
+            "distance",
+            "aspect",
+            "ref_protein_accession",
+            "qualifier",
+            "evidence_code",
+            "k_position",
+            "go_term_frequency",
+            "ref_annotation_density",
+            "neighbor_distance_std",
+            "neighbor_vote_fraction",
+            "neighbor_min_distance",
+            "neighbor_mean_distance",
+            "prediction_set_id",
+            "go_id",
+        )
+        for left, right in zip(pred_sorted, direct_sorted, strict=True):
+            for key in shared_keys:
+                assert left.get(key) == right.get(key), (
+                    f"divergence on key {key}: protea={left.get(key)} vs "
+                    f"pipeline={right.get(key)} for row "
+                    f"{(left.get('protein_accession'), left.get('go_term_id'))}"
+                )
+
+    def test_predictions_carry_prediction_set_id(self) -> None:
+        """Every emitted row must stamp the ``PredictionSet`` id PROTEA
+        passes through ``PredictConfig`` — proves the F2C.5a contract
+        is honoured by the delegation."""
+        fixture = _toy_aspect_separated_fixture()
+        payload = self._payload()
+        op = PredictGOTermsBatchOperation()
+        self._patch_db_loaders(op, fixture)
+        ctx = self._build_ctx(fixture, payload)
+
+        predictions, _, _, _ = op._run_aspect_separated_knn(MagicMock(), ctx)
+        assert predictions, "fixture must produce at least one row"
+        for row in predictions:
+            assert row["prediction_set_id"] == str(ctx.prediction_set_id)
+            assert row["aspect"] in {"P", "F", "C"}

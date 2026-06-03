@@ -57,11 +57,11 @@ class OperationResult:
     surfaced in the job detail view. ``progress_current`` / ``progress_total``
     are written back to the Job row so the UI can render a progress bar.
 
-    ``deferred`` — if True, BaseWorker will NOT transition the job to SUCCEEDED.
+    ``deferred``: if True, BaseWorker will NOT transition the job to SUCCEEDED.
     Use this for coordinator operations that delegate work to child jobs; the
     last child is responsible for marking the parent SUCCEEDED.
 
-    ``publish_after_commit`` — list of (queue_name, job_id) pairs that BaseWorker
+    ``publish_after_commit``: list of (queue_name, job_id) pairs that BaseWorker
     will publish to RabbitMQ *after* the DB commit, guaranteeing workers always
     find the child job row before they try to claim it.
     """

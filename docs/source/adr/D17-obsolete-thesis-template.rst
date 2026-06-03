@@ -3,7 +3,7 @@ ADR-D17: OBSOLETE: thesis LaTeX template choice
 
 :Status: Obsolete
 :Date: 2026-05-05
-:Supersedes: earlier plan revision (v1)
+:Supersedes: earlier plan revision (revision 1)
 
 Context
 -------

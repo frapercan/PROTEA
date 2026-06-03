@@ -1,0 +1,27 @@
+# Loki datasource provisioning for the PROTEA Grafana stack.
+#
+# The Loki container runs on the same Compose-managed `protea_monitoring`
+# bridge network as Grafana, so it is reachable at the service name. No
+# auth is configured (auth_enabled: false in loki-config.yml) because the
+# stack is intended for local-host and small single-tenant deployments;
+# put it behind a reverse proxy if you expose it externally.
+#
+# Logs land here through the `loki-docker-driver` plugin configured on
+# the api / worker services (see docs/source/runbooks/loki.rst). Until
+# the plugin is installed and the application services are restarted with
+# the `logging:` block enabled, panels show "No data", which is the
+# intended bootstrap state.
+
+apiVersion: 1
+
+datasources:
+  - name: PROTEA Loki
+    uid: protea-loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    jsonData:
+      maxLines: 1000
+      timeout: 60
+    editable: true
+    isDefault: false

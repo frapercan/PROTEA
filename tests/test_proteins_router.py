@@ -23,6 +23,7 @@ def _reset_router_cache():
     yield
     _cache_invalidate()
 
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -153,6 +154,35 @@ class TestProteinStats:
         data = resp.json()
         assert data["total"] == 0
         assert data["isoforms"] == 0
+
+    def test_serves_stale_when_recompute_raises(self, client):
+        """Cold cache + DB blip must serve the last-known payload, not 500.
+
+        Pages call /proteins/stats on mount and block render on it; raising
+        here would translate into the multi-refresh hang reported by users.
+        """
+        from protea.api.cache import _store as cache_store
+        from protea.api.routers.proteins import PROTEIN_STATS_CACHE_KEY
+
+        c, session = client
+        # Seed an expired-but-known-good entry directly into the store
+        # (the cached helper is the system under test).
+        warm = {
+            "total": 7,
+            "canonical": 7,
+            "isoforms": 0,
+            "reviewed": 4,
+            "unreviewed": 3,
+            "with_metadata": 2,
+            "with_embeddings": 2,
+            "with_go_annotations": 2,
+        }
+        cache_store[PROTEIN_STATS_CACHE_KEY] = (0.0, warm)
+        session.query.side_effect = RuntimeError("simulated DB blip")
+
+        resp = c.get("/proteins/stats")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 7
 
 
 # ---------------------------------------------------------------------------

@@ -11,13 +11,38 @@ and an ``emit`` callback, but they do not manage connections, queues, or
 transactions themselves. This strict boundary makes every operation
 independently testable and trivially substitutable.
 
+.. rubric:: Axis tuple
+
+``protea.core.axis_tuple`` defines the ``AxisTuple`` named-tuple used to
+identify a training configuration in the multi-PLM sweep. Each axis
+carries the PLM identifier, neighbourhood size ``k``, reranker flag,
+feature family set, evaluation set name, propagation mode, and ensemble
+strategy. All serialised config keys in ``Dataset`` and ``ExperimentRun``
+rows use the canonical axis-tuple string form derived from this type.
+
+.. automodule:: protea.core.axis_tuple
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. rubric:: Domain types
+
+``protea.core.domain.aspect`` defines the ``Aspect`` enum used throughout
+the codebase to identify the three GO namespaces: MFO (Molecular Function),
+BPO (Biological Process), and CCO (Cellular Component).
+
+.. automodule:: protea.core.domain.aspect
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Contracts
 ---------
 
 The contracts module defines the interfaces that every operation must satisfy
 and the shared types used across the entire codebase.
 
-``Operation`` is a structural Protocol — any class that exposes a ``name``
+``Operation`` is a structural Protocol: any class that exposes a ``name``
 string and an ``execute(session, payload, *, emit)`` method conforms to it,
 without needing to inherit from a base class. ``ProteaPayload`` is the
 immutable, strictly-typed Pydantic base class for all operation payloads:
@@ -26,7 +51,7 @@ accidental mutation after validation. ``OperationResult`` is the return value
 of every ``execute`` call; its ``deferred`` flag tells ``BaseWorker`` that
 completion will be signalled by child workers rather than immediately.
 ``RetryLaterError`` is raised when a shared resource (e.g. the GPU) is
-occupied — ``BaseWorker`` catches it, resets the job to ``QUEUED``, and
+occupied; ``BaseWorker`` catches it, resets the job to ``QUEUED``, and
 re-publishes the message after a configurable delay.
 
 .. automodule:: protea.core.contracts.operation
@@ -59,15 +84,18 @@ across coordinators.
 Retry middleware
 ----------------
 
-``protea.core.retry`` implements the ``with_retry`` decorator used by
-``BaseWorker`` to wrap the execute session against transient
+``protea.core.retry`` exposes ``with_retry``, a wrapper function used
+by ``BaseWorker`` to run the execute session against transient
 database errors (deadlocks, connection drops, serialisation
-failures). Exponential backoff with jitter; the maximum number of
-attempts and the backoff base are controlled by
-``settings.WorkerTuning.retry_max_attempts`` and
-``settings.WorkerTuning.retry_backoff_base`` (see
-:doc:`/appendix/configuration`). Added as part of F0 (T0.3) of the
-master plan v3.
+failures) and brief network blips. Exponential backoff with jitter;
+all knobs (``max_attempts``, ``base_delay``, ``max_delay``,
+``jitter_ratio``, ``predicate``, ``on_retry``) are bundled in a
+``RetryPolicy`` frozen dataclass passed via the ``policy`` keyword
+argument (T-CONTEXTS, PR #237). ``BaseWorker`` instantiates a fixed
+policy at call site (``RetryPolicy(max_attempts=3, base_delay=1.0,
+max_delay=10.0, jitter_ratio=0.3)``); there is no global
+``TuningSettings`` field for these values. Added as part of F0
+(T0.3) of the master plan revision 3.
 
 .. automodule:: protea.core.retry
    :members:
@@ -89,20 +117,97 @@ new operation is a one-line edit here plus a new module under
    :undoc-members:
    :show-inheritance:
 
+Plugin discovery
+----------------
+
+``protea.core.plugins`` centralises ``importlib.metadata.entry_points``
+discovery for every PROTEA plugin group (``protea.backends``,
+``protea.sources``, ``protea.runners``). ``discover_plugins(group)``
+returns a cached ``{name: plugin}`` map and hard-errors with
+``RuntimeError`` if a plugin's ``name`` attribute drifts from its
+entry-point name. ``reset_plugin_cache`` is a test-only seam for
+suites that install/uninstall plugins between cases. Added in T2A.5
+for backend dispatch and generalised in T2A.8 (PR #240).
+
+.. automodule:: protea.core.plugins
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. rubric:: Feature registry
+
+``protea.core.features.registry`` is the central registry that maps
+feature-family names to their producer functions. The ``ALL_FEATURES``
+constant lists every column the pipeline may populate; adding a column
+without wiring a producer here causes a T1.8 invariant failure in the
+dataset-export pipeline.
+
+.. automodule:: protea.core.features.registry
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. rubric:: Schema SHA
+
+``protea.core.schema_sha_v2`` computes a 16-character deterministic
+fingerprint of the feature schema version. The hash is embedded in
+``Dataset.schema_sha`` and ``RerankerModel.feature_schema_sha``; a
+mismatch at inference time indicates that the booster was trained on a
+different feature set and must be rejected.
+
+.. automodule:: protea.core.schema_sha_v2
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. rubric:: JSONB dual-write
+
+``protea.core.jsonb_dual_write`` provides helpers for writing structured
+data to both a typed column and a JSONB fallback column in the same
+transaction. Used during schema-migration windows where old and new code
+may run concurrently against the same database.
+
+.. automodule:: protea.core.jsonb_dual_write
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Experiment runners
+------------------
+
+``protea.core.runners`` adapts the generic plugin discovery to the
+``protea.runners`` group. ``resolve_runner(name)`` maps an identifier
+(``"knn"`` / ``"baseline"`` / ``"lightgbm"``) to a runner plugin
+instance implementing the ``protea_contracts.ExperimentRunner``
+interface; unknown names raise ``ValueError`` listing the discovered
+set. PROTEA does not yet dispatch to runners at inference time (the
+active KNN + reranker path stays in ``PredictGOTermsBatchOperation``
+until F2C of master plan revision 3 hoists the inference core into a
+shared package). The adapter exists so ``GET /v1/runners`` has a
+stable resolver and future code has a one-line entry. Closes T2A.8
+(PR #240).
+
+.. automodule:: protea.core.runners
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Utilities
 ---------
 
-``protea.core.utils`` provides three shared utilities used across multiple
+``protea.core.utils`` provides two shared utilities used across multiple
 operations.
 
 ``utcnow()`` returns a timezone-aware UTC datetime, avoiding the common
 mistake of calling ``datetime.utcnow()`` which returns a naive object.
 ``chunks(seq, n)`` splits any sequence into fixed-size chunks, used by
-coordinator operations to partition work into batches. ``UniProtHttpMixin``
-encapsulates all retry logic for the UniProt REST API: exponential backoff
-with jitter, ``Retry-After`` header parsing, and cursor extraction for
-paginated endpoints. It is mixed into ``InsertProteinsOperation`` and
-``FetchUniProtMetadataOperation``.
+coordinator operations to partition work into batches.
+
+The previous ``UniProtHttpMixin`` (exponential backoff with jitter,
+``Retry-After`` header parsing, cursor extraction for paginated UniProt
+REST endpoints) was inlined into ``InsertProteinsOperation`` and
+``FetchUniProtMetadataOperation`` when those operations were rewritten;
+the retry/backoff/cursor logic now lives directly in each operation.
 
 .. automodule:: protea.core.utils
    :members:
@@ -181,19 +286,19 @@ documented in :ref:`train_reranker <train-reranker-operation>`.
 
 The module provides:
 
-- ``prepare_dataset(df)`` — extracts and coerces feature columns. Numeric
+- ``prepare_dataset(df)``: extracts and coerces feature columns. Numeric
   columns are coerced with ``errors="coerce"`` (invalid strings become
   ``NaN``); categorical columns are converted to pandas ``category`` dtype,
   which LightGBM consumes directly without manual label encoding.
-- ``train(df)`` — stratified positive/negative split with early-stopping on a
+- ``train(df)``: stratified positive/negative split with early-stopping on a
   held-out validation set (default 20 %). Returns a ``TrainResult`` with the
   Booster, validation metrics (AUC, logloss, precision, recall, F1 at the
   0.5 threshold), the best boosting iteration, and gain-based feature
   importance.
-- ``predict(model, df)`` — returns probability scores in ``[0, 1]``.
-- ``model_to_string()`` / ``model_from_string()`` — serialization for DB
+- ``predict(model, df)``: returns probability scores in ``[0, 1]``.
+- ``model_to_string()`` / ``model_from_string()``: serialization for DB
   storage in the ``RerankerModel`` table.
-- ``load_training_tsv()`` — parses a training data TSV as produced by the
+- ``load_training_tsv()``: parses a training data TSV as produced by the
   ``/scoring/prediction-sets/{id}/training-data.tsv`` endpoint.
 
 .. note::
@@ -216,15 +321,15 @@ Parquet export (``protea.core.parquet_export``)
 parquet shards produced by the KNN + feature pipeline into the frozen
 dataset layout consumed by ``protea-reranker-lab``: exactly
 ``train.parquet``, ``eval.parquet`` and ``manifest.json`` under a single
-directory. The manifest follows ``ManifestV1`` (schema version ``v2``)
+directory. The manifest follows ``ManifestV1`` (schema version 2)
 and records PROTEA's ``producer_version`` + ``producer_git_sha``.
 
 The single public function ``export_reranker_parquets(...)`` is shared
 by two callers:
 
-- ``train_reranker._dump_frozen_dataset`` — thin wrapper that uses this
-  helper to emit the dataset alongside a training run.
-- ``ExportResearchDatasetOperation`` — stand-alone operation that only
+- ``training_dump_helpers._dump_frozen_dataset``: thin wrapper that
+  uses this helper to emit the dataset alongside a training-data dump.
+- ``ExportResearchDatasetOperation``: stand-alone operation that only
   materialises and publishes the dataset, without running LightGBM.
 
 When ``store`` is provided, the three consolidated files are
@@ -290,16 +395,16 @@ Each dictionary maps a protein accession to a set of GO term IDs.
 
 ``EvaluationData`` fields:
 
-- ``nk`` — delta annotations for No-Knowledge proteins (no prior annotations
+- ``nk``: delta annotations for No-Knowledge proteins (no prior annotations
   in any namespace at t0).
-- ``lk`` — delta annotations for Limited-Knowledge proteins (had annotations
+- ``lk``: delta annotations for Limited-Knowledge proteins (had annotations
   in some namespaces but gained new terms in a previously empty namespace).
-- ``pk`` — novel annotations for Partial-Knowledge proteins (gained new terms
+- ``pk``: novel annotations for Partial-Knowledge proteins (gained new terms
   in a namespace where they already had annotations).
-- ``pk_known`` — old experimental annotations for PK proteins in the
+- ``pk_known``: old experimental annotations for PK proteins in the
   relevant namespaces; passed as ``-known`` to ``cafaeval`` to exclude them
   from scoring.
-- ``known`` — all old experimental annotations flattened across namespaces;
+- ``known``: all old experimental annotations flattened across namespaces;
   available for download via the reference endpoint.
 
 The public entry point is ``compute_evaluation_data(session,
@@ -314,16 +419,47 @@ different namespaces simultaneously (e.g., LK in CCO and PK in BPO).
    :undoc-members:
    :show-inheritance:
 
+Provenance
+----------
+
+``protea.core.provenance`` provides ``capture_provenance(extra=None)``,
+a side-effect-free runtime snapshot for jobs / experiments / artefacts
+to carry an audit trail without DB or network probes. Returns a fresh
+``dict[str, Any]`` with auto-keys ``protea_version`` (from
+``importlib.metadata``), ``protea_git_sha`` (delegates to
+``parquet_export.resolve_protea_git_sha``), ``python_version``,
+``platform``, ``hostname``, and ``captured_at`` (ISO-8601 UTC). Any
+caller-supplied ``extra`` mapping is overlaid last, so callers always
+win on key collisions.
+
+Every probe is wrapped: missing distribution metadata, a non-git
+checkout, or an absent ``git`` binary all degrade to ``None`` rather
+than raising. Added in T3.11 of master plan v3.2 §24 Fase 4.
+
+.. automodule:: protea.core.provenance
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Operations
 ----------
 
-PROTEA ships seventeen registered operation instances at worker startup
-via ``protea.core.operation_catalog.build_operation_registry``. Each
-operation is a class that implements the ``Operation`` protocol: a
-``name`` string and an ``execute`` method.
-Operations are stateless with respect to infrastructure — they receive a
-session and emit structured events, but do not open connections or manage
-transactions.
+PROTEA ships a curated set of registered operation instances at worker
+startup via ``protea.core.operation_catalog.build_operation_registry``,
+which is the authoritative list (read the function body for the live
+count).
+The catalog splits into job-backed entries (reachable through
+``POST /jobs``) and ephemeral consumers (dispatched internally by the
+``compute_embeddings`` and ``predict_go_terms`` coordinators; see
+:doc:`/architecture/operations` for that taxonomy). Each operation is a
+class that implements the ``Operation`` protocol: a ``name`` string and
+an ``execute`` method. Operations are stateless with respect to
+infrastructure: they receive a session and emit structured events, but
+do not open connections or manage transactions. The job-backed entries
+are documented below; the four ephemeral siblings
+(``compute_embeddings_batch``, ``store_embeddings``,
+``predict_go_terms_batch``, ``store_predictions``) live in
+:doc:`/architecture/operations`.
 
 **ping**
    Smoke-test operation. Returns immediately with a success result.
@@ -339,7 +475,7 @@ transactions.
    Fetches protein sequences from the UniProt REST API using cursor-based
    FASTA streaming. Sequences are deduplicated by MD5 hash before upsert;
    proteins are upserted by accession. Exponential backoff with jitter and
-   ``Retry-After`` header handling are provided by ``UniProtHttpMixin``.
+   ``Retry-After`` header handling are implemented inline in the operation.
    Isoforms are parsed and stored separately, sharing the canonical sequence
    where the amino-acid string is identical.
 
@@ -353,7 +489,7 @@ transactions.
    ``ProteinUniProtMetadata`` rows keyed by canonical accession. Fields
    include functional description, EC numbers, pathway membership, and
    kinetics. Isoforms inherit metadata through the ``canonical_accession``
-   join — no duplicate rows are created.
+   join; no duplicate rows are created.
 
 .. automodule:: protea.core.operations.fetch_uniprot_metadata
    :members:
@@ -399,7 +535,7 @@ transactions.
    ``protea.embeddings.batch``. The coordinator serialises on the
    ``protea.embeddings`` queue (one at a time) to prevent concurrent model
    loads from exhausting GPU memory. Batch and write workers scale
-   independently. Returns ``deferred=True`` — the parent job is closed by
+   independently. Returns ``deferred=True``; the parent job is closed by
    the last write worker.
 
 .. automodule:: protea.core.operations.compute_embeddings
@@ -412,7 +548,7 @@ transactions.
    float16 cache, partitions the query set into batches, and dispatches one
    ``predict_go_terms_batch`` message per batch to
    ``protea.predictions.batch``. Feature engineering (alignments, taxonomy)
-   is opt-in via payload flags. Returns ``deferred=True`` — the parent job
+   is opt-in via payload flags. Returns ``deferred=True``; the parent job
    is closed by the last write worker.
 
 .. automodule:: protea.core.operations.predict_go_terms
@@ -444,6 +580,38 @@ transactions.
    :undoc-members:
    :show-inheritance:
 
+**load_interpro_go_mapping**
+   Downloads and persists the InterPro-to-GO mapping file, linking
+   InterPro domain entries to their associated GO terms. Used as a
+   prerequisite step before running InterProScan-based annotation.
+
+.. automodule:: protea.core.operations.load_interpro_go_mapping
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+**run_interproscan_batch**
+   Submits sequences to the EBI InterProScan REST API in configurable
+   batch sizes. Stores ``InterproAnnotation`` rows linking each protein
+   to its domain signatures. Supports resume via previously stored
+   job IDs.
+
+.. automodule:: protea.core.operations.run_interproscan_batch
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+**predict_go_terms_from_interpro**
+   Derives GO term predictions from stored ``InterproAnnotation`` rows
+   and the ``InterproGoMapping`` table, without running KNN search.
+   Produces a ``PredictionSet`` whose entries are directly evidence-backed
+   by domain-matching rather than embedding distance.
+
+.. automodule:: protea.core.operations.predict_go_terms_from_interpro
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 **export_research_dataset**
    Publishes the frozen re-ranker dataset (``train.parquet`` /
    ``eval.parquet`` / ``manifest.json``) consumed by
@@ -466,13 +634,19 @@ Training-dump helpers
 ``protea.core.training_dump_helpers`` is the home of the KNN /
 feature-generation helpers that were extracted in F0 (T0.6) when
 ``protea.core.operations.train_reranker`` was deleted. The module is
-deliberately not an operation — it is reused in-process by
+deliberately not an operation: it is reused in-process by
 :class:`ExportResearchDatasetOperation` to materialise ``train`` and
 ``eval`` shards before the ``parquet_export`` consolidation pass.
 LightGBM training itself lives in
 `protea-reranker-lab <https://github.com/frapercan/protea-reranker-lab>`_,
 which consumes the published ``Dataset`` rows produced by
 ``export_research_dataset``.
+
+As of T-RES.1 (PR #368), ``parent_map_str`` is always passed to the KNN
+transfer runner unconditionally, regardless of the ``expand_votes_to_ancestors``
+flag. The lineage producer (``protea_method.lineage.compute_lineage_features``)
+requires the parent map for its ``lineage_*`` column computation; the flag only
+controls ancestor-vote expansion, not the availability of the map itself.
 
 .. automodule:: protea.core.training_dump_helpers
    :members:
@@ -486,18 +660,94 @@ These modules are imported by the operations and the feature
 engineering layer; they are documented here for completeness but are
 not part of the public API.
 
-- ``protea.core.anc2vec_embeddings`` — anc2vec ancestry embeddings for
-  GO terms, used as features by the re-ranker (see ADR D19 for the
-  GeOKG replacement candidate).
-- ``protea.core.annotation_intern`` — string interning helper for
+- ``protea.core.anc2vec_embeddings``: anc2vec ancestry embeddings for
+  GO terms, used as features by the re-ranker.
+- ``protea.core.annotation_intern``: string interning helper for
   reducing memory pressure when loading large annotation sets.
-- ``protea.core.disk_cache`` — generic on-disk cache with TTL used by
+- ``protea.core.disk_cache``: generic on-disk cache with TTL used by
   the KNN reference loader and the PCA cache.
-- ``protea.core.feature_enricher`` — orchestrator that combines
+- ``protea.core.feature_enricher``: orchestrator that combines
   alignment, taxonomy and anc2vec features into a single
   per-candidate row.
-- ``protea.core.pca_cache`` — per-PLM PCA projection cache, used to
+- ``protea.core.pca_cache``: per-PLM PCA projection cache, used to
   pre-compute the ``emb_pca`` feature family.
+- ``protea.core._anc2vec_phases``: phase helpers for the anc2vec
+  embedding pipeline.
+- ``protea.core._feature_enricher_helpers``: low-level helpers extracted
+  from ``feature_enricher`` to keep per-phase logic self-contained.
+- ``protea.core.features._bindings``: internal feature-column binding
+  declarations consumed by ``features.registry``.
+- ``protea.core._knn_transfer_runner``: worker-side KNN transfer runner
+  dispatched by the predictions coordinator.
+- ``protea.core._leaf_record_builder``: builder for leaf-prediction
+  records in the KNN transfer pipeline.
+- ``protea.core._pair_feature_compute``: pair-level feature computation
+  with optional process-pool parallelism and SQLite alignment cache.
+- ``protea.core._training_dump_loaders``: data-loading helpers used by
+  the training-dump pipeline.
+- ``protea.core.training_dump._constants``: shared constants for the
+  training-dump subpackage.
+- ``protea.core.training_dump._contexts``: context dataclasses bundling
+  session, settings, and configuration for training-dump passes.
+- ``protea.core.training_dump._data_loaders``: loaders that hydrate
+  protein, embedding, and annotation data for the training-dump pipeline.
+- ``protea.core.training_dump._knn_transfer``: KNN search and GO-term
+  transfer logic specific to the training-dump path.
+- ``protea.core.training_dump._payload``: Pydantic payload model for the
+  ``export_research_dataset`` operation.
+- ``protea.core.training_dump._runner``: top-level runner that
+  coordinates the training-dump passes.
+- ``protea.core.training_dump._test_split``: helper that materialises the
+  eval/test shard of the frozen dataset.
+- ``protea.core.training_dump._train_split``: helper that materialises the
+  train shard of the frozen dataset.
+- ``protea.core.operations._compute_embeddings_backends``: backend
+  dispatch logic for the ``compute_embeddings`` coordinator.
+- ``protea.core.operations._compute_embeddings_helpers``: batch
+  construction and progress helpers for ``compute_embeddings``.
+- ``protea.core.operations._load_ontology_helpers``: OBO parsing helpers
+  used by ``load_ontology_snapshot``.
+- ``protea.core.operations._predict_go_terms_adapter``: adapter that
+  routes the ``predict_go_terms`` coordinator to the unified-path or
+  batch-op implementations.
+- ``protea.core.operations.predict_go_terms._aspect_helpers``: per-aspect
+  splitting and merging helpers for the predict pipeline.
+- ``protea.core.operations.predict_go_terms._batch_op``: batch operation
+  executed by ``OperationConsumer`` workers.
+- ``protea.core.operations.predict_go_terms._batch_op_feature``: feature
+  generation phase of the batch operation.
+- ``protea.core.operations.predict_go_terms._batch_op_reference``:
+  reference-embedding loading and KNN search for batch operations.
+- ``protea.core.operations.predict_go_terms._batch_op_reranker``:
+  reranker scoring phase of the batch operation.
+- ``protea.core.operations.predict_go_terms._common``: shared types and
+  constants used across the predict-go-terms subpackage.
+- ``protea.core.operations.predict_go_terms._coordinator``: coordinator
+  that partitions the query set and dispatches batch messages.
+- ``protea.core.operations.predict_go_terms._post_knn_pipeline``:
+  post-KNN pipeline steps (feature enrichment, reranker, aggregation).
+- ``protea.core.operations.predict_go_terms._reranker_scorer``:
+  ``RerankerScorer`` compositive class that applies a loaded booster to
+  batch prediction DataFrames.
+- ``protea.core.operations.predict_go_terms._store``: bulk-insert helpers
+  for writing ``GOPrediction`` rows.
+- ``protea.core.operations.predict_go_terms._unified_path``: unified
+  in-process execution path used when a single worker handles both KNN
+  and write phases.
+- ``protea.core.operations._run_cafa_artifacts``: artifact download and
+  staging helpers for ``run_cafa_evaluation``.
+- ``protea.core.operations._run_cafa_data_helpers``: data-loading helpers
+  for the CAFA evaluation pipeline.
+- ``protea.core.operations._run_cafa_eval_driver``: driver that calls
+  ``cafaeval.cafa_eval`` and collects per-namespace results.
+- ``protea.core.operations._run_cafa_helpers``: shared helper functions
+  used across the ``_run_cafa_*`` modules.
+- ``protea.core.operations._run_cafa_reranker_loader``: loads and applies
+  the reranker model to CAFA prediction TSVs.
+- ``protea.core.operations._run_cafa_setup``: environment and directory
+  setup for a CAFA evaluation run.
+- ``protea.core.operations._run_cafa_summary``: summarises cafaeval
+  results into ``EvaluationResult`` rows.
 
 .. automodule:: protea.core.anc2vec_embeddings
    :members:
@@ -524,11 +774,218 @@ not part of the public API.
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: protea.core._anc2vec_phases
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core._feature_enricher_helpers
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core.features._bindings
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core._knn_transfer_runner
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core._leaf_record_builder
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core._pair_feature_compute
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core._training_dump_loaders
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core.training_dump._constants
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.training_dump._contexts
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.training_dump._data_loaders
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.training_dump._knn_transfer
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.training_dump._payload
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.training_dump._runner
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.training_dump._test_split
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.training_dump._train_split
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.operations._compute_embeddings_backends
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.operations._compute_embeddings_helpers
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.operations._load_ontology_helpers
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core.operations._predict_go_terms_adapter
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.operations.predict_go_terms._aspect_helpers
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.operations.predict_go_terms._batch_op
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.operations.predict_go_terms._batch_op_feature
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.operations.predict_go_terms._batch_op_reference
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.operations.predict_go_terms._batch_op_reranker
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.operations.predict_go_terms._common
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.operations.predict_go_terms._coordinator
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.operations.predict_go_terms._post_knn_pipeline
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.operations.predict_go_terms._reranker_scorer
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.operations.predict_go_terms._store
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.operations.predict_go_terms._unified_path
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. automodule:: protea.core.operations._run_cafa_artifacts
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core.operations._run_cafa_data_helpers
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core.operations._run_cafa_eval_driver
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core.operations._run_cafa_helpers
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core.operations._run_cafa_reranker_loader
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core.operations._run_cafa_setup
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: protea.core.operations._run_cafa_summary
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. seealso::
 
-   - :doc:`/architecture/operations` — narrative documentation for every
+   - :doc:`/architecture/operations`: narrative documentation for every
      operation listed above, with payload examples and execution flow.
-   - :doc:`infrastructure` — the ORM models that ``protea.core`` reads and
+   - :doc:`infrastructure`: the ORM models that ``protea.core`` reads and
      writes.
-   - :doc:`/appendix/howto_guides` — task-oriented recipes that exercise
+   - :doc:`/appendix/howto_guides`: task-oriented recipes that exercise
      these modules end-to-end.

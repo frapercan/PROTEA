@@ -17,7 +17,7 @@
 
 ---
 
-## Exp 1 — Baseline KNN: efecto de k
+## Exp 1: Baseline KNN: efecto de k
 
 **Scoring:** baseline (`1 - distance/2`), `aspect_separated_knn=true`
 
@@ -32,7 +32,7 @@
 
 ---
 
-## Exp 2 — Efecto de `aspect_separated_knn`
+## Exp 2: Efecto de `aspect_separated_knn`
 
 Con k=5, comparar índice unificado vs separado por aspecto (BPO/MFO/CCO).
 
@@ -45,7 +45,7 @@ Con k=5, comparar índice unificado vs separado por aspecto (BPO/MFO/CCO).
 
 ---
 
-## Exp 3 — Scoring heurístico
+## Exp 3: Scoring heurístico
 
 **Requisito:** prediction set con `compute_alignments=true, compute_taxonomy=true` (k=5, aspect_sep=mejor de Exp 2).
 
@@ -61,11 +61,11 @@ Usa los 5 ScoringConfig presets del sistema. El scoring se aplica en evaluación
 
 **Prediction set:** `a818b653` (k=5, aspect_sep=true, alignments+taxonomy+reranker_features)
 
-**Conclusión:** `alignment_weighted` es el mejor scoring en todas las categorías y aspectos. Mejora el baseline (embedding_only) entre +1.5% y +4% Fmax. Las configs que usan evidence_weight (evidence_primary, composite, embedding_plus_evidence) **empeoran** el baseline — la señal de evidencia perjudica el ranking bajo CAFA-eval con IA weighting.
+**Conclusión:** `alignment_weighted` es el mejor scoring en todas las categorías y aspectos. Mejora el baseline (embedding_only) entre +1.5% y +4% Fmax. Las configs que usan evidence_weight (evidence_primary, composite, embedding_plus_evidence) **empeoran** el baseline, porque la señal de evidencia perjudica el ranking bajo CAFA-eval con IA weighting.
 
 ---
 
-## Exp 4 — Re-ranker LightGBM
+## Exp 4: Re-ranker LightGBM
 
 **Requisito:** prediction set con `compute_alignments=true, compute_taxonomy=true, compute_reranker_features=true`.
 
@@ -76,7 +76,7 @@ Usa los 5 ScoringConfig presets del sistema. El scoring se aplica en evaluación
 
 | Cat-Asp | AUC | Iter | Observación |
 |---------|-----|------|-------------|
-| NK-BPO | 0.771 | 1 | early stop — pocos positivos (0.17%) |
+| NK-BPO | 0.771 | 1 | early stop (pocos positivos, 0.17%) |
 | NK-MFO | 0.938 | 300 | buen modelo |
 | NK-CCO | 0.911 | 266 | buen modelo |
 | LK-BPO | 0.770 | 1 | early stop |
@@ -122,7 +122,7 @@ Todos los modelos aprenden. BPO sube ~12 puntos AUC. MFO/CCO bajan ligeramente (
 
 ---
 
-## Exp 5 — Re-ranker v2 (per-categoría con IA weighting)
+## Exp 5: Re-ranker v2 (per-categoría con IA weighting)
 
 **Cambios respecto a v1:**
 - 3 modelos per-categoría (NK, LK, PK) en vez de 9 per-aspecto
@@ -131,7 +131,7 @@ Todos los modelos aprenden. BPO sube ~12 puntos AUC. MFO/CCO bajan ligeramente (
 - `num_boost_round`: 300 → 1000 (con `early_stopping_rounds`: 50)
 - IA values como `sample_weight` en entrenamiento (términos raros pesan más)
 
-### 5a. Quick test (2 splits: 211→215→220, test 229) — eval `9242ea3e`
+### 5a. Quick test (2 splits: 211→215→220, test 229), eval `9242ea3e`
 
 | Método | NK-BPO | NK-MFO | NK-CCO | LK-BPO | LK-MFO | LK-CCO | PK-BPO | PK-MFO | PK-CCO |
 |--------|--------|--------|--------|--------|--------|--------|--------|--------|--------|
@@ -139,7 +139,7 @@ Todos los modelos aprenden. BPO sube ~12 puntos AUC. MFO/CCO bajan ligeramente (
 
 MFO ya no se destruye (0.601 vs 0.577 de v1 balanced). Prometedor con solo 2 splits.
 
-### 5b. Full training (13 splits: 160→220, test 229) — eval `a3d3bbea`
+### 5b. Full training (13 splits: 160→220, test 229), eval `a3d3bbea`
 
 Modelos: `lgbm_v2_full-{nk,lk,pk}`
 - NK: `fc013658-9c95-48e8-9c72-c13f477a8b26`
@@ -155,7 +155,7 @@ Modelos: `lgbm_v2_full-{nk,lk,pk}`
 | **reranker v2 full** | 0.425 | 0.607 | **0.689** | 0.486 | 0.575 | **0.707** | 0.199 | 0.297 | **0.335** |
 
 **Conclusiones v2 full:**
-- **Mucho más robusto que v1** — MFO no se destruye (0.607 vs 0.577 de v1 bal), BPO mejora consistentemente
+- **Mucho más robusto que v1**: MFO no se destruye (0.607 vs 0.577 de v1 bal), BPO mejora consistentemente
 - **CCO sigue siendo el punto fuerte del reranker**: NK-CCO 0.689, LK-CCO 0.707 (segundo mejor tras v1 unbal)
 - **PK recupera**: v2 full (0.199/0.297/0.335) supera al v2 quick test que había caído en PK-BPO
 - **alignment_weighted sigue ganando en BPO y MFO**: NK-BPO 0.428 vs 0.425, LK-BPO 0.500 vs 0.486, LK-MFO 0.598 vs 0.575
@@ -163,18 +163,18 @@ Modelos: `lgbm_v2_full-{nk,lk,pk}`
 
 ---
 
-## Exp 6 — Re-ranker v3 (features completas: alineamientos + taxonomía en entrenamiento)
+## Exp 6: Re-ranker v3 (features completas: alineamientos + taxonomía en entrenamiento)
 
-**Cambio clave respecto a v2:** En v2 las features de alineamiento (NW/SW) y taxonomía estaban hardcodeadas a NULL durante el entrenamiento — el modelo nunca las veía. v3 computa `compute_alignment()` y `compute_taxonomy()` por cada par (query, ref) durante la generación de datos de entrenamiento, dando al modelo acceso a las 22 features completas.
+**Cambio clave respecto a v2:** En v2 las features de alineamiento (NW/SW) y taxonomía estaban hardcodeadas a NULL durante el entrenamiento, por lo que el modelo nunca las veía. v3 computa `compute_alignment()` y `compute_taxonomy()` por cada par (query, ref) durante la generación de datos de entrenamiento, dando al modelo acceso a las 22 features completas.
 
-**Configuración:** 13 splits (160→220), test 229, `neg_pos_ratio=10`, IA weights, `compute_alignments=true`, `compute_taxonomy=true`. Tiempo de entrenamiento: ~2h 45m (vs ~2h de v2 — el overhead de alineamientos es mínimo).
+**Configuración:** 13 splits (160→220), test 229, `neg_pos_ratio=10`, IA weights, `compute_alignments=true`, `compute_taxonomy=true`. Tiempo de entrenamiento: ~2h 45m (vs ~2h de v2; el overhead de alineamientos es mínimo).
 
 Modelos: `lgbm_v3_full-{nk,lk,pk}`
 - NK: `2ff1818f-71b6-4932-8f8d-b3000e3c8d34`
 - LK: `269e26b4-0bec-42fa-a077-fe5b675dd2de`
 - PK: `e14b9716-bbf8-4b99-b34b-b801c3966579`
 
-### Resultados CAFA-eval — eval `23851bff`
+### Resultados CAFA-eval, eval `23851bff`
 
 | Método | NK-BPO | NK-MFO | NK-CCO | LK-BPO | LK-MFO | LK-CCO | PK-BPO | PK-MFO | PK-CCO |
 |--------|--------|--------|--------|--------|--------|--------|--------|--------|--------|
@@ -207,8 +207,8 @@ Modelos: `lgbm_v3_full-{nk,lk,pk}`
 | 8 | **Comparativa Pannzer2 + data leakage** | ✅ | 0.717 (con leakage: 62.4% NK GT exacto) |
 | 9 | **Comparativa InterProScan 6** | ✅ | 0.551 (PROTEA supera en 8/9 celdas) |
 | 10 | **ProstT5 vs ESMC (v3 preliminar)** | ⚠️ F3 contaminado por under-training | F1+F2 válidos, F3 pendiente |
-| 11 | **Re-train v4 "converged" (5000 rounds)** | 🔄 en curso | — |
-| 12 | **Extended PLM matrix (8 modelos)** | 📋 diseño listo (`EXPERIMENTAL_DESIGN.md`) | — |
+| 11 | **Re-train v4 "converged" (5000 rounds)** | 🔄 en curso | n/a |
+| 12 | **Extended PLM matrix (8 modelos)** | 📋 diseño listo (`EXPERIMENTAL_DESIGN.md`) | n/a |
 
 **Flujo de dependencias:**
 ```
@@ -228,7 +228,7 @@ Exp 1 (k sweep) ✅
 
 ---
 
-## Exp 7 — Comparativa con eggNOG-mapper
+## Exp 7: Comparativa con eggNOG-mapper
 
 **Herramienta:** eggNOG-mapper v2.1.13 (Docker: `quay.io/biocontainers/eggnog-mapper:2.1.13--pyhdfd78af_2`)
 **Base de datos:** eggNOG DB v5.0.2 + Diamond v2.0.15
@@ -262,7 +262,7 @@ Exp 1 (k sweep) ✅
 
 ---
 
-## Exp 8 — Comparativa con Pannzer2 + análisis de data leakage
+## Exp 8: Comparativa con Pannzer2 + análisis de data leakage
 
 **Herramienta:** Pannzer2 (servidor web Helsinki, marzo 2026)
 **Base de datos:** UniProt/SwissProt actual (actualizada a fecha de ejecución)
@@ -287,7 +287,7 @@ Los resultados de Pannzer2 y eggNOG-mapper **no son comparables directamente** c
 
 | | Pannzer2 | InterProScan 6 | eggNOG-mapper | PROTEA |
 |---|---|---|---|---|
-| **Fecha de ejecución** | Marzo 2026 | 25 Mar 2026 | 24 Mar 2026 | — |
+| **Fecha de ejecución** | Marzo 2026 | 25 Mar 2026 | 24 Mar 2026 | n/a |
 | **BD de referencia** | UniProt/SwissProt 2026 | InterPro 2026 | eggNOG v5.0.2 (2026) | GOA 220 (frozen at t0) |
 | **Conoce las respuestas?** | Sí | Parcialmente | Parcialmente | No |
 
@@ -300,12 +300,12 @@ Los resultados de Pannzer2 y eggNOG-mapper **no son comparables directamente** c
 | LK | 5,520 | 3,624 (**65.7%**) | 1,087 (19.7%) |
 | PK | 27,541 | 12,410 (45.1%) | 8,196 (29.8%) |
 
-Pannzer2 acierta el 62.4% de las anotaciones NK — proteínas que por definición no tenían anotaciones experimentales en t0. Esto confirma que su BD de referencia contiene anotaciones posteriores a GOA 220, incluyendo muchas que forman parte del ground truth GOA 229.
+Pannzer2 acierta el 62.4% de las anotaciones NK (proteínas que por definición no tenían anotaciones experimentales en t0). Esto confirma que su BD de referencia contiene anotaciones posteriores a GOA 220, incluyendo muchas que forman parte del ground truth GOA 229.
 
 **Conclusión:** PROTEA es la única herramienta del benchmark que garantiza integridad temporal: la referencia se congela en t0, el ground truth se computa como delta, y todo queda versionado en la BD. Los números de Pannzer2 y eggNOG-mapper representan un **upper bound optimista** bajo data leakage, no una comparación fair.
 
-- Parsing de resultados Pannzer2: `/home/frapercan/Thesis/pannzer2_results/parse_pannzer2.py`
-- Raw HTML: `/home/frapercan/Thesis/pannzer2_results/raw/PANZ_{1-21}.html`
+- Parsing de resultados Pannzer2: `/home/frapercan/Thesis2/pannzer2_results/parse_pannzer2.py`
+- Raw HTML: `/home/frapercan/Thesis2/pannzer2_results/raw/PANZ_{1-21}.html`
 - Script de evaluación: `scripts/evaluate_external_tool.py --tool pannzer2`
 
 ---
@@ -319,16 +319,16 @@ Pannzer2 acierta el 62.4% de las anotaciones NK — proteínas que por definici�
 
 ### Cambios de configuración
 
-- **2026-04-23 — Peso IEA en `DEFAULT_EVIDENCE_WEIGHTS` 0.3 → 0.8.** La jerarquía clásica de GO-docs coloca IEA por debajo del tier computacional (ISS/IBA/... 0.7) y de NAS (0.5). Observación empírica en el histórico de GOA: las anotaciones IEA se promueven a un código experimental con mayor frecuencia que las del tier computacional, por lo que su fiabilidad previa estaba infraestimada. Los tres stages del benchmark (`baseline`, `alignment_weighted`, `reranker` v4) no consumen `evidence_weight`, así que las Fmax reportadas en Exp 1–11 no cambian; el swap sólo afecta a scorings basados en evidencia (p. ej. `evidence_primary`, `composite`, `embedding_plus_evidence`).
+- **2026-04-23: Peso IEA en `DEFAULT_EVIDENCE_WEIGHTS` 0.3 → 0.8.** La jerarquía clásica de GO-docs coloca IEA por debajo del tier computacional (ISS/IBA/... 0.7) y de NAS (0.5). Observación empírica en el histórico de GOA: las anotaciones IEA se promueven a un código experimental con mayor frecuencia que las del tier computacional, por lo que su fiabilidad previa estaba infraestimada. Los tres stages del benchmark (`baseline`, `alignment_weighted`, `reranker` v4) no consumen `evidence_weight`, así que las Fmax reportadas en Exp 1–11 no cambian; el swap sólo afecta a scorings basados en evidencia (p. ej. `evidence_primary`, `composite`, `embedding_plus_evidence`).
 
 ---
 
-## Exp 10 — ProstT5 vs ESMC (comparativa preliminar v3)
+## Exp 10: ProstT5 vs ESMC (comparativa preliminar v3)
 
 **Fecha**: 2026-04-10
 **Objetivo**: replicar el reranker v3 sobre un segundo PLM (ProstT5-XL ~3B) para ver si la ganancia del v3 generaliza más allá de ESMC-300M.
 
-> **Caveat metodológico importante**: ESMC-300M (~300M params, BERT-like encoder) y ProstT5-XL (~3B params, T5 encoder + structure fine-tuning) son modelos con tamaño y arquitectura distintos. Esta comparativa mezcla esos ejes — no es fair para concluir nada sobre "ESMC vs ProstT5 como familia". El benchmark con matriz limpia está en `EXPERIMENTAL_DESIGN.md` (Exp 12).
+> **Caveat metodológico importante**: ESMC-300M (~300M params, BERT-like encoder) y ProstT5-XL (~3B params, T5 encoder + structure fine-tuning) son modelos con tamaño y arquitectura distintos. Esta comparativa mezcla esos ejes, por lo que no es fair para concluir nada sobre "ESMC vs ProstT5 como familia". El benchmark con matriz limpia está en `EXPERIMENTAL_DESIGN.md` (Exp 12).
 
 ### Setup
 
@@ -351,9 +351,9 @@ CAFA eval results:
 
 ### Resultados (cafaeval + IA, evaluación oficial)
 
-**F1 — ProstT5 gana en retrieval bruto**: avg Fmax baseline ProstT5 0.4849 vs ESMC 0.4824. Consistente en las 9 celdas: ProstT5 gana 44/45 en el 45-cell benchmark previo.
+**F1: ProstT5 gana en retrieval bruto**: avg Fmax baseline ProstT5 0.4849 vs ESMC 0.4824. Consistente en las 9 celdas: ProstT5 gana 44/45 en el 45-cell benchmark previo.
 
-**F3 — Reranker per-aspect (9 celdas)**:
+**F3: Reranker per-aspect (9 celdas)**:
 
 | Método | NK-BPO | NK-MFO | NK-CCO | LK-BPO | LK-MFO | LK-CCO | PK-BPO | PK-MFO | PK-CCO | Avg |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -366,7 +366,7 @@ CAFA eval results:
 - **ProstT5 degrada con reranker**: 9/9 celdas, avg Δ = **−0.0032**
 - Avg final ESMC+rr (0.4846) ≈ ProstT5+rr (0.4817), diferencia pequeña pero de signo opuesto a la del retrieval bruto
 
-### F2 — Feature importance (hipótesis de compensación)
+### F2: Feature importance (hipótesis de compensación)
 
 Extracción de `feature_importance` (gain) de los 6 rerankers. Agregado sobre features de `{alignment_*, similarity_*, taxonomic_*}`:
 
@@ -378,7 +378,7 @@ Extracción de `feature_importance` (gain) de los 6 rerankers. Agregado sobre fe
 
 **Interpretación**: cuando el embedding es "más fuerte" (ProstT5), el reranker se apoya menos en señales externas (alineamiento, taxonomía) y más en estadísticos derivados del propio retrieval. Este es el carry-over de la hipótesis que se va a testear formalmente como H4 en `EXPERIMENTAL_DESIGN.md`.
 
-### Blocker — under-training en los 6 modelos v3
+### Blocker: under-training en los 6 modelos v3
 
 Revisión del `best_iteration` de cada modelo con `num_boost_round=1000, early_stopping_rounds=50`:
 
@@ -393,10 +393,10 @@ Revisión del `best_iteration` de cada modelo con `num_boost_round=1000, early_s
 
 Con 95k–332k samples por tier y LR=0.01, este dataset típicamente necesita 3000–10000 iters para saturar. **Conclusión**: los deltas de F3 (especialmente el signo negativo de ProstT5 −0.0032) pueden ser artefacto del under-training, no efecto real del embedding.
 
-- **F2 (feature importance) sigue siendo válido** — ambos modelos tuvieron el mismo presupuesto bajo el techo, la diferencia *relativa* en cómo distribuyen alignment/taxonomy es una comparación justa
-- **F3 (signos de los deltas Fmax) está contaminado** — no se debe usar para la tesis hasta que converjan
+- **F2 (feature importance) sigue siendo válido**: ambos modelos tuvieron el mismo presupuesto bajo el techo, la diferencia *relativa* en cómo distribuyen alignment/taxonomy es una comparación justa
+- **F3 (signos de los deltas Fmax) está contaminado**: no se debe usar para la tesis hasta que converjan
 
-**Lección metodológica crítica**: el campo `test_evaluation` que reporta `train_reranker_auto` muestra deltas de +0.04 a +0.08 Fmax mucho más optimistas que los +0.002 reales de cafaeval. El test_evaluation no aplica propagación GO ni IA weighting — **no usar para la tesis**. Solo cafaeval con IA.
+**Lección metodológica crítica**: el campo `test_evaluation` que reporta `train_reranker_auto` muestra deltas de +0.04 a +0.08 Fmax mucho más optimistas que los +0.002 reales de cafaeval. El test_evaluation no aplica propagación GO ni IA weighting. **No usar para la tesis.** Solo cafaeval con IA.
 
 ### Estado
 
@@ -406,7 +406,7 @@ Con 95k–332k samples por tier y LR=0.01, este dataset típicamente necesita 30
 
 ---
 
-## Exp 11 — Re-training v4 "converged" (en curso)
+## Exp 11: Re-training v4 "converged" (en curso)
 
 **Fecha de lanzamiento**: 2026-04-10 18:03 UTC
 **Objetivo**: re-entrenar los 6 modelos (ESMC y ProstT5, NK/LK/PK) con presupuesto suficiente para que el early stopping dispare de verdad, eliminando el confounder de under-training del Exp 10.
@@ -417,9 +417,9 @@ Con 95k–332k samples por tier y LR=0.01, este dataset típicamente necesita 30
 |---|---|---|
 | `num_boost_round` | 1000 | **5000** |
 | `early_stopping_rounds` | 50 | **100** |
-| Resto | — | idéntico (13 splits 160→220, neg_pos_ratio=10, IA weights, per-tier NK/LK/PK, alignment+taxonomy features) |
+| Resto | (same) | idéntico (13 splits 160→220, neg_pos_ratio=10, IA weights, per-tier NK/LK/PK, alignment+taxonomy features) |
 
-El resto del pipeline (KNN, FAISS IVFFlat, feature engineering) es idéntico — v4 cambia **solo** el presupuesto de boosting.
+El resto del pipeline (KNN, FAISS IVFFlat, feature engineering) es idéntico. v4 cambia **solo** el presupuesto de boosting.
 
 ### Jobs
 
@@ -434,9 +434,9 @@ Tiempo estimado total: ~4h serial (protea.training procesa uno a uno).
 
 ### Escenarios esperados al terminar
 
-- **A — narrativa F2 se confirma**: ProstT5 sigue degradando (−ΔFmax tras converger) → conclusión fuerte de tesis, la hipótesis de compensación gana peso
-- **B — ProstT5 pasa a neutro o +**: narrativa se suaviza ("ambos embeddings mejoran con reranker, ESMC un poco más") — F2 sigue válido como explicación
-- **C — ambos suben ~0.01-0.02**: confirma que v3 estaba under-trained y da números definitivos más altos que Exp 10
+- **A: narrativa F2 se confirma**: ProstT5 sigue degradando (−ΔFmax tras converger) → conclusión fuerte de tesis, la hipótesis de compensación gana peso
+- **B: ProstT5 pasa a neutro o +**: narrativa se suaviza ("ambos embeddings mejoran con reranker, ESMC un poco más"). F2 sigue válido como explicación.
+- **C: ambos suben ~0.01-0.02**: confirma que v3 estaba under-trained y da números definitivos más altos que Exp 10
 
 ### Pendientes cuando termine
 
@@ -448,7 +448,7 @@ Tiempo estimado total: ~4h serial (protea.training procesa uno a uno).
 
 ---
 
-## Exp 12 — Extended PLM benchmark matrix (planned)
+## Exp 12: Extended PLM benchmark matrix (planned)
 
 **Fecha de diseño**: 2026-04-10
 **Estado**: documento de diseño prospectivo
@@ -477,12 +477,12 @@ Exp 10 expuso el confounder central del trabajo preliminar: comparar ESMC-300M (
 
 - **RQ1**: ¿a tamaño fijo, qué familia gana (BERT-like vs T5 encoder)?
 - **RQ2**: ¿cómo escala Fmax con el tamaño dentro de una familia? ¿Dónde satura?
-- **RQ3**: ¿estructura aporta? — test pareado ProtT5-XL vs ProstT5-XL (mismo backbone, única diferencia = 3Di fine-tuning)
+- **RQ3**: ¿estructura aporta? Test pareado ProtT5-XL vs ProstT5-XL (mismo backbone, única diferencia = 3Di fine-tuning).
 - **RQ4**: ¿los embeddings más débiles fuerzan al reranker a compensar con alignment+taxonomy? (carry-over de F2)
 
 ### Protocolo
 
-Pipeline idéntico para los 8 modelos — cero tuning per-modelo. Ver `EXPERIMENTAL_DESIGN.md` §6 para hiperparámetros pinned: KNN `k=5`, FAISS IVFFlat, alignments + taxonomy on, reranker v4 (5000 rounds), `run_cafa_evaluation` con IA weighting.
+Pipeline idéntico para los 8 modelos, cero tuning per-modelo. Ver `EXPERIMENTAL_DESIGN.md` §6 para hiperparámetros pinned: KNN `k=5`, FAISS IVFFlat, alignments + taxonomy on, reranker v4 (5000 rounds), `run_cafa_evaluation` con IA weighting.
 
 ### Tests estadísticos
 
@@ -496,7 +496,7 @@ Wilcoxon signed-rank sobre las 9 celdas Fmax, corrección Holm-Bonferroni sobre 
 
 - **Diseño**: completo (`EXPERIMENTAL_DESIGN.md` v1.0)
 - **Ejecución**: bloqueada hasta que v4 (Exp 11) valide que el presupuesto es correcto
-- **Dependencias previas**: Ankh backend ya integrado en PROTEA como `model_backend="ankh"` dedicado (no alias de `t5`) — ver `project_ankh_backend.md`
+- **Dependencias previas**: Ankh backend ya integrado en PROTEA como `model_backend="ankh"` dedicado (no alias de `t5`). Ver `project_ankh_backend.md`.
 
 ### Deliverables esperados
 
