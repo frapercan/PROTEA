@@ -39,11 +39,19 @@ def embed_sequences(
     max_residues: int = 4000,
     max_seq_len: int = 1000,
     max_batch: int = 100,
+    max_length: int = 2048,
 ) -> dict[str, np.ndarray]:
     """Return one mean-pooled vector per accession.
 
     Sorts sequences by descending length so short tails batch efficiently;
     falls back to single-sequence processing for sequences > ``max_seq_len``.
+
+    Sequences are truncated to ``max_length`` tokens (default 2048) to match
+    the reference bundle's embedding config (``max_length=2048``,
+    ``use_chunking=False``) and to keep long proteins (e.g. 4000+ residues)
+    from exhausting GPU memory. Without this cap the encoder both OOMs on the
+    longest queries and produces full-length vectors that are inconsistent
+    with the truncated reference embeddings the KNN searches against.
     """
     if not sequences:
         return {}
@@ -74,7 +82,11 @@ def embed_sequences(
         batch = []
 
         token_encoding = tokenizer.batch_encode_plus(
-            list(seqs), add_special_tokens=True, padding="longest"
+            list(seqs),
+            add_special_tokens=True,
+            padding="longest",
+            truncation=True,
+            max_length=max_length,
         )
         input_ids = torch.tensor(token_encoding["input_ids"]).to(device)
         attention_mask = torch.tensor(token_encoding["attention_mask"]).to(device)
@@ -87,7 +99,10 @@ def embed_sequences(
             continue
 
         for b_idx, ident in enumerate(accs):
-            s_len = lens[b_idx]
+            # Cap at max_length: a truncated sequence has at most ``max_length``
+            # token positions, so pooling over the original (longer) length
+            # would run past the truncated hidden state.
+            s_len = min(lens[b_idx], max_length)
             vec = hidden[b_idx, :s_len].mean(dim=0).detach().cpu().numpy().astype(np.float32)
             embeddings[ident] = vec
 
