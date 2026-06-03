@@ -51,7 +51,7 @@ RUN apt-get update \
 # query encoder and the parquet bundle reader. The version pins match
 # the LAFA v1 container so downstream LAFA v2 images can rebase here
 # without re-vetting the dependency graph.
-ARG PROTEA_METHOD_REF=master
+ARG PROTEA_METHOD_REF=main
 RUN pip install \
     "protea-method @ git+https://github.com/frapercan/protea-method.git@${PROTEA_METHOD_REF}" \
     "pyarrow>=14" \
