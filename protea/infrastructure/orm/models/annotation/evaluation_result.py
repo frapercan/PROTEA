@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import DateTime, ForeignKey, func
+from sqlalchemy import DateTime, ForeignKey, Index, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -40,6 +40,16 @@ class EvaluationResult(Base):
     """
 
     __tablename__ = "evaluation_result"
+    __table_args__ = (
+        # T3.5: ``list_evaluation_results`` filters by
+        # ``evaluation_set_id`` and orders by ``created_at DESC``;
+        # the composite turns that into a single index scan.
+        Index(
+            "ix_evaluation_result_eval_set_created_at",
+            "evaluation_set_id",
+            "created_at",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     evaluation_set_id: Mapped[uuid.UUID] = mapped_column(

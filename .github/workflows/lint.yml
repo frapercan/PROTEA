@@ -2,11 +2,16 @@ name: Lint
 
 on:
   push:
+    branches: [develop, main]
   pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   lint:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -27,14 +32,38 @@ jobs:
       - name: Add poetry to PATH
         run: echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      - name: Install main + dev dependencies
-        run: poetry install --with dev
+      - name: Use in-project virtualenv
+        run: poetry config virtualenvs.in-project true
+
+      - name: Restore venv cache
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py${{ matrix.python-version }}-poetry${{ matrix.poetry-version }}-lint-${{ hashFiles('**/poetry.lock') }}
+
+      - name: Install main + lint dependencies
+        run: poetry install --with lint
+
+      - name: poetry lock consistency
+        run: poetry check --lock
 
       - name: ruff check
         run: poetry run ruff check protea scripts
 
-      - name: flake8
-        run: poetry run flake8 protea
-
       - name: mypy
         run: poetry run mypy protea
+
+      - name: smell budget (master plan v3.2 §3)
+        run: poetry run python scripts/check_smells.py
+
+      - name: em-dash check (no em-dashes in publishable prose)
+        run: python scripts/check_no_em_dashes.py
+
+      - name: doc ref drift gate (DS.2)
+        run: poetry run python scripts/check_doc_refs.py
+
+      - name: autodoc coverage gate (DR.1)
+        run: python scripts/check_autodoc_coverage.py
+
+      - name: OpenAPI cross-reference check (DS.3)
+        run: python scripts/check_openapi_refs.py

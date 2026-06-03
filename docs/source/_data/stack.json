@@ -1,0 +1,92 @@
+{
+  "repos": [
+    {
+      "name": "PROTEA",
+      "slug": "protea-core",
+      "role": "platform",
+      "role_label": "Platform",
+      "status": "active",
+      "summary": "Backend platform. Hosts the ORM, job queue, FastAPI surface, frontend, and orchestration.",
+      "github_url": "https://github.com/frapercan/PROTEA",
+      "docs_url": "https://frapercan.github.io/PROTEA/",
+      "package_url": null
+    },
+    {
+      "name": "protea-contracts",
+      "slug": "protea-contracts",
+      "role": "contracts",
+      "role_label": "Contracts",
+      "status": "active",
+      "summary": "Shared contract surface. ABCs, pydantic payloads, feature schema, schema_sha. Imported by every other repo.",
+      "github_url": "https://github.com/frapercan/protea-contracts",
+      "docs_url": null,
+      "package_url": "https://github.com/frapercan/protea-contracts/releases"
+    },
+    {
+      "name": "protea-method",
+      "slug": "protea-method",
+      "role": "inference",
+      "role_label": "Inference",
+      "status": "active",
+      "summary": "Pure inference path (KNN, feature compute, reranker apply). Delegation target for the F2C extraction; live in production since F2C.5b. Bind-mounted by the LAFA containers.",
+      "github_url": "https://github.com/frapercan/protea-method",
+      "docs_url": null,
+      "package_url": null
+    },
+    {
+      "name": "protea-sources",
+      "slug": "protea-sources",
+      "role": "plugin",
+      "role_label": "Source plugin",
+      "status": "active",
+      "summary": "Annotation source plugins (GOA, QuickGO, UniProt). Discovered via Python entry_points (goa, quickgo, uniprot).",
+      "github_url": "https://github.com/frapercan/protea-sources",
+      "docs_url": null,
+      "package_url": null
+    },
+    {
+      "name": "protea-runners",
+      "slug": "protea-runners",
+      "role": "plugin",
+      "role_label": "Runner plugin",
+      "status": "active",
+      "summary": "Experiment runner plugins (LightGBM, KNN, baseline). Discovered via Python entry_points (lightgbm, knn, baseline).",
+      "github_url": "https://github.com/frapercan/protea-runners",
+      "docs_url": null,
+      "package_url": null
+    },
+    {
+      "name": "protea-backends",
+      "slug": "protea-backends",
+      "role": "plugin",
+      "role_label": "Backend plugin",
+      "status": "active",
+      "summary": "Protein language model embedding backends (ESM family, T5/ProstT5, Ankh, ESM3-C). Discovered via Python entry_points (esm, t5, ankh, esm3c).",
+      "github_url": "https://github.com/frapercan/protea-backends",
+      "docs_url": null,
+      "package_url": null
+    },
+    {
+      "name": "protea-reranker-lab",
+      "slug": "protea-reranker-lab",
+      "role": "lab",
+      "role_label": "Lab",
+      "status": "active",
+      "summary": "LightGBM reranker training lab. Pulls datasets from PROTEA, trains boosters, publishes them back via /reranker-models/import-by-reference.",
+      "github_url": "https://github.com/frapercan/protea-reranker-lab",
+      "docs_url": null,
+      "package_url": null
+    },
+    {
+      "name": "cafaeval-protea",
+      "slug": "cafaeval-protea",
+      "role": "tool",
+      "role_label": "Evaluator",
+      "status": "active",
+      "summary": "Standalone fork of cafaeval (CAFA-evaluator-PK) with the PK-coverage fix and a bit-exact parity guarantee against the upstream.",
+      "github_url": "https://github.com/frapercan/cafaeval-protea",
+      "docs_url": null,
+      "package_url": null
+    }
+  ]
+}

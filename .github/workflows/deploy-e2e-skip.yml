@@ -1,0 +1,49 @@
+name: Deploy E2E (skip)
+
+# Companion to deploy-e2e.yml. Branch protection on develop requires the
+# check "deploy slice builds and smokes". The real workflow only fires
+# when deploy-relevant paths change, so frontend-only / docs-only /
+# agent-farm-only PRs never produce that check and stay blocked forever
+# in "Expected, waiting for status to be reported".
+#
+# This workflow uses paths-ignore mirroring the real workflow's paths
+# filter: it fires exactly when the real one does not, and reports a
+# job with the same name so the required check is always satisfied on
+# develop-bound PRs.
+#
+# Edge case: PRs that change BOTH a deploy path AND a non-deploy path
+# trigger only the real workflow (paths-ignore needs every changed file
+# to match). The required check is still satisfied by the real run.
+
+on:
+  pull_request:
+    paths-ignore:
+      - Dockerfile
+      - docker-compose.yml
+      - docker-compose.e2e.yml
+      - docker-compose.prod.yml
+      - docker/**
+      - poetry.lock
+      - pyproject.toml
+      - protea/**
+      - scripts/worker.py
+      - scripts/test_deploy_e2e.sh
+      - scripts/deploy.sh
+      - scripts/manage.sh
+      - alembic/**
+      - alembic.ini
+      - .github/workflows/deploy-e2e.yml
+
+concurrency:
+  group: deploy-e2e-skip-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  deploy-e2e-skip:
+    name: deploy slice builds and smokes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+
+    steps:
+      - name: Skip (no deploy-relevant paths changed)
+        run: 'echo "skip - no deploy-relevant paths changed"'

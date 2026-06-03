@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Iterator
 from collections.abc import Sequence as Seq
+from dataclasses import dataclass
 from typing import Annotated, Any
 
 from protea_contracts import UniProtFastaStreamPayload, UniProtProteinRecord
@@ -16,6 +17,19 @@ from protea.infrastructure.orm.models.sequence.sequence import Sequence as Seque
 
 PositiveInt = Annotated[int, Field(gt=0)]
 NonNegativeFloat = Annotated[float, Field(ge=0.0)]
+
+
+@dataclass
+class _InsertTotals:
+    """Mutable counters threaded through the per-page flush loop."""
+
+    pages: int = 0
+    retrieved: int = 0
+    isoforms: int = 0
+    proteins_inserted: int = 0
+    proteins_updated: int = 0
+    sequences_inserted: int = 0
+    sequences_reused: int = 0
 
 
 class InsertProteinsPayload(ProteaPayload, frozen=True):
@@ -79,7 +93,6 @@ class InsertProteinsOperation(Operation):
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
         p = InsertProteinsPayload.model_validate(payload)
-
         t0 = time.perf_counter()
         emit(
             "insert_proteins.start",
@@ -88,20 +101,10 @@ class InsertProteinsOperation(Operation):
             "info",
         )
 
-        pages = 0
-        retrieved = 0
-        isoforms = 0
-        proteins_inserted = 0
-        proteins_updated = 0
-        sequences_inserted = 0
-        sequences_reused = 0
-
-        # Buffer per-record into operation-controlled pages of size
-        # ``p.page_size``. The plugin yields one record at a time
-        # (D-MIGR-01); the operation owns batching policy.
+        totals = _InsertTotals()
         buffer: list[UniProtProteinRecord] = []
         for record in self._stream_fasta(p, emit):
-            if p.total_limit is not None and retrieved >= p.total_limit:
+            if p.total_limit is not None and totals.retrieved >= p.total_limit:
                 emit(
                     "insert_proteins.limit_reached",
                     None,
@@ -109,69 +112,68 @@ class InsertProteinsOperation(Operation):
                     "warning",
                 )
                 break
-
             buffer.append(record)
-            retrieved += 1
+            totals.retrieved += 1
             if record.isoform_index is not None:
-                isoforms += 1
-
+                totals.isoforms += 1
             if len(buffer) >= p.page_size:
-                pages += 1
-                ins_p, upd_p, ins_s, re_s = self._store_records(session, buffer, emit)
-                proteins_inserted += ins_p
-                proteins_updated += upd_p
-                sequences_inserted += ins_s
-                sequences_reused += re_s
+                self._flush_page(session, buffer, p, emit, totals)
                 buffer.clear()
 
-                http_req, http_ret = self._uniprot_plugin.http_counters
-                emit(
-                    "insert_proteins.page_done",
-                    None,
-                    {
-                        "page": pages,
-                        "retrieved_total": retrieved,
-                        "proteins_inserted_total": proteins_inserted,
-                        "proteins_updated_total": proteins_updated,
-                        "sequences_inserted_total": sequences_inserted,
-                        "sequences_reused_total": sequences_reused,
-                        "http_requests": http_req,
-                        "http_retries": http_ret,
-                        "_progress_current": retrieved,
-                        **(
-                            {"_progress_total": p.total_limit}
-                            if p.total_limit
-                            else {}
-                        ),
-                    },
-                    "info",
-                )
-
-        # Flush remaining buffer.
         if buffer:
-            pages += 1
+            totals.pages += 1
             ins_p, upd_p, ins_s, re_s = self._store_records(session, buffer, emit)
-            proteins_inserted += ins_p
-            proteins_updated += upd_p
-            sequences_inserted += ins_s
-            sequences_reused += re_s
+            totals.proteins_inserted += ins_p
+            totals.proteins_updated += upd_p
+            totals.sequences_inserted += ins_s
+            totals.sequences_reused += re_s
 
-        elapsed = time.perf_counter() - t0
         http_req, http_ret = self._uniprot_plugin.http_counters
         result_dict = {
-            "pages": pages,
-            "retrieved_records": retrieved,
-            "isoform_records": isoforms,
-            "proteins_inserted": proteins_inserted,
-            "proteins_updated": proteins_updated,
-            "sequences_inserted": sequences_inserted,
-            "sequences_reused": sequences_reused,
+            "pages": totals.pages,
+            "retrieved_records": totals.retrieved,
+            "isoform_records": totals.isoforms,
+            "proteins_inserted": totals.proteins_inserted,
+            "proteins_updated": totals.proteins_updated,
+            "sequences_inserted": totals.sequences_inserted,
+            "sequences_reused": totals.sequences_reused,
             "http_requests": http_req,
             "http_retries": http_ret,
-            "elapsed_seconds": elapsed,
+            "elapsed_seconds": time.perf_counter() - t0,
         }
         emit("insert_proteins.done", None, result_dict, "info")
         return OperationResult(result=result_dict)
+
+    def _flush_page(
+        self,
+        session: Session,
+        buffer: list[UniProtProteinRecord],
+        p: InsertProteinsPayload,
+        emit: EmitFn,
+        totals: _InsertTotals,
+    ) -> None:
+        """Persist one page worth of buffered records + emit progress."""
+        totals.pages += 1
+        ins_p, upd_p, ins_s, re_s = self._store_records(session, buffer, emit)
+        totals.proteins_inserted += ins_p
+        totals.proteins_updated += upd_p
+        totals.sequences_inserted += ins_s
+        totals.sequences_reused += re_s
+        http_req, http_ret = self._uniprot_plugin.http_counters
+        fields: dict[str, Any] = {
+            "page": totals.pages,
+            "retrieved_total": totals.retrieved,
+            "proteins_inserted_total": totals.proteins_inserted,
+            "proteins_updated_total": totals.proteins_updated,
+            "sequences_inserted_total": totals.sequences_inserted,
+            "sequences_reused_total": totals.sequences_reused,
+            "http_requests": http_req,
+            "http_retries": http_ret,
+            "_progress_current": totals.retrieved,
+        }
+        if p.total_limit:
+            fields["_progress_total"] = p.total_limit
+        emit("insert_proteins.page_done", None, fields, "info")
 
     def _stream_fasta(
         self, p: InsertProteinsPayload, emit: EmitFn
@@ -204,8 +206,28 @@ class InsertProteinsOperation(Operation):
     ) -> tuple[int, int, int, int]:
         if not records:
             return 0, 0, 0, 0
+        existing_seq_ids, sequences_inserted, sequences_reused = self._dedup_and_persist_sequences(
+            session, records, emit
+        )
+        accessions = [r.accession for r in records]
+        existing_prot = self._load_existing_proteins(session, accessions)
+        proteins_inserted, proteins_updated = self._upsert_proteins(
+            session, records, existing_prot, existing_seq_ids, emit
+        )
+        return proteins_inserted, proteins_updated, sequences_inserted, sequences_reused
 
-        # 1) Deduplicate sequences
+    def _dedup_and_persist_sequences(
+        self,
+        session: Session,
+        records: list[UniProtProteinRecord],
+        emit: EmitFn,
+    ) -> tuple[dict[str, int], int, int]:
+        """Deduplicate by ``sequence_hash``, return ``(seq_id_by_hash, inserted, reused)``.
+
+        Updates ``seq_id_by_hash`` in place with new IDs for hashes that
+        had to be inserted, so the caller can resolve every record's
+        ``sequence_id`` in a single dict lookup.
+        """
         hash_to_seq: dict[str, str] = {}
         for r in records:
             if r.sequence_hash not in hash_to_seq:
@@ -213,115 +235,112 @@ class InsertProteinsOperation(Operation):
 
         unique_hashes = list(hash_to_seq.keys())
         emit("db.lookup_sequences_start", None, {"count": len(unique_hashes)}, "info")
-
         existing_seq_ids = self._load_existing_sequences(session, unique_hashes)
         sequences_reused = len(existing_seq_ids)
-
         emit("db.lookup_sequences_done", None, {"existing": sequences_reused}, "info")
 
-        # Insert missing sequences
         missing_hashes = [h for h in unique_hashes if h not in existing_seq_ids]
         sequences_inserted = 0
-
         if missing_hashes:
             emit("db.insert_sequences_start", None, {"rows": len(missing_hashes)}, "info")
-
             new_sequences = [
                 SequenceModel(sequence=hash_to_seq[h], sequence_hash=h) for h in missing_hashes
             ]
             session.add_all(new_sequences)
             session.flush()
-
             for s in new_sequences:
                 existing_seq_ids[s.sequence_hash] = s.id
-
             sequences_inserted = len(new_sequences)
             emit("db.insert_sequences_done", None, {"rows": sequences_inserted}, "info")
 
-        # 2) Load existing proteins
-        accessions = [r.accession for r in records]
-        existing_prot = self._load_existing_proteins(session, accessions)
+        return existing_seq_ids, sequences_inserted, sequences_reused
 
-        # 3) Upsert proteins (insert new, conservative update existing)
+    def _upsert_proteins(
+        self,
+        session: Session,
+        records: list[UniProtProteinRecord],
+        existing_prot: dict[str, Protein],
+        existing_seq_ids: dict[str, int],
+        emit: EmitFn,
+    ) -> tuple[int, int]:
+        """Insert new ``Protein`` rows + conservatively patch existing ones.
+
+        Returns ``(proteins_inserted, proteins_updated)``. Existing rows are
+        only touched via ``_apply_protein_updates``, which fills nulls /
+        flips canonicality / refreshes isoform index without clobbering
+        non-empty curator-supplied fields.
+        """
         proteins_inserted = 0
         proteins_updated = 0
         to_add: list[Protein] = []
-
         for r in records:
             seq_id = existing_seq_ids[r.sequence_hash]
-
             if r.accession in existing_prot:
-                p = existing_prot[r.accession]
-                changed = False
-
-                if getattr(p, "sequence_id", None) is None and seq_id is not None:
-                    p.sequence_id = seq_id
-                    changed = True
-
-                if getattr(p, "entry_name", None) in (None, "") and r.entry_name:
-                    p.entry_name = r.entry_name
-                    changed = True
-
-                if getattr(p, "canonical_accession", None) != r.canonical_accession:
-                    p.canonical_accession = r.canonical_accession
-                    changed = True
-
-                if getattr(p, "is_canonical", None) != r.is_canonical:
-                    p.is_canonical = r.is_canonical
-                    changed = True
-
-                if getattr(p, "isoform_index", None) != r.isoform_index:
-                    p.isoform_index = r.isoform_index
-                    changed = True
-
-                if getattr(p, "reviewed", None) is None:
-                    p.reviewed = r.reviewed
-                    changed = True
-
-                if getattr(p, "taxonomy_id", None) in (None, "") and r.taxonomy_id:
-                    p.taxonomy_id = r.taxonomy_id
-                    changed = True
-
-                if getattr(p, "organism", None) in (None, "") and r.organism:
-                    p.organism = r.organism
-                    changed = True
-
-                if getattr(p, "gene_name", None) in (None, "") and r.gene_name:
-                    p.gene_name = r.gene_name
-                    changed = True
-
-                if getattr(p, "length", None) is None:
-                    p.length = r.length
-                    changed = True
-
-                if changed:
+                if self._apply_protein_updates(existing_prot[r.accession], r, seq_id):
                     proteins_updated += 1
-
             else:
-                to_add.append(
-                    Protein(
-                        accession=r.accession,
-                        canonical_accession=r.canonical_accession,
-                        is_canonical=r.is_canonical,
-                        isoform_index=r.isoform_index,
-                        reviewed=r.reviewed,
-                        entry_name=r.entry_name,
-                        organism=r.organism,
-                        taxonomy_id=r.taxonomy_id,
-                        gene_name=r.gene_name,
-                        length=r.length,
-                        sequence_id=seq_id,
-                    )
-                )
+                to_add.append(self._build_new_protein(r, seq_id))
                 proteins_inserted += 1
-
         if to_add:
             emit("db.insert_proteins_start", None, {"rows": len(to_add)}, "info")
             session.add_all(to_add)
             session.flush()
             emit("db.insert_proteins_done", None, {"rows": len(to_add)}, "info")
+        return proteins_inserted, proteins_updated
 
-        return proteins_inserted, proteins_updated, sequences_inserted, sequences_reused
+    @staticmethod
+    def _apply_protein_updates(
+        p: Protein, r: UniProtProteinRecord, seq_id: int | None
+    ) -> bool:
+        """Patch ``p`` with non-clobbering updates from ``r``; return ``True`` if anything changed."""
+        changed = False
+        if getattr(p, "sequence_id", None) is None and seq_id is not None:
+            p.sequence_id = seq_id
+            changed = True
+        if getattr(p, "entry_name", None) in (None, "") and r.entry_name:
+            p.entry_name = r.entry_name
+            changed = True
+        if getattr(p, "canonical_accession", None) != r.canonical_accession:
+            p.canonical_accession = r.canonical_accession
+            changed = True
+        if getattr(p, "is_canonical", None) != r.is_canonical:
+            p.is_canonical = r.is_canonical
+            changed = True
+        if getattr(p, "isoform_index", None) != r.isoform_index:
+            p.isoform_index = r.isoform_index
+            changed = True
+        if getattr(p, "reviewed", None) is None:
+            p.reviewed = r.reviewed
+            changed = True
+        if getattr(p, "taxonomy_id", None) in (None, "") and r.taxonomy_id:
+            p.taxonomy_id = r.taxonomy_id
+            changed = True
+        if getattr(p, "organism", None) in (None, "") and r.organism:
+            p.organism = r.organism
+            changed = True
+        if getattr(p, "gene_name", None) in (None, "") and r.gene_name:
+            p.gene_name = r.gene_name
+            changed = True
+        if getattr(p, "length", None) is None:
+            p.length = r.length
+            changed = True
+        return changed
+
+    @staticmethod
+    def _build_new_protein(r: UniProtProteinRecord, seq_id: int | None) -> Protein:
+        return Protein(
+            accession=r.accession,
+            canonical_accession=r.canonical_accession,
+            is_canonical=r.is_canonical,
+            isoform_index=r.isoform_index,
+            reviewed=r.reviewed,
+            entry_name=r.entry_name,
+            organism=r.organism,
+            taxonomy_id=r.taxonomy_id,
+            gene_name=r.gene_name,
+            length=r.length,
+            sequence_id=seq_id,
+        )
 
     def _load_existing_sequences(
         self, session: Session, hashes: Seq[str], chunk_size: int = 5000

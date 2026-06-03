@@ -1,0 +1,23 @@
+version: 2
+
+# GitGuardian config: suppress false-positive secret detections that come from
+# shell parameter-default placeholders. These are not real secrets; they are the
+# fallback values for env vars in docker-compose interpolation, used only when
+# the operator forgets to provide a real value at start-up.
+#
+# Pattern example:
+#   PROTEA_DB_URL: postgresql+psycopg://${POSTGRES_USER:-protea}:${POSTGRES_PASSWORD:-protea}@...
+#                                                                            ^^^^^^
+#                                                                            this is the default placeholder, not a credential
+
+secret:
+  ignored-matches:
+    - name: docker-compose-default-postgres-password
+      match: "POSTGRES_PASSWORD:-protea"
+    - name: docker-compose-default-rabbitmq-password
+      match: "RABBITMQ_PASS:-guest"
+  ignored-paths:
+    - "**/*.example"
+    - "**/*.example.yml"
+    - "**/*.example.yaml"
+    - "**/.env.bundle.example"

@@ -6,7 +6,7 @@ data model, job lifecycle, and extension points. Each page focuses on one
 concern and links to the others where they intersect.
 
 :doc:`system_overview`
-   The four horizontal layers (presentation, API, worker, data), the seven
+   The four horizontal layers (presentation, API, worker, data), the ten
    RabbitMQ queues that connect them, and how a typical request flows through
    the stack from FASTA upload to stored prediction.
 
@@ -16,8 +16,8 @@ concern and links to the others where they intersect.
    the soft-cancellation contract.
 
 :doc:`data_model`
-   The relational schema in five logical groups — sequences and proteins,
-   ontology and annotations, embeddings, predictions, query sets and jobs —
+   The relational schema in five logical groups (sequences and proteins,
+   ontology and annotations, embeddings, predictions, query sets and jobs)
    with the deduplication and versioning rules that make every prediction
    reproducible.
 
@@ -31,11 +31,33 @@ concern and links to the others where they intersect.
    end-to-end evaluation workflow used to produce the figures in
    :doc:`/results`.
 
+:doc:`orchestration`
+   How PROTEA relates to the rest of the working tree: the satellite
+   repositories, the optional ``agent-farm`` orchestration system, and
+   the contract surface (HTTP API + artefact store) the platform exposes
+   for automated consumption.
+
+:doc:`auth`
+   Four-role authentication system (guest/researcher/operator/admin) shipped in
+   FARM-AUTH.1-11 (ADR D37). Human email+password login, API-key programmatic
+   access, session revocation, per-user quota, optional SMTP, and audit log.
+
+:doc:`multistage-pipeline`
+   Shared coordinator/fan-out/collect contract (``MultiStagePayload``,
+   ``StageArtifactStore``, ``PipelineStage``, ``Coordinator``) that the three
+   production pipelines will converge onto.
+
+:doc:`export-coordinator`
+   The minijob-based dataset export pipeline: ``PROTEA_EXPORT_MINIJOBS`` env gate,
+   fan-out into KNN batch minijobs, fast-fail pre-flight, aggregate failure
+   semantics, accepted search backends (numpy/faiss/torch), and
+   ``annotation_set_id`` auto-derivation.
+
 Architecture Decision Records
 -----------------------------
 
 The pages above describe **what** the architecture looks like today. The
-:doc:`/adr/index` records explain **why** each major decision was taken —
+:doc:`/adr/index` records explain **why** each major decision was taken:
 the constraint, the rejected alternatives, and the trade-off that closed
 the question.
 
@@ -78,4 +100,8 @@ The full ADR index lives at :doc:`/adr/index`.
    data_model
    operations
    evaluation
+   orchestration
+   auth
+   multistage-pipeline
+   export-coordinator
    /adr/index

@@ -3,10 +3,10 @@ ADR-008: PK coverage fix in cafaeval fork
 
 :Date: 2026-04-23
 :Author: frapercan
-:Status: applied
+:Status: Accepted
 
-The problem
------------
+Context
+-------
 
 Upstream ``cafaeval`` (pinned at ``claradepaolis/CAFA-evaluator-PK``) reports
 ``coverage`` values greater than ``1.0`` for the Partial-Knowledge (PK)
@@ -50,12 +50,12 @@ the per-TP weighting, but **not** to the row count that becomes
 The observed ``coverage > 1`` is the visible symptom. The silent
 secondary effect is that ``precision`` under
 ``normalization='cafa'`` uses ``metrics['n']`` as its denominator
-(``normalize()``, line 569), so precision is under-divided — tightened
+(``normalize()``, line 569), so precision is under-divided, tightened
 by the same factor. On the 220→230 PROTEA benchmark this drags PK Fmax
 from its true value down by 30–40 %.
 
-What we do
-----------
+Decision
+--------
 
 ``cafaeval-protea`` (fork commit ``cec8ccd``) applies a one-line semantic
 fix inside ``compute_confusion_matrix_exclude_sparse``:
@@ -65,7 +65,7 @@ fix inside ``compute_confusion_matrix_exclude_sparse``:
    # Restrict the row count to proteins that still have ≥1 GT annotation
    # in TOI after the per-protein exclude mask. Without this, `n` counts
    # proteins whose TOI annotations were all already known in t0, while
-   # the denominator `ne` drops them — producing coverage > 1.
+   # the denominator `ne` drops them, producing coverage > 1.
    eligible_rows = (
        (gt_sub != 0) & toi_mask[None, :] & (~excluded_mask)
    ).any(axis=1)
@@ -88,7 +88,7 @@ Why this was not caught by the fork's parity tests
 The parity tests in ``tests/diff/test_oracle_parity.py`` compare the
 fork's output against a frozen pickle of the upstream evaluator run on
 the same corpora. They enforce bit-/ULP-exact equality across every
-column — including ``n`` and ``cov`` — so any semantic correction in
+column (including ``n`` and ``cov``), so any semantic correction in
 the PK branch will look like a regression.
 
 To keep the parity gate honest, the fix is accompanied by two changes
@@ -103,12 +103,18 @@ in the test suite:
 2. ``tests/diff/test_oracle_parity.py``: a ``_maybe_xfail_pk()`` helper
    xfails the PK variants of the oracle parity with a documented reason.
    The NK/LK variants continue to enforce bit-exact parity with
-   upstream. The xfail is intentional and load-bearing — it records
+   upstream. The xfail is intentional and load-bearing: it records
    the fact that the fork has deliberately diverged from upstream on
    PK semantics, not because of a numerical drift.
 
+Consequences
+------------
+
+The sections below document the measured impact and operational steps required
+after applying the fix.
+
 Effect on the PROTEA 220→230 benchmark
----------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 After re-running the 15 PK evaluations under the patched fork:
 
@@ -145,7 +151,7 @@ NK and LK cells are unchanged within float noise. The thesis PK metrics
 reported hereafter reflect the corrected computation.
 
 Operational implication
------------------------
+~~~~~~~~~~~~~~~~~~~~~~~
 
 - ``cafaeval-protea`` is installed in PROTEA via a ``file://`` path
   dependency. After pulling a new fork commit, the venv must be force-
@@ -159,7 +165,7 @@ Operational implication
 
 - Every live ``worker-evaluations`` process holds the ``cafaeval``
   module in memory. Reinstalling the package does **not** hot-patch
-  running workers — they must be restarted to pick up the fix::
+  running workers; they must be restarted to pick up the fix::
 
       systemctl --user restart protea-worker-evaluations
 
@@ -170,7 +176,7 @@ Operational implication
   automatically for any ``prediction_set`` that loses its eval.
 
 We should push this fix upstream
---------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The bug exists verbatim in ``claradepaolis/CAFA-evaluator-PK`` and, as
 far as we can tell, has never been flagged in an issue. The fix is

@@ -40,8 +40,14 @@ autodoc_mock_imports = [
     'cafaeval',
     'numpy',
     'pandas',
+    'pyarrow',
     'scipy',
     'sklearn',
+    'aio_pika',
+    'minio',
+    'opentelemetry',
+    'prometheus_client',
+    'pgvector',
 ]
 
 master_doc = 'index'

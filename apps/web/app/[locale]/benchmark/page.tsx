@@ -1,7 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useParams } from "next/navigation";
+import { useTranslations } from "next-intl";
+import { BenchmarkHeatmap } from "@/components/BenchmarkHeatmap";
+import { Skeleton } from "@/components/Skeleton";
+import { Tooltip } from "@/components/Tooltip";
+import { useUrlNumber, useUrlParam } from "@/lib/useUrlParam";
 import {
   getBenchmarkEmbeddings,
   getBenchmarkMatrix,
@@ -12,6 +18,63 @@ import {
   type BenchmarkRow,
   type BenchmarkStage,
 } from "../../../lib/api";
+
+/** Canonical category definitions. Anchored to the leakage-fixed champion
+ *  memory (project_lb2_leakage_fixed_champion) and the paired bootstrap
+ *  result (project_lb3_paired_ci_2026_05_18): NK = the strict CAFA "no
+ *  knowledge" split (no experimental annotations exist for the test
+ *  protein in the train cutoff), LK = limited knowledge (some aspects
+ *  annotated but not the one under evaluation), PK = partial knowledge
+ *  (the protein is annotated for the same aspect but with at least one
+ *  new term added in the evaluation cutoff). Selective-deploy memory
+ *  (project_v27_binary_multiseed) explains why PK is policy-zero for
+ *  the v27-binary reranker. */
+const CATEGORY_TOOLTIPS: Record<string, string> = {
+  NK: "No Knowledge — the test protein has no experimental annotations of any aspect at the train cutoff. Strictest CAFA split: 0.7291 ± 0.0028 multiseed Fmax on v27-binary (NK+LK pooled).",
+  LK: "Limited Knowledge — the protein carries annotations in other aspects but not the one being evaluated. Paired with NK in the publishable selective-deploy claim.",
+  PK: "Partial Knowledge — the protein already has annotations for the same aspect; the evaluation only scores newly added terms. Reranker stays policy-zero here; KNN baseline drives selective deploy.",
+};
+
+/** Lineage chip filter — decomposes the BenchmarkEvalSet.stats counters
+ *  (nk_proteins / lk_proteins / pk_proteins) along the same NK / LK / PK
+ *  axis used by the matrix rows. Selecting a chip keeps only rows whose
+ *  ``category`` matches one of the listed categories; ``All`` keeps every
+ *  category returned by the matrix endpoint. This is purely a UI filter
+ *  on top of the data already in hand — no extra request. */
+type LineageChipKey = "all" | "nk_lk" | "pk_only" | "nk" | "lk";
+
+const LINEAGE_CHIPS: { key: LineageChipKey; label: string; cats: string[]; tooltip: string }[] = [
+  {
+    key: "all",
+    label: "All",
+    cats: ["NK", "LK", "PK"],
+    tooltip: "Show every CAFA split (No / Limited / Partial Knowledge). Restores the full benchmark matrix.",
+  },
+  {
+    key: "nk_lk",
+    label: "NK + LK only",
+    cats: ["NK", "LK"],
+    tooltip: "Selective-deploy window: the v27-binary reranker is published only on NK + LK splits (0.7291 ± 0.0028 multiseed pooled). Removes PK from the matrix.",
+  },
+  {
+    key: "pk_only",
+    label: "PK only",
+    cats: ["PK"],
+    tooltip: "Partial Knowledge in isolation. The reranker stays policy-zero here, so the matrix surfaces the KNN baseline that drives the selective-deploy decision.",
+  },
+  {
+    key: "nk",
+    label: "NK",
+    cats: ["NK"],
+    tooltip: "No Knowledge in isolation — the strictest CAFA split where the test protein has zero experimental annotations at train cutoff.",
+  },
+  {
+    key: "lk",
+    label: "LK",
+    cats: ["LK"],
+    tooltip: "Limited Knowledge in isolation — proteins annotated in other aspects but not the one under evaluation.",
+  },
+];
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -33,6 +96,26 @@ function formatProteins(n: number | undefined): string {
 
 function cellKey(eid: string, cat: string, asp: string): string {
   return `${eid}|${cat}|${asp}`;
+}
+
+/** Format the optional fmax_std as a compact "± 0.003" suffix. Returns
+ *  an empty string when the std is missing, so callers can append
+ *  unconditionally without conditional whitespace. */
+function formatStd(std: number | null | undefined): string {
+  if (std == null || !Number.isFinite(std)) return "";
+  return `± ${std.toFixed(3)}`;
+}
+
+/** True when the row carries both bootstrap bounds. The CI band only
+ *  renders when both are present and form a valid interval. */
+function hasCiBand(row: BenchmarkRow): boolean {
+  return (
+    row.fmax_ci_low != null &&
+    row.fmax_ci_high != null &&
+    Number.isFinite(row.fmax_ci_low) &&
+    Number.isFinite(row.fmax_ci_high) &&
+    row.fmax_ci_high >= row.fmax_ci_low
+  );
 }
 
 /** Index rows by (embedding, cat, asp) for O(1) cell lookup. The matrix
@@ -139,12 +222,29 @@ function downloadCsv(filename: string, content: string): void {
 // ── Page ─────────────────────────────────────────────────────────────────
 
 export default function BenchmarkPage() {
+  const params = useParams<{ locale: string }>();
+  const locale = params?.locale ?? "en";
+  const t = useTranslations("benchmark");
   const [embeddings, setEmbeddings] = useState<BenchmarkEmbedding[] | null>(null);
   const [matrix, setMatrix] = useState<BenchmarkMatrixResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [stage, setStage] = useState<string | null>(null);
-  const [evalSetId, setEvalSetId] = useState<string | "all">("all");
-  const [selectedK, setSelectedK] = useState<number | null>(null);
+  // URL-synced filters: copy the page link and the chips persist.
+  const [stage, setStage] = useUrlParam("stage", null);
+  const [evalSetIdRaw, setEvalSetIdRaw] = useUrlParam("eval_set", "all");
+  const evalSetId = (evalSetIdRaw ?? "all") as string | "all";
+  const setEvalSetId = (v: string | "all") => setEvalSetIdRaw(v === "all" ? null : v);
+  const [selectedK, setSelectedK] = useUrlNumber("k", null);
+  // Lineage chip filter (URL-synced). Default "all" is encoded as the
+  // missing param so a copied benchmark URL stays clean for the default
+  // view. Anchored to the BenchmarkEvalSet.stats nk/lk/pk counters and
+  // the selective-deploy memory (project_v27_binary_multiseed): NK+LK is
+  // the published reranker window; PK is policy-zero.
+  const [lineageRaw, setLineageRaw] = useUrlParam("lineage", null);
+  const lineage = (lineageRaw ?? "all") as LineageChipKey;
+  const setLineage = (v: LineageChipKey) => setLineageRaw(v === "all" ? null : v);
+  // Default view: heatmap small-multiples (#81). The full numeric matrix is
+  // still one click away under the toggle for export workflows.
+  const [viewMode, setViewMode] = useState<"heatmap" | "table">("heatmap");
 
   // Unfiltered catalog fetch — populates the full set of known stages and
   // eval sets, so selector chips don't disappear when a filtered query
@@ -157,9 +257,49 @@ export default function BenchmarkPage() {
     ks: number[];
   }>({ stages: [], evalSets: [], categories: [], aspects: [], ks: [] });
 
+  // Filter signature most recently used to fetch matrix data. The
+  // filter-change effect compares the current filter state against this
+  // ref and skips when they match — that swallows the programmatic
+  // ``setStage(default)`` / ``setSelectedK(default)`` calls the first
+  // effect issues right after applying the URL-pinned response.
+  const lastFetchedSig = useRef<string | null>(null);
+
+  function filterSig(s: string | null, esid: string, k: number | null): string {
+    return `${s ?? ""}|${esid}|${k ?? ""}`;
+  }
+
+  // First effect: runs ONCE on mount. Fires a SINGLE Promise.all that
+  // requests the matrix using whatever filters the URL provides
+  // (``stage`` / ``evaluation_set_id`` / ``k`` — any combination) and
+  // the embeddings list in parallel. Catalog (stages, evalSets, ks) is
+  // derived from the response, which always echoes the full observed
+  // catalog regardless of filter — see ``_aggregate_benchmark_matrix``
+  // in protea/api/routers/benchmark.py.
+  //
+  // When the URL is bare or partial, ``setStage(default)`` /
+  // ``setSelectedK(default)`` push derived defaults into URL state. The
+  // second effect compares the resulting filter signature against the
+  // one we just fetched and short-circuits when they match, so this
+  // first paint is always exactly ONE matrix call. UX trade-off on the
+  // bare/partial path: leaderboards reflect the request filters (which
+  // may be a superset of the resolved chip selection) until the user
+  // changes a chip; the global-champion banner stays correct either
+  // way, and the user's URL ``/en/benchmark/?k=3`` (the slow path that
+  // motivated this refactor) now resolves in one round-trip.
   useEffect(() => {
-    getBenchmarkMatrix()
-      .then((m) => {
+    setError(null);
+    const urlPinned = {
+      stage: stage ?? undefined,
+      evaluation_set_id: evalSetId === "all" ? undefined : evalSetId,
+      k: selectedK ?? undefined,
+    };
+    const hasAnyPin =
+      stage != null || evalSetId !== "all" || selectedK != null;
+    Promise.all([
+      getBenchmarkMatrix(hasAnyPin ? urlPinned : undefined),
+      getBenchmarkEmbeddings(),
+    ])
+      .then(([m, e]) => {
         setCatalog({
           stages: m.stages,
           evalSets: m.evaluation_sets,
@@ -167,27 +307,39 @@ export default function BenchmarkPage() {
           aspects: m.aspects,
           ks: m.ks ?? [],
         });
-        setStage((prev) => prev ?? pickDefaultStage(m.stages));
-        setSelectedK((prev) => prev ?? (m.ks?.[0] ?? null));
-      })
-      .catch((e) => setError(e.message));
-  }, []);
-
-  useEffect(() => {
-    if (stage === null) return;
-    setError(null);
-    Promise.all([
-      getBenchmarkEmbeddings(),
-      getBenchmarkMatrix({
-        stage,
-        evaluation_set_id: evalSetId === "all" ? undefined : evalSetId,
-        k: selectedK ?? undefined,
-      }),
-    ])
-      .then(([e, m]) => {
         setEmbeddings(e.embeddings);
         setMatrix(m);
+        const resolvedStage = stage ?? pickDefaultStage(m.stages);
+        const resolvedK = selectedK ?? m.ks?.[0] ?? null;
+        // Record the resolved signature BEFORE pushing defaults to URL
+        // state, so the second effect's no-op pass on the same filter
+        // combo short-circuits and we don't issue a redundant call.
+        lastFetchedSig.current = filterSig(resolvedStage, evalSetId, resolvedK);
+        if (stage == null && resolvedStage != null) setStage(resolvedStage);
+        if (selectedK == null && resolvedK != null) setSelectedK(resolvedK);
       })
+      .catch((e) => setError(e.message));
+    // Intentionally mount-only. URL state read once; subsequent changes
+    // go through the filter-change effect below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Second effect: fires when the user actively changes a filter chip.
+  // Skips runs whose filter signature already matches the data we hold,
+  // which absorbs both the initial defaults-application from the first
+  // effect and any no-op re-renders that don't change filters.
+  useEffect(() => {
+    if (stage === null) return;
+    const sig = filterSig(stage, evalSetId, selectedK);
+    if (lastFetchedSig.current === sig) return;
+    setError(null);
+    lastFetchedSig.current = sig;
+    getBenchmarkMatrix({
+      stage,
+      evaluation_set_id: evalSetId === "all" ? undefined : evalSetId,
+      k: selectedK ?? undefined,
+    })
+      .then(setMatrix)
       .catch((e) => setError(e.message));
   }, [stage, evalSetId, selectedK]);
 
@@ -198,6 +350,14 @@ export default function BenchmarkPage() {
 
   const bestPerCell = useMemo(
     () => (matrix ? indexBestPerCell(matrix.best_per_cell) : new Map<string, BenchmarkBestCell>()),
+    [matrix],
+  );
+
+  const bestPerCellGlobal = useMemo(
+    () =>
+      matrix
+        ? indexBestPerCell(matrix.best_per_cell_global ?? [])
+        : new Map<string, BenchmarkBestCell>(),
     [matrix],
   );
 
@@ -217,10 +377,71 @@ export default function BenchmarkPage() {
   }
 
   if (!embeddings || !matrix || stage === null) {
+    // Two-step progress hint: matrix fetch typically dominates (200-1200ms
+    // cold, instant when the Next.js 60s cache is warm); the embeddings
+    // catalog usually returns first. We surface both so users see motion
+    // even when one half is mid-flight, and a shimmer-row preview hints at
+    // the table structure (PLM rows x aspect/category columns) that's
+    // about to render. Memory feedback_no_blocking_slow_endpoints: the
+    // real fix is the cache on getBenchmarkMatrix, not a synchronous wait.
+    const matrixReady = matrix !== null;
+    const embeddingsReady = embeddings !== null;
     return (
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12 space-y-8">
-        <div className="h-8 w-64 bg-gray-100 rounded animate-pulse" />
-        <div className="h-96 bg-gray-100 rounded-lg animate-pulse" />
+      <div
+        className="max-w-6xl mx-auto px-4 sm:px-6 py-12 space-y-6"
+        role="status"
+        aria-live="polite"
+        aria-busy="true"
+      >
+        <div className="space-y-2">
+          <p className="text-sm font-semibold text-slate-700">{t("loadingTitle")}</p>
+          <p className="text-xs text-slate-500 max-w-2xl">{t("loadingHint")}</p>
+        </div>
+        <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+          <li className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2">
+            <span
+              aria-hidden
+              className={`inline-block h-2 w-2 rounded-full ${
+                matrixReady ? "bg-emerald-500" : "bg-blue-400 animate-pulse"
+              }`}
+            />
+            <span className={matrixReady ? "text-slate-700" : "text-slate-500"}>
+              {t("loadingStepMatrix")}
+            </span>
+          </li>
+          <li className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2">
+            <span
+              aria-hidden
+              className={`inline-block h-2 w-2 rounded-full ${
+                embeddingsReady ? "bg-emerald-500" : "bg-blue-400 animate-pulse"
+              }`}
+            />
+            <span className={embeddingsReady ? "text-slate-700" : "text-slate-500"}>
+              {t("loadingStepEmbeddings")}
+            </span>
+          </li>
+        </ul>
+        {/* Shimmer preview: two header rows (categories then aspects) and
+            four embedding rows hint at the table structure so the user
+            knows what's about to land. */}
+        <div className="rounded-lg border bg-white shadow-sm overflow-hidden">
+          <p className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500 border-b bg-slate-50">
+            {t("loadingRowsPreview")}
+          </p>
+          <div className="divide-y">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div
+                key={i}
+                className="grid grid-cols-[180px_repeat(9,minmax(0,1fr))] gap-2 px-4 py-2.5 items-center"
+              >
+                <Skeleton className="h-4 w-32" />
+                {Array.from({ length: 9 }).map((__, j) => (
+                  <Skeleton key={j} className="h-4 w-12 mx-auto" />
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     );
   }
@@ -228,9 +449,26 @@ export default function BenchmarkPage() {
   const hasData = matrix.rows.length > 0;
   const stageList = catalog.stages.length > 0 ? catalog.stages : matrix.stages;
   const evalSetList = catalog.evalSets.length > 0 ? catalog.evalSets : matrix.evaluation_sets;
-  const categories = catalog.categories.length > 0 ? catalog.categories : matrix.categories;
+  const allCategories = catalog.categories.length > 0 ? catalog.categories : matrix.categories;
   const aspects = catalog.aspects.length > 0 ? catalog.aspects : matrix.aspects;
   const currentStageLabel = stageLabel(stageList, stage);
+
+  // Lineage chip filter — applied to every category-keyed visualisation
+  // below (champions grid, leaderboard, heatmap, full table). When the
+  // chip would null out the entire view we fall back to the unfiltered
+  // category list so the page never goes blank: this happens, for
+  // example, on a benchmark that has only NK rows when the user clicks
+  // "PK only". A subtle banner explains the fallback.
+  const activeChip = LINEAGE_CHIPS.find((c) => c.key === lineage) ?? LINEAGE_CHIPS[0];
+  const chipCats = new Set(activeChip.cats);
+  const categories = allCategories.filter((c) => chipCats.has(c));
+  const lineageHasNoMatch = categories.length === 0 && allCategories.length > 0;
+  const effectiveCategories = lineageHasNoMatch ? allCategories : categories;
+  // Used by row-level lookups (heatmap, table) to skip rows whose
+  // category was filtered out. Identical to chipCats on the happy path,
+  // but defaults to "all known" when the fallback fires above.
+  const effectiveCatSet = new Set(effectiveCategories);
+  const filteredRows = matrix.rows.filter((r) => effectiveCatSet.has(r.category));
 
   // Active eval set banner: when "all" is selected and there's only one set,
   // show that one; when a specific one is selected, show its full metadata.
@@ -246,12 +484,12 @@ export default function BenchmarkPage() {
       {/* Header */}
       <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Benchmark matrix</h1>
-          <p className="text-sm text-gray-500 mt-1">
+          <h1 className="text-2xl font-bold text-slate-900">Benchmark matrix</h1>
+          <p className="text-sm text-slate-500 mt-1">
             Per-embedding Fmax across categories and aspects for every evaluation
             run in the database.{" "}
-            <Link href="/" className="text-blue-600 hover:underline">
-              Back to home
+            <Link href={`/${locale}/`} className="text-blue-600 hover:underline">
+              {t("backToHome")}
             </Link>
           </p>
         </div>
@@ -260,11 +498,11 @@ export default function BenchmarkPage() {
             disabled={!hasData}
             onClick={() =>
               downloadCsv(
-                `benchmark_${stage}.csv`,
-                rowsToCsv(embeddings, matrix.rows, stage),
+                `benchmark_${stage}${lineage !== "all" ? `_${lineage}` : ""}.csv`,
+                rowsToCsv(embeddings, filteredRows, stage),
               )
             }
-            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Download CSV
           </button>
@@ -293,8 +531,14 @@ export default function BenchmarkPage() {
                   proteins
                 </span>
               )}
+              {/* NK/LK/PK counters dim when the lineage chip filters
+                  them out, so the banner doubles as the chip's effective
+                  scope readout. The active chip's categories stay bold. */}
               {activeEvalSet.stats.nk_proteins != null && (
-                <span>
+                <span
+                  className={effectiveCatSet.has("NK") ? "" : "opacity-40"}
+                  title={effectiveCatSet.has("NK") ? undefined : "Hidden by lineage chip"}
+                >
                   <span className="text-blue-500">NK</span>{" "}
                   <span className="font-mono font-semibold">
                     {formatProteins(activeEvalSet.stats.nk_proteins)}
@@ -302,7 +546,10 @@ export default function BenchmarkPage() {
                 </span>
               )}
               {activeEvalSet.stats.lk_proteins != null && (
-                <span>
+                <span
+                  className={effectiveCatSet.has("LK") ? "" : "opacity-40"}
+                  title={effectiveCatSet.has("LK") ? undefined : "Hidden by lineage chip"}
+                >
                   <span className="text-blue-500">LK</span>{" "}
                   <span className="font-mono font-semibold">
                     {formatProteins(activeEvalSet.stats.lk_proteins)}
@@ -310,7 +557,10 @@ export default function BenchmarkPage() {
                 </span>
               )}
               {activeEvalSet.stats.pk_proteins != null && (
-                <span>
+                <span
+                  className={effectiveCatSet.has("PK") ? "" : "opacity-40"}
+                  title={effectiveCatSet.has("PK") ? undefined : "Hidden by lineage chip"}
+                >
                   <span className="text-blue-500">PK</span>{" "}
                   <span className="font-mono font-semibold">
                     {formatProteins(activeEvalSet.stats.pk_proteins)}
@@ -331,24 +581,25 @@ export default function BenchmarkPage() {
       {/* Filters */}
       <div className="flex flex-wrap gap-3 items-end">
         <div>
-          <label className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
+          <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">
             Pipeline stage
           </label>
-          <div className="flex flex-wrap gap-1 rounded-lg bg-gray-100 p-0.5">
+          <div role="group" aria-label="Pipeline stage" className="flex flex-wrap gap-1 rounded-lg bg-slate-100 p-0.5">
             {stageList.map((s) => (
               <button
                 key={s.name}
                 onClick={() => setStage(s.name)}
+                aria-pressed={stage === s.name}
                 title={`${s.kind}${s.is_baseline ? " · baseline" : ""}`}
                 className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
                   stage === s.name
-                    ? "bg-white text-gray-900 shadow-sm"
-                    : "text-gray-500 hover:text-gray-700"
+                    ? "bg-white text-slate-900 shadow-sm"
+                    : "text-slate-500 hover:text-slate-700"
                 }`}
               >
                 {s.label}
                 {s.is_baseline && (
-                  <span className="ml-1 text-[9px] text-gray-400 uppercase">base</span>
+                  <span className="ml-1 text-[9px] text-slate-600 uppercase">base</span>
                 )}
               </button>
             ))}
@@ -357,18 +608,19 @@ export default function BenchmarkPage() {
 
         {catalog.ks.length > 0 && (
           <div>
-            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
+            <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">
               Neighbours (K)
             </label>
-            <div className="flex gap-1 rounded-lg bg-gray-100 p-0.5">
+            <div role="group" aria-label="Neighbours (K)" className="flex gap-1 rounded-lg bg-slate-100 p-0.5">
               {catalog.ks.map((n) => (
                 <button
                   key={n}
                   onClick={() => setSelectedK(n)}
+                  aria-pressed={selectedK === n}
                   className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
                     selectedK === n
-                      ? "bg-white text-gray-900 shadow-sm"
-                      : "text-gray-500 hover:text-gray-700"
+                      ? "bg-white text-slate-900 shadow-sm"
+                      : "text-slate-500 hover:text-slate-700"
                   }`}
                 >
                   K={n}
@@ -380,13 +632,13 @@ export default function BenchmarkPage() {
 
         {evalSetList.length > 1 && (
           <div>
-            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
+            <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">
               Evaluation set
             </label>
             <select
               value={evalSetId}
               onChange={(e) => setEvalSetId(e.target.value)}
-              className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700"
+              className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700"
             >
               <option value="all">All splits</option>
               {evalSetList.map((es) => (
@@ -398,21 +650,75 @@ export default function BenchmarkPage() {
           </div>
         )}
 
-        <div className="text-xs text-gray-400 ml-auto self-end">
-          {matrix.total} cells · {matrix.embedding_config_ids.length} embeddings ·{" "}
+        {/* Lineage chip filter — decomposes the matrix along the same
+            NK / LK / PK axis used by BenchmarkEvalSet.stats counters.
+            Pure UI filter, no extra request. */}
+        {allCategories.length > 1 && (
+          <div data-testid="benchmark-lineage-chips">
+            <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">
+              Lineage
+            </label>
+            <div
+              role="group"
+              aria-label="Lineage decomposition"
+              className="flex flex-wrap gap-1 rounded-lg bg-slate-100 p-0.5"
+            >
+              {LINEAGE_CHIPS.map((chip) => {
+                const active = chip.key === lineage;
+                return (
+                  <Tooltip key={chip.key} text={chip.tooltip}>
+                    <button
+                      type="button"
+                      onClick={() => setLineage(chip.key)}
+                      aria-pressed={active}
+                      className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                        active
+                          ? "bg-white text-slate-900 shadow-sm"
+                          : "text-slate-500 hover:text-slate-700"
+                      }`}
+                    >
+                      {chip.label}
+                    </button>
+                  </Tooltip>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div className="text-xs text-slate-600 ml-auto self-end">
+          {filteredRows.length} cells
+          {filteredRows.length !== matrix.rows.length && (
+            <span className="text-slate-400"> / {matrix.total}</span>
+          )}{" "}
+          · {matrix.embedding_config_ids.length} embeddings ·{" "}
           {matrix.evaluation_sets.length} eval set
           {matrix.evaluation_sets.length === 1 ? "" : "s"}
         </div>
       </div>
 
-      {/* Leaderboard: best Fmax per (cat, asp) across every model & stage */}
-      {matrix.best_per_cell.length > 0 && (
-        <section className="rounded-xl border bg-white shadow-sm p-4">
-          <div className="flex items-baseline justify-between mb-3">
-            <h2 className="text-sm font-semibold text-gray-800">
-              Best Fmax per cell
-              <span className="ml-2 text-xs font-normal text-gray-400">
-                across every model in current stage filter
+      {lineageHasNoMatch && (
+        <div
+          className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+          role="status"
+        >
+          The <strong>{activeChip.label}</strong> chip would hide every row
+          in the current evaluation set (no matching {activeChip.cats.join(" / ")} cells exist).
+          Showing all categories instead — pick a chip with data, or
+          choose a different evaluation set above.
+        </div>
+      )}
+
+      {/* Global champions: best Fmax per (cat, asp) ignoring stage/K filters.
+          Stable across filter changes — anchors the absolute-best read. */}
+      {matrix.best_per_cell_global && matrix.best_per_cell_global.length > 0 && (
+        <section className="rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50/60 via-white to-violet-50/40 shadow-sm p-4 sm:p-5">
+          <div className="flex items-baseline justify-between mb-3 flex-wrap gap-2">
+            <h2 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+              <span aria-hidden className="text-base">🏆</span>
+              Global champions per cell
+              <span className="ml-1 text-[11px] font-normal text-slate-500">
+                across every stage and K · current evaluation set
               </span>
             </h2>
           </div>
@@ -420,11 +726,12 @@ export default function BenchmarkPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr>
-                  <th className="px-2 py-1 text-left font-medium text-gray-500"></th>
+                  <th scope="col" className="px-2 py-1 text-left font-medium text-slate-500"></th>
                   {aspects.map((asp) => (
                     <th
                       key={asp}
-                      className="px-2 py-1 text-center text-[10px] font-medium text-gray-500 uppercase tracking-wide"
+                      scope="col"
+                      className="px-2 py-1 text-center text-[10px] font-medium text-slate-500 uppercase tracking-wide"
                     >
                       {asp}
                     </th>
@@ -432,16 +739,112 @@ export default function BenchmarkPage() {
                 </tr>
               </thead>
               <tbody>
-                {categories.map((cat) => (
+                {effectiveCategories.map((cat) => (
+                  <tr key={cat} className="border-t border-slate-200/60">
+                    <th scope="row" className="px-2 py-2.5 font-semibold text-slate-700 text-left">
+                      {CATEGORY_TOOLTIPS[cat] ? (
+                        <Tooltip text={CATEGORY_TOOLTIPS[cat]}>
+                          <span className="underline decoration-dotted decoration-slate-300 underline-offset-4 cursor-help">
+                            {cat}
+                          </span>
+                        </Tooltip>
+                      ) : (
+                        cat
+                      )}
+                    </th>
+                    {aspects.map((asp) => {
+                      const best = bestPerCellGlobal.get(`${cat}|${asp}`);
+                      if (!best) {
+                        return (
+                          <td key={asp} className="px-2 py-2.5 text-center text-slate-300">
+                            —
+                          </td>
+                        );
+                      }
+                      const emb = embeddings.find((e) => e.id === best.embedding_config_id);
+                      return (
+                        <td
+                          key={asp}
+                          className="px-2 py-2.5 text-center border-l border-slate-200/60"
+                          title={`${emb?.display_name ?? best.embedding_config_id} · ${stageLabel(stageList, best.stage)} · K=${best.k}`}
+                        >
+                          <Link
+                            href={`/${locale}/evaluation/${best.evaluation_set_id}?result=${best.evaluation_result_id}`}
+                            className="block group rounded-md px-1 py-0.5 hover:bg-blue-50 focus:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 transition-colors"
+                          >
+                            <div className="font-bold text-lg text-slate-900 group-hover:text-blue-700 tabular-nums leading-none">
+                              {best.fmax.toFixed(3)}
+                            </div>
+                            <div className="text-[11px] font-medium text-slate-700 truncate max-w-[140px] mx-auto mt-1">
+                              {emb?.display_name ?? "—"}
+                            </div>
+                            <div className="text-[10px] text-slate-500 truncate max-w-[140px] mx-auto mt-0.5">
+                              {stageLabel(stageList, best.stage)}
+                              <span className="mx-1 text-slate-300">·</span>
+                              <span className="tabular-nums">K={best.k}</span>
+                            </div>
+                          </Link>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {/* Leaderboard: best Fmax per (cat, asp) across every model & stage */}
+      {matrix.best_per_cell.length > 0 && (
+        <section className="rounded-xl border bg-white shadow-sm p-4">
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 className="text-sm font-semibold text-slate-800">
+              Best Fmax per cell
+              <span className="ml-2 text-xs font-normal text-slate-600">
+                in current selection
+                {stage ? ` · stage=${stageLabel(stageList, stage)}` : ""}
+                {selectedK ? ` · K=${selectedK}` : ""}
+              </span>
+            </h2>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr>
+                  <th scope="col" className="px-2 py-1 text-left font-medium text-slate-500"></th>
+                  {aspects.map((asp) => (
+                    <th
+                      key={asp}
+                      scope="col"
+                      className="px-2 py-1 text-center text-[10px] font-medium text-slate-500 uppercase tracking-wide"
+                    >
+                      {asp}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {effectiveCategories.map((cat) => (
                   <tr key={cat} className="border-t">
-                    <td className="px-2 py-2 font-semibold text-gray-700">{cat}</td>
+                    <th scope="row" className="px-2 py-2 font-semibold text-slate-700 text-left">
+                      {CATEGORY_TOOLTIPS[cat] ? (
+                        <Tooltip text={CATEGORY_TOOLTIPS[cat]}>
+                          <span className="underline decoration-dotted decoration-slate-300 underline-offset-4 cursor-help">
+                            {cat}
+                          </span>
+                        </Tooltip>
+                      ) : (
+                        cat
+                      )}
+                    </th>
                     {aspects.map((asp) => {
                       const best = bestPerCell.get(`${cat}|${asp}`);
                       if (!best) {
                         return (
                           <td
                             key={asp}
-                            className="px-2 py-2 text-center text-gray-300"
+                            className="px-2 py-2 text-center text-slate-300"
                           >
                             —
                           </td>
@@ -454,15 +857,20 @@ export default function BenchmarkPage() {
                           className="px-2 py-2 text-center border-l"
                           title={`${emb?.display_name ?? best.embedding_config_id} · ${stageLabel(stageList, best.stage)}`}
                         >
-                          <div className="font-semibold text-gray-900 tabular-nums">
-                            {best.fmax.toFixed(3)}
-                          </div>
-                          <div className="text-[10px] text-gray-500 truncate max-w-[120px] mx-auto">
-                            {emb?.display_name ?? "—"}
-                          </div>
-                          <div className="text-[9px] text-gray-400 truncate max-w-[120px] mx-auto">
-                            {stageLabel(stageList, best.stage)}
-                          </div>
+                          <Link
+                            href={`/${locale}/evaluation/${best.evaluation_set_id}?result=${best.evaluation_result_id}`}
+                            className="block group rounded-md px-1 py-0.5 hover:bg-blue-50 focus:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 transition-colors"
+                          >
+                            <div className="font-semibold text-slate-900 group-hover:text-blue-700 tabular-nums">
+                              {best.fmax.toFixed(3)}
+                            </div>
+                            <div className="text-[10px] text-slate-500 truncate max-w-[120px] mx-auto">
+                              {emb?.display_name ?? "—"}
+                            </div>
+                            <div className="text-[9px] text-slate-600 truncate max-w-[120px] mx-auto">
+                              {stageLabel(stageList, best.stage)}
+                            </div>
+                          </Link>
                         </td>
                       );
                     })}
@@ -474,45 +882,95 @@ export default function BenchmarkPage() {
         </section>
       )}
 
-      {/* Matrix table */}
+      {/* View toggle: Heatmap (default) | Table */}
+      {hasData && (
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div role="tablist" aria-label="View mode" className="inline-flex rounded-xl border border-slate-200 bg-white p-0.5 shadow-sm">
+            {(["heatmap", "table"] as const).map((mode) => {
+              const active = viewMode === mode;
+              return (
+                <button
+                  key={mode}
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setViewMode(mode)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-colors ${
+                    active
+                      ? "bg-blue-600 text-white shadow-sm"
+                      : "text-slate-600 hover:bg-slate-100"
+                  }`}
+                >
+                  <span aria-hidden>{mode === "heatmap" ? "📊" : "🔢"}</span>
+                  {mode === "heatmap" ? "Heatmap" : "Table"}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-xs text-slate-500">
+            {viewMode === "heatmap"
+              ? "Visual ranking per cell. Bars sorted by Fmax."
+              : "Full matrix with raw numbers. Useful for export."}
+          </p>
+        </div>
+      )}
+
+      {/* Matrix view */}
       {!hasData ? (
-        <section className="rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 p-12 text-center">
-          <p className="text-gray-500 text-sm">
+        <section className="rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 p-12 text-center">
+          <p className="text-slate-500 text-sm">
             No evaluation results for{" "}
             <span className="font-semibold">{currentStageLabel}</span> yet.
           </p>
-          <p className="text-gray-400 text-xs mt-2">
+          <p className="text-slate-600 text-xs mt-2">
             Run <code>run_cafa_evaluation</code> for an embedding to populate
             this cell of the matrix.
           </p>
         </section>
+      ) : viewMode === "heatmap" ? (
+        <BenchmarkHeatmap
+          rows={filteredRows}
+          embeddings={embeddings}
+          categories={effectiveCategories}
+          aspects={aspects}
+        />
       ) : (
-        <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
+        <div className="rounded-lg border bg-white shadow-sm">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50">
+            <thead className="protea-thead-sticky bg-slate-50">
               <tr>
                 <th
                   rowSpan={2}
-                  className="px-4 py-2 text-left font-medium text-gray-600 border-b sticky left-0 bg-gray-50"
+                  scope="col"
+                  className="px-4 py-2 text-left font-medium text-slate-600 border-b sticky left-0 bg-slate-50"
                 >
                   Embedding
                 </th>
-                {categories.map((cat) => (
+                {effectiveCategories.map((cat) => (
                   <th
                     key={cat}
                     colSpan={aspects.length}
-                    className="px-2 py-1.5 text-center font-semibold text-gray-700 border-b border-l"
+                    scope="colgroup"
+                    className="px-2 py-1.5 text-center font-semibold text-slate-700 border-b border-l"
                   >
-                    {cat}
+                    {CATEGORY_TOOLTIPS[cat] ? (
+                      <Tooltip text={CATEGORY_TOOLTIPS[cat]}>
+                        <span className="underline decoration-dotted decoration-slate-300 underline-offset-4 cursor-help">
+                          {cat}
+                        </span>
+                      </Tooltip>
+                    ) : (
+                      cat
+                    )}
                   </th>
                 ))}
               </tr>
               <tr>
-                {categories.flatMap((cat) =>
+                {effectiveCategories.flatMap((cat) =>
                   aspects.map((asp) => (
                     <th
                       key={`${cat}-${asp}`}
-                      className="px-2 py-1 text-center text-[10px] font-medium text-gray-500 uppercase tracking-wide border-b border-l"
+                      scope="col"
+                      className="px-2 py-1 text-center text-[10px] font-medium text-slate-500 uppercase tracking-wide border-b border-l"
                     >
                       {asp}
                     </th>
@@ -529,22 +987,27 @@ export default function BenchmarkPage() {
                     className={`border-t ${hasRow ? "" : "opacity-50"}`}
                   >
                     <td className="px-4 py-2 sticky left-0 bg-white border-r">
-                      <div className="font-medium text-gray-900">
+                      <div className="font-medium text-slate-900">
                         {emb.display_name}
                       </div>
-                      <div className="text-[10px] text-gray-400 font-mono">
+                      <div className="text-[10px] text-slate-600 font-mono">
                         {emb.family}
                         {emb.param_count != null
                           ? ` · ${formatParams(emb.param_count)}`
                           : ""}
                       </div>
                     </td>
-                    {categories.flatMap((cat) =>
+                    {effectiveCategories.flatMap((cat) =>
                       aspects.map((asp) => {
                         const row = rowIndex.get(cellKey(emb.id, cat, asp));
                         const best = bestPerCell.get(`${cat}|${asp}`);
                         const isWinner =
                           row && best && row.evaluation_result_id === best.evaluation_result_id;
+                        const std = formatStd(row?.fmax_std ?? null);
+                        const ciBand =
+                          row && hasCiBand(row)
+                            ? `CI95 [${row.fmax_ci_low!.toFixed(3)}, ${row.fmax_ci_high!.toFixed(3)}]`
+                            : "";
                         return (
                           <td
                             key={`${emb.id}-${cat}-${asp}`}
@@ -553,20 +1016,30 @@ export default function BenchmarkPage() {
                             }`}
                             title={
                               row
-                                ? `precision=${row.precision ?? "—"} recall=${row.recall ?? "—"} (eval_result=${row.evaluation_result_id.slice(0, 8)}…)`
+                                ? `precision=${row.precision ?? "—"} recall=${row.recall ?? "—"}${ciBand ? ` · ${ciBand}` : ""} (eval_result=${row.evaluation_result_id.slice(0, 8)}…)`
                                 : "no data"
                             }
                           >
                             {row ? (
-                              <span
-                                className={`font-semibold ${
-                                  isWinner ? "text-green-700" : "text-gray-900"
-                                }`}
+                              <Link
+                                href={`/${locale}/evaluation/${row.evaluation_set_id}?result=${row.evaluation_result_id}`}
+                                className="inline-flex items-baseline gap-1 rounded-md px-1 py-0.5 group hover:bg-blue-50 focus:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 transition-colors"
                               >
-                                {row.fmax.toFixed(3)}
-                              </span>
+                                <span
+                                  className={`font-semibold group-hover:text-blue-700 ${
+                                    isWinner ? "text-green-700" : "text-slate-900"
+                                  }`}
+                                >
+                                  {row.fmax.toFixed(3)}
+                                </span>
+                                {std && (
+                                  <span className="text-[10px] font-normal text-slate-500 group-hover:text-blue-600 tabular-nums">
+                                    {std}
+                                  </span>
+                                )}
+                              </Link>
                             ) : (
-                              <span className="text-gray-300">—</span>
+                              <span className="text-slate-300">—</span>
                             )}
                           </td>
                         );
@@ -580,7 +1053,7 @@ export default function BenchmarkPage() {
         </div>
       )}
 
-      <p className="text-xs text-gray-400">
+      <p className="text-xs text-slate-600">
         Display names and stage labels come from{" "}
         <code>embedding_config</code> (DB) and{" "}
         <code>protea/config/benchmark.yaml</code>. Edit the YAML to change

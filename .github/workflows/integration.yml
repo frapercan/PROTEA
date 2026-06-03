@@ -5,9 +5,13 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   integration:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -43,8 +47,17 @@ jobs:
       - name: Add poetry to PATH
         run: echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      - name: Install dependencies
-        run: poetry install --with dev
+      - name: Use in-project virtualenv
+        run: poetry config virtualenvs.in-project true
+
+      - name: Restore venv cache
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py${{ matrix.python-version }}-poetry${{ matrix.poetry-version }}-test-${{ hashFiles('**/poetry.lock') }}
+
+      - name: Install main + test dependencies
+        run: poetry install --with test
 
       - name: Install psql client
         run: sudo apt-get install -y postgresql-client
@@ -58,4 +71,8 @@ jobs:
           PROTEA_PG_PASSWORD: protea
           PROTEA_PG_DB: protea_test
           PROTEA_PG_PORT: 5432
+          # CI Postgres is a disposable service container; opt past the
+          # destructive-test guard added in this PR (which otherwise refuses
+          # drop_all/create_all against a loopback:5432 target).
+          PROTEA_ALLOW_DESTRUCTIVE_TESTS: "1"
         run: poetry run pytest --with-postgres -q

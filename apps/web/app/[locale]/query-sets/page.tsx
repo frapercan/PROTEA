@@ -13,6 +13,7 @@ function formatDate(iso?: string | null) {
 
 export default function QuerySetsPage() {
   const t = useTranslations("querySets");
+  const tToast = useTranslations("toasts");
   const toast = useToast();
   const [sets, setSets] = useState<QuerySet[]>([]);
   const [loading, setLoading] = useState(true);
@@ -64,7 +65,7 @@ export default function QuerySetsPage() {
       const created = await createQuerySet(uploadFile, uploadName.trim(), uploadDescription.trim() || undefined);
       setSets((prev) => [created, ...prev]);
       setShowModal(false);
-      toast(`Query set "${created.name}" uploaded — ${created.entry_count} sequences`, "success");
+      toast(tToast("querySetUploaded", { name: created.name, count: created.entry_count }), "success");
     } catch (err: any) {
       setUploadError(String(err));
     } finally {
@@ -77,7 +78,7 @@ export default function QuerySetsPage() {
     try {
       await deleteQuerySet(id);
       setSets((prev) => prev.filter((s) => s.id !== id));
-      toast(`Deleted "${name}"`, "info");
+      toast(tToast("querySetDeleted", { name }), "info");
     } catch (err: any) {
       setError(String(err));
       toast(String(err), "error");
@@ -95,7 +96,7 @@ export default function QuerySetsPage() {
   }
 
   const inputClass = "w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
-  const labelClass = "block text-sm font-medium text-gray-700 mb-1";
+  const labelClass = "block text-sm font-medium text-slate-700 mb-1";
 
   return (
     <>
@@ -110,14 +111,20 @@ export default function QuerySetsPage() {
       </div>
 
       {error && (
-        <pre className="mb-4 whitespace-pre-wrap rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {error}
-        </pre>
+        <div
+          role="alert"
+          className="mb-4 inline-flex items-center gap-2 rounded-full bg-amber-50 ring-1 ring-inset ring-amber-200 px-3 py-1.5 text-[12px] font-medium text-amber-700"
+        >
+          <span className="relative flex h-2 w-2 shrink-0">
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500 ring-2 ring-amber-200" />
+          </span>
+          <span>{t("fetchError")}: {error}</span>
+        </div>
       )}
 
       {/* List */}
       <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
-        <div className="grid grid-cols-[1fr_80px_140px_60px] gap-2 border-b bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500">
+        <div className="grid grid-cols-[1fr_80px_140px_60px] gap-2 border-b bg-slate-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
           <div>{t("tableHeaders.name")}</div>
           <div>{t("tableHeaders.sequences")}</div>
           <div>{t("tableHeaders.created")}</div>
@@ -130,7 +137,7 @@ export default function QuerySetsPage() {
 
         {!loading && sets.length === 0 && (
           <div className="px-4 py-10 text-center">
-            <p className="text-sm text-gray-400 mb-2">{t("noQuerySets")}</p>
+            <p className="text-sm text-slate-600 mb-2">{t("noQuerySets")}</p>
             <button
               onClick={openModal}
               className="text-sm text-blue-600 underline"
@@ -147,14 +154,19 @@ export default function QuerySetsPage() {
               onClick={() => setExpandedId(expandedId === qs.id ? null : qs.id)}
             >
               <div>
-                <span className="font-medium text-gray-900">{qs.name}</span>
+                <span
+                  className="font-medium text-slate-900 cursor-help"
+                  title={`${t("idTooltip")}: ${qs.id}`}
+                  onClick={(e) => { e.stopPropagation(); void navigator.clipboard.writeText(qs.id); }}
+                >
+                  {qs.name}
+                </span>
                 {qs.description && (
-                  <span className="ml-2 text-xs text-gray-400">{qs.description}</span>
+                  <span className="ml-2 text-xs text-slate-600">{qs.description}</span>
                 )}
-                <div className="font-mono text-xs text-gray-300 mt-0.5">{qs.id}</div>
               </div>
-              <div className="text-gray-700">{qs.entry_count}</div>
-              <div className="text-xs text-gray-400">{formatDate(qs.created_at)}</div>
+              <div className="text-slate-700">{qs.entry_count}</div>
+              <div className="text-xs text-slate-600">{formatDate(qs.created_at)}</div>
               <div className="flex justify-end">
                 <button
                   onClick={(e) => { e.stopPropagation(); handleDelete(qs.id, qs.name); }}
@@ -166,15 +178,14 @@ export default function QuerySetsPage() {
             </div>
 
             {expandedId === qs.id && qs.entries && (
-              <div className="border-t bg-gray-50 px-6 py-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+              <div className="border-t bg-slate-50 px-6 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
                   {t("expandedEntries.title")} {t("expandedEntries.count", { count: qs.entries.length })}
                 </p>
                 <div className="max-h-48 overflow-y-auto space-y-1">
                   {qs.entries.map((entry) => (
-                    <div key={entry.accession} className="flex gap-4 text-xs text-gray-600 font-mono">
-                      <span className="text-gray-900">{entry.accession}</span>
-                      <span className="text-gray-400">seq_id={entry.sequence_id}</span>
+                    <div key={entry.accession} className="flex gap-4 text-xs text-slate-600 font-mono">
+                      <span className="text-slate-900">{entry.accession}</span>
                     </div>
                   ))}
                 </div>
@@ -192,7 +203,7 @@ export default function QuerySetsPage() {
               <h2 className="text-base font-semibold">{t("uploadModal.title")}</h2>
               <button
                 onClick={() => setShowModal(false)}
-                className="text-gray-400 hover:text-gray-600 text-xl leading-none"
+                className="text-slate-600 hover:text-slate-600 text-xl leading-none"
               >
                 {t("uploadModal.close")}
               </button>
@@ -240,7 +251,7 @@ export default function QuerySetsPage() {
                       ? "border-blue-400 bg-blue-50 text-blue-700"
                       : uploadFile
                       ? "border-green-300 bg-green-50 text-green-700"
-                      : "border-gray-200 bg-gray-50 text-gray-500 hover:border-gray-300 hover:bg-gray-100"
+                      : "border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300 hover:bg-slate-100"
                   }`}
                 >
                   {uploadFile ? (
@@ -282,7 +293,7 @@ export default function QuerySetsPage() {
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
-                  className="rounded-md border px-4 py-2 text-sm hover:bg-gray-50"
+                  className="rounded-md border px-4 py-2 text-sm hover:bg-slate-50"
                 >
                   {t("uploadModal.cancel")}
                 </button>

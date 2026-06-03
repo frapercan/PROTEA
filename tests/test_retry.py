@@ -11,6 +11,7 @@ from sqlalchemy.exc import OperationalError
 
 from protea.core.retry import (
     RETRYABLE_PG_CODES,
+    RetryPolicy,
     is_retryable,
     is_retryable_connection_error,
     is_retryable_db_error,
@@ -92,7 +93,10 @@ class TestWithRetry:
             return "ok"
 
         with patch("protea.core.retry.time.sleep") as mock_sleep:
-            result = with_retry(fn, max_attempts=5, base_delay=0.01, jitter_ratio=0)
+            result = with_retry(
+                fn,
+                policy=RetryPolicy(max_attempts=5, base_delay=0.01, jitter_ratio=0),
+            )
 
         assert result == "ok"
         assert attempts["n"] == 3
@@ -104,7 +108,7 @@ class TestWithRetry:
 
         with patch("protea.core.retry.time.sleep") as mock_sleep:
             with pytest.raises(ValueError, match="bad"):
-                with_retry(fn, max_attempts=5)
+                with_retry(fn, policy=RetryPolicy(max_attempts=5))
 
         # Non-retryable exception means no sleep, no retry.
         assert fn.call_count == 1
@@ -115,7 +119,10 @@ class TestWithRetry:
 
         with patch("protea.core.retry.time.sleep") as mock_sleep:
             with pytest.raises(OperationalError):
-                with_retry(fn, max_attempts=3, base_delay=0.01, jitter_ratio=0)
+                with_retry(
+                    fn,
+                    policy=RetryPolicy(max_attempts=3, base_delay=0.01, jitter_ratio=0),
+                )
 
         assert fn.call_count == 3
         # Sleep happens only between attempts (so 2 sleeps for 3 attempts).
@@ -126,7 +133,12 @@ class TestWithRetry:
 
         with patch("protea.core.retry.time.sleep") as mock_sleep:
             with pytest.raises(OperationalError):
-                with_retry(fn, max_attempts=4, base_delay=1.0, max_delay=30.0, jitter_ratio=0)
+                with_retry(
+                    fn,
+                    policy=RetryPolicy(
+                        max_attempts=4, base_delay=1.0, max_delay=30.0, jitter_ratio=0
+                    ),
+                )
 
         sleeps = [c.args[0] for c in mock_sleep.call_args_list]
         # attempt 1 -> sleep 1.0, attempt 2 -> 2.0, attempt 3 -> 4.0
@@ -137,13 +149,18 @@ class TestWithRetry:
 
         with patch("protea.core.retry.time.sleep") as mock_sleep:
             with pytest.raises(OperationalError):
-                with_retry(fn, max_attempts=8, base_delay=1.0, max_delay=5.0, jitter_ratio=0)
+                with_retry(
+                    fn,
+                    policy=RetryPolicy(
+                        max_attempts=8, base_delay=1.0, max_delay=5.0, jitter_ratio=0
+                    ),
+                )
 
         sleeps = [c.args[0] for c in mock_sleep.call_args_list]
         # 1, 2, 4, 5 (capped), 5, 5, 5
         assert sleeps == [1.0, 2.0, 4.0, 5.0, 5.0, 5.0, 5.0]
 
-    def test_jitter_keeps_sleep_within_band(self) -> None:
+    def test_jitter_keeps_backoff_within_band(self) -> None:
         fn = MagicMock(side_effect=_make_op_error("40P01"))
         captured: list[float] = []
 
@@ -151,7 +168,12 @@ class TestWithRetry:
             "protea.core.retry.time.sleep", side_effect=lambda d: captured.append(d)
         ):
             with pytest.raises(OperationalError):
-                with_retry(fn, max_attempts=4, base_delay=1.0, max_delay=30.0, jitter_ratio=0.5)
+                with_retry(
+                    fn,
+                    policy=RetryPolicy(
+                        max_attempts=4, base_delay=1.0, max_delay=30.0, jitter_ratio=0.5
+                    ),
+                )
 
         # First sleep base = 1.0; with jitter 0.5, range is [0.5, 1.5].
         assert 0.5 <= captured[0] <= 1.5
@@ -167,7 +189,12 @@ class TestWithRetry:
         fn = MagicMock(side_effect=[_make_op_error("40P01"), "ok"])
 
         with patch("protea.core.retry.time.sleep"):
-            result = with_retry(fn, max_attempts=2, base_delay=0.01, jitter_ratio=0, on_retry=cb)
+            result = with_retry(
+                fn,
+                policy=RetryPolicy(
+                    max_attempts=2, base_delay=0.01, jitter_ratio=0, on_retry=cb
+                ),
+            )
 
         assert result == "ok"
         assert len(events) == 1
@@ -179,7 +206,10 @@ class TestWithRetry:
 
         with caplog.at_level(logging.WARNING, logger="protea.retry"):
             with patch("protea.core.retry.time.sleep"):
-                with_retry(fn, max_attempts=2, base_delay=0.01, jitter_ratio=0)
+                with_retry(
+                    fn,
+                    policy=RetryPolicy(max_attempts=2, base_delay=0.01, jitter_ratio=0),
+                )
 
         relevant = [r for r in caplog.records if r.name == "protea.retry"]
         assert relevant, "expected at least one log under protea.retry"
@@ -189,11 +219,19 @@ class TestWithRetry:
     def test_max_attempts_zero_raises(self) -> None:
         fn = MagicMock()
         with pytest.raises(ValueError, match="max_attempts must be"):
-            with_retry(fn, max_attempts=0)
+            with_retry(fn, policy=RetryPolicy(max_attempts=0))
 
     def test_does_not_swallow_keyboard_interrupt(self) -> None:
         def fn() -> Any:
             raise KeyboardInterrupt
 
         with pytest.raises(KeyboardInterrupt):
-            with_retry(fn, max_attempts=3, base_delay=0.01)
+            with_retry(fn, policy=RetryPolicy(max_attempts=3, base_delay=0.01))
+
+    def test_default_policy_used_when_omitted(self) -> None:
+        """Calling ``with_retry(fn)`` with no policy uses ``RetryPolicy()`` defaults."""
+        fn = MagicMock(return_value="ok")
+        # Default RetryPolicy has max_attempts=3, so a one-shot success
+        # should still go through (no retries needed for non-failing fn).
+        assert with_retry(fn) == "ok"
+        fn.assert_called_once_with()

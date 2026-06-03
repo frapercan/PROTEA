@@ -2,6 +2,7 @@ services:
 
   postgres:
     image: pgvector/pgvector:pg16
+    shm_size: 2gb
     environment:
       POSTGRES_USER: protea
       POSTGRES_PASSWORD: protea
@@ -16,6 +17,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    stop_grace_period: 30s
     deploy:
       resources:
         limits:
@@ -51,6 +53,12 @@ services:
     ports:
       - "5672:5672"
       - "15672:15672"
+      # rabbitmq_prometheus plugin metrics endpoint (enabled by default in
+      # rabbitmq:3-management; the enabled_plugins file in docker/ makes it
+      # explicit so a plain rabbitmq:3 image also works).
+      - "15692:15692"
+    volumes:
+      - ./docker/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "ping"]
       interval: 10s

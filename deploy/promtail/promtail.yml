@@ -1,0 +1,56 @@
+# Promtail configuration for tailing PROTEA process-stack log files.
+#
+# The PROTEA application stack is process-based (uvicorn + workers +
+# next.js), not docker-based.  It writes plaintext log files under
+# logs/ in the deploy working directory.  This config is mounted into
+# the promtail container by docker-compose.monitoring.yml and tells
+# promtail which files to tail and how to label each stream before
+# pushing to Loki.
+#
+# Label alignment with the logs.json dashboard:
+#   compose_project = "protea"   (static; matches the dashboard filter)
+#   service_name    = <basename without .log>
+#                     e.g. api, worker-jobs, worker-embeddings,
+#                          worker-embeddings-batch, worker-predictions,
+#                          worker-predictions-batch, worker-predictions-write,
+#                          worker-training, worker-reaper, frontend
+#
+# Push target is http://loki:3100/loki/api/v1/push  (container-name DNS
+# on the protea_monitoring bridge network).
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/promtail-positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: protea_process_logs
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          compose_project: protea
+          job: protea
+          __path__: /var/log/protea/*.log
+
+    pipeline_stages:
+      # Extract the filename stem (everything before the final .log) and
+      # store it as the service_name label so the dashboard variable
+      # selector populates the same way as the docker-driver path.
+      - static_labels:
+          compose_project: protea
+
+      # Derive service_name from the log filename captured by __path__.
+      # promtail sets the special label `filename` from __path__ matches;
+      # we regex-extract the basename-without-extension from it.
+      - regex:
+          source: filename
+          expression: '.*/(?P<service_name>[^/]+)\.log$'
+
+      - labels:
+          service_name:

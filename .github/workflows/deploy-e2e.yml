@@ -1,0 +1,76 @@
+name: Deploy E2E
+
+# Targeted regression for the deploy slice: build the image, bring up
+# the minimal worker-jobs path, run a smoke probe end to end. Catches
+# the class of regression PR #324 fixed (workers crashing on missing
+# protea install) by exercising the full publish → consume round-trip
+# in CI instead of relying on staging to find it.
+#
+# Decoupled from the unit / integration suites in test.yml + integration.yml:
+# those use a service container and run pytest inside the runner. This
+# job builds the production-shaped Dockerfile + compose stack and
+# verifies the deployment itself comes up green.
+
+on:
+  pull_request:
+    paths:
+      - Dockerfile
+      - docker-compose.yml
+      - docker-compose.e2e.yml
+      - docker-compose.prod.yml
+      - docker/**
+      - poetry.lock
+      - pyproject.toml
+      - protea/**
+      - scripts/worker.py
+      - scripts/test_deploy_e2e.sh
+      - scripts/deploy.sh
+      - scripts/manage.sh
+      - alembic/**
+      - alembic.ini
+      - .github/workflows/deploy-e2e.yml
+  push:
+    branches: [develop, main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  deploy-e2e:
+    name: deploy slice builds and smokes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Run E2E deploy smoke
+        run: bash scripts/test_deploy_e2e.sh
+        env:
+          # Generous on a cold GitHub runner: image build + pull
+          # (postgres / rabbitmq) plus migrate run.
+          PROTEA_E2E_READY_TIMEOUT_S: "300"
+          # worker.py eagerly imports the operations catalog, which in
+          # turn instantiates ete3.NCBITaxa() at module load and parses
+          # ~2.8M taxonomy nodes on a fresh image (no cache between CI
+          # runs). The ping job stays queued until that finishes, so the
+          # job-completion window has to absorb that startup tax.
+          # TODO: move NCBI init behind a lazy-load so worker boot is
+          # cheap and ping completes in seconds.
+          PROTEA_E2E_JOB_TIMEOUT_S: "300"
+
+      - name: Dump compose state on failure
+        if: failure()
+        run: |
+          docker compose -p protea-e2e -f docker-compose.yml -f docker-compose.e2e.yml ps || true
+          docker compose -p protea-e2e -f docker-compose.yml -f docker-compose.e2e.yml logs --no-color --tail=400 || true
+
+      - name: Force tear down
+        if: always()
+        run: |
+          docker compose -p protea-e2e -f docker-compose.yml -f docker-compose.e2e.yml down -v --remove-orphans || true

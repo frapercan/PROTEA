@@ -3,9 +3,10 @@ ADR-003: Two types of consumer
 
 :Date: 2026-01-10
 :Author: frapercan
+:Status: Accepted
 
-The problem
------------
+Context
+-------
 
 Distributed pipelines (``compute_embeddings``, ``predict_go_terms``) split
 work into hundreds of batches.  If each batch had its own ``Job`` row in
@@ -16,18 +17,19 @@ the DB:
 - Each batch pays the cost of the two-session pattern (2 round-trips),
   which for 2-8s batches is more overhead than useful work.
 
-What we do
-----------
+Decision
+--------
 
 Two consumers coexist:
 
-**QueueConsumer** — for user-facing jobs with full lifecycle tracking:
+**QueueConsumer.** For user-facing jobs with full lifecycle tracking:
 
 - Receives ``{"job_id": "<uuid>"}`` and delegates to
   ``BaseWorker.handle_job()``.
-- Used by: ``protea.ping``, ``protea.jobs``, ``protea.embeddings``.
+- Used by: ``protea.ping``, ``protea.jobs``, ``protea.training``,
+  ``protea.embeddings``, ``protea.predictions``, ``protea.evaluations``.
 
-**OperationConsumer** — for ephemeral batches with no individual DB row:
+**OperationConsumer.** For ephemeral batches with no individual DB row:
 
 - Receives ``{"operation": "...", "job_id": "<parent>", "payload": {...}}``.
 - Executes the operation in a single session, ack/nack, done.
@@ -40,16 +42,16 @@ Two consumers coexist:
 From the outside, the user sees a single job (the coordinator) with a
 progress bar that advances.  Batches are invisible.
 
-Trade-offs
-----------
+Consequences
+------------
 
 - Two code paths for consuming messages, but both are short (~100 lines)
   and share infrastructure (DLQ, registry, emit).
 - If a batch fails and goes to the DLQ, there is no individual retry
-  counter — just the dead message for inspection.
+  counter, just the dead message for inspection.
 
-Rejected
---------
+Rejected alternatives
+---------------------
 
 - **Job with** ``is_batch=True`` **flag**: still creates thousands of DB
   rows.

@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import DateTime, ForeignKey, String, func
+from sqlalchemy import DateTime, ForeignKey, Index, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -30,6 +30,19 @@ class EvaluationSet(Base):
     """
 
     __tablename__ = "evaluation_set"
+    __table_args__ = (
+        # T3.5: list endpoints order by ``created_at DESC``.
+        Index("ix_evaluation_set_created_at", "created_at"),
+        # The (old, new) pair semantically identifies one evaluation
+        # episode; two rows for the same pair are duplicates by
+        # construction. Enforced at the DB level via
+        # alembic revision ``b8e3f1a7c2d9_evaluation_set_pair_unique``.
+        UniqueConstraint(
+            "old_annotation_set_id",
+            "new_annotation_set_id",
+            name="uq_evaluation_set_old_new_annotation_set",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     old_annotation_set_id: Mapped[uuid.UUID] = mapped_column(

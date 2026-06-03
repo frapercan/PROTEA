@@ -9,9 +9,37 @@ from pydantic import field_validator
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
-from protea.infrastructure.orm.models.annotation.go_term import GOTerm
-from protea.infrastructure.orm.models.annotation.go_term_relationship import GOTermRelationship
+from protea.core.operations._load_ontology_helpers import (
+    handle_existing_snapshot,
+    insert_new_snapshot,
+)
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
+
+
+def _flush_term(
+    current: dict[str, Any],
+    terms: list[dict[str, Any]],
+    aspect_map: dict[str, str],
+) -> None:
+    """Append the in-progress OBO term to ``terms`` and reset ``current``.
+
+    Pulled out of ``LoadOntologySnapshotOperation._parse_terms`` to keep
+    that method under the §3 60-LOC ceiling. Caller passes the class's
+    ``_ASPECT_MAP`` explicitly so this helper has no implicit ``self``
+    dependency.
+    """
+    if "go_id" in current:
+        terms.append(
+            {
+                "go_id": current["go_id"],
+                "name": current.get("name"),
+                "aspect": aspect_map.get(current.get("namespace", ""), None),
+                "definition": current.get("definition"),
+                "is_obsolete": current.get("is_obsolete", False),
+                "relationships": current.get("relationships", []),
+            }
+        )
+    current.clear()
 
 
 class LoadOntologySnapshotPayload(ProteaPayload, frozen=True):
@@ -33,7 +61,7 @@ class LoadOntologySnapshotOperation:
     The ``data-version:`` header of the OBO file is used as the canonical
     version identifier (e.g. ``releases/2024-01-17``). If a snapshot with that
     version already exists, the operation is a no-op and returns the existing
-    snapshot id — making it safe to re-run.
+    snapshot id, making it safe to re-run.
 
     GO term aspect is mapped from the OBO ``namespace`` field:
     ``biological_process`` → P, ``molecular_function`` → F,
@@ -66,150 +94,16 @@ class LoadOntologySnapshotOperation:
 
         obo_text = self._download(p, emit)
         obo_version = self._extract_version(obo_text)
-
         emit("load_ontology_snapshot.version", None, {"obo_version": obo_version}, "info")
-
-        # Idempotency: if snapshot already loaded, check if relationships are missing
-        existing = session.query(OntologySnapshot).filter_by(obo_version=obo_version).first()
-        if existing is not None:
-            from sqlalchemy import func as _func
-
-            rel_count = (
-                session.query(_func.count(GOTermRelationship.id))
-                .filter(GOTermRelationship.ontology_snapshot_id == existing.id)
-                .scalar()
-                or 0
-            )
-
-            if rel_count > 0:
-                emit(
-                    "load_ontology_snapshot.already_exists",
-                    None,
-                    {"ontology_snapshot_id": str(existing.id), "obo_version": obo_version},
-                    "info",
-                )
-                return OperationResult(
-                    result={
-                        "ontology_snapshot_id": str(existing.id),
-                        "obo_version": obo_version,
-                        "skipped": True,
-                    }
-                )
-
-            # Snapshot exists but has no relationships — backfill them
-            emit(
-                "load_ontology_snapshot.backfill_relationships",
-                None,
-                {"ontology_snapshot_id": str(existing.id)},
-                "info",
-            )
-            terms = self._parse_terms(obo_text)
-            go_id_to_db_id = {
-                go_id: db_id
-                for go_id, db_id in session.query(GOTerm.go_id, GOTerm.id)
-                .filter(GOTerm.ontology_snapshot_id == existing.id)
-                .all()
-            }
-            relationships: list[GOTermRelationship] = []
-            for t in terms:
-                child_db_id = go_id_to_db_id.get(t["go_id"])
-                if child_db_id is None:
-                    continue
-                for rel_type, parent_go_id in t.get("relationships", []):
-                    parent_db_id = go_id_to_db_id.get(parent_go_id)
-                    if parent_db_id is None:
-                        continue
-                    relationships.append(
-                        GOTermRelationship(
-                            child_go_term_id=child_db_id,
-                            parent_go_term_id=parent_db_id,
-                            relation_type=rel_type,
-                            ontology_snapshot_id=existing.id,
-                        )
-                    )
-            session.add_all(relationships)
-            session.flush()
-            emit(
-                "load_ontology_snapshot.backfill_done",
-                None,
-                {"relationships_inserted": len(relationships)},
-                "info",
-            )
-            return OperationResult(
-                result={
-                    "ontology_snapshot_id": str(existing.id),
-                    "obo_version": obo_version,
-                    "skipped": False,
-                    "relationships_inserted": len(relationships),
-                }
-            )
-
-        snapshot = OntologySnapshot(obo_url=p.obo_url, obo_version=obo_version)
-        session.add(snapshot)
-        session.flush()
 
         terms = self._parse_terms(obo_text)
         emit("load_ontology_snapshot.parsed", None, {"term_count": len(terms)}, "info")
 
-        go_terms = [
-            GOTerm(
-                go_id=t["go_id"],
-                name=t["name"],
-                aspect=t["aspect"],
-                definition=t["definition"],
-                is_obsolete=t["is_obsolete"],
-                ontology_snapshot_id=snapshot.id,
-            )
-            for t in terms
-        ]
-        session.add_all(go_terms)
-        session.flush()
+        existing = session.query(OntologySnapshot).filter_by(obo_version=obo_version).first()
+        if existing is not None:
+            return handle_existing_snapshot(session, existing, terms, obo_version, emit)
 
-        # Build go_id → db id map for relationship insertion
-        go_id_to_db_id = {gt.go_id: gt.id for gt in go_terms}
-
-        relationships: list[GOTermRelationship] = []
-        for t in terms:
-            child_db_id = go_id_to_db_id.get(t["go_id"])
-            if child_db_id is None:
-                continue
-            for rel_type, parent_go_id in t.get("relationships", []):
-                parent_db_id = go_id_to_db_id.get(parent_go_id)
-                if parent_db_id is None:
-                    continue
-                relationships.append(
-                    GOTermRelationship(
-                        child_go_term_id=child_db_id,
-                        parent_go_term_id=parent_db_id,
-                        relation_type=rel_type,
-                        ontology_snapshot_id=snapshot.id,
-                    )
-                )
-        session.add_all(relationships)
-        session.flush()
-
-        elapsed = time.perf_counter() - t0
-        emit(
-            "load_ontology_snapshot.done",
-            None,
-            {
-                "ontology_snapshot_id": str(snapshot.id),
-                "obo_version": obo_version,
-                "terms_inserted": len(go_terms),
-                "relationships_inserted": len(relationships),
-                "elapsed_seconds": elapsed,
-            },
-            "info",
-        )
-        return OperationResult(
-            result={
-                "ontology_snapshot_id": str(snapshot.id),
-                "obo_version": obo_version,
-                "terms_inserted": len(go_terms),
-                "relationships_inserted": len(relationships),
-                "elapsed_seconds": elapsed,
-            }
-        )
+        return insert_new_snapshot(session, p.obo_url, obo_version, terms, t0, emit)
 
     def _download(self, p: LoadOntologySnapshotPayload, emit: EmitFn) -> str:
         emit("load_ontology_snapshot.download_start", None, {"url": p.obo_url}, "info")
@@ -245,30 +139,15 @@ class LoadOntologySnapshotOperation:
     def _parse_terms(self, obo_text: str) -> list[dict[str, Any]]:
         terms: list[dict[str, Any]] = []
         current: dict[str, Any] = {}
-
-        def flush() -> None:
-            if "go_id" in current:
-                terms.append(
-                    {
-                        "go_id": current["go_id"],
-                        "name": current.get("name"),
-                        "aspect": self._ASPECT_MAP.get(current.get("namespace", ""), None),
-                        "definition": current.get("definition"),
-                        "is_obsolete": current.get("is_obsolete", False),
-                        "relationships": current.get("relationships", []),
-                    }
-                )
-            current.clear()
-
         in_term = False
         for raw in obo_text.splitlines():
             line = raw.strip()
             if line == "[Term]":
-                flush()
+                _flush_term(current, terms, self._ASPECT_MAP)
                 in_term = True
                 continue
             if line.startswith("[") and line != "[Term]":
-                flush()
+                _flush_term(current, terms, self._ASPECT_MAP)
                 in_term = False
                 continue
             if not in_term or not line or line.startswith("!"):
@@ -299,5 +178,5 @@ class LoadOntologySnapshotOperation:
                 ):
                     current.setdefault("relationships", []).append((parts[0], parts[1]))
 
-        flush()
+        _flush_term(current, terms, self._ASPECT_MAP)
         return terms

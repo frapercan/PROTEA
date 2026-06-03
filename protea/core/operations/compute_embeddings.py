@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import re
 import time
 import uuid
-from dataclasses import dataclass
 from typing import Annotated, Any
 from uuid import UUID
 
-import numpy as np
 from pydantic import Field, field_validator
 from sqlalchemy import exists, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -15,6 +12,24 @@ from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload, RetryLaterError
 from protea.core.contracts.parent_progress import update_parent_progress
+from protea.core.operations._compute_embeddings_backends import (
+    ChunkEmbedding,
+    _aggregate_1d,
+    _aggregate_residue_layers,
+    _chunk_and_pool,
+    _compute_chunk_spans,
+    _embed_ankh,
+    _embed_esm,
+    _embed_esm3c,
+    _embed_t5,
+    _validate_layers,
+)
+from protea.core.operations._compute_embeddings_helpers import (
+    build_batch_dispatch_messages,
+    build_embedding_rows,
+    build_store_message,
+    serialize_inferred_chunks,
+)
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 from protea.infrastructure.orm.models.job import Job, JobStatus
@@ -22,29 +37,29 @@ from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.orm.models.query.query_set import QuerySetEntry
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
 
+# Re-export the backend embed functions so:
+#   * ``getattr(sys.modules[__name__], fn_name)`` in ``_dispatch_embed``
+#     resolves the entry from this module's namespace, and
+#   * the documented ``unittest.mock.patch(
+#       "protea.core.operations.compute_embeddings._embed_*")``
+#     pattern keeps working without any test changes.
+__all__ = [
+    "ChunkEmbedding",
+    "_aggregate_1d",
+    "_aggregate_residue_layers",
+    "_chunk_and_pool",
+    "_compute_chunk_spans",
+    "_embed_ankh",
+    "_embed_esm",
+    "_embed_esm3c",
+    "_embed_t5",
+    "_validate_layers",
+]
+
 PositiveInt = Annotated[int, Field(gt=0)]
 
 _BATCH_QUEUE = "protea.embeddings.batch"
 _WRITE_QUEUE = "protea.embeddings.write"
-
-
-# ---------------------------------------------------------------------------
-# Data container
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class ChunkEmbedding:
-    """One pooled embedding for a contiguous residue span of a sequence.
-
-    ``chunk_index_s`` and ``chunk_index_e`` use the same convention as the
-    DB columns: start is 0-based inclusive, end is exclusive.  When chunking
-    is disabled, ``chunk_index_s=0`` and ``chunk_index_e=None`` (full sequence).
-    """
-
-    chunk_index_s: int
-    chunk_index_e: int | None
-    vector: np.ndarray  # 1-D float32
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +72,7 @@ class ComputeEmbeddingsPayload(ProteaPayload, frozen=True):
 
     The coordinator publishes N ephemeral operation messages to
     ``protea.embeddings.batch``.  Any worker consuming that queue picks up a
-    message and runs ``ComputeEmbeddingsBatchOperation`` — no child Job rows
+    message and runs ``ComputeEmbeddingsBatchOperation``: no child Job rows
     are created in the DB.
 
     Fields
@@ -227,12 +242,8 @@ class ComputeEmbeddingsOperation:
             emit("compute_embeddings.no_sequences", None, {}, "warning")
             return OperationResult(result={"batches": 0, "sequences": 0})
 
-        # Partition into batches and create one child Job per batch.
-        batches = [
-            sequence_ids[i : i + p.sequences_per_job]
-            for i in range(0, len(sequence_ids), p.sequences_per_job)
-        ]
-        n_batches = len(batches)
+        operations = build_batch_dispatch_messages(p, parent_job_id, sequence_ids)
+        n_batches = len(operations)
 
         emit(
             "compute_embeddings.dispatching",
@@ -244,26 +255,6 @@ class ComputeEmbeddingsOperation:
             },
             "info",
         )
-
-        operations: list[tuple[str, dict]] = []
-        for batch_seq_ids in batches:
-            operations.append(
-                (
-                    _BATCH_QUEUE,
-                    {
-                        "operation": "compute_embeddings_batch",
-                        "job_id": str(parent_job_id),
-                        "payload": {
-                            "embedding_config_id": p.embedding_config_id,
-                            "sequence_ids": batch_seq_ids,
-                            "parent_job_id": str(parent_job_id),
-                            "device": p.device,
-                            "skip_existing": p.skip_existing,
-                            "batch_size": p.batch_size,
-                        },
-                    },
-                )
-            )
 
         return OperationResult(
             result={"batches": n_batches, "sequences": len(sequence_ids)},
@@ -324,15 +315,12 @@ class ComputeEmbeddingsOperation:
         config: EmbeddingConfig,
         device: str,
     ) -> list[list[ChunkEmbedding]]:
-        """Embed a list of sequences, returning per-chunk results for each."""
-        if config.model_backend == "esm3c":
-            return _embed_esm3c(model, sequences, config, device)
-        elif config.model_backend == "t5":
-            return _embed_t5(model, tokenizer, sequences, config, device)
-        elif config.model_backend == "ankh":
-            return _embed_ankh(model, tokenizer, sequences, config, device)
-        else:  # esm / auto
-            return _embed_esm(model, tokenizer, sequences, config, device)
+        """Embed a list of sequences, returning per-chunk results for each.
+
+        Delegates to ``_dispatch_embed``, which routes through the
+        backend plugin's ``embed_chunks`` (T2A.5b plugin-only path).
+        """
+        return _dispatch_embed(model, tokenizer, sequences, config, device)
 
 
 # ---------------------------------------------------------------------------
@@ -371,8 +359,6 @@ class ComputeEmbeddingsBatchOperation:
         config_id = uuid.UUID(p.embedding_config_id)
         parent_job_id = UUID(p.parent_job_id)
 
-        # Skip processing if the parent job was cancelled or failed while this
-        # batch message was waiting in the queue.
         parent = session.get(Job, parent_job_id)
         if parent is not None and parent.status in (JobStatus.CANCELLED, JobStatus.FAILED):
             emit(
@@ -388,72 +374,46 @@ class ComputeEmbeddingsBatchOperation:
             raise ValueError(f"EmbeddingConfig {p.embedding_config_id} not found")
 
         sequences = session.query(Sequence).filter(Sequence.id.in_(p.sequence_ids)).all()
-
         t0 = time.perf_counter()
         emit(
             "compute_embeddings_batch.start",
             None,
-            {
-                "sequences": len(sequences),
-                "parent_job_id": str(parent_job_id),
-            },
+            {"sequences": len(sequences), "parent_job_id": str(parent_job_id)},
             "info",
         )
 
-        model, tokenizer = self._load_model(config, p.device, emit)
+        write_sequences = self._infer_all(config, sequences, p, emit)
 
-        # Run inference only — no DB writes here.
-        write_sequences = []
-        for i in range(0, len(sequences), p.batch_size):
-            batch = sequences[i : i + p.batch_size]
-            seq_strs = [s.sequence for s in batch]
-            batch_chunks = self._embed_batch(model, tokenizer, seq_strs, config, p.device)
-            for seq, chunks in zip(batch, batch_chunks, strict=False):
-                write_sequences.append(
-                    {
-                        "sequence_id": seq.id,
-                        "chunks": [
-                            {
-                                "chunk_index_s": c.chunk_index_s,
-                                "chunk_index_e": c.chunk_index_e,
-                                "vector": c.vector.tolist(),
-                                "embedding_dim": int(c.vector.shape[0]),
-                            }
-                            for c in chunks
-                        ],
-                    }
-                )
-
-        elapsed = time.perf_counter() - t0
         emit(
             "compute_embeddings_batch.done",
             None,
             {
                 "sequences_inferred": len(write_sequences),
-                "elapsed_seconds": elapsed,
+                "elapsed_seconds": time.perf_counter() - t0,
             },
             "info",
         )
-
-        # Hand off to the write worker — GPU is free to take the next batch.
         return OperationResult(
             result={"sequences_inferred": len(write_sequences)},
-            publish_operations=[
-                (
-                    _WRITE_QUEUE,
-                    {
-                        "operation": "store_embeddings",
-                        "job_id": str(parent_job_id),
-                        "payload": {
-                            "parent_job_id": str(parent_job_id),
-                            "embedding_config_id": p.embedding_config_id,
-                            "skip_existing": p.skip_existing,
-                            "sequences": write_sequences,
-                        },
-                    },
-                )
-            ],
+            publish_operations=[build_store_message(parent_job_id, p, write_sequences)],
         )
+
+    def _infer_all(
+        self,
+        config: EmbeddingConfig,
+        sequences: list[Sequence],
+        p: ComputeEmbeddingsBatchPayload,
+        emit: EmitFn,
+    ) -> list[dict]:
+        """Run model inference over ``sequences`` in batches of ``p.batch_size``."""
+        model, tokenizer = self._load_model(config, p.device, emit)
+        write_sequences: list[dict] = []
+        for i in range(0, len(sequences), p.batch_size):
+            batch = sequences[i : i + p.batch_size]
+            seq_strs = [s.sequence for s in batch]
+            batch_chunks = self._embed_batch(model, tokenizer, seq_strs, config, p.device)
+            write_sequences.extend(serialize_inferred_chunks(batch, batch_chunks))
+        return write_sequences
 
     def _load_model(self, config: EmbeddingConfig, device: str, emit: EmitFn) -> tuple[Any, Any]:
         return _get_or_load_model(config, device, emit)
@@ -466,14 +426,8 @@ class ComputeEmbeddingsBatchOperation:
         config: EmbeddingConfig,
         device: str,
     ) -> list[list[ChunkEmbedding]]:
-        if config.model_backend == "esm3c":
-            return _embed_esm3c(model, sequences, config, device)
-        elif config.model_backend == "t5":
-            return _embed_t5(model, tokenizer, sequences, config, device)
-        elif config.model_backend == "ankh":
-            return _embed_ankh(model, tokenizer, sequences, config, device)
-        else:
-            return _embed_esm(model, tokenizer, sequences, config, device)
+        """Per-batch dispatch shim; delegates to ``_dispatch_embed`` (T2A.5b)."""
+        return _dispatch_embed(model, tokenizer, sequences, config, device)
 
 
 # ---------------------------------------------------------------------------
@@ -525,42 +479,9 @@ class StoreEmbeddingsOperation:
             )
             return OperationResult(result={"skipped": True})
 
-        embeddings_stored = 0
-        sequences_skipped = 0
-
-        rows_to_insert: list[dict] = []
-
-        for seq_data in p.sequences:
-            sequence_id = seq_data["sequence_id"]
-            chunks = seq_data["chunks"]
-
-            if p.skip_existing:
-                existing = (
-                    session.query(SequenceEmbedding)
-                    .filter_by(sequence_id=sequence_id, embedding_config_id=config_id)
-                    .first()
-                )
-                if existing is not None:
-                    sequences_skipped += 1
-                    continue
-            else:
-                session.query(SequenceEmbedding).filter_by(
-                    sequence_id=sequence_id, embedding_config_id=config_id
-                ).delete()
-
-            for chunk in chunks:
-                rows_to_insert.append(
-                    {
-                        "sequence_id": sequence_id,
-                        "embedding_config_id": config_id,
-                        "chunk_index_s": chunk["chunk_index_s"],
-                        "chunk_index_e": chunk.get("chunk_index_e"),
-                        "embedding": chunk["vector"],
-                        "embedding_dim": chunk["embedding_dim"],
-                    }
-                )
-                embeddings_stored += 1
-
+        rows_to_insert, embeddings_stored, sequences_skipped = build_embedding_rows(
+            session, p, config_id
+        )
         if rows_to_insert:
             session.execute(
                 pg_insert(SequenceEmbedding).on_conflict_do_nothing(),
@@ -628,41 +549,16 @@ def _get_or_load_model(config: EmbeddingConfig, device: str, emit: EmitFn) -> tu
     return _MODEL_CACHE[key]
 
 
-# Cached map of backend plugins resolved from the ``protea.backends``
-# entry_points group.  Lazy: populated on first call to ``_load_model``.
-# ``None`` means "not yet discovered"; an empty dict means "no backends
-# installed" (which is a hard error at load time, not a registry warning).
-_BACKEND_PLUGINS: dict[str, Any] | None = None
-
-
 def _get_backend_plugins() -> dict[str, Any]:
-    """Discover and cache backend plugins via ``entry_points``.
+    """Thin wrapper around ``protea.core.plugins.discover_plugins``.
 
-    Returns a dict keyed by ``plugin.name``. Each plugin must implement
-    :class:`protea_contracts.EmbeddingBackend`. Discovery is performed
-    once per process; subsequent calls return the cached map.
-
-    A plugin whose ``name`` attribute disagrees with its entry_point
-    name is a hard error — the entry_points file and the class
-    declaration must agree, and silently letting them drift would make
-    "Unknown model_backend" errors confusing.
+    The shared discovery helper handles the cache + name-mismatch hard
+    error; this shim exists so the resolver below has a stable internal
+    name for monkey-patching in tests.
     """
-    global _BACKEND_PLUGINS
-    if _BACKEND_PLUGINS is None:
-        from importlib.metadata import entry_points
+    from protea.core.plugins import discover_plugins
 
-        cache: dict[str, Any] = {}
-        for ep in entry_points(group="protea.backends"):
-            plugin = ep.load()
-            if getattr(plugin, "name", None) != ep.name:
-                raise RuntimeError(
-                    f"Backend plugin name mismatch: entry_point {ep.name!r} "
-                    f"resolves to plugin with name "
-                    f"{getattr(plugin, 'name', None)!r}"
-                )
-            cache[ep.name] = plugin
-        _BACKEND_PLUGINS = cache
-    return _BACKEND_PLUGINS
+    return discover_plugins("protea.backends")
 
 
 def _resolve_backend(backend_name: str) -> Any:
@@ -675,10 +571,7 @@ def _resolve_backend(backend_name: str) -> Any:
     plugins = _get_backend_plugins()
     key = "esm" if backend_name == "auto" else backend_name
     if key not in plugins:
-        raise ValueError(
-            f"Unknown model_backend: {backend_name!r}. "
-            f"Discovered: {sorted(plugins)}"
-        )
+        raise ValueError(f"Unknown model_backend: {backend_name!r}. Discovered: {sorted(plugins)}")
     return plugins[key]
 
 
@@ -705,439 +598,27 @@ def _load_model(config: EmbeddingConfig, device: str, emit: EmitFn) -> tuple[Any
 
 
 # ---------------------------------------------------------------------------
-# Backend: ESM (HuggingFace EsmModel)
+# Backend dispatch (T2A.5b: pure plugin path)
 # ---------------------------------------------------------------------------
 
 
-def _embed_esm(
+def _dispatch_embed(
     model: Any,
     tokenizer: Any,
     sequences: list[str],
     config: EmbeddingConfig,
     device: str,
 ) -> list[list[ChunkEmbedding]]:
-    """Embed sequences with ESM-2 / EsmModel.
+    """Route the batch to the resolved backend plugin's ``embed_chunks``.
 
-    Processes one sequence at a time to handle variable lengths without
-    OOM issues.  CLS (position 0) and EOS (last valid position) tokens are
-    excluded from all residue-level operations.
+    T2A.5b collapsed the legacy ``_BACKEND_FN_NAMES`` fall-back into a
+    single line: every ``model_backend`` PROTEA supports out of the box
+    (``esm``, ``auto``, ``t5``, ``ankh``, ``esm3c``) is now served by the
+    matching ``protea-backends`` plugin via ``plugin.embed_chunks``.
+    ``_resolve_backend`` raises ``ValueError`` for unknown identifiers,
+    so the dispatch never silently falls back on a wrong backend. The
+    legacy ``_embed_*`` shims in ``_compute_embeddings_backends`` are
+    retained as the bit-exact regression reference for the parity tests.
     """
-    import torch
-    import torch.nn.functional as F
-
-    results: list[list[ChunkEmbedding]] = []
-
-    with torch.no_grad():
-        for seq_str in sequences:
-            tokens = tokenizer(
-                seq_str,
-                return_tensors="pt",
-                truncation=True,
-                max_length=config.max_length,
-                add_special_tokens=True,
-            )
-            tokens = {k: v.to(device) for k, v in tokens.items()}
-            outputs = model(**tokens, output_hidden_states=True)
-            hidden_states = outputs.hidden_states  # tuple of (1, L, D)
-
-            valid_layers = _validate_layers(
-                config.layer_indices, hidden_states, "ESM", seq_str[:20]
-            )
-
-            if config.pooling == "cls":
-                # CLS token at position 0 of the raw hidden states
-                layer_tensors_1d = [
-                    hidden_states[-(li + 1)][0, 0, :].float() for li in valid_layers
-                ]
-                pooled = _aggregate_1d(layer_tensors_1d, config.layer_agg)
-                if config.normalize:
-                    pooled = F.normalize(pooled.unsqueeze(0), p=2, dim=1).squeeze(0)
-                results.append([ChunkEmbedding(0, None, pooled.cpu().numpy())])
-            else:
-                # Strip CLS (pos 0) and EOS (last valid pos)
-                # attention_mask.sum() = CLS + content + EOS
-                actual_len = int(tokens["attention_mask"].sum().item())
-                layer_tensors_2d = [
-                    hidden_states[-(li + 1)][0, 1 : actual_len - 1, :].float()
-                    for li in valid_layers
-                ]
-                residues = _aggregate_residue_layers(layer_tensors_2d, config.layer_agg)
-                if config.normalize_residues:
-                    residues = F.normalize(residues, p=2, dim=1)
-                results.append(_chunk_and_pool(residues, config))
-
-            del outputs, hidden_states
-            torch.cuda.empty_cache()
-
-    return results
-
-
-# ---------------------------------------------------------------------------
-# Backend: T5 (HuggingFace T5EncoderModel)
-# ---------------------------------------------------------------------------
-
-
-def _embed_t5(
-    model: Any,
-    tokenizer: Any,
-    sequences: list[str],
-    config: EmbeddingConfig,
-    device: str,
-    *,
-    use_aa2fold: bool | None = None,
-    split_into_words: bool = False,
-) -> list[list[ChunkEmbedding]]:
-    """Embed sequences with T5EncoderModel (ProstT5, prot_t5_xl, Ankh, …).
-
-    Sequences are processed as a padded batch.  ProSTT5 mode is auto-detected
-    from ``config.model_name`` (looks for ``prostt5`` substring, case-insensitive)
-    when ``use_aa2fold`` is ``None``; callers (e.g. the Ankh backend) can pass
-    ``use_aa2fold=False`` to disable the prefix unconditionally.
-
-    Tokeniser input format
-    ----------------------
-    Two tokenisation strategies are supported:
-
-    * ``split_into_words=False`` (default) — each sequence is joined with
-      single spaces (``"A C D E"``) and passed as a string.  This matches the
-      ProstT5 / ``prot_t5_xl_uniref50`` SentencePiece models, which recognise
-      space-separated amino acids as individual tokens.
-    * ``split_into_words=True`` — each sequence is passed as a list of
-      characters with ``is_split_into_words=True``.  Required by Ankh
-      (``ElnaggarLab/ankh-base`` / ``-large``): Ankh's SentencePiece
-      tokeniser maps a literal space to ``<unk>``, so the space-joined path
-      produces ~50% ``<unk>`` tokens and NaN outputs under FP16.
-
-    Residue slicing
-    ---------------
-    T5 has no CLS token at position 0, but ProstT5 injects a ``<AA2fold>``
-    prefix token there, and every T5 tokenizer appends an EOS at the last
-    valid position.  The residue-level slice strips both so that
-    ``residues[0]`` is always the first amino acid and ``residues.shape[0]``
-    equals the amino-acid count, consistent with ``_embed_esm`` /
-    ``_embed_esm3c`` which strip CLS/BOS+EOS:
-
-        start = 1 if use_aa2fold else 0   # skip <AA2fold> on ProstT5 only
-        end   = actual_len - 1            # drop trailing EOS
-
-    This makes ``chunk_index_s`` / ``chunk_index_e`` mean the same thing on
-    every backend: indices into the amino-acid sequence, not into the
-    backend-specific residue tensor.  The CLS pooling path is unchanged
-    (position 0 = ``<AA2fold>`` for ProstT5, arbitrary first AA otherwise).
-    """
-    import torch
-    import torch.nn.functional as F
-
-    if use_aa2fold is None:
-        use_aa2fold = "prostt5" in config.model_name.lower()
-
-    # Replace ambiguous amino acids (U/Z/O/B → X) regardless of tokenisation mode.
-    cleaned = [re.sub(r"[UZOB]", "X", seq_str) for seq_str in sequences]
-
-    if split_into_words:
-        # Ankh path: pass list-of-chars with is_split_into_words=True so the
-        # tokeniser treats each residue as one word and never falls back to <unk>.
-        inputs = tokenizer.batch_encode_plus(
-            [list(c) for c in cleaned],
-            padding="longest",
-            truncation=True,
-            max_length=config.max_length,
-            add_special_tokens=True,
-            is_split_into_words=True,
-            return_tensors="pt",
-        )
-    else:
-        processed = [
-            ("<AA2fold> " if use_aa2fold else "") + " ".join(c) for c in cleaned
-        ]
-        inputs = tokenizer.batch_encode_plus(
-            processed,
-            padding="longest",
-            truncation=True,
-            max_length=config.max_length,
-            add_special_tokens=True,
-            return_tensors="pt",
-        )
-    inputs = {k: v.to(device) for k, v in inputs.items()}
-
-    with torch.no_grad():
-        outputs = model(
-            input_ids=inputs["input_ids"],
-            attention_mask=inputs["attention_mask"],
-            output_hidden_states=True,
-        )
-
-    hidden_states = outputs.hidden_states  # tuple of (B, L, D)
-    del outputs
-    torch.cuda.empty_cache()
-
-    valid_layers = _validate_layers(config.layer_indices, hidden_states, "T5", "batch")
-
-    # On ProstT5 the <AA2fold> prefix lives at token position 0; skip it.
-    start_idx = 1 if use_aa2fold else 0
-
-    results: list[list[ChunkEmbedding]] = []
-    for i in range(len(sequences)):
-        # actual_len = (optional <AA2fold>) + N residues + EOS
-        actual_len = int(inputs["attention_mask"][i].sum().item())
-
-        if config.pooling == "cls":
-            # CLS pooling on T5 uses position 0 — the <AA2fold> hidden state
-            # on ProstT5, otherwise the first amino-acid hidden state.
-            layer_tensors_1d = [hidden_states[-(li + 1)][i, 0, :].float() for li in valid_layers]
-            pooled = _aggregate_1d(layer_tensors_1d, config.layer_agg)
-            if config.normalize:
-                pooled = F.normalize(pooled.unsqueeze(0), p=2, dim=1).squeeze(0)
-            results.append([ChunkEmbedding(0, None, pooled.cpu().numpy())])
-        else:
-            # Residue slice: strip <AA2fold> (if present) and trailing EOS so
-            # residues[0] is AA 0 and residues.shape[0] == amino-acid count.
-            layer_tensors_2d = [
-                hidden_states[-(li + 1)][i, start_idx : actual_len - 1, :].float()
-                for li in valid_layers
-            ]
-            residues = _aggregate_residue_layers(layer_tensors_2d, config.layer_agg)
-            if config.normalize_residues:
-                residues = F.normalize(residues, p=2, dim=1)
-            results.append(_chunk_and_pool(residues, config))
-
-    del hidden_states
-    torch.cuda.empty_cache()
-
-    return results
-
-
-# ---------------------------------------------------------------------------
-# Backend: Ankh (HuggingFace T5EncoderModel, loaded via AutoTokenizer)
-# ---------------------------------------------------------------------------
-
-
-def _embed_ankh(
-    model: Any,
-    tokenizer: Any,
-    sequences: list[str],
-    config: EmbeddingConfig,
-    device: str,
-) -> list[list[ChunkEmbedding]]:
-    """Embed sequences with Ankh (base / large).
-
-    Ankh is a T5 encoder-decoder; we reuse the shared T5 batched pipeline but
-    with two deviations:
-
-    * never inject the ProstT5 ``<AA2fold>`` prefix (Ankh was pre-trained on
-      plain amino-acid sequences);
-    * tokenise via ``is_split_into_words=True`` with a list of per-residue
-      characters.  Ankh's SentencePiece tokeniser maps a literal space to
-      ``<unk>``, so the space-joined path used for ProstT5 produces ~50%
-      ``<unk>`` tokens and collapses to NaN under FP16.  Verified on
-      ``ElnaggarLab/ankh-base``.
-    """
-    return _embed_t5(
-        model,
-        tokenizer,
-        sequences,
-        config,
-        device,
-        use_aa2fold=False,
-        split_into_words=True,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Backend: ESM3c (ESM SDK ESMC)
-# ---------------------------------------------------------------------------
-
-
-def _embed_esm3c(
-    model: Any,
-    sequences: list[str],
-    config: EmbeddingConfig,
-    device: str,
-) -> list[list[ChunkEmbedding]]:
-    """Embed sequences with ESMC (ESM3c family).
-
-    Uses the ESM SDK directly — no external tokenizer.  The model must have
-    been loaded with ``ESMC.from_pretrained`` and cast to FP16.  Hidden states
-    are returned via ``LogitsConfig(return_hidden_states=True)``.
-
-    BOS (position 0) and EOS (position -1) tokens are stripped before all
-    residue-level operations, matching PIS / FANTASIA behaviour.
-    """
-    import torch
-    import torch.nn.functional as F
-    from esm.sdk.api import ESMProtein, LogitsConfig
-
-    device_obj = torch.device(device) if isinstance(device, str) else device
-    results: list[list[ChunkEmbedding]] = []
-
-    with torch.no_grad():
-        for seq_str in sequences:
-            protein = ESMProtein(sequence=seq_str[: config.max_length])
-
-            with torch.autocast(
-                device_type=device_obj.type,
-                dtype=torch.float16,
-                enabled=(device_obj.type == "cuda"),
-            ):
-                protein_tensor = model.encode(protein)
-                logits_output = model.logits(
-                    protein_tensor,
-                    LogitsConfig(sequence=True, return_hidden_states=True),
-                )
-
-            hs = logits_output.hidden_states
-            if hs is None:
-                raise RuntimeError(f"ESM3c returned no hidden_states for sequence {seq_str[:20]!r}")
-
-            # Normalise to a list of per-layer tensors [1, L, D]
-            if isinstance(hs, torch.Tensor):
-                hs = [hs[i] for i in range(hs.shape[0])]
-
-            valid_layers = _validate_layers(config.layer_indices, hs, "ESM3c", seq_str[:20])
-
-            if config.pooling == "cls":
-                # BOS token at position 0 (before stripping)
-                layer_tensors_1d = [hs[-(li + 1)][0, 0, :].float() for li in valid_layers]
-                pooled = _aggregate_1d(layer_tensors_1d, config.layer_agg)
-                if config.normalize:
-                    pooled = F.normalize(pooled.unsqueeze(0), p=2, dim=1).squeeze(0)
-                results.append([ChunkEmbedding(0, None, pooled.cpu().numpy())])
-            else:
-                # Strip BOS (0) and EOS (-1): positions [1:-1]
-                layer_tensors_2d = [hs[-(li + 1)][0, 1:-1, :].float() for li in valid_layers]
-                residues = _aggregate_residue_layers(layer_tensors_2d, config.layer_agg)
-                if config.normalize_residues:
-                    residues = F.normalize(residues, p=2, dim=1)
-                results.append(_chunk_and_pool(residues, config))
-
-            del logits_output, hs
-            torch.cuda.empty_cache()
-
-    return results
-
-
-# ---------------------------------------------------------------------------
-# Shared helpers
-# ---------------------------------------------------------------------------
-
-
-def _validate_layers(
-    layer_indices: list[int],
-    hidden_states: Any,
-    model_tag: str,
-    seq_id: str,
-) -> list[int]:
-    """Validate reverse-indexed layer indices against the model's hidden states.
-
-    ``layer_indices = [0]`` → last layer; ``[1]`` → penultimate; etc.
-    Raises ``ValueError`` if any index is out of range.
-    Returns a sorted, deduplicated list of valid indices.
-    """
-    import torch
-
-    if isinstance(hidden_states, torch.Tensor):
-        total = int(hidden_states.shape[0])
-    else:
-        total = len(hidden_states)
-
-    req = sorted(set(int(li) for li in layer_indices))
-    invalid = [li for li in req if not (0 <= li < total)]
-    if invalid:
-        raise ValueError(
-            f"[{model_tag}] seq={seq_id!r}: invalid layer_indices {invalid}. "
-            f"Valid range: 0..{total - 1}  (0 = last layer)."
-        )
-    return req
-
-
-def _aggregate_residue_layers(layer_tensors: list[Any], layer_agg: str) -> Any:
-    """Combine [L, D] tensors from multiple layers into one [L, D] tensor."""
-    import torch
-
-    if layer_agg == "last":
-        return layer_tensors[-1]
-    elif layer_agg == "mean":
-        return torch.stack(layer_tensors, dim=0).mean(dim=0)
-    elif layer_agg == "concat":
-        return torch.cat(layer_tensors, dim=-1)
-    else:
-        raise ValueError(f"Unknown layer_agg: {layer_agg!r}. Choose: last, mean, concat")
-
-
-def _aggregate_1d(layer_tensors: list[Any], layer_agg: str) -> Any:
-    """Combine [D] tensors from multiple layers into one [D] tensor (CLS path)."""
-    import torch
-
-    if layer_agg == "last":
-        return layer_tensors[-1]
-    elif layer_agg == "mean":
-        return torch.stack(layer_tensors, dim=0).mean(dim=0)
-    elif layer_agg == "concat":
-        return torch.cat(layer_tensors, dim=-1)
-    else:
-        raise ValueError(f"Unknown layer_agg: {layer_agg!r}. Choose: last, mean, concat")
-
-
-def _chunk_and_pool(residues: Any, config: EmbeddingConfig) -> list[ChunkEmbedding]:
-    """Apply chunking (optional) and pooling to a residue tensor [L, D].
-
-    Returns one ``ChunkEmbedding`` per chunk.  Without chunking, returns a
-    single element covering the full sequence.
-    """
-    import torch
-    import torch.nn.functional as F
-
-    if config.use_chunking:
-        spans = _compute_chunk_spans(residues.shape[0], config.chunk_size, config.chunk_overlap)
-    else:
-        spans = [(0, residues.shape[0])]
-
-    results: list[ChunkEmbedding] = []
-    for start, end in spans:
-        chunk = residues[start:end]  # [chunk_L, D]
-
-        if config.pooling == "mean":
-            pooled = chunk.mean(dim=0)
-        elif config.pooling == "max":
-            pooled = chunk.max(dim=0).values
-        elif config.pooling == "mean_max":
-            pooled = torch.cat([chunk.mean(dim=0), chunk.max(dim=0).values])
-        else:
-            raise ValueError(
-                f"Pooling {config.pooling!r} is not supported in residue-level mode. "
-                f"Use 'cls' for CLS token pooling."
-            )
-
-        if config.normalize:
-            pooled = F.normalize(pooled.unsqueeze(0), p=2, dim=1).squeeze(0)
-
-        chunk_index_e = end if config.use_chunking else None
-        results.append(
-            ChunkEmbedding(
-                chunk_index_s=start,
-                chunk_index_e=chunk_index_e,
-                vector=pooled.float().cpu().numpy(),
-            )
-        )
-
-    return results
-
-
-def _compute_chunk_spans(length: int, chunk_size: int, overlap: int) -> list[tuple[int, int]]:
-    """Compute (start, end) spans for overlapping chunks over a sequence of ``length`` residues.
-
-    Raises ``ValueError`` if ``overlap >= chunk_size`` — such a configuration
-    would produce O(L) single-residue chunks or an infinite loop.
-    """
-    if overlap >= chunk_size:
-        raise ValueError(
-            f"chunk_overlap ({overlap}) must be strictly less than chunk_size ({chunk_size})"
-        )
-    step = chunk_size - overlap
-    spans: list[tuple[int, int]] = []
-    start = 0
-    while start < length:
-        end = min(start + chunk_size, length)
-        spans.append((start, end))
-        start += step
-    return spans
+    plugin = _resolve_backend(config.model_backend)
+    return plugin.embed_chunks(model, tokenizer, sequences, config, device)  # type: ignore[no-any-return]

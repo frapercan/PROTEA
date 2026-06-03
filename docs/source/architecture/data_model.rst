@@ -6,7 +6,7 @@ Data Model
    :depth: 2
 
 All models use SQLAlchemy 2.x declarative style with ``Mapped[]`` type annotations.
-The schema is managed by Alembic (22 migrations to date).
+The schema is managed by Alembic (35 migrations to date).
 
 Protein and sequence deduplication
 ------------------------------------
@@ -31,7 +31,7 @@ Protein and sequence deduplication
 
 **Sequence**
    Stores unique amino-acid sequences, deduplicated by MD5 hash (``sequence_hash``).
-   Many ``Protein`` rows can reference the same ``Sequence`` — ``sequence_id`` is
+   Many ``Protein`` rows can reference the same ``Sequence``; ``sequence_id`` is
    deliberately non-unique.
 
 **Protein**
@@ -235,27 +235,44 @@ Predictions
 **GOPrediction**
    One row per (query protein, GO term, reference protein) triple. The alignment and
    taxonomy columns are ``NULL`` unless ``compute_alignments=true`` and/or
-   ``compute_taxonomy=true`` were set in the prediction payload. Five additional
-   re-ranker features (``vote_count``, ``k_position``, ``go_term_frequency``,
-   ``ref_annotation_density``, ``neighbor_distance_std``) are populated when
-   ``compute_reranker_features=true``.
+   ``compute_taxonomy=true`` were set in the prediction payload (both default
+   to ``True``).
+
+   When ``compute_reranker_features=true`` (also the default) the legacy
+   re-ranker aggregate columns are populated: ``vote_count``,
+   ``k_position``, ``go_term_frequency``, ``ref_annotation_density``,
+   ``neighbor_distance_std``, ``neighbor_vote_fraction``,
+   ``neighbor_min_distance``, ``neighbor_mean_distance``: eight fields in
+   total.
+
+   When ``compute_v6_features=true`` (opt-in, default ``False``) the
+   ``v6_features`` family is materialised on top: 6 anc2vec columns
+   (``anc2vec_neighbor_cos`` / ``anc2vec_neighbor_maxcos`` /
+   ``anc2vec_has_emb`` / ``anc2vec_query_known_cos`` /
+   ``anc2vec_query_known_maxcos`` / ``anc2vec_query_known_count``), 3
+   tax-voter aggregates (``tax_voters_same_frac``,
+   ``tax_voters_close_frac``, ``tax_voters_mean_common_ancestors``) and
+   16 PCA-projected embedding columns (``emb_pca_query_0`` …
+   ``emb_pca_query_15``): 25 additional fields. PCA state is fit once
+   per ``EmbeddingConfig`` and cached on disk
+   (``PROTEA_PCA_ARTIFACTS_DIR``).
 
 **RerankerModel**
    Stores a trained LightGBM binary (or LambdaRank) re-ranker. References the
    ``PredictionSet`` and ``EvaluationSet`` used for training (both
    ``SET NULL`` on delete). Two storage modes coexist:
 
-   - **Inline (legacy)** — ``model_data`` (``Text``, now nullable) holds the
+   - **Inline (legacy).** ``model_data`` (``Text``, now nullable) holds the
      serialized booster string. Rows created before the 2026-04 integration
      with ``protea-reranker-lab`` use this path.
-   - **Artifact-backed (preferred)** — ``artifact_uri`` (``String(512)``)
+   - **Artifact-backed (preferred).** ``artifact_uri`` (``String(512)``)
      points at a ``file://`` or ``s3://`` URI resolved by the
      ``ArtifactStore``. Rows inserted via ``scripts/register_reranker.py``
      always use this path and leave ``model_data`` NULL.
 
    Additional provenance columns record the lab run that produced the model:
 
-   - ``feature_schema_sha`` (``String(16)``) — 12-hex-char fingerprint
+   - ``feature_schema_sha`` (``String(16)``): 12-hex-char fingerprint
      of the feature families the booster was trained on, computed via
      ``protea_reranker_lab.contracts.compute_feature_schema_sha``.
      **Load-bearing at inference time**: ``predict_go_terms`` refuses to
@@ -263,17 +280,62 @@ Predictions
      feature set, falling back to KNN ordering rather than scoring with
      NaN-filled columns.
    - ``embedding_config_id`` / ``ontology_snapshot_id`` (FKs, both
-     ``SET NULL``) — the embedding recipe and ontology release the
+     ``SET NULL``): the embedding recipe and ontology release the
      booster was trained against.
    - ``producer_version`` (``String(64)``) / ``producer_git_sha``
-     (``String(40)``) — PROTEA ``__version__`` and HEAD sha at export
+     (``String(40)``): PROTEA ``__version__`` and HEAD sha at export
      time, recorded in the dataset manifest and propagated here.
-   - ``spec_yaml`` (``Text``) — the full ``ExperimentSpec`` YAML used to
+   - ``spec_yaml`` (``Text``): the full ``ExperimentSpec`` YAML used to
      drive the lab training run, for reproducibility.
 
 **ScoringConfig**
    Defines a named scoring recipe: a set of feature weights and parameters
    that can be applied to any prediction set. Immutable once created.
+
+Re-ranker datasets
+------------------
+
+.. code-block:: text
+
+   ┌──────────────────────────────────┐
+   │             Dataset              │
+   │──────────────────────────────────│
+   │ id (UUID, PK)                    │
+   │ name (str, unique)               │
+   │ operation (export_research_…)    │
+   │ job_id (FK, nullable)            │
+   │ ── storage layout ──             │
+   │ storage_backend (local|minio)    │
+   │ key_prefix                       │
+   │ train_uri / eval_uri             │
+   │ manifest_uri                     │
+   │ ── content fingerprints ──       │
+   │ schema_sha (16-char)             │
+   │ manifest_sha (sha256)            │
+   │ n_train_rows / n_eval_rows       │
+   │ ── dump parameters ──            │
+   │ k                                │
+   │ annotation_source                │
+   │ embedding_config_id (FK, null)   │
+   │ ontology_snapshot_id (FK, null)  │
+   │ train_snapshot_pairs (JSONB)     │
+   │ eval_snapshot_pair               │
+   │ ── reproducibility ──            │
+   │ producer_version                 │
+   │ producer_git_sha                 │
+   │ meta (JSONB)                     │
+   │ created_at                       │
+   └──────────────────────────────────┘
+
+**Dataset**
+   The durable handle for a frozen re-ranker dataset published to the
+   artifact store by ``export_research_dataset``. One row per successful
+   export run; ``protea-reranker-lab``'s ``pull_dataset.py`` resolves
+   either ``id`` or ``name`` against this table to download the exact
+   ``train.parquet`` / ``eval.parquet`` / ``manifest.json`` triple that
+   trained a given booster. ``schema_sha`` must equal the booster's
+   ``feature_schema_sha`` at inference (load-bearing); ``manifest_sha``
+   detects content drift across re-emissions.
 
 Evaluation
 ----------
@@ -322,6 +384,34 @@ Support
 **SupportEntry**
    Community feedback: a thumbs-up with an optional comment (max 500 chars).
 
+Visitor events
+--------------
+
+.. code-block:: text
+
+   ┌──────────────────────────────┐
+   │        VisitorEvent          │
+   │──────────────────────────────│
+   │ id (BigInt, PK)              │
+   │ day (Date, indexed)          │
+   │ visitor_hash (16-char)       │
+   │ path                         │
+   │ method                       │
+   │ status (int)                 │
+   │ created_at                   │
+   └──────────────────────────────┘
+
+**VisitorEvent**
+   Append-only log that powers the Grafana "unique visitors" dashboard.
+   The schema deliberately omits IP addresses: ``visitor_hash`` is the
+   first 16 hex chars of ``sha256(daily_salt || client_ip)``, where
+   ``daily_salt`` is a 32-byte random value held in process memory and
+   regenerated every calendar day. Once the day rolls over the salt is
+   gone, so cross-day correlation becomes cryptographically infeasible
+   (the same no-PII model used by Plausible and Fathom). The ``(day,
+   visitor_hash)`` index drives unique-visitor counts per day; the
+   ``path`` index drives top-page reports.
+
 Job queue
 ---------
 
@@ -341,6 +431,9 @@ Job queue
    │ progress_total             │
    │ error_code                 │
    │ error_message              │
+   │ description (Text, null)   │
+   │ findings (Text, null)      │
+   │ tags (ARRAY[Text])         │
    │ created_at / started_at /  │
    │ finished_at                │
    └────────────────────────────┘
@@ -350,9 +443,95 @@ Job queue
    coordinator parent (used in distributed pipelines). ``progress_current`` /
    ``progress_total`` track batch completion for progress bars.
 
+   The three narrative columns (``description``, ``findings``, ``tags``)
+   were added in T3.9 / D11 to give every run a place for human context:
+   ``description`` carries the pre-execution intent supplied at
+   ``POST /jobs`` time, ``findings`` is a free-form post-completion note
+   the operator (or a downstream tool) can write back via the existing
+   PATCH path, and ``tags`` is a free-form ``Text[]`` (default ``[]``)
+   for ad-hoc grouping. None of the three are interpreted by
+   ``BaseWorker``; they are operator metadata only.
+
 **JobEvent**
    Append-only audit log. Written by the ``emit`` callback during execution. The frontend
    renders these as a chronological timeline. Events are never updated or deleted.
+
+**JobComment**
+   Human-authored note thread attached to a ``Job`` (T3.10 / D11).
+   One-to-many: ``job_id`` UUID FK to ``job(id)`` with ``ON DELETE
+   CASCADE``, ``author`` Text nullable, ``body`` Text required,
+   ``created_at`` Timestamptz default ``now()``. Indexed by
+   ``(job_id, created_at)`` for the natural read pattern. Comments
+   are written through ``POST /jobs/{job_id}/comments`` and read
+   chronologically through ``GET /jobs/{job_id}/comments``; they
+   complement ``JobEvent`` (which is machine-emitted) by giving
+   curators / operators a place for free-form annotations.
+
+Experiment runs
+---------------
+
+.. code-block:: text
+
+   ┌──────────────────────────────┐
+   │       ExperimentRun          │
+   │──────────────────────────────│
+   │ id (UUID, PK)                │
+   │ name (Text, UNIQUE)          │
+   │ description (Text, null)     │
+   │ hypothesis (Text, null)      │
+   │ findings (Text, null)        │
+   │ status (enum)                │
+   │ config (JSONB)               │
+   │ provenance (JSONB)           │
+   │ tags (ARRAY[Text])           │
+   │ plm (Text, null)             │
+   │ k (Integer, null)            │
+   │ reranker_spec_id (Text, null)│
+   │ feature_schema_sha (Text)    │
+   │ eval_set_name (Text, null)   │
+   │ eval_set_manifest_sha (Text) │
+   │ propagation (Text, null)     │
+   │ ensemble_spec (JSONB, null)  │
+   │ axis_tuple_shortid (Text)    │
+   │ created_at                   │
+   │ started_at (null)            │
+   │ finished_at (null)           │
+   └──────────────────────────────┘
+
+**ExperimentRun**
+   Per-research-run narrative + provenance anchor (T3.8 / Fase 4).
+   The row that F-EXP campaigns and the F8b Experiments page hang
+   their per-run metadata off of: a single ``ExperimentRun``
+   typically aggregates multiple ``Job`` / ``EvaluationResult`` /
+   ``RerankerModel`` rows under one human ``name``. The narrative
+   trio (``description`` / ``hypothesis`` / ``findings``) mirrors
+   ``Job``'s D11 columns; ``config`` and ``provenance`` are JSONB
+   bags suitable for the ``capture_provenance`` snapshot from
+   :mod:`protea.core.provenance`. Status enum is
+   ``planned`` → ``running`` → ``done`` (or ``abandoned``); planned
+   rather than queued because experiments often live as drafts
+   before any compute kicks off, and ``abandoned`` rather than
+   ``failed`` because a research run can be stopped without a hard
+   error.
+
+   The nine **FARM-EXP.1 axis columns** (``plm``, ``k``,
+   ``reranker_spec_id``, ``feature_schema_sha``, ``eval_set_name``,
+   ``eval_set_manifest_sha``, ``propagation``, ``ensemble_spec``,
+   ``axis_tuple_shortid``) land in migration
+   ``e1c4a7b2d8f3_farm_exp_1_experiment_run_axis``. Together they
+   form the axis tuple that the F-EXP-RESET re-benchmark addresses
+   every cell by. ``axis_tuple_shortid`` is the canonical 12-hex
+   digest ``sha256(canonical_json(axis_tuple))[:12]`` shared with
+   ``protea-reranker-lab`` via :mod:`protea.core.axis_tuple`. A
+   partial-unique index (``uq_experiment_run_axis_tuple_shortid``)
+   enforces uniqueness only when the shortid is non-NULL, so legacy
+   rows without a shortid can coexist until backfilled.
+
+   The ``status`` column uses ``values_callable=lambda e: [m.value
+   for m in e]`` (FIX-EXP-RUN-ENUM) so SQLAlchemy persists and
+   reads the DB-native lowercase labels (``"planned"``,
+   ``"running"``, ...) instead of the Python enum names; without
+   this fix all ORM inserts raised ``InvalidTextRepresentation``.
 
 Status enum
 -----------
@@ -375,10 +554,10 @@ Status enum
 
 .. seealso::
 
-   - :doc:`operations` — every operation lists the tables it touches.
-   - :doc:`/reference/infrastructure` — the SQLAlchemy ``Mapped[]`` classes
+   - :doc:`operations`: every operation lists the tables it touches.
+   - :doc:`/reference/infrastructure`: the SQLAlchemy ``Mapped[]`` classes
      behind every table on this page.
-   - :doc:`/adr/006-sequence-deduplication-by-md5` — why the
+   - :doc:`/adr/006-sequence-deduplication-by-md5`: why the
      ``Sequence`` ↔ ``Protein`` split exists.
-   - :doc:`/adr/001-knn-without-pgvector` — why ``SequenceEmbedding`` uses
+   - :doc:`/adr/001-knn-without-pgvector`: why ``SequenceEmbedding`` uses
      pgvector for storage but not for search.

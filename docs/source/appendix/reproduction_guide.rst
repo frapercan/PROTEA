@@ -8,29 +8,91 @@ Reproduction guide
    end-to-end against the GOA 220 → 229 temporal holdout.
 
    **Read** :doc:`howto_guides` **instead if:** you have one specific task to
-   accomplish — load an ontology, upload a FASTA, predict GO terms for your
-   own proteins, scale a worker. The how-to is recipe-style and stops at the
+   accomplish (load an ontology, upload a FASTA, predict GO terms for your
+   own proteins, scale a worker). The how-to is recipe-style and stops at the
    step you need; this guide is a single ordered procedure that runs every
    experiment in sequence.
 
-.. admonition:: Provisional expected values — pending final recompute
+.. admonition:: Provisional expected values, pending final recompute
    :class: warning
 
    The expected Fmax values cited throughout this guide (baseline
-   0.412 / 0.590 / 0.668, the +1.5–4 % ``alignment_weighted`` gain, the v2/v3
-   re-ranker targets) are the pre-2026-04-10 numbers and will be refreshed
-   for the Zenodo deposit. The *procedure* itself — every curl command,
-   payload, operation name, and the order in which they are issued — is
-   stable and will not change. See :doc:`/results` for the full provisional
-   notice and the reason behind the recompute.
+   0.412 / 0.590 / 0.668, the +1.5-4 % ``alignment_weighted`` gain, the
+   second and third re-ranker iteration targets) are the pre-2026-04-10
+   numbers and will be refreshed for the Zenodo deposit. See
+   :doc:`/results` for the full provisional notice and the reason
+   behind the recompute.
+
+.. admonition:: API drift across Stages 1.3 – 4
+   :class: caution
+
+   The curl recipes from **Step 1.3 onward** still use field names that
+   the current Pydantic payloads no longer accept. Stage 1 up to and
+   including Step 1.2 is correct (PR #138 fixed
+   ``source_tag`` → ``source_version`` there); everything after needs
+   manual translation before it can be re-run end-to-end. The
+   *procedure* (the order of jobs, the conceptual inputs / outputs) is
+   stable; only the field names drifted.
+
+   Concrete renames operators must apply:
+
+   .. list-table::
+      :header-rows: 1
+      :widths: 28 32 40
+
+      * - Where
+        - Doc says
+        - Current payload uses
+      * - Step 1.3 (``generate``) and the GET filter
+        - ``"name": "goa_220_to_229"``, ``?name=…``
+        - ``GenerateEvaluationSetPayload`` accepts no ``name``
+          field; filter the GET response client-side with ``jq``.
+      * - Step 1.4 (``compute_embeddings``)
+        - ``"target": "all_sequences"``
+        - ``ComputeEmbeddingsPayload`` accepts ``accessions`` (list)
+          or ``query_set_id`` (UUID); ``null`` for both = embed all.
+      * - Stage 2 (``predict_go_terms``)
+        - ``query_annotation_set_id``, ``reference_annotation_set_id``
+        - The payload has a single ``annotation_set_id`` (the reference
+          set) plus ``query_set_id`` (a ``QuerySet`` UUID). The query
+          *set* is no longer keyed off another ``AnnotationSet``.
+      * - Stage 2 (``predict_go_terms``)
+        - ``"k": 5``, ``"backend": "faiss"``, ``"index_type": …``,
+          ``"name": "k5_aspect_sep"``
+        - ``limit_per_entry``, ``search_backend``, ``faiss_index_type``;
+          there is no ``name`` field on ``PredictGoTermsPayload``.
+      * - Stages 3 and 4 (``run_cafa_evaluation``)
+        - ``scoring_config_name``, ``reranker_name``
+        - ``scoring_config_id`` (UUID) plus either flat
+          ``reranker_id_{nk,lk,pk}`` UUIDs or the nested ``rerankers``
+          mapping. See :class:`RunCafaEvaluationPayload` in
+          :mod:`protea.core.operations.run_cafa_evaluation`.
+
+   **Stage 4 specifically** also targets the retired
+   ``POST /scoring/rerankers/train`` endpoint
+   (``train_reranker`` / ``train_reranker_auto`` were unregistered in
+   F0 / T0.6). LightGBM training has moved to the sibling repo
+   `protea-reranker-lab <https://github.com/frapercan/protea-reranker-lab>`_,
+   which consumes a frozen parquet dataset published by PROTEA via
+   ``export_research_dataset`` and registers the booster through
+   ``POST /reranker-models/import``. The four-step flow is documented
+   in :ref:`Register a reranker from protea-reranker-lab
+   <howto-register-reranker>`.
+
+   The historical experiments below produced the
+   ``lgbm_v1`` / ``lgbm_v2`` / ``lgbm_v3`` boosters that still back the
+   numbers in :doc:`/results`; the *commands* must be translated
+   against the contracts in :doc:`/architecture/operations` before
+   they can be re-run. A staged rewrite of this guide is on the
+   doc-writer roadmap.
 
 This appendix documents the exact sequence of steps required to reproduce the
 experimental results reported in :doc:`../results`. The target is a fresh
 PROTEA installation against the GOA 220 → 229 temporal holdout, covering all
 nine experiments: the ``k`` sweep, the aspect-separated KNN ablation, the five
 heuristic scoring configurations, the three re-ranker iterations
-(``v1``, ``v2``, ``v3``), and the external benchmark against eggNOG-mapper,
-Pannzer2, and InterProScan 6.
+(``lgbm_v1``, ``lgbm_v2``, ``lgbm_v3``), and the external benchmark against
+eggNOG-mapper, Pannzer2, and InterProScan 6.
 
 Every command is expressed against the public HTTP API. The API runs at
 ``http://127.0.0.1:8000`` after ``bash scripts/manage.sh start``; environment
@@ -61,10 +123,10 @@ The key reference UUIDs from the original campaign are recorded in
 on a new deployment regenerates these UUIDs; the shell variables below are
 placeholders that the user fills in after each preparation step.
 
-Stage 1 — Prepare infrastructure
+Stage 1: Prepare infrastructure
 --------------------------------
 
-Step 1.1 — Load the GO ontology
+Step 1.1: Load the GO ontology
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Queue a ``load_ontology_snapshot`` job. The OBO file is versioned by
@@ -87,7 +149,7 @@ snapshot ID:
    SNAPSHOT_ID=$(curl -s $API/annotations/snapshots \
      | jq -r '.[0].id')
 
-Step 1.2 — Load GOA annotation sets
+Step 1.2: Load GOA annotation sets
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 For the temporal re-ranker training pipeline the campaign loads 15 releases
@@ -102,7 +164,7 @@ required: ``220`` (the ``t0`` reference) and ``229`` (the ``t1`` ground truth).
        -d "{
          \"gaf_url\": \"http://release.geneontology.org/2026-01-23/annotations/goa_uniprot_all.gaf.gz\",
          \"ontology_snapshot_id\": \"$SNAPSHOT_ID\",
-         \"source_tag\": \"goa_${REL}\"
+         \"source_version\": \"goa_${REL}\"
        }"
    done
 
@@ -110,14 +172,18 @@ Each load emits ``ProteinGOAnnotation`` rows filtered against canonical
 accessions already in the database, so ``insert_proteins`` for the UniProt
 slice of interest must have been executed beforehand.
 
-Record the two critical IDs once the jobs complete:
+Record the two critical IDs once the jobs complete. The ``GET /annotations/sets``
+endpoint accepts only a ``source`` filter (``goa`` or ``quickgo``); narrow
+to a specific release with ``jq``:
 
 .. code-block:: bash
 
-   OLD_SET=$(curl -s "$API/annotations/sets?source_tag=goa_220" | jq -r '.[0].id')
-   NEW_SET=$(curl -s "$API/annotations/sets?source_tag=goa_229" | jq -r '.[0].id')
+   OLD_SET=$(curl -s "$API/annotations/sets?source=goa" \
+     | jq -r '.[] | select(.source_version=="goa_220") | .id')
+   NEW_SET=$(curl -s "$API/annotations/sets?source=goa" \
+     | jq -r '.[] | select(.source_version=="goa_229") | .id')
 
-Step 1.3 — Generate the NK/LK/PK evaluation set
+Step 1.3: Generate the NK/LK/PK evaluation set
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: bash
@@ -140,7 +206,7 @@ experimental evidence filtering, and per-namespace classification. The
 summary counts stored on the ``EvaluationSet`` row should match the numbers
 reported in Infrastructure above.
 
-Step 1.4 — Compute ESM-C reference embeddings
+Step 1.4: Compute ESM-C reference embeddings
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Create the embedding config first (ESM-C 300M, mean-pooled, float16 storage):
@@ -177,17 +243,17 @@ The full reference set contains 527 K sequences; total wall-clock time is
 approximately 6–8 hours on a single GPU. Monitor ``manage.sh status`` and the
 ``protea.embeddings.batch`` worker logs for progress.
 
-Stage 2 — Baseline KNN experiments
+Stage 2: Baseline KNN experiments
 ----------------------------------
 
 Stage 2 reproduces experiments 1 and 2 from ``EXPERIMENTS.md``:
 the ``k`` sweep and the ``aspect_separated_knn`` ablation.
 
-Experiment 1 — ``k`` sweep
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+Experiment 1: ``k`` sweep
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Run one ``predict_go_terms`` job for each target ``k``. Feature-engineering
-flags are left disabled at this stage — the scoring and re-ranker experiments
+flags are left disabled at this stage; the scoring and re-ranker experiments
 reuse a single enriched prediction set generated in Stage 3.
 
 .. code-block:: bash
@@ -223,8 +289,8 @@ The expected ``k = 5`` baseline Fmax (IA-weighted) is ``0.412 / 0.590 / 0.668``
 for NK BPO/MFO/CCO and degrades monotonically for larger ``k``. Use ``k = 5``
 for all downstream experiments.
 
-Experiment 2 — ``aspect_separated_knn``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Experiment 2: ``aspect_separated_knn``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Re-run prediction with ``aspect_separated_knn: false`` and compare against the
 ``k = 5`` result from Experiment 1:
@@ -249,10 +315,10 @@ Differences between the two variants are within ±0.011 Fmax across all nine
 cells. The campaign retains ``aspect_separated_knn = true`` for uniform aspect
 coverage.
 
-Stage 3 — Feature engineering and scoring
+Stage 3: Feature engineering and scoring
 -----------------------------------------
 
-Experiment 3 — Heuristic scoring configurations
+Experiment 3: Heuristic scoring configurations
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 All scoring configurations operate on a single enriched prediction set that
@@ -305,13 +371,14 @@ improving the ``embedding_only`` baseline by +1.5 % to +4 % Fmax. Every scoring
 configuration that mixes evidence-code weights degrades the baseline under
 IA-weighted CAFA evaluation.
 
-Stage 4 — Re-ranker training
+Stage 4: Re-ranker training
 ----------------------------
 
-Experiment 4 — Re-ranker v1 (per-aspect LightGBM)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Experiment 4: Re-ranker iteration 1 (per-aspect LightGBM)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Version ``v1`` trains nine LightGBM binary classifiers (one per NK/LK/PK ×
+The first iteration (``lgbm_v1``) trains nine LightGBM binary
+classifiers (one per NK/LK/PK ×
 BPO/MFO/CCO cell) on 12 temporal splits (GOA 160 → 165, 165 → 170, …,
 215 → 220). Train first without class balancing and then with
 ``neg_pos_ratio = 10`` to observe the effect on the BPO cells, which otherwise
@@ -350,11 +417,12 @@ In the unbalanced run six of the nine models early-stop at iteration 1 due to
 extreme class imbalance (≈0.17 % positives in BPO). The balanced run recovers
 BPO (+0.124 AUC for LK-BPO) but does not outperform ``alignment_weighted``.
 
-Experiment 5 — Re-ranker v2 (per-category + IA weighting)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Experiment 5: Re-ranker iteration 2 (per-category + IA weighting)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Version ``v2`` collapses the nine per-aspect models into three per-category
-models (NK, LK, PK) and passes the per-term Information Accretion values as
+The second iteration (``lgbm_v2``) collapses the nine per-aspect
+models into three per-category models (NK, LK, PK) and passes the
+per-term Information Accretion values as
 ``sample_weight`` to LightGBM, so that rare terms contribute more to the
 training loss. Hyperparameters move to ``learning_rate = 0.01`` and
 ``num_boost_round = 1000`` with ``early_stopping_rounds = 50``.
@@ -379,18 +447,20 @@ training loss. Hyperparameters move to ``learning_rate = 0.01`` and
        \"embedding_config_id\": \"$EMB_CONFIG\"
      }"
 
-The expected ``v2 full`` Fmax matches or exceeds ``v1`` in every cell but does
-not yet overtake ``alignment_weighted`` globally.
+The expected ``lgbm_v2_full`` Fmax matches or exceeds the
+``lgbm_v1`` numbers in every cell but does not yet overtake
+``alignment_weighted`` globally.
 
-Experiment 6 — Re-ranker v3 (full alignment and taxonomy features)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Experiment 6: Re-ranker iteration 3 (full alignment and taxonomy features)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Version ``v3`` is identical to ``v2`` except that the training-data generator
-calls ``compute_alignment()`` and ``compute_taxonomy()`` for every
-(query, reference) pair in the historical splits, so that the alignment and
-taxonomy feature columns are populated throughout training (in ``v1`` and
-``v2`` those columns were hardcoded to ``NULL`` because the features were only
-computed at prediction time).
+The third iteration (``lgbm_v3``) is identical to ``lgbm_v2`` except
+that the training-data generator calls ``compute_alignment()`` and
+``compute_taxonomy()`` for every (query, reference) pair in the
+historical splits, so that the alignment and taxonomy feature columns
+are populated throughout training (in ``lgbm_v1`` and ``lgbm_v2``
+those columns were hardcoded to ``NULL`` because the features were
+only computed at prediction time).
 
 .. code-block:: bash
 
@@ -416,10 +486,10 @@ computed at prediction time).
 
 Training wall-clock time is approximately 2 h 45 min on a single CPU machine.
 The alignment overhead during training data generation is marginal (~15 min
-over ``v2``). Three models are produced: ``lgbm_v3_full-nk``,
+over ``lgbm_v2``). Three models are produced: ``lgbm_v3_full-nk``,
 ``lgbm_v3_full-lk``, ``lgbm_v3_full-pk``.
 
-Score and evaluate the enriched prediction set with each ``v3`` model:
+Score and evaluate the enriched prediction set with each ``lgbm_v3`` model:
 
 .. code-block:: bash
 
@@ -432,11 +502,11 @@ Score and evaluate the enriched prediction set with each ``v3`` model:
        }"
    done
 
-Expected result: ``v3`` outperforms the ``alignment_weighted`` heuristic in 7
-of the 9 evaluation cells and is the best global configuration reported in
-:doc:`../results`.
+Expected result: ``lgbm_v3`` outperforms the ``alignment_weighted``
+heuristic in 7 of the 9 evaluation cells and is the best global
+configuration reported in :doc:`../results`.
 
-Stage 5 — External tool benchmarks
+Stage 5: External tool benchmarks
 ----------------------------------
 
 All external tools are evaluated on the same 20 281-protein delta as PROTEA
@@ -444,8 +514,8 @@ using ``scripts/evaluate_external_tool.py``. The script normalises each tool's
 output into a CAFA-style ``predictions.tsv`` and runs ``cafaeval`` with IA
 weights against the same evaluation set.
 
-Experiment 7 — eggNOG-mapper
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Experiment 7: eggNOG-mapper
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: bash
 
@@ -460,10 +530,11 @@ Experiment 7 — eggNOG-mapper
      --predictions data/eggnog_out.emapper.annotations \
      --evaluation-set $EVAL_SET
 
-PROTEA reranker v3 is expected to outperform eggNOG-mapper in 9 of 9 cells
-(differences up to +0.306 Fmax in NK-CCO).
+The PROTEA reranker third iteration (``lgbm_v3``) is expected to
+outperform eggNOG-mapper in 9 of 9 cells (differences up to +0.306
+Fmax in NK-CCO).
 
-Experiment 8 — Pannzer2 and the data-leakage analysis
+Experiment 8: Pannzer2 and the data-leakage analysis
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Pannzer2 is invoked via the Helsinki web server; results are downloaded as
@@ -477,7 +548,7 @@ HTML, parsed into a CAFA-style TSV, and scored the same way.
      --evaluation-set $EVAL_SET
 
 Pannzer2 posts the highest apparent Fmax in the benchmark (e.g. NK-MFO 0.717),
-but its reference database was pulled in March 2026 — after the GOA 229 cutoff
+but its reference database was pulled in March 2026, after the GOA 229 cutoff
 that defines the ground truth. The leakage measurement compares the
 (protein, GO term) pairs in the ground truth against those in each tool's
 predictions and reports the exact-match overlap per NK/LK/PK category. For
@@ -486,8 +557,8 @@ explaining its apparent advantage over temporally strict methods. PROTEA is
 the only tool in the benchmark that freezes its reference at ``t0``, so its
 numbers are the only fair upper bound.
 
-Experiment 9 — InterProScan 6
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Experiment 9: InterProScan 6
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: bash
 
@@ -501,7 +572,8 @@ Experiment 9 — InterProScan 6
      --predictions data/interproscan_out/query.fasta.tsv \
      --evaluation-set $EVAL_SET
 
-PROTEA reranker v3 is expected to outperform InterProScan 6 in 8 of 9 cells.
+The PROTEA reranker third iteration (``lgbm_v3``) is expected to
+outperform InterProScan 6 in 8 of 9 cells.
 
 Checklist
 ---------
@@ -509,16 +581,16 @@ Checklist
 The nine experiments above fully reproduce the figures and tables in
 :doc:`../results`:
 
-1. Experiment 1 — ``k`` sweep (``k ∈ {5, 10, 20, 50}``)
-2. Experiment 2 — ``aspect_separated_knn`` ablation
-3. Experiment 3 — Heuristic scoring (five presets)
-4. Experiment 4 — Re-ranker ``v1`` (per-aspect, unbalanced and balanced)
-5. Experiment 5 — Re-ranker ``v2`` (per-category, IA-weighted)
-6. Experiment 6 — Re-ranker ``v3`` (per-category, full alignment and
-   taxonomy features) — best global configuration
-7. Experiment 7 — eggNOG-mapper benchmark
-8. Experiment 8 — Pannzer2 benchmark plus data-leakage analysis
-9. Experiment 9 — InterProScan 6 benchmark
+1. Experiment 1: ``k`` sweep (``k ∈ {5, 10, 20, 50}``)
+2. Experiment 2: ``aspect_separated_knn`` ablation
+3. Experiment 3: Heuristic scoring (five presets)
+4. Experiment 4: Re-ranker ``lgbm_v1`` (per-aspect, unbalanced and balanced)
+5. Experiment 5: Re-ranker ``lgbm_v2`` (per-category, IA-weighted)
+6. Experiment 6: Re-ranker ``lgbm_v3`` (per-category, full alignment and
+   taxonomy features), best global configuration
+7. Experiment 7: eggNOG-mapper benchmark
+8. Experiment 8: Pannzer2 benchmark plus data-leakage analysis
+9. Experiment 9: InterProScan 6 benchmark
 
 Every prediction set, evaluation result, and re-ranker model is persisted in
 the database with a UUID that can be recorded alongside the thesis tables,

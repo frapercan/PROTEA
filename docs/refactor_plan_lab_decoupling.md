@@ -1,7 +1,7 @@
 # PROTEA ↔ protea-reranker-lab: plan de desacoplamiento
 
 **Fecha:** 2026-05-04
-**Estado:** propuesta, sin aprobar
+**Estado:** **implementado**. El plan se ejecutó vía ADR D10 (rollout de `schema_sha_v2`) y ADR 007 (contract-first lab integration). LightGBM training vive ya en `protea-reranker-lab`; PROTEA importa la definición canónica de features desde `protea-contracts`, y la columna `schema_sha_v2` está activa en `Dataset` y `RerankerModel`. Mantenido como contexto histórico del diagnóstico inicial.
 **Autor:** discusión con Claude (sesión guru/PROTEA-audit)
 
 Plan completo para limpiar el contrato entre PROTEA y `protea-reranker-lab`. La fricción central es que las definiciones de columnas viven duplicadas en tres sitios y el cómputo está disperso entre tres archivos de PROTEA. Esto crea un canal silencioso de schema-drift que solo se detecta en runtime de inferencia.
@@ -133,7 +133,7 @@ La definición está unificada (fase 1). El cómputo sigue disperso. Aquí el co
 
 - **2.2** Mover el cómputo actual en bloques:
   - `feature_engineering.py` (alignment NW/SW, taxonomy pair) → `alignment.py`, `taxonomy.py`.
-  - `feature_enricher.py` (las 25 v6 features) → repartir entre `taxonomy.py` (tax_voters_*), `anc2vec.py`, `emb_pca.py`.
+  - `feature_enricher.py` (las 25 features de la familia `v6_features`) → repartir entre `taxonomy.py` (tax_voters_*), `anc2vec.py`, `emb_pca.py`.
   - `predict_go_terms.py:_load_*` que carga datos de soporte → no tocar la **carga**, solo el cálculo de la columna.
 
 - **2.3** En `parquet_export.py` y en `predict_go_terms._predict_batch`, usar el registry:

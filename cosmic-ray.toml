@@ -1,0 +1,54 @@
+# Cosmic Ray mutation testing configuration (F6.3).
+#
+# Targets the pure-Python algorithmic core of PROTEA and uses the
+# F6.2 Hypothesis property tests (tests/property/) as the kill
+# criterion. Property tests are deliberately chosen over example-based
+# unit tests because they exercise dozens of generated inputs per
+# invariant per run, so a mutation that survives one execution rarely
+# survives a second-shot retry.
+#
+# Reference module: protea.core.scoring
+# ------------------------------------
+# Pure functions over plain dicts and numbers, no I/O or ORM session
+# work. A baseline mutation pass on this file is the recommended
+# starting point because the property tests cover it directly and it
+# fits in a single cosmic-ray session under fifteen minutes.
+#
+# To re-target another module, change ``module-path`` below. Keep the
+# scope narrow (one module per session); a full ``protea/core/`` sweep
+# would generate several thousand mutants and take many hours, which
+# is why the CI workflow (.github/workflows/mutation.yml) only runs on
+# PR-touched modules.
+
+[cosmic-ray]
+# Pin to the scoring module for the reference baseline. To mutate a
+# different module, override on the command line by editing this path
+# (cosmic-ray reads the file once when ``init`` is invoked, so no
+# environment-variable interpolation is supported).
+module-path = "protea/core/scoring.py"
+
+# Per-mutation pytest timeout. The property suite finishes in ~3 s on
+# a developer laptop with ``--hypothesis-profile=dev``; the CI profile
+# pushes that to ~12 s (max_examples=200, derandomized). Sixty seconds
+# leaves ample headroom for the slowest CI runner while still catching
+# infinite loops introduced by a mutation.
+timeout = 60.0
+
+# Modules to exclude from mutation. Empty for the scoring baseline.
+excluded-modules = []
+
+# Run the F6.2 property tests as the kill criterion. ``--hypothesis-profile=ci``
+# pins the seed (derandomize=True) so identical mutations produce
+# identical pytest outcomes across runs, which is the property cosmic-ray
+# needs to classify a mutant as killed-vs-survived reliably.
+#
+# ``-x`` aborts on the first failure (we only need one to declare the
+# mutant killed). ``--hypothesis-seed=0`` is an extra belt-and-braces
+# pin in case the env profile is not picked up.
+test-command = "pytest tests/property/test_scoring_property.py -q -x --hypothesis-profile=ci --timeout=60 -p no:cacheprovider"
+
+[cosmic-ray.distributor]
+# ``local`` runs all mutation work in subprocesses on this machine.
+# Use ``http`` plus ``cosmic-ray http-worker`` to fan out across a
+# pool of remote workers when wall-clock time becomes the bottleneck.
+name = "local"

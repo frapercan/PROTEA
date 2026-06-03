@@ -1,0 +1,450 @@
+"""Unit tests for ``protea.core._training_dump_loaders``.
+
+The first three helpers (``_count_embeddings_with_dim``,
+``_stream_embeddings``, ``_load_annotation_aggregations``) were
+extracted out of ``_preload_all_embeddings`` /
+``_build_reference_from_cache`` to keep those under the §3 60-LOC
+method ceiling.
+
+The next four (``_resolve_annotation_set_ids``,
+``_check_reranker_name_collisions``, ``_load_ia_weights``,
+``_load_go_maps``) were extracted out of
+``TrainRerankerAutoOperation.execute`` for T2B.5 partial #1 to start
+chipping the 670-LOC method down toward the §3 ceiling.
+
+These tests pin each helper's wire shape without standing up a real
+database (they exercise SQL composition + result-row handling against
+a mocked SQLAlchemy ``Session`` / ``Connection``).
+"""
+from __future__ import annotations
+
+import uuid
+from unittest.mock import MagicMock, patch
+
+import numpy as np
+import pytest
+
+from protea.core._training_dump_loaders import (
+    _check_reranker_name_collisions,
+    _collect_cat_gt_pairs,
+    _count_embeddings_with_dim,
+    _DumpRequest,
+    _load_annotation_aggregations,
+    _load_go_maps,
+    _load_ia_weights,
+    _maybe_fit_pca_state,
+    _perform_dataset_dump,
+    _resolve_annotation_set_ids,
+    _resolve_test_eval_inputs,
+    _stream_embeddings,
+)
+
+# ---------------------------------------------------------------------------
+# _count_embeddings_with_dim
+# ---------------------------------------------------------------------------
+
+
+class TestCountEmbeddingsWithDim:
+    def test_returns_total_and_dim(self) -> None:
+        conn = MagicMock()
+        conn.execute.return_value.one.return_value = (5, 1024)
+
+        total, dim = _count_embeddings_with_dim(conn, uuid.uuid4())
+
+        assert total == 5
+        assert dim == 1024
+
+    def test_dim_falls_back_to_960_when_probe_returns_null(self) -> None:
+        conn = MagicMock()
+        conn.execute.return_value.one.return_value = (3, None)
+
+        total, dim = _count_embeddings_with_dim(conn, uuid.uuid4())
+
+        assert total == 3
+        assert dim == 960
+
+
+# ---------------------------------------------------------------------------
+# _stream_embeddings
+# ---------------------------------------------------------------------------
+
+
+class TestStreamEmbeddings:
+    def test_fills_preallocated_matrix_from_string_rows(self) -> None:
+        conn = MagicMock()
+        rows = [
+            ("P1", "[0.1, 0.2, 0.3]"),
+            ("P2", "[0.4, 0.5, 0.6]"),
+        ]
+        conn.execute.return_value.yield_per.return_value = iter(rows)
+
+        embeddings, accessions = _stream_embeddings(
+            conn, uuid.uuid4(), total=2, dim=3, stream_chunk=10
+        )
+
+        assert embeddings.shape == (2, 3)
+        assert embeddings.dtype == np.float16
+        np.testing.assert_allclose(
+            embeddings[0], np.array([0.1, 0.2, 0.3], dtype=np.float16)
+        )
+        np.testing.assert_allclose(
+            embeddings[1], np.array([0.4, 0.5, 0.6], dtype=np.float16)
+        )
+        assert accessions == ["P1", "P2"]
+
+    def test_handles_array_like_rows(self) -> None:
+        conn = MagicMock()
+        rows = [
+            ("Q1", [1.0, 2.0]),
+            ("Q2", [3.0, 4.0]),
+        ]
+        conn.execute.return_value.yield_per.return_value = iter(rows)
+
+        embeddings, accessions = _stream_embeddings(
+            conn, uuid.uuid4(), total=2, dim=2, stream_chunk=5
+        )
+
+        np.testing.assert_allclose(embeddings[0], np.array([1.0, 2.0], dtype=np.float16))
+        np.testing.assert_allclose(embeddings[1], np.array([3.0, 4.0], dtype=np.float16))
+        assert accessions == ["Q1", "Q2"]
+
+
+# ---------------------------------------------------------------------------
+# _load_annotation_aggregations
+# ---------------------------------------------------------------------------
+
+
+class TestLoadAnnotationAggregations:
+    def test_groups_by_aspect_for_known_accessions(self) -> None:
+        conn = MagicMock()
+        # 3 rows: P1 has F + C, P2 has P. Q1 has P but is filtered out
+        # because it is missing from acc_to_idx.
+        rows = [
+            ("P1", "F", "GO:0001", None, "EXP"),
+            ("P1", "C", "GO:0002", None, "EXP"),
+            ("P2", "P", "GO:0003", None, "TAS"),
+            ("Q1", "P", "GO:0004", None, "TAS"),
+        ]
+        conn.execute.return_value.yield_per.return_value = iter(rows)
+        acc_to_idx = {"P1": 0, "P2": 1}
+
+        aspect_accs, aspect_go_map = _load_annotation_aggregations(
+            conn, uuid.uuid4(), acc_to_idx
+        )
+
+        assert aspect_accs["F"] == {"P1"}
+        assert aspect_accs["C"] == {"P1"}
+        assert aspect_accs["P"] == {"P2"}
+        # Q1 was filtered out; no aspect should claim it.
+        assert "Q1" not in aspect_accs["P"]
+
+        assert aspect_go_map["F"]["P1"][0]["go_term_id"] == "GO:0001"
+        assert aspect_go_map["C"]["P1"][0]["go_term_id"] == "GO:0002"
+        assert aspect_go_map["P"]["P2"][0]["go_term_id"] == "GO:0003"
+
+    def test_empty_rows_yield_empty_aggregations(self) -> None:
+        conn = MagicMock()
+        conn.execute.return_value.yield_per.return_value = iter([])
+
+        aspect_accs, aspect_go_map = _load_annotation_aggregations(
+            conn, uuid.uuid4(), acc_to_idx={"P1": 0}
+        )
+
+        assert aspect_accs == {"P": set(), "F": set(), "C": set()}
+        assert aspect_go_map == {"P": {}, "F": {}, "C": {}}
+
+    def test_multiple_annotations_per_protein_aspect_collected_in_list(self) -> None:
+        conn = MagicMock()
+        rows = [
+            ("P1", "F", "GO:0001", "enables", "EXP"),
+            ("P1", "F", "GO:0042", "enables", "TAS"),
+        ]
+        conn.execute.return_value.yield_per.return_value = iter(rows)
+
+        _, aspect_go_map = _load_annotation_aggregations(
+            conn, uuid.uuid4(), acc_to_idx={"P1": 0}
+        )
+
+        f_records = aspect_go_map["F"]["P1"]
+        assert len(f_records) == 2
+        assert {r["go_term_id"] for r in f_records} == {"GO:0001", "GO:0042"}
+
+
+# ---------------------------------------------------------------------------
+# T2B.5 partial #1 helpers (extracted from TrainRerankerAutoOperation.execute)
+# ---------------------------------------------------------------------------
+
+
+class TestResolveAnnotationSetIds:
+    def test_returns_two_dicts_keyed_by_version(self) -> None:
+        """``(version → set_id, version → native_snapshot_id)`` for every version."""
+        aset160 = MagicMock()
+        aset160.id = uuid.uuid4()
+        aset160.ontology_snapshot_id = uuid.uuid4()
+        aset170 = MagicMock()
+        aset170.id = uuid.uuid4()
+        aset170.ontology_snapshot_id = uuid.uuid4()
+
+        session = MagicMock()
+        # ``.filter(...).first()`` is called once per version.
+        session.query.return_value.filter.return_value.first.side_effect = [
+            aset160,
+            aset170,
+        ]
+
+        v_to_set, v_to_native = _resolve_annotation_set_ids(session, "goa", [160, 170])
+
+        assert v_to_set == {160: aset160.id, 170: aset170.id}
+        assert v_to_native == {
+            160: aset160.ontology_snapshot_id,
+            170: aset170.ontology_snapshot_id,
+        }
+
+    def test_missing_version_raises_value_error(self) -> None:
+        session = MagicMock()
+        session.query.return_value.filter.return_value.first.return_value = None
+
+        with pytest.raises(ValueError, match="AnnotationSet not found"):
+            _resolve_annotation_set_ids(session, "goa", [999])
+
+
+class TestCheckRerankerNameCollisions:
+    def test_passes_when_no_existing_rows(self) -> None:
+        session = MagicMock()
+        session.query.return_value.filter.return_value.first.return_value = None
+        # No raise = pass.
+        _check_reranker_name_collisions(session, ["foo-NK", "foo-LK", "foo-PK"])
+
+    def test_raises_with_quoted_name_on_collision(self) -> None:
+        session = MagicMock()
+        session.query.return_value.filter.return_value.first.return_value = MagicMock()
+
+        with pytest.raises(ValueError, match="RerankerModel 'foo-NK' already exists"):
+            _check_reranker_name_collisions(session, ["foo-NK"])
+
+
+class TestLoadIAWeights:
+    def test_returns_none_for_empty_path(self, tmp_path) -> None:
+        assert _load_ia_weights(None) is None
+        assert _load_ia_weights("") is None
+
+    def test_parses_tab_separated_lines(self, tmp_path) -> None:
+        ia_file = tmp_path / "ia.tsv"
+        ia_file.write_text("GO:0008150\t1.0\nGO:0003674\t2.5\n")
+        weights = _load_ia_weights(str(ia_file))
+        assert weights == {"GO:0008150": 1.0, "GO:0003674": 2.5}
+
+    def test_skips_blank_and_short_lines(self, tmp_path) -> None:
+        ia_file = tmp_path / "ia.tsv"
+        ia_file.write_text("GO:0008150\t1.0\n\nbad-row-no-tab\nGO:0003674\t2.5\n")
+        weights = _load_ia_weights(str(ia_file))
+        # Only the two well-formed rows survive.
+        assert weights == {"GO:0008150": 1.0, "GO:0003674": 2.5}
+
+
+class TestLoadGoMaps:
+    def test_returns_id_maps_plus_pivot_set(self) -> None:
+        session = MagicMock()
+        # First execute() returns the union rows; second returns the pivot rows.
+        union_result = MagicMock()
+        union_result.fetchall.return_value = [
+            (1, "GO:0001", "P"),
+            (2, "GO:0002", "F"),
+            (3, "GO:0003", None),  # filtered out of aspect_map
+        ]
+        pivot_result = MagicMock()
+        pivot_result.fetchall.return_value = [("GO:0001",), ("GO:0002",)]
+        session.execute.side_effect = [union_result, pivot_result]
+
+        snap = uuid.uuid4()
+        native = {uuid.uuid4()}
+        go_id_map, aspect_map, pivot_go_ids = _load_go_maps(session, snap, native)
+
+        assert go_id_map == {1: "GO:0001", 2: "GO:0002", 3: "GO:0003"}
+        # ``aspect=None`` row is skipped from the aspect map.
+        assert aspect_map == {1: "P", 2: "F"}
+        assert pivot_go_ids == {"GO:0001", "GO:0002"}
+
+
+class TestMaybeFitPcaState:
+    def _captured_emit(self) -> tuple[list[tuple], MagicMock]:
+        events: list[tuple] = []
+
+        def emit(event, message, fields, level):
+            events.append((event, message, fields, level))
+
+        return events, emit
+
+    def test_returns_none_when_pca_disabled(self) -> None:
+        events, emit = self._captured_emit()
+        embeddings = np.array([[1.0, 2.0]], dtype=np.float32)
+        out = _maybe_fit_pca_state(uuid.uuid4(), embeddings, use_pca=False, emit=emit)
+        assert out is None
+        assert events == []  # no audit event when PCA is off
+
+    def test_returns_none_for_empty_pool(self) -> None:
+        events, emit = self._captured_emit()
+        empty = np.empty((0, 2), dtype=np.float32)
+        out = _maybe_fit_pca_state(uuid.uuid4(), empty, use_pca=True, emit=emit)
+        assert out is None
+        assert events == []  # short-circuit before the cache hit
+
+    def test_delegates_to_shared_cache_and_emits(self) -> None:
+        events, emit = self._captured_emit()
+        embeddings = np.array(
+            [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32
+        )
+        cfg_id = uuid.uuid4()
+
+        with patch(
+            "protea.core.pca_cache._load_or_fit_pca_state",
+            return_value=("MEAN_FAKE", "COMPONENTS_FAKE"),
+        ) as mock_cache:
+            out = _maybe_fit_pca_state(cfg_id, embeddings, use_pca=True, emit=emit)
+
+        assert out == ("MEAN_FAKE", "COMPONENTS_FAKE")
+        mock_cache.assert_called_once_with(cfg_id, embeddings)
+        # One audit event with the expected payload shape.
+        assert len(events) == 1
+        event, _, fields, level = events[0]
+        assert event == "dump_helper.pca_fit"
+        assert level == "info"
+        assert fields["n_refs"] == 2
+        assert fields["dim_in"] == 3
+        assert fields["source"] == "shared_cache"
+
+
+class TestPerformDatasetDump:
+    def _request(self, *, dump_to: str | None = "/tmp/fake-dump") -> _DumpRequest:
+        payload = MagicMock()
+        payload.dump_to = dump_to
+        payload.name = "fake-bench"
+        payload.limit_per_entry = 5
+        payload.annotation_source = "goa"
+        return _DumpRequest(
+            payload=payload,
+            split_files={"NK": [], "LK": [], "PK": []},
+            valid_split_versions=[(160, 165), (165, 170)],
+            test_files={"NK": None, "LK": None, "PK": None},
+            test_old_v=170,
+            test_new_v=230,
+            emb_config_id=uuid.uuid4(),
+            ontology_snapshot_id=uuid.uuid4(),
+        )
+
+    def _captured_emit(self) -> tuple[list[tuple], MagicMock]:
+        events: list[tuple] = []
+
+        def emit(event, message, fields, level):
+            events.append((event, message, fields, level))
+
+        return events, emit
+
+    def test_raises_when_dump_to_unset(self) -> None:
+        request = self._request(dump_to=None)
+        events, emit = self._captured_emit()
+
+        with pytest.raises(ValueError, match="dump_helper requires dump_to"):
+            _perform_dataset_dump(request, MagicMock(), 0.0, emit)
+
+        assert events == []  # No audit event when validation fails.
+
+    def test_returns_operation_result_with_dump_metadata(self) -> None:
+        request = self._request()
+        events, emit = self._captured_emit()
+        dump_fn = MagicMock(return_value={"dump_dir": "/tmp/fake-dump", "n_train_rows": 42})
+
+        # Patch parquet_export imports so the helper does not need a real
+        # ParquetExportContext / git sha resolver.
+        with patch(
+            "protea.core.parquet_export.resolve_protea_git_sha",
+            return_value="deadbeef",
+        ), patch(
+            "protea.core.parquet_export.ParquetExportContext"
+        ) as mock_ctx_cls:
+            result = _perform_dataset_dump(request, dump_fn, t0=0.0, emit=emit)
+
+        # ``dump_fn`` is called once with the constructed context.
+        dump_fn.assert_called_once()
+        mock_ctx_cls.assert_called_once()
+        # Result carries dump_path + dump_stats + elapsed_seconds.
+        assert result.result["dumped"] is True
+        assert result.result["dump_path"] == "/tmp/fake-dump"
+        assert result.result["dump_stats"] == {"dump_dir": "/tmp/fake-dump", "n_train_rows": 42}
+        assert "elapsed_seconds" in result.result
+        # Two events fire in order: dump_done then done.
+        event_names = [ev[0] for ev in events]
+        assert event_names == ["dump_helper.dump_done", "dump_helper.done"]
+
+
+class TestCollectCatGtPairs:
+    def test_flattens_per_category_and_unions_proteins(self) -> None:
+        eval_data = MagicMock()
+        eval_data.nk = {"P1": {"GO:0001", "GO:0002"}, "P2": {"GO:0003"}}
+        eval_data.lk = {"P3": {"GO:0004"}}
+        eval_data.pk = {"P4": {"GO:0005"}, "P1": {"GO:0006"}}
+
+        cat_pairs, all_queries = _collect_cat_gt_pairs(eval_data)
+
+        assert cat_pairs["nk"] == {("P1", "GO:0001"), ("P1", "GO:0002"), ("P2", "GO:0003")}
+        assert cat_pairs["lk"] == {("P3", "GO:0004")}
+        assert cat_pairs["pk"] == {("P4", "GO:0005"), ("P1", "GO:0006")}
+        # ``P1`` appears in NK + PK; the union dedupes it.
+        assert all_queries == {"P1", "P2", "P3", "P4"}
+
+    def test_empty_categories_produce_empty_sets(self) -> None:
+        eval_data = MagicMock()
+        eval_data.nk = {}
+        eval_data.lk = {}
+        eval_data.pk = {}
+
+        cat_pairs, all_queries = _collect_cat_gt_pairs(eval_data)
+
+        assert cat_pairs == {"nk": set(), "lk": set(), "pk": set()}
+        assert all_queries == set()
+
+
+class TestResolveTestEvalInputs:
+    def test_returns_eset_eval_data_and_versions(self) -> None:
+        old_id = uuid.uuid4()
+        new_id = uuid.uuid4()
+        version_to_set = {170: old_id, 230: new_id}
+
+        eset = MagicMock()
+        eval_data = MagicMock()
+
+        session = MagicMock()
+        session.query.return_value.filter_by.return_value.one_or_none.return_value = eset
+
+        with patch(
+            "protea.core.evaluation.load_evaluation_data_for_set",
+            return_value=(eval_data, "fake-pivot-id"),
+        ) as mock_load:
+            out_eset, out_data, out_old_v, out_new_v = _resolve_test_eval_inputs(
+                session,
+                train_versions=[160, 165, 170],
+                test_versions=[230],
+                version_to_set=version_to_set,
+            )
+
+        assert out_eset is eset
+        assert out_data is eval_data
+        assert out_old_v == 170
+        assert out_new_v == 230
+        mock_load.assert_called_once_with(session, eset)
+
+    def test_missing_eset_raises_runtime_error(self) -> None:
+        old_id = uuid.uuid4()
+        new_id = uuid.uuid4()
+        version_to_set = {170: old_id, 230: new_id}
+
+        session = MagicMock()
+        session.query.return_value.filter_by.return_value.one_or_none.return_value = None
+
+        with pytest.raises(RuntimeError, match="EvaluationSet missing for test pair"):
+            _resolve_test_eval_inputs(
+                session,
+                train_versions=[170],
+                test_versions=[230],
+                version_to_set=version_to_set,
+            )

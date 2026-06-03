@@ -2,7 +2,50 @@
 
 import { useEffect, useState } from "react";
 import { baseUrl } from "@/lib/api";
+import { Skeleton } from "@/components/Skeleton";
 import { useTranslations } from "next-intl";
+
+const ISSUES_URL = "https://github.com/frapercan/PROTEA/issues";
+const DOCS_URL = "/sphinx/";
+
+function HelpSection({ t }: { t: ReturnType<typeof useTranslations> }) {
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white px-6 py-5 space-y-4">
+      <div className="space-y-1">
+        <h2 className="text-base font-semibold text-slate-900">
+          {t("helpSection.heading")}
+        </h2>
+        <p className="text-sm text-slate-600 leading-relaxed">
+          {t("helpSection.body")}
+        </p>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <a
+          href={DOCS_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="group flex flex-col gap-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 hover:border-blue-300 hover:bg-blue-50 transition-colors"
+        >
+          <span className="text-sm font-semibold text-slate-900 group-hover:text-blue-800">
+            {t("helpSection.docsLink")} ↗
+          </span>
+          <span className="text-xs text-slate-600">{t("helpSection.docsHint")}</span>
+        </a>
+        <a
+          href={ISSUES_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="group flex flex-col gap-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 hover:border-blue-300 hover:bg-blue-50 transition-colors"
+        >
+          <span className="text-sm font-semibold text-slate-900 group-hover:text-blue-800">
+            {t("helpSection.issuesLink")} ↗
+          </span>
+          <span className="text-xs text-slate-600">{t("helpSection.issuesHint")}</span>
+        </a>
+      </div>
+    </section>
+  );
+}
 
 type Comment = { id: string; comment: string; created_at: string };
 type SupportData = { count: number; comments: Comment[] };
@@ -27,7 +70,29 @@ export default function SupportPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <div className="p-8 text-sm text-gray-400">Loading…</div>;
+  if (loading) {
+    return (
+      <div className="max-w-2xl space-y-10">
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900">{t("title")}</h1>
+        <div className="rounded-2xl border border-blue-100 bg-blue-50 px-8 py-10 text-center space-y-3">
+          <Skeleton className="h-14 w-14 mx-auto" />
+          <Skeleton className="h-12 w-32 mx-auto" />
+          <Skeleton className="h-4 w-48 mx-auto" />
+          <Skeleton className="h-3 w-40 mx-auto" />
+        </div>
+        <div className="space-y-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-sm space-y-2">
+              <Skeleton className="h-3 w-3/4" />
+              <Skeleton className="h-3 w-1/2" />
+              <Skeleton className="h-3 w-16" />
+            </div>
+          ))}
+        </div>
+        <HelpSection t={t} />
+      </div>
+    );
+  }
   if (!data) return <div className="p-8 text-sm text-red-500">Could not load support data.</div>;
 
   const withComments = data.comments.length;
@@ -35,6 +100,7 @@ export default function SupportPage() {
 
   return (
     <div className="max-w-2xl space-y-10">
+      <h1 className="text-2xl font-bold tracking-tight text-slate-900">{t("title")}</h1>
 
       {/* Hero */}
       <div className="rounded-2xl border border-blue-100 bg-blue-50 px-8 py-10 text-center space-y-3">
@@ -49,17 +115,17 @@ export default function SupportPage() {
       {/* Comments */}
       {data.comments.length > 0 && (
         <section className="space-y-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-400">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600">
             {t("commentsSection.heading")}
           </h2>
           <div className="space-y-3">
             {data.comments.map((c) => (
               <div
                 key={c.id}
-                className="rounded-xl border border-gray-100 bg-white px-5 py-4 shadow-sm"
+                className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-sm"
               >
-                <p className="text-sm text-gray-700 leading-relaxed">{c.comment}</p>
-                <p className="mt-2 text-xs text-gray-400">{timeAgo(c.created_at)}</p>
+                <p className="text-sm text-slate-700 leading-relaxed">{c.comment}</p>
+                <p className="mt-2 text-xs text-slate-600">{timeAgo(c.created_at)}</p>
               </div>
             ))}
           </div>
@@ -67,8 +133,10 @@ export default function SupportPage() {
       )}
 
       {data.comments.length === 0 && (
-        <p className="text-center text-sm text-gray-400">{t("commentsSection.noComments")}</p>
+        <p className="text-center text-sm text-slate-600">{t("commentsSection.noComments")}</p>
       )}
+
+      <HelpSection t={t} />
     </div>
   );
 }

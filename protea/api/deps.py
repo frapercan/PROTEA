@@ -9,6 +9,7 @@ from starlette.requests import Request
 
 from protea.core.contracts.registry import OperationRegistry
 from protea.infrastructure.benchmark_config import BenchmarkConfig
+from protea.infrastructure.settings import Settings
 
 
 def get_session_factory(request: Request) -> sessionmaker[Session]:
@@ -44,3 +45,20 @@ def get_benchmark_config(request: Request) -> BenchmarkConfig:
     if cfg is None:
         raise RuntimeError("app.state.benchmark_config is not set")
     return cfg  # type: ignore[no-any-return]
+
+
+def get_settings(request: Request) -> Settings:
+    """Return the application-level Settings from app state."""
+    cfg = getattr(request.app.state, "settings", None)
+    if cfg is None:
+        raise RuntimeError("app.state.settings is not set")
+    return cfg  # type: ignore[no-any-return]
+
+
+def get_user_quota_per_day(request: Request) -> dict[str, int]:
+    """Return the per-user daily quota limit map from app state (FARM-AUTH.7)."""
+    quotas = getattr(request.app.state, "user_quota_per_day", None)
+    if quotas is None:
+        # Fail-safe: return generous defaults rather than crashing.
+        return {"predict": 100, "export_research_dataset": 5, "run_cafa_evaluation": 20}
+    return quotas  # type: ignore[no-any-return]

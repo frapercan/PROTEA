@@ -1,0 +1,68 @@
+name: OpenAPI spec drift
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  drift:
+    name: docs/openapi.json matches code
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12"]
+        poetry-version: ["2.1.0"]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: abatilo/actions-poetry@v3
+        with:
+          poetry-version: ${{ matrix.poetry-version }}
+
+      - name: Add poetry to PATH
+        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Use in-project virtualenv
+        run: poetry config virtualenvs.in-project true
+
+      - name: Restore venv cache
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py${{ matrix.python-version }}-poetry${{ matrix.poetry-version }}-main-plugins-${{ hashFiles('**/poetry.lock') }}
+
+      - name: Install main + plugins deps
+        # The drift gate calls ``app.openapi()`` which loads every router.
+        # That means we need the runtime dep tree, including the
+        # ``protea-contracts`` git source pinned in the ``plugins`` poetry
+        # group (``protea.core.contracts.operation`` re-exports symbols
+        # from it at module load).
+        run: poetry install --only main,plugins
+
+      - name: Regenerate docs/openapi.json
+        run: poetry run python scripts/generate_openapi.py
+
+      - name: Fail on drift
+        # The committed snapshot must match what the live FastAPI app
+        # produces. If they diverge, the PR author needs to either:
+        #   a) accept the new surface — re-run the generator locally
+        #      and commit the updated docs/openapi.json, or
+        #   b) revert the unintended route / schema change.
+        run: |
+          if ! git diff --exit-code docs/openapi.json; then
+            echo ""
+            echo "::error title=OpenAPI drift::docs/openapi.json is out of sync with the FastAPI app."
+            echo "Run 'poetry run python scripts/generate_openapi.py' locally and commit the result."
+            exit 1
+          fi

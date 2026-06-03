@@ -1,29 +1,46 @@
-"""Unit tests for the /admin router.
+"""Unit tests for the /admin router (FARM-AUTH.4).
 
-Database and subprocess calls are fully mocked -- no real infrastructure required.
+Auth is now enforced by ``require_role("admin")`` via the FEAT-AUTH JWT
+flow. Database and subprocess calls are fully mocked -- no real
+infrastructure required.
 """
 
 from __future__ import annotations
 
 import sys
+import time
 from unittest.mock import MagicMock, patch
 
+import jwt
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from protea.api.routers.admin import router
 
-_TEST_TOKEN = "test-admin-secret"
-_AUTH_HEADER = {"Authorization": f"Bearer {_TEST_TOKEN}"}
+_SECRET = "feat-auth-test-secret-padding-padding-padding"  # >32 bytes
+_ALG = "HS256"
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+def _mint(role: str | None, *, ttl: int = 60) -> str:
+    now = int(time.time())
+    payload: dict[str, object] = {
+        "sub": "00000000-0000-0000-0000-000000000001",
+        "iat": now,
+        "exp": now + ttl,
+    }
+    if role is not None:
+        payload["role"] = role
+    return jwt.encode(payload, _SECRET, algorithm=_ALG)
 
 
-def _make_app():
+def _make_app(monkeypatch, *, allow_reset: bool = True) -> FastAPI:
+    monkeypatch.setenv("PROTEA_AUTHN_REQUIRED", "true")
+    monkeypatch.setenv("PROTEA_JWT_SECRET", _SECRET)
+    if allow_reset:
+        monkeypatch.setenv("PROTEA_ALLOW_DB_RESET", "1")
+    else:
+        monkeypatch.delenv("PROTEA_ALLOW_DB_RESET", raising=False)
     app = FastAPI()
     app.state.session_factory = MagicMock()
     app.include_router(router)
@@ -31,7 +48,7 @@ def _make_app():
 
 
 # ---------------------------------------------------------------------------
-# Fixtures
+# Helpers
 # ---------------------------------------------------------------------------
 
 
@@ -46,52 +63,97 @@ def mock_psycopg():
         yield mock_mod, conn_ctx
 
 
-@pytest.fixture()
-def client(mock_psycopg):
-    app = _make_app()
-    with TestClient(app) as c, patch("protea.api.routers.admin._ADMIN_TOKEN", _TEST_TOKEN):
-        yield c, app, mock_psycopg
-
-
 # ---------------------------------------------------------------------------
-# POST /admin/reset-db
+# POST /admin/reset-db -- role gate
 # ---------------------------------------------------------------------------
 
 
 class TestResetDBAuth:
-    def test_no_token_configured_returns_403(self, mock_psycopg):
-        app = _make_app()
-        with TestClient(app) as c, patch("protea.api.routers.admin._ADMIN_TOKEN", ""):
-            resp = c.post("/admin/reset-db", headers=_AUTH_HEADER)
-            assert resp.status_code == 403
-            assert "disabled" in resp.json()["detail"]
-
-    def test_missing_header_returns_401(self, client):
-        c, *_ = client
-        resp = c.post("/admin/reset-db")
+    def test_unauthenticated_returns_401(self, monkeypatch):
+        app = _make_app(monkeypatch)
+        client = TestClient(app)
+        resp = client.post("/admin/reset-db")
         assert resp.status_code == 401
 
-    def test_wrong_token_returns_403(self, client):
-        c, *_ = client
-        resp = c.post("/admin/reset-db", headers={"Authorization": "Bearer wrong"})
+    def test_operator_jwt_rejected_with_403(self, monkeypatch):
+        app = _make_app(monkeypatch)
+        client = TestClient(app)
+        resp = client.post(
+            "/admin/reset-db",
+            headers={"Authorization": f"Bearer {_mint('operator')}"},
+        )
         assert resp.status_code == 403
-        assert "Invalid" in resp.json()["detail"]
+        assert "insufficient" in resp.json()["detail"]
+
+    def test_viewer_jwt_rejected_with_403(self, monkeypatch):
+        app = _make_app(monkeypatch)
+        client = TestClient(app)
+        resp = client.post(
+            "/admin/reset-db",
+            headers={"Authorization": f"Bearer {_mint('viewer')}"},
+        )
+        assert resp.status_code == 403
+
+    def test_invalid_token_rejected_with_401(self, monkeypatch):
+        app = _make_app(monkeypatch)
+        client = TestClient(app)
+        resp = client.post(
+            "/admin/reset-db",
+            headers={"Authorization": "Bearer not-a-real-jwt"},
+        )
+        assert resp.status_code == 401
+
+    def test_none_principal_dev_fallback_rejected_with_401(self, monkeypatch):
+        """With auth disabled the principal is None (role_of(None)==admin).
+
+        That dev convenience must NOT authorize a DROP SCHEMA: reset-db
+        rejects a None principal with 401 even though the sentinel is set.
+        """
+        monkeypatch.setenv("PROTEA_AUTHN_REQUIRED", "false")
+        monkeypatch.setenv("PROTEA_ALLOW_DB_RESET", "1")
+        app = FastAPI()
+        app.state.session_factory = MagicMock()
+        app.include_router(router)
+        client = TestClient(app)
+        resp = client.post("/admin/reset-db")
+        assert resp.status_code == 401
+        assert "real authenticated admin" in resp.json()["detail"]
+
+    def test_admin_jwt_rejected_when_sentinel_unset_with_403(self, monkeypatch):
+        """A genuine admin is still blocked unless PROTEA_ALLOW_DB_RESET=1."""
+        app = _make_app(monkeypatch, allow_reset=False)
+        client = TestClient(app)
+        resp = client.post(
+            "/admin/reset-db",
+            headers={"Authorization": f"Bearer {_mint('admin')}"},
+        )
+        assert resp.status_code == 403
+        assert "PROTEA_ALLOW_DB_RESET" in resp.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# POST /admin/reset-db -- success path (admin role)
+# ---------------------------------------------------------------------------
 
 
 class TestResetDB:
     @patch("protea.api.routers.admin.build_session_factory")
     @patch("protea.api.routers.admin.subprocess.run")
     @patch("protea.api.routers.admin.load_settings")
-    def test_reset_db_success(self, mock_settings, mock_run, mock_build, client):
-        c, app, (mock_psycopg_mod, conn_ctx) = client
+    def test_reset_db_success(self, mock_settings, mock_run, mock_build, monkeypatch, mock_psycopg):
+        mock_psycopg_mod, conn_ctx = mock_psycopg
+        app = _make_app(monkeypatch)
         settings = MagicMock()
         settings.db_url = "postgresql+psycopg://u:p@localhost/db"
         mock_settings.return_value = settings
-
         mock_run.return_value = MagicMock(returncode=0)
         mock_build.return_value = MagicMock()
 
-        resp = c.post("/admin/reset-db", headers=_AUTH_HEADER)
+        client = TestClient(app)
+        resp = client.post(
+            "/admin/reset-db",
+            headers={"Authorization": f"Bearer {_mint('admin')}"},
+        )
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
         mock_build.assert_called_once()
@@ -99,15 +161,21 @@ class TestResetDB:
     @patch("protea.api.routers.admin.build_session_factory")
     @patch("protea.api.routers.admin.subprocess.run")
     @patch("protea.api.routers.admin.load_settings")
-    def test_reset_db_migration_failure(self, mock_settings, mock_run, mock_build, client):
-        c, app, (mock_psycopg_mod, conn_ctx) = client
+    def test_reset_db_migration_failure(
+        self, mock_settings, mock_run, mock_build, monkeypatch, mock_psycopg
+    ):
+        mock_psycopg_mod, conn_ctx = mock_psycopg
+        app = _make_app(monkeypatch)
         settings = MagicMock()
         settings.db_url = "postgresql+psycopg://u:p@localhost/db"
         mock_settings.return_value = settings
-
         mock_run.return_value = MagicMock(returncode=1, stderr="migration error")
 
-        resp = c.post("/admin/reset-db", headers=_AUTH_HEADER)
+        client = TestClient(app)
+        resp = client.post(
+            "/admin/reset-db",
+            headers={"Authorization": f"Bearer {_mint('admin')}"},
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["ok"] is False
@@ -117,15 +185,21 @@ class TestResetDB:
     @patch("protea.api.routers.admin.build_session_factory")
     @patch("protea.api.routers.admin.subprocess.run")
     @patch("protea.api.routers.admin.load_settings")
-    def test_reset_db_drops_and_recreates_schema(self, mock_settings, mock_run, mock_build, client):
-        c, app, (mock_psycopg_mod, conn_ctx) = client
+    def test_reset_db_drops_and_recreates_schema(
+        self, mock_settings, mock_run, mock_build, monkeypatch, mock_psycopg
+    ):
+        mock_psycopg_mod, conn_ctx = mock_psycopg
+        app = _make_app(monkeypatch)
         settings = MagicMock()
         settings.db_url = "postgresql+psycopg://u:p@localhost/db"
         mock_settings.return_value = settings
-
         mock_run.return_value = MagicMock(returncode=0)
 
-        resp = c.post("/admin/reset-db", headers=_AUTH_HEADER)
+        client = TestClient(app)
+        resp = client.post(
+            "/admin/reset-db",
+            headers={"Authorization": f"Bearer {_mint('admin')}"},
+        )
         assert resp.status_code == 200
         conn_ctx.execute.assert_any_call("DROP SCHEMA public CASCADE")
         conn_ctx.execute.assert_any_call("CREATE SCHEMA public")
@@ -133,17 +207,22 @@ class TestResetDB:
     @patch("protea.api.routers.admin.build_session_factory")
     @patch("protea.api.routers.admin.subprocess.run")
     @patch("protea.api.routers.admin.load_settings")
-    def test_reset_db_replaces_psycopg_in_url(self, mock_settings, mock_run, mock_build, client):
-        c, app, (mock_psycopg_mod, conn_ctx) = client
+    def test_reset_db_replaces_psycopg_in_url(
+        self, mock_settings, mock_run, mock_build, monkeypatch, mock_psycopg
+    ):
+        mock_psycopg_mod, conn_ctx = mock_psycopg
+        app = _make_app(monkeypatch)
         settings = MagicMock()
         settings.db_url = "postgresql+psycopg://u:p@localhost/db"
         mock_settings.return_value = settings
-
         mock_run.return_value = MagicMock(returncode=0)
 
-        resp = c.post("/admin/reset-db", headers=_AUTH_HEADER)
+        client = TestClient(app)
+        resp = client.post(
+            "/admin/reset-db",
+            headers={"Authorization": f"Bearer {_mint('admin')}"},
+        )
         assert resp.status_code == 200
-        # Verify psycopg.connect was called with the URL without +psycopg
         mock_psycopg_mod.connect.assert_called_once_with(
             "postgresql://u:p@localhost/db", autocommit=True
         )

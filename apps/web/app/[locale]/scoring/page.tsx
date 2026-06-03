@@ -25,6 +25,7 @@
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useToast } from "@/components/Toast";
+import { SkeletonTableRow } from "@/components/Skeleton";
 import {
   listScoringConfigs,
   createScoringConfig,
@@ -74,8 +75,8 @@ function WeightBar({
 }) {
   return (
     <div className="flex items-center gap-2" title={hint}>
-      <span className="text-xs text-gray-500 w-40 shrink-0">{label}</span>
-      <div className="flex-1 h-1.5 rounded-full bg-gray-100 overflow-hidden">
+      <span className="text-[13px] text-slate-500 w-40 shrink-0">{label}</span>
+      <div className="flex-1 h-1.5 rounded-full bg-slate-100 overflow-hidden">
         <div
           className="h-1.5 rounded-full bg-blue-400 transition-all"
           style={{ width: `${value * 100}%` }}
@@ -83,7 +84,7 @@ function WeightBar({
       </div>
       <span
         className={`font-mono text-xs w-8 text-right ${
-          value > 0 ? "text-gray-700" : "text-gray-300"
+          value > 0 ? "text-slate-700" : "text-slate-300"
         }`}
       >
         {value.toFixed(2)}
@@ -127,7 +128,7 @@ function ConfigCard({
       {/* Header */}
       <div className="flex items-start justify-between gap-3 mb-3">
         <div>
-          <span className="font-semibold text-gray-900">{config.name}</span>
+          <span className="font-semibold text-slate-900">{config.name}</span>
           <span className="ml-2 rounded bg-blue-50 border border-blue-100 px-1.5 py-0.5 text-xs font-mono text-blue-700">
             {config.formula}
           </span>
@@ -137,7 +138,7 @@ function ConfigCard({
             </span>
           )}
           {config.description && (
-            <p className="mt-0.5 text-xs text-gray-400">{config.description}</p>
+            <p className="mt-0.5 text-xs text-slate-600">{config.description}</p>
           )}
         </div>
         <button
@@ -160,7 +161,7 @@ function ConfigCard({
       <div className="mt-3 border-t pt-2.5">
         <button
           onClick={() => setShowEvidenceWeights((v) => !v)}
-          className="text-xs text-gray-400 hover:text-gray-600"
+          className="text-xs text-slate-600 hover:text-slate-600"
         >
           {showEvidenceWeights ? t("configCard.collapse") : t("configCard.expand")} {t("configCard.evidenceCodeWeights")}{" "}
           {hasCustomEvidence ? t("configCard.custom") : t("configCard.systemDefaults")}
@@ -170,7 +171,7 @@ function ConfigCard({
           <div className="mt-3 space-y-4">
             {evidenceGroups.map((group) => (
               <div key={group.label}>
-                <p className="text-xs font-semibold text-gray-500 mb-1.5">
+                <p className="text-xs font-semibold text-slate-500 mb-1.5">
                   {group.label}
                 </p>
                 <div className="space-y-1">
@@ -184,23 +185,23 @@ function ConfigCard({
                       <div key={code} className="flex items-center gap-2">
                         <span
                           className={`font-mono text-xs w-10 shrink-0 ${
-                            isOverridden ? "text-amber-700 font-semibold" : "text-gray-500"
+                            isOverridden ? "text-amber-700 font-semibold" : "text-slate-500"
                           }`}
                         >
                           {code}
                         </span>
-                        <span className="text-xs text-gray-400 w-52 shrink-0 truncate" title={label}>
+                        <span className="text-xs text-slate-600 w-52 shrink-0 truncate" title={label}>
                           {label}
                         </span>
-                        <div className="flex-1 h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                        <div className="flex-1 h-1.5 rounded-full bg-slate-100 overflow-hidden">
                           <div
                             className={`h-1.5 rounded-full transition-all ${
-                              isOverridden ? "bg-amber-400" : "bg-gray-300"
+                              isOverridden ? "bg-amber-400" : "bg-slate-300"
                             }`}
                             style={{ width: `${val * 100}%` }}
                           />
                         </div>
-                        <span className="font-mono text-xs w-8 text-right text-gray-600">
+                        <span className="font-mono text-xs w-8 text-right text-slate-600">
                           {val.toFixed(2)}
                         </span>
                       </div>
@@ -213,7 +214,7 @@ function ConfigCard({
         )}
       </div>
 
-      <p className="mt-2 text-xs text-gray-300">
+      <p className="mt-2 text-xs text-slate-300">
         Created {new Date(config.created_at).toLocaleDateString()}
       </p>
     </div>
@@ -232,6 +233,7 @@ function NewConfigForm({
   onCreated: (c: ScoringConfig) => void;
 }) {
   const t = useTranslations("scoring");
+  const tToast = useTranslations("toasts");
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [formula, setFormula] = useState("linear");
@@ -272,9 +274,9 @@ function NewConfigForm({
       onCreated(c);
       reset();
       setOpen(false);
-      toast("Scoring config created", "success");
+      toast(tToast("scoringConfigCreated"), "success");
     } catch (err: any) {
-      toast(err.message ?? "Failed to create config", "error");
+      toast(err.message ?? tToast("createConfigFailed"), "error");
     } finally {
       setSaving(false);
     }
@@ -292,7 +294,7 @@ function NewConfigForm({
     return (
       <button
         onClick={() => setOpen(true)}
-        className="rounded-md border border-dashed border-gray-300 bg-white px-4 py-3 text-sm text-gray-500 hover:border-blue-400 hover:text-blue-600 w-full text-center"
+        className="rounded-md border border-dashed border-slate-300 bg-white px-4 py-3 text-sm text-slate-500 hover:border-blue-400 hover:text-blue-600 w-full text-center"
       >
         {t("newConfigForm.newConfig")}
       </button>
@@ -306,11 +308,11 @@ function NewConfigForm({
     >
       {/* ── Header ── */}
       <div className="flex items-center justify-between">
-        <span className="text-sm font-semibold text-gray-700">{t("newConfigForm.formTitle")}</span>
+        <span className="text-sm font-semibold text-slate-700">{t("newConfigForm.formTitle")}</span>
         <button
           type="button"
           onClick={() => { setOpen(false); reset(); }}
-          className="text-gray-400 hover:text-gray-600 text-lg leading-none"
+          className="text-slate-600 hover:text-slate-600 text-lg leading-none"
         >
           {t("newConfigForm.close")}
         </button>
@@ -319,7 +321,7 @@ function NewConfigForm({
       {/* ── Name + formula ── */}
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">{t("newConfigForm.nameLabel")}</label>
+          <label className="block text-xs font-medium text-slate-600 mb-1">{t("newConfigForm.nameLabel")}</label>
           <input
             type="text"
             value={name}
@@ -330,7 +332,7 @@ function NewConfigForm({
           />
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">{t("newConfigForm.formulaLabel")}</label>
+          <label className="block text-xs font-medium text-slate-600 mb-1">{t("newConfigForm.formulaLabel")}</label>
           <select
             value={formula}
             onChange={(e) => setFormula(e.target.value)}
@@ -352,8 +354,8 @@ function NewConfigForm({
       )}
 
       <div>
-        <label className="block text-xs font-medium text-gray-600 mb-1">
-          {t("newConfigForm.descriptionLabel")} <span className="font-normal text-gray-400">{t("newConfigForm.descriptionHelper")}</span>
+        <label className="block text-xs font-medium text-slate-600 mb-1">
+          {t("newConfigForm.descriptionLabel")} <span className="font-normal text-slate-600">{t("newConfigForm.descriptionHelper")}</span>
         </label>
         <input
           type="text"
@@ -366,7 +368,7 @@ function NewConfigForm({
 
       {/* ── Signal weights ── */}
       <div>
-        <label className="block text-xs font-medium text-gray-600 mb-2">
+        <label className="block text-xs font-medium text-slate-600 mb-2">
           {t("newConfigForm.signalWeights")}
         </label>
         <div className="space-y-3">
@@ -374,7 +376,7 @@ function NewConfigForm({
             const val = weights[key] ?? 0;
             return (
               <div key={key} className="flex items-center gap-3" title={hint}>
-                <span className="text-xs text-gray-600 w-44 shrink-0">{label}</span>
+                <span className="text-[13px] text-slate-600 w-44 shrink-0">{label}</span>
                 <input
                   type="range"
                   min="0"
@@ -386,7 +388,7 @@ function NewConfigForm({
                   }
                   className="flex-1 accent-blue-500"
                 />
-                <span className="font-mono text-xs text-gray-700 w-10 text-right">
+                <span className="font-mono text-[13px] text-slate-700 w-10 text-right">
                   {val.toFixed(2)}
                 </span>
               </div>
@@ -405,13 +407,13 @@ function NewConfigForm({
             onChange={(e) => setUseCustomEvidence(e.target.checked)}
             className="accent-blue-500"
           />
-          <label htmlFor="custom-evidence" className="text-xs font-medium text-gray-700 cursor-pointer">
+          <label htmlFor="custom-evidence" className="text-xs font-medium text-slate-700 cursor-pointer">
             {t("newConfigForm.overrideCheckbox")}
           </label>
         </div>
 
         {!useCustomEvidence && (
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-slate-600">
             {t("newConfigForm.systemDefaultsNote")}
           </p>
         )}
@@ -422,8 +424,8 @@ function NewConfigForm({
               <div key={group.label}>
                 <div className="flex items-center justify-between mb-1.5">
                   <div>
-                    <p className="text-xs font-semibold text-gray-600">{group.label}</p>
-                    <p className="text-xs text-gray-400">{group.description}</p>
+                    <p className="text-xs font-semibold text-slate-600">{group.label}</p>
+                    <p className="text-xs text-slate-600">{group.description}</p>
                   </div>
                   {/* Group-level shortcuts */}
                   <div className="flex gap-1 shrink-0">
@@ -434,7 +436,7 @@ function NewConfigForm({
                         onClick={() =>
                           setGroupWeight(group.codes.map((c) => c.code), v)
                         }
-                        className="rounded border px-1.5 py-0.5 text-xs text-gray-500 hover:bg-gray-50"
+                        className="rounded border px-1.5 py-0.5 text-[13px] text-slate-500 hover:bg-slate-50"
                       >
                         {v === 0 ? t("newConfigForm.off") : v === 1 ? t("newConfigForm.max") : t("newConfigForm.groupShortcut")}
                       </button>
@@ -450,13 +452,13 @@ function NewConfigForm({
                       <div key={code} className="flex items-center gap-2">
                         <span
                           className={`font-mono text-xs w-10 shrink-0 ${
-                            isDefault ? "text-gray-500" : "text-amber-700 font-semibold"
+                            isDefault ? "text-slate-500" : "text-amber-700 font-semibold"
                           }`}
                           title={label}
                         >
                           {code}
                         </span>
-                        <span className="text-xs text-gray-400 w-48 shrink-0 truncate" title={label}>
+                        <span className="text-xs text-slate-600 w-48 shrink-0 truncate" title={label}>
                           {label}
                         </span>
                         <input
@@ -475,7 +477,7 @@ function NewConfigForm({
                         />
                         <span
                           className={`font-mono text-xs w-8 text-right ${
-                            isDefault ? "text-gray-500" : "text-amber-700 font-semibold"
+                            isDefault ? "text-slate-500" : "text-amber-700 font-semibold"
                           }`}
                         >
                           {val.toFixed(2)}
@@ -490,7 +492,7 @@ function NewConfigForm({
             <button
               type="button"
               onClick={() => setEvidenceWeights({ ...SYSTEM_EVIDENCE_DEFAULTS })}
-              className="text-xs text-gray-400 hover:text-gray-600 underline"
+              className="text-xs text-slate-600 hover:text-slate-600 underline"
             >
               {t("newConfigForm.resetEvidenceWeights")}
             </button>
@@ -510,7 +512,7 @@ function NewConfigForm({
         <button
           type="button"
           onClick={() => { setOpen(false); reset(); }}
-          className="rounded-md border px-4 py-2 text-sm text-gray-600 hover:bg-gray-50"
+          className="rounded-md border px-4 py-2 text-sm text-slate-600 hover:bg-slate-50"
         >
           {t("newConfigForm.cancel")}
         </button>
@@ -523,6 +525,7 @@ function NewConfigForm({
 
 export default function ScoringPage() {
   const t = useTranslations("scoring");
+  const tToast = useTranslations("toasts");
   const [configs, setConfigs] = useState<ScoringConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingPresets, setLoadingPresets] = useState(false);
@@ -591,7 +594,7 @@ export default function ScoringPage() {
   useEffect(() => {
     listScoringConfigs()
       .then(setConfigs)
-      .catch(() => toast("Failed to load scoring configs", "error"))
+      .catch(() => toast(tToast("loadScoringConfigsFailed"), "error"))
       .finally(() => setLoading(false));
   }, []);
 
@@ -603,12 +606,12 @@ export default function ScoringPage() {
       setConfigs(updated);
       toast(
         result.created.length > 0
-          ? `Presets created: ${result.created.join(", ")}`
-          : "All presets already exist",
+          ? tToast("presetsCreated", { names: result.created.join(", ") })
+          : tToast("presetsAllExist"),
         result.created.length > 0 ? "success" : "info",
       );
     } catch (err: any) {
-      toast(err.message ?? "Failed to load presets", "error");
+      toast(err.message ?? tToast("loadPresetsFailed"), "error");
     } finally {
       setLoadingPresets(false);
     }
@@ -619,49 +622,63 @@ export default function ScoringPage() {
       {/* ── Page header ── */}
       <div className="mb-6">
         <div className="flex items-center justify-between gap-4 mb-1">
-          <h1 className="text-xl font-semibold text-gray-900">{t("title")}</h1>
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-xl font-semibold text-slate-900">{t("title")}</h1>
+            <span
+              title={t("labBadgeHint")}
+              className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-violet-700 ring-1 ring-violet-200"
+            >
+              {t("labBadge")}
+            </span>
+          </div>
           <button
             onClick={handleLoadPresets}
             disabled={loadingPresets}
-            className="rounded-md border bg-white px-3 py-1.5 text-sm text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-40 shrink-0"
+            className="rounded-md border bg-white px-3 py-1.5 text-sm text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-40 shrink-0"
           >
             {loadingPresets ? t("presetsLoading") : t("loadPresets")}
           </button>
         </div>
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-slate-500">
           {t("description")}
         </p>
       </div>
 
       {/* ── Reference card ── */}
       <div className="mb-6 rounded-lg border bg-white p-4 shadow-sm">
-        <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 mb-3">
           {t("availableSignals")}
         </p>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 mb-4">
           {signals.map(({ key, label, hint }) => (
             <div key={key} className="flex items-start gap-2">
-              <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-xs text-gray-700 shrink-0">
+              <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[13px] text-slate-700 shrink-0">
                 {label}
               </span>
-              <span className="text-xs text-gray-500">{hint}</span>
+              <span className="text-[13px] text-slate-500">{hint}</span>
             </div>
           ))}
         </div>
-        <div className="border-t pt-3 grid grid-cols-1 gap-1.5 sm:grid-cols-2 text-xs text-gray-500">
+        <div className="border-t pt-3 grid grid-cols-1 gap-1.5 sm:grid-cols-2 text-[13px] text-slate-500">
           <div>
-            <strong className="text-gray-700">linear:</strong>{" "}
+            <strong className="text-slate-700">linear:</strong>{" "}
             Σ(w_i · s_i) / Σ(w_i) over all active (w_i &gt; 0 and signal available) signals.
           </div>
           <div>
-            <strong className="text-gray-700">evidence_weighted:</strong>{" "}
+            <strong className="text-slate-700">evidence_weighted:</strong>{" "}
             Same as linear, then multiplied by the resolved evidence weight — down-ranks IEA
             even when other signals are strong.
           </div>
         </div>
       </div>
 
-      {loading && <p className="text-sm text-gray-400">Loading…</p>}
+      {loading && (
+        <div className="rounded-lg border bg-white shadow-sm overflow-hidden">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <SkeletonTableRow key={i} cols={5} />
+          ))}
+        </div>
+      )}
 
       {!loading && (
         <div className="space-y-3">
@@ -672,7 +689,7 @@ export default function ScoringPage() {
           />
 
           {configs.length === 0 && (
-            <p className="text-sm text-gray-400 text-center py-8">
+            <p className="text-sm text-slate-600 text-center py-8">
               {t("noConfigs")}
             </p>
           )}

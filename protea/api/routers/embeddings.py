@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import csv
-import io
 from typing import Any
 from uuid import UUID
 
@@ -10,134 +8,86 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
 
-from protea.api.cache import cached
+from protea.api.auth.user_quota import require_user_quota
+from protea.api.cache import cached, invalidate
 from protea.api.deps import get_amqp_url, get_session_factory
-from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
-from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
+from protea.api.roles import ROLE_OPERATOR, require_role
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
-from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
-from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
-from protea.infrastructure.orm.models.job import Job, JobEvent
 from protea.infrastructure.queue.publisher import publish_job
 from protea.infrastructure.session import session_scope
+from protea.services.embeddings_service import (
+    EntityNotFoundError,
+    InvalidEmbeddingConfigError,
+    InvalidUUIDFieldError,
+    assert_prediction_set_exists,
+    config_to_dict,
+    delete_embedding_config_cascade,
+    delete_prediction_set_cascade,
+    get_go_term_distribution_data,
+    get_prediction_set_data,
+    get_predictions_for_protein,
+    iter_predictions_cafa_tsv,
+    iter_predictions_tsv,
+    list_prediction_sets_data,
+    list_proteins_in_prediction_set,
+    prepare_cafa_export,
+    validate_embedding_config_body,
+    validate_predict_request,
+)
+from protea.services.jobs_service import enqueue_job
 
 router = APIRouter(prefix="/embeddings", tags=["embeddings"])
 
 _PREDICTIONS_QUEUE = "protea.predictions"
 
-_VALID_BACKENDS = {"esm", "esm3c", "t5", "ankh", "auto"}
-_VALID_LAYER_AGG = {"mean", "last", "concat"}
-_VALID_POOLING = {"mean", "max", "cls", "mean_max"}
+PREDICTION_SETS_CACHE_KEY = "embeddings:prediction-sets"
+PREDICTION_SETS_TTL_SECONDS = 300.0
+EMBEDDING_CONFIGS_CACHE_KEY = "embeddings:configs"
+EMBEDDING_CONFIGS_TTL_SECONDS = 300.0
 
 
 def _validate_embedding_config_body(body: dict[str, Any]) -> dict[str, Any]:
-    errors: list[str] = []
+    """Translate :class:`InvalidEmbeddingConfigError` to HTTP 422.
 
-    model_name = body.get("model_name")
-    if not isinstance(model_name, str) or not model_name.strip():
-        errors.append("model_name must be a non-empty string")
-
-    model_backend = body.get("model_backend")
-    if model_backend not in _VALID_BACKENDS:
-        errors.append(f"model_backend must be one of {sorted(_VALID_BACKENDS)}")
-
-    layer_indices = body.get("layer_indices")
-    if (
-        not isinstance(layer_indices, list)
-        or len(layer_indices) == 0
-        or not all(isinstance(i, int) for i in layer_indices)
-    ):
-        errors.append("layer_indices must be a non-empty list of ints")
-
-    layer_agg = body.get("layer_agg")
-    if layer_agg not in _VALID_LAYER_AGG:
-        errors.append(f"layer_agg must be one of {sorted(_VALID_LAYER_AGG)}")
-
-    pooling = body.get("pooling")
-    if pooling not in _VALID_POOLING:
-        errors.append(f"pooling must be one of {sorted(_VALID_POOLING)}")
-
-    normalize_residues = body.get("normalize_residues", False)
-    if not isinstance(normalize_residues, bool):
-        errors.append("normalize_residues must be a boolean")
-
-    normalize = body.get("normalize", True)
-    if not isinstance(normalize, bool):
-        errors.append("normalize must be a boolean")
-
-    max_length = body.get("max_length", 1022)
-    if not isinstance(max_length, int) or max_length <= 0:
-        errors.append("max_length must be a positive integer")
-
-    use_chunking = body.get("use_chunking", False)
-    if not isinstance(use_chunking, bool):
-        errors.append("use_chunking must be a boolean")
-
-    chunk_size = body.get("chunk_size", 512)
-    if not isinstance(chunk_size, int) or chunk_size <= 0:
-        errors.append("chunk_size must be a positive integer")
-
-    chunk_overlap = body.get("chunk_overlap", 0)
-    if not isinstance(chunk_overlap, int) or chunk_overlap < 0:
-        errors.append("chunk_overlap must be a non-negative integer")
-
-    description = body.get("description", None)
-    if description is not None and not isinstance(description, str):
-        errors.append("description must be a string or null")
-
-    # Cross-field: overlap must be strictly less than chunk_size
-    if (
-        isinstance(chunk_size, int)
-        and isinstance(chunk_overlap, int)
-        and chunk_overlap >= chunk_size
-    ):
-        errors.append(
-            f"chunk_overlap ({chunk_overlap}) must be strictly less than chunk_size ({chunk_size})"
-        )
-
-    if errors:
-        raise HTTPException(status_code=422, detail=errors)
-
-    return {
-        "model_name": model_name,
-        "model_backend": model_backend,
-        "layer_indices": layer_indices,
-        "layer_agg": layer_agg,
-        "pooling": pooling,
-        "normalize_residues": normalize_residues,
-        "normalize": normalize,
-        "max_length": max_length,
-        "use_chunking": use_chunking,
-        "chunk_size": chunk_size,
-        "chunk_overlap": chunk_overlap,
-        "description": description,
-    }
+    Thin shim over
+    :func:`protea.services.embeddings_service.validate_embedding_config_body`
+    so existing call sites in this router keep working unchanged.
+    """
+    try:
+        return validate_embedding_config_body(body)
+    except InvalidEmbeddingConfigError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors) from exc
 
 
 def _config_to_dict(c: EmbeddingConfig, embedding_count: int | None = None) -> dict[str, Any]:
-    d: dict[str, Any] = {
-        "id": str(c.id),
-        "model_name": c.model_name,
-        "model_backend": c.model_backend,
-        "layer_indices": c.layer_indices,
-        "layer_agg": c.layer_agg,
-        "pooling": c.pooling,
-        "normalize_residues": c.normalize_residues,
-        "normalize": c.normalize,
-        "max_length": c.max_length,
-        "use_chunking": c.use_chunking,
-        "chunk_size": c.chunk_size,
-        "chunk_overlap": c.chunk_overlap,
-        "description": c.description,
-        "created_at": c.created_at.isoformat(),
-    }
-    if embedding_count is not None:
-        d["embedding_count"] = embedding_count
-    return d
+    """Backwards-compatible alias for ``embeddings_service.config_to_dict``."""
+    return config_to_dict(c, embedding_count)
 
 
 # ── Embedding Configs ─────────────────────────────────────────────────────────
+
+
+def _compute_embedding_configs(
+    factory: sessionmaker[Session],
+) -> list[dict[str, Any]]:
+    """Run the configs + per-config GROUP BY count and shape the payload.
+
+    Sits at module scope (not nested inside the route handler) so the
+    prewarm hook can share the exact same producer the route caches under.
+    """
+    with session_scope(factory) as session:
+        rows = session.query(EmbeddingConfig).order_by(EmbeddingConfig.created_at.desc()).all()
+        counts = {
+            config_id: cnt
+            for config_id, cnt in session.query(
+                SequenceEmbedding.embedding_config_id,
+                func.count(SequenceEmbedding.id),
+            )
+            .group_by(SequenceEmbedding.embedding_config_id)
+            .all()
+        }
+        return [_config_to_dict(c, embedding_count=counts.get(c.id, 0)) for c in rows]
 
 
 @router.get("/configs", summary="List embedding configs")
@@ -146,29 +96,36 @@ def list_embedding_configs(
 ) -> list[dict[str, Any]]:
     """List all embedding configurations with their stored embedding counts, newest first.
 
-    The per-config GROUP BY over a 4M-row table is cached 5 minutes — new
+    The per-config GROUP BY over a 4M-row table is cached 5 minutes; new
     configs still appear immediately (they have 0 embeddings), only the
-    counts are stale.
+    counts are stale. Serves the last-known value when the recompute
+    fails (DB blip, query timeout) so the page never blocks on a
+    cold-cache 500.
     """
-
-    def _compute() -> list[dict[str, Any]]:
-        with session_scope(factory) as session:
-            rows = session.query(EmbeddingConfig).order_by(EmbeddingConfig.created_at.desc()).all()
-            counts = {
-                config_id: cnt
-                for config_id, cnt in session.query(
-                    SequenceEmbedding.embedding_config_id,
-                    func.count(SequenceEmbedding.id),
-                )
-                .group_by(SequenceEmbedding.embedding_config_id)
-                .all()
-            }
-            return [_config_to_dict(c, embedding_count=counts.get(c.id, 0)) for c in rows]
-
-    return cached("embeddings:configs", 300.0, _compute)
+    return cached(
+        EMBEDDING_CONFIGS_CACHE_KEY,
+        EMBEDDING_CONFIGS_TTL_SECONDS,
+        lambda: _compute_embedding_configs(factory),
+        serve_stale_on_error=True,
+    )
 
 
-@router.post("/configs", summary="Create an embedding config")
+def prewarm_embedding_configs(
+    factory: sessionmaker[Session],
+) -> list[dict[str, Any]]:
+    """Recompute and store ``embeddings:configs``; used by the app startup
+    hook and the background refresh loop. Always bypasses the existing
+    entry so the cache is refilled with fresh counts before the old TTL
+    expires."""
+    invalidate(EMBEDDING_CONFIGS_CACHE_KEY)
+    return cached(
+        EMBEDDING_CONFIGS_CACHE_KEY,
+        EMBEDDING_CONFIGS_TTL_SECONDS,
+        lambda: _compute_embedding_configs(factory),
+    )
+
+
+@router.post("/configs", summary="Create an embedding config", dependencies=[Depends(require_role(ROLE_OPERATOR))])
 def create_embedding_config(
     body: dict[str, Any],
     factory: sessionmaker[Session] = Depends(get_session_factory),
@@ -209,62 +166,30 @@ def get_embedding_config(
         return _config_to_dict(c, embedding_count=embedding_count)
 
 
-@router.delete("/configs/{config_id}", summary="Delete an embedding config")
+@router.delete("/configs/{config_id}", summary="Delete an embedding config", dependencies=[Depends(require_role(ROLE_OPERATOR))])
 def delete_embedding_config(
     config_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
     """Delete an EmbeddingConfig and cascade-delete all linked embeddings, prediction sets, and predictions."""
-    with session_scope(factory) as session:
-        c = session.get(EmbeddingConfig, config_id)
-        if c is None:
-            raise HTTPException(status_code=404, detail="EmbeddingConfig not found")
-
-        # 1) Delete GOPredictions for all PredictionSets linked to this config
-        #    (PredictionSet → GOPrediction is CASCADE, but bulk-delete bypasses ORM)
-        pred_set_ids = [
-            row[0]
-            for row in session.query(PredictionSet.id)
-            .filter(PredictionSet.embedding_config_id == config_id)
-            .all()
-        ]
-        deleted_predictions = 0
-        if pred_set_ids:
-            deleted_predictions = (
-                session.query(GOPrediction)
-                .filter(GOPrediction.prediction_set_id.in_(pred_set_ids))
-                .delete(synchronize_session=False)
-            )
-
-        # 2) Delete PredictionSets
-        deleted_prediction_sets = (
-            session.query(PredictionSet)
-            .filter(PredictionSet.embedding_config_id == config_id)
-            .delete(synchronize_session=False)
-        )
-
-        # 3) Delete SequenceEmbeddings
-        deleted_embeddings = (
-            session.query(SequenceEmbedding)
-            .filter(SequenceEmbedding.embedding_config_id == config_id)
-            .delete(synchronize_session=False)
-        )
-
-        # 4) Delete the config itself
-        session.delete(c)
-
-    return {
-        "deleted": str(config_id),
-        "embeddings_deleted": deleted_embeddings,
-        "prediction_sets_deleted": deleted_prediction_sets,
-        "predictions_deleted": deleted_predictions,
-    }
+    try:
+        with session_scope(factory) as session:
+            return delete_embedding_config_cascade(session, config_id)
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 # ── Predict ───────────────────────────────────────────────────────────────────
 
 
-@router.post("/predict", summary="Trigger GO term prediction")
+@router.post(
+    "/predict",
+    summary="Trigger GO term prediction",
+    dependencies=[
+        Depends(require_role(ROLE_OPERATOR)),
+        Depends(require_user_quota("predict")),
+    ],
+)
 def predict_go_terms(
     body: dict[str, Any],
     factory: sessionmaker[Session] = Depends(get_session_factory),
@@ -278,43 +203,26 @@ def predict_go_terms(
 
     Required body fields: `embedding_config_id`, `annotation_set_id`, `ontology_snapshot_id`.
     Optional: `query_set_id` (FASTA upload), `limit_per_entry`, `distance_threshold`,
-    `batch_size`, `search_backend`. Feature-engineering flags default to True —
+    `batch_size`, `search_backend`. Feature-engineering flags default to True:
     `compute_alignments`, `compute_taxonomy`, `compute_reranker_features` all run
     unless explicitly set to false. `aspect_separated_knn` defaults to true
     (one KNN index per GO aspect to guarantee BPO/MFO/CCO coverage even when
     unified nearest neighbours carry only one aspect).
     """
 
-    def _parse_uuid(key: str) -> UUID:
-        raw = body.get(key)
-        try:
-            return UUID(str(raw))
-        except (ValueError, AttributeError):
-            raise HTTPException(status_code=422, detail=f"{key} must be a valid UUID") from None
-
-    config_id = _parse_uuid("embedding_config_id")
-    annotation_set_id = _parse_uuid("annotation_set_id")
-    ontology_snapshot_id = _parse_uuid("ontology_snapshot_id")
-
-    with session_scope(factory) as session:
-        if session.get(EmbeddingConfig, config_id) is None:
-            raise HTTPException(status_code=404, detail="EmbeddingConfig not found")
-        if session.get(AnnotationSet, annotation_set_id) is None:
-            raise HTTPException(status_code=404, detail="AnnotationSet not found")
-        if session.get(OntologySnapshot, ontology_snapshot_id) is None:
-            raise HTTPException(status_code=404, detail="OntologySnapshot not found")
-
-        job = Job(operation="predict_go_terms", queue_name=_PREDICTIONS_QUEUE, payload=body)
-        session.add(job)
-        session.flush()
-        job_id = job.id
-        session.add(
-            JobEvent(
-                job_id=job_id,
-                event="job.created",
-                fields={"operation": "predict_go_terms", "queue": _PREDICTIONS_QUEUE},
+    try:
+        with session_scope(factory) as session:
+            validate_predict_request(session, body)
+            job_id = enqueue_job(
+                session,
+                operation="predict_go_terms",
+                queue_name=_PREDICTIONS_QUEUE,
+                payload=body,
             )
-        )
+    except InvalidUUIDFieldError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     publish_job(amqp_url, _PREDICTIONS_QUEUE, job_id)
     return {"id": str(job_id), "status": "queued"}
@@ -323,69 +231,53 @@ def predict_go_terms(
 # ── Prediction Sets ───────────────────────────────────────────────────────────
 
 
+def _compute_prediction_sets(
+    factory: sessionmaker[Session],
+) -> list[dict[str, Any]]:
+    """Run the prediction-sets DISTINCT-over-JOIN and shape the payload.
+
+    Sits at module scope (not nested inside the route handler) so the
+    prewarm hook can share the exact same producer the route caches under.
+    """
+    with session_scope(factory) as session:
+        return list_prediction_sets_data(session)
+
+
 @router.get("/prediction-sets", summary="List prediction sets")
 def list_prediction_sets(
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> list[dict[str, Any]]:
-    """List the 100 most recent prediction sets.
+    """List the 100 most recent prediction sets, cached 5 min.
 
-    The per-set GO-prediction count comes from a single ``GROUP BY`` query
-    rather than a correlated subquery — for tables in the 10⁷+ row range
-    PostgreSQL's planner reliably falls into a per-row index probe with
-    the correlated form (~30 s per outer row). The grouped variant runs
-    one index-only scan over ``prediction_set_id`` and returns all 25
-    counts at once, cached for 5 minutes alongside the rest of the
-    response.
+    The DISTINCT-over-JOIN against prediction_set + embedding_config +
+    annotation_set + ontology_snapshot scans tens of millions of rows on
+    cold cache (115s+ measured). The startup hook in ``protea.api.app``
+    prewarms this key and a background task refreshes it before expiry
+    so users never hit a cold path under normal operation. Serves the
+    last-known value on producer failure to prevent a DB blip from
+    surfacing as a 500.
     """
+    return cached(
+        PREDICTION_SETS_CACHE_KEY,
+        PREDICTION_SETS_TTL_SECONDS,
+        lambda: _compute_prediction_sets(factory),
+        serve_stale_on_error=True,
+    )
 
-    def _compute() -> list[dict[str, Any]]:
-        with session_scope(factory) as session:
-            rows = (
-                session.query(
-                    PredictionSet,
-                    EmbeddingConfig,
-                    AnnotationSet,
-                    OntologySnapshot,
-                )
-                .join(EmbeddingConfig, PredictionSet.embedding_config_id == EmbeddingConfig.id)
-                .join(AnnotationSet, PredictionSet.annotation_set_id == AnnotationSet.id)
-                .join(OntologySnapshot, PredictionSet.ontology_snapshot_id == OntologySnapshot.id)
-                .order_by(PredictionSet.created_at.desc())
-                .limit(100)
-                .all()
-            )
-            counts = {
-                set_id: cnt
-                for set_id, cnt in session.query(
-                    GOPrediction.prediction_set_id,
-                    func.count(GOPrediction.id),
-                )
-                .group_by(GOPrediction.prediction_set_id)
-                .all()
-            }
-            return [
-                {
-                    "id": str(ps.id),
-                    "embedding_config_id": str(ps.embedding_config_id),
-                    "embedding_config_name": ec.model_name,
-                    "annotation_set_id": str(ps.annotation_set_id),
-                    "annotation_set_label": (
-                        f"{ann.source} {ann.source_version}"
-                        if ann.source_version
-                        else ann.source
-                    ),
-                    "ontology_snapshot_id": str(ps.ontology_snapshot_id),
-                    "ontology_snapshot_version": snap.obo_version,
-                    "query_set_id": str(ps.query_set_id) if ps.query_set_id else None,
-                    "limit_per_entry": ps.limit_per_entry,
-                    "distance_threshold": ps.distance_threshold,
-                    "created_at": ps.created_at.isoformat(),
-                    "prediction_count": int(counts.get(ps.id, 0)),
-                }
-                for ps, ec, ann, snap in rows
-            ]
 
-    return cached("embeddings:prediction-sets", 300.0, _compute)
+def prewarm_prediction_sets(
+    factory: sessionmaker[Session],
+) -> list[dict[str, Any]]:
+    """Recompute and store ``embeddings:prediction-sets``; used by the app
+    startup hook and the background refresh loop. Always bypasses the
+    existing entry so the cache is refilled with fresh data before the
+    old TTL expires."""
+    invalidate(PREDICTION_SETS_CACHE_KEY)
+    return cached(
+        PREDICTION_SETS_CACHE_KEY,
+        PREDICTION_SETS_TTL_SECONDS,
+        lambda: _compute_prediction_sets(factory),
+    )
 
 
 @router.get("/prediction-sets/{set_id}", summary="Get prediction set details")
@@ -394,132 +286,47 @@ def get_prediction_set(
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
     """Retrieve a prediction set with total prediction count and per-protein GO term counts."""
-    with session_scope(factory) as session:
-        ps = session.get(PredictionSet, set_id)
-        if ps is None:
-            raise HTTPException(status_code=404, detail="PredictionSet not found")
-
-        prediction_count = (
-            session.query(func.count(GOPrediction.id))
-            .filter(GOPrediction.prediction_set_id == set_id)
-            .scalar()
-        )
-
-        per_protein = (
-            session.query(GOPrediction.protein_accession, func.count(GOPrediction.id))
-            .filter(GOPrediction.prediction_set_id == set_id)
-            .group_by(GOPrediction.protein_accession)
-            .all()
-        )
-
-        return {
-            "id": str(ps.id),
-            "embedding_config_id": str(ps.embedding_config_id),
-            "annotation_set_id": str(ps.annotation_set_id),
-            "ontology_snapshot_id": str(ps.ontology_snapshot_id),
-            "query_set_id": str(ps.query_set_id) if ps.query_set_id else None,
-            "limit_per_entry": ps.limit_per_entry,
-            "distance_threshold": ps.distance_threshold,
-            "created_at": ps.created_at.isoformat(),
-            "prediction_count": prediction_count,
-            "per_protein_counts": {acc: cnt for acc, cnt in per_protein},
-        }
+    try:
+        with session_scope(factory) as session:
+            return get_prediction_set_data(session, set_id)
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/prediction-sets/{set_id}/proteins", summary="List proteins in a prediction set")
 def list_prediction_set_proteins(
     set_id: UUID,
-    search: str | None = None,
-    limit: int = 50,
-    offset: int = 0,
+    search: str | None = Query(
+        default=None,
+        description=(
+            "Substring filter on protein accession; case-insensitive. "
+            "Pairs with ``limit`` / ``offset`` for client-driven "
+            "pagination."
+        ),
+    ),
+    limit: int = Query(
+        default=50,
+        description="Max rows per page.",
+    ),
+    offset: int = Query(
+        default=0,
+        description="Offset into the alphabetically-ordered result set.",
+    ),
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
     """Paginated list of proteins in a prediction set with their predicted GO count, minimum distance,
     known annotation count, and how many predictions match known annotations (precision proxy)."""
-    with session_scope(factory) as session:
-        ps = session.get(PredictionSet, set_id)
-        if ps is None:
-            raise HTTPException(status_code=404, detail="PredictionSet not found")
-
-        from protea.infrastructure.orm.models.annotation.protein_go_annotation import (
-            ProteinGOAnnotation,
-        )
-        from protea.infrastructure.orm.models.protein.protein import Protein
-
-        q = (
-            session.query(
-                GOPrediction.protein_accession,
-                func.count(GOPrediction.id).label("go_count"),
-                func.min(GOPrediction.distance).label("min_distance"),
+    try:
+        with session_scope(factory) as session:
+            return list_proteins_in_prediction_set(
+                session,
+                prediction_set_id=set_id,
+                search=search,
+                limit=limit,
+                offset=offset,
             )
-            .filter(GOPrediction.prediction_set_id == set_id)
-            .group_by(GOPrediction.protein_accession)
-        )
-        if search:
-            q = q.filter(GOPrediction.protein_accession.ilike(f"%{search}%"))
-
-        total = q.count()
-        rows = q.order_by(GOPrediction.protein_accession).offset(offset).limit(limit).all()
-
-        accessions = [r[0] for r in rows]
-        protein_map = {
-            p.accession: p
-            for p in session.query(Protein).filter(Protein.accession.in_(accessions)).all()
-        }
-
-        ann_counts: dict[str, int] = {}
-        match_counts: dict[str, int] = {}
-        if accessions:
-            ann_counts = {
-                acc: cnt
-                for acc, cnt in session.query(
-                    ProteinGOAnnotation.protein_accession,
-                    func.count(ProteinGOAnnotation.id),
-                )
-                .filter(
-                    ProteinGOAnnotation.protein_accession.in_(accessions),
-                    ProteinGOAnnotation.annotation_set_id == ps.annotation_set_id,
-                )
-                .group_by(ProteinGOAnnotation.protein_accession)
-                .all()
-            }
-
-            match_counts = {
-                acc: cnt
-                for acc, cnt in session.query(
-                    GOPrediction.protein_accession,
-                    func.count(func.distinct(GOPrediction.go_term_id)),
-                )
-                .join(
-                    ProteinGOAnnotation,
-                    (ProteinGOAnnotation.go_term_id == GOPrediction.go_term_id)
-                    & (ProteinGOAnnotation.protein_accession == GOPrediction.protein_accession)
-                    & (ProteinGOAnnotation.annotation_set_id == ps.annotation_set_id),
-                )
-                .filter(
-                    GOPrediction.prediction_set_id == set_id,
-                    GOPrediction.protein_accession.in_(accessions),
-                )
-                .group_by(GOPrediction.protein_accession)
-                .all()
-            }
-
-        return {
-            "total": total,
-            "offset": offset,
-            "limit": limit,
-            "items": [
-                {
-                    "accession": acc,
-                    "go_count": go_count,
-                    "min_distance": round(min_dist, 4) if min_dist is not None else None,
-                    "annotation_count": ann_counts.get(acc, 0),
-                    "match_count": match_counts.get(acc, 0),
-                    "in_db": acc in protein_map,
-                }
-                for acc, go_count, min_dist in rows
-            ],
-        }
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get(
@@ -532,64 +339,13 @@ def get_protein_predictions(
 ) -> list[dict[str, Any]]:
     """Return all predicted GO terms for a protein in a prediction set, sorted by distance (nearest first).
     Includes GO term details plus optional alignment (NW/SW) and taxonomy fields when computed."""
-    with session_scope(factory) as session:
-        from protea.infrastructure.orm.models.annotation.go_term import GOTerm
-
-        ps = session.get(PredictionSet, set_id)
-        if ps is None:
-            raise HTTPException(status_code=404, detail="PredictionSet not found")
-
-        rows = (
-            session.query(GOPrediction, GOTerm)
-            .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
-            .filter(
-                GOPrediction.prediction_set_id == set_id,
-                GOPrediction.protein_accession == accession,
+    try:
+        with session_scope(factory) as session:
+            return get_predictions_for_protein(
+                session, prediction_set_id=set_id, accession=accession
             )
-            .order_by(GOPrediction.distance)
-            .all()
-        )
-
-        return [
-            {
-                "go_id": gt.go_id,
-                "name": gt.name,
-                "aspect": gt.aspect,
-                "distance": round(pred.distance, 4),
-                "ref_protein_accession": pred.ref_protein_accession,
-                "qualifier": pred.qualifier,
-                "evidence_code": pred.evidence_code,
-                # Alignment — NW
-                "identity_nw": pred.identity_nw,
-                "similarity_nw": pred.similarity_nw,
-                "alignment_score_nw": pred.alignment_score_nw,
-                "gaps_pct_nw": pred.gaps_pct_nw,
-                "alignment_length_nw": pred.alignment_length_nw,
-                # Alignment — SW
-                "identity_sw": pred.identity_sw,
-                "similarity_sw": pred.similarity_sw,
-                "alignment_score_sw": pred.alignment_score_sw,
-                "gaps_pct_sw": pred.gaps_pct_sw,
-                "alignment_length_sw": pred.alignment_length_sw,
-                # Lengths
-                "length_query": pred.length_query,
-                "length_ref": pred.length_ref,
-                # Taxonomy
-                "query_taxonomy_id": pred.query_taxonomy_id,
-                "ref_taxonomy_id": pred.ref_taxonomy_id,
-                "taxonomic_lca": pred.taxonomic_lca,
-                "taxonomic_distance": pred.taxonomic_distance,
-                "taxonomic_common_ancestors": pred.taxonomic_common_ancestors,
-                "taxonomic_relation": pred.taxonomic_relation,
-                # Re-ranker features
-                "vote_count": pred.vote_count,
-                "k_position": pred.k_position,
-                "go_term_frequency": pred.go_term_frequency,
-                "ref_annotation_density": pred.ref_annotation_density,
-                "neighbor_distance_std": pred.neighbor_distance_std,
-            }
-            for pred, gt in rows
-        ]
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get(
@@ -597,94 +353,19 @@ def get_protein_predictions(
 )
 def get_go_term_distribution(
     set_id: UUID,
-    limit: int = 50,
+    limit: int = Query(
+        default=50,
+        description=("Max number of top-N GO terms to return per aspect (``F``/``P``/``C``)."),
+    ),
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
     """Return the most frequently predicted GO terms grouped by aspect (F/P/C)
     and the total prediction counts per aspect."""
-    with session_scope(factory) as session:
-        from protea.infrastructure.orm.models.annotation.go_term import GOTerm
-
-        ps = session.get(PredictionSet, set_id)
-        if ps is None:
-            raise HTTPException(status_code=404, detail="PredictionSet not found")
-
-        rows = (
-            session.query(
-                GOTerm.go_id,
-                GOTerm.name,
-                GOTerm.aspect,
-                func.count(GOPrediction.id).label("count"),
-            )
-            .join(GOPrediction, GOPrediction.go_term_id == GOTerm.id)
-            .filter(GOPrediction.prediction_set_id == set_id)
-            .group_by(GOTerm.go_id, GOTerm.name, GOTerm.aspect)
-            .order_by(func.count(GOPrediction.id).desc())
-            .limit(limit)
-            .all()
-        )
-
-        by_aspect: dict[str, list] = {"F": [], "P": [], "C": [], "other": []}
-        for go_id, name, aspect, count in rows:
-            entry = {"go_id": go_id, "name": name, "count": count}
-            by_aspect.get(aspect or "other", by_aspect["other"]).append(entry)
-
-        aspect_counts = (
-            session.query(GOTerm.aspect, func.count(GOPrediction.id))
-            .join(GOPrediction, GOPrediction.go_term_id == GOTerm.id)
-            .filter(GOPrediction.prediction_set_id == set_id)
-            .group_by(GOTerm.aspect)
-            .all()
-        )
-
-        return {
-            "by_aspect": by_aspect,
-            "aspect_totals": {asp or "other": cnt for asp, cnt in aspect_counts},
-            "top_terms": [
-                {"go_id": go_id, "name": name, "aspect": aspect, "count": count}
-                for go_id, name, aspect, count in rows
-            ],
-        }
-
-
-_TSV_COLUMNS = [
-    "protein_accession",
-    "go_id",
-    "go_name",
-    "go_aspect",
-    "distance",
-    "ref_protein_accession",
-    "qualifier",
-    "evidence_code",
-    # NW alignment
-    "identity_nw",
-    "similarity_nw",
-    "alignment_score_nw",
-    "gaps_pct_nw",
-    "alignment_length_nw",
-    # SW alignment
-    "identity_sw",
-    "similarity_sw",
-    "alignment_score_sw",
-    "gaps_pct_sw",
-    "alignment_length_sw",
-    # Lengths
-    "length_query",
-    "length_ref",
-    # Taxonomy
-    "query_taxonomy_id",
-    "ref_taxonomy_id",
-    "taxonomic_lca",
-    "taxonomic_distance",
-    "taxonomic_common_ancestors",
-    "taxonomic_relation",
-    # Re-ranker features
-    "vote_count",
-    "k_position",
-    "go_term_frequency",
-    "ref_annotation_density",
-    "neighbor_distance_std",
-]
+    try:
+        with session_scope(factory) as session:
+            return get_go_term_distribution_data(session, prediction_set_id=set_id, limit=limit)
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get(
@@ -709,94 +390,27 @@ def download_predictions_tsv(
 
     Optional filters: ``accession``, ``aspect`` (F/P/C), ``max_distance``.
 
-    The response streams rows directly from the database — suitable for large
+    The response streams rows directly from the database; suitable for large
     prediction sets without loading everything into memory.
     """
-    from protea.infrastructure.orm.models.annotation.go_term import GOTerm
-
-    # Verify existence before starting the stream so 404 can be returned properly.
-    with session_scope(factory) as _check:
-        if _check.get(PredictionSet, set_id) is None:
-            raise HTTPException(status_code=404, detail="PredictionSet not found")
-
-    def _generate():
-        with session_scope(factory) as session:
-            buf = io.StringIO()
-            writer = csv.writer(buf, delimiter="\t", lineterminator="\n")
-            writer.writerow(_TSV_COLUMNS)
-            yield buf.getvalue()
-
-            q = (
-                session.query(GOPrediction, GOTerm)
-                .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
-                .filter(GOPrediction.prediction_set_id == set_id)
-            )
-            if accession:
-                q = q.filter(GOPrediction.protein_accession == accession)
-            if aspect:
-                q = q.filter(GOTerm.aspect == aspect.upper())
-            if max_distance is not None:
-                q = q.filter(GOPrediction.distance <= max_distance)
-
-            q = q.order_by(GOPrediction.protein_accession, GOPrediction.distance)
-
-            for pred, gt in q.yield_per(1000):
-                buf = io.StringIO()
-                writer = csv.writer(buf, delimiter="\t", lineterminator="\n")
-                writer.writerow(
-                    [
-                        pred.protein_accession,
-                        gt.go_id,
-                        gt.name,
-                        gt.aspect,
-                        pred.distance,
-                        pred.ref_protein_accession,
-                        pred.qualifier or "",
-                        pred.evidence_code or "",
-                        _fmt(pred.identity_nw),
-                        _fmt(pred.similarity_nw),
-                        _fmt(pred.alignment_score_nw),
-                        _fmt(pred.gaps_pct_nw),
-                        _fmt(pred.alignment_length_nw),
-                        _fmt(pred.identity_sw),
-                        _fmt(pred.similarity_sw),
-                        _fmt(pred.alignment_score_sw),
-                        _fmt(pred.gaps_pct_sw),
-                        _fmt(pred.alignment_length_sw),
-                        pred.length_query if pred.length_query is not None else "",
-                        pred.length_ref if pred.length_ref is not None else "",
-                        pred.query_taxonomy_id if pred.query_taxonomy_id is not None else "",
-                        pred.ref_taxonomy_id if pred.ref_taxonomy_id is not None else "",
-                        pred.taxonomic_lca if pred.taxonomic_lca is not None else "",
-                        pred.taxonomic_distance if pred.taxonomic_distance is not None else "",
-                        pred.taxonomic_common_ancestors
-                        if pred.taxonomic_common_ancestors is not None
-                        else "",
-                        pred.taxonomic_relation or "",
-                        pred.vote_count if pred.vote_count is not None else "",
-                        pred.k_position if pred.k_position is not None else "",
-                        pred.go_term_frequency if pred.go_term_frequency is not None else "",
-                        pred.ref_annotation_density
-                        if pred.ref_annotation_density is not None
-                        else "",
-                        _fmt(pred.neighbor_distance_std),
-                    ]
-                )
-                yield buf.getvalue()
+    try:
+        with session_scope(factory) as _check:
+            assert_prediction_set_exists(_check, set_id)
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     filename = f"predictions_{set_id}.tsv"
     return StreamingResponse(
-        _generate(),
+        iter_predictions_tsv(
+            factory,
+            prediction_set_id=set_id,
+            accession=accession,
+            aspect=aspect,
+            max_distance=max_distance,
+        ),
         media_type="text/tab-separated-values",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
-
-
-def _fmt(v: float | None) -> str:
-    """Format a nullable float for TSV output."""
-    if v is None:
-        return ""
-    return f"{v:.6g}"
 
 
 @router.get(
@@ -819,91 +433,40 @@ def download_predictions_cafa(
 
     Score is computed as ``max(0.0, 1.0 - distance)`` so that closer neighbours
     receive higher confidence scores in the [0, 1] range expected by the
-    CAFA evaluator.  One row per (protein, GO term) pair — duplicate GO terms
+    CAFA evaluator.  One row per (protein, GO term) pair; duplicate GO terms
     for the same protein are deduplicated keeping the highest score (lowest distance).
 
     Pass ``eval_id`` to restrict output to delta proteins only (NK + LK targets),
     which is required for a valid CAFA evaluation.
     """
-    from protea.core.evaluation import compute_evaluation_data
-    from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
-    from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
-    from protea.infrastructure.orm.models.annotation.go_term import GOTerm
-
-    with session_scope(factory) as _check:
-        if _check.get(PredictionSet, set_id) is None:
-            raise HTTPException(status_code=404, detail="PredictionSet not found")
-
-        delta_proteins: set[str] | None = None
-        if eval_id is not None:
-            e = _check.get(EvaluationSet, eval_id)
-            if e is None:
-                raise HTTPException(status_code=404, detail="EvaluationSet not found")
-            ann_old = _check.get(AnnotationSet, e.old_annotation_set_id)
-            data = compute_evaluation_data(
-                _check,
-                e.old_annotation_set_id,
-                e.new_annotation_set_id,
-                ann_old.ontology_snapshot_id,
-            )
-            delta_proteins = set(data.nk) | set(data.lk)
-
-    def _generate():
-        with session_scope(factory) as session:
-            # Deduplicate at the DB level: keep the lowest distance per
-            # (protein_accession, go_id) pair so we never need an unbounded
-            # `seen` set in Python — this preserves true streaming.
-            from sqlalchemy import func as sa_func
-
-            min_dist = session.query(
-                GOPrediction.protein_accession,
-                GOPrediction.go_term_id,
-                sa_func.min(GOPrediction.distance).label("min_distance"),
-            ).filter(GOPrediction.prediction_set_id == set_id)
-            if max_distance is not None:
-                min_dist = min_dist.filter(GOPrediction.distance <= max_distance)
-            min_dist = min_dist.group_by(
-                GOPrediction.protein_accession, GOPrediction.go_term_id
-            ).subquery()
-
-            q = session.query(
-                min_dist.c.protein_accession, GOTerm.go_id, min_dist.c.min_distance
-            ).join(GOTerm, min_dist.c.go_term_id == GOTerm.id)
-            if aspect:
-                q = q.filter(GOTerm.aspect == aspect.upper())
-            if delta_proteins is not None:
-                q = q.filter(min_dist.c.protein_accession.in_(delta_proteins))
-
-            q = q.order_by(min_dist.c.protein_accession, GOTerm.go_id)
-
-            for acc, go_id, dist in q.yield_per(1000):
-                score = max(0.0, 1.0 - dist)
-                yield f"{acc}\t{go_id}\t{score:.4f}\n"
+    try:
+        with session_scope(factory) as _check:
+            delta_proteins = prepare_cafa_export(_check, prediction_set_id=set_id, eval_id=eval_id)
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     filename = f"predictions_cafa_{set_id}.tsv"
     return StreamingResponse(
-        _generate(),
+        iter_predictions_cafa_tsv(
+            factory,
+            prediction_set_id=set_id,
+            aspect=aspect,
+            max_distance=max_distance,
+            delta_proteins=delta_proteins,
+        ),
         media_type="text/tab-separated-values",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
-@router.delete("/prediction-sets/{set_id}", summary="Delete a prediction set")
+@router.delete("/prediction-sets/{set_id}", summary="Delete a prediction set", dependencies=[Depends(require_role(ROLE_OPERATOR))])
 def delete_prediction_set(
     set_id: UUID,
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
     """Delete a prediction set and all its GOPrediction rows."""
-    with session_scope(factory) as session:
-        ps = session.get(PredictionSet, set_id)
-        if ps is None:
-            raise HTTPException(status_code=404, detail="PredictionSet not found")
-
-        deleted_predictions = (
-            session.query(GOPrediction)
-            .filter(GOPrediction.prediction_set_id == set_id)
-            .delete(synchronize_session=False)
-        )
-        session.delete(ps)
-
-    return {"deleted": str(set_id), "predictions_deleted": deleted_predictions}
+    try:
+        with session_scope(factory) as session:
+            return delete_prediction_set_cascade(session, set_id)
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

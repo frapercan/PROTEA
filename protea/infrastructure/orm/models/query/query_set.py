@@ -8,6 +8,7 @@ from sqlalchemy import (
     BigInteger,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -33,6 +34,10 @@ class QuerySet(Base):
     """
 
     __tablename__ = "query_set"
+    __table_args__ = (
+        # T3.5: list endpoints order by ``created_at DESC``.
+        Index("ix_query_set_created_at", "created_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String, nullable=False)

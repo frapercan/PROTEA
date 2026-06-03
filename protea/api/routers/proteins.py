@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import distinct, func
 from sqlalchemy.orm import Session, sessionmaker
 
-from protea.api.cache import cached
+from protea.api.cache import cached, invalidate
 from protea.api.deps import get_session_factory
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
@@ -19,8 +19,65 @@ from protea.infrastructure.session import session_scope
 
 router = APIRouter(prefix="/proteins", tags=["proteins"])
 
+PROTEIN_STATS_CACHE_KEY = "proteins:stats"
+PROTEIN_STATS_TTL_SECONDS = 300.0
+
 
 # ── Stats ─────────────────────────────────────────────────────────────────────
+
+
+def _compute_protein_stats(
+    factory: sessionmaker[Session],
+) -> dict[str, Any]:
+    """Run the per-stat SQL counts and shape them into the API payload.
+
+    Sits at module scope (not nested inside the route handler) so the
+    handler stays under the §3 60-LOC ceiling and the per-count SQL
+    is independently swappable when the schema changes.
+    """
+    with session_scope(factory) as session:
+        total = session.query(func.count(Protein.accession)).scalar() or 0
+        canonical = (
+            session.query(func.count(Protein.accession))
+            .filter(Protein.is_canonical.is_(True))
+            .scalar()
+            or 0
+        )
+        reviewed = (
+            session.query(func.count(Protein.accession)).filter(Protein.reviewed.is_(True)).scalar()
+            or 0
+        )
+        with_metadata = (
+            session.query(func.count(distinct(Protein.canonical_accession)))
+            .join(
+                ProteinUniProtMetadata,
+                Protein.canonical_accession == ProteinUniProtMetadata.canonical_accession,
+            )
+            .scalar()
+            or 0
+        )
+        with_embeddings = (
+            session.query(func.count(distinct(Protein.accession)))
+            .join(
+                SequenceEmbedding,
+                Protein.sequence_id == SequenceEmbedding.sequence_id,
+            )
+            .scalar()
+            or 0
+        )
+        with_go = (
+            session.query(func.count(distinct(ProteinGOAnnotation.protein_accession))).scalar() or 0
+        )
+        return {
+            "total": total,
+            "canonical": canonical,
+            "isoforms": total - canonical,
+            "reviewed": reviewed,
+            "unreviewed": total - reviewed,
+            "with_metadata": with_metadata,
+            "with_embeddings": with_embeddings,
+            "with_go_annotations": with_go,
+        }
 
 
 @router.get("/stats", summary="Aggregate protein statistics")
@@ -30,60 +87,33 @@ def get_protein_stats(
     """Return aggregate counts: total proteins, canonical vs isoforms, reviewed,
     and how many have metadata, embeddings, or GO annotations.
 
-    Cached for 5 minutes — the DISTINCT-over-JOIN counts scan 4M–80M rows and
+    Cached for 5 minutes: the DISTINCT-over-JOIN counts scan 4M–80M rows and
     take 30+ seconds to run from scratch. Counts move slowly enough that a
     5-min staleness is invisible to users.
+
+    Serves the last-known value when the recompute fails (DB blip, query
+    timeout) so the page never blocks on a cold-cache 500. The startup hook
+    in ``protea.api.app`` prewarms this key and a background task refreshes
+    it before expiry so users never hit a cold path under normal operation.
     """
+    return cached(
+        PROTEIN_STATS_CACHE_KEY,
+        PROTEIN_STATS_TTL_SECONDS,
+        lambda: _compute_protein_stats(factory),
+        serve_stale_on_error=True,
+    )
 
-    def _compute() -> dict[str, Any]:
-        with session_scope(factory) as session:
-            total = session.query(func.count(Protein.accession)).scalar() or 0
-            canonical = (
-                session.query(func.count(Protein.accession))
-                .filter(Protein.is_canonical.is_(True))
-                .scalar()
-                or 0
-            )
-            reviewed = (
-                session.query(func.count(Protein.accession))
-                .filter(Protein.reviewed.is_(True))
-                .scalar()
-                or 0
-            )
-            with_metadata = (
-                session.query(func.count(distinct(Protein.canonical_accession)))
-                .join(
-                    ProteinUniProtMetadata,
-                    Protein.canonical_accession == ProteinUniProtMetadata.canonical_accession,
-                )
-                .scalar()
-                or 0
-            )
-            with_embeddings = (
-                session.query(func.count(distinct(Protein.accession)))
-                .join(
-                    SequenceEmbedding,
-                    Protein.sequence_id == SequenceEmbedding.sequence_id,
-                )
-                .scalar()
-                or 0
-            )
-            with_go = (
-                session.query(func.count(distinct(ProteinGOAnnotation.protein_accession))).scalar()
-                or 0
-            )
-            return {
-                "total": total,
-                "canonical": canonical,
-                "isoforms": total - canonical,
-                "reviewed": reviewed,
-                "unreviewed": total - reviewed,
-                "with_metadata": with_metadata,
-                "with_embeddings": with_embeddings,
-                "with_go_annotations": with_go,
-            }
 
-    return cached("proteins:stats", 300.0, _compute)
+def prewarm_protein_stats(factory: sessionmaker[Session]) -> dict[str, Any]:
+    """Recompute and store ``proteins:stats``; used by the app startup hook
+    and the background refresh loop. Always bypasses the existing entry so
+    the cache is refilled with fresh counts before the old TTL expires."""
+    invalidate(PROTEIN_STATS_CACHE_KEY)
+    return cached(
+        PROTEIN_STATS_CACHE_KEY,
+        PROTEIN_STATS_TTL_SECONDS,
+        lambda: _compute_protein_stats(factory),
+    )
 
 
 # ── List ──────────────────────────────────────────────────────────────────────
@@ -91,11 +121,24 @@ def get_protein_stats(
 
 @router.get("", summary="List proteins")
 def list_proteins(
-    search: str | None = Query(default=None),
-    reviewed: bool | None = Query(default=None),
-    canonical_only: bool = Query(default=True),
-    limit: int = Query(default=50, le=500),
-    offset: int = Query(default=0, ge=0),
+    search: str | None = Query(
+        default=None,
+        description="Substring filter on accession/entry/gene/organism (case-insensitive).",
+    ),
+    reviewed: bool | None = Query(
+        default=None,
+        description="Filter to UniProt-reviewed (true) or unreviewed (false). None = no filter.",
+    ),
+    canonical_only: bool = Query(
+        default=True,
+        description="When true (default), exclude protein isoforms.",
+    ),
+    limit: int = Query(default=50, le=500, description="Max rows per page; capped at 500."),
+    offset: int = Query(
+        default=0,
+        ge=0,
+        description="Offset into alphabetically-ordered (by accession) results.",
+    ),
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
     """Paginated protein listing with optional full-text search across accession, entry name, gene name, and organism."""
@@ -141,6 +184,54 @@ def list_proteins(
 # ── Detail ────────────────────────────────────────────────────────────────────
 
 
+def _serialise_uniprot_metadata(
+    meta: ProteinUniProtMetadata | None,
+) -> dict[str, Any] | None:
+    """Materialise the UniProt functional-metadata payload for a protein.
+
+    Returns ``None`` when the protein has no metadata row (Swiss-Prot
+    annotation has not been ingested for this canonical accession).
+    """
+    if meta is None:
+        return None
+    return {
+        "function_cc": meta.function_cc,
+        "ec_number": meta.ec_number,
+        "catalytic_activity": meta.catalytic_activity,
+        "pathway": meta.pathway,
+        "keywords": meta.keywords,
+        "cofactor": meta.cofactor,
+        "activity_regulation": meta.activity_regulation,
+        "absorption": meta.absorption,
+        "kinetics": meta.kinetics,
+        "ph_dependence": meta.ph_dependence,
+        "redox_potential": meta.redox_potential,
+        "temperature_dependence": meta.temperature_dependence,
+        "active_site": meta.active_site,
+        "binding_site": meta.binding_site,
+        "dna_binding": meta.dna_binding,
+        "rhea_id": meta.rhea_id,
+        "site": meta.site,
+        "features": meta.features,
+    }
+
+
+def _list_isoforms(session: Session, p: Protein) -> list[str]:
+    """Return non-canonical isoform accessions for a canonical protein."""
+    if not p.is_canonical:
+        return []
+    return [
+        row.accession
+        for row in session.query(Protein.accession)
+        .filter(
+            Protein.canonical_accession == p.canonical_accession,
+            Protein.is_canonical.is_(False),
+        )
+        .order_by(Protein.isoform_index)
+        .all()
+    ]
+
+
 @router.get("/{accession}", summary="Get protein details")
 def get_protein(
     accession: str,
@@ -158,7 +249,6 @@ def get_protein(
             .filter(ProteinUniProtMetadata.canonical_accession == p.canonical_accession)
             .first()
         )
-
         embedding_count = (
             session.query(func.count(SequenceEmbedding.id))
             .filter(SequenceEmbedding.sequence_id == p.sequence_id)
@@ -166,25 +256,11 @@ def get_protein(
             if p.sequence_id
             else 0
         )
-
         go_count = (
             session.query(func.count(ProteinGOAnnotation.id))
             .filter(ProteinGOAnnotation.protein_accession == accession)
             .scalar()
         )
-
-        isoforms = []
-        if p.is_canonical:
-            isoforms = [
-                row.accession
-                for row in session.query(Protein.accession)
-                .filter(
-                    Protein.canonical_accession == p.canonical_accession,
-                    Protein.is_canonical.is_(False),
-                )
-                .order_by(Protein.isoform_index)
-                .all()
-            ]
 
         return {
             "accession": p.accession,
@@ -197,32 +273,11 @@ def get_protein(
             "is_canonical": p.is_canonical,
             "canonical_accession": p.canonical_accession,
             "isoform_index": p.isoform_index,
-            "isoforms": isoforms,
+            "isoforms": _list_isoforms(session, p),
             "sequence_id": p.sequence_id,
             "embedding_count": embedding_count,
             "go_annotation_count": go_count,
-            "metadata": {
-                "function_cc": meta.function_cc,
-                "ec_number": meta.ec_number,
-                "catalytic_activity": meta.catalytic_activity,
-                "pathway": meta.pathway,
-                "keywords": meta.keywords,
-                "cofactor": meta.cofactor,
-                "activity_regulation": meta.activity_regulation,
-                "absorption": meta.absorption,
-                "kinetics": meta.kinetics,
-                "ph_dependence": meta.ph_dependence,
-                "redox_potential": meta.redox_potential,
-                "temperature_dependence": meta.temperature_dependence,
-                "active_site": meta.active_site,
-                "binding_site": meta.binding_site,
-                "dna_binding": meta.dna_binding,
-                "rhea_id": meta.rhea_id,
-                "site": meta.site,
-                "features": meta.features,
-            }
-            if meta
-            else None,
+            "metadata": _serialise_uniprot_metadata(meta),
         }
 
 
@@ -232,7 +287,14 @@ def get_protein(
 @router.get("/{accession}/annotations", summary="List GO annotations for a protein")
 def get_protein_annotations(
     accession: str,
-    annotation_set_id: str | None = Query(default=None),
+    annotation_set_id: str | None = Query(
+        default=None,
+        description=(
+            "Optional UUID of an ``AnnotationSet`` to scope the "
+            "lookup. When omitted, annotations from every set the "
+            "protein appears in are returned. Invalid UUIDs return 422."
+        ),
+    ),
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> list[dict[str, Any]]:
     """Return all GO term annotations for a protein, joined with term details and annotation set source.

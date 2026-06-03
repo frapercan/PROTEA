@@ -5,25 +5,78 @@
   },
   "nav": {
     "proteins": "Proteins",
-    "annotations": "Annotations",
+    "annotations": "GO Annotations",
     "querySets": "Query Sets",
     "embeddings": "Embeddings",
-    "functionalAnnotation": "Functional Annotation",
+    "functionalAnnotation": "KNN Search",
     "scoring": "Scoring",
-    "evaluation": "Evaluation",
+    "evaluation": "CAFA Evaluation",
     "benchmark": "Benchmark",
     "reranker": "Re-ranker",
+    "datasets": "Datasets",
     "jobs": "Jobs",
+    "admin": "Admin",
+    "experimentRuns": "Experiment runs",
     "maintenance": "Maintenance",
     "home": "Home",
-    "data": "Data",
+    "data": "Reference Data",
     "pipelineGroup": "Pipeline",
     "results": "Results",
-    "system": "System"
+    "system": "Operations",
+    "stack": "Stack",
+    "annotate": "Annotate",
+    "annotateTooltip": "Submit your FASTA sequences for GO annotation",
+    "docs": "Docs",
+    "sphinx": "Sphinx manual",
+    "sphinxHint": "Architecture, queues, ORM, operations",
+    "swagger": "OpenAPI / Swagger",
+    "swaggerHint": "Interactive REST reference",
+    "thesis": "Thesis PDF",
+    "thesisHint": "PROTEA doctoral manuscript",
+    "support": "Back the project",
+    "supportHint": "Send thanks, leave a public comment",
+    "farmSection": "Agent farm",
+    "farmPlan": "Plan",
+    "farmCost": "Cost",
+    "pipelineHint": "From sequence to GO term",
+    "dataHint": "Reference proteome, ground truth, query sets",
+    "resultsHint": "Benchmark matrix and CAFA evaluation",
+    "operationsHint": "Queues, maintenance, stack health",
+    "groupAnnotate": "Annotate",
+    "groupAnnotateLabel": "Run the pipeline on your sequences",
+    "groupRunAnnotation": "Run KNN annotation",
+    "groupQuickAnnotate": "Quick FASTA annotate",
+    "groupQuickAnnotateHint": "One-click, auto-selected best method",
+    "search": "Search",
+    "searchHint": "Pages, jobs, UniProt accessions",
+    "menu": "Menu",
+    "openMenu": "Open navigation menu",
+    "closeMenu": "Close navigation menu",
+    "ariaPrimary": "Primary navigation",
+    "skipToContent": "Skip to main content",
+    "subtitleShort": "Protein Functional Embedding-based Annotation",
+    "subtitleLong": "GO term prediction by embedding similarity, sequence alignment features and learned reranking",
+    "statusRunning": "{count} running",
+    "statusIdle": "Queue idle",
+    "statusDegraded": "API unreachable",
+    "statusBuild": "build",
+    "authAnonymous": "Anonymous",
+    "authApiKey": "API key",
+    "authBearer": "Bearer",
+    "authAnonymousHint": "Sign in to raise rate limits and own jobs",
+    "openSwagger": "Open in Swagger",
+    "collapseSidebar": "Collapse sidebar",
+    "openSidebar": "Open sidebar",
+    "adminGroup": "Admin",
+    "adminGroupHint": "Operator-only controls: keys, audit",
+    "apiKeys": "API keys",
+    "apiKeysHint": "Mint, list and revoke programmatic access keys",
+    "dlq": "Dead-letter queue",
+    "dlqHint": "Audit and drain failed messages from the DLQ"
   },
   "home": {
     "title": "Protein Function Prediction Pipeline",
-    "subtitle": "From sequence to functional annotation through embedding similarity, re-ranking, and LLM curation",
+    "subtitle": "From sequence to functional annotation through embedding similarity and learned re-ranking",
     "bestResults": "Best Results",
     "bestOverall": "Best Overall",
     "avgFmaxAcrossCells": "mean Fmax across 9 cells",
@@ -55,15 +108,22 @@
     "stageEmbeddings": "Embeddings",
     "stageKnn": "KNN Search",
     "stageReranker": "Re-ranker",
-    "stageLlm": "LLM Curation",
     "stageAnnotation": "Annotation",
     "stageEvaluation": "Evaluation",
+    "stageSequencesDesc": "Proteins indexed from UniProt with deduplicated FASTA",
+    "stageEmbeddingsDesc": "One vector per protein computed by 8 PLMs",
+    "stageKnnDesc": "k nearest neighbours transfer their GO terms",
+    "stageRerankerDesc": "LightGBM re-orders the candidates by learned features",
+    "stageEvaluationDesc": "CAFA-style Fmax / AuPRC scored per aspect",
+    "stageView": "view",
     "nkCategory": "NK category (No prior Knowledge) — most demanding evaluation setting",
     "annotateTitle": "Annotate Your Proteins",
     "annotateDescription": "Paste your protein sequences in FASTA format and get functional annotations automatically using the best available method.",
     "annotatePlaceholder": ">sp|P04637|P53_HUMAN Cellular tumor antigen p53\nMEEPQSDPSVEPPLSQETFSDLWKLL...",
+    "annotateInputAriaLabel": "Sequence input in FASTA format",
     "annotateTryExample": "Try example",
     "annotateUploadFile": "Upload file",
+    "annotateUseExample": "Use our example (KRAS + P53)",
     "annotateButton": "Annotate",
     "annotateUploading": "Uploading...",
     "annotateEmbedding": "Computing embeddings...",
@@ -74,11 +134,26 @@
     "annotateStepPredict": "Prediction",
     "annotateQueueBlockedTitle": "Annotation temporarily unavailable",
     "annotateQueueBlockedBody": "The embedding / prediction pipeline is currently busy processing a backlog of long-running jobs. New requests would not enter the queue in a reasonable time, so submissions are paused until the backlog clears.",
+    "annotateQueueBlockedFriendly": "The shared GPU is currently running a research export. Your annotation request would not be picked up in a reasonable time, so submissions are paused until the export finishes. In the meantime you can already explore the benchmark results.",
+    "annotateQueueViewResults": "View available results",
+    "annotateQueueShowDetails": "Technical details",
+    "annotateQueueHideDetails": "Hide technical details",
     "annotateQueueRunningLabel": "running",
-    "annotateQueueWaitingLabel": "Jobs waiting"
+    "annotateQueueWaitingLabel": "Jobs waiting",
+    "shareCopy": "Share",
+    "shareCopied": "Link copied"
+  },
+  "benchmark": {
+    "loadingTitle": "Loading benchmark…",
+    "loadingHint": "Resolving embeddings and matrix.",
+    "loadingStepMatrix": "Matrix",
+    "loadingStepEmbeddings": "Embeddings",
+    "loadingRowsPreview": "Rows preview",
+    "backToHome": "Back to home"
   },
   "jobs": {
     "title": "Jobs",
+    "description": "Every action PROTEA executes — inserting proteins, computing embeddings, exporting datasets — runs as a background job. This page is the live audit trail: track progress, diagnose failures, and cancel work that is no longer needed.",
     "allStatuses": "All statuses",
     "queued": "Queued",
     "running": "Running",
@@ -94,6 +169,35 @@
     "jobId": "Job ID",
     "created": "Created",
     "activeJobs": "{count} active",
+    "showChildJobs": "Show child jobs",
+    "showChildJobsHint": "Some operations spawn child jobs per batch (e.g. each embedding shard). Hidden by default to keep the list readable; enable to see the full task tree.",
+    "showBatchJobs": "Show batch jobs",
+    "showBatchJobsHint": "Embedding batches run on a separate queue and are hidden by default. Enable to monitor low-level GPU inference throughput.",
+    "statusTooltips": {
+      "queued": "Waiting in the work queue. The job has been accepted but no worker has picked it up yet.",
+      "running": "A worker is actively processing this job. Progress updates appear in real time.",
+      "succeeded": "The job completed without error. Results are stored and available.",
+      "failed": "The job encountered an error and stopped. Open the detail page for the error code and event log.",
+      "cancelled": "The job was cancelled before or during execution. Partial results, if any, are retained."
+    },
+    "emptyHero": {
+      "title": "No jobs yet",
+      "body": "Jobs appear here as soon as you dispatch an operation — inserting proteins, computing embeddings, exporting a research dataset, or running a CAFA evaluation. Each job shows live progress and a full event log.",
+      "ctaJobs": "Dispatch from Embeddings",
+      "ctaAnnotate": "Run KNN Annotation"
+    },
+    "selectRow": "Select job",
+    "selectAll": "Select all",
+    "selectedCount": "{count} selected",
+    "clearSelection": "Clear",
+    "cancelSelected": "Cancel selected",
+    "cancelSelectedAria": "Cancel {count} selected jobs",
+    "cancelInProgress": "Cancelling {done} of {total}…",
+    "cancelDone": "Cancelled {ok} of {total}.",
+    "cancelDoneWithFailures": "Cancelled {ok} of {total}; {failed} failed.",
+    "cancelSignInHint": "Sign in to cancel jobs",
+    "cancelOnlyActiveHint": "Only queued or running jobs can be cancelled",
+    "cancelConfirm": "Cancel {count} selected jobs? Running jobs will be asked to stop at the next checkpoint.",
     "jobDetail": {
       "title": "Job Detail",
       "backToJobs": "← Jobs",
@@ -111,6 +215,20 @@
       "childJobsCount": "({count})",
       "eventsTitle": "Events",
       "eventsCount": "({count})"
+    },
+    "commentsThread": {
+      "title": "Comments",
+      "empty": "No comments yet. Drop the first observation, follow-up, or post-mortem.",
+      "anonymousAuthor": "anonymous",
+      "formLabel": "Append a comment",
+      "bodyLabel": "Comment",
+      "bodyPlaceholder": "e.g. Re-running with k=10; k=5 hit the variance ceiling on PK.",
+      "authorLabel": "Author",
+      "authorPlaceholder": "your handle or bot id (optional)",
+      "postButton": "Post",
+      "posting": "Posting…",
+      "posted": "Comment posted",
+      "hint": "Comments are durable narrative notes. The machine-emitted event timeline above stays separate."
     }
   },
   "proteins": {
@@ -125,6 +243,7 @@
       "searchPlaceholder": "accession, gene, organism…",
       "search": "Search",
       "clear": "Clear",
+      "filterReviewedAria": "Filter proteins by review status",
       "allProteins": "All proteins",
       "swissProt": "Swiss-Prot only",
       "trembl": "TrEMBL only",
@@ -165,10 +284,10 @@
       "goAnnotationsSub": "{percent}% of total"
     },
     "insertTab": {
-      "title": "Insert Proteins from UniProt",
-      "description": "Downloads FASTA sequences and upserts Protein + Sequence rows.",
+      "title": "Insert proteins from UniProt",
+      "description": "Fetches protein sequences from UniProt in FASTA format and saves each one as a Protein row plus a deduplicated Sequence row. This is always the first step: every other pipeline stage (embeddings, annotation, evaluation) requires proteins and their sequences to be loaded here first.",
       "searchCriteriaLabel": "Search criteria",
-      "searchCriteriaHelper": "UniProt query — reviewed:true = Swiss-Prot only",
+      "searchCriteriaHelper": "UniProt query syntax. E.g. \"reviewed:true\" = Swiss-Prot only (~600k); \"reviewed:true AND organism_id:9606\" = reviewed human only.",
       "pageSizeLabel": "Page size",
       "totalLimitLabel": "Total limit",
       "totalLimitOptional": "(optional)",
@@ -178,10 +297,10 @@
       "launching": "Launching…"
     },
     "metadataTab": {
-      "title": "Fetch UniProt Metadata",
-      "description": "Downloads TSV annotations and upserts ProteinUniProtMetadata rows.",
+      "title": "Enrich proteins with UniProt",
+      "description": "After \"Insert proteins\" (which only loads accession + sequence), this step fetches each protein's functional record from UniProt and stores it as ProteinUniProtMetadata: name, gene, organism, EC, catalytic activity, active and binding sites, cofactor, pathway, kinetics, keywords, and more. It also backfills the core Protein columns (Swiss-Prot/TrEMBL, organism, length, gene) left empty by the insert. Idempotent: re-running only updates what changed upstream.",
       "searchCriteriaLabel": "Search criteria",
-      "searchCriteriaHelper": "UniProt query — reviewed:true = Swiss-Prot only",
+      "searchCriteriaHelper": "UniProt query syntax. E.g. \"reviewed:true\" = Swiss-Prot only (~600k); \"reviewed:true AND organism_id:9606\" = reviewed human only.",
       "pageSizeLabel": "Page size",
       "totalLimitLabel": "Total limit",
       "totalLimitOptional": "(optional)",
@@ -243,6 +362,11 @@
         "qualifier": "Qualifier",
         "source": "Source"
       }
+    },
+    "notFound": {
+      "title": "Protein not found",
+      "body": "No protein with accession {accession} exists in this dataset. The accession may be retired, mistyped, or filtered out of the current snapshot.",
+      "cta": "Back to protein search"
     }
   },
   "annotations": {
@@ -396,10 +520,68 @@
       "skipExisting": "Skip existing embeddings",
       "launchComputeJob": "Launch Compute Job",
       "launching": "Launching…"
+    },
+    "computeDialog": {
+      "title": "Launch compute embeddings",
+      "subtitle": "Dispatch a compute_embeddings job onto the protea.embeddings queue without leaving this page.",
+      "close": "Close",
+      "configLabel": "Embedding config",
+      "loading": "Loading…",
+      "noConfigs": "— no configs available —",
+      "querySetLabel": "Query set",
+      "querySetHelper": "(optional — leave empty to compute all)",
+      "allSequences": "— all sequences —",
+      "queueBatchSizeLabel": "Queue batch size",
+      "queueBatchSizeHelper": "(seqs/job)",
+      "modelBatchSizeLabel": "Model batch size",
+      "modelBatchSizeHelper": "(seqs/forward)",
+      "deviceLabel": "Device",
+      "deviceCpu": "cpu — CPU (FP32)",
+      "deviceCuda": "cuda — GPU default (FP16 for ESM3c/T5)",
+      "deviceCuda0": "cuda:0 — GPU 0",
+      "deviceCuda1": "cuda:1 — GPU 1",
+      "deviceCustom": "custom…",
+      "skipExisting": "Skip existing embeddings",
+      "launch": "Launch compute job",
+      "launching": "Launching…",
+      "cancel": "Cancel",
+      "errors": {
+        "configRequired": "Pick an embedding config."
+      }
     }
   },
   "functionalAnnotation": {
     "title": "Functional Annotation",
+    "onboarding": {
+      "intro": "Functional annotation transfers GO terms from proteins of known function to your query sequences. PROTEA encodes each protein into a high-dimensional embedding, runs a KNN search against a reference annotation set, and aggregates the neighbors' GO terms into a ranked prediction per protein. You need three ingredients before launching a job: precomputed embeddings, a reference annotation set, and the query sequences you want to annotate.",
+      "prereqsTitle": "Prerequisites",
+      "prereqsHelper": "Each step opens its dedicated page so you can build or pick the artefact.",
+      "prereqsAriaLabel": "Annotation prerequisites",
+      "steps": {
+        "embeddings": {
+          "title": "Embedding model",
+          "help": "A protein language model (PLM) configuration plus its precomputed vectors over your reference proteins. The KNN search runs in this embedding space, so its choice (esm2, prost_t5, ankh, etc.) determines which proteins look similar.",
+          "unit": "vectors",
+          "emptyLabel": "No embedding configuration is registered yet.",
+          "cta": "Compute embeddings"
+        },
+        "annotationSet": {
+          "title": "Reference annotation set",
+          "help": "The pool of GO annotations you transfer from. Typically a GOA or QuickGO release filtered by evidence code. Neighbors found by KNN must come from this set, so its coverage and freshness directly limit recall.",
+          "unit": "annotations",
+          "emptyLabel": "No reference annotation set is loaded yet.",
+          "cta": "Load annotations"
+        },
+        "querySet": {
+          "title": "Query set",
+          "help": "Named bundle of protein sequences you want to annotate. Pick a saved query set to keep the prediction reproducible, or leave it empty to annotate every protein in the database.",
+          "unit": "sequences",
+          "allSequences": "All sequences in the database",
+          "emptyLabel": "No saved query sets. You can still annotate all sequences, or upload one.",
+          "cta": "Manage query sets"
+        }
+      }
+    },
     "tabs": {
       "predict": "Run Annotation",
       "results": "Results"
@@ -429,6 +611,11 @@
       "sequenceAlignmentsHelper": "NW (global) + SW (local) via parasail/BLOSUM62",
       "taxonomicDistance": "Taxonomic distance",
       "taxonomicDistanceHelper": "LCA, distance and relation via NCBI taxonomy",
+      "rerankerFeatures": "Reranker feature families",
+      "rerankerFeaturesHelper": "enables lineage / anc2vec / emb_pca / annotation_meta — the full bundle used by the reranker",
+      "lockedByRerankerNote": "(locked)",
+      "lockedByRerankerTooltip": "Required by the reranker model schema (cannot be disabled while the reranker bundle is on).",
+      "computedFamiliesTitle": "Feature families that will be computed",
       "searchBackend": "Search Backend",
       "searchBackendLabel": "Backend",
       "numpyBackend": "numpy — exact",
@@ -445,12 +632,21 @@
       "mLabel": "M",
       "efSearchLabel": "efSearch",
       "launchAnnotationJob": "Launch Annotation Job",
-      "launching": "Launching…"
+      "launching": "Launching…",
+      "openPage": "Open page",
+      "formInvalidHint": "Please fix the required fields above before launching."
     },
     "resultsTab": {
       "title": "Results",
       "refresh": "Refresh",
-      "noResults": "No annotation results yet. Run an annotation job from the Run Annotation tab.",
+      "noResults": "No annotations run yet. Launch one from \"Run annotation\", results will land here, ready to download as TSV, browse term scores, or export for CAFA evaluation.",
+      "resultCount": "{count, plural, one {1 annotation} other {{count} annotations}}",
+      "emptyHero": {
+        "title": "No annotations run yet",
+        "body": "Each run produces a PredictionSet with per-protein GO scores, downloadable as TSV or exportable to cafaeval. Once you launch the first one from the previous tab, it shows up here.",
+        "ctaPrimary": "Go to Run Annotation",
+        "ctaSecondary": "You can also see benchmark examples in /benchmark"
+      },
       "tableHeaders": {
         "id": "ID",
         "config": "Config",
@@ -536,7 +732,19 @@
   },
   "scoring": {
     "title": "Scoring Configs",
+    "labBadge": "LAB",
+    "labBadgeHint": "Research / LAB surface: research and reproducibility parameters are intentionally exposed.",
     "description": "A ScoringConfig defines how raw prediction signals are combined into a single [0, 1] confidence score — without re-running the KNN pipeline.",
+    "pageDescription": "After KNN annotation produces a ranked list of candidate GO terms, the scoring layer re-weights those candidates using configurable signal combinations: embedding similarity, sequence alignment identity, GO evidence code quality, and taxonomic proximity. Different configs let you compare scoring strategies on the same prediction set without dispatching new annotation jobs.",
+    "formulaHints": {
+      "linear": "Weighted average of active signals: score = sum(w_i * s_i) / sum(w_i). Simple and interpretable.",
+      "evidenceWeighted": "Same weighted average as linear, then multiplied by the resolved evidence quality weight. Predictions backed only by IEA (electronic) are automatically down-ranked even if their embedding similarity is high."
+    },
+    "emptyHero": {
+      "title": "No scoring configs yet",
+      "body": "Load the built-in presets to start — they cover the most common trade-offs between embedding-only scoring, alignment-boosted scoring, and evidence-weighted scoring. You can then clone and tune them.",
+      "cta": "Load presets"
+    },
     "loadPresets": "Load presets",
     "presetsLoading": "Loading…",
     "availableSignals": "Available signals",
@@ -601,6 +809,8 @@
     "uploadFasta": "+ Upload FASTA",
     "noQuerySets": "No query sets yet.",
     "uploadFastaCta": "Upload a FASTA file to get started",
+    "fetchError": "Failed to load query sets",
+    "idTooltip": "Internal ID (click to copy)",
     "tableHeaders": {
       "name": "Name",
       "sequences": "Sequences",
@@ -631,17 +841,347 @@
       "count": "({count})"
     }
   },
+  "datasets": {
+    "title": "Datasets",
+    "subtitle": "Frozen training cuts produced by export_research_dataset and registered here for reproducibility. Each row is a versioned snapshot of KNN neighbours plus features, ready to be consumed by the offline reranker lab.",
+    "refresh": "Refresh",
+    "newExport": "Dispatch new export",
+    "loadError": "Failed to load datasets",
+    "count": "{shown} of {total} shown",
+    "emptyAll": "No datasets registered yet.",
+    "emptyFiltered": "No datasets match the current filters.",
+    "dispatchFirst": "Dispatch the first export",
+    "dispatched": "Export dispatched: {name} (job {jobId})",
+    "imported": "Dataset registered by reference: {name} ({datasetId})",
+    "footnote": "Each row is one Dataset record. Click a name to inspect schema/manifest provenance and link back to the producer job.",
+    "filters": {
+      "family": "PLM family",
+      "k": "Neighbours (K)",
+      "search": "Search",
+      "searchPlaceholder": "filter by name…",
+      "all": "All"
+    },
+    "cols": {
+      "name": "Name",
+      "family": "Family",
+      "k": "K",
+      "kTooltip": "Number of KNN neighbours per query protein. Higher K produces more training pairs but a heavier dump.",
+      "trainWindow": "Train window",
+      "trainWindowTooltip": "GOA snapshot versions used for the temporal training split. Pairs proteins annotated in the older snapshot against new annotations gained by the newer one.",
+      "test": "Test pair",
+      "testTooltip": "The held-out evaluation snapshot pair. Must not overlap with the training window so the evaluation measures genuine generalization.",
+      "schemaSha": "schema_sha",
+      "schemaShaTooltip": "Feature-set fingerprint. Any booster trained on this dataset must present this exact value at inference time; a mismatch causes PROTEA to refuse scoring.",
+      "manifestSha": "manifest_sha",
+      "manifestShaTooltip": "SHA-256 of the serialised manifest.json bytes. A change here means the lab trained on a different dump than the one published here.",
+      "nTrain": "Train rows",
+      "nEval": "Eval rows",
+      "created": "Created"
+    },
+    "emptyHero": {
+      "title": "No datasets registered yet",
+      "body": "A Dataset row is created automatically when an export_research_dataset job completes. Dispatch one from the button above, or register an existing lab dump by reference.",
+      "ctaDispatch": "Dispatch new export",
+      "ctaImport": "Import by reference"
+    },
+    "copy": {
+      "schemaSha": "Copy schema_sha",
+      "manifestSha": "Copy manifest_sha",
+      "copied": "Copied to clipboard"
+    },
+    "detail": {
+      "backToList": "Back to datasets",
+      "viewJob": "View producer job",
+      "producedByExport": "Produced by export_research_dataset",
+      "importedByReference": "Imported by reference (artefacts staged externally)",
+      "annotationSource": "Annotation source",
+      "provenanceTitle": "Provenance",
+      "schemaSha": "schema_sha",
+      "schemaShaHelp": "Feature set fingerprint. Boosters trained on this dataset must match this value at inference.",
+      "manifestSha": "manifest_sha",
+      "manifestShaHelp": "sha256 of the serialised manifest.json bytes.",
+      "datasetId": "Dataset UUID",
+      "producerVersion": "Producer version",
+      "producerGitSha": "Producer git SHA",
+      "embeddingProvenance": "Embedding config",
+      "openEmbeddings": "Open Embeddings page",
+      "embeddingMissing": "No embedding_config_id recorded.",
+      "embeddingNotResolved": "Config {id} not present in this PROTEA instance.",
+      "model": "Model",
+      "backend": "Backend",
+      "pooling": "Pooling",
+      "layerAgg": "Layer aggregation",
+      "layerIndices": "Layer indices",
+      "normalise": "Normalise",
+      "normaliseResidues": "Normalise residues",
+      "maxLength": "Max length",
+      "snapshotsTitle": "Ontology and snapshot windows",
+      "ontologySnapshot": "Ontology snapshot",
+      "artifactsTitle": "Artifact store",
+      "keyPrefix": "Key prefix",
+      "manifestUri": "manifest.json URI",
+      "trainUri": "train.parquet URI",
+      "evalUri": "eval.parquet URI",
+      "metaTitle": "Metadata",
+      "meta": "Raw meta JSONB",
+      "payloadHint": "The original export payload lives on the producer job.",
+      "footnote": "This is the source of truth the lab's pull_dataset.py consumes.",
+      "copied": "{field} copied",
+      "copyFailed": "Copy failed",
+      "download": "Download",
+      "downloadTrain": "Download train.parquet",
+      "downloadEval": "Download eval.parquet",
+      "downloadManifest": "Download manifest.json",
+      "downloadUnavailable": "File not yet registered",
+      "aspectStatsTitle": "Annotations by aspect",
+      "aspectProteins": "Proteins",
+      "aspectGoTerms": "GO terms",
+      "aspectAnnotations": "Annotations",
+      "bpo": "BPO",
+      "mfo": "MFO",
+      "cco": "CCO",
+      "aspectStatsLoading": "Loading aspect statistics...",
+      "aspectStatsError": "Could not load aspect statistics",
+      "openOntologyPage": "Open ontology page",
+      "trainWindowChart": "Training window coverage",
+      "aspectDonut": "Annotation distribution by aspect"
+    },
+    "dispatch": {
+      "title": "Dispatch new dataset export",
+      "subtitle": "Runs export_research_dataset on protea.training. KNN + features + parquet upload, then registers a Dataset row.",
+      "close": "Close",
+      "cancel": "Cancel",
+      "dispatch": "Dispatch",
+      "dispatching": "Dispatching…",
+      "loading": "Loading…",
+      "noEmbeddings": "No embedding configs available",
+      "noSnapshots": "No ontology snapshots available",
+      "nameLabel": "Output name",
+      "useSuggested": "Use suggested: {name}",
+      "embeddingLabel": "Embedding config",
+      "snapshotLabel": "Ontology snapshot",
+      "kLabel": "Neighbours (K)",
+      "kHelp": "Number of KNN neighbours per query. Higher K means more training pairs but heavier dump.",
+      "backendLabel": "Search backend",
+      "backendHelp": "FAISS CPU-IVF. Exact-numpy is also supported but not exposed here.",
+      "trainVersionsLabel": "Train versions",
+      "trainVersionsHelp": "Comma/space-separated GOA snapshot versions for the temporal training window. At least two.",
+      "testVersionsLabel": "Test versions",
+      "testVersionsHelp": "Held-out evaluation snapshot(s); usually one recent release like 230.",
+      "featuresLegend": "Feature toggles",
+      "computeAlignments": "Compute pairwise alignments (parasail)",
+      "computeAlignmentsHelp": "Materialises NW/SW alignment columns. Slow but feeds the reranker.",
+      "computeTaxonomy": "Compute taxonomy distances",
+      "computeTaxonomyHelp": "Attach NCBI lineage features per neighbour pair.",
+      "usePca": "Project embeddings through cached PCA",
+      "usePcaHelp": "Transductive PCA(16) per PLM, cached by embedding_config_id (see project_pca_transductive_decision).",
+      "expandVotes": "Expand votes to ancestors",
+      "expandVotesHelp": "Legacy knob; ancestor-expanded ground truth is now handled inside the eval-set.",
+      "errors": {
+        "nameRequired": "Output name is required.",
+        "embeddingRequired": "Pick an embedding config.",
+        "snapshotRequired": "Pick an ontology snapshot.",
+        "needTwoTrain": "Need at least two train versions to build a temporal split.",
+        "needOneTest": "Need at least one test version.",
+        "badVersionToken": "Bad version token: {token} (must be a non-negative integer)"
+      },
+      "tabs": {
+        "ariaLabel": "Dataset registration mode",
+        "dispatch": "Dispatch export",
+        "import": "Import from reference"
+      },
+      "import": {
+        "title": "Register a dataset by reference",
+        "subtitle": "Train/eval parquets and manifest.json already live in the artifact store; PROTEA only persists a Dataset row pointing at the URIs.",
+        "intro": "No job is enqueued, no artefacts re-read. Use this for lab dumps, salvage replays, or cross-environment imports where the data is already staged.",
+        "storageBackendLabel": "Storage backend",
+        "storageBackendHelp": "Identifier matching the URIs (local for file:// paths, minio for s3:// keys). Recorded verbatim; PROTEA does not validate the scheme against this value.",
+        "keyPrefixLabel": "Key prefix",
+        "keyPrefixHelp": "Artifact-store prefix that contains the parquets and manifest (e.g. datasets/<name>/). Used to rebuild URIs after a backend swap.",
+        "manifestUriLabel": "manifest.json URI",
+        "manifestUriHelp": "Required. PROTEA records the URI verbatim and never re-reads it.",
+        "trainUriLabel": "train.parquet URI",
+        "trainUriHelp": "Optional; leave empty for eval-only dumps.",
+        "evalUriLabel": "eval.parquet URI",
+        "evalUriHelp": "Optional; leave empty for train-only dumps.",
+        "schemaShaLabel": "schema_sha",
+        "schemaShaHelp": "Feature-set fingerprint from the lab's manifest. Boosters trained on this dump must match it at inference.",
+        "manifestShaLabel": "manifest_sha",
+        "manifestShaHelp": "sha256 hex of the serialized manifest.json bytes. Nullable for legacy dumps.",
+        "annotationSourceLabel": "Annotation source",
+        "nTrainRowsLabel": "Train row count",
+        "nEvalRowsLabel": "Eval row count",
+        "embeddingHelp": "Optional. NULL'd when the FK cannot be resolved in this PROTEA instance.",
+        "embeddingNotResolved": "(none / not resolved)",
+        "snapshotHelp": "Optional. Same NULL-on-unresolved semantics as the embedding config.",
+        "snapshotNotResolved": "(none / not resolved)",
+        "trainPairsLabel": "Train snapshot pairs",
+        "trainPairsHelp": "Comma/space-separated v{old}-v{new} tokens, one per shard. Empty for eval-only dumps.",
+        "evalPairLabel": "Eval snapshot pair",
+        "evalPairHelp": "v{old}-v{new} window of the eval parquet, if present.",
+        "producerVersionLabel": "Producer version",
+        "producerGitShaLabel": "Producer git SHA",
+        "externalSourceLabel": "External source",
+        "externalSourceHelp": "Free-form provenance tag (e.g. protea-reranker-lab@<git-sha>). Recorded in the meta JSONB column.",
+        "forceLabel": "Overwrite existing row with the same name",
+        "forceHelp": "Default rejects duplicates with 409. Enable only when re-registering after a backend swap or salvage replay.",
+        "importButton": "Register dataset",
+        "importing": "Registering…",
+        "errors": {
+          "keyPrefixRequired": "Key prefix is required.",
+          "manifestUriRequired": "manifest.json URI is required.",
+          "schemaShaRequired": "schema_sha is required.",
+          "kPositive": "K must be a positive integer.",
+          "rowCountInvalid": "Row count must be a non-negative integer (got: {token})."
+        }
+      }
+    }
+  },
+  "admin": {
+    "experimentRuns": {
+      "title": "Experiment runs",
+      "subtitle": "Narrative spine for the F-EXP campaign: every research run carries a description, hypothesis, structured config, provenance overlay, and findings. Linked to Job / EvaluationResult / RerankerModel rows by name.",
+      "adminBadge": "ADMIN",
+      "adminBadgeTooltip": "Writes are gated by the API key / bearer auth mode configured on the deployment.",
+      "newRun": "New run",
+      "refresh": "Refresh",
+      "refreshing": "Refreshing…",
+      "filterAriaLabel": "Filter runs by status",
+      "filters": {
+        "all": "All"
+      },
+      "status": {
+        "planned": "Planned",
+        "running": "Running",
+        "done": "Done",
+        "abandoned": "Abandoned"
+      },
+      "cols": {
+        "name": "Name",
+        "status": "Status",
+        "tags": "Tags",
+        "created": "Created",
+        "actions": "Actions"
+      },
+      "actions": {
+        "edit": "Edit",
+        "delete": "Delete",
+        "cancel": "Cancel"
+      },
+      "emptyAll": "No experiment runs yet. Mint the first one to start a campaign narrative.",
+      "emptyFiltered": "No runs match this status filter.",
+      "deleteConfirm": "Delete experiment run \"{name}\"? This cannot be undone.",
+      "deleteDialog": {
+        "title": "Delete experiment run?",
+        "body": "This removes the row from the server. The narrative, hypothesis, and findings cannot be restored.",
+        "confirm": "Delete run",
+        "confirming": "Deleting…"
+      },
+      "modal": {
+        "close": "Close dialog"
+      },
+      "toasts": {
+        "created": "Experiment run \"{name}\" minted",
+        "updated": "Experiment run \"{name}\" updated",
+        "deleted": "Experiment run \"{name}\" deleted"
+      },
+      "mint": {
+        "title": "Mint a new experiment run",
+        "subtitle": "Starts in the planned state. Transition via the Edit modal once the run picks up.",
+        "submit": "Mint run",
+        "submitting": "Minting…"
+      },
+      "edit": {
+        "title": "Edit run: {name}",
+        "subtitle": "Patch narrative, status, tags, config, or provenance. Status transitions stamp started_at / finished_at automatically on the server.",
+        "submit": "Save changes",
+        "submitting": "Saving…"
+      },
+      "fields": {
+        "name": "Name",
+        "status": "Status",
+        "statusHelp": "First move to running stamps started_at. First move to done or abandoned stamps finished_at. Re-entering a state is idempotent.",
+        "description": "Description",
+        "descriptionPlaceholder": "Free-form intent text shown on the run detail page.",
+        "hypothesis": "Hypothesis",
+        "hypothesisPlaceholder": "What this run is trying to verify or falsify.",
+        "findings": "Findings",
+        "findingsHelp": "Fill in when transitioning to done to capture the writeup.",
+        "tags": "Tags",
+        "tagsHelp": "Comma or space-separated grouping tokens (e.g. ablation, K-sweep).",
+        "config": "Config (JSON)",
+        "configHelp": "Free-form JSON object: hyperparameters, feature flags, dataset slugs. Empty string clears it.",
+        "provenance": "Provenance overlay (JSON)",
+        "provenanceHelp": "Free-form JSON object merged with the server's baseline provenance (git sha, hostname, timestamp). Empty string clears it."
+      },
+      "readonly": {
+        "id": "ID",
+        "startedAt": "Started",
+        "finishedAt": "Finished"
+      },
+      "errors": {
+        "nameRequired": "Name is required.",
+        "configInvalid": "Config JSON is invalid: {reason}",
+        "provenanceInvalid": "Provenance JSON is invalid: {reason}"
+      }
+    }
+  },
   "support": {
-    "title": "Support",
+    "title": "Back the project",
     "hero": {
-      "supportCount": "{count} people support this project",
+      "supportCount": "{count} people back this project",
       "withComments": "{count} with comments",
       "anonymous": "{count} anonymous"
     },
     "commentsSection": {
       "heading": "What people are saying",
       "noComments": "No comments yet. Be the first!"
+    },
+    "helpSection": {
+      "heading": "Need help?",
+      "body": "This page is for upvotes and feature requests, not technical help. If you ran into a bug or have a question, please use the resources below.",
+      "docsLink": "Browse the documentation",
+      "docsHint": "Sphinx manual with architecture, queues and ORM reference",
+      "issuesLink": "Open an issue on GitHub",
+      "issuesHint": "Report bugs, ask questions, request features"
     }
+  },
+  "dlq": {
+    "title": "Dead-Letter Queue (DLQ)",
+    "description": "Audit and drain the protea.dead-letter queue by grouping messages by operation and source queue. Admin-only.",
+    "forbiddenTitle": "Admins only",
+    "forbiddenBody": "This page manages the dead-letter queue and is restricted to users with the admin role.",
+    "summaryTitle": "Groups summary",
+    "colOperation": "Operation",
+    "colSourceQueue": "Source queue",
+    "colAge": "Age",
+    "colCount": "Messages",
+    "depth": "Depth",
+    "peeked": "Peeked",
+    "noGroups": "No messages found in the DLQ.",
+    "notLoaded": "Click Refresh to load the summary.",
+    "loading": "Loading...",
+    "refresh": "Refresh",
+    "loadFailed": "Could not load DLQ summary.",
+    "actionTitle": "Replay / Purge",
+    "filterOperation": "Filter by operation",
+    "filterQueue": "Filter by source queue",
+    "allOperations": "All operations",
+    "allQueues": "All queues",
+    "dryRunLabel": "Dry-run mode: report only, do not move messages",
+    "dryRunBadge": "Dry run",
+    "done": "Done",
+    "replayBtn": "Replay",
+    "replayDryResult": "Would replay {count} messages ({skipped} skipped).",
+    "replayResult": "Replayed {replayed} messages ({skipped} skipped).",
+    "purgeBtn": "Purge",
+    "purgeConfirmBtn": "Confirm purge",
+    "purgeDryResult": "Would purge {count} messages ({skipped} skipped).",
+    "purgeResult": "Purged {purged} messages ({skipped} skipped).",
+    "actionFailed": "The operation failed.",
+    "working": "Processing...",
+    "liveWarning": "Live mode: messages will be moved or permanently deleted. Always run a dry-run first.",
+    "baselineNote": "Baseline audited 2026-05-26: ~7272 messages, 100% store_embeddings from historic re-ingestion events. See docs/incidents/2026-05-26-dlq-audit-baseline.md."
   },
   "maintenance": {
     "title": "Maintenance",
@@ -668,6 +1208,18 @@
       "refresh": "Refresh",
       "vacuum": "Vacuum",
       "cleaning": "Cleaning…"
+    },
+    "forbidden": {
+      "title": "Admin only",
+      "body": "Maintenance vacuums are reserved for accounts with the admin role.",
+      "roleLabel": "Your current role",
+      "backHome": "Back to home"
+    }
+  },
+  "adminUsers": {
+    "backendMissing": {
+      "title": "User management is coming soon",
+      "body": "User management features are coming soon. Check back later."
     }
   },
   "components": {
@@ -694,30 +1246,553 @@
       "viewAll": "View all →"
     },
     "usagePolicyModal": {
-      "title": "Welcome to PROTEA",
-      "subtitle": "Personal compute resources, openly shared — please read before continuing",
-      "intro": "This platform runs on personal hardware shared freely for research purposes. No registration or authorization is required. Please keep the following in mind:",
-      "rule1": "These are personal resources shared voluntarily. Please be mindful of the load you generate.",
-      "rule2": "Before launching heavy or long-running jobs, reach out first — a quick message explaining your use case is much appreciated.",
-      "rule3": "All processed data is public and open. Feel free to use and share results.",
-      "rule4": "PROTEA is free and open source. Any individual or research institution can deploy their own instance — source code on GitHub.",
-      "rule5": "This service runs on a best-effort basis. The system may be taken down for maintenance or personal use at any time without prior notice.",
-      "rule6": "If something breaks or behaves unexpectedly, please report it. Bug reports and feedback are genuinely appreciated.",
-      "dataPublicNote": "All data processed here is public. Thank you for using this responsibly.",
-      "accept": "Got it, let's go"
+      "title": "PROTEA: research preview",
+      "subtitle": "Open-access research tool. Please read before continuing.",
+      "accept": "I understand and accept",
+      "identification": {
+        "heading": "Operator",
+        "body": "This is a non-commercial academic research deployment, operated personally and independently. It does NOT constitute an official service of any institution."
+      },
+      "asIs": {
+        "heading": "No warranty",
+        "body": "Provided as-is, without warranty of any kind. The author assumes no liability for results, downtime, or data loss. Best-effort availability; the service may be taken down for maintenance without notice."
+      },
+      "dataHandling": {
+        "heading": "What you submit",
+        "body": "Do not submit confidential, proprietary, or personally identifiable data. Submitted sequences are processed in clear and may be retained for debugging, reproducibility, and use by other research users of this instance. By submitting, you certify that you have the right to share the data publicly."
+      },
+      "privacyLog": {
+        "heading": "Privacy and logs",
+        "body": "No accounts required. The server logs IP addresses and request timestamps for 30 days for abuse prevention. No tracking cookies. Data protection requests (access, erasure, rectification): open an issue on the project repository on GitHub."
+      },
+      "license": {
+        "heading": "License",
+        "body": "Source code is released under the repository <license>LICENSE on GitHub</license>. Outputs generated by this deployment are released under CC-BY-4.0 unless explicitly stated otherwise on a specific result page."
+      },
+      "responsibleUse": {
+        "heading": "Responsible use",
+        "body": "Be mindful of the shared compute load. Before launching heavy or long-running jobs, reach out first via the <issues>GitHub issue tracker</issues>."
+      },
+      "bugReport": {
+        "heading": "Bug reports",
+        "body": "If something breaks or behaves unexpectedly, <issues>file an issue on GitHub</issues>. Reports are appreciated."
+      },
+      "lastUpdated": "Policy revision 2, 2026-05-23.",
+      "keyboardHint": "Press Enter or Space to accept"
     },
     "statusBadge": {
       "queued": "QUEUED",
       "running": "RUNNING",
       "succeeded": "SUCCEEDED",
       "failed": "FAILED",
-      "cancelled": "CANCELLED"
+      "cancelled": "CANCELLED",
+      "killed": "KILLED",
+      "crashed": "CRASHED"
     },
     "eventTimeline": {
       "noEvents": "No events yet."
     },
     "languageSwitcher": {
       "label": "Language"
+    },
+    "floatingJobsWidget": {
+      "toggleLabel": "View running jobs ({count})"
+    }
+  },
+  "stack": {
+    "title": "PROTEA stack",
+    "subtitle": "Eight repositories make up PROTEA. Use this page to jump between them when reviewing pull requests or comparing implementations.",
+    "reposHeading": "Repositories",
+    "colRepo": "Repo",
+    "colRole": "Role",
+    "colStatus": "Status",
+    "colSummary": "Summary",
+    "colLinks": "Links",
+    "loading": "Loading repositories...",
+    "pullsHeading": "Open pull requests across the stack",
+    "refresh": "Refresh",
+    "refreshing": "Refreshing...",
+    "fetchedAt": "Fetched {time}. Cached for 5 minutes.",
+    "errorsHeading": "Some repositories could not be queried:",
+    "prRepo": "Repo",
+    "prTitle": "Title",
+    "prAuthor": "Author",
+    "prUpdated": "Updated",
+    "noOpenPulls": "No open pull requests in any repository. Tabula rasa.",
+    "loadingPulls": "Loading pull requests...",
+    "linkDocs": "Docs",
+    "linkDocsLocal": "Local docs",
+    "thesisHeading": "PROTEA thesis",
+    "thesisDescription": "The compiled thesis PDF is being served from this deploy.",
+    "thesisOpen": "Open PDF"
+  },
+  "farm": {
+    "title": "Agent farm",
+    "subtitle": "Tasks from the agent-farm orchestrator",
+    "refresh": "Refresh",
+    "emptyState": "No tasks match the current filters.",
+    "authGate": {
+      "title": "Sign in to view the farm",
+      "body": "Agent-farm tasks, plans and cost data are reserved for signed-in users. Sign in and you will be sent back here automatically.",
+      "signIn": "Sign in"
+    },
+    "subnav": {
+      "ariaLabel": "Agent farm section navigation",
+      "tasks": "Tasks",
+      "plan": "Plan",
+      "cost": "Cost"
+    },
+    "rowCount": "{count} task{count, plural, one {} other {s}} shown",
+    "filters": {
+      "statusLabel": "Status",
+      "statusAll": "All",
+      "agentLabel": "Agent",
+      "agentPlaceholder": "exact agent name",
+      "windowLabel": "Window"
+    },
+    "windows": {
+      "24h": "Last 24h",
+      "7d": "Last 7d"
+    },
+    "status": {
+      "queued": "Queued",
+      "running": "Running",
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "cancelled": "Cancelled",
+      "killed": "Killed",
+      "crashed": "Crashed"
+    },
+    "table": {
+      "taskId": "Task ID",
+      "agent": "Agent",
+      "status": "Status",
+      "started": "Started",
+      "duration": "Duration",
+      "model": "Model"
+    },
+    "pill": {
+      "running": "{count} farm",
+      "error": "{count} err",
+      "unknown": "Farm offline",
+      "recentErrorsAria": "{count} farm errors in the last hour"
+    },
+    "detail": {
+      "title": "Task detail",
+      "backLink": "← Back to tasks",
+      "created": "Created",
+      "started": "Started",
+      "ended": "Ended",
+      "model": "Model",
+      "exitCode": "Exit code",
+      "pid": "PID",
+      "worktree": "Worktree",
+      "ownerRepo": "Owner / repo",
+      "spawnArgs": "Spawn args",
+      "spawnArgsAdmin": "Spawn args (admin only, raw payload)",
+      "spawnArgsRedacted": "Spawn args are hidden. Sign in with an admin account to view the raw payload.",
+      "diffRange": "Commit range",
+      "shaBefore": "Before",
+      "shaAfter": "After",
+      "heartbeatsTitle": "Heartbeats",
+      "heartbeatsCount": "({count} shown)",
+      "summaryTitle": "Result summary",
+      "summaryEmpty": "Result row exists but the summary is empty.",
+      "summaryMissing": "No result row yet. The task has not reached finalize."
+    },
+    "plan": {
+      "title": "Slice DAG",
+      "subtitle": "Dependency graph across every loop in plans/",
+      "refresh": "Refresh",
+      "emptyState": "No slices match the current filters.",
+      "sliceCount": "{count} slice{count, plural, one {} other {s}} shown",
+      "filters": {
+        "loopLabel": "Loop",
+        "phaseLabel": "Phase",
+        "priorityLabel": "Priority",
+        "statusLabel": "Status",
+        "allLabel": "All",
+        "criticalPath": "Critical path"
+      },
+      "status": {
+        "pending": "Pending",
+        "in_progress": "In progress",
+        "blocked": "Blocked",
+        "done": "Done",
+        "deferred": "Deferred"
+      },
+      "legend": {
+        "nodes": "Nodes",
+        "edges": "Edges",
+        "deps": "depends on",
+        "criticalEdge": "critical edge"
+      },
+      "hover": {
+        "priority": "Priority",
+        "hours": "Hours",
+        "acceptance": "Acceptance",
+        "deps": "Deps",
+        "loop": "Loop",
+        "phase": "Phase"
+      },
+      "criticalPath": {
+        "toggleOn": "Highlight critical path",
+        "toggleOff": "Clear highlight",
+        "noneFound": "No pending-only chain found.",
+        "summary": "{count} slice{count, plural, one {} other {s}} on the longest pending chain ({hours}h budget)."
+      },
+      "a11y": {
+        "dagLabel": "Slice dependency graph, {count} slice{count, plural, one {} other {s}}",
+        "dagSummary": "{count} slice{count, plural, one {} other {s}} in this graph.",
+        "dagListTitle": "Slices grouped by status"
+      }
+    },
+    "cost": {
+      "title": "Cost rollup",
+      "subtitle": "Spend by agent, model, and day, compared with each agent's advisory cap",
+      "refresh": "Refresh",
+      "loading": "Loading cost rollup",
+      "emptyState": "No cost data in the selected window.",
+      "summary": {
+        "total": "Total spend",
+        "tasks": "Tasks billed",
+        "window": "Window",
+        "windowDays": "Last {days} days"
+      },
+      "controls": {
+        "viewLabel": "View",
+        "windowLabel": "Window",
+        "view": {
+          "agent": "By agent",
+          "model": "By model",
+          "day": "By day"
+        },
+        "windowOption": {
+          "d7": "7d",
+          "d30": "30d",
+          "d60": "60d"
+        }
+      },
+      "captions": {
+        "agent": "Daily-average spend per agent over the last {days} days.",
+        "model": "Stacked spend per model over the last {days} days.",
+        "day": "Total daily spend over the last {days} days."
+      },
+      "legend": {
+        "spend": "Spend",
+        "overBudget": "over cap",
+        "budget": "Daily cap",
+        "budgetTick": "cap marker"
+      }
+    }
+  },
+  "reranker": {
+    "page": {
+      "title": "Re-ranker Models",
+      "labBadge": "LAB",
+      "labBadgeHint": "Research surface: reproducibility parameters are intentionally visible.",
+      "description": "LightGBM binary classifiers that re-score GO predictions using alignment, taxonomy, and aggregate features. Training lives in the offline protea-reranker-lab; this page registers the resulting booster so PROTEA can use it during inference.",
+      "importBtn": "Import booster (upload)",
+      "importBtnHint": "Upload the three files from a lab run: model.txt (the LightGBM booster), spec.yaml (experiment spec), and run.json (metrics and provenance). PROTEA stores the booster in the artifact store and records a RerankerModel row.",
+      "registerBtn": "Register by URI",
+      "registerBtnHint": "The booster already lives in MinIO or the local artifact store. Paste the URI and the spec/run metadata so PROTEA records the row without re-uploading the binary.",
+      "contextBannerTitle": "Register a LightGBM booster trained in protea-reranker-lab",
+      "contextBannerBody": "LightGBM training lives in the offline lab; this page registers the resulting booster so PROTEA can score predictions with it. Use Import booster to upload a fresh model.txt + spec.yaml + run.json, or Register by URI when the artefact already lives in MinIO.",
+      "categoryHints": {
+        "nk": "No Knowledge: proteins with zero GO annotations at the training cutoff. The hardest evaluation setting; measures pure prediction ability from sequence alone.",
+        "lk": "Limited Knowledge: proteins annotated in some GO namespaces but not all at the training cutoff. The booster targets new annotations in previously empty namespaces.",
+        "pk": "Partial Knowledge: proteins that already had annotations in a namespace at the training cutoff and gained further annotations later. The booster predicts extensions to existing functional profiles."
+      },
+      "provenanceTitle": "Provenance and feature selection",
+      "schemaShaHint": "feature_schema_sha: family-aware fingerprint of the feature set the booster was trained on. PROTEA refuses to use a booster whose schema does not match the live pipeline.",
+      "manifestShaHint": "dataset_manifest_sha: SHA-256 of the training dataset manifest. A drift here means the lab trained on a different dump than the one registered in the Datasets page.",
+      "datasetHint": "Dataset row that was used for training. Click the name to open the full provenance in the Datasets page.",
+      "externalSourceHint": "Free-form provenance tag recording which external tool and version produced the booster (e.g. protea-reranker-lab@<git-sha>).",
+      "emptyHero": {
+        "title": "No re-ranker models registered yet",
+        "body": "Train a LightGBM booster in protea-reranker-lab using a frozen Dataset, then import it here. The booster will replace the raw embedding distance ranking with calibrated probabilities.",
+        "ctaImport": "Import booster",
+        "ctaRegister": "Register by URI"
+      },
+      "metricsTitle": "Training-time metrics",
+      "importanceTitle": "Feature importance (gain)",
+      "specTitle": "ExperimentSpec (spec.yaml)",
+      "downloadTitle": "Download re-ranked predictions",
+      "downloadBtn": "Download reranked TSV",
+      "computeMetricsTitle": "Compute CAFA metrics",
+      "computeMetricsBtn": "Compute metrics",
+      "computeMetricsRunning": "Computing... (this may take 30-60s)"
+    },
+    "importDialog": {
+      "title": "Import re-ranker booster",
+      "subtitle": "Upload model.txt + spec.yaml + run.json produced by protea-reranker-lab.",
+      "close": "Close",
+      "filesLegend": "Run artefacts",
+      "filesHelp": "Pick the three files from your lab's runs/<run_id>/ directory. PROTEA uploads model.txt to the artifact store and derives provenance from spec.yaml and run.json.",
+      "modelFileLabel": "model.txt (LightGBM booster)",
+      "modelFileHelp": "Plain-text LightGBM dump (lightgbm.Booster.save_model).",
+      "specFileLabel": "spec.yaml (ExperimentSpec)",
+      "specFileHelp": "Recorded for reproducibility. ``training.cell`` parses into category / aspect.",
+      "runFileLabel": "run.json (metrics + provenance)",
+      "runFileHelp": "Includes metrics, feature_importance, dataset metadata, and feature-family selection.",
+      "nameLabel": "Row name (optional)",
+      "namePlaceholder": "defaults to run.run_id",
+      "nameHelp": "Overrides the auto-derived RerankerModel.name. Must be unique unless you tick \"replace\".",
+      "forceLabel": "Replace existing row with same name",
+      "provenanceLegend": "Optional provenance overrides",
+      "provenanceHelp": "When the lab run carries the dataset.name and FK UUIDs, leave these blank: the server resolves them automatically. Use the overrides only when the lab can't see the local PROTEA instance.",
+      "datasetLabel": "Linked Dataset",
+      "datasetAuto": "Auto (resolve from run.json dataset.name)",
+      "datasetPlaceholder": "Dataset UUID",
+      "datasetHelp": "Forces a specific Dataset row UUID. If unset, PROTEA resolves by run.dataset.name.",
+      "externalSourceLabel": "External source tag",
+      "externalSourceHelp": "Free-form provenance, e.g. protea-reranker-lab@<git-sha>.",
+      "predictionSetLabel": "PredictionSet UUID (optional)",
+      "evaluationSetLabel": "EvaluationSet UUID (optional)",
+      "import": "Import booster",
+      "importing": "Uploading…",
+      "cancel": "Cancel",
+      "errors": {
+        "filesRequired": "All three files (model.txt, spec.yaml, run.json) are required."
+      }
+    },
+    "registerDialog": {
+      "title": "Register booster by URI",
+      "subtitle": "Booster already in MinIO/local FS. Paste artifact_uri + spec.yaml + run.json so PROTEA records the URI without re-uploading the blob.",
+      "close": "Close",
+      "artifactUriLabel": "Artifact URI",
+      "artifactUriHelp": "s3://bucket/key or file://path/to/model.txt. PROTEA registers this verbatim and trusts the blob.",
+      "specYamlLabel": "spec.yaml (paste contents)",
+      "specYamlHelp": "Full ExperimentSpec YAML text. ``training.cell`` parses into category / aspect.",
+      "runJsonLabel": "run.json (paste contents)",
+      "runJsonHelp": "Lab run metadata (metrics, feature_importance, dataset.name, features.families_enabled). Must be valid JSON.",
+      "nameLabel": "Row name (optional)",
+      "namePlaceholder": "defaults to run.run_id",
+      "nameHelp": "Overrides the auto-derived RerankerModel.name.",
+      "forceLabel": "Replace existing row with same name",
+      "provenanceLegend": "Optional provenance overrides",
+      "datasetLabel": "Linked Dataset",
+      "datasetAuto": "Auto (resolve from run.json dataset.name)",
+      "datasetPlaceholder": "Dataset UUID",
+      "externalSourceLabel": "External source tag",
+      "predictionSetLabel": "PredictionSet UUID (optional)",
+      "evaluationSetLabel": "EvaluationSet UUID (optional)",
+      "register": "Register booster",
+      "registering": "Registering…",
+      "cancel": "Cancel",
+      "errors": {
+        "uriRequired": "Artifact URI is required.",
+        "specRequired": "spec.yaml contents are required.",
+        "runJsonInvalid": "run.json is not valid JSON: {message}"
+      }
+    }
+  },
+  "apiKeys": {
+    "title": "API keys",
+    "subtitle": "Programmatic access keys for CLI clients, CI pipelines, and the offline reranker lab. Each key is hashed on the server the moment it is created; the raw value is displayed once and cannot be retrieved again. Rotate keys regularly and revoke any that are no longer in use.",
+    "roleDescriptions": {
+      "viewer": "Read-only access to all public endpoints. Use for monitoring dashboards or read-only CI checks.",
+      "operator": "Can dispatch jobs (POST /v1/datasets, POST /v1/jobs), run maintenance, and manage query sets. Required by the reranker lab when pulling datasets or registering boosters.",
+      "admin": "Full control including minting and revoking other API keys, admin-only pages, and destructive operations. Restrict to trusted automation only."
+    },
+    "rotationAdvice": "Rotate keys every 90 days or immediately after any suspected exposure.",
+    "storageAdvice": "Store the raw key in a secret manager (e.g. GitHub Actions secrets, Vault). Never commit it to source control.",
+    "emptyHero": {
+      "title": "No API keys yet",
+      "body": "Mint a key to give CI pipelines, the offline reranker lab, or any automated client programmatic access. Choose the narrowest role that the client needs.",
+      "cta": "Mint the first key"
+    },
+    "refresh": "Refresh",
+    "mint": "Mint new key",
+    "mintFirst": "Mint the first key",
+    "revoke": "Revoke",
+    "revoking": "Revoking...",
+    "empty": "No API keys yet.",
+    "includeRevoked": "Show revoked keys",
+    "counts": "{active} active, {revoked} revoked",
+    "neverUsed": "never",
+    "statusActive": "Active",
+    "statusRevoked": "Revoked",
+    "loadError": "Could not load API keys",
+    "revokedToast": "Revoked {name}",
+    "revokeErrorToast": "Revoke failed: {error}",
+    "mintedToast": "Minted {name}",
+    "footnote": "Revocation is irreversible. Revoked rows remain visible for audit when 'Show revoked keys' is enabled.",
+    "forbiddenTitle": "Admin only",
+    "forbiddenBody": "This page manages programmatic access keys and is restricted to operators with the admin role.",
+    "forbiddenRoleLabel": "Your current role",
+    "forbiddenBackHome": "Back to home",
+    "cols": {
+      "name": "Name",
+      "role": "Role",
+      "prefix": "Prefix",
+      "created": "Created",
+      "lastUsed": "Last used",
+      "status": "Status",
+      "actions": "Actions"
+    },
+    "dialog": {
+      "title": "Mint a new API key",
+      "subtitle": "The raw key value is returned exactly once. Copy it now; it cannot be retrieved later.",
+      "revealTitle": "Copy your new key",
+      "revealSubtitle": "This is the only time the raw value will be shown.",
+      "close": "Close",
+      "cancel": "Cancel",
+      "mint": "Mint key",
+      "minting": "Minting...",
+      "done": "I've saved it",
+      "copy": "Copy",
+      "copied": "Copied",
+      "nameLabel": "Name",
+      "namePlaceholder": "lab-runner-2026-05",
+      "nameHelp": "Free-form label that helps you identify the key in audit logs.",
+      "roleLabel": "Role",
+      "roleHelp": "Determines which endpoints the key can call.",
+      "roleViewer": "Viewer",
+      "roleViewerHelp": "Read-only access. Safe default.",
+      "roleOperator": "Operator",
+      "roleOperatorHelp": "Can dispatch jobs and run maintenance.",
+      "roleAdmin": "Admin",
+      "roleAdminHelp": "Full control including destructive admin actions.",
+      "expiryLabel": "Expiry (optional)",
+      "expiryHelp": "When set, the key stops working after this date.",
+      "expiryFootnote": "Not yet enforced server-side; UI captures the value for the upcoming follow-up.",
+      "prefixLabel": "Prefix",
+      "warningTitle": "Save this key now",
+      "warningBody": "PROTEA only stores a hash. If you lose this value you must mint a new key and revoke this one.",
+      "errors": {
+        "nameRequired": "Name is required."
+      }
+    },
+    "confirm": {
+      "title": "Revoke this key?",
+      "body": "The key will stop authenticating immediately. The row stays visible for audit.",
+      "cancel": "Cancel",
+      "confirm": "Yes, revoke",
+      "confirming": "Revoking..."
+    }
+  },
+  "toasts": {
+    "jobSucceeded": "Job succeeded",
+    "jobFailed": "Job failed",
+    "jobCancelled": "Job cancelled",
+    "jobDeleted": "Job deleted",
+    "jobQueued": "Job queued",
+    "computeJobQueued": "Compute job queued",
+    "iaUrlSaved": "IA URL saved",
+    "embeddingConfigCreated": "Embedding config created",
+    "configDeleted": "Config deleted",
+    "scoringConfigCreated": "Scoring config created",
+    "annotationsDeleted": "Deleted ({count} annotations removed)",
+    "predictionsDeleted": "Deleted ({count} assignments removed)",
+    "querySetDeleted": "Deleted \"{name}\"",
+    "querySetUploaded": "Query set \"{name}\" uploaded ({count} sequences)",
+    "sequencesVacuumed": "Deleted {count} orphan sequence(s)",
+    "embeddingsVacuumed": "Deleted {count} unindexed embedding(s)",
+    "presetsCreated": "Presets created: {names}",
+    "presetsAllExist": "All presets already exist",
+    "loadAnnotationSetsFailed": "Failed to load annotation sets",
+    "loadSnapshotsFailed": "Failed to load snapshots",
+    "loadProteinFailed": "Failed to load protein",
+    "loadProteinsFailed": "Failed to load proteins",
+    "loadStatsFailed": "Failed to load stats",
+    "loadAnnotationsFailed": "Failed to load annotations",
+    "loadGraphFailed": "Failed to load graph",
+    "loadDataFailed": "Failed to load data",
+    "loadResultsFailed": "Failed to load results",
+    "loadDistributionFailed": "Failed to load distribution",
+    "loadDetailFailed": "Failed to load detail",
+    "loadScoringConfigsFailed": "Failed to load scoring configs",
+    "loadPresetsFailed": "Failed to load presets",
+    "loadSequenceStatsFailed": "Failed to load sequence stats",
+    "loadEmbeddingStatsFailed": "Failed to load embedding stats",
+    "vacuumFailed": "Vacuum failed",
+    "createConfigFailed": "Failed to create config"
+  },
+  "auth": {
+    "login": {
+      "title": "Sign in to PROTEA",
+      "subtitle": "Use the email and password you registered with.",
+      "emailLabel": "Email",
+      "passwordLabel": "Password",
+      "submit": "Sign in",
+      "submitting": "Signing in",
+      "needAccount": "Need an account?",
+      "needAccountCta": "Request one",
+      "errors": {
+        "invalidCredentials": "Invalid email or password.",
+        "pendingApproval": "Your account is still pending admin approval. You will be able to sign in once it has been activated.",
+        "deactivated": "This account has been deactivated. Contact an administrator to re-enable it.",
+        "serverUnavailable": "Sign-in is not available on this server (JWT secret is not configured).",
+        "fallback": "Sign in failed (HTTP {status}).",
+        "unexpected": "Unexpected error."
+      }
+    },
+    "signup": {
+      "title": "Create a PROTEA account",
+      "subtitle": "Tell us a little about why you need access. An admin reviews every new account before activation.",
+      "emailLabel": "Email",
+      "usernameLabel": "Username",
+      "usernameHint": "Shown on shared resources (jobs, audit log). Letters, digits, dashes.",
+      "passwordLabel": "Password",
+      "passwordHint": "Minimum 8 characters.",
+      "displayNameLabel": "Display name",
+      "displayNameHint": "Optional human-readable name.",
+      "intendedUseLabel": "Intended use",
+      "intendedUseHint": "What you plan to do with PROTEA. Helps admins approve faster.",
+      "intendedUsePlaceholder": "e.g. Benchmarking GO-term predictors on CAFA-style splits.",
+      "optional": "optional",
+      "submit": "Request an account",
+      "submitting": "Submitting account request",
+      "haveAccount": "Already have an account?",
+      "haveAccountCta": "Sign in",
+      "errors": {
+        "emailTaken": "An account with this email already exists. Try signing in instead.",
+        "usernameTaken": "That username is already taken. Please pick another one.",
+        "conflict": "This account already exists.",
+        "fallback": "Signup failed (HTTP {status}).",
+        "unexpected": "Unexpected error."
+      }
+    },
+    "profile": {
+      "anonymousTitle": "Sign in to view your profile",
+      "anonymousBody": "Your account details, role and status appear here once you are signed in.",
+      "signIn": "Sign in",
+      "createAccount": "Create account",
+      "loadError": "Could not load your profile: {message}",
+      "title": "Your profile",
+      "subtitle": "Account details for {name}.",
+      "signOut": "Sign out",
+      "fields": {
+        "username": "Username",
+        "email": "Email",
+        "userId": "User ID",
+        "role": "Role"
+      },
+      "roles": {
+        "admin": "Admin",
+        "operator": "Operator",
+        "researcher": "Researcher",
+        "viewer": "Viewer"
+      },
+      "statuses": {
+        "active": "Active",
+        "pending": "Pending approval",
+        "deactivated": "Deactivated"
+      },
+      "displayNameHeading": "Display name",
+      "displayNameBody": "Shown next to your jobs, audit-log entries and shared resources.",
+      "displayNamePlaceholder": "(none set)",
+      "save": "Save",
+      "saveDisabledTitle": "The PATCH /auth/me endpoint is not yet wired. Display name edits land in a follow-up auth slice.",
+      "saveDisabledNote": "Editing is disabled in this build (no profile-update endpoint on the current server). It will activate automatically once the backend exposes the corresponding mutation."
+    },
+    "pendingApproval": {
+      "title": "Account pending admin approval",
+      "body": "Your account request has been recorded. An administrator will review your intended use and activate the account. You will be able to sign in once that happens.",
+      "note": "Approvals are usually processed within a working day. If you have not heard back after that, please ping the project maintainer through the documentation contact.",
+      "backHome": "Back home",
+      "goSignIn": "Go to sign in"
     }
   }
 }

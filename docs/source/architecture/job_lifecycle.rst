@@ -39,12 +39,12 @@ The two-session pattern
 
 ``BaseWorker.handle_job(job_id)`` uses **two independent database sessions** by design:
 
-**Session 1 — Claim**
+**Session 1. Claim.**
    Loads the job, checks it is in QUEUED status, transitions it to RUNNING, writes a
    ``job.started`` event, and commits. After this commit, any monitoring tool or frontend
    can see the job is running. The session is then closed.
 
-**Session 2 — Execute**
+**Session 2. Execute.**
    Loads the job again (fresh session), resolves the operation from the registry, and
    calls ``operation.execute(session, payload, emit=emit)``. On success, writes
    ``job.succeeded`` and commits. On exception, writes ``job.failed`` with the error class
@@ -59,7 +59,7 @@ reflects the last committed state, and no session is left open across a long-run
    A single long-lived session would hold a transaction open for the entire duration of the
    operation (potentially minutes). This blocks table-level vacuuming and causes lock
    contention. More importantly, a crash in the execute phase leaves the claim phase committed
-   (RUNNING is visible) while the result is not — which is the correct observable state.
+   (RUNNING is visible) while the result is not, which is the correct observable state.
 
 Parent-child job hierarchy
 --------------------------
@@ -83,16 +83,16 @@ many parallel workers using a **parent-child pattern**:
 The parent job stays in ``RUNNING`` state until the **last write worker** atomically
 increments the progress counter and detects completion. The ``Job`` model includes:
 
-- ``parent_job_id`` — FK to the coordinator job (``NULL`` for top-level jobs)
-- ``progress_current`` — batches completed so far
-- ``progress_total`` — total batches dispatched
+- ``parent_job_id``: FK to the coordinator job (``NULL`` for top-level jobs)
+- ``progress_current``: batches completed so far
+- ``progress_total``: total batches dispatched
 
 .. admonition:: Snapshotted context in batch payloads
    :class: note
 
    Coordinators that dispatch to ephemeral batch queues
    (``protea.embeddings.batch``, ``protea.predictions.batch``) serialise
-   the full :class:`ProteaPayload` into the AMQP body — there is no DB
+   the full :class:`ProteaPayload` into the AMQP body; there is no DB
    row the worker can read from. When a coordinator needs to propagate
    state resolved against a row that lives in PostgreSQL, it **snapshots
    the relevant columns into the batch payload at dispatch time**.
@@ -125,8 +125,8 @@ for closing the job passes to the child workers through the progress tracking me
 This is used by all coordinator operations to allow the parent job to remain RUNNING
 while batch workers process their messages in parallel.
 
-RetryLaterError — deferring busy operations
--------------------------------------------
+RetryLaterError: deferring busy operations
+------------------------------------------
 
 When a resource is unavailable (e.g., GPU already in use by another embedding job),
 an operation can raise ``RetryLaterError``:
@@ -150,11 +150,11 @@ Event log
 Every state transition and significant progress event is recorded as a ``JobEvent`` row.
 The ``emit`` callback available to every operation writes a ``JobEvent`` with:
 
-- ``event`` — a dot-separated name (e.g. ``insert_proteins.page_done``)
-- ``message`` — optional human-readable description
-- ``fields`` — arbitrary ``JSONB`` payload (counts, URLs, timing)
-- ``level`` — ``info`` | ``warning`` | ``error``
-- ``ts`` — server-side timestamp
+- ``event``: a dot-separated name (e.g. ``insert_proteins.page_done``)
+- ``message``: optional human-readable description
+- ``fields``: arbitrary ``JSONB`` payload (counts, URLs, timing)
+- ``level``: ``info`` | ``warning`` | ``error``
+- ``ts``: server-side timestamp
 
 The frontend polls ``GET /jobs/{id}/events`` to display this timeline in real time.
 
@@ -185,18 +185,18 @@ already in a terminal state (SUCCEEDED, FAILED, CANCELLED) the endpoint is a no-
 Any queued child jobs (status = QUEUED) are also cancelled atomically.
 
 .. note::
-   Cancellation of a RUNNING job is a soft cancel — it marks the DB row as CANCELLED but
+   Cancellation of a RUNNING job is a soft cancel: it marks the DB row as CANCELLED but
    does not interrupt the worker process. The worker will still complete the operation and
    attempt to write SUCCEEDED/FAILED, but the CANCELLED status is already committed and
    takes precedence in the frontend view.
 
 .. seealso::
 
-   - :doc:`operations` — the operations that workers actually run.
-   - :doc:`/reference/workers` — class-level docs for ``BaseWorker``,
+   - :doc:`operations`: the operations that workers actually run.
+   - :doc:`/reference/workers`: class-level docs for ``BaseWorker``,
      ``QueueConsumer``, ``OperationConsumer``, and ``StaleJobReaper``.
-   - :doc:`/adr/002-two-session-worker-pattern` — why two sessions, not one.
-   - :doc:`/adr/003-queue-consumer-vs-operation-consumer` — when each
+   - :doc:`/adr/002-two-session-worker-pattern`: why two sessions, not one.
+   - :doc:`/adr/003-queue-consumer-vs-operation-consumer`: when each
      consumer type applies.
-   - :doc:`/adr/004-dead-letter-queue-and-retry-strategy` — how
+   - :doc:`/adr/004-dead-letter-queue-and-retry-strategy`: how
      ``RetryLaterError`` and the DLQ interact.

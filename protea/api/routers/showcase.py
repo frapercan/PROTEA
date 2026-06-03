@@ -1,4 +1,4 @@
-"""Showcase endpoint — aggregates platform stats and the single best evaluation
+"""Showcase endpoint: aggregates platform stats and the single best evaluation
 result with full embedding attribution.
 
 Unlike :mod:`protea.api.routers.benchmark`, which exposes the full per-model
@@ -13,7 +13,7 @@ buckets (``knn_baseline`` / ``knn_scored`` / ``knn_reranker``) and took the
 maximum Fmax across *all* embeddings in each bucket.  That hid which concrete
 embedding won a given cell, and silently dropped losing embeddings from the
 UI entirely.  With the introduction of the 8-model benchmark, that collapse
-is actively misleading — so this endpoint now returns a single named winner
+is actively misleading; so this endpoint now returns a single named winner
 and a link to ``/benchmark`` for the full matrix.
 """
 
@@ -54,8 +54,8 @@ def _approx_count(session: Session, table: str) -> int:
 def _avg_fmax(results: dict[str, Any]) -> float | None:
     """Mean Fmax across the 9 (category × aspect) cells, ignoring missing ones.
 
-    Returns ``None`` if the ``results`` blob is empty or has no Fmax values —
-    that way a malformed or partial evaluation does not pretend to be
+    Returns ``None`` if the ``results`` blob is empty or has no Fmax values
+    so a malformed or partial evaluation does not pretend to be
     "the best".
     """
     values: list[float] = []
@@ -71,6 +71,63 @@ def _avg_fmax(results: dict[str, Any]) -> float | None:
     return sum(values) / len(values)
 
 
+def _load_showcase_counts(session: Session) -> dict[str, int]:
+    """Pipeline stage row counts shown on the showcase page.
+
+    Large tables (``protein`` / ``sequence`` / ``sequence_embedding`` /
+    ``go_prediction``) use ``pg_class.reltuples`` because exact
+    ``COUNT(*)`` on ``go_prediction`` takes 20-30 s. Small tables keep
+    exact counts.
+    """
+    return {
+        "proteins": _approx_count(session, "protein"),
+        "canonical_proteins": (
+            session.scalar(
+                select(func.count(Protein.accession)).where(Protein.is_canonical.is_(True))
+            )
+            or 0
+        ),
+        "sequences": _approx_count(session, "sequence"),
+        "embeddings": _approx_count(session, "sequence_embedding"),
+        "prediction_sets": session.scalar(select(func.count(PredictionSet.id))) or 0,
+        "predictions": _approx_count(session, "go_prediction"),
+        "reranker_models": session.scalar(select(func.count(RerankerModel.id))) or 0,
+    }
+
+
+def _pick_best_evaluation(session: Session) -> tuple[dict[str, Any] | None, int]:
+    """Return the single best ``EvaluationResult`` by mean Fmax + total count."""
+    rows = session.execute(
+        select(EvaluationResult, EmbeddingConfig, ScoringConfig.name)
+        .join(PredictionSet, PredictionSet.id == EvaluationResult.prediction_set_id)
+        .join(EmbeddingConfig, EmbeddingConfig.id == PredictionSet.embedding_config_id)
+        .outerjoin(ScoringConfig, ScoringConfig.id == EvaluationResult.scoring_config_id)
+    ).all()
+    best: dict[str, Any] | None = None
+    best_score: float = -1.0
+    for er, cfg, scoring_name in rows:
+        score = _avg_fmax(er.results or {})
+        if score is None or score <= best_score:
+            continue
+        best_score = score
+        best = {
+            "evaluation_result_id": str(er.id),
+            "evaluation_set_id": str(er.evaluation_set_id),
+            "stage": stage_of(er, scoring_name),
+            "avg_fmax": round(score, 4),
+            "embedding": {
+                "id": str(cfg.id),
+                "model_name": cfg.model_name,
+                "model_backend": cfg.model_backend,
+                "display_name": cfg.display_name or cfg.model_name,
+                "family": cfg.family or cfg.model_backend,
+                "param_count": cfg.param_count,
+            },
+            "per_cell": _flatten_cells(er.results or {}),
+        }
+    return best, len(rows)
+
+
 @router.get("", summary="Platform showcase data")
 def get_showcase(
     factory: sessionmaker[Session] = Depends(get_session_factory),
@@ -79,98 +136,43 @@ def get_showcase(
     result (by mean Fmax across the 9 cells) along with the embedding that
     produced it.
 
-    Empty-state contract:
-
-    - ``best`` is ``None`` when no ``EvaluationResult`` exists yet
-    - ``pipeline_stages`` always returns five entries, with ``count = 0``
-      for stages that have not been populated yet
-    - ``counts`` always returns the same keys, defaulting to 0
-
-    The frontend is expected to render sensible placeholder copy when ``best``
-    is ``None`` rather than hiding the page.
+    Empty-state contract: ``best`` is ``None`` when no ``EvaluationResult``
+    exists; ``pipeline_stages`` always returns the same five entries with
+    ``count = 0`` for unpopulated stages; ``counts`` always returns the
+    same keys.
     """
-
     with session_scope(factory) as session:
-        # ── Pipeline stage counts ────────────────────────────────────────
-        # Large tables (protein/sequence/sequence_embedding/go_prediction) use
-        # pg_class.reltuples — exact COUNT(*) on go_prediction takes 20-30s.
-        # Small tables keep exact counts.
-        total_proteins = _approx_count(session, "protein")
-        canonical_proteins = (
-            session.scalar(
-                select(func.count(Protein.accession)).where(Protein.is_canonical.is_(True))
-            )
-            or 0
-        )
-        total_sequences = _approx_count(session, "sequence")
-        total_embeddings = _approx_count(session, "sequence_embedding")
-        total_prediction_sets = session.scalar(select(func.count(PredictionSet.id))) or 0
-        total_predictions = _approx_count(session, "go_prediction")
-        total_rerankers = session.scalar(select(func.count(RerankerModel.id))) or 0
-
-        # ── Pick the single best evaluation result ──────────────────────
-        rows = session.execute(
-            select(EvaluationResult, EmbeddingConfig, ScoringConfig.name)
-            .join(PredictionSet, PredictionSet.id == EvaluationResult.prediction_set_id)
-            .join(EmbeddingConfig, EmbeddingConfig.id == PredictionSet.embedding_config_id)
-            .outerjoin(
-                ScoringConfig, ScoringConfig.id == EvaluationResult.scoring_config_id
-            )
-        ).all()
-
-        total_evaluations = len(rows)
-        best: dict[str, Any] | None = None
-        best_score: float = -1.0
-
-        for er, cfg, scoring_name in rows:
-            score = _avg_fmax(er.results or {})
-            if score is None:
-                continue
-            if score > best_score:
-                best_score = score
-                stage = stage_of(er, scoring_name)
-                best = {
-                    "evaluation_result_id": str(er.id),
-                    "evaluation_set_id": str(er.evaluation_set_id),
-                    "stage": stage,
-                    "avg_fmax": round(score, 4),
-                    "embedding": {
-                        "id": str(cfg.id),
-                        "model_name": cfg.model_name,
-                        "model_backend": cfg.model_backend,
-                        "display_name": cfg.display_name or cfg.model_name,
-                        "family": cfg.family or cfg.model_backend,
-                        "param_count": cfg.param_count,
-                    },
-                    "per_cell": _flatten_cells(er.results or {}),
-                }
-
+        counts = _load_showcase_counts(session)
+        best, total_evaluations = _pick_best_evaluation(session)
         pipeline_stages = [
-            {"name": "sequences", "count": int(total_sequences), "href": "/proteins"},
-            {"name": "embeddings", "count": int(total_embeddings), "href": "/embeddings"},
+            {"name": "sequences", "count": int(counts["sequences"]), "href": "/proteins"},
+            {"name": "embeddings", "count": int(counts["embeddings"]), "href": "/embeddings"},
             {
                 "name": "predictions",
-                "count": int(total_predictions),
+                "count": int(counts["predictions"]),
                 "href": "/functional-annotation",
             },
-            {"name": "reranker_models", "count": int(total_rerankers), "href": "/reranker"},
-            {"name": "evaluations", "count": int(total_evaluations), "href": "/benchmark"},
+            {
+                "name": "reranker_models",
+                "count": int(counts["reranker_models"]),
+                "href": "/reranker",
+            },
+            {"name": "evaluations", "count": total_evaluations, "href": "/benchmark"},
         ]
-
         return {
             "protein_stats": {
-                "total": int(total_proteins),
-                "canonical": int(canonical_proteins),
+                "total": int(counts["proteins"]),
+                "canonical": int(counts["canonical_proteins"]),
             },
             "best": best,
             "counts": {
-                "proteins": int(total_proteins),
-                "sequences": int(total_sequences),
-                "embeddings": int(total_embeddings),
-                "prediction_sets": int(total_prediction_sets),
-                "predictions": int(total_predictions),
-                "reranker_models": int(total_rerankers),
-                "evaluations": int(total_evaluations),
+                "proteins": int(counts["proteins"]),
+                "sequences": int(counts["sequences"]),
+                "embeddings": int(counts["embeddings"]),
+                "prediction_sets": int(counts["prediction_sets"]),
+                "predictions": int(counts["predictions"]),
+                "reranker_models": int(counts["reranker_models"]),
+                "evaluations": total_evaluations,
             },
             "pipeline_stages": pipeline_stages,
         }

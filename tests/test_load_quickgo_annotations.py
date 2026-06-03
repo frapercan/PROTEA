@@ -10,7 +10,22 @@ import requests
 from protea.core.operations.load_quickgo_annotations import (
     LoadQuickGOAnnotationsOperation,
     LoadQuickGOAnnotationsPayload,
+    _QuickGoStoreCtx,
 )
+
+
+def _ctx(
+    *,
+    accessions: set[str],
+    go_term_map: dict[str, int],
+    eco_map: dict[str, str] | None = None,
+) -> _QuickGoStoreCtx:
+    return _QuickGoStoreCtx(
+        annotation_set_id=uuid.UUID(_SNAPSHOT_ID),
+        protein_accessions=accessions,
+        go_term_map=go_term_map,
+        eco_map=eco_map or {},
+    )
 
 _noop_emit = lambda *_: None  # noqa: E731
 _SNAPSHOT_ID = str(uuid.uuid4())
@@ -83,10 +98,7 @@ class TestStoreBuffer:
         inserted, skipped = op._store_buffer(
             session,
             _quickgo_records(),
-            uuid.UUID(_SNAPSHOT_ID),
-            valid_accessions={"P12345"},
-            go_term_map={"GO:0003824": 1, "GO:0008150": 2},
-            eco_map={},
+            _ctx(accessions={"P12345"}, go_term_map={"GO:0003824": 1, "GO:0008150": 2}),
         )
         assert inserted == 1
         assert skipped == 2
@@ -97,10 +109,7 @@ class TestStoreBuffer:
         inserted, skipped = op._store_buffer(
             session,
             _quickgo_records(),
-            uuid.UUID(_SNAPSHOT_ID),
-            valid_accessions={"P12345", "Q67890", "XXXXXX"},
-            go_term_map={},
-            eco_map={},
+            _ctx(accessions={"P12345", "Q67890", "XXXXXX"}, go_term_map={}),
         )
         assert inserted == 0
         assert skipped == 3
@@ -111,10 +120,10 @@ class TestStoreBuffer:
         inserted, skipped = op._store_buffer(
             session,
             _quickgo_records(),
-            uuid.UUID(_SNAPSHOT_ID),
-            valid_accessions={"P12345", "Q67890", "XXXXXX"},
-            go_term_map={"GO:0003824": 1, "GO:0008150": 2},
-            eco_map={},
+            _ctx(
+                accessions={"P12345", "Q67890", "XXXXXX"},
+                go_term_map={"GO:0003824": 1, "GO:0008150": 2},
+            ),
         )
         assert inserted == 3
         assert skipped == 0
@@ -127,10 +136,7 @@ class TestStoreBuffer:
         inserted, _ = op._store_buffer(
             session,
             [_quickgo_records()[0]],
-            uuid.UUID(_SNAPSHOT_ID),
-            valid_accessions={"P12345"},
-            go_term_map={"GO:0003824": 1},
-            eco_map=eco_map,
+            _ctx(accessions={"P12345"}, go_term_map={"GO:0003824": 1}, eco_map=eco_map),
         )
         assert inserted == 1
         call_stmt = session.execute.call_args[0][0]
@@ -145,10 +151,7 @@ class TestStoreBuffer:
         inserted, _ = op._store_buffer(
             session,
             [_quickgo_records()[0]],
-            uuid.UUID(_SNAPSHOT_ID),
-            valid_accessions={"P12345"},
-            go_term_map={"GO:0003824": 1},
-            eco_map={},
+            _ctx(accessions={"P12345"}, go_term_map={"GO:0003824": 1}),
         )
         assert inserted == 1
         call_stmt = session.execute.call_args[0][0]
@@ -164,10 +167,7 @@ class TestStoreBuffer:
         inserted, _ = op._store_buffer(
             session,
             [rec],
-            uuid.UUID(_SNAPSHOT_ID),
-            valid_accessions={"P12345"},
-            go_term_map={"GO:0003824": 1},
-            eco_map={},
+            _ctx(accessions={"P12345"}, go_term_map={"GO:0003824": 1}),
         )
         assert inserted == 1
 
@@ -182,10 +182,7 @@ class TestStoreBuffer:
         inserted, skipped = op._store_buffer(
             session,
             [rec],
-            uuid.UUID(_SNAPSHOT_ID),
-            valid_accessions={"P12345"},
-            go_term_map={"GO:0003824": 1},
-            eco_map={},
+            _ctx(accessions={"P12345"}, go_term_map={"GO:0003824": 1}),
         )
         assert inserted == 0
         assert skipped == 1
@@ -198,10 +195,7 @@ class TestStoreBuffer:
         inserted, skipped = op._store_buffer(
             session,
             records,
-            uuid.UUID(_SNAPSHOT_ID),
-            valid_accessions={"P12345"},
-            go_term_map={"GO:0003824": 1},
-            eco_map={},
+            _ctx(accessions={"P12345"}, go_term_map={"GO:0003824": 1}),
         )
         assert inserted == 5001
         assert skipped == 0

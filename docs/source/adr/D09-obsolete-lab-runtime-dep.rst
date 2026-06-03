@@ -3,7 +3,7 @@ ADR-D9: OBSOLETE: lab as runtime dependency
 
 :Status: Obsolete
 :Date: 2026-05-05
-:Supersedes: earlier plan revision (v1)
+:Supersedes: earlier plan revision (revision 1)
 :Superseded-by: D1 (Structure C)
 
 Context
@@ -15,7 +15,7 @@ PROTEA worker pool.
 
 Decision
 --------
-Obsolete. Plan v3 adopts Structure C: the lab merges into
+Obsolete. Plan revision 3 adopts Structure C: the lab merges into
 ``protea-runners.lightgbm`` as a plugin discovered via ``entry_points``.
 There is no runtime coupling.
 

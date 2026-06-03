@@ -1,0 +1,4 @@
+# CI / workflow / actions files require human review even when auto-merge would otherwise apply.
+# See memory: feedback_audit_janitor_shipped_shell_injection (2026-05-24 shell-injection incident).
+.github/workflows/  @frapercan
+.github/actions/    @frapercan

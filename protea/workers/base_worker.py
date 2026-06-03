@@ -3,21 +3,32 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy import func
 from sqlalchemy import update as sa_update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.core.contracts.operation import OperationResult, RetryLaterError, make_safe_emit
 from protea.core.contracts.registry import OperationRegistry
-from protea.core.retry import is_retryable, with_retry
+from protea.core.retry import RetryPolicy, is_retryable, with_retry
 from protea.core.utils import utcnow
 from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
 from protea.infrastructure.queue.publisher import publish_job, publish_operation
 
 logger = logging.getLogger(__name__)
+
+
+class WorkerShutdown(Exception):
+    """Raised when a worker is asked to exit while a job is in flight.
+
+    Used by the consumer SIGTERM handler to mark the in-flight job FAILED
+    through ``BaseWorker._force_fail_job`` before the process exits, so
+    deploy-keeper redeploys never leave jobs orphaned in RUNNING.
+    """
 
 
 @dataclass(frozen=True)
@@ -66,36 +77,69 @@ class BaseWorker:
             with_retry(
                 self._execute_with_session,
                 job_id,
-                max_attempts=3,
-                base_delay=1.0,
-                max_delay=10.0,
-                jitter_ratio=0.3,
+                policy=RetryPolicy(
+                    max_attempts=3,
+                    base_delay=1.0,
+                    max_delay=10.0,
+                    jitter_ratio=0.3,
+                ),
             )
         except RetryLaterError:
             # Consumer re-publishes; job is already QUEUED.
             raise
         except Exception as exc:
-            # If retry was exhausted on a retryable error, the job is still
-            # in RUNNING with no FAILED transition recorded. Force-mark FAILED
-            # via fallback session so it never gets stuck.
-            if is_retryable(exc):
-                self._force_fail_job(job_id, exc)
+            # Any other exception leaves the job in RUNNING unless we
+            # close it out here. Two real-world paths hit this branch:
+            #   - retryable infra error exhausted by ``with_retry`` (the
+            #     execute session already rolled back, but no FAILED
+            #     transition was committed).
+            #   - non-retryable error raised BEFORE the operation ran
+            #     (e.g. ``InFailedSqlTransaction`` on the ``session.get``
+            #     inside ``_execute_with_session``), so the
+            #     ``_on_operation_failure`` path that normally records
+            #     FAILED never got a chance to fire.
+            # ``_force_fail_job`` is idempotent (UPDATE ... WHERE
+            # status=RUNNING) and uses a fresh session from the pool, so
+            # invoking it unconditionally is safe even when the primary
+            # session is aborted.
+            self._force_fail_job(job_id, exc)
             raise
 
-    def _claim_job(self, job_id: UUID) -> bool:
-        """Transition the job from QUEUED to RUNNING in its own session.
+    #: Initial lease duration. The worker extends it via heartbeat while the
+    #: job is running. Chosen to be safely larger than the heartbeat interval
+    #: (PROTEA_JOB_HEARTBEAT_INTERVAL_SECONDS, default 30s) so a single missed
+    #: heartbeat does not prematurely expire the lease.
+    _LEASE_SECONDS: int = 120
 
-        Returns True if claim succeeded; False if the job is missing or
-        already in a non-QUEUED state.
+    def _claim_job(self, job_id: UUID) -> bool:
+        """Transition the job from QUEUED to RUNNING via a conditional UPDATE.
+
+        Uses a single atomic UPDATE (WHERE id=:j AND status='queued') and
+        checks the affected rowcount to detect race conditions. Returns True
+        if the claim succeeded, False if the job is missing or already in a
+        non-QUEUED state (e.g. a duplicate consumer picked it up first).
+
+        Also sets ``started_at`` and the initial ``leased_until`` timestamp
+        so the stale-job reaper can track liveness without relying on
+        ``started_at`` alone.
         """
         session = self._factory()
         try:
-            job = session.get(Job, job_id)
-            if job is None or job.status != JobStatus.QUEUED:
+            now = utcnow()
+            result: CursorResult[Any] = session.execute(  # type: ignore[assignment]
+                sa_update(Job)
+                .where(Job.id == job_id, Job.status == JobStatus.QUEUED)
+                .values(
+                    status=JobStatus.RUNNING,
+                    started_at=now,
+                    leased_until=now + timedelta(seconds=self._LEASE_SECONDS),
+                )
+            )
+            if result.rowcount == 0:
+                # Job is missing or was already claimed by another consumer.
+                session.rollback()
                 return False
 
-            job.status = JobStatus.RUNNING
-            job.started_at = utcnow()
             self._emit(
                 session,
                 job_id,
@@ -106,6 +150,33 @@ class BaseWorker:
             )
             session.commit()
             return True
+        finally:
+            session.close()
+
+    def extend_lease(self, job_id: UUID) -> None:
+        """Extend the ``leased_until`` timestamp for a running job.
+
+        Called periodically by the consumer heartbeat loop while a job
+        is in progress. Uses a fresh session so the heartbeat never
+        interferes with the execute session's transaction. No-op when the
+        job is no longer in RUNNING state (e.g. already succeeded or was
+        externally cancelled).
+        """
+        session = self._factory()
+        try:
+            now = utcnow()
+            session.execute(
+                sa_update(Job)
+                .where(Job.id == job_id, Job.status == JobStatus.RUNNING)
+                .values(leased_until=now + timedelta(seconds=self._LEASE_SECONDS))
+            )
+            session.commit()
+        except Exception as exc:
+            logger.warning("Lease extension failed (non-fatal). job_id=%s error=%s", job_id, exc)
+            try:
+                session.rollback()
+            except Exception:
+                pass
         finally:
             session.close()
 
@@ -183,9 +254,7 @@ class BaseWorker:
 
         return raw_emit
 
-    def _cancel_if_parent_cancelled(
-        self, session: Session, job: Job, job_id: UUID
-    ) -> bool:
+    def _cancel_if_parent_cancelled(self, session: Session, job: Job, job_id: UUID) -> bool:
         if job.parent_job_id is None:
             return False
         parent = session.get(Job, job.parent_job_id)
@@ -207,6 +276,15 @@ class BaseWorker:
     def _on_operation_success(
         self, session: Session, job: Job, job_id: UUID, result: OperationResult
     ) -> None:
+        # Long-running operations (multi-hour exports, training jobs) can
+        # outlive the underlying DB connection: pika reconnects, idle pools
+        # recycle, and the original Job ORM instance becomes detached. A
+        # plain attribute access then triggers a refresh on a dead session
+        # and raises "Instance ... is not bound to a Session". Re-fetch via
+        # ``session.get`` so we either get a bound instance back or surface
+        # a clean None to handle gracefully. ``pool_pre_ping=True`` on the
+        # engine already revives the connection on the SELECT below.
+        job = self._rebind_job(session, job, job_id)
         if result.progress_current is not None:
             job.progress_current = int(result.progress_current)
         if result.progress_total is not None:
@@ -267,6 +345,10 @@ class BaseWorker:
     def _on_operation_failure(
         self, session: Session, job: Job, job_id: UUID, exc: Exception
     ) -> None:
+        # Same rebind dance as _on_operation_success: an op that took hours
+        # may have left the Job ORM instance detached from a recycled
+        # connection. Pull a fresh copy before mutating it.
+        job = self._rebind_job(session, job, job_id)
         job.status = JobStatus.FAILED
         job.finished_at = utcnow()
         job.error_code = exc.__class__.__name__
@@ -320,6 +402,61 @@ class BaseWorker:
         finally:
             fallback.close()
 
+    def requeue_on_shutdown(self, job_id: UUID) -> bool:
+        """Transition a RUNNING job back to QUEUED so it can be re-dispatched.
+
+        Called by the queue consumer when SIGTERM/SIGINT arrives mid-job:
+        rather than force-failing the in-flight job (which loses work and
+        requires manual re-dispatch), flip it back to QUEUED with a cleared
+        ``leased_until`` and ``started_at`` so the next consumer can claim
+        it. The accompanying delivery is republished by the caller, mirroring
+        the spec's "NACK-requeue + UPDATE job back to PLANNED" semantics
+        under the pre-ack consumer pattern (the original delivery has already
+        been acked to avoid AMQP ``consumer_timeout``).
+
+        Returns ``True`` on a successful re-queue, ``False`` when the job
+        is no longer RUNNING (already finished naturally) or the UPDATE
+        could not commit. Idempotent on terminal states.
+        """
+        session = self._factory()
+        try:
+            result: CursorResult[Any] = session.execute(  # type: ignore[assignment]
+                sa_update(Job)
+                .where(Job.id == job_id, Job.status == JobStatus.RUNNING)
+                .values(
+                    status=JobStatus.QUEUED,
+                    started_at=None,
+                    leased_until=None,
+                )
+            )
+            if result.rowcount == 0:
+                session.rollback()
+                return False
+            self._emit(
+                session,
+                job_id,
+                "job.requeued_on_shutdown",
+                None,
+                {"worker": self._config.worker_name},
+                level="info",
+            )
+            session.commit()
+            logger.info("Re-queued in-flight job on shutdown. job_id=%s", job_id)
+            return True
+        except Exception as exc:
+            logger.error(
+                "Re-queue-on-shutdown failed; job may remain RUNNING. job_id=%s error=%s",
+                job_id,
+                exc,
+            )
+            try:
+                session.rollback()
+            except Exception:
+                pass
+            return False
+        finally:
+            session.close()
+
     def _maybe_fail_parent(self, session: Session, parent_job_id: UUID) -> None:
         """Mark parent FAILED if all its children are in terminal states and none succeeded."""
         _TERMINAL = (JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELLED)
@@ -358,6 +495,29 @@ class BaseWorker:
             {"reason": "all_children_failed"},
             level="error",
         )
+
+    @staticmethod
+    def _rebind_job(session: Session, job: Job, job_id: UUID) -> Job:
+        """Return a Job ORM instance guaranteed bound to ``session``.
+
+        Long operations (multi-hour exports, retrains) may outlive the
+        original DB connection. When that happens the cached ``job``
+        instance is detached and any attribute read raises
+        ``DetachedInstanceError``. ``session.get`` issues a fresh SELECT
+        (revived by ``pool_pre_ping=True``) and returns a bound row. If
+        the row has somehow disappeared we fall back to the original
+        instance and merge it back into the session so callers can still
+        record a terminal state.
+        """
+        fresh = session.get(Job, job_id)
+        if fresh is not None:
+            return fresh
+        # Row genuinely missing (rare). Re-attach the in-memory copy so
+        # subsequent attribute writes do not explode the session.
+        try:
+            return session.merge(job)
+        except Exception:
+            return job
 
     @staticmethod
     def _emit(

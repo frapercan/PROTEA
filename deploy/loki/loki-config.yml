@@ -1,0 +1,58 @@
+# Loki single-binary configuration for the PROTEA monitoring sidecar.
+#
+# This file is mounted read-only into the loki container by
+# docker-compose.monitoring.yml. Filesystem storage is used so the stack
+# stays self-contained for local dev and small single-host deploys; the
+# data lives in the `loki_data` volume defined in the compose file.
+#
+# Schema is the v13 / tsdb default recommended by Grafana Labs as of
+# Loki 3.x. Retention is left to the operator (no compactor retention
+# rules) because the monitoring stack is opt-in and rotating logs is a
+# deploy-specific policy.
+
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: info
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  # `metric_aggregation_enabled` was added in Loki 3.3; the image pinned
+  # by `docker-compose.monitoring.yml` is 3.2.1, so referencing the field
+  # here makes the container crash-loop on every start (yaml unmarshal
+  # error on `validation.plain`). Reintroduce alongside the image bump
+  # when we are ready to enable metric aggregation.
+  allow_structured_metadata: true
+  volume_enabled: true
+  retention_period: 168h
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+
+ruler:
+  alertmanager_url: http://localhost:9093
+
+analytics:
+  reporting_enabled: false

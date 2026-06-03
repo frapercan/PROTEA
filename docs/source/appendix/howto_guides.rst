@@ -8,8 +8,8 @@ How-to Guides
 .. admonition:: Audience and scope
    :class: tip
 
-   **Read this if:** you have one specific task to accomplish — load an
-   ontology, upload a FASTA, train a re-ranker, scale a worker — and you
+   **Read this if:** you have one specific task to accomplish (load an
+   ontology, upload a FASTA, train a re-ranker, scale a worker) and you
    want the shortest path from a clean stack to a finished job.
 
    **Read** :doc:`reproduction_guide` **instead if:** you want to regenerate
@@ -22,7 +22,7 @@ Every job requires ``operation``, ``queue_name``, and an optional ``payload``
 dict. The ``payload`` must match the fields expected by the target operation's
 ``ProteaPayload`` subclass.
 
-Example — insert Swiss-Prot human proteins:
+Example: insert Swiss-Prot human proteins.
 
 .. code-block:: bash
 
@@ -91,7 +91,7 @@ Cancel a queued job
 
    curl -s -X POST http://127.0.0.1:8000/jobs/<job-id>/cancel
 
-Jobs in terminal states (``SUCCEEDED``, ``FAILED``) are unaffected —
+Jobs in terminal states (``SUCCEEDED``, ``FAILED``) are unaffected;
 the endpoint is a no-op. Cancelling a ``RUNNING`` job marks the DB row as
 ``CANCELLED`` but does not interrupt the worker process (soft cancel).
 
@@ -160,7 +160,7 @@ Load a GO ontology snapshot
 ---------------------------
 
 Download and parse a GO OBO file release. The ``obo_version`` extracted from
-the file header is used as the unique key — re-running with the same URL is
+the file header is used as the unique key, so re-running with the same URL is
 safe (idempotent).
 
 .. code-block:: bash
@@ -278,7 +278,7 @@ the DB before submitting.
      -H "Content-Type: application/json" \
      -d '{
        "operation": "predict_go_terms",
-       "queue_name": "protea.jobs",
+       "queue_name": "protea.predictions",
        "payload": {
          "embedding_config_id": "<config-uuid>",
          "annotation_set_id": "<annotation-set-uuid>",
@@ -332,28 +332,19 @@ NK, LK, and PK settings. Download metrics via
 Train a re-ranker
 ------------------
 
-Train a LightGBM binary classifier to re-score GO predictions using
-temporal holdout labels:
-
-.. code-block:: bash
-
-   curl -s -X POST http://127.0.0.1:8000/jobs \
-     -H "Content-Type: application/json" \
-     -d '{
-       "operation": "train_reranker",
-       "queue_name": "protea.jobs",
-       "payload": {
-         "prediction_set_id": "<prediction-set-uuid>",
-         "evaluation_set_id": "<eval-set-uuid>"
-       }
-     }'
-
-The prediction set must have been generated with
-``compute_alignments=true``, ``compute_taxonomy=true``, and
-``compute_reranker_features=true`` to provide the full feature set.
+In-process re-ranker training was retired in F0 (T0.6): the
+``train_reranker`` and ``train_reranker_auto`` operations are no
+longer registered. LightGBM training has moved to the sibling repo
+`protea-reranker-lab <https://github.com/frapercan/protea-reranker-lab>`_,
+which consumes the frozen parquet dataset that PROTEA publishes via
+``export_research_dataset``. The four-step workflow is described in
+:ref:`Register a reranker from protea-reranker-lab
+<howto-register-reranker>` below.
 
 Apply a trained re-ranker to new predictions via
 ``GET /scoring/prediction-sets/{id}/rerank.tsv?reranker_id=<uuid>``.
+
+.. _howto-register-reranker:
 
 Register a reranker from ``protea-reranker-lab``
 -------------------------------------------------
@@ -363,7 +354,7 @@ contract-first integration) are registered in PROTEA in four steps:
 export a frozen dataset, train in the lab, register the resulting
 run, and invoke ``predict_go_terms`` with the new ``reranker_model_id``.
 
-**Step 1 — Export the frozen dataset.** Submit an
+**Step 1. Export the frozen dataset.** Submit an
 ``export_research_dataset`` job. The operation generates
 ``train.parquet`` / ``eval.parquet`` / ``manifest.json`` and uploads
 them through the configured ``ArtifactStore`` under
@@ -375,7 +366,7 @@ them through the configured ``ArtifactStore`` under
      -H "Content-Type: application/json" \
      -d '{
        "operation": "export_research_dataset",
-       "queue_name": "protea.jobs",
+       "queue_name": "protea.training",
        "payload": {
          "embedding_config_id": "<config-uuid>",
          "ontology_snapshot_id": "<snapshot-uuid>",
@@ -393,10 +384,10 @@ them through the configured ``ArtifactStore`` under
 
 The job emits ``export_research_dataset.published`` once the three
 files have been uploaded. The ``result`` dict contains ``train_uri``,
-``eval_uri`` and ``manifest_uri`` — ``file://…`` URIs with the local
+``eval_uri`` and ``manifest_uri``: ``file://…`` URIs with the local
 backend, ``s3://bucket/…`` with MinIO.
 
-**Step 2 — Train in the lab.** In a ``protea-reranker-lab`` checkout,
+**Step 2. Train in the lab.** In a ``protea-reranker-lab`` checkout,
 point the lab's spec at the dataset URI and run its training CLI:
 
 .. code-block:: bash
@@ -409,7 +400,7 @@ point the lab's spec at the dataset URI and run its training CLI:
 The lab writes ``runs/<name>/`` containing ``run.json``, ``spec.yaml``
 and ``model.txt`` (the LightGBM booster).
 
-**Step 3 — Register the run in PROTEA.** ``scripts/register_reranker.py``
+**Step 3. Register the run in PROTEA.** ``scripts/register_reranker.py``
 parses the run directory, uploads the booster to the configured
 ``ArtifactStore`` under ``rerankers/<run_id>/model.txt``, computes
 ``feature_schema_sha`` via
@@ -426,7 +417,7 @@ The script prints the new ``RerankerModel`` UUID to stdout. Use
 to existing DB artefacts, ``--name-override`` to pick a custom name,
 and ``--force`` to replace an existing row with the same name.
 
-**Step 4 — Predict with the reranker.** Reference the new model by
+**Step 4. Predict with the reranker.** Reference the new model by
 UUID in the ``predict_go_terms`` payload:
 
 .. code-block:: bash
@@ -458,7 +449,7 @@ ordering without crashing.
 
 .. note::
    ``reranker_score`` is currently surfaced in-memory only and exposed
-   through the ``predict_go_terms_batch.done`` event — ``GOPrediction``
+   through the ``predict_go_terms_batch.done`` event; ``GOPrediction``
    has no column for it yet. Persistence is tracked for a future
    schema change.
 
@@ -485,12 +476,16 @@ Create a scoring config and apply it to a prediction set:
 
 .. code-block:: bash
 
-   # Create scoring config
+   # Create scoring config. ``weights`` keys must come from
+   # ``DEFAULT_WEIGHTS``: ``embedding_similarity``, ``identity_nw``,
+   # ``identity_sw``, ``evidence_weight``, ``taxonomic_proximity``,
+   # ``neighbor_vote_fraction`` (any other key triggers a 422 since the
+   # request body is ``extra=forbid``). Omitted keys default to 0.
    curl -s -X POST http://127.0.0.1:8000/scoring/configs \
      -H "Content-Type: application/json" \
      -d '{
-       "name": "distance-only",
-       "weights": {"distance": -1.0}
+       "name": "alignment-weighted",
+       "weights": {"embedding_similarity": 0.5, "identity_nw": 0.3, "identity_sw": 0.2}
      }' | python -m json.tool
 
    # Download scored predictions
@@ -516,10 +511,16 @@ memory consumption.
 Build the documentation locally
 --------------------------------
 
+Sphinx and the theme stack live in the optional ``docs`` Poetry
+group. Install once, then build:
+
 .. code-block:: bash
 
+   poetry install --with docs       # one-time: pulls Sphinx, furo, etc.
    poetry run task html_docs
    # or directly:
    cd docs && poetry run sphinx-build -b html source build/html
 
-Open ``docs/build/html/index.html`` in a browser.
+Open ``docs/build/html/index.html`` in a browser. The ``html_docs``
+task is defined under ``[tool.taskipy.tasks]`` in ``pyproject.toml``;
+it requires ``taskipy`` (installed via ``--with lint``).

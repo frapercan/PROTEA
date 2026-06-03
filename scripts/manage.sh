@@ -71,24 +71,51 @@ cmd_start() {
     # running so long-running jobs (e.g. run_cafa_evaluation) are not interrupted.
     sleep 1
 
+    # Database migrations
+    printf "\n${BOLD}[2] Database schema${RESET}\n"
+    if [ "${PROTEA_SKIP_ALEMBIC:-}" != "1" ]; then
+        printf "  Waiting for postgres to accept connections...\n"
+        for i in $(seq 1 30); do
+            if pg_isready -h localhost -p 5432 -U protea -d protea -q 2>/dev/null; then
+                break
+            fi
+            sleep 1
+        done
+
+        printf "  Running alembic upgrade head...\n"
+        if ! poetry run alembic upgrade head; then
+            printf "  ${RED}✗ alembic upgrade head FAILED${RESET} — stack will not start cleanly.\n"
+            exit 1
+        fi
+        printf "  ${GREEN}✓ Schema at head${RESET}\n"
+    else
+        printf "  ${YELLOW}(skipped: PROTEA_SKIP_ALEMBIC=1)${RESET}\n"
+    fi
+
     # API
-    printf "\n${BOLD}[2] API${RESET}\n"
+    printf "\n${BOLD}[3] API${RESET}\n"
     cd "$ROOT"
     _start_bg api poetry run uvicorn protea.api.app:create_app \
         --factory --host 0.0.0.0 --port 8000 --root-path /api-proxy
-    sleep 3
-    curl -sf http://localhost:8000/jobs > /dev/null \
-        && printf "  ${GREEN}API OK${RESET} → http://localhost:8000\n" \
-        || { printf "  ${RED}API FAILED${RESET} — check logs/api.log\n"; exit 1; }
+    api_ready=0
+    for _ in $(seq 1 120); do
+        if curl -sf http://localhost:8000/jobs > /dev/null 2>&1; then api_ready=1; break; fi
+        sleep 1
+    done
+    if [[ $api_ready -eq 1 ]]; then
+        printf "  ${GREEN}API OK${RESET} → http://localhost:8000\n"
+    else
+        printf "  ${RED}API FAILED${RESET} — check logs/api.log\n"; exit 1
+    fi
 
     # Core workers
-    printf "\n${BOLD}[3] Core workers${RESET}\n"
+    printf "\n${BOLD}[4] Core workers${RESET}\n"
     _start_bg worker-ping        poetry run python scripts/worker.py --queue protea.ping
     _start_bg worker-jobs        poetry run python scripts/worker.py --queue protea.jobs
     _start_bg worker-training    poetry run python scripts/worker.py --queue protea.training
 
     # Embeddings pipeline
-    printf "\n${BOLD}[4] Embeddings pipeline${RESET}\n"
+    printf "\n${BOLD}[5] Embeddings pipeline${RESET}\n"
     _start_bg worker-embeddings-coord  poetry run python scripts/worker.py --queue protea.embeddings
     for i in $(seq 1 "$BATCH_WORKERS"); do
         _start_bg "worker-embeddings-batch-${i}" \
@@ -97,7 +124,7 @@ cmd_start() {
     _start_bg worker-embeddings-write  poetry run python scripts/worker.py --queue protea.embeddings.write
 
     # Predictions pipeline
-    printf "\n${BOLD}[5] Predictions pipeline${RESET}\n"
+    printf "\n${BOLD}[6] Predictions pipeline${RESET}\n"
     _start_bg worker-predictions-coord poetry run python scripts/worker.py --queue protea.predictions
     for i in $(seq 1 "$BATCH_WORKERS"); do
         _start_bg "worker-predictions-batch-${i}" \
@@ -106,11 +133,22 @@ cmd_start() {
     _start_bg worker-predictions-write poetry run python scripts/worker.py --queue protea.predictions.write
 
     # Evaluations pipeline
-    printf "\n${BOLD}[6] Evaluations pipeline${RESET}\n"
+    printf "\n${BOLD}[7] Evaluations pipeline${RESET}\n"
     _start_bg worker-evaluations poetry run python scripts/worker.py --queue protea.evaluations
 
+    # Export minijob pipeline (only when PROTEA_EXPORT_MINIJOBS=1)
+    if [[ "${PROTEA_EXPORT_MINIJOBS:-0}" == "1" ]]; then
+        printf "\n${BOLD}[8a] Export minijob workers (PROTEA_EXPORT_MINIJOBS=1)${RESET}\n"
+        _start_bg worker-export-knn-batch \
+            poetry run python scripts/worker.py --queue protea.training.knn-batch
+        _start_bg worker-export-features \
+            poetry run python scripts/worker.py --queue protea.training.features
+        _start_bg worker-export-write \
+            poetry run python scripts/worker.py --queue protea.training.write
+    fi
+
     # Stale job reaper
-    printf "\n${BOLD}[7] Stale job reaper${RESET}\n"
+    printf "\n${BOLD}[8] Stale job reaper${RESET}\n"
     _start_bg worker-reaper poetry run python scripts/worker.py --queue reaper
 
     # Frontend
@@ -119,12 +157,33 @@ cmd_start() {
     # (ngrok, Cloudflare free tier, etc). Override with FRONTEND_MODE=dev for
     # local hacking where HMR is actually useful.
     local FRONTEND_MODE="${FRONTEND_MODE:-prod}"
-    printf "\n${BOLD}[8] Frontend (%s)${RESET}\n" "$FRONTEND_MODE"
+    printf "\n${BOLD}[9] Frontend (%s)${RESET}\n" "$FRONTEND_MODE"
     cd "$ROOT/apps/web"
     if [[ "$FRONTEND_MODE" == "prod" ]]; then
         printf "  Building production bundle (this may take ~30-60s)...\n"
         if npm run build >> "$LOG_DIR/frontend-build.log" 2>&1; then
             printf "  ${GREEN}✓${RESET} build OK → logs/frontend-build.log\n"
+            # Copy static assets and public dir into the standalone tree so
+            # node server.js can serve them.  Next 16 emits server.js at
+            # .next/standalone/server.js; static and public files must sit
+            # alongside it for correct asset resolution.
+            local STANDALONE_DIR=".next/standalone"
+            if [[ -d "$STANDALONE_DIR" ]]; then
+                mkdir -p "$STANDALONE_DIR/.next" "$STANDALONE_DIR/public"
+                if ! cp -r .next/static "$STANDALONE_DIR/.next/static"; then
+                    printf "  ${RED}✗ FAILED to copy .next/static into standalone${RESET}\n"; exit 1
+                fi
+                if ! cp -r public/. "$STANDALONE_DIR/public/"; then
+                    printf "  ${RED}✗ FAILED to copy public/ into standalone${RESET}\n"; exit 1
+                fi
+                if ! ls "$STANDALONE_DIR/.next/static/chunks/"*.css > /dev/null 2>&1; then
+                    printf "  ${RED}✗ FAILED to populate standalone static chunks (no CSS found)${RESET}\n"; exit 1
+                fi
+                if [[ ! -f "$STANDALONE_DIR/public/protea-mark.png" ]]; then
+                    printf "  ${RED}✗ FAILED to populate standalone public (protea-mark.png missing)${RESET}\n"; exit 1
+                fi
+                printf "  ${GREEN}✓${RESET} standalone assets copied\n"
+            fi
         else
             printf "  ${RED}✗ build FAILED${RESET} — see logs/frontend-build.log\n"
             printf "  ${YELLOW}Falling back to dev mode.${RESET}\n"
@@ -132,7 +191,15 @@ cmd_start() {
         fi
     fi
     if [[ "$FRONTEND_MODE" == "prod" ]]; then
-        _start_bg frontend npm run start
+        local STANDALONE_SERVER=".next/standalone/server.js"
+        if [[ -f "$STANDALONE_SERVER" ]]; then
+            # output:standalone build — serve via node, not next start
+            PORT=3000 HOSTNAME=0.0.0.0 _start_bg frontend node "$STANDALONE_SERVER"
+        else
+            printf "  ${YELLOW}WARNING: standalone server.js not found at %s; falling back to next start${RESET}\n" \
+                "$STANDALONE_SERVER"
+            _start_bg frontend npm run start
+        fi
     else
         _start_bg frontend npm run dev
     fi

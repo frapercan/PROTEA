@@ -1,0 +1,284 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Postgres connection and SQLAlchemy pool health for PROTEA. Mixes server-side metrics from postgres_exporter (pg_stat_activity, pg_stat_database) with app-side counters from protea_db_pool_* that T5.2 will export from the SQLAlchemy engine.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "protea-prometheus" },
+      "description": "Backends by state, from pg_stat_activity.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "stacking": { "group": "A", "mode": "normal" }
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "protea-prometheus" },
+          "editorMode": "code",
+          "expr": "sum by (state) (pg_stat_activity_count{datname=\"protea\"})",
+          "legendFormat": "{{state}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Server-side backends by state",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "protea-prometheus" },
+      "description": "SQLAlchemy pool: checked-out vs idle connections, per service.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "protea-prometheus" },
+          "editorMode": "code",
+          "expr": "sum by (service) (protea_db_pool_checked_out)",
+          "legendFormat": "checked-out {{service}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "protea-prometheus" },
+          "editorMode": "code",
+          "expr": "sum by (service) (protea_db_pool_idle)",
+          "legendFormat": "idle {{service}}",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "App pool usage",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "protea-prometheus" },
+      "description": "Pool saturation: checked-out / pool_size. Sustained values above 0.8 mean the pool needs to grow or the workload needs to spread.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "max": 1,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.8 },
+              { "color": "red", "value": 0.95 }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 3,
+      "options": {
+        "minVizHeight": 200,
+        "minVizWidth": 200,
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "pluginVersion": "11.3.0",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "protea-prometheus" },
+          "editorMode": "code",
+          "expr": "sum(protea_db_pool_checked_out) / clamp_min(sum(protea_db_pool_size), 1)",
+          "legendFormat": "saturation",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Pool saturation",
+      "type": "gauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "protea-prometheus" },
+      "description": "Postgres-side commits vs rollbacks per second. A sustained rollback rate is a smell.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never"
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "id": 4,
+      "options": {
+        "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "protea-prometheus" },
+          "editorMode": "code",
+          "expr": "rate(pg_stat_database_xact_commit{datname=\"protea\"}[$__rate_interval])",
+          "legendFormat": "commit",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "protea-prometheus" },
+          "editorMode": "code",
+          "expr": "rate(pg_stat_database_xact_rollback{datname=\"protea\"}[$__rate_interval])",
+          "legendFormat": "rollback",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Transactions (commit vs rollback)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "protea-prometheus" },
+      "description": "Long-running transactions: max age in seconds of any active backend in the protea DB.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 60 },
+              { "color": "red", "value": 600 }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 16 },
+      "id": 5,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "pluginVersion": "11.3.0",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "protea-prometheus" },
+          "editorMode": "code",
+          "expr": "max(pg_stat_activity_max_tx_duration{datname=\"protea\"})",
+          "legendFormat": "max tx age",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Oldest open transaction",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "protea-prometheus" },
+      "description": "Deadlocks and serialization conflicts. Should be flat at zero.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "lineWidth": 1
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 16 },
+      "id": 6,
+      "options": {
+        "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "protea-prometheus" },
+          "editorMode": "code",
+          "expr": "increase(pg_stat_database_deadlocks{datname=\"protea\"}[$__rate_interval])",
+          "legendFormat": "deadlocks",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Deadlocks (per interval)",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["protea", "postgres", "db"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "PROTEA / DB connections",
+  "uid": "protea-db-connections",
+  "version": 1,
+  "weekStart": ""
+}

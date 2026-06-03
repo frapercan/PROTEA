@@ -18,9 +18,9 @@ Decision
 F-LAFA at the end of the timeline (~1.5 weeks). Three containers
 built on top of ``protea-method-runtime``:
 
-- **knn-v1** (one PLM, KNN baseline, GO propagation).
-- **knn-8plm** (ensemble across the eight PLMs).
-- **v18** (full pipeline with selective re-ranking).
+- **lafa_knn_v1** (one PLM, KNN baseline, GO propagation).
+- **lafa_knn_8plm** (ensemble across the eight PLMs).
+- **lafa_v18** (full pipeline with selective re-ranking).
 
 Each container submitted to the LAFA test suite per
 ``anphan0828/LAFA_container_guide``.

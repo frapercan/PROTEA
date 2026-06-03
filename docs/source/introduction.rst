@@ -7,8 +7,8 @@ Motivation
 The gap between the number of protein sequences deposited in public databases
 and the number that carry experimentally verified functional annotations has
 grown by several orders of magnitude over the past decade. UniProtKB/TrEMBL
-stores more than 250 million unreviewed sequences, while UniProtKB/Swiss-Prot —
-the manually curated subset — contains fewer than 600 000. Closing this gap by
+stores more than 250 million unreviewed sequences, while UniProtKB/Swiss-Prot
+(the manually curated subset) contains fewer than 600 000. Closing this gap by
 wet-lab experiments is economically infeasible, and the community has
 therefore invested in *automated* functional annotation: computational
 pipelines that transfer Gene Ontology (GO) terms :cite:`cafa2013` from a small
@@ -19,7 +19,7 @@ Automated GO term prediction is now a mature research area with well-defined
 benchmarks (the CAFA challenges :cite:`cafa2013,cafa2019,cafa2023`), a
 reference scoring tool (``cafa-evaluator`` :cite:`cafaeval2023`), and a rich
 catalogue of methods surveyed in :doc:`related_work`. Most open-source
-pipelines, however, were released as *research artefacts* — single-purpose
+pipelines, however, were released as *research artefacts*: single-purpose
 scripts optimised for the paper that accompanies them. When integrated into a
 production setting (a web server, a shared lab platform, a recurring batch
 job) they expose a cluster of engineering issues that are rarely discussed in
@@ -31,8 +31,8 @@ the original publications:
    reproducible today often cannot be replayed one year later because none
    of these versions is recorded alongside the prediction.
 2. **Temporal integrity of evaluation.** Benchmarking a tool against its own
-   reference database — the default configuration for most open-source
-   predictors — exposes the evaluation to data leakage: the tool has already
+   reference database (the default configuration for most open-source
+   predictors) exposes the evaluation to data leakage: the tool has already
    seen the annotations that the benchmark treats as ground truth. This
    problem is acknowledged by the CAFA protocol but ignored by many method
    papers.
@@ -57,7 +57,7 @@ single classes.
 
 A typical PIS/FANTASIA worker manages its own database session, connects
 directly to the message broker, orchestrates task sequencing, *and* executes
-domain logic — all in the same class. This coupling produces code that is
+domain logic, all in the same class. This coupling produces code that is
 difficult to unit-test (because all infrastructure must be mocked at once),
 hard to extend (because adding a new operation requires understanding the
 entire execution context), and fragile under failure (because a queue
@@ -72,20 +72,20 @@ This thesis investigates whether the engineering issues above can be resolved
 by architectural discipline *without* sacrificing prediction quality or
 computational efficiency. It is organised around three research questions:
 
-**RQ1 — Reproducible architecture.**
+**RQ1.** Reproducible architecture.
    Can a protein functional annotation pipeline be architected so that every
    prediction is *exactly reproducible* given the same input data, without
    sacrificing horizontal scalability on a single GPU and a modest number
    of CPU workers?
 
-**RQ2 — Temporal integrity of evaluation.**
+**RQ2.** Temporal integrity of evaluation.
    To what extent does temporal data leakage inflate the apparent performance
    of homology-based GO prediction tools (Pannzer2, InterProScan,
    eggNOG-mapper) when they are benchmarked against their own current
    reference databases, and can a fair temporal holdout protocol be enforced
    at the data model level?
 
-**RQ3 — Feature engineering on top of KNN.**
+**RQ3.** Feature engineering on top of KNN.
    Does a learned re-ranker that exploits classical pairwise alignment metrics
    (Needleman–Wunsch, Smith–Waterman) and taxonomic distance features on top
    of embedding-based KNN results consistently outperform the baseline
@@ -123,24 +123,26 @@ Contributions
    The specific figures cited below (62.4 % NK leakage in C2, "improves Fmax
    across all 9 cells" in C3) come from the pre-2026-04-10 experimental run
    and will be regenerated for the Zenodo deposit accompanying the thesis.
-   The *direction* of the findings — large data-leakage overlap for Pannzer2,
-   and the re-ranker surpassing the heuristic — is stable; only the exact
+   The *direction* of the findings (large data-leakage overlap for Pannzer2,
+   and the re-ranker surpassing the heuristic) is stable; only the exact
    values may move slightly when the chapter is re-rendered. See
    :doc:`/results` for the full provisional notice.
 
 The thesis makes three contributions, one per research question:
 
-**C1 — A reproducible platform for protein functional annotation** built on
+**C1.** A reproducible platform for protein functional annotation, built on
 a typed operation protocol, a two-session job lifecycle, a RabbitMQ job queue
-with seven routed queues, and a PostgreSQL + pgvector data model that
+with ten routed queues, and a PostgreSQL + pgvector data model that
 versions every input (OBO release, annotation set source, embedding config)
 by UUID. The platform is released as open source and runs end-to-end on a
-single workstation with one GPU. PROTEA currently consolidates sixteen
+single workstation with one GPU. PROTEA currently consolidates eighteen
 registered operations covering ingestion, embedding, prediction, evaluation,
-and re-ranking, as well as a one-click ``/annotate`` endpoint that takes a
-FASTA upload and returns ranked GO predictions.
+re-ranking and provenance maintenance, as well as a one-click ``/annotate``
+endpoint that takes a FASTA upload and returns ranked GO predictions. The
+authoritative list is the body of
+``protea.core.operation_catalog.build_operation_registry``.
 
-**C2 — A quantitative data-leakage analysis** of Pannzer2, InterProScan, and
+**C2.** A quantitative data-leakage analysis of Pannzer2, InterProScan, and
 eggNOG-mapper against a GOA 220 → 229 temporal holdout. The analysis measures
 exact-match overlap between each tool's predictions and the ground-truth
 annotations and shows that up to 62.4 % of the NK ground truth is already
@@ -148,9 +150,10 @@ present in the Pannzer2 reference database, fully explaining its apparent
 advantage over temporally strict methods. The chapter :doc:`results` presents
 the full numbers and discusses the interpretation.
 
-**C3 — A temporal-holdout re-ranking pipeline** trained on 13 historical GOA
+**C3.** A temporal-holdout re-ranking pipeline trained on 13 historical GOA
 splits (releases 160 through 220) using alignment and taxonomy features on
-top of ESM-C 300M KNN results. The final re-ranker (``v3``) is shown to
+top of ESM-C 300M KNN results. The final re-ranker (the iteration with
+full alignment and taxonomy features) is shown to
 improve Fmax over the embedding-only baseline across all 9 evaluation cells
 of the NK/LK/PK × BPO/MFO/CCO grid, while keeping the training signal
 interpretable (per-feature importances are reported in :doc:`results`).
@@ -168,8 +171,8 @@ layers:
 **Execution layer** (``protea/workers/``)
    Orchestrates the job lifecycle: claiming a job, dispatching it to the
    correct operation, and recording the outcome. The ``BaseWorker`` uses two
-   independent sessions by design — one to claim (``QUEUED → RUNNING``) and
-   one to execute — ensuring that even a mid-execution crash leaves the
+   independent sessions by design (one to claim with ``QUEUED → RUNNING``,
+   one to execute), ensuring that even a mid-execution crash leaves the
    database in a consistent, inspectable state.
 
 **Domain layer** (``protea/core/``)
@@ -199,21 +202,24 @@ database migrations managed by Alembic.
 Current capabilities
 ---------------------
 
-PROTEA currently provides sixteen registered operations spanning the full
-protein functional annotation pipeline:
+PROTEA currently provides the following registered operations across
+the protein functional annotation pipeline (the authoritative list is
+the body of ``protea.core.operation_catalog.build_operation_registry``):
 
-- **Data ingestion** — ``insert_proteins``, ``fetch_uniprot_metadata``,
+- **Data ingestion**: ``insert_proteins``, ``fetch_uniprot_metadata``,
   ``load_ontology_snapshot``, ``load_goa_annotations``,
   ``load_quickgo_annotations``.
-- **Embedding computation** — ``compute_embeddings`` (coordinator),
+- **Embedding computation**: ``compute_embeddings`` (coordinator),
   ``compute_embeddings_batch``, ``store_embeddings``.
-- **GO term prediction** — ``predict_go_terms`` (coordinator),
+- **GO term prediction**: ``predict_go_terms`` (coordinator),
   ``predict_go_terms_batch``, ``store_predictions``.
-- **Evaluation** — ``generate_evaluation_set``, ``run_cafa_evaluation``.
-- **Re-ranker dataset publishing** — ``export_research_dataset`` (LightGBM
+- **InterPro-based prediction**: ``load_interpro_go_mapping``,
+  ``run_interproscan_batch``, ``predict_go_terms_from_interpro``.
+- **Evaluation**: ``generate_evaluation_set``, ``run_cafa_evaluation``.
+- **Re-ranker dataset publishing**: ``export_research_dataset`` (LightGBM
   training itself lives in ``protea-reranker-lab``; PROTEA only produces
   the frozen train/eval parquets and serves the registered boosters).
-- **Diagnostics** — ``ping``.
+- **Diagnostics**: ``ping``.
 
 A scoring engine applies weighted formulas or trained LightGBM re-rankers to
 prediction sets. The one-click ``/annotate`` endpoint automates the entire

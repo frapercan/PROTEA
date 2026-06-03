@@ -1,7 +1,7 @@
 """K-nearest-neighbour search — thin shim over ``protea_method.knn_search``.
 
-The numpy + FAISS backends live in the standalone ``protea-method``
-library (F2C extraction, 2026-05-07). This module is a
+The numpy, FAISS, and torch backends live in the standalone
+``protea-method`` library (F2C extraction, 2026-05-07). This module is a
 backwards-compatible shim so existing PROTEA call sites that import
 from ``protea.core.knn_search`` keep working without changes; new
 code should import directly from ``protea_method.knn_search``.
@@ -10,6 +10,13 @@ PROTEA's ``OperationTuning.numpy_query_chunk`` configuration is
 forwarded to the library via the ``PROTEA_METHOD_NUMPY_QUERY_CHUNK``
 environment variable on first call, so the chunk-size knob is
 preserved without changing call signatures.
+
+Torch backend env vars (pass-through, no PROTEA-side config required):
+
+- ``PROTEA_KNN_DEVICE``: ``"auto"`` (default), ``"cuda"``, or ``"cpu"``.
+  Controls which device the torch backend uses for KNN computation.
+- ``PROTEA_KNN_CHUNK_SIZE``: int, default 4096. Number of query rows
+  processed per GPU kernel launch.
 """
 
 from __future__ import annotations

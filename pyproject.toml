@@ -1,7 +1,7 @@
 [project]
 name = "protea"
 version = "0.8.0"
-description = ""
+description = "PROtein funcTional Embedding-based Annotation: distributed platform for GO term prediction via PLM embeddings, KNN transfer, and learned re-ranking."
 authors = [
     {name = "frapercan",email = "frapercan1@alum.us.es"}
 ]
@@ -17,6 +17,7 @@ dependencies = [
     "numpy (>=1.26.0,<3.0.0)",
     "transformers (>=4.40.0,<5.0.0)",
     "torch (>=2.0.0)",
+    "torchvision (>=0.15.0)",
     "sentencepiece (>=0.2.1,<0.3.0)",
     "esm (>=3.2.1)",
     "python-multipart (>=0.0.22,<0.0.23)",
@@ -26,10 +27,35 @@ dependencies = [
     "cafaeval-protea @ git+https://github.com/frapercan/cafaeval-protea.git@main",
     "lightgbm (>=4.6.0,<5.0.0)",
     "pyarrow (>=23.0.1,<24.0.0)",
+    "httpx (>=0.28.1,<0.29.0)",
+    "pyjwt (>=2.10.0,<3.0.0)",
+    "slowapi (>=0.1.9,<0.2.0)",
+    "uvicorn (>=0.41.0,<0.42.0)",
+    "pydantic-settings (>=2.0,<3.0)",
+    "prometheus-client (>=0.20.0,<1.0.0)",
+    "protea-contracts @ git+https://github.com/frapercan/protea-contracts.git@main",
+    "argon2-cffi (>=23.1.0,<26.0.0)",
+    "minio (>=7.2,<8.0)",
 ]
 
-[project.optional-dependencies]
-storage = ["minio (>=7.2,<8.0)"]
+
+[tool.poetry.dependencies]
+# Default torch + torchvision install the CPU wheels from the PyTorch CPU
+# index, dropping the ~6 GB NVIDIA/triton stack that the CI runners and the
+# slim production Docker image never use. GPU embedding workers override
+# torch post-install via ``scripts/install_gpu_torch.sh``
+# (see CLAUDE.md "GPU torch override"). torchvision is pulled in transitively
+# by ``esm``; pinning it to the same source keeps ABI parity with torch+cpu
+# (otherwise ``transformers`` errors out with ``operator torchvision::nms
+# does not exist``).
+torch = {source = "pytorch-cpu"}
+torchvision = {source = "pytorch-cpu"}
+uvicorn = ">=0.41.0,<0.42.0"
+
+[[tool.poetry.source]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+priority = "explicit"
 
 
 [tool.poetry.group.plugins.dependencies]
@@ -39,11 +65,13 @@ storage = ["minio (>=7.2,<8.0)"]
 # disk. Real ABCs / payloads land in F1 (T1.1-T1.5); during F0 these
 # packages export only their version sentinel and entry_point stubs,
 # which is enough to validate the multi-repo layout.
-protea-contracts = { git = "https://github.com/frapercan/protea-contracts.git", branch = "master" }
-protea-method = { git = "https://github.com/frapercan/protea-method.git", branch = "master" }
-protea-sources = { git = "https://github.com/frapercan/protea-sources.git", branch = "master" }
-protea-runners = { git = "https://github.com/frapercan/protea-runners.git", branch = "master" }
-protea-backends = { git = "https://github.com/frapercan/protea-backends.git", branch = "master" }
+# NOTE: protea-contracts is a MAIN dependency (imported at runtime by
+# protea.core.contracts.operation); the remaining four are optional
+# plugin extras installed via --with plugins.
+protea-method = { git = "https://github.com/frapercan/protea-method.git", branch = "main" }
+protea-sources = { git = "https://github.com/frapercan/protea-sources.git", branch = "main" }
+protea-runners = { git = "https://github.com/frapercan/protea-runners.git", branch = "main" }
+protea-backends = { git = "https://github.com/frapercan/protea-backends.git", branch = "main" }
 
 
 [build-system]
@@ -51,36 +79,89 @@ requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 
-[tool.poetry.group.dev.dependencies]
-# Dev-time only: imported by protea.core.parquet_export at export-validation
-# time so the manifest dict is checked against the lab's pydantic contract
-# before we publish to the ArtifactStore. Production images do NOT need this.
-protea-reranker-lab = {git = "https://github.com/frapercan/protea-reranker-lab.git", branch = "main"}
-pytest = ">=9.0.2,<10.0.0"
-uvicorn = ">=0.41.0,<0.42.0"
-coverage = {extras = ["toml"], version = ">=7.2.1"}
-flake8 = ">=6.0.0"
-flake8-bugbear = ">=23.2.13"
+[tool.poetry.group.lint]
+optional = true
+[tool.poetry.group.lint.dependencies]
+# Static analysis only. Lint CI installs ``--with lint`` (main + lint).
+ruff = ">=0.15.5,<0.16.0"
+mypy = ">=1.19.1,<2.0.0"
+types-requests = "^2.32.4.20260107"
+types-pyyaml = "^6.0.12.20250915"
 taskipy = ">=1.10.3"
+
+
+# T5.1a (D7 accepted 2026-05-06): OpenTelemetry SDK + OTLP HTTP exporter
+# + FastAPI instrumentor. Kept in its own optional poetry group so
+# developer / CI installs stay slim while deploy targets opt in with
+# ``poetry install --with telemetry``. T5.1b extends this group with
+# the SQLAlchemy + pika instrumentors.
+[tool.poetry.group.telemetry]
+optional = true
+[tool.poetry.group.telemetry.dependencies]
+opentelemetry-api = ">=1.27.0,<2.0.0"
+opentelemetry-sdk = ">=1.27.0,<2.0.0"
+opentelemetry-exporter-otlp-proto-http = ">=1.27.0,<2.0.0"
+opentelemetry-instrumentation-fastapi = ">=0.48b0,<1.0.0"
+# T5.1b: SQLAlchemy engine spans + W3C traceparent propagation through
+# pika. The pika library does not have an OTel instrumentor of its own;
+# producer/consumer spans are wired by hand in publisher.py + consumer.py
+# using opentelemetry.propagate (shipped with opentelemetry-api).
+opentelemetry-instrumentation-sqlalchemy = ">=0.48b0,<1.0.0"
+
+
+[tool.poetry.group.test]
+optional = true
+[tool.poetry.group.test.dependencies]
+# Unit + integration test runtime. Includes ``protea-reranker-lab`` because
+# ``test_predict_go_terms.py`` and ``test_reranker.py`` import
+# ``protea_reranker_lab.contracts.compute_feature_schema_sha`` to assert
+# parity with the offline trainer.
+pytest = ">=9.0.2,<10.0.0"
+pytest-cov = ">=7.0.0,<8.0.0"
+coverage = {extras = ["toml"], version = ">=7.2.1"}
+# Property-based tests (F6.2). CI activates the deterministic profile
+# via PROTEA_HYPOTHESIS_PROFILE=ci (registered in tests/conftest.py),
+# so every run picks the same seed and example count.
+hypothesis = ">=6.100,<7"
+# F6.3: cosmic-ray mutation testing. Kept in the test group so a
+# ``poetry install --with test`` provisioning is sufficient for the
+# mutation CI job (see .github/workflows/mutation.yml). pytest-timeout
+# is pulled in explicitly because the cosmic-ray test command relies
+# on ``--timeout=<seconds>`` to cap runaway mutants.
+cosmic-ray = ">=8.4.6,<9.0.0"
+pytest-timeout = ">=2.3,<3"
+protea-reranker-lab = {git = "https://github.com/frapercan/protea-reranker-lab.git", branch = "main"}
+
+
+[tool.poetry.group.profiling]
+optional = true
+[tool.poetry.group.profiling.dependencies]
+# CPU + memory profiling; run via `scalene -- python -m <driver>`.
+scalene = ">=1.5.47"
+# Flamegraph capture on live processes; run via `py-spy record --pid <PID>`.
+py-spy = ">=0.3.14"
+
+
+[tool.poetry.group.docs]
+optional = true
+[tool.poetry.group.docs.dependencies]
+# Sphinx build. Heavy autodoc imports rely on ``main`` deps too, so docs
+# CI installs ``--with docs`` (which implies ``--with main``).
 sphinx = ">=7.2.6"
 furo = ">=2024.8.6"
 sphinx-copybutton = ">=0.5.2"
 sphinx-design = ">=0.6.1"
 shibuya = ">=2025.9.24"
-httpx = ">=0.28.1,<0.29.0"
-ruff = ">=0.15.5,<0.16.0"
-mypy = ">=1.19.1,<2.0.0"
-pytest-cov = ">=7.0.0,<8.0.0"
-types-requests = "^2.32.4.20260107"
-types-pyyaml = "^6.0.12.20250915"
 sphinxcontrib-bibtex = "^2.7.0"
 
+
 [tool.taskipy.tasks]
-lint     = "ruff check protea scripts && flake8 protea"
+lint     = "ruff check protea scripts"
 format   = "ruff format protea scripts"
 typecheck = "mypy protea"
 coverage = "coverage run -m pytest tests && coverage report -m"
 html_docs = "make html -C docs"
+docs     = "bash scripts/build_all_docs.sh"
 
 [tool.ruff]
 target-version = "py312"

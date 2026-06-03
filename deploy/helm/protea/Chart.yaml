@@ -1,0 +1,24 @@
+apiVersion: v2
+name: protea
+description: |
+  PROTEA (Protein functional Embedding-based Annotation) Helm chart.
+  Deploys the full PROTEA stack: postgres (with pgvector), rabbitmq,
+  minio, api, workers (jobs / embeddings / embeddings.batch /
+  embeddings.write / predictions.batch / predictions.write / reaper),
+  and the Next.js frontend. Reflects the service set defined in
+  docker-compose.yml.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.24.0-0"
+keywords:
+  - protein
+  - bioinformatics
+  - embeddings
+  - cafa
+home: https://github.com/frapercan/PROTEA
+sources:
+  - https://github.com/frapercan/PROTEA
+maintainers:
+  - name: Francisco Miguel Pérez Canales
+    email: frapercan1@alum.us.es

@@ -1,0 +1,69 @@
+# Alert-rule provisioning: 3+ error-level heartbeats in a 5-minute
+# window, grouped by task_id, route via the agent-farm policy to the
+# Slack contact point.
+#
+# The rule lives in the `agent-farm` folder (Grafana creates the folder
+# from the alert payload if it does not exist) so it sits next to the
+# agent-farm-heartbeats dashboard in the UI. The Loki query mirrors the
+# bottom-row panel of that dashboard, so an operator can sanity-check
+# the firing count against the table view before opening Slack.
+#
+# Rate-limiting: Grafana evaluates every 1m, but `for: 0s` plus the
+# policy `repeat_interval: 30m` means a sustained burst produces one
+# Slack message immediately, then at most one follow-up every 30
+# minutes. The acceptance test in agent-farm (synthetic 5 errors)
+# expects exactly one Slack POST.
+
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: agent-farm-heartbeat-errors
+    folder: agent-farm
+    interval: 1m
+    rules:
+      - uid: agent-farm-error-burst
+        title: agent-farm error burst (3+ in 5m)
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: protea-loki
+            model:
+              datasource: { type: loki, uid: protea-loki }
+              editorMode: code
+              expr: 'sum by (task_id, agent_name) (count_over_time({compose_project="agent-farm"} | json | level="error" [5m]))'
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: instant
+              refId: A
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              refId: C
+              expression: A
+              conditions:
+                - evaluator: { type: gt, params: [2] }
+                  operator: { type: and }
+                  query: { params: ["A"] }
+                  reducer: { type: last, params: [] }
+                  type: query
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels:
+          service: agent-farm
+          severity: warning
+        annotations:
+          summary: "{{ $labels.agent_name }} task {{ $labels.task_id }} emitted {{ $values.A.Value }} error heartbeats in the last 5 minutes."
+          # description doubles as fallback Slack text for any future
+          # contact point that ignores the custom template above.
+          description: "Open https://protea.ngrok.app/en/farm/{{ $labels.task_id }}/ for the task transcript."
+          runbook_url: "https://protea.ngrok.app/en/farm/{{ $labels.task_id }}/"
+        isPaused: false

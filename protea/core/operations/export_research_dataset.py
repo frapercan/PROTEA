@@ -21,21 +21,34 @@ Why a dedicated operation instead of dump-only mode of the helper?
 from __future__ import annotations
 
 import hashlib
+import json
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, NamedTuple
 
 from pydantic import Field, field_validator
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
+from protea.core.schema_sha_v2 import maybe_v2
 from protea.core.training_dump_helpers import TrainRerankerAutoOperation
 from protea.infrastructure.orm.models.embedding.dataset import Dataset
+from protea.infrastructure.session import build_session_factory, session_scope
 from protea.infrastructure.settings import load_settings
 from protea.infrastructure.storage import get_artifact_store
 
 PositiveInt = Annotated[int, Field(gt=0)]
+
+
+class _DumpOutcome(NamedTuple):
+    """Bundle of artefact-store + manifest metadata produced by the dump."""
+
+    settings: Any
+    key_prefix: str
+    uploaded: dict[str, str]
+    manifest_data: dict[str, Any]
+    manifest_sha: str
 
 
 class ExportResearchDatasetPayload(ProteaPayload, frozen=True):
@@ -90,9 +103,7 @@ class ExportResearchDatasetOperation:
 
     _auto = TrainRerankerAutoOperation()
 
-    def summarize_payload(
-        self, payload: dict[str, Any], *, session: Session | None = None
-    ) -> str:
+    def summarize_payload(self, payload: dict[str, Any], *, session: Session | None = None) -> str:
         p = payload or {}
         bits: list[str] = []
         if p.get("output_name"):
@@ -110,72 +121,81 @@ class ExportResearchDatasetOperation:
     def execute(
         self, session: Session, payload: dict[str, Any], *, emit: EmitFn
     ) -> OperationResult:
+        """Run the export in three short session windows.
+
+        The compute phase (KNN search + parquet staging + upload) can
+        take 3-4 hours. Holding a single SQLAlchemy session open across
+        that span ends in tears: pool recycle / idle timeouts / pika
+        reconnects all conspire to detach the session by the time we
+        try to insert the Dataset row, which then raises
+        ``DetachedInstanceError`` and loses the work.
+
+        Layout:
+
+        * Window 1 (uniqueness check) uses the session handed in by
+          BaseWorker. We touch it just long enough to verify the name
+          is free, then release it.
+        * Window 2 (compute) opens its own short-lived session for the
+          dump helper, since its SQL is structured as many small reads
+          rather than one long transaction.
+        * Window 3 (register) opens a fresh ``session_scope`` to insert
+          the Dataset row. That session is born after the long compute
+          phase, so its connection is guaranteed healthy.
+
+        The BaseWorker-supplied session is left untouched after window 1
+        so the success/failure commit at the end of the worker loop
+        runs against a fresh-enough connection (``_rebind_job`` in
+        BaseWorker handles the residual detachment risk for the Job
+        ORM itself).
+        """
         p = ExportResearchDatasetPayload.model_validate(payload)
         raw_job_id = payload.get("_job_id") if isinstance(payload, dict) else None
         job_uuid = uuid.UUID(raw_job_id) if raw_job_id else None
 
         settings = load_settings(_resolve_project_root())
+
+        self._reject_duplicate_name(session, p.output_name)
+        factory = build_session_factory(settings.db_url)
+
+        outcome, auto_result = self._compute_and_upload(p, factory, settings, emit)
+        with session_scope(factory) as register_session:
+            dataset_id = self._register_dataset(register_session, p, outcome, job_uuid, emit)
+
+        return OperationResult(result=self._merge_result(auto_result, p, outcome, dataset_id))
+
+    @staticmethod
+    def _reject_duplicate_name(session: Session, output_name: str) -> None:
+        """Window 1: pre-flight uniqueness check on the passed session.
+
+        Touches the session only for one read so the long compute phase
+        does not hold it open across pool-recycle / idle-timeout windows.
+        """
+        if session.query(Dataset.id).filter(Dataset.name == output_name).first() is not None:
+            raise ValueError(f"Dataset {output_name!r} already exists")
+        session.expire_all()
+
+    def _compute_and_upload(
+        self,
+        p: ExportResearchDatasetPayload,
+        factory: Any,
+        settings: Any,
+        emit: EmitFn,
+    ) -> tuple[_DumpOutcome, OperationResult]:
+        """Window 2: KNN dump + parquet upload.
+
+        Dump helper opens its own short session_scope; the parquet
+        writers and the upload do not touch the DB. Returns the dump
+        outcome plus the inner ``OperationResult`` for merging.
+        """
         store = get_artifact_store(settings)
         key_prefix = f"datasets/{p.output_name}/"
-
-        # Reject duplicate names up-front so a half-succeeded run doesn't
-        # silently leave orphan blobs in the store.
-        existing = (
-            session.query(Dataset.id).filter(Dataset.name == p.output_name).first()
-        )
-        if existing is not None:
-            raise ValueError(f"Dataset {p.output_name!r} already exists")
-
-        def _relay(event: str, scope: str | None, evt_payload: dict[str, Any], level: str) -> None:
-            # Surface the underlying dump-helper events under this
-            # operation's namespace so the job event log reads naturally.
-            if event.startswith("dump_helper."):
-                event = "export_research_dataset." + event[len("dump_helper."):]
-            emit(event, scope, evt_payload, level)  # type: ignore[arg-type]
-
         with tempfile.TemporaryDirectory(prefix="protea_export_") as tmp:
             stage_dir = Path(tmp)
-            auto_payload: dict[str, Any] = {
-                "name": p.output_name,
-                "embedding_config_id": p.embedding_config_id,
-                "ontology_snapshot_id": p.ontology_snapshot_id,
-                "train_versions": p.train_versions,
-                "test_versions": p.test_versions,
-                "annotation_source": p.annotation_source,
-                "limit_per_entry": p.k,
-                "search_backend": p.search_backend,
-                "compute_alignments": p.compute_alignments,
-                "compute_taxonomy": p.compute_taxonomy,
-                "expand_votes_to_ancestors": p.expand_votes_to_ancestors,
-                "use_embedding_pca": p.use_embedding_pca,
-                "training_scope": "per_cell",
-                "dump_to": str(stage_dir),
-                "dump_only": True,
-            }
-            auto_result = self._auto.execute(session, auto_payload, emit=_relay)
-
-            uploaded: dict[str, str] = {}
-            for fname in ("train.parquet", "eval.parquet", "manifest.json"):
-                p_path = stage_dir / fname
-                if p_path.exists():
-                    uploaded[fname] = store.put(key_prefix + fname, p_path)
-
-            # Read manifest bytes while the staging dir still exists so the
-            # Dataset row can record a content-addressed fingerprint. The
-            # manifest is written by ``export_reranker_parquets`` and is
-            # never empty on a successful run.
-            import json as _json
-
-            manifest_path = stage_dir / "manifest.json"
-            if not manifest_path.exists():
-                raise RuntimeError(
-                    "export_research_dataset: manifest.json missing from stage dir — "
-                    "dump path did not produce the expected layout"
-                )
-            manifest_bytes = manifest_path.read_bytes()
-            manifest_sha = hashlib.sha256(manifest_bytes).hexdigest()
-            manifest_data = _json.loads(manifest_bytes)
-
+            with session_scope(factory) as compute_session:
+                auto_result = self._dump_to_stage(compute_session, p, stage_dir, emit)
+            uploaded, manifest_data, manifest_sha = self._upload_outputs(
+                stage_dir, store, key_prefix
+            )
             emit(
                 "export_research_dataset.published",
                 None,
@@ -188,18 +208,128 @@ class ExportResearchDatasetOperation:
                 "info",
             )
 
-        # Register the dataset in the DB so the lab can pull by name/id.
+        outcome = _DumpOutcome(
+            settings=settings,
+            key_prefix=key_prefix,
+            uploaded=uploaded,
+            manifest_data=manifest_data,
+            manifest_sha=manifest_sha,
+        )
+        return outcome, auto_result
+
+    @staticmethod
+    def _merge_result(
+        auto_result: OperationResult,
+        p: ExportResearchDatasetPayload,
+        outcome: _DumpOutcome,
+        dataset_id: uuid.UUID,
+    ) -> dict[str, Any]:
+        """Compose the final OperationResult dict from the dump output."""
+        merged: dict[str, Any] = dict(auto_result.result)
+        merged.update(
+            {
+                "dataset_id": str(dataset_id),
+                "output_name": p.output_name,
+                "key_prefix": outcome.key_prefix,
+                "storage_backend": outcome.settings.storage_backend,
+                "train_uri": outcome.uploaded.get("train.parquet"),
+                "eval_uri": outcome.uploaded.get("eval.parquet"),
+                "manifest_uri": outcome.uploaded.get("manifest.json"),
+                "manifest_sha": outcome.manifest_sha,
+            }
+        )
+        return merged
+
+    def _dump_to_stage(
+        self,
+        session: Session,
+        p: ExportResearchDatasetPayload,
+        stage_dir: Path,
+        emit: EmitFn,
+    ) -> OperationResult:
+        """Run the inner dump-only path of TrainRerankerAutoOperation.
+
+        Routes its events under this operation's namespace via the
+        ``dump_helper.`` → ``export_research_dataset.`` prefix swap so the
+        job event log reads naturally.
+        """
+
+        def _relay(event: str, scope: str | None, evt_payload: dict[str, Any], level: str) -> None:
+            if event.startswith("dump_helper."):
+                event = "export_research_dataset." + event[len("dump_helper.") :]
+            emit(event, scope, evt_payload, level)  # type: ignore[arg-type]
+
+        auto_payload: dict[str, Any] = {
+            "name": p.output_name,
+            "embedding_config_id": p.embedding_config_id,
+            "ontology_snapshot_id": p.ontology_snapshot_id,
+            "train_versions": p.train_versions,
+            "test_versions": p.test_versions,
+            "annotation_source": p.annotation_source,
+            "limit_per_entry": p.k,
+            "search_backend": p.search_backend,
+            "compute_alignments": p.compute_alignments,
+            "compute_taxonomy": p.compute_taxonomy,
+            "expand_votes_to_ancestors": p.expand_votes_to_ancestors,
+            "use_embedding_pca": p.use_embedding_pca,
+            "training_scope": "per_cell",
+            "dump_to": str(stage_dir),
+            "dump_only": True,
+        }
+        return self._auto.execute(session, auto_payload, emit=_relay)
+
+    @staticmethod
+    def _upload_outputs(
+        stage_dir: Path, store: Any, key_prefix: str
+    ) -> tuple[dict[str, str], dict[str, Any], str]:
+        """Upload train/eval parquets + manifest, return ``(uploaded, manifest_data, manifest_sha)``.
+
+        Reads manifest bytes while the staging dir still exists so the
+        Dataset row can record a content-addressed fingerprint.
+        """
+        uploaded: dict[str, str] = {}
+        for fname in ("train.parquet", "eval.parquet", "manifest.json"):
+            p_path = stage_dir / fname
+            if p_path.exists():
+                uploaded[fname] = store.put(key_prefix + fname, p_path)
+        manifest_path = stage_dir / "manifest.json"
+        if not manifest_path.exists():
+            raise RuntimeError(
+                "export_research_dataset: manifest.json missing from stage dir; "
+                "dump path did not produce the expected layout"
+            )
+        manifest_bytes = manifest_path.read_bytes()
+        manifest_sha = hashlib.sha256(manifest_bytes).hexdigest()
+        manifest_data = json.loads(manifest_bytes)
+        return uploaded, manifest_data, manifest_sha
+
+    def _register_dataset(
+        self,
+        session: Session,
+        p: ExportResearchDatasetPayload,
+        outcome: _DumpOutcome,
+        job_uuid: uuid.UUID | None,
+        emit: EmitFn,
+    ) -> uuid.UUID:
+        """Insert the ``Dataset`` row + emit ``registered``; returns its UUID."""
+        manifest_data = outcome.manifest_data
+        legacy_schema_sha = manifest_data.get("schema_sha", "")
         dataset = Dataset(
             name=p.output_name,
             operation=self.name,
             job_id=job_uuid,
-            storage_backend=settings.storage_backend,
-            key_prefix=key_prefix,
-            train_uri=uploaded.get("train.parquet"),
-            eval_uri=uploaded.get("eval.parquet"),
-            manifest_uri=uploaded["manifest.json"],
-            schema_sha=manifest_data.get("schema_sha", ""),
-            manifest_sha=manifest_sha,
+            storage_backend=outcome.settings.storage_backend,
+            key_prefix=outcome.key_prefix,
+            train_uri=outcome.uploaded.get("train.parquet"),
+            eval_uri=outcome.uploaded.get("eval.parquet"),
+            manifest_uri=outcome.uploaded["manifest.json"],
+            schema_sha=legacy_schema_sha,
+            # T1.6 (ADR D10) dual-write gated by
+            # ``PROTEA_SCHEMA_SHA_V2_WRITE_ENABLED``; when off the
+            # column stays NULL and the existing read paths keep using
+            # ``schema_sha`` unchanged.
+            schema_sha_v2=maybe_v2(legacy_schema_sha or None),
+            manifest_sha=outcome.manifest_sha,
             n_train_rows=int(manifest_data.get("n_train_rows", 0)),
             n_eval_rows=int(manifest_data.get("n_eval_rows", 0)),
             k=int(manifest_data.get("k", p.k)),
@@ -214,28 +344,13 @@ class ExportResearchDatasetOperation:
         )
         session.add(dataset)
         session.flush()
-        dataset_id = dataset.id
         emit(
             "export_research_dataset.registered",
             None,
-            {"dataset_id": str(dataset_id), "name": p.output_name},
+            {"dataset_id": str(dataset.id), "name": p.output_name},
             "info",
         )
-
-        merged: dict[str, Any] = dict(auto_result.result)
-        merged.update(
-            {
-                "dataset_id": str(dataset_id),
-                "output_name": p.output_name,
-                "key_prefix": key_prefix,
-                "storage_backend": settings.storage_backend,
-                "train_uri": uploaded.get("train.parquet"),
-                "eval_uri": uploaded.get("eval.parquet"),
-                "manifest_uri": uploaded.get("manifest.json"),
-                "manifest_sha": manifest_sha,
-            }
-        )
-        return OperationResult(result=merged)
+        return dataset.id
 
 
 def _resolve_project_root() -> Path:

@@ -6,9 +6,11 @@ import { use, useEffect, useRef, useState } from "react";
 import { cancelJob, deleteJob, getJob, getJobEvents, listJobs, JobEvent, Job } from "@/lib/api";
 import { StatusBadge } from "@/components/StatusBadge";
 import { EventTimeline } from "@/components/EventTimeline";
+import { Skeleton, SkeletonTableRow } from "@/components/Skeleton";
 import { useToast } from "@/components/Toast";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { CommentsThread } from "@/components/CommentsThread";
 
 const TERMINAL = ["succeeded", "failed", "cancelled"];
 
@@ -34,10 +36,10 @@ function ProgressBar({
   if (!total) {
     return (
       <div className="mt-2 space-y-1">
-        <div className="text-xs text-gray-500">
+        <div className="text-[13px] text-slate-500">
           <span className="font-medium">{(current ?? 0).toLocaleString()} {unit} processed</span>
         </div>
-        <div className="h-2.5 w-full overflow-hidden rounded-full bg-gray-100">
+        <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
           <div className="h-2.5 w-1/3 rounded-full bg-blue-400 animate-pulse" />
         </div>
       </div>
@@ -46,10 +48,10 @@ function ProgressBar({
   const pct = Math.min(100, Math.round(((current ?? 0) / total) * 100));
   return (
     <div className="mt-2 space-y-1">
-      <div className="flex justify-between text-xs text-gray-500">
+      <div className="flex justify-between text-[13px] text-slate-500">
         <span className="font-medium">{(current ?? 0).toLocaleString()} / {total.toLocaleString()} {unit} ({pct}%)</span>
       </div>
-      <div className="h-2.5 w-full overflow-hidden rounded-full bg-gray-100">
+      <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
         <div
           className="h-2.5 rounded-full bg-blue-500 transition-all duration-500"
           style={{ width: `${pct}%` }}
@@ -62,6 +64,8 @@ function ProgressBar({
 export default function JobDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id: jobId } = use(params);
   const t = useTranslations("jobs");
+const tToast = useTranslations("toasts");
+  const locale = useLocale();
   const [job, setJob] = useState<any>(null);
   const [events, setEvents] = useState<JobEvent[]>([]);
   const [children, setChildren] = useState<Job[]>([]);
@@ -78,16 +82,16 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
       const [j, ev, ch] = await Promise.all([
         getJob(jobId),
         getJobEvents(jobId, 200),
-        listJobs({ limit: 500 }),
+        listJobs({ parent_job_id: jobId, limit: 200 }),
       ]);
       setJob(j);
       setEvents([...ev].reverse()); // chronological
-      setChildren(ch.filter((c) => c.parent_job_id === jobId));
+      setChildren(ch);
       // Notify when job reaches a terminal state
       if (prevStatusRef.current && prevStatusRef.current !== j.status) {
-        if (j.status === "succeeded") toast("Job succeeded", "success");
-        else if (j.status === "failed") toast("Job failed", "error");
-        else if (j.status === "cancelled") toast("Job cancelled", "info");
+        if (j.status === "succeeded") toast(tToast("jobSucceeded"), "success");
+        else if (j.status === "failed") toast(tToast("jobFailed"), "error");
+        else if (j.status === "cancelled") toast(tToast("jobCancelled"), "info");
       }
       prevStatusRef.current = j.status;
     } catch (e: any) {
@@ -124,8 +128,8 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
     try {
       setError("");
       await deleteJob(jobId);
-      toast("Job deleted", "info");
-      router.push("/jobs");
+      toast(tToast("jobDeleted"), "info");
+      router.push(`/${locale}/jobs`);
     } catch (e: any) {
       setError(String(e));
       toast(String(e), "error");
@@ -136,7 +140,7 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
     try {
       setError("");
       await cancelJob(jobId);
-      toast("Job cancelled", "info");
+      toast(tToast("jobCancelled"), "info");
       await refresh();
     } catch (e: any) {
       setError(String(e));
@@ -160,13 +164,13 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
           </span>
         )}
         <div className="ml-auto flex gap-2">
-          <button onClick={refresh} className="rounded-md border bg-white px-3 py-1.5 text-sm hover:bg-gray-50">
+          <button onClick={refresh} className="rounded-md border bg-white px-3 py-1.5 text-sm hover:bg-slate-50">
             {t("refresh")}
           </button>
           <button
             onClick={onCancel}
             disabled={isTerminal}
-            className="rounded-md border px-3 py-1.5 text-sm hover:bg-gray-50 disabled:opacity-40"
+            className="rounded-md border px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-40"
           >
             {t("jobDetail.cancel")}
           </button>
@@ -187,28 +191,52 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
       )}
 
       {/* Job card */}
+      {!job && !error && (
+        <div className="mt-4 rounded-lg border bg-white p-4 shadow-sm space-y-3">
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-5 w-20" />
+            <Skeleton className="h-4 w-40" />
+            <Skeleton className="h-3 w-60" />
+          </div>
+          <Skeleton className="h-3 w-3/4" />
+          <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+            <Skeleton className="h-3 w-32" />
+            <Skeleton className="h-3 w-32" />
+            <Skeleton className="h-3 w-32" />
+            <Skeleton className="h-3 w-32" />
+          </div>
+          <Skeleton className="h-2.5 w-full" />
+        </div>
+      )}
+      {!job && !error && (
+        <div className="mt-6 rounded-lg border bg-white shadow-sm overflow-hidden">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <SkeletonTableRow key={i} cols={3} />
+          ))}
+        </div>
+      )}
       {job && (
         <div className="mt-4 rounded-lg border bg-white p-4 shadow-sm space-y-3">
           <div className="flex items-center gap-3">
             <StatusBadge status={job.status} />
-            <span className="font-semibold text-gray-800">{job.operation}</span>
-            <span className="font-mono text-xs text-gray-400">{jobId}</span>
+            <span className="font-semibold text-slate-800">{job.operation}</span>
+            <span className="font-mono text-xs text-slate-600">{jobId}</span>
           </div>
 
           {job.operation_description && (
-            <p className="text-sm text-gray-600 leading-snug">{job.operation_description}</p>
+            <p className="text-sm text-slate-600 leading-snug">{job.operation_description}</p>
           )}
           {job.operation_summary && (
-            <p className="font-mono text-xs text-gray-700 break-words rounded bg-gray-50 px-2 py-1.5 border border-gray-100">
+            <p className="font-mono text-[13px] text-slate-700 break-words rounded bg-slate-50 px-2 py-1.5 border border-slate-100">
               {job.operation_summary}
             </p>
           )}
 
           <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
-            <div><span className="text-gray-500">{t("jobDetail.queue")}</span> <span className="font-mono text-xs">{job.queue_name}</span></div>
-            <div><span className="text-gray-500">{t("jobDetail.created")}</span> {formatDate(job.created_at)}</div>
-            <div><span className="text-gray-500">{t("jobDetail.started")}</span> {formatDate(job.started_at)}</div>
-            <div><span className="text-gray-500">{t("jobDetail.finished")}</span> {formatDate(job.finished_at)}</div>
+            <div><span className="text-slate-500">{t("jobDetail.queue")}</span> <span className="font-mono text-xs">{job.queue_name}</span></div>
+            <div><span className="text-slate-500">{t("jobDetail.created")}</span> {formatDate(job.created_at)}</div>
+            <div><span className="text-slate-500">{t("jobDetail.started")}</span> {formatDate(job.started_at)}</div>
+            <div><span className="text-slate-500">{t("jobDetail.finished")}</span> {formatDate(job.finished_at)}</div>
             {job.error_code && (
               <div className="col-span-2 text-red-600">
                 <span className="font-medium">{job.error_code}:</span> {job.error_message}
@@ -230,8 +258,8 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
 
           {job.payload && Object.keys(job.payload).length > 0 && (
             <details className="text-sm">
-              <summary className="cursor-pointer text-gray-500 hover:text-gray-700">{t("jobDetail.payloadLabel")}</summary>
-              <pre className="mt-1 rounded bg-gray-50 p-2 text-xs overflow-auto">{JSON.stringify(job.payload, null, 2)}</pre>
+              <summary className="cursor-pointer text-slate-500 hover:text-slate-700">{t("jobDetail.payloadLabel")}</summary>
+              <pre className="mt-1 rounded bg-slate-50 p-2 text-xs overflow-auto">{JSON.stringify(job.payload, null, 2)}</pre>
             </details>
           )}
         </div>
@@ -242,16 +270,16 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
         <div className="mt-6">
           <div className="mb-3 flex items-center gap-4 flex-wrap">
             <h2 className="text-base font-semibold">
-              {t("jobDetail.childJobsTitle")} <span className="text-xs font-normal text-gray-400">{t("jobDetail.childJobsCount", { count: children.length })}</span>
+              {t("jobDetail.childJobsTitle")} <span className="text-xs font-normal text-slate-600">{t("jobDetail.childJobsCount", { count: children.length })}</span>
             </h2>
             {(["running", "queued", "succeeded", "failed", "cancelled"] as const).map((s) => {
               const n = children.filter((c) => c.status === s).length;
               if (!n) return null;
-              return <span key={s} className="text-xs text-gray-500">{s}: <strong>{n}</strong></span>;
+              return <span key={s} className="text-[13px] text-slate-500">{s}: <strong>{n}</strong></span>;
             })}
           </div>
           <div className="overflow-x-auto rounded-lg border bg-white shadow-sm">
-            <div className="grid grid-cols-[120px_1fr_160px] gap-2 border-b bg-gray-50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+            <div className="grid grid-cols-[120px_1fr_160px] gap-2 border-b bg-slate-50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
               <div>{t("status")}</div>
               <div>{t("jobId")}</div>
               <div>{t("jobDetail.finished")}</div>
@@ -264,12 +292,12 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
               .map((c) => (
               <Link
                 key={c.id}
-                href={`/jobs/${c.id}`}
+                href={`/${locale}/jobs/${c.id}`}
                 className="grid grid-cols-[120px_1fr_160px] gap-2 border-b px-4 py-2.5 text-sm hover:bg-blue-50 transition-colors last:border-0"
               >
                 <div><StatusBadge status={c.status} /></div>
-                <div className="font-mono text-xs text-gray-400 truncate">{c.id}</div>
-                <div className="text-xs text-gray-400">{formatDate(c.finished_at)}</div>
+                <div className="font-mono text-xs text-slate-600 truncate">{c.id}</div>
+                <div className="text-xs text-slate-600">{formatDate(c.finished_at)}</div>
               </Link>
             ))}
           </div>
@@ -279,10 +307,16 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
       {/* Events */}
       <div className="mt-6">
         <h2 className="mb-3 text-base font-semibold">
-          {t("jobDetail.eventsTitle")} <span className="text-xs font-normal text-gray-400">{t("jobDetail.eventsCount", { count: events.length })}</span>
+          {t("jobDetail.eventsTitle")} <span className="text-xs font-normal text-slate-600">{t("jobDetail.eventsCount", { count: events.length })}</span>
         </h2>
         <EventTimeline events={events} />
       </div>
+
+      {/* Curator / operator comment thread (D11 narrative surface).
+          Sits under the machine-emitted event timeline because comments
+          are typically reactions to events; rendered for every job
+          (live or terminal) so a post-mortem can land on a failed run. */}
+      <CommentsThread jobId={jobId} />
     </div>
   );
 }

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field, field_validator
 
 from protea.api.deps import get_session_factory
+from protea.api.roles import ROLE_VIEWER, require_role
 from protea.config.tuning import get_tuning
 from protea.infrastructure.orm.models.support_entry import SupportEntry
 from protea.infrastructure.session import session_scope
@@ -14,7 +15,23 @@ router = APIRouter(prefix="/support", tags=["support"])
 
 
 class SupportCreate(BaseModel):
-    comment: str | None = Field(default=None)
+    """Body for ``POST /support``.
+
+    A thumbs-up may carry an optional free-form ``comment``. The text is
+    capped at ``api.max_comment_length`` from the tuning config; longer
+    submissions are rejected with 422 rather than silently truncated.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    comment: str | None = Field(
+        default=None,
+        description=(
+            "Optional free-form note shown on the support feed. "
+            "Capped at ``api.max_comment_length`` from the tuning "
+            "config."
+        ),
+    )
 
     @field_validator("comment")
     @classmethod
@@ -29,7 +46,15 @@ class SupportCreate(BaseModel):
 
 @router.get("")
 def get_support(
-    all_comments: bool = Query(False),
+    all_comments: bool = Query(
+        False,
+        description=(
+            "When false (default), the response carries only the most "
+            "recent N comments (per the tuning config). When true, "
+            "every comment is returned (uncapped; intended for moderation "
+            "tooling, not the public landing page)."
+        ),
+    ),
     factory=Depends(get_session_factory),
 ) -> dict[str, Any]:
     """Return total thumbs-up count and comments.
@@ -57,7 +82,7 @@ def get_support(
         }
 
 
-@router.post("", status_code=201)
+@router.post("", status_code=201, dependencies=[Depends(require_role(ROLE_VIEWER))])
 def post_support(
     body: SupportCreate,
     factory=Depends(get_session_factory),

@@ -6,6 +6,7 @@ Usage:
     poetry run python scripts/worker.py
     poetry run python scripts/worker.py --queue protea.jobs
 """
+
 from __future__ import annotations
 
 import argparse
@@ -14,7 +15,11 @@ import time
 from pathlib import Path
 
 from protea.core.operation_catalog import build_operation_registry
-from protea.infrastructure.queue.consumer import OperationConsumer, QueueConsumer
+from protea.infrastructure.queue.consumer import (
+    ConsumerOptions,
+    OperationConsumer,
+    QueueConsumer,
+)
 from protea.infrastructure.session import build_session_factory
 from protea.infrastructure.settings import load_settings
 from protea.workers.base_worker import BaseWorker, WorkerConfig
@@ -34,10 +39,20 @@ def main() -> None:
     args = parser.parse_args()
 
     from protea.infrastructure.logging import configure_logging
+    from protea.infrastructure.telemetry import configure_telemetry
 
     configure_logging(json=(args.log_format == "json"))
     # Suppress pika's verbose connection lifecycle messages
     logging.getLogger("pika").setLevel(logging.WARNING)
+
+    # T5.1b: boot the OTel SDK before building the session factory so
+    # the SQLAlchemy instrumentor in ``build_engine`` sees an active
+    # provider. ``default_service_name`` derives from the queue so
+    # workers show up as distinct resources (``protea-worker-<queue>``)
+    # in the OTel UI.
+    configure_telemetry(
+        default_service_name=f"protea-worker-{args.queue}",
+    )
 
     project_root = Path(__file__).resolve().parents[1]
     settings = load_settings(project_root)
@@ -53,6 +68,11 @@ def main() -> None:
         "protea.embeddings.write",
         "protea.predictions.batch",
         "protea.predictions.write",
+        # Export minijob pipeline sub-queues (PROTEA_EXPORT_MINIJOBS=1).
+        # No DB Job row per message; parent Job progress tracked by coordinator.
+        "protea.training.knn-batch",
+        "protea.training.features",
+        "protea.training.write",
     }
 
     # Special mode: stale job reaper (no queue, just periodic DB check).
@@ -67,10 +87,14 @@ def main() -> None:
         from protea.config.tuning import get_tuning
 
         worker_settings = get_tuning().worker
+        # F-OPS-JOBS.1: pass the AMQP URL so lease-expired jobs can be
+        # re-enqueued onto their source queue instead of marked FAILED.
         reaper = StaleJobReaper(
             factory,
             timeout_seconds=worker_settings.reaper_main_timeout_seconds,
             stall_seconds=worker_settings.reaper_stall_seconds,
+            amqp_url=settings.amqp_url,
+            max_lease_requeues=worker_settings.max_lease_requeues,
         )
         logging.info(
             "Stale job reaper started. timeout=%ds stall=%ds interval=60s",
@@ -80,21 +104,24 @@ def main() -> None:
         reaper.run(interval_seconds=60)
         return
 
+    options = ConsumerOptions(requeue_on_failure=args.requeue_on_failure)
     if args.queue in _OPERATION_QUEUES:
         consumer: QueueConsumer | OperationConsumer = OperationConsumer(
             amqp_url=settings.amqp_url,
             queue_name=args.queue,
             registry=registry,
             session_factory=factory,
-            requeue_on_failure=args.requeue_on_failure,
+            options=options,
         )
     else:
-        worker = BaseWorker(factory, registry, WorkerConfig(worker_name="queue-worker"), amqp_url=settings.amqp_url)
+        worker = BaseWorker(
+            factory, registry, WorkerConfig(worker_name="queue-worker"), amqp_url=settings.amqp_url
+        )
         consumer = QueueConsumer(
             amqp_url=settings.amqp_url,
             queue_name=args.queue,
             worker=worker,
-            requeue_on_failure=args.requeue_on_failure,
+            options=options,
         )
 
     # Pre-warm taxonomy DB for prediction workers that may need it.
