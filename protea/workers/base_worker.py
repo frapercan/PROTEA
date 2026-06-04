@@ -291,6 +291,10 @@ class BaseWorker:
             job.progress_total = int(result.progress_total)
 
         if result.deferred:
+            # FIX-PREDICT-COORD-RELIABLE: clear the lease so a deferred coord is
+            # kept alive by the reaper's event-based path (child *.done events),
+            # not reaped mid-flight when the 120s claim lease expires (see PR).
+            job.leased_until = None
             self._emit(
                 session,
                 job_id,
