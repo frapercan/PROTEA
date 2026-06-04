@@ -764,6 +764,13 @@ export default function EvaluationPage() {
   const [refreshingDates, setRefreshingDates] = useState(false);
   const [refreshError, setRefreshError] = useState("");
 
+  // Evaluation-set list pagination: every card is tall (GOA timeline +
+  // downloads + run controls), so the un-paginated list runs ~15k px and a
+  // single down-arrow on a projector scrolls past interesting items. Show
+  // the most recent EVAL_PAGE_SIZE first with a "Load more" reveal.
+  const EVAL_PAGE_SIZE = 5;
+  const [visibleEvalCount, setVisibleEvalCount] = useState(EVAL_PAGE_SIZE);
+
   const reload = () =>
     Promise.all([listAnnotationSets(), listPredictionSets(), listEvaluationSets(), listScoringConfigs(), listRerankers()])
       .then(([ann, pred, ev, sc, rr]) => {
@@ -908,7 +915,7 @@ export default function EvaluationPage() {
       {evaluationSets.length > 0 && (
         <section className="space-y-4">
           <h2 className="text-base font-semibold text-slate-800">{t("evaluationSetsSection.heading")}</h2>
-          {evaluationSets.map((e) => (
+          {evaluationSets.slice(0, visibleEvalCount).map((e) => (
             <EvaluationSetCard
               key={e.id}
               e={e}
@@ -921,6 +928,20 @@ export default function EvaluationPage() {
               onDeleted={() => setEvaluationSets((prev) => prev.filter((x) => x.id !== e.id))}
             />
           ))}
+          {evaluationSets.length > visibleEvalCount && (
+            <div className="flex flex-col items-center gap-1.5 pt-1">
+              <button
+                type="button"
+                onClick={() => setVisibleEvalCount((c) => c + EVAL_PAGE_SIZE)}
+                className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 transition-colors"
+              >
+                Load more evaluation sets
+              </button>
+              <span className="text-xs text-slate-500 tabular-nums">
+                Showing {Math.min(visibleEvalCount, evaluationSets.length)} of {evaluationSets.length}
+              </span>
+            </div>
+          )}
         </section>
       )}
 

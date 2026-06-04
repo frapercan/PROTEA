@@ -60,7 +60,7 @@
     "statusIdle": "Queue inaktiv",
     "statusDegraded": "API nicht erreichbar",
     "statusBuild": "Build",
-    "authAnonymous": "Anonym",
+    "authAnonymous": "Öffentlicher Zugang",
     "authApiKey": "API-Key",
     "authBearer": "Bearer",
     "authAnonymousHint": "Anmelden für höhere Limits und Job-Besitz",

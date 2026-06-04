@@ -60,7 +60,7 @@
     "statusIdle": "队列空闲",
     "statusDegraded": "API 不可达",
     "statusBuild": "构建",
-    "authAnonymous": "匿名",
+    "authAnonymous": "公共访问",
     "authApiKey": "API 密钥",
     "authBearer": "Bearer",
     "authAnonymousHint": "登录以提升速率限制并拥有任务",

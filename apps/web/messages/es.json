@@ -60,7 +60,7 @@
     "statusIdle": "Cola inactiva",
     "statusDegraded": "API no accesible",
     "statusBuild": "build",
-    "authAnonymous": "Anónimo",
+    "authAnonymous": "Acceso público",
     "authApiKey": "Clave API",
     "authBearer": "Bearer",
     "authAnonymousHint": "Inicia sesión para aumentar límites y poseer trabajos",
