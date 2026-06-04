@@ -60,7 +60,7 @@
     "statusIdle": "Fila inativa",
     "statusDegraded": "API inacessível",
     "statusBuild": "build",
-    "authAnonymous": "Anónimo",
+    "authAnonymous": "Acesso público",
     "authApiKey": "Chave API",
     "authBearer": "Bearer",
     "authAnonymousHint": "Entre para aumentar limites e ser dono dos jobs",

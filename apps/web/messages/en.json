@@ -60,7 +60,7 @@
     "statusIdle": "Queue idle",
     "statusDegraded": "API unreachable",
     "statusBuild": "build",
-    "authAnonymous": "Anonymous",
+    "authAnonymous": "Public access",
     "authApiKey": "API key",
     "authBearer": "Bearer",
     "authAnonymousHint": "Sign in to raise rate limits and own jobs",

@@ -25,10 +25,13 @@ const ASPECT_LABELS: Record<string, string> = {
   CCO: "Cellular Component",
 };
 
+// Text shades bumped one step darker (700 -> 800) so the abbreviation
+// labels clear WCAG 2.2 AA (4.5:1) against their tinted backgrounds; the
+// emerald-700-on-emerald-50 pairing was the lowest at 3.55:1.
 const ASPECT_COLORS: Record<string, { bg: string; text: string; ring: string }> = {
-  MFO: { bg: "bg-blue-50", text: "text-blue-700", ring: "ring-blue-100" },
-  BPO: { bg: "bg-violet-50", text: "text-violet-700", ring: "ring-violet-100" },
-  CCO: { bg: "bg-emerald-50", text: "text-emerald-700", ring: "ring-emerald-100" },
+  MFO: { bg: "bg-blue-50", text: "text-blue-800", ring: "ring-blue-100" },
+  BPO: { bg: "bg-violet-50", text: "text-violet-800", ring: "ring-violet-100" },
+  CCO: { bg: "bg-emerald-50", text: "text-emerald-800", ring: "ring-emerald-100" },
 };
 
 // Tooltips for the GO aspects, written in plain English. Hover surfaces
@@ -270,7 +273,7 @@ export async function HomeShowcase() {
                         </span>
                       </Tooltip>
                     </div>
-                    <div className="text-xs text-slate-500 mt-0.5 truncate" title={ASPECT_LABELS[aspect]}>
+                    <div className="text-xs text-slate-600 mt-0.5 truncate" title={ASPECT_LABELS[aspect]}>
                       {ASPECT_LABELS[aspect]}
                     </div>
                   </div>

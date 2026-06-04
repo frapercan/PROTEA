@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useFocusTrap } from "@/lib/useFocusTrap";
 
@@ -24,14 +25,33 @@ const ISSUES_URL = "https://github.com/frapercan/PROTEA/issues";
 
 export function UsagePolicyModal() {
   const t = useTranslations("components.usagePolicyModal");
+  // Start hidden. The gate is opened only after the mount-time effect
+  // confirms the policy has NOT been accepted and the demo bypass is not
+  // in play. Starting hidden avoids a first-paint flash of the legal wall
+  // during a live demo.
   const [visible, setVisible] = useState(false);
   const titleId = useId();
+  // `useSearchParams` resolves the query reliably across the next-intl
+  // locale-prefix rewrite (reading `window.location.search` inside the
+  // mount effect can race the rewrite and miss the flag). `?demo=1`
+  // marks a live-presentation session.
+  const searchParams = useSearchParams();
+  const isDemo = searchParams?.get("demo") === "1";
 
   useEffect(() => {
-    if (!localStorage.getItem(STORAGE_KEY)) {
-      setVisible(true);
+    // Demo bypass: `?demo=1` pre-accepts the policy so a live presentation
+    // is never walled by the legal gate on a fresh tab or refresh. The
+    // acceptance is persisted under the same storage key, so once the
+    // presenter opens the app with `?demo=1` every later navigation in the
+    // session stays clean. Any non-empty acceptance value (returning
+    // visitor) likewise suppresses the modal.
+    if (isDemo) {
+      localStorage.setItem(STORAGE_KEY, "1");
+      setVisible(false);
+      return;
     }
-  }, []);
+    setVisible(!localStorage.getItem(STORAGE_KEY));
+  }, [isDemo]);
 
   const accept = useCallback(() => {
     localStorage.setItem(STORAGE_KEY, "1");

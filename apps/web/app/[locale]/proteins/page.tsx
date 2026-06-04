@@ -304,13 +304,13 @@ const tToast = useTranslations("toasts");
                 <Link
                   key={p.accession}
                   href={`/${locale}/proteins/${p.accession}`}
-                  className="grid grid-cols-[130px_140px_120px_1fr_80px_110px] gap-2 border-b px-4 py-3 text-sm hover:bg-blue-50 transition-colors last:border-0 items-center"
+                  className="grid grid-cols-[130px_140px_120px_1fr_80px_110px] gap-2 border-b px-4 py-3.5 text-sm hover:bg-blue-50 transition-colors last:border-0 items-center"
                 >
-                  <div className="font-mono text-xs text-blue-600">{p.accession}</div>
-                  <div className="text-slate-700 truncate text-xs">{p.entry_name ?? "—"}</div>
-                  <div className="font-medium text-slate-800 truncate">{p.gene_name ?? "—"}</div>
-                  <div className="text-xs text-slate-500 truncate">{p.organism ?? "—"}</div>
-                  <div className="text-xs text-slate-600">{p.length?.toLocaleString() ?? "—"}</div>
+                  <div className="font-mono text-sm font-medium text-blue-600">{p.accession}</div>
+                  <div className="text-slate-700 truncate text-sm">{p.entry_name ?? "—"}</div>
+                  <div className="font-medium text-slate-800 truncate text-sm">{p.gene_name ?? "—"}</div>
+                  <div className="text-sm text-slate-600 truncate">{p.organism ?? "—"}</div>
+                  <div className="text-sm text-slate-700 tabular-nums">{p.length?.toLocaleString() ?? "—"}</div>
                   <div><ReviewedBadge reviewed={p.reviewed} /></div>
                 </Link>
               ))}
