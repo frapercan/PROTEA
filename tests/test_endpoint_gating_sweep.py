@@ -133,7 +133,6 @@ _OPERATOR_PATHS = {
     "/datasets/import-by-reference",
     "/embeddings/configs",
     "/embeddings/configs/{config_id}",
-    "/embeddings/predict",
     "/embeddings/prediction-sets/{set_id}",
     "/experiment-runs",
     "/experiment-runs/{run_id}",
@@ -168,6 +167,10 @@ _VIEWER_PATHS = {
 # Paths open to anonymous callers (no auth gate, quota-only).
 _ANON_OPEN_PATHS = {
     "/annotate",
+    # FIX-ANON-PREDICT: the one-click annotation chain ends in a
+    # predict_go_terms dispatch; the endpoint mirrors /annotate's anon
+    # quota gate so logged-out demo visitors complete the flow.
+    "/embeddings/predict",
 }
 
 
@@ -258,6 +261,22 @@ class TestViewerFloorRoutes:
             f"POST /annotate: anonymous caller was blocked by auth gate ({resp.status_code})"
         )
 
+    def test_predict_allows_anonymous(self, monkeypatch, client):
+        """POST /embeddings/predict is open to anonymous callers (FIX-ANON-PREDICT).
+
+        The one-click annotation chain dispatches predict_go_terms after
+        embeddings finish; the endpoint mirrors /annotate's anon quota gate so
+        logged-out demo visitors complete the flow. The handler may 4xx for
+        business reasons (missing body fields), but auth must not block it.
+        """
+        monkeypatch.setenv("PROTEA_AUTHN_REQUIRED", "true")
+        monkeypatch.setenv("PROTEA_JWT_SECRET", _SECRET)
+        resp = client.post("/embeddings/predict", json={})
+        assert resp.status_code not in (401, 403), (
+            "POST /embeddings/predict: anonymous caller was blocked by auth "
+            f"gate ({resp.status_code})"
+        )
+
     @pytest.mark.parametrize(
         "method,path",
         [
@@ -288,7 +307,6 @@ class TestOperatorFloorRoutes:
         [
             ("POST", "/datasets"),
             ("POST", "/embeddings/configs"),
-            ("POST", "/embeddings/predict"),
             ("POST", "/experiment-runs"),
             ("POST", "/jobs"),
             ("POST", "/scoring/configs"),
@@ -308,7 +326,6 @@ class TestOperatorFloorRoutes:
         [
             ("POST", "/datasets"),
             ("POST", "/embeddings/configs"),
-            ("POST", "/embeddings/predict"),
             ("POST", "/experiment-runs"),
             ("POST", "/jobs"),
             ("POST", "/scoring/configs"),
