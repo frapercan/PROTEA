@@ -782,6 +782,28 @@ class TestBaseWorkerDeferredResult:
         # written to the job — not that the in-memory object became RUNNING.
         assert job.status != JobStatus.SUCCEEDED
 
+    def test_deferred_result_clears_lease(self):
+        """FIX-PREDICT-COORD-RELIABLE: a deferred coordinator clears
+        ``leased_until`` so the consumer (which stops heartbeating after the
+        deferred return) does not leave a stale claim-time lease that the
+        reaper would requeue mid-flight."""
+        job = _make_job()
+        job.leased_until = datetime.now(UTC) + timedelta(seconds=120)
+        session = MagicMock()
+        session.get.return_value = job
+        factory = MagicMock(return_value=session)
+        registry, _ = _make_registry(
+            result=OperationResult(result={"dispatched": True}, deferred=True)
+        )
+
+        worker = BaseWorker(factory, registry, WorkerConfig(worker_name="test"))
+        worker.handle_job(job.id)
+
+        assert job.status != JobStatus.SUCCEEDED
+        # Lease cleared → reaper falls back to event-based liveness, never the
+        # 120s lease-expiry requeue path.
+        assert job.leased_until is None
+
 
 class TestBaseWorkerPublishAfterCommit:
     """Cover publish_after_commit and publish_operations (lines 169-176)."""

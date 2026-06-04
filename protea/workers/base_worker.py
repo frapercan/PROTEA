@@ -291,6 +291,20 @@ class BaseWorker:
             job.progress_total = int(result.progress_total)
 
         if result.deferred:
+            # FIX-PREDICT-COORD-RELIABLE: a deferred coordinator (e.g.
+            # ``predict_go_terms``, ``compute_embeddings``) returns here while
+            # still RUNNING; the consumer then acks the message and STOPS the
+            # lease heartbeat. If we leave the claim-time ``leased_until`` in
+            # place it expires within ``_LEASE_SECONDS`` (120s) and the
+            # stale-job reaper requeues the coordinator mid-flight, re-running
+            # it and creating a duplicate PredictionSet + re-dispatched
+            # batches. Clearing the lease hands the deferred job to the
+            # reaper's event-based liveness path instead: the child batch
+            # workers emit ``*.done`` events onto this parent's JobEvent
+            # stream, so the coordinator is kept alive while batches progress
+            # and is only recovered on a genuine stall (no batch completed in
+            # ``stall_seconds``).
+            job.leased_until = None
             self._emit(
                 session,
                 job_id,
