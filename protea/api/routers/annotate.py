@@ -181,17 +181,9 @@ async def annotate(
 
     publish_job(amqp_url, "protea.embeddings", embed_job_id)
 
-    predict_payload: dict[str, Any] = {
-        "embedding_config_id": str(config_id),
-        "annotation_set_id": str(annotation_set_id),
-        "ontology_snapshot_id": str(ontology_snapshot_id),
-        "query_set_id": str(query_set_id),
-        "search_backend": "numpy",
-        "aspect_separated_knn": True,
-        "compute_alignments": True,
-        "compute_taxonomy": True,
-        "compute_reranker_features": compute_reranker_features,
-    }
+    predict_payload = _predict_payload(
+        config_id, annotation_set_id, ontology_snapshot_id, query_set_id, compute_reranker_features
+    )
     return {
         "query_set_id": str(query_set_id),
         "embedding_config_id": str(config_id),
@@ -201,6 +193,27 @@ async def annotate(
         "predict_payload": predict_payload,
         "reranker_id": str(reranker_id) if reranker_id else None,
         "sequence_count": len(records),
+    }
+
+
+def _predict_payload(
+    config_id: uuid.UUID,
+    annotation_set_id: uuid.UUID,
+    ontology_snapshot_id: uuid.UUID,
+    query_set_id: uuid.UUID,
+    compute_reranker_features: bool,
+) -> dict[str, Any]:
+    """Build the predict_go_terms chaining payload returned by /annotate."""
+    return {
+        "embedding_config_id": str(config_id),
+        "annotation_set_id": str(annotation_set_id),
+        "ontology_snapshot_id": str(ontology_snapshot_id),
+        "query_set_id": str(query_set_id),
+        "search_backend": "numpy",
+        "aspect_separated_knn": True,
+        "compute_alignments": True,
+        "compute_taxonomy": True,
+        "compute_reranker_features": compute_reranker_features,
     }
 
 
