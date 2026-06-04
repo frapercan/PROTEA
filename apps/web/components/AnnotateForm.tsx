@@ -6,28 +6,18 @@ import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import {
   annotateProteins,
+  getGpuAvailability,
   getJob,
   launchPredictGoTerms,
-  listJobs,
   listPredictionSets,
   type AnnotateResult,
-  type Job,
+  type GpuAvailability,
 } from "@/lib/api";
 
 type Stage = "idle" | "uploading" | "embedding" | "predicting" | "done" | "error";
 
 const POLL_MS = 3_000;
 const QUEUE_POLL_MS = 30_000;
-
-// Operations that occupy the shared GPU pipeline. While any of these is
-// queued or running we block new user annotation requests, since they won't
-// actually enter the queue in a reasonable time frame.
-const BLOCKING_OPERATIONS = new Set([
-  "compute_embeddings",
-  "compute_embeddings_batch",
-  "predict_go_terms",
-  "predict_go_terms_batch",
-]);
 
 const EXAMPLE_FASTA = `>sp|P01116|RASK_HUMAN GTPase KRas OS=Homo sapiens OX=9606 GN=KRAS PE=1 SV=1
 MTEYKLVVVGAGGVGKSALTIQLIQNHFVDEYDPTIEDSYRKQVVIDGETCLLDILDTAG
@@ -60,10 +50,12 @@ export function AnnotateForm() {
   // Drag-and-drop state
   const [dragOver, setDragOver] = useState(false);
 
-  // Queue-awareness: poll active jobs and block submission while any
-  // embedding/prediction operation is queued or running, because our
-  // single-GPU setup can't absorb another request in reasonable time.
-  const [blockingJobs, setBlockingJobs] = useState<Job[] | null>(null);
+  // Queue-awareness: poll the backend GPU-availability signal and block
+  // submission only while real GPU work is in flight. The backend gates
+  // `busy` on freshly-leased running jobs + genuinely queued work, so
+  // stale/zombie rows (dead worker, no RMQ message) never falsely block
+  // the form (FIX-ANNOTATE-BANNER-ACCURACY).
+  const [gpu, setGpu] = useState<GpuAvailability | null>(null);
   // Whether the user has opened the technical-details disclosure of the
   // queue-blocked banner. Default closed so first-time visitors do not
   // see opaque operation names.
@@ -180,30 +172,25 @@ export function AnnotateForm() {
     };
   }, []);
 
-  // Poll for active embedding/prediction jobs to know whether the GPU
-  // pipeline is currently saturated.
+  // Poll the truthful GPU-availability signal to know whether the GPU
+  // pipeline is genuinely busy (vs. a stale row left behind by a dead
+  // worker).
   useEffect(() => {
     let cancelled = false;
-    const fetchBlocking = async () => {
+    const fetchAvailability = async () => {
       if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
       try {
-        const [queued, running] = await Promise.all([
-          listJobs({ limit: 100, status: "queued" }),
-          listJobs({ limit: 100, status: "running" }),
-        ]);
+        const next = await getGpuAvailability();
         if (cancelled) return;
-        const merged = [...running, ...queued].filter((j) =>
-          BLOCKING_OPERATIONS.has(j.operation),
-        );
-        setBlockingJobs(merged);
+        setGpu(next);
       } catch {
         // ignore transient errors; keep prior state
       }
     };
-    fetchBlocking();
-    const id = setInterval(fetchBlocking, QUEUE_POLL_MS);
+    fetchAvailability();
+    const id = setInterval(fetchAvailability, QUEUE_POLL_MS);
     const onVisibility = () => {
-      if (document.visibilityState === "visible") fetchBlocking();
+      if (document.visibilityState === "visible") fetchAvailability();
     };
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
@@ -215,14 +202,15 @@ export function AnnotateForm() {
 
   const isRunning = stage === "uploading" || stage === "embedding" || stage === "predicting";
   // A running local annotation flow already owns the UI; don't double-block.
-  const isQueueBlocked = !isRunning && (blockingJobs?.length ?? 0) > 0;
-  const runningJob = blockingJobs?.find((j) => j.status === "running") ?? null;
+  // Only block on genuinely-active GPU work (backend `busy`), never on
+  // stale/zombie rows.
+  const isQueueBlocked = !isRunning && (gpu?.busy ?? false);
+  const runningOperation = (gpu?.running_fresh ?? 0) > 0 ? gpu?.active_operation ?? null : null;
   const runningPct =
-    runningJob && runningJob.progress_total && runningJob.progress_current
-      ? Math.round((runningJob.progress_current / runningJob.progress_total) * 100)
+    gpu && gpu.progress_total && gpu.progress_current
+      ? Math.round((gpu.progress_current / gpu.progress_total) * 100)
       : null;
-  const queuedCount =
-    blockingJobs?.filter((j) => j.status === "queued").length ?? 0;
+  const queuedCount = gpu?.queued ?? 0;
 
   return (
     <section className="rounded-2xl border-2 border-blue-100 bg-gradient-to-b from-blue-50/60 to-white p-6 sm:p-8">
@@ -273,9 +261,9 @@ export function AnnotateForm() {
               </div>
               {showQueueDetails && (
                 <ul className="mt-3 space-y-0.5 text-xs text-amber-800 border-t border-amber-200 pt-2">
-                  {runningJob && (
+                  {runningOperation && (
                     <li>
-                      <span className="font-mono break-all">{runningJob.operation}</span>
+                      <span className="font-mono break-all">{runningOperation}</span>
                       {", "}
                       {t("annotateQueueRunningLabel" as any)}
                       {runningPct != null ? ` (${runningPct}%)` : ""}

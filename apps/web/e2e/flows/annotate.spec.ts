@@ -36,6 +36,18 @@ const ANNOTATE_OK = {
   sequence_count: 1,
 };
 
+// Free GPU pipeline: the AnnotateForm enables the form when the
+// availability endpoint reports not-busy (FIX-ANNOTATE-BANNER-ACCURACY).
+const GPU_FREE = {
+  busy: false,
+  running_fresh: 0,
+  queued: 0,
+  running_stale: 0,
+  active_operation: null,
+  progress_current: null,
+  progress_total: null,
+};
+
 const PREDICTION_SETS_OK = [
   {
     id: "ps-test-001",
@@ -75,10 +87,10 @@ test.describe("annotate flow", () => {
     page,
     mockApi,
   }) => {
-    // Default fixture mocks /jobs as running compute_embeddings, which
-    // would trigger the queue-busy banner. Override to an empty list so
-    // we assert the empty-input gating cleanly.
-    mockApi.override("/jobs", []);
+    // Default fixture reports the GPU pipeline as busy, which would
+    // trigger the queue-busy banner. Override to a free signal so we
+    // assert the empty-input gating cleanly.
+    mockApi.override("/jobs/gpu-availability", GPU_FREE);
     await page.goto("/en/");
     const submit = page.getByRole("button", { name: /^Annotate$/ });
     await expect(submit).toBeDisabled();
@@ -87,9 +99,9 @@ test.describe("annotate flow", () => {
   test("queue-busy banner blocks submission while pipeline is saturated", async ({
     page,
   }) => {
-    // Default mock has a running compute_embeddings job, which is in
-    // BLOCKING_OPERATIONS, so the banner should render and the textarea
-    // should be disabled even with content.
+    // Default mock reports the GPU pipeline as busy (a fresh-leased
+    // compute_embeddings run), so the banner should render and the
+    // textarea should be disabled even with content.
     await page.goto("/en/");
     await expect(page.getByText("Annotation temporarily unavailable")).toBeVisible();
     const textarea = page.getByLabel("Sequence input in FASTA format");
@@ -100,8 +112,8 @@ test.describe("annotate flow", () => {
     page,
     mockApi,
   }) => {
-    // Clear the queue so the submit button is enabled.
-    mockApi.override("/jobs", []);
+    // Free the GPU pipeline so the submit button is enabled.
+    mockApi.override("/jobs/gpu-availability", GPU_FREE);
     mockApi.override("/annotate", ANNOTATE_OK);
     mockApi.override("/jobs/job-embed-001", jobLifecycle("job-embed-001"));
     mockApi.override("/embeddings/predict", { id: "job-predict-001", status: "queued" });
@@ -143,7 +155,7 @@ test.describe("annotate flow", () => {
     page,
     mockApi,
   }) => {
-    mockApi.override("/jobs", []);
+    mockApi.override("/jobs/gpu-availability", GPU_FREE);
     mockApi.override("/annotate", { detail: "fasta parse failed" }, 422);
 
     await page.goto("/en/");

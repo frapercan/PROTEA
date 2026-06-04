@@ -147,6 +147,23 @@ export function getJob(id: string) {
   return http<any>(`/jobs/${id}`);
 }
 
+export type GpuAvailability = {
+  busy: boolean;
+  running_fresh: number;
+  queued: number;
+  running_stale: number;
+  active_operation?: string | null;
+  progress_current?: number | null;
+  progress_total?: number | null;
+};
+
+// Truthful GPU busy/free signal (FIX-ANNOTATE-BANNER-ACCURACY). The
+// backend gates `busy` on freshly-leased RUNNING jobs + genuinely queued
+// work, so stale/zombie rows never falsely block the annotation form.
+export function getGpuAvailability() {
+  return http<GpuAvailability>(`/jobs/gpu-availability`);
+}
+
 export function getJobEvents(id: string, limit = 200) {
   return http<JobEvent[]>(`/jobs/${id}/events?limit=${limit}`);
 }

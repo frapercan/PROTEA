@@ -30,6 +30,7 @@ from protea.api.routers import datasets as datasets_router
 from protea.api.routers import embeddings as embeddings_router
 from protea.api.routers import experiment_runs as experiment_runs_router
 from protea.api.routers import jobs as jobs_router
+from protea.api.routers import jobs_availability as jobs_availability_router
 from protea.api.routers import maintenance as maintenance_router
 from protea.api.routers import metrics as metrics_router
 from protea.api.routers import proteins as proteins_router
@@ -172,6 +173,10 @@ _ROUTER_MODULES = (
     auth_login_router,
     auth_smtp_router,
     auth_user_router,
+    # Mount the GPU-availability route before the main jobs router so the
+    # static ``/jobs/gpu-availability`` path resolves ahead of the
+    # ``/jobs/{job_id}`` catch-all.
+    jobs_availability_router,
     jobs_router,
     proteins_router,
     proteins_stats_router,
