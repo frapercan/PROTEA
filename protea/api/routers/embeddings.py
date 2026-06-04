@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
 
-from protea.api.auth.user_quota import require_user_quota
+from protea.api.auth.anon_quota import require_anon_quota
 from protea.api.cache import cached, invalidate
 from protea.api.deps import get_amqp_url, get_session_factory
 from protea.api.roles import ROLE_OPERATOR, require_role
@@ -186,8 +186,7 @@ def delete_embedding_config(
     "/predict",
     summary="Trigger GO term prediction",
     dependencies=[
-        Depends(require_role(ROLE_OPERATOR)),
-        Depends(require_user_quota("predict")),
+        Depends(require_anon_quota),
     ],
 )
 def predict_go_terms(
@@ -196,6 +195,11 @@ def predict_go_terms(
     amqp_url: str = Depends(get_amqp_url),
 ) -> dict[str, Any]:
     """Queue a `predict_go_terms` job that runs KNN-based GO term transfer.
+
+    Open to anonymous callers under the IP-hash daily quota
+    (`require_anon_quota`), mirroring `/annotate`, so the one-click
+    annotation chain (annotate -> embeddings -> predict) completes for
+    logged-out demo visitors. Authenticated callers bypass the anon gate.
 
     The coordinator partitions query proteins into batches, each dispatched to
     `protea.predictions.batch` workers for KNN search (numpy or FAISS) + GO annotation transfer.
