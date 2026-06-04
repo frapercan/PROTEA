@@ -62,13 +62,18 @@ The canonical secret store lives at ``~/.secrets/protea.env``
 ``~/Thesis2/worktrees/protea-deploy/.env`` are symlinks to that file.
 Editing ``~/.secrets/protea.env`` propagates atomically to both trees.
 
-``manage.sh`` does NOT source ``.env`` automatically. Starting the stack
-without sourcing it causes ``AUTHN_REQUIRED`` to default to ``true``,
-which makes ``JWT_SECRET`` a required variable. If ``JWT_SECRET`` is
-missing the API aborts at boot. The correct start sequence is:
+``manage.sh start`` now sources its own env (step ``[0] Environment``):
+it loads ``$ROOT/.env`` then ``$ROOT/.env.local`` with ``set -a`` so a
+naive ``bash scripts/manage.sh start`` no longer aborts the API on a
+missing ``PROTEA_JWT_SECRET`` (``AUTHN_REQUIRED`` defaults to ``true``,
+which makes the JWT secret a required variable). Sourcing the bundle
+manually beforehand is still safe and remains a no-op when both files are
+absent (CI, fresh clones):
 
 .. code-block:: bash
 
+   bash scripts/manage.sh start              # self-sources .env + .env.local
+   # equivalent explicit form (still valid):
    set -a && source ~/.secrets/protea.env && set +a
    bash scripts/manage.sh start
 
@@ -182,6 +187,8 @@ manage.sh reference
    bash scripts/manage.sh status
    bash scripts/manage.sh logs [name]
    bash scripts/manage.sh scale <queue> [N]
+   bash scripts/manage.sh health
+   bash scripts/manage.sh watch
 
 .. list-table::
    :header-rows: 1
@@ -208,8 +215,45 @@ manage.sh reference
    * - ``scale <queue> [N]``
      - Add ``N`` extra workers to an existing queue without restarting
        anything. Example: ``bash scripts/manage.sh scale protea.predictions.batch 2``.
+   * - ``health``
+     - One-shot probe + heal. Sources env, restarts the API if
+       ``/health`` is down, and restarts any tracked worker whose PID is
+       dead by replaying its recorded ``logs/pids/<name>.cmd``. Idempotent
+       (live workers are left alone, never duplicated). Safe to run from
+       cron. Always exits 0.
+   * - ``watch``
+     - Supervised self-heal loop: runs ``health`` every
+       ``WATCH_INTERVAL`` seconds (default 30) until killed, logging to
+       ``logs/watchdog.log``. Refuses to start a second watchdog while one
+       is already live (``logs/pids/watchdog.pid``). Run under ``nohup`` /
+       tmux / a systemd user unit for a persistent watchdog.
+
+**Self-healing the stack:**
+
+The stack self-recovers from process death without a full bounce:
+
+.. code-block:: bash
+
+   # background watchdog (probes API + workers every 30 s)
+   nohup bash scripts/manage.sh watch >/dev/null 2>&1 &
+
+   # or a one-shot heal from cron / a manual check
+   bash scripts/manage.sh health
+
+The watchdog only restarts the API (via its ``/health`` probe) and
+*dead* tracked workers. It never touches a worker whose PID is still
+alive, so an in-flight export or prediction job is never interrupted.
+The frontend is intentionally left to the deploy-keeper / ``deploy.sh``
+rebuild path because restarting it needs a fresh standalone build, not a
+bare re-exec.
 
 **Hardened behaviours in the current version:**
+
+- ``start`` self-sources ``.env`` + ``.env.local`` at step [0] so a
+  naive caller never crashes the API on a missing ``PROTEA_JWT_SECRET``.
+- ``_start_bg`` records each worker's launch argv in
+  ``logs/pids/<name>.cmd`` so ``health`` / ``watch`` can replay the exact
+  invocation when a worker dies.
 
 - The API readiness check at step [3] of ``start`` waits up to 120 s
   (was 3 s before PR #470) before declaring failure and exiting.
