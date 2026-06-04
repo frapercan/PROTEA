@@ -153,6 +153,20 @@ const DEFAULT_JOB_DETAIL = {
   payload: { embedding_config_id: "emb-esm2", batch_size: 32 },
 };
 
+// Truthful GPU-availability signal consumed by the AnnotateForm banner.
+// Default mirrors DEFAULT_JOBS: a live compute_embeddings run + a queued
+// predict, so the queue-busy banner renders by default. Tests that need a
+// free pipeline override "/jobs/gpu-availability" with { busy: false }.
+const DEFAULT_GPU_AVAILABILITY = {
+  busy: true,
+  running_fresh: 1,
+  queued: 1,
+  running_stale: 0,
+  active_operation: "compute_embeddings",
+  progress_current: 4500,
+  progress_total: 9000,
+};
+
 const DEFAULT_JOB_EVENTS = [
   {
     id: 1,
@@ -259,6 +273,14 @@ export const test = base.extend<{ mockApi: MockApi }>({
           status: 200,
           contentType: "application/json",
           body: JSON.stringify(DEFAULT_SHOWCASE),
+        });
+      }
+
+      if (path.match(/\/jobs\/gpu-availability\/?$/)) {
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(DEFAULT_GPU_AVAILABILITY),
         });
       }
 

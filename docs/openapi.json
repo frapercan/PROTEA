@@ -593,6 +593,75 @@
         "title": "ExperimentRunStatus",
         "type": "string"
       },
+      "GpuAvailability": {
+        "description": "Truthful busy/free signal for the shared GPU pipeline.\n\n``busy`` is true only when there is a freshly-leased RUNNING\ncoordinator (``leased_until`` in the future) or genuinely QUEUED work\nfor a GPU operation. Stale RUNNING rows are reported in\n``running_stale`` for observability but never set ``busy``.",
+        "properties": {
+          "active_operation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Operation name of the representative live GPU job, if any.",
+            "title": "Active Operation"
+          },
+          "busy": {
+            "description": "True when real GPU work is in flight (fresh-leased RUNNING coordinator or queued GPU work). Stale jobs never set this.",
+            "title": "Busy",
+            "type": "boolean"
+          },
+          "progress_current": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Progress counter of the representative live job.",
+            "title": "Progress Current"
+          },
+          "progress_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Progress total of the representative live job.",
+            "title": "Progress Total"
+          },
+          "queued": {
+            "description": "Count of QUEUED GPU jobs awaiting a worker.",
+            "title": "Queued",
+            "type": "integer"
+          },
+          "running_fresh": {
+            "description": "Count of RUNNING GPU jobs with a live (future) lease.",
+            "title": "Running Fresh",
+            "type": "integer"
+          },
+          "running_stale": {
+            "description": "Count of RUNNING GPU jobs whose lease has expired (zombie rows; ignored for the busy signal).",
+            "title": "Running Stale",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "busy",
+          "running_fresh",
+          "queued",
+          "running_stale"
+        ],
+        "title": "GpuAvailability",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -6875,6 +6944,28 @@
           }
         },
         "summary": "Create and enqueue a job",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/v1/jobs/gpu-availability": {
+      "get": {
+        "description": "Report whether the shared GPU pipeline is genuinely busy.\n\nPowers the annotation form's \"GPU busy\" banner. Unlike a raw\n``GET /jobs?status=running`` scan, this gates on real liveness: a\nRUNNING job only counts when its ``leased_until`` is still in the\nfuture (a live worker renews the lease every heartbeat). Expired-lease\nRUNNING rows are zombies (dead worker) and are excluded from ``busy``\nso the form is not blocked by stale state.",
+        "operationId": "gpu_availability_v1_jobs_gpu_availability_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GpuAvailability"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "GPU pipeline availability (truthful busy/free signal)",
         "tags": [
           "jobs"
         ]
