@@ -8,14 +8,16 @@ frontend needs to chain ``predict_go_terms`` once embeddings finish.
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import func
+from sqlalchemy import exists
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.auth.anon_quota import require_anon_quota
+from protea.api.cache import cached
 from protea.api.deps import get_amqp_url, get_session_factory
 from protea.api.routers.query_sets import _parse_fasta
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
@@ -30,6 +32,12 @@ from protea.infrastructure.queue.publisher import publish_job
 from protea.infrastructure.session import session_scope
 
 router = APIRouter(prefix="/annotate", tags=["annotate"])
+
+# Cache key for the resolved "smallest config that has embeddings" id. The
+# answer only changes when a new PLM is embedded, so a short TTL keeps the
+# quick-annotation path fast (no per-request 5.8M-row scan) without going
+# stale in a way users notice.
+_BEST_CONFIG_CACHE_KEY = "annotate:best_embedding_config_id"
 
 # Default embedding recipe (ESM-2 650M, last layer, mean pooling).
 _DEFAULT_CONFIG = {
@@ -49,23 +57,54 @@ _DEFAULT_CONFIG = {
 
 def _best_embedding_config(session: Session) -> EmbeddingConfig | None:
     """Pick the smallest model that already has embeddings; the quick-annotation
-    path is latency-sensitive, so a 300M PLM beats a 3B one for the default."""
-    rows = (
-        session.query(
-            EmbeddingConfig,
-            func.count(SequenceEmbedding.id).label("cnt"),
-        )
-        .outerjoin(SequenceEmbedding, SequenceEmbedding.embedding_config_id == EmbeddingConfig.id)
-        .group_by(EmbeddingConfig.id)
+    path is latency-sensitive, so a 300M PLM beats a 3B one for the default.
+
+    Walks configs smallest-first and EXISTS-probes ``sequence_embedding``
+    (indexed on ``embedding_config_id``) one config at a time, stopping at the
+    first that has any embedding. This is O(configs) cheap index lookups
+    instead of a GROUP BY count over all 5.8M embedding rows."""
+    configs = (
+        session.query(EmbeddingConfig)
         .order_by(EmbeddingConfig.param_count.asc().nulls_last())
         .all()
     )
-    if not rows:
+    if not configs:
         return None
-    for config, cnt in rows:
-        if cnt > 0:
+    for config in configs:
+        has_embeddings = session.query(
+            exists().where(SequenceEmbedding.embedding_config_id == config.id)
+        ).scalar()
+        if has_embeddings:
             return config
-    return rows[0][0]
+    return configs[0]
+
+
+def _best_embedding_config_id_cached(
+    factory: sessionmaker[Session], ttl: float
+) -> uuid.UUID | None:
+    """Return the cached id of the smallest config that has embeddings.
+
+    Caches only the id (a uuid), never a session-bound ORM object, so the
+    value is safe to reuse across requests. ``None`` means no config exists
+    yet (caller creates the default). Returns ``None`` without caching so a
+    later default-create is picked up promptly."""
+
+    def _produce() -> uuid.UUID | None:
+        with session_scope(factory) as session:
+            config = _best_embedding_config(session)
+            return config.id if config is not None else None
+
+    config_id = cached(_BEST_CONFIG_CACHE_KEY, ttl, _produce, serve_stale_on_error=True)
+    if config_id is None:
+        invalidate_best_config_cache()
+    return config_id
+
+
+def invalidate_best_config_cache() -> None:
+    """Drop the cached best-config id (call after embedding a new PLM)."""
+    from protea.api.cache import invalidate
+
+    invalidate(_BEST_CONFIG_CACHE_KEY)
 
 
 def _newest_annotation_set(session: Session) -> AnnotationSet | None:
@@ -128,10 +167,15 @@ async def annotate(
     content = await _read_fasta_content(file, fasta_text)
     records = _parse_and_dedup_records(content)
 
+    from protea.config.tuning import get_tuning
+
+    ttl = get_tuning().worker.api_cache_default_ttl_seconds
+    cached_config_id = _best_embedding_config_id_cached(factory, ttl)
+
     with session_scope(factory) as session:
         query_set_id = _upsert_query_set(session, name, records)
         config_id, annotation_set_id, ontology_snapshot_id, reranker_id = (
-            _resolve_dispatch_resources(session)
+            _resolve_dispatch_resources(session, cached_config_id)
         )
         embed_job_id = _enqueue_embed_job(session, config_id, query_set_id)
 
@@ -237,18 +281,32 @@ def _upsert_query_set(session: Session, name: str, records: list[tuple[str, str,
     return qs.id
 
 
-def _resolve_dispatch_resources(session: Session) -> tuple[Any, Any, Any, Any]:
+def _resolve_dispatch_resources(
+    session: Session, cached_config_id: uuid.UUID | None = None
+) -> tuple[Any, Any, Any, Any]:
     """Pick the best embedding config (creating the default ESM-2 if none exists),
     the newest AnnotationSet + OntologySnapshot, and the latest RerankerModel.
+
+    ``cached_config_id`` is the TTL-cached id of the smallest config that has
+    embeddings; when supplied (and still present), it skips the per-request
+    config scan. ``None`` means resolve fresh (and create the default if the
+    DB is empty).
 
     Raises HTTP 409 when no annotation set or ontology snapshot is loaded yet.
     Returns ``(config_id, annotation_set_id, ontology_snapshot_id, reranker_id)``;
     ``reranker_id`` is ``None`` when no RerankerModel rows exist."""
-    config = _best_embedding_config(session)
+    config = None
+    if cached_config_id is not None:
+        config = session.get(EmbeddingConfig, cached_config_id)
+        if config is None:
+            invalidate_best_config_cache()
+    if config is None:
+        config = _best_embedding_config(session)
     if config is None:
         config = EmbeddingConfig(**_DEFAULT_CONFIG)
         session.add(config)
         session.flush()
+        invalidate_best_config_cache()
     ann = _newest_annotation_set(session)
     if ann is None:
         raise HTTPException(
