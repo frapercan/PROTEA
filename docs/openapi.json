@@ -2316,7 +2316,7 @@
     },
     "/v1/admin/reset-db": {
       "post": {
-        "description": "Drop and recreate the public schema, then re-apply all Alembic migrations.\n\nRequires an authenticated ``admin`` principal (FARM-AUTH.4) plus the\nextra destructive-op guards in :func:`_authorize_reset_db`.",
+        "description": "Drop and recreate the public schema, then re-apply all Alembic migrations.\n\nRequires an authenticated principal with the ``admin`` role (FARM-AUTH.4).",
         "operationId": "reset_db_v1_admin_reset_db_post",
         "parameters": [
           {
@@ -4811,7 +4811,7 @@
     },
     "/v1/benchmark/embeddings": {
       "get": {
-        "description": "Return every ``EmbeddingConfig`` with its persisted display metadata.\n\nThe metadata lives in ``embedding_config.display_name / family /\nparam_count``: filled at creation time by the seed scripts. No\nheuristic inference happens here. Configs listed in\n``benchmark.yaml: hidden_embeddings`` are suppressed. Cached for 5 min;\nthe benchmark page is the first router touch on a fresh deploy so cold\npg pages push this past several seconds without the cache.",
+        "description": "Return every ``EmbeddingConfig`` with its persisted display metadata.\n\nThe metadata lives in ``embedding_config.display_name / family /\nparam_count``: filled at creation time by the seed scripts. No\nheuristic inference happens here. Cached for 5 min; the benchmark\npage is the first router touch on a fresh deploy so cold pg pages\npush this past several seconds without the cache.",
         "operationId": "list_benchmark_embeddings_v1_benchmark_embeddings_get",
         "responses": {
           "200": {
