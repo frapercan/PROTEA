@@ -118,6 +118,7 @@
     "stageView": "ver",
     "nkCategory": "Categoria NK (No Knowledge) — configuracion de evaluacion mas exigente",
     "annotateTitle": "Anota tus proteinas",
+    "annotateCpuModeNotice": "No hay GPU disponible ahora mismo, así que anotar una secuencia que no esté ya en la base de datos se ejecuta en CPU y puede tardar bastante más.",
     "annotateDescription": "Pega tus secuencias de proteinas en formato FASTA y obtiene anotaciones funcionales automaticamente con el mejor metodo disponible.",
     "annotatePlaceholder": ">sp|P04637|P53_HUMAN Cellular tumor antigen p53\nMEEPQSDPSVEPPLSQETFSDLWKLL...",
     "annotateInputAriaLabel": "Entrada de secuencia en formato FASTA",

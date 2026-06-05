@@ -152,6 +152,7 @@ export type GpuAvailability = {
   running_fresh: number;
   queued: number;
   running_stale: number;
+  gpu_present?: boolean;
   active_operation?: string | null;
   progress_current?: number | null;
   progress_total?: number | null;
@@ -520,6 +521,22 @@ export function launchPredictGoTerms(body: {
 
 export function listPredictionSets() {
   return http<PredictionSet[]>(`/embeddings/prediction-sets/`);
+}
+
+/**
+ * Resolve the newest prediction set for a (query_set_id, embedding_config_id)
+ * pair via a cheap, uncached backend lookup. Used by the quick-annotate flow
+ * to redirect to results immediately, instead of scanning the 5-min-cached
+ * `listPredictionSets()` (which would not yet contain a just-created set).
+ */
+export function resolvePredictionSet(querySetId: string, embeddingConfigId: string) {
+  const qs = new URLSearchParams({
+    query_set_id: querySetId,
+    embedding_config_id: embeddingConfigId,
+  });
+  return http<{ id: string; created_at: string }>(
+    `/embeddings/prediction-sets/resolve?${qs.toString()}`,
+  );
 }
 
 export function getPredictionSet(id: string) {

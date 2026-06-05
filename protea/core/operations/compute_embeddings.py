@@ -575,6 +575,32 @@ def _resolve_backend(backend_name: str) -> Any:
     return plugins[key]
 
 
+def _effective_device(device: str, emit: EmitFn | None = None) -> str:
+    """Return the device to actually use, degrading ``cuda`` to ``cpu`` when
+    no CUDA runtime is available.
+
+    A config (or default) asking for ``cuda`` on a host whose torch build is
+    CPU-only previously surfaced as a hard, non-retryable
+    ``AssertionError: Torch not compiled with CUDA enabled`` that failed the
+    whole embedding job (and any annotation of a novel sequence). Falling back
+    to CPU keeps the instance operational; it is slower, but it works.
+    """
+    if not device.lower().startswith("cuda"):
+        return device
+    import torch
+
+    if torch.cuda.is_available():
+        return device
+    if emit is not None:
+        emit(
+            "compute_embeddings.cuda_unavailable_cpu_fallback",
+            None,
+            {"requested": device},
+            "warning",
+        )
+    return "cpu"
+
+
 def _load_model(config: EmbeddingConfig, device: str, emit: EmitFn) -> tuple[Any, Any]:
     """Load ``(model, tokenizer)`` via the ``protea.backends`` plugin
     matching ``config.model_backend``.
@@ -592,7 +618,7 @@ def _load_model(config: EmbeddingConfig, device: str, emit: EmitFn) -> tuple[Any
         "info",
     )
     plugin = _resolve_backend(config.model_backend)
-    model, tokenizer = plugin.load_model(config.model_name, device, emit)
+    model, tokenizer = plugin.load_model(config.model_name, _effective_device(device, emit), emit)
     emit("compute_embeddings.model_load_done", None, {}, "info")
     return model, tokenizer
 
@@ -621,4 +647,8 @@ def _dispatch_embed(
     retained as the bit-exact regression reference for the parity tests.
     """
     plugin = _resolve_backend(config.model_backend)
-    return plugin.embed_chunks(model, tokenizer, sequences, config, device)  # type: ignore[no-any-return]
+    # Match the device the model was actually loaded on (see _effective_device):
+    # if cuda was requested but is unavailable, the model lives on CPU and the
+    # inputs must follow, or embed_chunks would try to move them to a missing
+    # GPU and re-trigger the "not compiled with CUDA" failure.
+    return plugin.embed_chunks(model, tokenizer, sequences, config, _effective_device(device))  # type: ignore[no-any-return]
