@@ -26,12 +26,33 @@ function formatEta(seconds: number): string {
 }
 
 function ProgressBar({
-  current, total, unit = "items",
+  current, total, unit = "items", status, completeLabel,
 }: {
   current?: number | null;
   total?: number | null;
   unit?: string;
+  status?: string;
+  completeLabel?: string;
 }) {
+  // A succeeded job is 100% done by definition. Coordinators that finalize
+  // their work in deferred child batches leave progress_current/total at a
+  // stale 0/1, which used to render a misleading "0 / 1 batches (0%)" on a
+  // job that actually finished. Always show a full, completed bar instead.
+  if (status === "succeeded") {
+    return (
+      <div className="mt-2 space-y-1">
+        <div className="text-[13px] font-medium text-emerald-600">
+          {completeLabel ?? "Completed"}
+        </div>
+        <div className="h-2.5 w-full overflow-hidden rounded-full bg-emerald-100">
+          <div className="h-2.5 w-full rounded-full bg-emerald-500" />
+        </div>
+      </div>
+    );
+  }
+  // Failed / cancelled jobs that never reported real progress have nothing
+  // meaningful to show; suppress the bar rather than imply "0%".
+  if ((status === "failed" || status === "cancelled") && !current) return null;
   if (!current && !total) return null;
   if (!total) {
     return (
@@ -247,6 +268,8 @@ const tToast = useTranslations("toasts");
           <ProgressBar
             current={job.progress_current}
             total={job.progress_total}
+            status={String(job.status ?? "").toLowerCase()}
+            completeLabel={t("jobDetail.completed")}
             unit={
               job.operation === "insert_proteins" || job.operation === "fetch_uniprot_metadata"
                 ? "proteins"
@@ -273,7 +296,9 @@ const tToast = useTranslations("toasts");
               {t("jobDetail.childJobsTitle")} <span className="text-xs font-normal text-slate-600">{t("jobDetail.childJobsCount", { count: children.length })}</span>
             </h2>
             {(["running", "queued", "succeeded", "failed", "cancelled"] as const).map((s) => {
-              const n = children.filter((c) => c.status === s).length;
+              // API serializes status as the uppercase enum name (SUCCEEDED),
+              // so compare case-insensitively or every count reads zero.
+              const n = children.filter((c) => String(c.status ?? "").toLowerCase() === s).length;
               if (!n) return null;
               return <span key={s} className="text-[13px] text-slate-500">{s}: <strong>{n}</strong></span>;
             })}
@@ -287,7 +312,9 @@ const tToast = useTranslations("toasts");
             {[...children]
               .sort((a, b) => {
                 const order: Record<string, number> = { running: 0, queued: 1, succeeded: 2, failed: 3, cancelled: 4 };
-                return (order[a.status] ?? 5) - (order[b.status] ?? 5);
+                const ra = order[String(a.status ?? "").toLowerCase()] ?? 5;
+                const rb = order[String(b.status ?? "").toLowerCase()] ?? 5;
+                return ra - rb;
               })
               .map((c) => (
               <Link

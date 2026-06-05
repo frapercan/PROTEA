@@ -195,6 +195,7 @@
       "started": "开始：",
       "finished": "完成：",
       "progress": "{current} / {total} {unit} ({percent}%)",
+      "completed": "已完成",
       "payloadLabel": "载荷",
       "childJobsTitle": "子任务",
       "childJobsCount": "({count})",

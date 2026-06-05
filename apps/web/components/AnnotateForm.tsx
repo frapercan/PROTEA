@@ -82,12 +82,18 @@ export function AnnotateForm() {
       while (!abortRef.current) {
         try {
           const job = await getJob(jobId);
+          // Only surface a percentage once there is genuine forward motion.
+          // Coordinator jobs that finalize in deferred child batches sit at
+          // a stale 0/1, so a naive "0%" would freeze on screen and read as
+          // stuck. When there's no real percent yet, leave `progress` empty
+          // and let the animated stage bar carry the sense of liveness.
           if (job.progress_total && job.progress_current) {
             const pct = Math.round((job.progress_current / job.progress_total) * 100);
-            setProgress(`${pct}%`);
+            if (pct > 0) setProgress(`${pct}%`);
           }
-          if (job.status === "succeeded") return "succeeded";
-          if (job.status === "failed" || job.status === "cancelled") return "failed";
+          const st = String(job.status ?? "").toLowerCase();
+          if (st === "succeeded") return "succeeded";
+          if (st === "failed" || st === "cancelled") return "failed";
         } catch {
           // transient error, keep polling
         }
@@ -115,7 +121,7 @@ export function AnnotateForm() {
 
       // Step 2: Poll embedding job
       setStage("embedding");
-      setProgress("0%");
+      setProgress("");
       const embedResult = await pollJob(result.embedding_job_id);
       if (embedResult === "failed") {
         throw new Error("Embedding computation failed");
@@ -123,7 +129,7 @@ export function AnnotateForm() {
 
       // Step 3: Launch prediction
       setStage("predicting");
-      setProgress("0%");
+      setProgress("");
       const predictJob = await launchPredictGoTerms(result.predict_payload as Parameters<typeof launchPredictGoTerms>[0]);
 
       // Step 4: Poll prediction job
