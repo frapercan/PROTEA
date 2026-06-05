@@ -99,8 +99,21 @@ cmd_start() {
     # Kill API and frontend (no long-running jobs, safe to force-kill)
     kill -9 $(pgrep -f "uvicorn protea.api" 2>/dev/null) 2>/dev/null || true
     kill -9 $(pgrep -f "next-server" 2>/dev/null) 2>/dev/null || true
-    # Workers that were tracked received SIGTERM above; untracked ones are left
-    # running so long-running jobs (e.g. run_cafa_evaluation) are not interrupted.
+    # Kill ALL worker.py processes, tracked or not. Leaving orphaned workers
+    # from a previous start alive accumulates duplicate queue consumers (4x
+    # observed), duplicated job processing, stale-code execution after a
+    # redeploy, and unbounded RAM growth (each predictions.batch worker pins a
+    # ~1 GB+ reference pool; three orphans reached ~45 GB). The fresh set takes
+    # over the queues; any in-flight job is requeued at-least-once and the
+    # reaper reclaims its expired lease. SIGTERM for a graceful drain, then
+    # SIGKILL the stragglers. The "scripts/worker[.]py" char-class keeps this
+    # command from matching its own argv.
+    pkill -TERM -f "scripts/worker[.]py" 2>/dev/null || true
+    for _ in 1 2 3; do
+        pgrep -f "scripts/worker[.]py" >/dev/null 2>&1 || break
+        sleep 1
+    done
+    pkill -KILL -f "scripts/worker[.]py" 2>/dev/null || true
     sleep 1
 
     # Database migrations

@@ -231,10 +231,12 @@ class ComputeEmbeddingsOperation:
             .first()
         )
         if conflict is not None:
+            from protea.config.tuning import get_tuning
+
             raise RetryLaterError(
                 f"GPU busy: compute_embeddings job {conflict.id} is already running. "
                 f"Will retry automatically.",
-                delay_seconds=60,
+                delay_seconds=get_tuning().operation.gpu_busy_retry_seconds,
             )
 
         sequence_ids = self._load_sequence_ids(session, p, config_id, emit)
