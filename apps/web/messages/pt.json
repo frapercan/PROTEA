@@ -195,6 +195,7 @@
       "started": "Iniciado:",
       "finished": "Concluído:",
       "progress": "{current} / {total} {unit} ({percent}%)",
+      "completed": "Concluído",
       "payloadLabel": "Payload",
       "childJobsTitle": "Jobs filhos",
       "childJobsCount": "({count})",
