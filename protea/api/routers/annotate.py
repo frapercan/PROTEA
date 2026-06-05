@@ -11,10 +11,11 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import exists
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from protea.api.auth.anon_quota import require_anon_quota
 from protea.api.cache import cached
@@ -137,17 +138,7 @@ class AnnotateFormOptions(BaseModel):
 
 @router.post("", summary="Annotate proteins from FASTA", dependencies=[Depends(require_anon_quota)])
 async def annotate(
-    file: UploadFile | None = None,
-    fasta_text: str | None = Form(None),
-    name: str = Form("Quick annotation"),
-    compute_reranker_features: bool = Form(
-        True,
-        description=(
-            "Enable the full reranker feature bundle: lineage / anc2vec / "
-            "anc2vec_query / emb_pca / annotation_meta. "
-            "Disable to skip these families and reduce compute time."
-        ),
-    ),
+    request: Request,
     factory: sessionmaker[Session] = Depends(get_session_factory),
     amqp_url: str = Depends(get_amqp_url),
 ) -> dict[str, Any]:
@@ -164,12 +155,41 @@ async def annotate(
     families (lineage, anc2vec, anc2vec_query, emb_pca, annotation_meta) are
     included in the downstream ``predict_go_terms`` job. Default: ``True``.
     """
+    from protea.config.tuning import get_tuning
+
+    tuning = get_tuning()
+    # Parse the multipart body ourselves so the per-part cap matches the
+    # configured FASTA size limit. FastAPI's automatic Form/UploadFile parsing
+    # uses Starlette's default max_part_size (1 MB), which rejected a whole
+    # proteome upload with a 400 ("Part exceeded maximum size of 1024KB") long
+    # before _read_fasta_content's max_fasta_bytes check could run.
+    max_part = tuning.api.max_fasta_bytes + (1 << 20)
+    try:
+        form = await request.form(max_part_size=max_part)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Upload exceeds the {tuning.api.max_fasta_bytes // (1024 * 1024)} MB limit",
+        ) from exc
+    # request.form() yields starlette's UploadFile; fastapi.UploadFile is a
+    # subclass, so check the base class to recognise the file part.
+    raw_file = form.get("file")
+    file = raw_file if isinstance(raw_file, StarletteUploadFile) else None
+    raw_text = form.get("fasta_text")
+    fasta_text = raw_text if isinstance(raw_text, str) else None
+    raw_name = form.get("name")
+    name = raw_name if isinstance(raw_name, str) and raw_name else "Quick annotation"
+    raw_crf = form.get("compute_reranker_features")
+    compute_reranker_features = (
+        True
+        if raw_crf is None
+        else str(raw_crf).strip().lower() not in ("false", "0", "no", "off")
+    )
+
     content = await _read_fasta_content(file, fasta_text)
     records = _parse_and_dedup_records(content)
 
-    from protea.config.tuning import get_tuning
-
-    ttl = get_tuning().worker.api_cache_default_ttl_seconds
+    ttl = tuning.worker.api_cache_default_ttl_seconds
     cached_config_id = _best_embedding_config_id_cached(factory, ttl)
 
     with session_scope(factory) as session:
