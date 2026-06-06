@@ -1621,7 +1621,9 @@ class TestStaleJobReaperLeaseRequeue:
         marking it FAILED."""
         stale = self._stale_job()
         session = MagicMock()
-        session.query.return_value.filter.return_value.all.return_value = [stale]
+        # First call to all() is for RUNNING candidates in _reap
+        # Second call to all() is for QUEUED candidates in _reap_orphaned_queued
+        session.query.return_value.filter.return_value.all.side_effect = [[stale], []]
         # last_event_ts irrelevant when leased_until is present; count() = 0.
         session.query.return_value.filter.return_value.scalar.side_effect = [None, 0]
         factory = MagicMock(return_value=session)
@@ -1648,7 +1650,9 @@ class TestStaleJobReaperLeaseRequeue:
         lease miss flips the job to FAILED with ``error_code=lease_expired``."""
         stale = self._stale_job()
         session = MagicMock()
-        session.query.return_value.filter.return_value.all.return_value = [stale]
+        # First call to all() is for RUNNING candidates in _reap
+        # Second call to all() is for QUEUED candidates in _reap_orphaned_queued
+        session.query.return_value.filter.return_value.all.side_effect = [[stale], []]
         # Three prior re-enqueues already happened — budget exhausted.
         session.query.return_value.filter.return_value.scalar.side_effect = [None, 3]
         factory = MagicMock(return_value=session)
@@ -1675,7 +1679,9 @@ class TestStaleJobReaperLeaseRequeue:
         is available — there is nowhere to republish."""
         stale = self._stale_job()
         session = MagicMock()
-        session.query.return_value.filter.return_value.all.return_value = [stale]
+        # First call to all() is for RUNNING candidates in _reap
+        # Second call to all() is for QUEUED candidates in _reap_orphaned_queued
+        session.query.return_value.filter.return_value.all.side_effect = [[stale], []]
         session.query.return_value.filter.return_value.scalar.side_effect = [None, 0]
         factory = MagicMock(return_value=session)
 
@@ -1701,7 +1707,9 @@ class TestStaleJobReaperLeaseRequeue:
         and a sibling consumer or manual re-dispatch recovers."""
         stale = self._stale_job()
         session = MagicMock()
-        session.query.return_value.filter.return_value.all.return_value = [stale]
+        # First call to all() is for RUNNING candidates in _reap
+        # Second call to all() is for QUEUED candidates in _reap_orphaned_queued
+        session.query.return_value.filter.return_value.all.side_effect = [[stale], []]
         session.query.return_value.filter.return_value.scalar.side_effect = [None, 0]
         factory = MagicMock(return_value=session)
 
