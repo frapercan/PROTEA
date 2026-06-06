@@ -9,7 +9,7 @@ import {
   getGpuAvailability,
   getJob,
   launchPredictGoTerms,
-  listPredictionSets,
+  resolvePredictionSet,
   type AnnotateResult,
   type GpuAvailability,
 } from "@/lib/api";
@@ -138,15 +138,29 @@ export function AnnotateForm() {
         throw new Error("Prediction failed");
       }
 
-      // Step 5: Find the prediction set created for this query_set
-      const sets = await listPredictionSets();
-      const match = sets.find(
-        (s) =>
-          (s as any).query_set_id === result.query_set_id &&
-          s.embedding_config_id === result.embedding_config_id,
-      );
-      if (match) {
-        setPredictionSetId(match.id);
+      // Step 5: Resolve the prediction set created for this query_set via a
+      // cheap, uncached lookup. The predict job can report SUCCEEDED a moment
+      // before the row is queryable, so retry briefly. (The old approach
+      // scanned the 5-min-cached listing, which would not yet contain the new
+      // set and left the flow stuck on "redirecting" forever.)
+      let resolvedId: string | null = null;
+      for (let attempt = 0; attempt < 8 && !abortRef.current; attempt++) {
+        try {
+          const hit = await resolvePredictionSet(
+            result.query_set_id,
+            result.embedding_config_id,
+          );
+          if (hit?.id) {
+            resolvedId = hit.id;
+            break;
+          }
+        } catch {
+          // 404 until the row lands; keep retrying
+        }
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+      if (resolvedId) {
+        setPredictionSetId(resolvedId);
       }
       if (result.reranker_id) {
         setRerankerId(result.reranker_id);
@@ -160,15 +174,20 @@ export function AnnotateForm() {
     }
   };
 
-  // Auto-redirect when done
+  // Auto-redirect when done. If the prediction set resolved, go straight to
+  // its results; otherwise fall back to the functional-annotation listing so
+  // the flow never dead-ends on "redirecting" with nowhere to go.
   useEffect(() => {
-    if (stage === "done" && predictionSetId) {
-      const timer = setTimeout(() => {
+    if (stage !== "done") return;
+    const timer = setTimeout(() => {
+      if (predictionSetId) {
         const qs = rerankerId ? `?reranker_id=${rerankerId}` : "";
         router.push(`/${locale}/functional-annotation/${predictionSetId}${qs}`);
-      }, 1500);
-      return () => clearTimeout(timer);
-    }
+      } else {
+        router.push(`/${locale}/functional-annotation`);
+      }
+    }, 1500);
+    return () => clearTimeout(timer);
   }, [stage, predictionSetId, rerankerId, router, locale]);
 
   // Cleanup on unmount
@@ -206,6 +225,9 @@ export function AnnotateForm() {
     };
   }, []);
 
+  // Surface CPU-only mode so users understand why a novel sequence is slow.
+  // `gpu_present` is undefined on older backends; only warn when explicitly false.
+  const cpuOnly = gpu?.gpu_present === false;
   const isRunning = stage === "uploading" || stage === "embedding" || stage === "predicting";
   // A running local annotation flow already owns the UI; don't double-block.
   // Only block on genuinely-active GPU work (backend `busy`), never on
@@ -283,6 +305,21 @@ export function AnnotateForm() {
                 </ul>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* CPU-only notice: no CUDA GPU is visible to the workers, so embedding
+          a sequence not already in the database runs on CPU and is slower.
+          Purely informational, never blocks submission. */}
+      {cpuOnly && !isQueueBlocked && (
+        <div
+          role="status"
+          className="mb-5 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700"
+        >
+          <div className="flex items-start gap-2">
+            <span aria-hidden className="text-base leading-none">🖥️</span>
+            <p className="flex-1 min-w-0">{t("annotateCpuModeNotice" as any)}</p>
           </div>
         </div>
       )}

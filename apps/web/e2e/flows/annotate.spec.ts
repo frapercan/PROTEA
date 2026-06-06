@@ -59,6 +59,16 @@ const PREDICTION_SETS_OK = [
   },
 ];
 
+// Cheap, uncached resolve lookup the AnnotateForm now uses to redirect
+// straight to the freshly-created set (resolvePredictionSet ->
+// /embeddings/prediction-sets/resolve), instead of scanning the cached
+// listing. Returns the single newest set for the (query_set,
+// embedding_config) pair.
+const PREDICTION_SET_RESOLVE_OK = {
+  id: "ps-test-001",
+  created_at: "2026-05-16T10:00:00Z",
+};
+
 // Build a /jobs/<id> response that flips from running to succeeded
 // after `flipAtCall` invocations, so the AnnotateForm's polling loop
 // sees the transition. We keep the running phase short (call 1) so the
@@ -119,6 +129,10 @@ test.describe("annotate flow", () => {
     mockApi.override("/embeddings/predict", { id: "job-predict-001", status: "queued" });
     mockApi.override("/jobs/job-predict-001", jobLifecycle("job-predict-001"));
     mockApi.override("/embeddings/prediction-sets/", PREDICTION_SETS_OK);
+    mockApi.override(
+      "/embeddings/prediction-sets/resolve",
+      PREDICTION_SET_RESOLVE_OK,
+    );
 
     await page.goto("/en/");
     const textarea = page.getByLabel("Sequence input in FASTA format");

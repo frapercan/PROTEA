@@ -1,46 +1,6 @@
 {
   "components": {
     "schemas": {
-      "Body_annotate_v1_annotate_post": {
-        "properties": {
-          "compute_reranker_features": {
-            "default": true,
-            "description": "Enable the full reranker feature bundle: lineage / anc2vec / anc2vec_query / emb_pca / annotation_meta. Disable to skip these families and reduce compute time.",
-            "title": "Compute Reranker Features",
-            "type": "boolean"
-          },
-          "fasta_text": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fasta Text"
-          },
-          "file": {
-            "anyOf": [
-              {
-                "contentMediaType": "application/octet-stream",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "File"
-          },
-          "name": {
-            "default": "Quick annotation",
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "title": "Body_annotate_v1_annotate_post",
-        "type": "object"
-      },
       "Body_create_query_set_v1_query_sets_post": {
         "properties": {
           "description": {
@@ -611,6 +571,12 @@
           "busy": {
             "description": "True when real GPU work is in flight (fresh-leased RUNNING coordinator or queued GPU work). Stale jobs never set this.",
             "title": "Busy",
+            "type": "boolean"
+          },
+          "gpu_present": {
+            "default": true,
+            "description": "Whether a CUDA GPU is available to the embedding workers. When false, embedding novel sequences falls back to CPU and is noticeably slower; the UI surfaces this so users understand why.",
+            "title": "Gpu Present",
             "type": "boolean"
           },
           "progress_current": {
@@ -2464,15 +2430,6 @@
       "post": {
         "description": "One-click annotation: upload FASTA, auto-select best method, run pipeline.\n\nAccepts either an uploaded FASTA ``file`` **or** raw ``fasta_text``.\nCreates a QuerySet, picks the best embedding config (or creates the\ndefault ESM-2 650M config), and queues a ``compute_embeddings`` job.\n\nReturns the IDs the frontend needs to monitor progress and chain\n``predict_go_terms`` once embeddings are ready.\n\n``compute_reranker_features`` controls whether the reranker feature\nfamilies (lineage, anc2vec, anc2vec_query, emb_pca, annotation_meta) are\nincluded in the downstream ``predict_go_terms`` job. Default: ``True``.",
         "operationId": "annotate_v1_annotate_post",
-        "requestBody": {
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_annotate_v1_annotate_post"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "content": {
@@ -2485,21 +2442,6 @@
               }
             },
             "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              },
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
           }
         },
         "summary": "Annotate proteins from FASTA",
@@ -5765,6 +5707,71 @@
           }
         },
         "summary": "List prediction sets",
+        "tags": [
+          "embeddings"
+        ]
+      }
+    },
+    "/v1/embeddings/prediction-sets/resolve": {
+      "get": {
+        "description": "Cheap, uncached lookup of the most recent prediction set matching a\n``(query_set_id, embedding_config_id)`` pair.\n\nThe quick-annotate flow uses this to redirect straight to results the\nmoment a predict job finishes. It deliberately bypasses\n``list_prediction_sets`` (which is cached for 5 minutes and computed via\nan expensive DISTINCT-over-JOIN): a just-created set would not yet appear\nin that cached listing, which previously left the flow stuck on\n\"redirecting\" forever. This is a single indexed lookup on two foreign\nkeys ordered by ``created_at``, so it stays fast and always current.",
+        "operationId": "resolve_prediction_set_v1_embeddings_prediction_sets_resolve_get",
+        "parameters": [
+          {
+            "description": "Query set the prediction was run over",
+            "in": "query",
+            "name": "query_set_id",
+            "required": true,
+            "schema": {
+              "description": "Query set the prediction was run over",
+              "format": "uuid",
+              "title": "Query Set Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Embedding config the prediction used",
+            "in": "query",
+            "name": "embedding_config_id",
+            "required": true,
+            "schema": {
+              "description": "Embedding config the prediction used",
+              "format": "uuid",
+              "title": "Embedding Config Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Resolve Prediction Set V1 Embeddings Prediction Sets Resolve Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve the newest prediction set for a query set + embedding config",
         "tags": [
           "embeddings"
         ]

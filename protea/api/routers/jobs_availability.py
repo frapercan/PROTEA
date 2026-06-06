@@ -42,6 +42,24 @@ _GPU_OPERATIONS: frozenset[str] = frozenset(
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
+# GPU presence does not change during a process lifetime, so probe torch once
+# and memoize. Imported lazily to keep torch off the API import path until the
+# first availability call.
+_GPU_PRESENT: bool | None = None
+
+
+def _gpu_present() -> bool:
+    """Return whether a CUDA GPU is visible to this host's torch build."""
+    global _GPU_PRESENT
+    if _GPU_PRESENT is None:
+        try:
+            import torch
+
+            _GPU_PRESENT = bool(torch.cuda.is_available())
+        except Exception:
+            _GPU_PRESENT = False
+    return _GPU_PRESENT
+
 
 class GpuAvailability(BaseModel):
     """Truthful busy/free signal for the shared GPU pipeline.
@@ -68,6 +86,14 @@ class GpuAvailability(BaseModel):
         description=(
             "Count of RUNNING GPU jobs whose lease has expired "
             "(zombie rows; ignored for the busy signal)."
+        ),
+    )
+    gpu_present: bool = Field(
+        default=True,
+        description=(
+            "Whether a CUDA GPU is available to the embedding workers. When "
+            "false, embedding novel sequences falls back to CPU and is "
+            "noticeably slower; the UI surfaces this so users understand why."
         ),
     )
     active_operation: str | None = Field(
@@ -110,6 +136,7 @@ def _classify(active: list[Job]) -> GpuAvailability:
         running_fresh=running_fresh,
         queued=queued,
         running_stale=running_stale,
+        gpu_present=_gpu_present(),
         active_operation=rep.operation if rep else None,
         progress_current=rep.progress_current if rep else None,
         progress_total=rep.progress_total if rep else None,

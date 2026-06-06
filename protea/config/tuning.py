@@ -258,6 +258,19 @@ class OperationTuning(BaseModel):
             "por lo que la ganancia es real. 1 desactiva la paralelización."
         ),
     )
+    gpu_busy_retry_seconds: int = Field(
+        default=8,
+        ge=1,
+        description=(
+            "Backoff en segundos cuando el coordinador compute_embeddings "
+            "encuentra la GPU ocupada por otro job y se re-encola. Bajo = la "
+            "cola de embeddings drena rápido cuando varios usuarios envían a la "
+            "vez (la GPU se serializa igual, pero el relevo es casi inmediato). "
+            "Antes estaba hardcodeado en 60s, que dejaba a los que esperan "
+            "parados hasta un minuto tras liberarse la GPU. "
+            "Override: PROTEA_TUNING__operation__gpu_busy_retry_seconds."
+        ),
+    )
 
 
 class APILimits(BaseModel):

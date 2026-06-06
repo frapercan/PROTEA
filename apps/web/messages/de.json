@@ -119,6 +119,7 @@
     "stageView": "ansehen",
     "nkCategory": "NK-Kategorie (No Knowledge) — anspruchsvollste Evaluierungseinstellung",
     "annotateTitle": "Ihre Proteine annotieren",
+    "annotateCpuModeNotice": "Aktuell ist keine GPU verfügbar. Das Annotieren einer Sequenz, die noch nicht in der Datenbank ist, läuft daher auf der CPU und kann deutlich länger dauern.",
     "annotateDescription": "Proteinsequenzen im FASTA-Format einfuegen und automatisch funktionelle Annotationen mit der besten verfuegbaren Methode erhalten.",
     "annotatePlaceholder": ">sp|P04637|P53_HUMAN Cellular tumor antigen p53\nMEEPQSDPSVEPPLSQETFSDLWKLL...",
     "annotateInputAriaLabel": "Sequenzeingabe im FASTA-Format",

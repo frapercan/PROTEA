@@ -13,6 +13,7 @@ from protea.api.cache import cached, invalidate
 from protea.api.deps import get_amqp_url, get_session_factory
 from protea.api.roles import ROLE_OPERATOR, require_role
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
+from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 from protea.infrastructure.queue.publisher import publish_job
 from protea.infrastructure.session import session_scope
@@ -282,6 +283,44 @@ def prewarm_prediction_sets(
         PREDICTION_SETS_TTL_SECONDS,
         lambda: _compute_prediction_sets(factory),
     )
+
+
+@router.get(
+    "/prediction-sets/resolve",
+    summary="Resolve the newest prediction set for a query set + embedding config",
+)
+def resolve_prediction_set(
+    query_set_id: UUID = Query(..., description="Query set the prediction was run over"),
+    embedding_config_id: UUID = Query(..., description="Embedding config the prediction used"),
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+) -> dict[str, Any]:
+    """Cheap, uncached lookup of the most recent prediction set matching a
+    ``(query_set_id, embedding_config_id)`` pair.
+
+    The quick-annotate flow uses this to redirect straight to results the
+    moment a predict job finishes. It deliberately bypasses
+    ``list_prediction_sets`` (which is cached for 5 minutes and computed via
+    an expensive DISTINCT-over-JOIN): a just-created set would not yet appear
+    in that cached listing, which previously left the flow stuck on
+    "redirecting" forever. This is a single indexed lookup on two foreign
+    keys ordered by ``created_at``, so it stays fast and always current.
+    """
+    with session_scope(factory) as session:
+        row = (
+            session.query(PredictionSet)
+            .filter(
+                PredictionSet.query_set_id == query_set_id,
+                PredictionSet.embedding_config_id == embedding_config_id,
+            )
+            .order_by(PredictionSet.created_at.desc())
+            .first()
+        )
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail="No prediction set exists yet for that query set and embedding config",
+            )
+        return {"id": str(row.id), "created_at": row.created_at.isoformat()}
 
 
 @router.get("/prediction-sets/{set_id}", summary="Get prediction set details")

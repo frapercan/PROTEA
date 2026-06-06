@@ -119,6 +119,7 @@
     "stageView": "查看",
     "nkCategory": "NK类别（No Knowledge）— 最严格的评估设置",
     "annotateTitle": "注释您的蛋白质",
+    "annotateCpuModeNotice": "当前没有可用的 GPU，因此对数据库中尚不存在的序列进行注释将在 CPU 上运行，可能会明显变慢。",
     "annotateDescription": "粘贴FASTA格式的蛋白质序列，使用最佳可用方法自动获取功能注释。",
     "annotatePlaceholder": ">sp|P04637|P53_HUMAN Cellular tumor antigen p53\nMEEPQSDPSVEPPLSQETFSDLWKLL...",
     "annotateInputAriaLabel": "FASTA 格式的序列输入",
