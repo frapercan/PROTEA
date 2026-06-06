@@ -32,6 +32,7 @@ from __future__ import annotations
 import logging
 import signal
 import time
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from sqlalchemy import func
@@ -42,6 +43,25 @@ from protea.infrastructure.orm.models.job import Job, JobEvent, JobStatus
 from protea.infrastructure.queue.publisher import publish_job
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class StaleJobReaperConfig:
+    """Configuration for StaleJobReaper timeout windows and requeue budgets."""
+
+    timeout_seconds: int = 3600
+    stall_seconds: int = 1800
+    queued_stall_seconds: int = 600
+    max_lease_requeues: int = 3
+    max_queue_requeues: int = 5
+
+    def to_timedeltas(self) -> tuple[timedelta, timedelta, timedelta]:
+        """Return (timeout, stall, queued_stall) as timedeltas."""
+        return (
+            timedelta(seconds=self.timeout_seconds),
+            timedelta(seconds=self.stall_seconds),
+            timedelta(seconds=self.queued_stall_seconds),
+        )
 
 #: Event name written every time the reaper re-enqueues a lease-expired job.
 #: Counted by :meth:`StaleJobReaper._lease_requeue_attempts` to honour the
@@ -61,21 +81,15 @@ class StaleJobReaper:
     def __init__(
         self,
         session_factory: sessionmaker[Session],
-        timeout_seconds: int = 3600,
-        *,
-        stall_seconds: int = 1800,
         amqp_url: str | None = None,
-        max_lease_requeues: int = 3,
-        queued_stall_seconds: int = 600,
-        max_queue_requeues: int = 5,
+        config: StaleJobReaperConfig | None = None,
     ) -> None:
         self._factory = session_factory
-        self._timeout = timedelta(seconds=timeout_seconds)
-        self._stall = timedelta(seconds=stall_seconds)
         self._amqp_url = amqp_url
-        self._max_lease_requeues = max(0, int(max_lease_requeues))
-        self._queued_stall = timedelta(seconds=queued_stall_seconds)
-        self._max_queue_requeues = max(0, int(max_queue_requeues))
+        cfg = config or StaleJobReaperConfig()
+        self._timeout, self._stall, self._queued_stall = cfg.to_timedeltas()
+        self._max_lease_requeues = max(0, int(cfg.max_lease_requeues))
+        self._max_queue_requeues = max(0, int(cfg.max_queue_requeues))
         self._stop = False
 
     def run(self, interval_seconds: int = 60) -> None:
@@ -197,57 +211,68 @@ class StaleJobReaper:
             .filter(Job.status == JobStatus.QUEUED, Job.created_at < queued_cutoff)
             .all()
         )
-        recovered = 0
-        for job in candidates:
-            last_event_ts = (
-                session.query(func.max(JobEvent.ts)).filter(JobEvent.job_id == job.id).scalar()
-            )
-            ref_ts = last_event_ts or job.created_at
-            if ref_ts > queued_cutoff:
-                continue  # still emitting / freshly created: not orphaned
-            prior = (
-                session.query(func.count(JobEvent.id))
-                .filter(
-                    JobEvent.job_id == job.id,
-                    JobEvent.event == QUEUE_STALL_REQUEUE_EVENT,
-                )
-                .scalar()
-                or 0
-            )
-            if prior >= self._max_queue_requeues:
-                continue  # budget spent; leave QUEUED for manual recovery
-            session.add(
-                JobEvent(
-                    job_id=job.id,
-                    event=QUEUE_STALL_REQUEUE_EVENT,
-                    message=(
-                        f"Orphaned in QUEUED; re-published attempt "
-                        f"{int(prior) + 1}/{self._max_queue_requeues}"
-                    ),
-                    fields={
-                        "prior_requeues": int(prior),
-                        "queue": job.queue_name,
-                        "last_event_ts": (last_event_ts.isoformat() if last_event_ts else None),
-                    },
-                    level="warning",
-                )
-            )
-            try:
-                publish_job(self._amqp_url, job.queue_name, job.id)
-                recovered += 1
-                logger.warning(
-                    "Re-published orphaned QUEUED job. job_id=%s operation=%s queue=%s attempt=%d/%d",
-                    job.id,
-                    job.operation,
-                    job.queue_name,
-                    int(prior) + 1,
-                    self._max_queue_requeues,
-                )
-            except Exception as exc:
-                logger.error(
-                    "Re-publish of orphaned QUEUED job failed. job_id=%s error=%s", job.id, exc
-                )
+        recovered = sum(
+            self._try_republish_orphaned_queued_job(session, job, queued_cutoff)
+            for job in candidates
+        )
         return recovered
+
+    def _try_republish_orphaned_queued_job(
+        self, session: Session, job: Job, queued_cutoff: datetime
+    ) -> int:
+        """Try to republish one orphaned QUEUED job. Returns 1 if published, 0 if skipped."""
+        assert self._amqp_url is not None  # guarded by _reap_orphaned_queued caller
+        last_event_ts = (
+            session.query(func.max(JobEvent.ts)).filter(JobEvent.job_id == job.id).scalar()
+        )
+        ref_ts = last_event_ts or job.created_at
+        if ref_ts > queued_cutoff:
+            return 0  # still emitting / freshly created: not orphaned
+
+        prior = (
+            session.query(func.count(JobEvent.id))
+            .filter(
+                JobEvent.job_id == job.id,
+                JobEvent.event == QUEUE_STALL_REQUEUE_EVENT,
+            )
+            .scalar()
+            or 0
+        )
+        if prior >= self._max_queue_requeues:
+            return 0  # budget spent; leave QUEUED for manual recovery
+
+        session.add(
+            JobEvent(
+                job_id=job.id,
+                event=QUEUE_STALL_REQUEUE_EVENT,
+                message=(
+                    f"Orphaned in QUEUED; re-published attempt "
+                    f"{int(prior) + 1}/{self._max_queue_requeues}"
+                ),
+                fields={
+                    "prior_requeues": int(prior),
+                    "queue": job.queue_name,
+                    "last_event_ts": (last_event_ts.isoformat() if last_event_ts else None),
+                },
+                level="warning",
+            )
+        )
+        try:
+            publish_job(self._amqp_url, job.queue_name, job.id)
+            logger.warning(
+                "Re-published orphaned QUEUED job. job_id=%s operation=%s queue=%s attempt=%d/%d",
+                job.id,
+                job.operation,
+                job.queue_name,
+                int(prior) + 1,
+                self._max_queue_requeues,
+            )
+            return 1
+        except Exception as exc:
+            logger.error(
+                "Re-publish of orphaned QUEUED job failed. job_id=%s error=%s", job.id, exc
+            )
+            return 0
 
     def _lease_requeue_attempts(self, session: Session, job_id) -> int:
         """Count prior lease-expiry re-enqueues for ``job_id``."""
