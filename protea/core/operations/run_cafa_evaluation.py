@@ -9,6 +9,7 @@ from typing import Any
 from pydantic import Field, field_validator
 from sqlalchemy.orm import Session
 
+from protea.core.band_registry import assert_band_consistency, ia_token
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.evaluation import load_evaluation_data_for_set
 from protea.core.operations import _run_cafa_artifacts as _artifacts
@@ -108,6 +109,19 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
             "prediction exceeds it for some protein/namespace; PROTEA-KNN style "
             "predictions never do, so this is normally inert. Set it only to "
             "reproduce a legacy capped run. See docs/EVAL_LAFA_PARITY.md."
+        ),
+    )
+    band: str | None = Field(
+        default=None,
+        description=(
+            "Declared evaluation band / cutoff (e.g. 'v226', 'v227', or any "
+            "vNNN-bearing dataset name). When set, the phantom-gap guard "
+            "(protea.core.band_registry) rejects the run if the resolved pivot "
+            "ontology snapshot or the resolved IA artifact come from a band "
+            "other than this one: a cross-band snapshot/IA inflates a fake "
+            "PROTEA-vs-LAFA gap. A band-declared cell may NEVER fall back to "
+            "uniform IC=1. Leave None for ad-hoc (unbanded) episodes. See "
+            "docs/IA_PROVENANCE_v227.md and docs/EVAL_LAFA_PARITY.md."
         ),
     )
     toi_file: str | None = Field(
@@ -307,6 +321,7 @@ class RunCafaEvaluationOperation:
         obo_path = os.path.join(tmpdir, "go.obo")
         _artifacts.download_obo(inputs.snapshot.obo_url, obo_path)
         ia_path = self._resolve_ia_file(tmpdir, inputs.snapshot, p.ia_file, emit)
+        self._enforce_band(p.band, inputs.snapshot, p.ia_file, emit)
 
         data = inputs.data
         if p.restrict_gt_to_predicted:
@@ -417,6 +432,40 @@ class RunCafaEvaluationOperation:
             "warning",
         )
         return None
+
+    @staticmethod
+    def _enforce_band(
+        declared_band: str | None,
+        snapshot: OntologySnapshot,
+        payload_ia_file: str | None,
+        emit: EmitFn,
+    ) -> None:
+        """Phantom-gap guard: when the payload declares a band, reject the run
+        if the pivot ontology snapshot or the resolved IA come from a foreign
+        band, and forbid the uniform IC=1 fallback.
+
+        Binds propagation / term-universe / orphans (the snapshot) AND the IA
+        to the declared band, extending the #599 IA-only resolver. Resolves the
+        IA *reference* (payload ``ia_file`` first, else snapshot ``ia_url``) so
+        the band is checked against the source artifact, not a downloaded
+        tempfile copy. No-op when ``declared_band`` is None (ad-hoc episode).
+        """
+        if not declared_band:
+            return
+        ia_ref = payload_ia_file or snapshot.ia_url
+        band = assert_band_consistency(
+            declared_band, obo_version=snapshot.obo_version, ia_ref=ia_ref
+        )
+        emit(
+            "run_cafa_evaluation.band_verified",
+            None,
+            {
+                "band": band.name,
+                "obo_version": snapshot.obo_version,
+                "ia_token": ia_token(ia_ref),
+            },
+            "info",
+        )
 
     @staticmethod
     def _upload_artifacts(

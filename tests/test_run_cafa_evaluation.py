@@ -16,6 +16,7 @@ import pandas as pd
 import pytest
 from pydantic import ValidationError
 
+from protea.core.band_registry import BandMismatchError
 from protea.core.evaluation import EvaluationData
 from protea.core.operations._run_cafa_artifacts import WritePredictionsContext
 from protea.core.operations.run_cafa_evaluation import (
@@ -62,10 +63,11 @@ def _make_ann_old():
     return ann
 
 
-def _make_snapshot(obo_url="https://example.com/go.obo", ia_url=None):
+def _make_snapshot(obo_url="https://example.com/go.obo", ia_url=None, obo_version=None):
     snap = MagicMock()
     snap.obo_url = obo_url
     snap.ia_url = ia_url
+    snap.obo_version = obo_version
     return snap
 
 
@@ -1190,6 +1192,93 @@ class TestExecuteHappyPath:
         emit_events = [c[0][0] for c in self.emit.call_args_list]
         assert "run_cafa_evaluation.ia_resolved" in emit_events
         assert "run_cafa_evaluation.downloading_ia" not in emit_events
+
+    def _run_with_band(self, mock_compute, *, snapshot, payload_extra):
+        """Drive ``execute`` with a banded payload; return the emit-event names.
+
+        Raises whatever the operation raises (the phantom-gap guard fires
+        before cafa_eval, so the mocked binary is never reached on rejection).
+        """
+        mock_compute.return_value = (_make_eval_data(), uuid.uuid4())
+        session = MagicMock()
+        session.get.side_effect = [_make_eval_set(), _make_pred_set(), snapshot]
+        query = MagicMock()
+        session.query.return_value = query
+        query.join.return_value = query
+        query.filter.return_value = query
+        query.order_by.return_value = query
+        query.yield_per.return_value = []
+        payload = {
+            "evaluation_set_id": EVAL_SET_ID,
+            "prediction_set_id": PRED_SET_ID,
+            **payload_extra,
+        }
+        with (
+            patch("protea.core.operations._run_cafa_artifacts.download_obo"),
+            patch("protea.core.operations._run_cafa_artifacts.download_tsv"),
+            patch(
+                "cafaeval.evaluation.cafa_eval",
+                return_value=(MagicMock(), _dfs_best_fixture()),
+            ),
+        ):
+            self.op.execute(session, payload, emit=self.emit)
+        return [c[0][0] for c in self.emit.call_args_list]
+
+    @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
+    def test_band_canonical_pair_verified(self, mock_compute):
+        """A v227-declared cell with the canonical snapshot + IA emits
+        band_verified and proceeds."""
+        snapshot = _make_snapshot(obo_version="releases/2025-07-22")
+        events = self._run_with_band(
+            mock_compute,
+            snapshot=snapshot,
+            payload_extra={"band": "v227", "ia_file": "/data/lafa_t0_Sep_2025/IA.tsv"},
+        )
+        assert "run_cafa_evaluation.band_verified" in events
+
+    @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
+    def test_band_rejects_cross_band_ia(self, mock_compute):
+        """A v227 cell that resolves the v226 IA is rejected at runtime."""
+        snapshot = _make_snapshot(obo_version="releases/2025-07-22")
+        with pytest.raises(BandMismatchError, match="IA artifact"):
+            self._run_with_band(
+                mock_compute,
+                snapshot=snapshot,
+                payload_extra={"band": "v227", "ia_file": "/data/IA_cafa6.tsv"},
+            )
+
+    @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
+    def test_band_rejects_cross_band_snapshot(self, mock_compute):
+        """A v227 cell whose pivot snapshot is the v226 ontology is rejected."""
+        snapshot = _make_snapshot(obo_version="releases/2025-03-16", ia_url=None)
+        with pytest.raises(BandMismatchError, match="obo_version"):
+            self._run_with_band(
+                mock_compute,
+                snapshot=snapshot,
+                payload_extra={"band": "v227", "ia_file": "/data/IA.tsv"},
+            )
+
+    @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
+    def test_band_rejects_ic1_fallback(self, mock_compute):
+        """A band-declared cell with no IA (would be IC=1) is rejected."""
+        snapshot = _make_snapshot(obo_version="releases/2025-03-16", ia_url=None)
+        with pytest.raises(BandMismatchError, match="IC=1"):
+            self._run_with_band(
+                mock_compute,
+                snapshot=snapshot,
+                payload_extra={"band": "v226"},
+            )
+
+    @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
+    def test_no_band_is_unguarded(self, mock_compute):
+        """Without a declared band the guard is a no-op (legacy/ad-hoc runs)."""
+        snapshot = _make_snapshot(obo_version="releases/2025-03-16", ia_url=None)
+        events = self._run_with_band(
+            mock_compute,
+            snapshot=snapshot,
+            payload_extra={},
+        )
+        assert "run_cafa_evaluation.band_verified" not in events
 
     @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
     def test_session_commit_before_cafa_eval(self, mock_compute):
