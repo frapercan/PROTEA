@@ -1228,7 +1228,7 @@ class TestExecuteHappyPath:
     def test_band_canonical_pair_verified(self, mock_compute):
         """A v227-declared cell with the canonical snapshot + IA emits
         band_verified and proceeds."""
-        snapshot = _make_snapshot(obo_version="releases/2025-09-01")
+        snapshot = _make_snapshot(obo_version="releases/2025-07-22")
         events = self._run_with_band(
             mock_compute,
             snapshot=snapshot,
@@ -1239,7 +1239,7 @@ class TestExecuteHappyPath:
     @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
     def test_band_rejects_cross_band_ia(self, mock_compute):
         """A v227 cell that resolves the v226 IA is rejected at runtime."""
-        snapshot = _make_snapshot(obo_version="releases/2025-09-01")
+        snapshot = _make_snapshot(obo_version="releases/2025-07-22")
         with pytest.raises(BandMismatchError, match="IA artifact"):
             self._run_with_band(
                 mock_compute,
@@ -1250,7 +1250,7 @@ class TestExecuteHappyPath:
     @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
     def test_band_rejects_cross_band_snapshot(self, mock_compute):
         """A v227 cell whose pivot snapshot is the v226 ontology is rejected."""
-        snapshot = _make_snapshot(obo_version="releases/2024-01-17", ia_url=None)
+        snapshot = _make_snapshot(obo_version="releases/2025-03-16", ia_url=None)
         with pytest.raises(BandMismatchError, match="obo_version"):
             self._run_with_band(
                 mock_compute,
@@ -1261,7 +1261,7 @@ class TestExecuteHappyPath:
     @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
     def test_band_rejects_ic1_fallback(self, mock_compute):
         """A band-declared cell with no IA (would be IC=1) is rejected."""
-        snapshot = _make_snapshot(obo_version="releases/2024-01-17", ia_url=None)
+        snapshot = _make_snapshot(obo_version="releases/2025-03-16", ia_url=None)
         with pytest.raises(BandMismatchError, match="IC=1"):
             self._run_with_band(
                 mock_compute,
@@ -1272,7 +1272,7 @@ class TestExecuteHappyPath:
     @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
     def test_no_band_is_unguarded(self, mock_compute):
         """Without a declared band the guard is a no-op (legacy/ad-hoc runs)."""
-        snapshot = _make_snapshot(obo_version="releases/2024-01-17", ia_url=None)
+        snapshot = _make_snapshot(obo_version="releases/2025-03-16", ia_url=None)
         events = self._run_with_band(
             mock_compute,
             snapshot=snapshot,
