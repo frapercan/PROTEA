@@ -26,6 +26,11 @@ class GenerateEvaluationSetPayload(ProteaPayload, frozen=True):
     old_annotation_set_id: str
     new_annotation_set_id: str
     pivot_ontology_snapshot_id: str | None = None
+    # ADR D40: bind the produced set to a rolling-origin protocol window.
+    # ``"valid"`` (selection + threshold tuning) | ``"test"`` (report once)
+    # | ``None`` (unbound). Defaults to None so existing callers are
+    # unaffected.
+    window_role: str | None = None
 
     @field_validator("old_annotation_set_id", "new_annotation_set_id", mode="before")
     @classmethod
@@ -42,6 +47,15 @@ class GenerateEvaluationSetPayload(ProteaPayload, frozen=True):
         if not isinstance(v, str) or not v.strip():
             raise ValueError("must be a non-empty string or null")
         return v.strip()
+
+    @field_validator("window_role", mode="before")
+    @classmethod
+    def window_role_in_vocab(cls, v):
+        if v is None:
+            return None
+        if not isinstance(v, str) or v not in ("valid", "test"):
+            raise ValueError("must be one of 'valid', 'test', or null")
+        return v
 
 
 class GenerateEvaluationSetOperation:
@@ -91,7 +105,9 @@ class GenerateEvaluationSetOperation:
         )
         mode = "same_snapshot" if same_snapshot else "reconciled"
 
-        reuse = self._maybe_reuse_existing(session, old_set_id, new_set_id, emit)
+        reuse = self._maybe_reuse_existing(
+            session, old_set_id, new_set_id, p.window_role, emit
+        )
         if reuse is not None:
             return reuse
 
@@ -126,6 +142,7 @@ class GenerateEvaluationSetOperation:
             old_annotation_set_id=old_set_id,
             new_annotation_set_id=new_set_id,
             stats=stats,
+            window_role=p.window_role,
         )
         session.add(eval_set)
         session.flush()
@@ -139,6 +156,7 @@ class GenerateEvaluationSetOperation:
         session: Session,
         old_set_id: uuid.UUID,
         new_set_id: uuid.UUID,
+        window_role: str | None,
         emit: EmitFn,
     ) -> OperationResult | None:
         """Return the existing EvaluationSet's result, or None if absent.
@@ -150,6 +168,11 @@ class GenerateEvaluationSetOperation:
         ``b8e3f1a7c2d9_evaluation_set_pair_unique``); this short-circuit
         avoids paying the delta compute cost on a re-submission and keeps
         the operation idempotent from the caller's perspective.
+
+        ADR D40: a re-submission MAY carry a ``window_role`` to (re)bind an
+        already-computed set to a protocol window. Designating the window
+        is metadata only, so it is applied in place without recomputing
+        the delta.
         """
         existing = (
             session.query(EvaluationSet)
@@ -161,6 +184,7 @@ class GenerateEvaluationSetOperation:
         )
         if existing is None:
             return None
+        self._rebind_window_role(session, existing, window_role, emit)
         stats = dict(existing.stats or {})
         result = {
             "evaluation_set_id": str(existing.id),
@@ -178,6 +202,29 @@ class GenerateEvaluationSetOperation:
             "info",
         )
         return OperationResult(result=result)
+
+    @staticmethod
+    def _rebind_window_role(
+        session: Session,
+        existing: EvaluationSet,
+        window_role: str | None,
+        emit: EmitFn,
+    ) -> None:
+        """Re-designate an existing set's protocol window in place (ADR D40).
+
+        No-op unless a ``window_role`` is supplied and differs from the
+        current one. Metadata only: the delta is never recomputed.
+        """
+        if window_role is None or existing.window_role == window_role:
+            return
+        existing.window_role = window_role
+        session.flush()
+        emit(
+            "generate_evaluation_set.window_role_set",
+            None,
+            {"evaluation_set_id": str(existing.id), "window_role": window_role},
+            "info",
+        )
 
     def _resolve_eval_inputs(
         self,

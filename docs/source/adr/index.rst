@@ -230,6 +230,14 @@ later revision).
      - :doc:`Defer neural-head champion; pivot to curated dataset packaging (F-DATA-PACK) <D38-neural-head-deferred-dataset-pack-pivot>`
      - Accepted
      - F-DATA-PACK
+   * - D39
+     - :doc:`Defense-in-depth guards on destructive database operations <D39-destructive-op-guards>`
+     - Accepted
+     - F-SEC
+   * - D40
+     - :doc:`Leakage-free temporal evaluation protocol (rolling-origin TRAIN/VALID/TEST) <D40-leakage-free-temporal-eval-protocol>`
+     - Accepted
+     - F-EVAL
 
 .. toctree::
    :maxdepth: 1
@@ -281,3 +289,4 @@ later revision).
    D37-feat-auth-users-roles-multi-instance
    D38-neural-head-deferred-dataset-pack-pivot
    D39-destructive-op-guards
+   D40-leakage-free-temporal-eval-protocol

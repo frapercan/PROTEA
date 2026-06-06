@@ -170,3 +170,4 @@ Key ADRs that affect ongoing development. Full catalog at `docs/source/adr/`.
 - **D35** (Accepted): Canonical 8-PLM embedding config IDs and orphan classification
 - **D36** (Accepted): PLM axis explicit in dataset naming (bench-v1-K{k}-v{band}-lineage-{plm})
 - **D37** (Proposed): Single auth system, manual approvals, multi-instance (FEAT-AUTH); supersedes D6
+- **D40** (Accepted): Leakage-free temporal evaluation protocol (rolling-origin TRAIN/VALID/TEST); adds a nullable `window_role` marker on `EvaluationSet`
