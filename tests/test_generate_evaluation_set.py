@@ -46,6 +46,30 @@ class TestGenerateEvaluationSetPayload:
         )
         assert p.old_annotation_set_id == uid
 
+    def test_window_role_defaults_none(self):
+        p = GenerateEvaluationSetPayload(
+            old_annotation_set_id=str(uuid.uuid4()),
+            new_annotation_set_id=str(uuid.uuid4()),
+        )
+        assert p.window_role is None
+
+    @pytest.mark.parametrize("role", ["valid", "test"])
+    def test_window_role_accepts_vocab(self, role):
+        p = GenerateEvaluationSetPayload(
+            old_annotation_set_id=str(uuid.uuid4()),
+            new_annotation_set_id=str(uuid.uuid4()),
+            window_role=role,
+        )
+        assert p.window_role == role
+
+    def test_window_role_rejects_unknown(self):
+        with pytest.raises(ValueError):
+            GenerateEvaluationSetPayload(
+                old_annotation_set_id=str(uuid.uuid4()),
+                new_annotation_set_id=str(uuid.uuid4()),
+                window_role="train",
+            )
+
 
 # ---------------------------------------------------------------------------
 # Operation execute — mocked session
@@ -227,3 +251,55 @@ class TestGenerateEvaluationSetExecute:
         events = [call.args[0] for call in self.emit.call_args_list]
         assert "generate_evaluation_set.start" in events
         assert "generate_evaluation_set.done" in events
+
+    def test_window_role_passed_to_new_set(self):
+        session = MagicMock()
+        snap_id = uuid.uuid4()
+        old_set = _make_annotation_set(snap_id)
+        new_set = _make_annotation_set(snap_id)
+        session.get.side_effect = [old_set, new_set]
+        session.query.return_value.filter_by.return_value.one_or_none.return_value = None
+
+        added: list = []
+        session.add.side_effect = lambda obj: (setattr(obj, "id", uuid.uuid4()), added.append(obj))
+        session.flush = MagicMock()
+
+        payload = self._payload()
+        payload["window_role"] = "valid"
+        with patch(
+            "protea.core.operations.generate_evaluation_set.compute_evaluation_data",
+            return_value=_make_eval_data(),
+        ):
+            self.op.execute(session, payload, emit=self.emit)
+
+        assert added, "expected an EvaluationSet to be added"
+        assert added[0].window_role == "valid"
+
+    def test_reuse_redesignates_window_role(self):
+        session = MagicMock()
+        snap_id = uuid.uuid4()
+        old_set = _make_annotation_set(snap_id)
+        new_set = _make_annotation_set(snap_id)
+        session.get.side_effect = [old_set, new_set]
+
+        existing = MagicMock()
+        existing.id = uuid.uuid4()
+        existing.stats = {"nk_proteins": 1}
+        existing.groundtruth_uri = "file://gt.parquet"
+        existing.window_role = None
+        session.query.return_value.filter_by.return_value.one_or_none.return_value = existing
+        session.flush = MagicMock()
+
+        payload = self._payload()
+        payload["window_role"] = "test"
+        with patch(
+            "protea.core.operations.generate_evaluation_set.compute_evaluation_data",
+        ) as mock_compute:
+            result = self.op.execute(session, payload, emit=self.emit)
+
+        # Reuse path must not recompute the delta.
+        assert not mock_compute.called
+        assert existing.window_role == "test"
+        assert result.result["evaluation_set_id"] == str(existing.id)
+        events = [call.args[0] for call in self.emit.call_args_list]
+        assert "generate_evaluation_set.window_role_set" in events
