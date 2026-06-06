@@ -90,8 +90,8 @@ relative to LAFA).
 Validated offline (no PROTEA stack) by calling `cafa_eval` directly on a
 prediction LAFA had already scored:
 
-- Prediction: `protea-lafa-knn/predictions_7401.tsv` (LAFA method
-  `PROTEA-KNN`, file `protea-knn-v1.tsv`).
+- Prediction: `protea-lafa-knn/predictions_7401.tsv` (the `PROTEA-KNN`
+  method's submission scored by the local LAFA).
 - Window: `Sep_2025_Mar_2026` (v227 LAFA band).
 - Inputs (identical to LAFA): OBO + IA from `lafa_t0_Sep_2025`, ground
   truth + TOI + PK-known from
