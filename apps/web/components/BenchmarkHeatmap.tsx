@@ -50,22 +50,23 @@ const CATEGORY_LABELS: Record<string, string> = {
   PK: "Partial Knowledge",
 };
 
-/** Pick the best Fmax row per embedding inside a single cell. The matrix
- *  endpoint already dedupes per (eid, esid, st, k, cat, asp) — collapse
- *  further to one row per embedding for the visualization. */
+/** Pick the best primary-metric row per embedding inside a single cell. The
+ *  matrix endpoint already dedupes per (eid, esid, st, k, cat, asp) — collapse
+ *  further to one row per embedding for the visualization. Ranked by the
+ *  IA-weighted `primary` (f_micro_w, fmax fallback). */
 function bestRowsByEmbedding(rows: BenchmarkRow[]): BenchmarkRow[] {
   const best = new Map<string, BenchmarkRow>();
   for (const r of rows) {
     const cur = best.get(r.embedding_config_id);
-    if (cur == null || r.fmax > cur.fmax) best.set(r.embedding_config_id, r);
+    if (cur == null || r.primary > cur.primary) best.set(r.embedding_config_id, r);
   }
-  return Array.from(best.values()).sort((a, b) => b.fmax - a.fmax);
+  return Array.from(best.values()).sort((a, b) => b.primary - a.primary);
 }
 
 /** Linear interpolation between two HSL colors. Returns a CSS color. */
-function fmaxToColor(fmax: number): string {
+function scoreToColor(score: number): string {
   // 0 → cool blue, 1 → deep violet (perceptually rising)
-  const t = Math.max(0, Math.min(1, fmax));
+  const t = Math.max(0, Math.min(1, score));
   const hue = 220 - 50 * t;        // 220 (blue) → 270 (violet)
   const sat = 65 + 20 * t;          // 65 → 85
   const light = 70 - 22 * t;        // 70 → 48 (darker = better)
@@ -132,7 +133,7 @@ function HeatmapCell({
                 <li
                   key={r.embedding_config_id}
                   className="grid grid-cols-[7rem_1fr_3.75rem] items-center gap-2 group"
-                  title={`${name} · ${r.stage} · K=${r.k} · ${r.fmax.toFixed(3)}${stdLabel ? ` ${stdLabel}` : ""}${ciTitle}`}
+                  title={`${name} · ${r.stage} · K=${r.k} · ${r.primary.toFixed(3)} ${r.primary_metric}${stdLabel ? ` ${stdLabel}` : ""}${ciTitle}`}
                 >
                   <div className="flex items-center gap-1 min-w-0">
                     {isWinner && (
@@ -149,8 +150,8 @@ function HeatmapCell({
                     <div
                       className="absolute inset-y-0 left-0 rounded-full transition-[width] duration-300"
                       style={{
-                        width: `${Math.max(2, r.fmax * 100)}%`,
-                        background: fmaxToColor(r.fmax),
+                        width: `${Math.max(2, r.primary * 100)}%`,
+                        background: scoreToColor(r.primary),
                       }}
                     />
                     {/* Bootstrap CI95 band: thin horizontal stripe spanning
@@ -173,8 +174,16 @@ function HeatmapCell({
                       href={`/${locale}/evaluation/${r.evaluation_result_id}`}
                       className="block text-[11px] tabular-nums font-semibold text-slate-700 hover:text-blue-700 focus:outline-none focus-visible:text-blue-700"
                     >
-                      {r.fmax.toFixed(3)}
+                      {r.primary.toFixed(3)}
                     </Link>
+                    {r.primary_metric === "fmax" && (
+                      <span
+                        className="block text-[8px] font-bold uppercase text-rose-600"
+                        title="Not IA-weighted (legacy Fmax)"
+                      >
+                        fmax
+                      </span>
+                    )}
                     {stdLabel && (
                       <span className="block text-[9px] tabular-nums text-slate-500">
                         {stdLabel}
@@ -225,11 +234,11 @@ export function BenchmarkHeatmap({
             Per-cell heatmap · 8 PLMs × {categories.length} categories × {aspectsCount} aspects
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Each card shows the best Fmax per embedding within the active selection. Bars sorted descending; leader marked.
+            Each card shows the best IA-weighted f_micro_w per embedding within the active selection. Bars sorted descending; leader marked.
           </p>
         </div>
         <div className="flex items-center gap-2 text-[10px] text-slate-500">
-          <span className="font-semibold uppercase tracking-wider">Fmax</span>
+          <span className="font-semibold uppercase tracking-wider font-mono">f_micro_w</span>
           <span className="inline-block h-2.5 w-32 rounded-full" style={{
             background: "linear-gradient(to right, hsl(220,65%,70%), hsl(245,75%,58%), hsl(270,85%,48%))",
           }} />
@@ -253,10 +262,11 @@ export function BenchmarkHeatmap({
         )}
       </div>
       <p className="text-[10px] text-slate-600 italic">
-        Hover any bar for stage / K / Fmax detail. Click the embedding
-        name or Fmax number to open the underlying EvaluationResult. A
-        thin dark band over the bar marks the 95% bootstrap CI whenever
-        the lab persists multiseed bounds.
+        Hover any bar for stage / K / f_micro_w detail. Click the embedding
+        name or score to open the underlying EvaluationResult. Cells flagged
+        <span className="text-rose-600 font-semibold not-italic"> fmax</span> are
+        not IA-weighted (legacy). A thin dark band over the bar marks the 95%
+        bootstrap CI whenever the lab persists multiseed bounds.
       </p>
     </section>
   );

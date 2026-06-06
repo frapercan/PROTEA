@@ -17,6 +17,7 @@ import {
   type BenchmarkMatrixResponse,
   type BenchmarkRow,
   type BenchmarkStage,
+  type PerTaskAggregate,
 } from "../../../lib/api";
 
 /** Canonical category definitions. Anchored to the leakage-fixed champion
@@ -75,6 +76,14 @@ const LINEAGE_CHIPS: { key: LineageChipKey; label: string; cats: string[]; toolt
     tooltip: "Limited Knowledge in isolation — proteins annotated in other aspects but not the one under evaluation.",
   },
 ];
+
+/** IA-weighted headline metric definition (FIX-METRIC-IA). */
+const FMICRO_TOOLTIP =
+  "f_micro_w: the information-accretion-weighted micro-averaged F score. The LAFA / CAFA headline metric, comparable to the external leaderboards. Rare, specific GO terms count more than common ones.";
+
+/** Shown on cells still carrying the legacy unweighted Fmax (no real IA yet). */
+const NOT_IA_TOOLTIP =
+  "Not IA-weighted: this cell predates real information-accretion scoring and reports the unweighted Fmax, which is not directly comparable to the LAFA / CAFA leaderboards.";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -167,6 +176,9 @@ function rowsToCsv(
     "stage",
     "category",
     "aspect",
+    "primary",
+    "primary_metric",
+    "f_micro_w",
     "fmax",
     "precision",
     "recall",
@@ -188,6 +200,9 @@ function rowsToCsv(
         r.stage,
         r.category,
         r.aspect,
+        r.primary,
+        r.primary_metric,
+        r.f_micro_w ?? "",
         r.fmax,
         r.precision ?? "",
         r.recall ?? "",
@@ -366,6 +381,15 @@ export default function BenchmarkPage() {
     return new Set(matrix.embedding_config_ids);
   }, [embeddings, matrix]);
 
+  // Honest headline: per-task mean ± 95% CI across all models in the current
+  // selection (FIX-METRIC-IA), keyed by (category|aspect). `per_task`
+  // defaults to [] so an older backend degrades to the best-cell view.
+  const perTaskIndex = useMemo(() => {
+    const out = new Map<string, PerTaskAggregate>();
+    for (const t of matrix?.per_task ?? []) out.set(`${t.category}|${t.aspect}`, t);
+    return out;
+  }, [matrix]);
+
   if (error) {
     return (
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12">
@@ -486,8 +510,9 @@ export default function BenchmarkPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Benchmark matrix</h1>
           <p className="text-sm text-slate-500 mt-1">
-            Per-embedding Fmax across categories and aspects for every evaluation
-            run in the database.{" "}
+            Per-embedding IA-weighted <span className="font-mono">f_micro_w</span> (LAFA / CAFA
+            comparable) across categories and aspects for every evaluation run in the
+            database.{" "}
             <Link href={`/${locale}/`} className="text-blue-600 hover:underline">
               {t("backToHome")}
             </Link>
@@ -709,16 +734,106 @@ export default function BenchmarkPage() {
         </div>
       )}
 
-      {/* Global champions: best Fmax per (cat, asp) ignoring stage/K filters.
-          Stable across filter changes — anchors the absolute-best read. */}
+      {/* Headline: honest per-task mean ± 95% CI across every model in the
+          current selection. This is the f_micro_w aggregate the page leads
+          with; the best-cell tables below report maxima, never the headline
+          (winner's-curse, FIX-METRIC-IA). */}
+      {perTaskIndex.size > 0 && (
+        <section className="rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50/60 via-white to-cyan-50/40 shadow-sm p-4 sm:p-5">
+          <div className="flex items-baseline justify-between mb-3 flex-wrap gap-2">
+            <h2 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+              <span aria-hidden className="text-base">📈</span>
+              Per-task headline
+              <Tooltip text={FMICRO_TOOLTIP}>
+                <span className="ml-1 font-mono text-[11px] font-normal text-slate-600 underline decoration-dotted decoration-slate-300 underline-offset-4 cursor-help">
+                  mean f_micro_w ± 95% CI
+                </span>
+              </Tooltip>
+              <span className="ml-1 text-[11px] font-normal text-slate-500">
+                across all models in the current selection
+              </span>
+            </h2>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr>
+                  <th scope="col" className="px-2 py-1 text-left font-medium text-slate-500"></th>
+                  {aspects.map((asp) => (
+                    <th
+                      key={asp}
+                      scope="col"
+                      className="px-2 py-1 text-center text-[10px] font-medium text-slate-500 uppercase tracking-wide"
+                    >
+                      {asp}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {effectiveCategories.map((cat) => (
+                  <tr key={cat} className="border-t border-slate-200/60">
+                    <th scope="row" className="px-2 py-2.5 font-semibold text-slate-700 text-left">
+                      {CATEGORY_TOOLTIPS[cat] ? (
+                        <Tooltip text={CATEGORY_TOOLTIPS[cat]}>
+                          <span className="underline decoration-dotted decoration-slate-300 underline-offset-4 cursor-help">
+                            {cat}
+                          </span>
+                        </Tooltip>
+                      ) : (
+                        cat
+                      )}
+                    </th>
+                    {aspects.map((asp) => {
+                      const agg = perTaskIndex.get(`${cat}|${asp}`);
+                      if (!agg) {
+                        return (
+                          <td key={asp} className="px-2 py-2.5 text-center text-slate-300 border-l border-slate-200/60">
+                            —
+                          </td>
+                        );
+                      }
+                      return (
+                        <td
+                          key={asp}
+                          className="px-2 py-2.5 text-center border-l border-slate-200/60"
+                          title={`mean ${agg.mean.toFixed(3)} ± ${agg.ci95.toFixed(3)} · best cell ${agg.max.toFixed(3)} · ${agg.n_models} models`}
+                        >
+                          <div className="font-bold text-lg text-slate-900 tabular-nums leading-none">
+                            {agg.mean.toFixed(3)}
+                          </div>
+                          <div className="text-[11px] text-slate-500 tabular-nums mt-1">
+                            ± {agg.ci95.toFixed(3)}
+                          </div>
+                          <div className="text-[9px] text-slate-400 tabular-nums mt-0.5">
+                            best {agg.max.toFixed(3)} · n={agg.n_models}
+                          </div>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 text-[11px] text-slate-500">
+            Headline = the calibrated mean across every model per task. The best-cell
+            tables below report the single top model per cell (a maximum), which runs
+            ~+0.02 to +0.03 above this mean and must not be read as the headline.
+          </p>
+        </section>
+      )}
+
+      {/* Global champions: best primary metric per (cat, asp) ignoring stage/K
+          filters. Stable across filter changes — anchors the best-cell read. */}
       {matrix.best_per_cell_global && matrix.best_per_cell_global.length > 0 && (
         <section className="rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50/60 via-white to-violet-50/40 shadow-sm p-4 sm:p-5">
           <div className="flex items-baseline justify-between mb-3 flex-wrap gap-2">
             <h2 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
               <span aria-hidden className="text-base">🏆</span>
-              Global champions per cell
+              Best cell per task
               <span className="ml-1 text-[11px] font-normal text-slate-500">
-                across every stage and K · current evaluation set
+                single top model per cell across every stage and K · best-cell maximum, not the headline
               </span>
             </h2>
           </div>
@@ -772,8 +887,15 @@ export default function BenchmarkPage() {
                             href={`/${locale}/evaluation/${best.evaluation_set_id}?result=${best.evaluation_result_id}`}
                             className="block group rounded-md px-1 py-0.5 hover:bg-blue-50 focus:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 transition-colors"
                           >
-                            <div className="font-bold text-lg text-slate-900 group-hover:text-blue-700 tabular-nums leading-none">
-                              {best.fmax.toFixed(3)}
+                            <div className="font-bold text-lg text-slate-900 group-hover:text-blue-700 tabular-nums leading-none flex items-center justify-center gap-1">
+                              {best.primary.toFixed(3)}
+                              {best.primary_metric === "fmax" && (
+                                <Tooltip text={NOT_IA_TOOLTIP}>
+                                  <span className="text-[8px] font-bold uppercase text-rose-600 cursor-help">
+                                    fmax
+                                  </span>
+                                </Tooltip>
+                              )}
                             </div>
                             <div className="text-[11px] font-medium text-slate-700 truncate max-w-[140px] mx-auto mt-1">
                               {emb?.display_name ?? "—"}
@@ -795,14 +917,14 @@ export default function BenchmarkPage() {
         </section>
       )}
 
-      {/* Leaderboard: best Fmax per (cat, asp) across every model & stage */}
+      {/* Leaderboard: best primary metric per (cat, asp) across every model & stage */}
       {matrix.best_per_cell.length > 0 && (
         <section className="rounded-xl border bg-white shadow-sm p-4">
           <div className="flex items-baseline justify-between mb-3">
             <h2 className="text-sm font-semibold text-slate-800">
-              Best Fmax per cell
+              Best cell per task
               <span className="ml-2 text-xs font-normal text-slate-600">
-                in current selection
+                in current selection · best-cell maximum, not the headline
                 {stage ? ` · stage=${stageLabel(stageList, stage)}` : ""}
                 {selectedK ? ` · K=${selectedK}` : ""}
               </span>
@@ -861,8 +983,15 @@ export default function BenchmarkPage() {
                             href={`/${locale}/evaluation/${best.evaluation_set_id}?result=${best.evaluation_result_id}`}
                             className="block group rounded-md px-1 py-0.5 hover:bg-blue-50 focus:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 transition-colors"
                           >
-                            <div className="font-semibold text-slate-900 group-hover:text-blue-700 tabular-nums">
-                              {best.fmax.toFixed(3)}
+                            <div className="font-semibold text-slate-900 group-hover:text-blue-700 tabular-nums flex items-center justify-center gap-1">
+                              {best.primary.toFixed(3)}
+                              {best.primary_metric === "fmax" && (
+                                <Tooltip text={NOT_IA_TOOLTIP}>
+                                  <span className="text-[8px] font-bold uppercase text-rose-600 cursor-help">
+                                    fmax
+                                  </span>
+                                </Tooltip>
+                              )}
                             </div>
                             <div className="text-[10px] text-slate-500 truncate max-w-[120px] mx-auto">
                               {emb?.display_name ?? "—"}
@@ -908,7 +1037,7 @@ export default function BenchmarkPage() {
           </div>
           <p className="text-xs text-slate-500">
             {viewMode === "heatmap"
-              ? "Visual ranking per cell. Bars sorted by Fmax."
+              ? "Visual ranking per cell. Bars sorted by IA-weighted f_micro_w."
               : "Full matrix with raw numbers. Useful for export."}
           </p>
         </div>
@@ -1030,8 +1159,16 @@ export default function BenchmarkPage() {
                                     isWinner ? "text-green-700" : "text-slate-900"
                                   }`}
                                 >
-                                  {row.fmax.toFixed(3)}
+                                  {row.primary.toFixed(3)}
                                 </span>
+                                {row.primary_metric === "fmax" && (
+                                  <span
+                                    className="text-[8px] font-bold uppercase text-rose-600"
+                                    title="Not IA-weighted (legacy Fmax)"
+                                  >
+                                    fmax
+                                  </span>
+                                )}
                                 {std && (
                                   <span className="text-[10px] font-normal text-slate-500 group-hover:text-blue-600 tabular-nums">
                                     {std}

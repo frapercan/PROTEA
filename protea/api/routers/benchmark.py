@@ -48,6 +48,7 @@ from sqlalchemy.orm import Session, aliased, sessionmaker
 
 from protea.api.cache import cached, invalidate
 from protea.api.deps import get_benchmark_config, get_session_factory
+from protea.api.metrics import PRIMARY_METRIC, per_task_aggregate, primary_cell_score
 from protea.api.stages import RERANKER_STAGE as _RERANKER_STAGE
 from protea.api.stages import StageKind  # noqa: F401  (re-exported for type hints)
 from protea.api.stages import stage_kind as _stage_kind
@@ -64,30 +65,11 @@ from protea.infrastructure.session import session_scope
 
 router = APIRouter(prefix="/benchmark", tags=["benchmark"])
 
-# Primary ranking metric. The IA-weighted micro-averaged F (``f_micro_w``)
-# is the LAFA / CAFA headline metric and the only one comparable to the
-# external leaderboards (FIX-METRIC-IA). Rows evaluated before a real IA
-# file was wired carry no ``f_micro_w``; for those we fall back to the
-# unweighted ``fmax`` so historical cells still rank, flagged via
-# ``primary_metric`` in the row payload.
-PRIMARY_METRIC = "f_micro_w"
-FALLBACK_METRIC = "fmax"
-
-
-def _primary_score(cell: dict[str, Any]) -> tuple[float, str]:
-    """Return ``(score, metric_name)`` for one ``(category, aspect)`` cell.
-
-    Prefers the IA-weighted ``f_micro_w``; falls back to the unweighted
-    ``fmax`` when the cell predates real-IA evaluation. Returns the metric
-    name so the caller can label which number is driving the ranking.
-    """
-    fw = cell.get(PRIMARY_METRIC)
-    if fw is not None:
-        return float(fw), PRIMARY_METRIC
-    fmax = cell.get(FALLBACK_METRIC)
-    if fmax is not None:
-        return float(fmax), FALLBACK_METRIC
-    return 0.0, FALLBACK_METRIC
+# Primary ranking metric + legacy fallback live in ``protea.api.metrics`` so
+# the benchmark matrix and the home showcase agree on the IA-weighted headline
+# (FIX-METRIC-IA). ``_primary_score`` is kept as a thin local alias to limit
+# the diff against the rest of this module.
+_primary_score = primary_cell_score
 
 BENCHMARK_EMBEDDINGS_CACHE_KEY = "benchmark:embeddings"
 BENCHMARK_EMBEDDINGS_TTL_SECONDS = 300.0
@@ -208,8 +190,6 @@ def _per_task_aggregate(
     (``1.96 * sd / sqrt(n)``), so the front-end can headline a calibrated
     central tendency and only label the maximum as best-cell.
     """
-    import math
-
     grouped: dict[tuple[str, str], list[float]] = {}
     for r in rows:
         grouped.setdefault((r["category"], r["aspect"]), []).append(float(r["primary"]))
@@ -217,25 +197,19 @@ def _per_task_aggregate(
     for cat in categories:
         for asp in aspects:
             vals = grouped.get((cat, asp))
-            if not vals:
+            agg = per_task_aggregate(vals or [])
+            if agg is None:
                 continue
-            n = len(vals)
-            mean = sum(vals) / n
-            if n > 1:
-                var = sum((v - mean) ** 2 for v in vals) / (n - 1)
-                ci = 1.96 * math.sqrt(var) / math.sqrt(n)
-            else:
-                ci = 0.0
             out.append(
                 {
                     "category": cat,
                     "aspect": asp,
                     "metric": PRIMARY_METRIC,
-                    "mean": round(mean, 4),
-                    "ci95": round(ci, 4),
-                    "max": round(max(vals), 4),
-                    "min": round(min(vals), 4),
-                    "n_models": n,
+                    "mean": agg["mean"],
+                    "ci95": agg["ci95"],
+                    "max": agg["max"],
+                    "min": agg["min"],
+                    "n_models": agg["n"],
                 }
             )
     return out

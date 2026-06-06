@@ -26,6 +26,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.deps import get_session_factory
+from protea.api.metrics import PRIMARY_METRIC, per_task_aggregate, primary_cell_score
 from protea.api.stages import stage_of
 from protea.core.domain.aspect import ASPECT_CAFA_CODES as _ASPECTS
 from protea.infrastructure.orm.models.annotation.evaluation_result import EvaluationResult
@@ -51,24 +52,31 @@ def _approx_count(session: Session, table: str) -> int:
     return int(n) if n is not None and n >= 0 else 0
 
 
-def _avg_fmax(results: dict[str, Any]) -> float | None:
-    """Mean Fmax across the 9 (category × aspect) cells, ignoring missing ones.
+def _avg_primary(results: dict[str, Any]) -> tuple[float | None, str]:
+    """Mean IA-weighted primary metric across the 9 cells + the driving metric.
 
-    Returns ``None`` if the ``results`` blob is empty or has no Fmax values
-    so a malformed or partial evaluation does not pretend to be
-    "the best".
+    Ranks evaluations by the LAFA-comparable ``f_micro_w`` (FIX-METRIC-IA),
+    falling back per-cell to the unweighted ``fmax`` for legacy cells. Returns
+    ``(mean, metric)`` where ``metric`` is ``f_micro_w`` when every contributing
+    cell carried a real IA-weighted score, else ``fmax`` so the home spotlight
+    can flag a not-IA-weighted result honestly. ``(None, ...)`` for a blob with
+    no scored cells so a partial evaluation never pretends to be "the best".
     """
     values: list[float] = []
+    all_weighted = True
     for cat in _CATEGORIES:
         cat_data = results.get(cat) or {}
         for asp in _ASPECTS:
             cell = cat_data.get(asp) or {}
-            fmax = cell.get("fmax")
-            if fmax is not None:
-                values.append(float(fmax))
+            if cell.get("fmax") is None and cell.get(PRIMARY_METRIC) is None:
+                continue
+            score, metric = primary_cell_score(cell)
+            values.append(score)
+            if metric != PRIMARY_METRIC:
+                all_weighted = False
     if not values:
-        return None
-    return sum(values) / len(values)
+        return None, PRIMARY_METRIC
+    return sum(values) / len(values), PRIMARY_METRIC if all_weighted else "fmax"
 
 
 def _load_showcase_counts(session: Session) -> dict[str, int]:
@@ -95,8 +103,20 @@ def _load_showcase_counts(session: Session) -> dict[str, int]:
     }
 
 
-def _pick_best_evaluation(session: Session) -> tuple[dict[str, Any] | None, int]:
-    """Return the single best ``EvaluationResult`` by mean Fmax + total count."""
+def _pick_best_evaluation(
+    session: Session,
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]], int]:
+    """Return ``(best, per_task, total)``.
+
+    ``best`` is the single best ``EvaluationResult`` ranked by mean IA-weighted
+    primary metric (``f_micro_w``, fmax fallback). It is the best-CELL spotlight
+    and must be labelled as such by the front-end, never as the headline.
+
+    ``per_task`` is the honest per-(category, aspect) summary the home page
+    headlines: mean of the primary metric across every model plus a 95% CI
+    half-width, so the dashboard leads with a calibrated central tendency
+    rather than the winner's-curse maximum (FIX-METRIC-IA).
+    """
     rows = session.execute(
         select(EvaluationResult, EmbeddingConfig, ScoringConfig.name)
         .join(PredictionSet, PredictionSet.id == EvaluationResult.prediction_set_id)
@@ -105,8 +125,11 @@ def _pick_best_evaluation(session: Session) -> tuple[dict[str, Any] | None, int]
     ).all()
     best: dict[str, Any] | None = None
     best_score: float = -1.0
+    grouped: dict[tuple[str, str], list[float]] = {}
     for er, cfg, scoring_name in rows:
-        score = _avg_fmax(er.results or {})
+        results = er.results or {}
+        _collect_primary_cells(results, grouped)
+        score, metric = _avg_primary(results)
         if score is None or score <= best_score:
             continue
         best_score = score
@@ -114,7 +137,8 @@ def _pick_best_evaluation(session: Session) -> tuple[dict[str, Any] | None, int]
             "evaluation_result_id": str(er.id),
             "evaluation_set_id": str(er.evaluation_set_id),
             "stage": stage_of(er, scoring_name),
-            "avg_fmax": round(score, 4),
+            "avg_primary": round(score, 4),
+            "primary_metric": metric,
             "embedding": {
                 "id": str(cfg.id),
                 "model_name": cfg.model_name,
@@ -123,27 +147,65 @@ def _pick_best_evaluation(session: Session) -> tuple[dict[str, Any] | None, int]
                 "family": cfg.family or cfg.model_backend,
                 "param_count": cfg.param_count,
             },
-            "per_cell": _flatten_cells(er.results or {}),
+            "per_cell": _flatten_cells(results),
         }
-    return best, len(rows)
+    return best, _build_per_task(grouped), len(rows)
+
+
+def _collect_primary_cells(
+    results: dict[str, Any], grouped: dict[tuple[str, str], list[float]]
+) -> None:
+    """Fold one evaluation's per-cell primary scores into the per-task buckets."""
+    for cat in _CATEGORIES:
+        cat_data = results.get(cat) or {}
+        for asp in _ASPECTS:
+            cell = cat_data.get(asp) or {}
+            if cell.get("fmax") is None and cell.get(PRIMARY_METRIC) is None:
+                continue
+            score, _ = primary_cell_score(cell)
+            grouped.setdefault((cat, asp), []).append(score)
+
+
+def _build_per_task(grouped: dict[tuple[str, str], list[float]]) -> list[dict[str, Any]]:
+    """Per-task mean + 95% CI across all models, in canonical cell order."""
+    out: list[dict[str, Any]] = []
+    for cat in _CATEGORIES:
+        for asp in _ASPECTS:
+            agg = per_task_aggregate(grouped.get((cat, asp), []))
+            if agg is None:
+                continue
+            out.append(
+                {
+                    "category": cat,
+                    "aspect": asp,
+                    "metric": PRIMARY_METRIC,
+                    "mean": agg["mean"],
+                    "ci95": agg["ci95"],
+                    "max": agg["max"],
+                    "min": agg["min"],
+                    "n_models": agg["n"],
+                }
+            )
+    return out
 
 
 @router.get("", summary="Platform showcase data")
 def get_showcase(
     factory: sessionmaker[Session] = Depends(get_session_factory),
 ) -> dict[str, Any]:
-    """Aggregate pipeline stage counts and return the single best evaluation
-    result (by mean Fmax across the 9 cells) along with the embedding that
+    """Aggregate pipeline stage counts and return the IA-weighted ``per_task``
+    summary (the home headline) plus the single best-cell evaluation result
+    ranked by mean ``f_micro_w`` (fmax fallback), along with the embedding that
     produced it.
 
-    Empty-state contract: ``best`` is ``None`` when no ``EvaluationResult``
-    exists; ``pipeline_stages`` always returns the same five entries with
-    ``count = 0`` for unpopulated stages; ``counts`` always returns the
-    same keys.
+    Empty-state contract: ``best`` is ``None`` and ``per_task`` is ``[]`` when
+    no ``EvaluationResult`` exists; ``pipeline_stages`` always returns the same
+    five entries with ``count = 0`` for unpopulated stages; ``counts`` always
+    returns the same keys.
     """
     with session_scope(factory) as session:
         counts = _load_showcase_counts(session)
-        best, total_evaluations = _pick_best_evaluation(session)
+        best, per_task, total_evaluations = _pick_best_evaluation(session)
         pipeline_stages = [
             {"name": "sequences", "count": int(counts["sequences"]), "href": "/proteins"},
             {"name": "embeddings", "count": int(counts["embeddings"]), "href": "/embeddings"},
@@ -165,6 +227,8 @@ def get_showcase(
                 "canonical": int(counts["canonical_proteins"]),
             },
             "best": best,
+            "primary_metric": PRIMARY_METRIC,
+            "per_task": per_task,
             "counts": {
                 "proteins": int(counts["proteins"]),
                 "sequences": int(counts["sequences"]),
@@ -179,25 +243,36 @@ def get_showcase(
 
 
 def _flatten_cells(results: dict[str, Any]) -> list[dict[str, Any]]:
-    """Serialise the nested (category → aspect) Fmax blob as a flat list.
+    """Serialise the nested (category → aspect) blob as a flat list.
 
     Kept on the showcase response so the Home page can render a compact
-    "per-tier breakdown" tile without a second fetch.  Only cells with a
-    non-null ``fmax`` are included.
+    "per-tier breakdown" tile without a second fetch. Each cell carries the
+    IA-weighted ``primary`` (``f_micro_w`` with fmax fallback) plus the
+    ``primary_metric`` flag so the front-end can mark legacy non-IA cells.
+    Only cells with a scored value are included.
     """
     out: list[dict[str, Any]] = []
     for cat in _CATEGORIES:
         cat_data = results.get(cat) or {}
         for asp in _ASPECTS:
             cell = cat_data.get(asp) or {}
-            fmax = cell.get("fmax")
-            if fmax is None:
+            if cell.get("fmax") is None and cell.get(PRIMARY_METRIC) is None:
                 continue
+            primary, primary_metric = primary_cell_score(cell)
             out.append(
                 {
                     "category": cat,
                     "aspect": asp,
-                    "fmax": round(float(fmax), 4),
+                    "primary": round(primary, 4),
+                    "primary_metric": primary_metric,
+                    "f_micro_w": (
+                        round(float(cell[PRIMARY_METRIC]), 4)
+                        if cell.get(PRIMARY_METRIC) is not None
+                        else None
+                    ),
+                    "fmax": (
+                        round(float(cell["fmax"]), 4) if cell.get("fmax") is not None else None
+                    ),
                     "precision": (
                         round(float(cell["precision"]), 4)
                         if cell.get("precision") is not None
