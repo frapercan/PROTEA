@@ -9462,7 +9462,7 @@
     },
     "/v1/showcase": {
       "get": {
-        "description": "Aggregate pipeline stage counts and return the single best evaluation\nresult (by mean Fmax across the 9 cells) along with the embedding that\nproduced it.\n\nEmpty-state contract: ``best`` is ``None`` when no ``EvaluationResult``\nexists; ``pipeline_stages`` always returns the same five entries with\n``count = 0`` for unpopulated stages; ``counts`` always returns the\nsame keys.",
+        "description": "Aggregate pipeline stage counts and return the IA-weighted ``per_task``\nsummary (the home headline) plus the single best-cell evaluation result\nranked by mean ``f_micro_w`` (fmax fallback), along with the embedding that\nproduced it.\n\nEmpty-state contract: ``best`` is ``None`` and ``per_task`` is ``[]`` when\nno ``EvaluationResult`` exists; ``pipeline_stages`` always returns the same\nfive entries with ``count = 0`` for unpopulated stages; ``counts`` always\nreturns the same keys.",
         "operationId": "get_showcase_v1_showcase_get",
         "responses": {
           "200": {

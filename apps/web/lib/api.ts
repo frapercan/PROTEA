@@ -994,9 +994,32 @@ export type ShowcasePipelineStage = {
 export type ShowcaseBestCell = {
   category: string;
   aspect: string;
-  fmax: number;
+  /** IA-weighted headline score for this cell (f_micro_w, fmax fallback for
+   *  legacy cells). Always present; `primary_metric` says which one drives it. */
+  primary: number;
+  /** Which metric `primary` carries: "f_micro_w" (LAFA-comparable) or the
+   *  legacy unweighted "fmax" fallback. */
+  primary_metric: "f_micro_w" | "fmax";
+  /** Raw IA-weighted score, null on cells that predate real-IA evaluation. */
+  f_micro_w: number | null;
+  fmax: number | null;
   precision: number | null;
   recall: number | null;
+};
+
+/** Per-(category, aspect) honest aggregate across every model: the mean
+ *  primary metric + a normal-approx 95% CI half-width. The home + benchmark
+ *  pages headline `mean ± ci95`, NOT the best-cell `max` (winner's-curse,
+ *  FIX-METRIC-IA). */
+export type PerTaskAggregate = {
+  category: string;
+  aspect: string;
+  metric: "f_micro_w" | "fmax";
+  mean: number;
+  ci95: number;
+  max: number;
+  min: number;
+  n_models: number;
 };
 
 export type ShowcaseEmbedding = {
@@ -1012,7 +1035,12 @@ export type ShowcaseBest = {
   evaluation_result_id: string;
   evaluation_set_id: string;
   stage: "baseline" | "alignment_weighted" | "reranker";
-  avg_fmax: number;
+  /** Mean IA-weighted primary metric across this evaluation's 9 cells. This
+   *  is the BEST-CELL spotlight (max model); label it as such, never headline.*/
+  avg_primary: number;
+  /** "f_micro_w" when every contributing cell was IA-weighted, else "fmax"
+   *  (one or more legacy cells) so the spotlight can flag a non-IA result. */
+  primary_metric: "f_micro_w" | "fmax";
   embedding: ShowcaseEmbedding;
   per_cell: ShowcaseBestCell[];
 };
@@ -1020,6 +1048,10 @@ export type ShowcaseBest = {
 export type ShowcaseData = {
   protein_stats: { total: number; canonical: number };
   best: ShowcaseBest | null;
+  /** Primary headline metric for the whole showcase (always "f_micro_w"). */
+  primary_metric: "f_micro_w";
+  /** Honest per-task mean ± 95% CI across all models. The home headline. */
+  per_task: PerTaskAggregate[];
   counts: {
     proteins: number;
     sequences: number;
@@ -1083,6 +1115,14 @@ export type BenchmarkRow = {
   k: number;
   category: string;
   aspect: string;
+  /** IA-weighted headline score for this cell (f_micro_w, fmax fallback). The
+   *  number the matrix ranks + displays; `primary_metric` flags which one. */
+  primary: number;
+  primary_metric: "f_micro_w" | "fmax";
+  /** Raw IA-weighted metrics; null on cells that predate real-IA evaluation. */
+  f_micro_w: number | null;
+  precision_w: number | null;
+  recall_w: number | null;
   fmax: number;
   precision: number | null;
   recall: number | null;
@@ -1105,6 +1145,14 @@ export type BenchmarkRow = {
 export type BenchmarkBestCell = {
   category: string;
   aspect: string;
+  /** IA-weighted best-cell score (f_micro_w, fmax fallback). This is the
+   *  per-cell MAXIMUM across models: label it "best cell", never as the
+   *  headline number (winner's-curse, FIX-METRIC-IA). */
+  primary: number;
+  primary_metric: "f_micro_w" | "fmax";
+  f_micro_w: number | null;
+  precision_w: number | null;
+  recall_w: number | null;
   fmax: number;
   precision: number | null;
   recall: number | null;
@@ -1140,6 +1188,11 @@ export type BenchmarkEvalSet = {
 export type BenchmarkMatrixResponse = {
   rows: BenchmarkRow[];
   total: number;
+  /** Headline metric for the matrix: always "f_micro_w" (IA-weighted). */
+  primary_metric: "f_micro_w";
+  /** Honest per-task mean ± 95% CI across models, in the current selection.
+   *  The benchmark headline; the best-cell tables remain max-labelled. */
+  per_task: PerTaskAggregate[];
   evaluation_sets: BenchmarkEvalSet[];
   embedding_config_ids: string[];
   stages: BenchmarkStage[];
