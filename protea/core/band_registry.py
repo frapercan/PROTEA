@@ -73,40 +73,47 @@ class Band:
         return token.lower() in {t.lower() for t in self.ia_tokens}
 
 
-# Canonical per-band bindings. Authoritative per the provenance docs:
-#   * v227 IA  = lafa_t0_Sep_2025/IA.tsv (docs/IA_PROVENANCE_v227.md): the exact
-#     table the deployed LAFA endpoint scored against, so it is the reference
-#     for the comparability gate. The generic IA_cafa6.tsv is a DIFFERENT
-#     corpus and is explicitly rejected for v227.
-#   * v226     = the historical benchmark cut. Its snapshot ia_url points at
-#     IA_cafa6.tsv (snapshot 35c3ad67), which is the v226 IA; that snapshot is
-#     SHARED, which is exactly why each band must pin its own IA token here so a
-#     v227 cell that accidentally resolves the v226 IA is rejected.
+# Canonical per-band bindings. The ontology per band is the GO OBO release
+# current at that band's GOA t0 date (congruence rule), verified against EBI
+# FTP publication dates and the GO release archive:
+#   * v226 (t0 = goa 226, 2025-05-03): latest GO release on/before that date is
+#     releases/2025-03-16 (April 2025 has no GO release; the next is March). IA
+#     = IA_cafa6.tsv (the historical benchmark IA, snapshot 35c3ad67 ia_url).
+#   * v227 (t0 = goa 227, 2025-09-04): ontology = releases/2025-07-22, the exact
+#     data-version in LAFA's own lafa_t0_Sep_2025/go-basic.obo. IA =
+#     lafa_t0_Sep_2025/IA.tsv (39906 terms), the exact table the deployed LAFA
+#     endpoint scored against (docs/IA_PROVENANCE_v227.md). The generic
+#     IA_cafa6.tsv is a DIFFERENT corpus and is rejected for v227.
 #
-# obo_versions hold the GO ontology release(s) that back each band. They are a
-# closed set rather than a single value so a band can span more than one OBO
-# release without re-pointing (e.g. an interim ontology refresh inside a GOA
-# window). New bands (v228, CAFA7, ...) add a row here; nothing else changes.
+# PROTEA had only ingested releases/2024-03-28 and releases/2026-01-23, so the
+# pre-registry v226/v227/v230 eval_sets all shared releases/2026-01-23 (a
+# ~6-months-too-late ontology); that snapshot-sharing IS the phantom-gap bug.
+# Each band now pins its own congruent OBO. obo_versions is a closed set (not a
+# single value) so an interim ontology refresh inside one GOA window does not
+# force a new band. New bands (CAFA7, ...) add a row here; nothing else changes.
 BANDS: dict[str, Band] = {
     "v226": Band(
         name="v226",
-        obo_versions=frozenset({"releases/2024-01-17"}),
+        obo_versions=frozenset({"releases/2025-03-16"}),
         ia_tokens=frozenset({"IA_cafa6.tsv"}),
         description=(
-            "Historical benchmark cut (GOA v226). Snapshot 35c3ad67 ia_url "
-            "points at the generic IA_cafa6.tsv. Superseded by v227 for "
-            "LAFA-comparable numbers; kept for history."
+            "Historical benchmark cut (GOA v226, t0 2025-05-03). Congruent GO "
+            "ontology = releases/2025-03-16 (latest release on/before t0). IA = "
+            "the generic IA_cafa6.tsv. Superseded by v227 for LAFA-comparable "
+            "numbers; kept for history."
         ),
     ),
     "v227": Band(
         name="v227",
-        obo_versions=frozenset({"releases/2025-08-01", "releases/2025-09-01"}),
+        obo_versions=frozenset({"releases/2025-07-22"}),
         ia_tokens=frozenset({"IA.tsv", "IA-swissprot-exp-v227.txt"}),
         description=(
-            "Deployed LAFA window (GOA v227 to v230, Sep_2025 t0). Canonical "
-            "IA = lafa_t0_Sep_2025/IA.tsv (the on-record LAFA table); the lab "
-            "recompute IA-swissprot-exp-v227.txt (r=0.98) is accepted as a "
-            "faithful reconstruction. The generic IA_cafa6.tsv is rejected."
+            "Deployed LAFA window (GOA v227 to v230, t0 2025-09-04). Congruent "
+            "GO ontology = releases/2025-07-22 (the data-version in LAFA's own "
+            "lafa_t0_Sep_2025/go-basic.obo). Canonical IA = "
+            "lafa_t0_Sep_2025/IA.tsv (39906 terms, the on-record LAFA table); "
+            "the lab recompute IA-swissprot-exp-v227.txt (r=0.98) is accepted "
+            "as a faithful reconstruction. The generic IA_cafa6.tsv is rejected."
         ),
     ),
 }

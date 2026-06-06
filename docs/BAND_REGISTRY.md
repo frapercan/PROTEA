@@ -20,22 +20,50 @@ A *band* is a GOA evaluation window. Each band binds two derived artifacts:
 
 The registry maps `band -> (canonical obo_versions, canonical IA tokens)`.
 These are DERIVED, pinned values, not free payload inputs: a cell never picks
-its own snapshot or IA. Adding a new band (v228, CAFA7, ...) is a single new
+its own snapshot or IA. Adding a new band (a later GOA window, CAFA7, ...) is a single new
 `Band` row in `protea.core.band_registry.BANDS`.
 
 ## Authoritative pairs
 
-| Band | Canonical snapshot (`obo_version`) | Canonical IA token | Source |
-| - | - | - | - |
-| v226 | `releases/2024-01-17` | `IA_cafa6.tsv` | historical benchmark cut; snapshot `35c3ad67` `ia_url` |
-| v227 | `releases/2025-08-01`, `releases/2025-09-01` | `IA.tsv`, `IA-swissprot-exp-v227.txt` | deployed LAFA window (Sep_2025 t0) |
+| Band | GOA t0 (EBI FTP) | Canonical snapshot (`obo_version`) | Canonical IA token | Source |
+| - | - | - | - | - |
+| v226 | goa 226, 2025-05-03 | `releases/2025-03-16` | `IA_cafa6.tsv` | historical benchmark cut; snapshot `35c3ad67` `ia_url` |
+| v227 | goa 227, 2025-09-04 | `releases/2025-07-22` | `IA.tsv`, `IA-swissprot-exp-v227.txt` | deployed LAFA window (Sep_2025 t0) |
 
-For v227 the authoritative IA is `lafa_t0_Sep_2025/IA.tsv`, the exact table
-the deployed LAFA endpoint scored against (the comparability reference per
-`docs/IA_PROVENANCE_v227.md`). The lab recompute
-`IA-swissprot-exp-v227.txt` (Pearson r=0.98) is accepted as a faithful
-reconstruction for the same band. The generic `IA_cafa6.tsv` is a DIFFERENT
-corpus and is the v226 IA, so it is rejected for v227.
+### Congruence rule (how each OBO was determined)
+
+A band's GO ontology is the GO OBO release current at that band's GOA t0
+date. GOA publication dates come from EBI FTP
+(`ftp.ebi.ac.uk/pub/databases/GO/goa/old/UNIPROT/`): goa 220 = 2024-04-16,
+goa 226 = 2025-05-03, goa 227 = 2025-09-04, goa 229 = 2025-12-04, goa 230 =
+2026-03-04.
+
+- **v227** (t0 2025-09-04): the OBO is `releases/2025-07-22`. This is the
+  exact `data-version` recorded inside LAFA's own
+  `lafa_t0_Sep_2025/go-basic.obo`, so it is the ground-truth ontology the
+  deployed LAFA endpoint propagated against, not an inferred value. Its IA is
+  `lafa_t0_Sep_2025/IA.tsv` (39906 terms), the exact table LAFA scored
+  against (the comparability reference per `docs/IA_PROVENANCE_v227.md`). The
+  lab recompute `IA-swissprot-exp-v227.txt` (Pearson r=0.98) is accepted as a
+  faithful reconstruction for the same band. The generic `IA_cafa6.tsv` is a
+  DIFFERENT corpus (the v226 IA) and is rejected for v227.
+- **v226** (t0 2025-05-03): the OBO is `releases/2025-03-16`, the latest GO
+  release on/before t0. Determined by probing the GO release archive
+  (`release.geneontology.org/<date>/ontology/go.obo`): there is no GO release
+  in April 2025, so the March 2025-03-16 release is the one current on
+  2025-05-03. Its `data-version` is `releases/2025-03-16`, confirmed against
+  the published OBO. The IA is `IA_cafa6.tsv`, the historical benchmark IA.
+
+### Why the previous values were wrong
+
+PROTEA had only ingested `releases/2024-03-28` and `releases/2026-01-23`, so
+the pre-registry v226/v227/v230 eval_sets all resolved to `releases/2026-01-23`
+(a roughly six-months-too-late ontology). That shared, future snapshot is the
+phantom-gap bug: scoring two bands against one off-band OBO measures snapshot
+drift, not prediction quality. The registry now pins each band to its own
+congruent OBO so the guard rejects any cell that resolves the wrong one. The
+v227 OBO is taken verbatim from LAFA's `go-basic.obo` `data-version`, the
+single source of truth for that window.
 
 `obo_versions` is a closed *set* per band (not a single value) so an interim
 ontology refresh inside one GOA window does not force a new band. No

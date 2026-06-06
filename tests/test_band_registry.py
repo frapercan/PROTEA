@@ -58,10 +58,10 @@ class TestResolveBand:
 
 class TestReverseLookups:
     def test_obo_version_lookup(self):
-        # v226 canonical obo
-        assert band_for_obo_version("releases/2024-01-17") == "v226"
-        # v227 canonical obo
-        assert band_for_obo_version("releases/2025-09-01") == "v227"
+        # v226 canonical obo (congruent: latest GO release on/before goa226 t0)
+        assert band_for_obo_version("releases/2025-03-16") == "v226"
+        # v227 canonical obo (LAFA's own go-basic.obo data-version)
+        assert band_for_obo_version("releases/2025-07-22") == "v227"
 
     def test_unknown_obo_version(self):
         assert band_for_obo_version("releases/1999-01-01") is None
@@ -83,7 +83,7 @@ class TestAssertBandConsistency:
     def test_v227_canonical_pair_passes(self):
         band = assert_band_consistency(
             "v227",
-            obo_version="releases/2025-09-01",
+            obo_version="releases/2025-07-22",
             ia_ref="/data/lafa_t0_Sep_2025/IA.tsv",
         )
         assert band.name == "v227"
@@ -91,7 +91,7 @@ class TestAssertBandConsistency:
     def test_v226_canonical_pair_passes(self):
         band = assert_band_consistency(
             "v226",
-            obo_version="releases/2024-01-17",
+            obo_version="releases/2025-03-16",
             ia_ref="https://host/IA_cafa6.tsv",
         )
         assert band.name == "v226"
@@ -99,7 +99,7 @@ class TestAssertBandConsistency:
     def test_dataset_name_band_passes(self):
         band = assert_band_consistency(
             "bench-v1-K5-v227-lineage-prostt5",
-            obo_version="releases/2025-09-01",
+            obo_version="releases/2025-07-22",
             ia_ref="IA.tsv",
         )
         assert band.name == "v227"
@@ -109,7 +109,7 @@ class TestAssertBandConsistency:
         with pytest.raises(BandMismatchError, match="obo_version"):
             assert_band_consistency(
                 "v227",
-                obo_version="releases/2024-01-17",
+                obo_version="releases/2025-03-16",
                 ia_ref="IA.tsv",
             )
 
@@ -118,7 +118,7 @@ class TestAssertBandConsistency:
         with pytest.raises(BandMismatchError, match="IA artifact"):
             assert_band_consistency(
                 "v227",
-                obo_version="releases/2025-09-01",
+                obo_version="releases/2025-07-22",
                 ia_ref="/data/IA_cafa6.tsv",
             )
 
@@ -126,7 +126,7 @@ class TestAssertBandConsistency:
         with pytest.raises(BandMismatchError, match="belongs to band 'v226'"):
             assert_band_consistency(
                 "v227",
-                obo_version="releases/2025-09-01",
+                obo_version="releases/2025-07-22",
                 ia_ref="IA_cafa6.tsv",
             )
 
@@ -135,7 +135,7 @@ class TestAssertBandConsistency:
         with pytest.raises(BandMismatchError, match="IC=1"):
             assert_band_consistency(
                 "v226",
-                obo_version="releases/2024-01-17",
+                obo_version="releases/2025-03-16",
                 ia_ref=None,
             )
 
@@ -143,7 +143,7 @@ class TestAssertBandConsistency:
         with pytest.raises(BandMismatchError, match="Unknown band"):
             assert_band_consistency(
                 "v999",
-                obo_version="releases/2024-01-17",
+                obo_version="releases/2025-03-16",
                 ia_ref="IA_cafa6.tsv",
             )
 
