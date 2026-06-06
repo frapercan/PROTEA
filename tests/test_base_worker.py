@@ -16,7 +16,7 @@ from protea.core.contracts.operation import OperationResult, RetryLaterError
 from protea.core.contracts.registry import OperationRegistry
 from protea.infrastructure.orm.models.job import Job, JobStatus
 from protea.workers.base_worker import BaseWorker, WorkerConfig
-from protea.workers.stale_job_reaper import StaleJobReaper
+from protea.workers.stale_job_reaper import StaleJobReaper, StaleJobReaperConfig
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -314,7 +314,7 @@ class TestStaleJobReaper:
         factory = MagicMock(return_value=session)
 
         # No amqp_url → reaper has no re-enqueue path, falls straight to FAILED.
-        reaper = StaleJobReaper(factory, timeout_seconds=3600)
+        reaper = StaleJobReaper(factory)
         count = reaper._reap()
 
         assert count == 1
@@ -343,7 +343,10 @@ class TestStaleJobReaper:
         ) - timedelta(minutes=5)
         factory = MagicMock(return_value=session)
 
-        reaper = StaleJobReaper(factory, timeout_seconds=3600, stall_seconds=1800)
+        reaper = StaleJobReaper(
+            factory,
+            config=StaleJobReaperConfig(timeout_seconds=3600, stall_seconds=1800),
+        )
         count = reaper._reap()
 
         assert count == 0
@@ -371,7 +374,10 @@ class TestStaleJobReaper:
         ]
         factory = MagicMock(return_value=session)
 
-        reaper = StaleJobReaper(factory, timeout_seconds=3600, stall_seconds=1800)
+        reaper = StaleJobReaper(
+            factory,
+            config=StaleJobReaperConfig(timeout_seconds=3600, stall_seconds=1800),
+        )
         count = reaper._reap()
 
         assert count == 1
@@ -384,7 +390,7 @@ class TestStaleJobReaper:
         session.query.return_value.filter.return_value.all.return_value = []
         factory = MagicMock(return_value=session)
 
-        reaper = StaleJobReaper(factory, timeout_seconds=3600)
+        reaper = StaleJobReaper(factory)
         count = reaper._reap()
 
         assert count == 0
@@ -396,7 +402,7 @@ class TestStaleJobReaper:
         session.query.side_effect = RuntimeError("DB connection lost")
         factory = MagicMock(return_value=session)
 
-        reaper = StaleJobReaper(factory, timeout_seconds=3600)
+        reaper = StaleJobReaper(factory)
         with pytest.raises(RuntimeError, match="DB connection lost"):
             reaper._reap()
         session.rollback.assert_called_once()
@@ -408,7 +414,7 @@ class TestStaleJobReaper:
         session.rollback.side_effect = RuntimeError("rollback failed too")
         factory = MagicMock(return_value=session)
 
-        reaper = StaleJobReaper(factory, timeout_seconds=3600)
+        reaper = StaleJobReaper(factory)
         with pytest.raises(RuntimeError, match="DB gone"):
             reaper._reap()
         session.rollback.assert_called_once()
@@ -417,7 +423,7 @@ class TestStaleJobReaper:
     def test_run_registers_signal_handlers(self):
         """run() should register SIGINT and SIGTERM handlers."""
         factory = MagicMock()
-        reaper = StaleJobReaper(factory, timeout_seconds=3600)
+        reaper = StaleJobReaper(factory)
         # Make _reap set _stop=True so the loop exits after one iteration
         reaper._stop = False
         call_count = [0]
@@ -443,7 +449,7 @@ class TestStaleJobReaper:
     def test_run_loops_and_stops_on_flag(self):
         """run() calls _reap repeatedly until _stop is set."""
         factory = MagicMock()
-        reaper = StaleJobReaper(factory, timeout_seconds=3600)
+        reaper = StaleJobReaper(factory)
         reap_count = [0]
 
         def fake_reap():
@@ -465,7 +471,7 @@ class TestStaleJobReaper:
     def test_run_logs_reaped_count(self):
         """When _reap returns non-zero, run() logs it."""
         factory = MagicMock()
-        reaper = StaleJobReaper(factory, timeout_seconds=3600)
+        reaper = StaleJobReaper(factory)
 
         def fake_reap():
             reaper._stop = True
@@ -487,7 +493,7 @@ class TestStaleJobReaper:
     def test_run_catches_reap_exception(self):
         """If _reap raises, run() logs the error and continues."""
         factory = MagicMock()
-        reaper = StaleJobReaper(factory, timeout_seconds=3600)
+        reaper = StaleJobReaper(factory)
         call_count = [0]
 
         def failing_reap():
@@ -513,7 +519,7 @@ class TestStaleJobReaper:
     def test_handle_stop_sets_flag(self):
         """_handle_stop sets the _stop flag."""
         factory = MagicMock()
-        reaper = StaleJobReaper(factory, timeout_seconds=3600)
+        reaper = StaleJobReaper(factory)
         assert reaper._stop is False
         reaper._handle_stop(signal.SIGINT, None)
         assert reaper._stop is True
@@ -1622,9 +1628,11 @@ class TestStaleJobReaperLeaseRequeue:
 
         reaper = StaleJobReaper(
             factory,
-            timeout_seconds=3600,
             amqp_url="amqp://test/",
-            max_lease_requeues=3,
+            config=StaleJobReaperConfig(
+                timeout_seconds=3600,
+                max_lease_requeues=3,
+            ),
         )
         with patch("protea.workers.stale_job_reaper.publish_job") as mock_publish:
             count = reaper._reap()
@@ -1647,9 +1655,11 @@ class TestStaleJobReaperLeaseRequeue:
 
         reaper = StaleJobReaper(
             factory,
-            timeout_seconds=3600,
             amqp_url="amqp://test/",
-            max_lease_requeues=3,
+            config=StaleJobReaperConfig(
+                timeout_seconds=3600,
+                max_lease_requeues=3,
+            ),
         )
         with patch("protea.workers.stale_job_reaper.publish_job") as mock_publish:
             count = reaper._reap()
@@ -1671,9 +1681,11 @@ class TestStaleJobReaperLeaseRequeue:
 
         reaper = StaleJobReaper(
             factory,
-            timeout_seconds=3600,
             amqp_url=None,
-            max_lease_requeues=3,
+            config=StaleJobReaperConfig(
+                timeout_seconds=3600,
+                max_lease_requeues=3,
+            ),
         )
         with patch("protea.workers.stale_job_reaper.publish_job") as mock_publish:
             count = reaper._reap()
@@ -1695,9 +1707,11 @@ class TestStaleJobReaperLeaseRequeue:
 
         reaper = StaleJobReaper(
             factory,
-            timeout_seconds=3600,
             amqp_url="amqp://test/",
-            max_lease_requeues=3,
+            config=StaleJobReaperConfig(
+                timeout_seconds=3600,
+                max_lease_requeues=3,
+            ),
         )
         with patch(
             "protea.workers.stale_job_reaper.publish_job",
