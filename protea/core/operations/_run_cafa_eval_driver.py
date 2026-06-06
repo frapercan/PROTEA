@@ -55,6 +55,8 @@ class CafaEvalRunContext:
     ia_path: str | None
     toi_path: str
     shared_pred_dir: str
+    th_step: float = 0.01
+    max_terms: int | None = None
 
 
 def _write_setting_predictions(
@@ -133,8 +135,8 @@ def _invoke_cafaeval_signal_safe(
             norm="cafa",
             no_orphans=True,
             toi_file=ctx.toi_path,
-            max_terms=500,
-            th_step=0.001,
+            max_terms=ctx.max_terms,
+            th_step=ctx.th_step,
             n_cpu=1,
         )
     finally:

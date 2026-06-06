@@ -30,13 +30,25 @@ class EvaluationResult(Base):
         {
           "NK": {
             "BPO": {"fmax": 0.45, "precision": 0.51, "recall": 0.40,
-                    "tau": 0.32, "coverage": 0.95, "n_proteins": 100},
+                    "tau": 0.32, "coverage": 0.95, "n_proteins": 100,
+                    "f_micro": 0.43, "fmax_w": 0.30,
+                    "f_micro_w": 0.26, "precision_w": 0.33,
+                    "recall_w": 0.22, "coverage_w": 0.95},
             "MFO": {...},
             "CCO": {...}
           },
           "LK": {...},
           "PK": {...}
         }
+
+    ``f_micro_w`` is the IA-weighted micro-averaged F-measure, the headline
+    metric shared with the LAFA / CAFA scorer, with its companion weighted
+    micro precision / recall / coverage (``precision_w`` / ``recall_w`` /
+    ``coverage_w``). The plain ``fmax`` / ``precision`` / ``recall`` are the
+    unweighted equivalents kept for history; they are not LAFA-comparable
+    (see docs/EVAL_LAFA_PARITY.md). The ``_w`` keys are populated only when a
+    real IA file was supplied to cafaeval; with the uniform IC=1 fallback
+    they collapse onto the unweighted values.
     """
 
     __tablename__ = "evaluation_result"

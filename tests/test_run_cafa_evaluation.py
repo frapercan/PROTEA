@@ -142,9 +142,27 @@ def _dfs_best_fixture(*, with_weighted: bool = False):
         )
         out["f_micro_w"] = pd.DataFrame(
             [
-                {"ns": "biological_process", "f_micro_w": 0.25},
-                {"ns": "molecular_function", "f_micro_w": 0.45},
-                {"ns": "cellular_component", "f_micro_w": 0.50},
+                {
+                    "ns": "biological_process",
+                    "f_micro_w": 0.25,
+                    "pr_micro_w": 0.33,
+                    "rc_micro_w": 0.20,
+                    "cov_max": 0.94,
+                },
+                {
+                    "ns": "molecular_function",
+                    "f_micro_w": 0.45,
+                    "pr_micro_w": 0.50,
+                    "rc_micro_w": 0.41,
+                    "cov_max": 0.87,
+                },
+                {
+                    "ns": "cellular_component",
+                    "f_micro_w": 0.50,
+                    "pr_micro_w": 0.55,
+                    "rc_micro_w": 0.46,
+                    "cov_max": 0.91,
+                },
             ]
         )
     return out
@@ -166,6 +184,35 @@ class TestRunCafaEvaluationPayload:
         assert p.max_distance is None
         assert p.scoring_config_id is None
         assert p.ia_file is None
+
+    def test_lafa_parity_defaults(self):
+        # The defaults must reproduce LAFA's cafaeval invocation exactly:
+        # th_step=0.01 (cafaeval default), no max_terms cap, snapshot TOI.
+        # See docs/EVAL_LAFA_PARITY.md. A finer th_step (e.g. 0.001) would
+        # inflate f_micro_w and break numeric parity with LAFA.
+        p = RunCafaEvaluationPayload(
+            evaluation_set_id=EVAL_SET_ID,
+            prediction_set_id=PRED_SET_ID,
+        )
+        assert p.th_step == 0.01
+        assert p.max_terms is None
+        assert p.toi_file is None
+
+    def test_th_step_out_of_range(self):
+        with pytest.raises(ValidationError):
+            RunCafaEvaluationPayload(
+                evaluation_set_id=EVAL_SET_ID,
+                prediction_set_id=PRED_SET_ID,
+                th_step=0.0,
+            )
+
+    def test_max_terms_must_be_positive(self):
+        with pytest.raises(ValidationError):
+            RunCafaEvaluationPayload(
+                evaluation_set_id=EVAL_SET_ID,
+                prediction_set_id=PRED_SET_ID,
+                max_terms=0,
+            )
 
     def test_valid_payload_all_fields(self):
         p = RunCafaEvaluationPayload(
@@ -313,6 +360,8 @@ class TestParseResults:
         assert "fmax_w" not in bpo
         assert "f_micro" not in bpo
         assert "f_micro_w" not in bpo
+        assert "precision_w" not in bpo
+        assert "recall_w" not in bpo
 
     def test_parse_with_weighted_surfaces_extra_keys(self):
         dfs_best = _dfs_best_fixture(with_weighted=True)
@@ -325,6 +374,23 @@ class TestParseResults:
         cco = result["CCO"]
         assert cco["fmax_w"] == 0.62
         assert cco["f_micro_w"] == 0.50
+
+    def test_parse_with_weighted_surfaces_weighted_precision_recall(self):
+        # The IA-weighted micro precision / recall / coverage that go with
+        # f_micro_w must be persisted per aspect (FIX-METRIC-IA): these are
+        # the LAFA-comparable numbers, distinct from the unweighted pr/rc.
+        dfs_best = _dfs_best_fixture(with_weighted=True)
+        result = self.op._parse_results(dfs_best)
+        bpo = result["BPO"]
+        assert bpo["precision_w"] == 0.33
+        assert bpo["recall_w"] == 0.20
+        assert bpo["coverage_w"] == 0.94
+        # unweighted pr/rc are unchanged and kept alongside
+        assert bpo["precision"] == 0.51
+        assert bpo["recall"] == 0.40
+        mfo = result["MFO"]
+        assert mfo["precision_w"] == 0.50
+        assert mfo["recall_w"] == 0.41
 
     def test_parse_weighted_handles_missing_namespace_in_extra_frame(self):
         dfs_best = _dfs_best_fixture(with_weighted=True)
@@ -819,7 +885,10 @@ class TestExecuteErrors:
 
     @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
     def test_no_delta_proteins(self, mock_compute):
-        mock_compute.return_value = (EvaluationData(nk={}, lk={}, pk={}, known={}, pk_known={}), uuid.uuid4())
+        mock_compute.return_value = (
+            EvaluationData(nk={}, lk={}, pk={}, known={}, pk_known={}),
+            uuid.uuid4(),
+        )
         session = MagicMock()
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
@@ -1304,3 +1373,94 @@ class TestSmellBudgetGuard:
             f"Methods exceed 60-LOC ceiling (T2B.5): {offenders}. "
             "Extract the body or apply the Method Object pattern."
         )
+
+
+# ---------------------------------------------------------------------------
+# LAFA parity: the cafaeval invocation must use LAFA-compatible flags
+# ---------------------------------------------------------------------------
+
+
+class TestCafaevalInvocationLafaParity:
+    """The signal-safe cafa_eval call must forward the parity knobs.
+
+    LAFA scores with cafaeval's default th_step (0.01) and no max_terms
+    cap. PROTEA must pass exactly the values carried on the run context
+    (defaulting to those), not hard-coded legacy values, otherwise the
+    same prediction scores differently on each side. See
+    docs/EVAL_LAFA_PARITY.md.
+    """
+
+    def _make_ctx(self, **overrides):
+        from protea.core.operations._run_cafa_eval_driver import CafaEvalRunContext
+
+        base = dict(
+            pred_set_id=uuid.uuid4(),
+            delta_proteins=set(),
+            max_distance=None,
+            artifacts_root=__import__("pathlib").Path("/tmp"),
+            has_rerankers=False,
+            reranker_models={},
+            scoring_config_snapshot=None,
+            data=EvaluationData(),
+            obo_path="/tmp/go.obo",
+            nk_path="/tmp/nk.tsv",
+            lk_path="/tmp/lk.tsv",
+            pk_path="/tmp/pk.tsv",
+            pk_known_path="/tmp/pk_known.tsv",
+            ia_path="/tmp/ia.tsv",
+            toi_path="/tmp/toi.txt",
+            shared_pred_dir="/tmp/preds",
+        )
+        base.update(overrides)
+        return CafaEvalRunContext(**base)
+
+    def test_context_defaults_are_lafa_compatible(self):
+        ctx = self._make_ctx()
+        assert ctx.th_step == 0.01
+        assert ctx.max_terms is None
+
+    def test_invoke_forwards_th_step_and_max_terms(self):
+        from protea.core.operations import _run_cafa_eval_driver as driver
+
+        ctx = self._make_ctx(th_step=0.01, max_terms=None)
+        captured: dict[str, Any] = {}
+
+        def fake_cafa_eval(*args, **kwargs):
+            captured.update(kwargs)
+            return ("df", "dfs_best")
+
+        with patch.dict(
+            "sys.modules",
+            {"cafaeval.evaluation": MagicMock(cafa_eval=fake_cafa_eval)},
+        ):
+            driver._invoke_cafaeval_signal_safe(
+                ctx=ctx, pred_dir="/tmp/preds", gt_file="/tmp/nk.tsv", known_file=None
+            )
+
+        assert captured["th_step"] == 0.01
+        assert captured["max_terms"] is None
+        assert captured["toi_file"] == "/tmp/toi.txt"
+        assert captured["prop"] == "fill"
+        assert captured["norm"] == "cafa"
+        assert captured["no_orphans"] is True
+
+    def test_invoke_uses_custom_knobs_when_overridden(self):
+        from protea.core.operations import _run_cafa_eval_driver as driver
+
+        ctx = self._make_ctx(th_step=0.001, max_terms=500)
+        captured: dict[str, Any] = {}
+
+        def fake_cafa_eval(*args, **kwargs):
+            captured.update(kwargs)
+            return ("df", "dfs_best")
+
+        with patch.dict(
+            "sys.modules",
+            {"cafaeval.evaluation": MagicMock(cafa_eval=fake_cafa_eval)},
+        ):
+            driver._invoke_cafaeval_signal_safe(
+                ctx=ctx, pred_dir="/tmp/preds", gt_file="/tmp/nk.tsv", known_file=None
+            )
+
+        assert captured["th_step"] == 0.001
+        assert captured["max_terms"] == 500
