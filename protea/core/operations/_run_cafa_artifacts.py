@@ -330,21 +330,46 @@ def parse_results(dfs_best: dict) -> dict[str, Any]:
             "n_proteins": int(row.get("n", 0)) if "n" in row else None,
         }
 
-    for key, fmt in (
-        ("f_w", "fmax_w"),
-        ("f_micro", "f_micro"),
-        ("f_micro_w", "f_micro_w"),
-    ):
+    _merge_weighted_metrics(dfs_best, ns_results)
+    return ns_results
+
+
+# Maps each extra cafaeval best-frame to the ``cafaeval column -> persisted
+# field`` it contributes. The IA-weighted micro frame (the LAFA headline
+# metric) also carries the weighted micro precision / recall / coverage;
+# persisting those per aspect (not only the unweighted pr/rc) is what makes
+# the blob LAFA-comparable. See docs/EVAL_LAFA_PARITY.md and FIX-METRIC-IA.
+_EXTRA_METRIC_SPECS: tuple[tuple[str, dict[str, str]], ...] = (
+    ("f_w", {"f_w": "fmax_w"}),
+    ("f_micro", {"f_micro": "f_micro"}),
+    (
+        "f_micro_w",
+        {
+            "f_micro_w": "f_micro_w",
+            "pr_micro_w": "precision_w",
+            "rc_micro_w": "recall_w",
+            "cov_max": "coverage_w",
+        },
+    ),
+)
+
+
+def _merge_weighted_metrics(dfs_best: dict, ns_results: dict[str, Any]) -> None:
+    """Fold the IA-weighted / micro best-frames into ``ns_results`` in place.
+
+    Each frame is keyed by namespace; only namespaces already present from the
+    unweighted ``f`` frame are touched. Missing frames (uniform IC=1 fallback)
+    are skipped, leaving the unweighted keys alone.
+    """
+    for key, col_to_field in _EXTRA_METRIC_SPECS:
         df_extra = dfs_best.get(key)
         if df_extra is None or df_extra.empty:
             continue
         df_extra = df_extra.reset_index()
-        col = key
         for _, row in df_extra.iterrows():
-            ns_long = str(row.get("ns", ""))
-            ns = _NS_LABELS.get(ns_long)
+            ns = _NS_LABELS.get(str(row.get("ns", "")))
             if ns is None or ns not in ns_results:
                 continue
-            ns_results[ns][fmt] = round(float(row.get(col, 0)), 4)
-
-    return ns_results
+            for col, field in col_to_field.items():
+                if col in row:
+                    ns_results[ns][field] = round(float(row.get(col, 0)), 4)

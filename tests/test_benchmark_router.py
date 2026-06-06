@@ -415,3 +415,68 @@ class TestBenchmarkMatrix:
         assert data["total"] == 1
         assert data["rows"][0]["category"] == "NK"
         assert data["rows"][0]["aspect"] == "MFO"
+
+    def test_primary_metric_is_f_micro_w_not_fmax(self, client):
+        """The winner per cell is the model with the highest IA-weighted
+        f_micro_w, even when another model has a higher unweighted fmax.
+        FIX-METRIC-IA: f_micro_w is the LAFA-comparable headline metric."""
+        c, session = client
+        emb_a = uuid4()
+        emb_b = uuid4()
+        eval_set_id = uuid4()
+        # Model A: high unweighted fmax but low IA-weighted f_micro_w (common
+        # easy terms inflate the unweighted number).
+        er_a = _make_eval(
+            {"NK": {"BPO": {"fmax": 0.80, "f_micro_w": 0.20}}},
+            scoring_config_id=uuid4(),
+        )
+        # Model B: lower fmax but higher f_micro_w (the real winner).
+        er_b = _make_eval(
+            {"NK": {"BPO": {"fmax": 0.60, "f_micro_w": 0.35}}},
+            scoring_config_id=uuid4(),
+        )
+        er_a.evaluation_set_id = eval_set_id
+        er_b.evaluation_set_id = eval_set_id
+        self._dual_execute(
+            session,
+            matrix_rows=[self._row(er_a, emb_a), self._row(er_b, emb_b)],
+            eval_set_rows=[self._eval_set_row(eval_set_id)],
+        )
+
+        data = c.get("/benchmark/matrix").json()
+        assert data["primary_metric"] == "f_micro_w"
+        winner = data["best_per_cell"][0]
+        assert winner["embedding_config_id"] == str(emb_b)
+        assert winner["primary"] == 0.35
+        assert winner["primary_metric"] == "f_micro_w"
+        assert winner["f_micro_w"] == 0.35
+
+    def test_per_task_aggregate_reports_mean_and_ci(self, client):
+        """The honest per-task summary reports the mean f_micro_w across
+        models plus a 95% CI, distinct from the best-cell maximum."""
+        c, session = client
+        eval_set_id = uuid4()
+        er_a = _make_eval(
+            {"NK": {"BPO": {"fmax": 0.5, "f_micro_w": 0.20}}},
+            scoring_config_id=uuid4(),
+        )
+        er_b = _make_eval(
+            {"NK": {"BPO": {"fmax": 0.6, "f_micro_w": 0.30}}},
+            scoring_config_id=uuid4(),
+        )
+        er_a.evaluation_set_id = eval_set_id
+        er_b.evaluation_set_id = eval_set_id
+        self._dual_execute(
+            session,
+            matrix_rows=[self._row(er_a, uuid4()), self._row(er_b, uuid4())],
+            eval_set_rows=[self._eval_set_row(eval_set_id)],
+        )
+
+        data = c.get("/benchmark/matrix").json()
+        per_task = {(t["category"], t["aspect"]): t for t in data["per_task"]}
+        cell = per_task[("NK", "BPO")]
+        assert cell["metric"] == "f_micro_w"
+        assert cell["mean"] == 0.25
+        assert cell["max"] == 0.30
+        assert cell["n_models"] == 2
+        assert cell["ci95"] > 0

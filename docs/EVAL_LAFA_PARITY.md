@@ -122,6 +122,53 @@ The `th_step` change is the load-bearing fix for parity. The `max_terms`
 change is a no-op on these predictions and a safety alignment. The `toi`
 field is required only for the last sub-`1e-3` MFO residual.
 
+## Own IA must reproduce LAFA's IA
+
+PROTEA computes its own Information Accretion rather than importing LAFA's
+`IA.tsv`, but the two must agree on shared terms within max abs diff `1e-3`,
+otherwise the IA-weighting on `f_micro_w` is not comparable. The computation
+lives in `protea/core/ia.py` (pure, unit-tested) and is driven over an
+`OntologySnapshot` + corpus by `scripts/compute_ia_for_snapshot.py`.
+
+It is a faithful reimplementation of LAFA's reference `calc_ia`
+(`protea-lafa-knn/ontology.py`):
+
+- `IA(v) = -log2( count(v) / count(parents(v)) )` where `count(parents(v))`
+  is the number of proteins annotated with the intersection of all direct
+  parents of `v` after True Path Rule propagation.
+- Parents are the direct `is_a` + `part_of` parents on the target snapshot.
+- A dummy protein annotated with every term is prepended (modelled as a `+1`
+  on both counts). This keeps the ratio defined when a term's parents are
+  never co-annotated and makes every aspect root collapse to exactly `0`.
+- When `count(v) == count(parents(v))` the value is returned as exactly `0.0`
+  (no `-log2(1.0)` floating-point residual), matching LAFA's guard.
+
+`tests/test_ia.py` reimplements LAFA's `calc_ia` inline (the same networkx
+`descendants_at_distance` + dummy-row counting) as an oracle and asserts the
+PROTEA core agrees with it within `1e-3` on randomised DAGs + corpora, plus
+hand-computed single-parent / multi-parent / equal-count cases.
+
+A full end-to-end reproduction against `lafa_t0_Sep_2025/IA.tsv` additionally
+requires the Sep_2025 OBO + SwissProt-exp corpus loaded as an
+`OntologySnapshot` + `AnnotationSet`; that ingest is the heavy, gated v227
+work (intentionally paused) and is tracked as the FIX-METRIC-IA.b follow-up
+(grid re-eval). The algorithm-level gate above is the load-bearing
+correctness check; the DB-level reproduction is mechanical once the corpus is
+ingested (run `compute_ia_for_snapshot.py --update-snapshot`, then diff its
+output against `IA.tsv` on the term intersection).
+
+## Persisted metrics
+
+`run_cafa_evaluation` now persists, per aspect, alongside the unweighted
+`fmax` / `precision` / `recall`: the IA-weighted `f_micro_w` (headline),
+`fmax_w`, `f_micro`, and the weighted micro `precision_w` / `recall_w` /
+`coverage_w`. The `_w` keys appear only when a real IA file was supplied;
+under the uniform IC=1 fallback they are omitted (and the unweighted numbers
+are not LAFA-comparable). `/v1/benchmark/matrix` ranks every cell by
+`f_micro_w` (falling back to `fmax` for legacy IC=1 rows, flagged via
+`primary_metric`) and exposes a `per_task` mean + 95% CI so the dashboard can
+headline a calibrated central tendency instead of the best-cell maximum.
+
 ## How to run a LAFA-comparable evaluation
 
 In the `run_cafa_evaluation` payload:

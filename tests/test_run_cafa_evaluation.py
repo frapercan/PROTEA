@@ -142,9 +142,27 @@ def _dfs_best_fixture(*, with_weighted: bool = False):
         )
         out["f_micro_w"] = pd.DataFrame(
             [
-                {"ns": "biological_process", "f_micro_w": 0.25},
-                {"ns": "molecular_function", "f_micro_w": 0.45},
-                {"ns": "cellular_component", "f_micro_w": 0.50},
+                {
+                    "ns": "biological_process",
+                    "f_micro_w": 0.25,
+                    "pr_micro_w": 0.33,
+                    "rc_micro_w": 0.20,
+                    "cov_max": 0.94,
+                },
+                {
+                    "ns": "molecular_function",
+                    "f_micro_w": 0.45,
+                    "pr_micro_w": 0.50,
+                    "rc_micro_w": 0.41,
+                    "cov_max": 0.87,
+                },
+                {
+                    "ns": "cellular_component",
+                    "f_micro_w": 0.50,
+                    "pr_micro_w": 0.55,
+                    "rc_micro_w": 0.46,
+                    "cov_max": 0.91,
+                },
             ]
         )
     return out
@@ -342,6 +360,8 @@ class TestParseResults:
         assert "fmax_w" not in bpo
         assert "f_micro" not in bpo
         assert "f_micro_w" not in bpo
+        assert "precision_w" not in bpo
+        assert "recall_w" not in bpo
 
     def test_parse_with_weighted_surfaces_extra_keys(self):
         dfs_best = _dfs_best_fixture(with_weighted=True)
@@ -354,6 +374,23 @@ class TestParseResults:
         cco = result["CCO"]
         assert cco["fmax_w"] == 0.62
         assert cco["f_micro_w"] == 0.50
+
+    def test_parse_with_weighted_surfaces_weighted_precision_recall(self):
+        # The IA-weighted micro precision / recall / coverage that go with
+        # f_micro_w must be persisted per aspect (FIX-METRIC-IA): these are
+        # the LAFA-comparable numbers, distinct from the unweighted pr/rc.
+        dfs_best = _dfs_best_fixture(with_weighted=True)
+        result = self.op._parse_results(dfs_best)
+        bpo = result["BPO"]
+        assert bpo["precision_w"] == 0.33
+        assert bpo["recall_w"] == 0.20
+        assert bpo["coverage_w"] == 0.94
+        # unweighted pr/rc are unchanged and kept alongside
+        assert bpo["precision"] == 0.51
+        assert bpo["recall"] == 0.40
+        mfo = result["MFO"]
+        assert mfo["precision_w"] == 0.50
+        assert mfo["recall_w"] == 0.41
 
     def test_parse_weighted_handles_missing_namespace_in_extra_frame(self):
         dfs_best = _dfs_best_fixture(with_weighted=True)
