@@ -85,6 +85,43 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
             "of a frozen lab dump where this filter has already been applied)."
         ),
     )
+    th_step: float = Field(
+        default=0.01,
+        gt=0.0,
+        le=1.0,
+        description=(
+            "Score-threshold grid step passed to cafaeval. cafaeval sweeps tau over "
+            "np.arange(th_step, 1, th_step) and reports the metric at its best tau. "
+            "A finer grid (smaller th_step) optimises over more candidate thresholds "
+            "and so reports a slightly higher Fmax / f_micro_w, which breaks numeric "
+            "parity with LAFA. LAFA uses cafaeval's default 0.01; keep this at 0.01 "
+            "for LAFA-comparable runs. See docs/EVAL_LAFA_PARITY.md."
+        ),
+    )
+    max_terms: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Optional cap on the number of predicted terms kept per protein per "
+            "namespace (highest-score first). None (the default, matching LAFA) "
+            "keeps every predicted term. A cap only changes the score when a "
+            "prediction exceeds it for some protein/namespace; PROTEA-KNN style "
+            "predictions never do, so this is normally inert. Set it only to "
+            "reproduce a legacy capped run. See docs/EVAL_LAFA_PARITY.md."
+        ),
+    )
+    toi_file: str | None = Field(
+        default=None,
+        description=(
+            "Path to an explicit terms-of-interest (TOI) file (one GO id per line) "
+            "passed to cafaeval's -toi flag. TOI restricts which terms count toward "
+            "precision/recall. When None, PROTEA derives the TOI from every GO term "
+            "in the pivot ontology snapshot. LAFA passes a release-specific "
+            "groundtruth_terms_of_interest.txt that is a subset of the full ontology, "
+            "so for strict LAFA parity pass that exact file here. See "
+            "docs/EVAL_LAFA_PARITY.md."
+        ),
+    )
 
     @field_validator("evaluation_set_id", "prediction_set_id", mode="before")
     @classmethod
@@ -277,8 +314,7 @@ class RunCafaEvaluationOperation:
                 session, prediction_set_id=inputs.pred_set_id, data=data, emit=emit
             )
         gt_paths = _data.write_ground_truth_files(artifacts_root, data)
-        toi_path = os.path.join(str(artifacts_root), "terms_of_interest.txt")
-        _data.write_terms_of_interest(toi_path, inputs.toi_go_ids, emit=emit)
+        toi_path = self._resolve_toi_file(artifacts_root, p, inputs.toi_go_ids, emit)
 
         delta_proteins = set(data.nk) | set(data.lk) | set(data.pk)
         emit(
@@ -307,7 +343,29 @@ class RunCafaEvaluationOperation:
             ia_path=ia_path,
             toi_path=toi_path,
             shared_pred_dir=os.path.join(str(artifacts_root), "predictions"),
+            th_step=p.th_step,
+            max_terms=p.max_terms,
         )
+
+    @staticmethod
+    def _resolve_toi_file(
+        artifacts_root: Path,
+        p: RunCafaEvaluationPayload,
+        toi_go_ids: list[str],
+        emit: EmitFn,
+    ) -> str:
+        """Resolve the cafaeval terms-of-interest path.
+
+        When ``p.toi_file`` is set, use that exact file (the LAFA-parity
+        path: score against LAFA's release-specific TOI). Otherwise write
+        the pivot-snapshot term universe. See docs/EVAL_LAFA_PARITY.md.
+        """
+        if p.toi_file:
+            emit("run_cafa_evaluation.toi_external", None, {"path": p.toi_file}, "info")
+            return p.toi_file
+        toi_path = os.path.join(str(artifacts_root), "terms_of_interest.txt")
+        _data.write_terms_of_interest(toi_path, toi_go_ids, emit=emit)
+        return toi_path
 
     @staticmethod
     def _write_shared_prediction_file(
