@@ -147,6 +147,13 @@ def _dfs_best_fixture(*, with_weighted: bool = False):
                 {"ns": "cellular_component", "f_micro_w": 0.50},
             ]
         )
+        out["s"] = pd.DataFrame(
+            [
+                {"ns": "biological_process", "s": 12.5},
+                {"ns": "molecular_function", "s": 8.0},
+                {"ns": "cellular_component", "s": 5.5},
+            ]
+        )
     return out
 
 
@@ -313,6 +320,7 @@ class TestParseResults:
         assert "fmax_w" not in bpo
         assert "f_micro" not in bpo
         assert "f_micro_w" not in bpo
+        assert "s_min" not in bpo
 
     def test_parse_with_weighted_surfaces_extra_keys(self):
         dfs_best = _dfs_best_fixture(with_weighted=True)
@@ -322,9 +330,11 @@ class TestParseResults:
         assert bpo["fmax_w"] == 0.40
         assert bpo["f_micro"] == 0.30
         assert bpo["f_micro_w"] == 0.25
+        assert bpo["s_min"] == 12.5
         cco = result["CCO"]
         assert cco["fmax_w"] == 0.62
         assert cco["f_micro_w"] == 0.50
+        assert cco["s_min"] == 5.5
 
     def test_parse_weighted_handles_missing_namespace_in_extra_frame(self):
         dfs_best = _dfs_best_fixture(with_weighted=True)

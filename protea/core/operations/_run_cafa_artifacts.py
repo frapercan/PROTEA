@@ -304,10 +304,14 @@ def parse_results(dfs_best: dict) -> dict[str, Any]:
     per namespace at the threshold optimising the protein-mean
     Fmax). When an IA file was supplied to cafaeval, the IA-weighted
     equivalents land in ``dfs_best["f_w"]`` (best by IA-weighted
-    Fmax) and the micro-averaged Fmax in ``dfs_best["f_micro"]`` /
-    ``dfs_best["f_micro_w"]``; these are surfaced here as the
-    ``_w`` / ``_micro`` / ``_micro_w`` keys so chapter-6 tables can
-    pull them without re-reading the per-tier TSV artifacts.
+    Fmax), the micro-averaged Fmax in ``dfs_best["f_micro"]`` /
+    ``dfs_best["f_micro_w"]``, and the minimum semantic distance in
+    ``dfs_best["s"]`` (best by lowest S, the IA-weighted misinformation
+    /remaining-uncertainty distance); these are surfaced here as the
+    ``_w`` / ``_micro`` / ``_micro_w`` / ``s_min`` keys so chapter-6
+    tables can pull them without re-reading the per-tier TSV artifacts.
+    ``s_min`` is the canonical CAFA S_min and, like ``f_micro_w``,
+    requires a real IA file to be meaningful (it is IA-weighted).
     """
     ns_results: dict[str, Any] = {}
 
@@ -334,6 +338,7 @@ def parse_results(dfs_best: dict) -> dict[str, Any]:
         ("f_w", "fmax_w"),
         ("f_micro", "f_micro"),
         ("f_micro_w", "f_micro_w"),
+        ("s", "s_min"),
     ):
         df_extra = dfs_best.get(key)
         if df_extra is None or df_extra.empty:
