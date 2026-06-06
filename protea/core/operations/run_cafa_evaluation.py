@@ -9,7 +9,11 @@ from typing import Any
 from pydantic import Field, field_validator
 from sqlalchemy.orm import Session
 
-from protea.core.band_registry import assert_band_consistency, ia_token
+from protea.core.band_registry import (
+    assert_band_consistency,
+    assert_release_not_after_cutoff,
+    ia_token,
+)
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
 from protea.core.evaluation import load_evaluation_data_for_set
 from protea.core.operations import _run_cafa_artifacts as _artifacts
@@ -455,6 +459,13 @@ class RunCafaEvaluationOperation:
         ia_ref = payload_ia_file or snapshot.ia_url
         band = assert_band_consistency(
             declared_band, obo_version=snapshot.obo_version, ia_ref=ia_ref
+        )
+        # No-future-data: even a set-canonical snapshot must not post-date the
+        # band's t0 (the set-membership check and the temporal ordering are
+        # independent; a band could in principle accept a date-bearing OBO that
+        # is still after its cutoff). Raises CutoffViolationError.
+        assert_release_not_after_cutoff(
+            declared_band, artifact="ontology snapshot", release_ref=snapshot.obo_version
         )
         emit(
             "run_cafa_evaluation.band_verified",

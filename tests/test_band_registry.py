@@ -6,16 +6,22 @@ phantom-gap guard (cross-band snapshot / IA rejection + the never-IC=1 rule).
 
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 
 from protea.core.band_registry import (
     BANDS,
     Band,
     BandMismatchError,
+    CutoffViolationError,
     assert_band_consistency,
+    assert_release_not_after_cutoff,
     band_for_ia_token,
     band_for_obo_version,
+    cutoff_violations_for_cell,
     ia_token,
+    obo_release_date,
     resolve_band,
 )
 
@@ -176,3 +182,103 @@ class TestRegistryWellFormed:
         band = Band(name="x", obo_versions=frozenset({"a"}), ia_tokens=frozenset({"b"}))
         with pytest.raises((AttributeError, TypeError)):
             band.name = "y"  # type: ignore[misc]
+
+
+class TestOboReleaseDate:
+    def test_releases_token(self):
+        assert obo_release_date("releases/2025-07-22") == date(2025, 7, 22)
+
+    def test_bare_date(self):
+        assert obo_release_date("2026-01-23") == date(2026, 1, 23)
+
+    def test_url(self):
+        assert obo_release_date(
+            "http://purl.obolibrary.org/obo/go/releases/2025-03-16/go-basic.obo"
+        ) == date(2025, 3, 16)
+
+    def test_no_date_returns_none(self):
+        assert obo_release_date("go-basic") is None
+        assert obo_release_date(None) is None
+        assert obo_release_date("") is None
+
+    def test_invalid_date_returns_none(self):
+        assert obo_release_date("releases/2025-13-40") is None
+
+
+class TestCutoffGuard:
+    """No-future-data ordering guard, independent of band set membership."""
+
+    def test_canonical_obo_passes(self):
+        # v227's congruent OBO (2025-07-22) precedes its t0 (2025-09-04).
+        assert_release_not_after_cutoff(
+            "v227", artifact="ontology snapshot", release_ref="releases/2025-07-22"
+        )
+
+    def test_future_release_flagged_v227(self):
+        # The exact phantom-gap case: v227 scored against a 2026 ontology.
+        with pytest.raises(CutoffViolationError, match="No-future-data"):
+            assert_release_not_after_cutoff(
+                "v227", artifact="ontology snapshot", release_ref="releases/2026-01-23"
+            )
+
+    def test_future_release_flagged_v226(self):
+        # v226 cutoff is 2025-05-03; a v227-band OBO (2025-07-22) is future.
+        with pytest.raises(CutoffViolationError):
+            assert_release_not_after_cutoff(
+                "v226", artifact="ontology snapshot", release_ref="releases/2025-07-22"
+            )
+
+    def test_no_date_ref_is_noop(self):
+        # An undated reference cannot be ordered; band guard covers it.
+        assert_release_not_after_cutoff(
+            "v227", artifact="ontology snapshot", release_ref="go-basic"
+        )
+
+    def test_band_without_cutoff_is_noop(self):
+        band = Band(
+            name="z",
+            obo_versions=frozenset({"releases/2099-01-01"}),
+            ia_tokens=frozenset({"IA.tsv"}),
+            t0_cutoff=None,
+        )
+        assert band.t0_cutoff is None
+
+    def test_extract_band_from_dataset_name(self):
+        with pytest.raises(CutoffViolationError):
+            assert_release_not_after_cutoff(
+                "bench-v1-K5-v227-lineage-prostt5",
+                artifact="ontology snapshot",
+                release_ref="releases/2026-01-23",
+            )
+
+    def test_collect_violations_aggregates(self):
+        viols = cutoff_violations_for_cell(
+            "v227",
+            obo_version="releases/2026-01-23",
+            ia_ref="/data/lafa_t0_Sep_2025/IA.tsv",
+            extra_refs={"KNN corpus": "releases/2027-02-02"},
+        )
+        # OBO and the future corpus violate; the dated IA path (Sep 2025) does
+        # not (its embedded date is 2025-09, on the cutoff month, not after).
+        assert len(viols) == 2
+        assert any("ontology snapshot" in v for v in viols)
+        assert any("KNN corpus" in v for v in viols)
+
+    def test_collect_violations_clean_cell(self):
+        assert cutoff_violations_for_cell(
+            "v227",
+            obo_version="releases/2025-07-22",
+            ia_ref="/data/lafa_t0_Sep_2025/IA.tsv",
+        ) == []
+
+    def test_every_pinned_band_self_consistent(self):
+        # Every band's canonical OBO must not post-date its own cutoff.
+        for name, band in BANDS.items():
+            if band.t0_cutoff is None:
+                continue
+            for obo in band.obo_versions:
+                released = obo_release_date(obo)
+                if released is not None:
+                    assert released <= band.t0_cutoff, (
+                        f"band {name} pins future OBO {obo}"
+                    )
