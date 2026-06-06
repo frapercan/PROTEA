@@ -30,15 +30,20 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
+from datetime import date
 
 __all__ = [
     "Band",
     "BANDS",
     "BandMismatchError",
+    "CutoffViolationError",
     "assert_band_consistency",
+    "assert_release_not_after_cutoff",
     "band_for_ia_token",
     "band_for_obo_version",
+    "cutoff_violations_for_cell",
     "ia_token",
+    "obo_release_date",
     "resolve_band",
 ]
 
@@ -46,6 +51,20 @@ __all__ = [
 class BandMismatchError(ValueError):
     """A cell's snapshot or IA artifact belongs to a band other than the
     one it declares (the phantom-gap guard fired)."""
+
+
+class CutoffViolationError(ValueError):
+    """An artifact references a data release dated *after* the declared
+    training cutoff for its cell (the no-future-data rule fired).
+
+    This is the temporal counterpart of :class:`BandMismatchError`: the
+    band guard checks set *membership* (is this OBO/IA canonical for the
+    band), while the cutoff guard checks the *ordering* (is the release
+    date <= the band's t0). The concrete error it exists to catch:
+    scoring the v227 band against ontology ``releases/2026-01-23`` when
+    v227's congruent (and LAFA's) OBO is ``releases/2025-07-22`` and its
+    t0 is ``2025-09-04`` (a release ~4 months in the future of the cut).
+    """
 
 
 @dataclass(frozen=True)
@@ -63,6 +82,11 @@ class Band:
     obo_versions: frozenset[str] = field(default_factory=frozenset)
     ia_tokens: frozenset[str] = field(default_factory=frozenset)
     description: str = ""
+    #: GOA t0 date for this band: the training cutoff. No artifact bound
+    #: to a cell in this band may reference a data release dated after
+    #: this (the no-future-data rule). ``None`` means the band does not
+    #: yet declare a cutoff and the temporal guard is skipped for it.
+    t0_cutoff: date | None = None
 
     def accepts_obo_version(self, obo_version: str | None) -> bool:
         return obo_version is not None and obo_version in self.obo_versions
@@ -96,6 +120,7 @@ BANDS: dict[str, Band] = {
         name="v226",
         obo_versions=frozenset({"releases/2025-03-16"}),
         ia_tokens=frozenset({"IA_cafa6.tsv"}),
+        t0_cutoff=date(2025, 5, 3),
         description=(
             "Historical benchmark cut (GOA v226, t0 2025-05-03). Congruent GO "
             "ontology = releases/2025-03-16 (latest release on/before t0). IA = "
@@ -107,6 +132,7 @@ BANDS: dict[str, Band] = {
         name="v227",
         obo_versions=frozenset({"releases/2025-07-22"}),
         ia_tokens=frozenset({"IA.tsv", "IA-swissprot-exp-v227.txt"}),
+        t0_cutoff=date(2025, 9, 4),
         description=(
             "Deployed LAFA window (GOA v227 to v230, t0 2025-09-04). Congruent "
             "GO ontology = releases/2025-07-22 (the data-version in LAFA's own "
@@ -228,3 +254,97 @@ def assert_band_consistency(
             f"{band.name!r}: {sorted(band.ia_tokens)}."
         )
     return band
+
+
+# A GO OBO release version is self-dating: ``releases/YYYY-MM-DD`` (the GO
+# release archive convention). The date in the token IS the release date, so
+# a date-bearing artifact reference can be ordered against a band's t0 cutoff
+# with no DB lookup -- which is what makes the cutoff guard a pure CI check.
+_OBO_RELEASE_DATE_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
+
+
+def obo_release_date(obo_ref: str | None) -> date | None:
+    """Parse the release date embedded in a GO OBO release reference.
+
+    Accepts ``releases/2025-07-22``, a full URL ending in that token, or a
+    bare ``2025-07-22``. Returns ``None`` when no ``YYYY-MM-DD`` date is
+    present (e.g. a ``go-basic`` snapshot named without a date), in which
+    case the temporal guard cannot order it and defers to the band guard.
+    """
+    if not obo_ref:
+        return None
+    match = _OBO_RELEASE_DATE_RE.search(obo_ref)
+    if match is None:
+        return None
+    try:
+        return date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+    except ValueError:
+        return None
+
+
+def assert_release_not_after_cutoff(
+    declared_band: str,
+    *,
+    artifact: str,
+    release_ref: str | None,
+) -> None:
+    """Reject an artifact that references a release dated after the band's t0.
+
+    ``declared_band`` is the band/cutoff the cell declares. ``artifact`` is a
+    human label for the offending artifact (``"ontology snapshot"``,
+    ``"IA"``, ...). ``release_ref`` is a date-bearing reference (an OBO
+    ``releases/YYYY-MM-DD`` token, an IA path/URL carrying a date, ...).
+
+    Raises :class:`CutoffViolationError` when the parsed release date is
+    strictly after the band's ``t0_cutoff``. A reference with no parseable
+    date, or a band with no declared cutoff, is a no-op here: the band guard
+    (:func:`assert_band_consistency`) covers set membership for those.
+    """
+    band = resolve_band(declared_band)
+    if band.t0_cutoff is None:
+        return
+    released = obo_release_date(release_ref)
+    if released is None:
+        return
+    if released > band.t0_cutoff:
+        raise CutoffViolationError(
+            f"No-future-data guard: cell declares band {band.name!r} (training "
+            f"cutoff t0 = {band.t0_cutoff.isoformat()}) but its {artifact} "
+            f"references release {released.isoformat()} ({release_ref!r}), which "
+            f"is AFTER the cutoff. An artifact built at the cutoff must not "
+            f"reference data from the future of the band. Pin the congruent "
+            f"release for {band.name!r}: {sorted(band.obo_versions)}."
+        )
+
+
+def cutoff_violations_for_cell(
+    declared_band: str,
+    *,
+    obo_version: str | None = None,
+    ia_ref: str | None = None,
+    extra_refs: dict[str, str] | None = None,
+) -> list[str]:
+    """Collect every no-future-data violation for one cell, as messages.
+
+    Checks the pivot ontology snapshot, the IA artifact, and any
+    ``extra_refs`` (``{label: release_ref}``, e.g. a KNN-corpus or
+    label-snapshot release token) against the band's t0 cutoff. Returns the
+    list of violation messages (empty when the cell is clean). Aggregating
+    instead of raising lets the CI guard report all offenders for a cell in
+    one pass; runtime callers use :func:`assert_release_not_after_cutoff`.
+    """
+    checks: list[tuple[str, str | None]] = [
+        ("ontology snapshot", obo_version),
+        ("IA", ia_ref),
+    ]
+    if extra_refs:
+        checks.extend(extra_refs.items())
+    violations: list[str] = []
+    for artifact, ref in checks:
+        try:
+            assert_release_not_after_cutoff(
+                declared_band, artifact=artifact, release_ref=ref
+            )
+        except CutoffViolationError as exc:
+            violations.append(str(exc))
+    return violations
