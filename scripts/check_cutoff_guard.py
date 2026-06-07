@@ -14,7 +14,7 @@ PROTEA scored the v227 band against ontology ``releases/2026-01-23`` when
 v227's congruent (and LAFA's) OBO is ``releases/2025-07-22`` and its cutoff
 is ``2025-09-04`` (a release ~4 months in the future of the cut).
 
-Two layers run here:
+Three layers run here:
 
 1. Registry self-consistency: every band's own canonical ``obo_versions``
    must NOT post-date its declared cutoff (a band that pins a future OBO is
@@ -22,14 +22,49 @@ Two layers run here:
 2. A red-team fixture: the exact ``releases/2026-01-23`` against v227 case
    must be flagged. This pins the guard's behaviour so a future refactor
    that silently weakens it fails CI.
+3. Emitted-bundle verification (``--bundle``): each ``manifest.json`` an
+   inference bundle declares (the single-``cutoff`` path in
+   ``scripts/export_lafa_bundle.py``) is read back and every release-bearing
+   ref it froze is ordered against its band's t0. This closes
+   F-EVAL-PROTOCOL.c: the cutoff guard runs on the artifacts the path
+   PRODUCES, not just on the registry.
 
 Usage:
     poetry run python scripts/check_cutoff_guard.py
+    poetry run python scripts/check_cutoff_guard.py --bundle path/to/frozen-dir
 """
 
 from __future__ import annotations
 
+import argparse
+import json
 import sys
+from pathlib import Path
+
+
+def _check_bundles(bundles: list[Path]) -> list[str]:
+    """Order every release-bearing ref each bundle manifest froze.
+
+    Each ``bundle`` is a directory holding a ``manifest.json`` (or the
+    manifest file itself). Returns the flat list of no-future-data
+    violations across all bundles.
+    """
+    from protea.core.band_registry import manifest_cutoff_violations
+
+    errors: list[str] = []
+    for bundle in bundles:
+        manifest_path = bundle / "manifest.json" if bundle.is_dir() else bundle
+        if not manifest_path.exists():
+            errors.append(f"bundle manifest not found at {manifest_path}")
+            continue
+        try:
+            manifest = json.loads(manifest_path.read_text())
+        except (json.JSONDecodeError, OSError) as exc:
+            errors.append(f"bundle manifest {manifest_path} unreadable: {exc}")
+            continue
+        for violation in manifest_cutoff_violations(manifest):
+            errors.append(f"{manifest_path}: {violation}")
+    return errors
 
 
 def _check() -> list[str]:
@@ -82,8 +117,24 @@ def _check() -> list[str]:
     return errors
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--bundle",
+        action="append",
+        type=Path,
+        default=[],
+        metavar="DIR",
+        help=(
+            "A frozen-bundle directory (or its manifest.json) to verify "
+            "against its declared band cutoff. Repeatable. When omitted only "
+            "the registry self-consistency + red-team checks run."
+        ),
+    )
+    args = parser.parse_args(argv)
+
     errors = _check()
+    errors.extend(_check_bundles(args.bundle))
     if errors:
         print("cutoff guard FAILED:", file=sys.stderr)
         for err in errors:

@@ -21,6 +21,7 @@ from protea.core.band_registry import (
     band_for_obo_version,
     cutoff_violations_for_cell,
     ia_token,
+    manifest_cutoff_violations,
     obo_release_date,
     resolve_band,
 )
@@ -282,3 +283,53 @@ class TestCutoffGuard:
                     assert released <= band.t0_cutoff, (
                         f"band {name} pins future OBO {obo}"
                     )
+
+
+class TestManifestCutoffViolations:
+    """Bundle-manifest verification for the single-cutoff inference path."""
+
+    def test_clean_bundle_passes(self):
+        manifest = {
+            "cutoff": "v227",
+            "obo_version": "releases/2025-07-22",
+        }
+        assert manifest_cutoff_violations(manifest) == []
+
+    def test_future_obo_in_bundle_flagged(self):
+        # The export-side analogue of the phantom-gap case: a bundle that
+        # froze a 2026 ontology for the v227 band.
+        manifest = {
+            "cutoff": "v227",
+            "obo_version": "releases/2026-01-23",
+        }
+        viols = manifest_cutoff_violations(manifest)
+        assert len(viols) == 1
+        assert "ontology snapshot" in viols[0]
+
+    def test_legacy_cutoff_version_key_resolved(self):
+        # Older bundles record the band under cutoff_version, not cutoff.
+        manifest = {
+            "cutoff_version": "v226",
+            "obo_version": "releases/2025-07-22",
+        }
+        # v226 cutoff is 2025-05-03; a July OBO is future.
+        assert len(manifest_cutoff_violations(manifest)) == 1
+
+    def test_extra_release_refs_checked(self):
+        manifest = {
+            "cutoff": "v227",
+            "obo_version": "releases/2025-07-22",
+            "knn_corpus_release": "releases/2027-02-02",
+        }
+        viols = manifest_cutoff_violations(manifest)
+        assert len(viols) == 1
+        assert "KNN candidate corpus" in viols[0]
+
+    def test_unknown_band_is_noop(self):
+        # A free-text cutoff that resolves to no band cannot be ordered.
+        assert manifest_cutoff_violations(
+            {"cutoff_version": "freeform-label", "obo_version": "releases/2099-01-01"}
+        ) == []
+
+    def test_no_cutoff_key_is_noop(self):
+        assert manifest_cutoff_violations({"obo_version": "releases/2099-01-01"}) == []
