@@ -14,6 +14,7 @@ import logging
 import time
 from pathlib import Path
 
+from protea.config.tuning import WorkerTuning
 from protea.core.operation_catalog import build_operation_registry
 from protea.infrastructure.queue.consumer import (
     ConsumerOptions,
@@ -23,7 +24,20 @@ from protea.infrastructure.queue.consumer import (
 from protea.infrastructure.session import build_session_factory
 from protea.infrastructure.settings import load_settings
 from protea.workers.base_worker import BaseWorker, WorkerConfig
-from protea.workers.stale_job_reaper import StaleJobReaper
+from protea.workers.stale_job_reaper import StaleJobReaper, StaleJobReaperConfig
+
+
+def _build_reaper_config(worker_settings: WorkerTuning) -> StaleJobReaperConfig:
+    """Build a StaleJobReaperConfig from WorkerTuning values.
+
+    Extracted as a standalone helper so that tests can exercise the exact
+    mapping without requiring a running AMQP connection or database.
+    """
+    return StaleJobReaperConfig(
+        timeout_seconds=worker_settings.reaper_main_timeout_seconds,
+        stall_seconds=worker_settings.reaper_stall_seconds,
+        max_lease_requeues=worker_settings.max_lease_requeues,
+    )
 
 
 def main() -> None:
@@ -91,10 +105,8 @@ def main() -> None:
         # re-enqueued onto their source queue instead of marked FAILED.
         reaper = StaleJobReaper(
             factory,
-            timeout_seconds=worker_settings.reaper_main_timeout_seconds,
-            stall_seconds=worker_settings.reaper_stall_seconds,
             amqp_url=settings.amqp_url,
-            max_lease_requeues=worker_settings.max_lease_requeues,
+            config=_build_reaper_config(worker_settings),
         )
         logging.info(
             "Stale job reaper started. timeout=%ds stall=%ds interval=60s",
