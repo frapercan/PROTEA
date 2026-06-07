@@ -43,6 +43,7 @@ __all__ = [
     "band_for_obo_version",
     "cutoff_violations_for_cell",
     "ia_token",
+    "manifest_cutoff_violations",
     "obo_release_date",
     "resolve_band",
 ]
@@ -348,3 +349,61 @@ def cutoff_violations_for_cell(
         except CutoffViolationError as exc:
             violations.append(str(exc))
     return violations
+
+
+#: Manifest keys whose values are date-bearing release references the
+#: no-future-data rule must order against the band cutoff. Each maps to a
+#: human label for the offending artifact. ``scripts/export_lafa_bundle.py``
+#: records these on every bundle it emits so the bundle is self-verifying.
+_MANIFEST_RELEASE_KEYS: dict[str, str] = {
+    "obo_version": "ontology snapshot",
+    "ia_ref": "IA",
+    "knn_corpus_release": "KNN candidate corpus",
+    "label_release": "labels",
+}
+
+
+def manifest_cutoff_violations(manifest: dict[str, object]) -> list[str]:
+    """Collect every no-future-data violation declared by a bundle manifest.
+
+    A bundle manifest produced by the single-``cutoff`` inference path
+    (``scripts/export_lafa_bundle.py``) records the band it was cut for
+    (``cutoff`` or, for legacy bundles, ``cutoff_version``) plus the
+    date-bearing release reference of each artifact it froze
+    (``obo_version`` and any of :data:`_MANIFEST_RELEASE_KEYS`). This walks
+    those references and orders each against the band's ``t0_cutoff`` via
+    :func:`assert_release_not_after_cutoff`, so the cutoff CI guard can
+    verify an *emitted* bundle, not just the registry.
+
+    Returns the list of violation messages (empty when the bundle is clean
+    or declares no recognised band). A manifest with no resolvable band is a
+    no-op here: bundles predating the registry are not retro-validated.
+    """
+    declared = manifest.get("cutoff") or manifest.get("cutoff_version")
+    if not isinstance(declared, str):
+        return []
+    try:
+        resolve_band(declared)
+    except BandMismatchError:
+        # An unknown band (e.g. a legacy free-text cutoff_version) cannot be
+        # ordered; the band guard owns set-membership for those.
+        return []
+    extra_refs: dict[str, str] = {}
+    obo_version: str | None = None
+    ia_ref: str | None = None
+    for key, label in _MANIFEST_RELEASE_KEYS.items():
+        value = manifest.get(key)
+        if not isinstance(value, str) or not value:
+            continue
+        if key == "obo_version":
+            obo_version = value
+        elif key == "ia_ref":
+            ia_ref = value
+        else:
+            extra_refs[label] = value
+    return cutoff_violations_for_cell(
+        declared,
+        obo_version=obo_version,
+        ia_ref=ia_ref,
+        extra_refs=extra_refs or None,
+    )

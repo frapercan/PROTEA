@@ -22,8 +22,20 @@ Usage::
         --annotation_set_id   <uuid> \\
         --reranker_model_name <name> \\
         --output_dir          /path/to/protea-frozen-v226-2025-05-03 \\
-        --cutoff_version      v226 \\
-        --cutoff_date         2025-05-03
+        --cutoff              v226
+
+``--cutoff`` is the single training-cutoff knob (F-EVAL-PROTOCOL.c): it
+names a band registered in ``protea.core.band_registry`` and derives the
+cutoff version + date from that band's t0. The frozen ontology snapshot
+is validated against the band cutoff (no-future-data rule) BEFORE the
+bundle is written, and the snapshot ``obo_version`` is recorded in the
+manifest so ``scripts/check_cutoff_guard.py --bundle <dir>`` can verify
+the emitted artifact. A retrain with only ``--cutoff`` changed (e.g.
+``v227``) produces a comparable, recency-controlled second submission.
+
+The legacy ``--cutoff_version`` / ``--cutoff_date`` pair is still accepted
+(free-text label, no temporal validation) for cuts not yet registered as a
+band.
 
 The script reuses the live PROTEA artifact store to materialise the
 reranker booster (``model_data`` inline, ``artifact_uri`` external,
@@ -53,6 +65,12 @@ from protea_method.pca_cache import load_or_fit_pca_state
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from protea.core.band_registry import (
+    BandMismatchError,
+    CutoffViolationError,
+    assert_release_not_after_cutoff,
+    resolve_band,
+)
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.annotation.protein_go_annotation import (
     ProteinGOAnnotation,
@@ -207,6 +225,28 @@ def _export_go_metadata(
     return len(rows)
 
 
+def _fetch_obo_version(
+    session: Session,
+    ontology_snapshot_id: uuid.UUID,
+) -> str | None:
+    """Return the frozen snapshot's ``data-version`` (``releases/YYYY-MM-DD``).
+
+    This is the date-bearing token the cutoff guard orders against the band
+    t0. ``None`` when the snapshot row carries no parseable version (the
+    guard then defers to the band-membership check).
+    """
+    from protea.infrastructure.orm.models.annotation.ontology_snapshot import (
+        OntologySnapshot,
+    )
+
+    obo_version = session.execute(
+        select(OntologySnapshot.obo_version).where(
+            OntologySnapshot.id == ontology_snapshot_id
+        ),
+    ).scalar_one_or_none()
+    return str(obo_version) if obo_version else None
+
+
 def _export_pca_state(
     embedding_config_id: uuid.UUID,
     embeddings: np.ndarray,
@@ -359,6 +399,7 @@ def _write_manifest(
     ontology_snapshot_id: uuid.UUID,
     cutoff_version: str,
     cutoff_date: str,
+    obo_version: str | None,
     n_refs: int,
     n_annotations: int,
     n_go_terms: int,
@@ -367,8 +408,17 @@ def _write_manifest(
 ) -> None:
     payload = {
         "schema_version": "1",
+        # ``cutoff`` is the single-knob band name (v226 / v227 / ...); the
+        # cutoff CI guard (scripts/check_cutoff_guard.py --bundle) orders every
+        # release-bearing ref below against this band's t0. ``cutoff_version``
+        # is kept as its historical alias for the LAFA container loaders.
+        "cutoff": cutoff_version,
         "cutoff_version": cutoff_version,
         "cutoff_date": cutoff_date,
+        # The frozen ontology snapshot's data-version (releases/YYYY-MM-DD).
+        # Recording it makes the bundle self-verifying: the guard reads this
+        # back and refuses a release dated after the band cutoff.
+        "obo_version": obo_version or "",
         "embedding_config_id": str(embedding_config_id),
         "annotation_set_id": str(annotation_set_id),
         "ontology_snapshot_id": str(ontology_snapshot_id),
@@ -381,7 +431,36 @@ def _write_manifest(
     (output_dir / "manifest.json").write_text(json.dumps(payload, indent=2, sort_keys=True))
     print(
         f"[export_lafa_bundle] manifest: cutoff={cutoff_version} ({cutoff_date}), "
-        f"refs={n_refs}, ann={n_annotations}, go_terms={n_go_terms}",
+        f"obo={obo_version or '?'}, refs={n_refs}, ann={n_annotations}, "
+        f"go_terms={n_go_terms}",
+    )
+
+
+def _resolve_cutoff(args: argparse.Namespace) -> tuple[str, str]:
+    """Resolve the (cutoff_version, cutoff_date) pair from the CLI.
+
+    The single ``--cutoff`` band knob is authoritative: it resolves a
+    registered ``Band`` and derives both the version label (the band name)
+    and the date (the band's ``t0_cutoff``). The legacy ``--cutoff_version``
+    / ``--cutoff_date`` pair is accepted only when ``--cutoff`` is absent, so
+    a free-text cut can still be exported but the recency-controlled
+    submission path threads a single knob. Exactly one of the two must be
+    given.
+    """
+    if args.cutoff:
+        band = resolve_band(args.cutoff)
+        version = band.name
+        if band.t0_cutoff is None:
+            raise ValueError(
+                f"band {band.name!r} declares no t0_cutoff; pin one in "
+                "protea.core.band_registry before exporting a bundle for it."
+            )
+        cutoff_date = args.cutoff_date or band.t0_cutoff.isoformat()
+        return version, cutoff_date
+    if args.cutoff_version:
+        return args.cutoff_version, args.cutoff_date or str(date.today())
+    raise ValueError(
+        "provide --cutoff <band> (preferred) or the legacy --cutoff_version."
     )
 
 
@@ -421,15 +500,42 @@ def main() -> None:
         help="Per-aspect CCO booster name (writes reranker/C.txt).",
     )
     parser.add_argument("--output_dir", required=True, type=Path)
-    parser.add_argument("--cutoff_version", required=True, type=str)
+    parser.add_argument(
+        "--cutoff",
+        type=str,
+        default=None,
+        help=(
+            "Single training-cutoff knob: a band name (v226 / v227 / ...) "
+            "registered in protea.core.band_registry. When given it derives "
+            "--cutoff_version and --cutoff_date from the band's t0, and the "
+            "frozen ontology snapshot is validated against the band cutoff "
+            "(no-future-data rule) before the bundle is written. Provide "
+            "either --cutoff (preferred) or the legacy --cutoff_version."
+        ),
+    )
+    parser.add_argument(
+        "--cutoff_version",
+        type=str,
+        default=None,
+        help="Legacy free-text cutoff label; superseded by --cutoff.",
+    )
     parser.add_argument(
         "--cutoff_date",
         type=str,
-        default=str(date.today()),
-        help="Default: today's date (YYYY-MM-DD).",
+        default=None,
+        help=(
+            "Legacy free-text cutoff date (YYYY-MM-DD); derived from --cutoff "
+            "when that is given, else defaults to today."
+        ),
     )
     parser.add_argument("--max_refs", type=int, default=None)
     args = parser.parse_args()
+
+    try:
+        cutoff_version, cutoff_date = _resolve_cutoff(args)
+    except (BandMismatchError, ValueError) as exc:
+        print(f"[export_lafa_bundle] error: {exc}", file=sys.stderr)
+        sys.exit(2)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -453,6 +559,22 @@ def main() -> None:
                 )
                 sys.exit(2)
             ontology_snapshot_id = anno_set.ontology_snapshot_id
+
+        obo_version = _fetch_obo_version(session, ontology_snapshot_id)
+        # No-future-data gate: when the single --cutoff knob declares a
+        # registered band, refuse to freeze a snapshot dated after the band's
+        # t0 BEFORE any artifact is written (fail fast, mirroring the CI
+        # guard). A free-text --cutoff_version is not orderable and skips this.
+        if args.cutoff:
+            try:
+                assert_release_not_after_cutoff(
+                    cutoff_version,
+                    artifact="ontology snapshot",
+                    release_ref=obo_version,
+                )
+            except CutoffViolationError as exc:
+                print(f"[export_lafa_bundle] error: {exc}", file=sys.stderr)
+                sys.exit(2)
 
         accessions, embeddings = _export_reference_embeddings(
             session,
@@ -507,8 +629,9 @@ def main() -> None:
             embedding_config_id=args.embedding_config_id,
             annotation_set_id=args.annotation_set_id,
             ontology_snapshot_id=ontology_snapshot_id,
-            cutoff_version=args.cutoff_version,
-            cutoff_date=args.cutoff_date,
+            cutoff_version=cutoff_version,
+            cutoff_date=cutoff_date,
+            obo_version=obo_version,
             n_refs=len(accessions),
             n_annotations=n_annotations,
             n_go_terms=n_go_terms,
