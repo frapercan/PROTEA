@@ -90,7 +90,7 @@ def test_entrypoint_parses_under_posix_sh() -> None:
 
 def test_entrypoint_pins_baseline_flags() -> None:
     text = _ENTRYPOINT.read_text()
-    for flag in ("--aspect_separated", "--no_v6", "--no_reranker"):
+    for flag in ("--aspect_separated", "--no_v6", "--no_reranker", "--self_prior"):
         assert flag in text, f"baseline flag {flag} not pinned in entrypoint"
     # The entrypoint must call protea-predict (or its script form).
     assert "/app/protea_predict.py" in text
