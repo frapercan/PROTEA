@@ -389,41 +389,49 @@ export async function HomeShowcase() {
           </p>
         </div>
 
+        {/* Mobile (< sm): flex-col vertical stack, each card full-width, arrows rotate to
+            point down. sm+: the inner row becomes a horizontal flex that may be wider
+            than the card. The outer wrapper is overflow-x-auto so the row scrolls
+            horizontally rather than overflowing the page. justify-center is intentionally
+            dropped from the scrollable row: centering an overflowing flex-row clips the
+            first card behind the left viewport edge with no way to scroll back to it. */}
         <div className="rounded-3xl border border-slate-200 bg-white p-5 sm:p-6 shadow-sm">
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-1 lg:gap-2">
-            {data.pipeline_stages.map((stage, i) => (
-              <div key={stage.name} className="flex flex-col sm:flex-row items-center">
-                {i > 0 && (
-                  <div className="text-slate-300 sm:mx-1 lg:mx-2 my-1 sm:my-0 select-none flex items-center justify-center">
-                    <svg className="rotate-90 sm:rotate-0 w-5 h-5" fill="none" viewBox="0 0 20 20" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M5 10h10M11 6l4 4-4 4" />
-                    </svg>
-                  </div>
-                )}
-                <Link
-                  href={withLocale(locale, stage.href)}
-                  aria-label={`${t(STAGE_I18N[stage.name] as never)} ${t(STAGE_DESC_I18N[stage.name] as never)}`}
-                  className="group relative flex flex-col items-center justify-center w-40 sm:w-44 min-h-[10rem] px-3 py-3 rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 hover:from-blue-50 hover:to-white hover:border-blue-300 hover:shadow-md transition-all cursor-pointer text-center"
-                >
-                  <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-500 text-sm font-bold group-hover:bg-blue-100 group-hover:text-blue-600 transition-colors">
-                    {STAGE_ICONS[stage.name] ?? stage.name.slice(0, 2).toUpperCase()}
-                  </span>
-                  <span className="text-[12px] font-semibold text-slate-700 mt-2 group-hover:text-slate-900">
-                    {t(STAGE_I18N[stage.name] as never)}
-                  </span>
-                  <span className="text-[11px] text-slate-600 tabular-nums mt-0.5 font-medium">
-                    {stage.count.toLocaleString()}
-                  </span>
-                  <span className="text-[10px] text-slate-500 leading-snug mt-1.5 line-clamp-2">
-                    {t(STAGE_DESC_I18N[stage.name] as never)}
-                  </span>
-                  <span className="text-[10px] font-medium text-blue-600 mt-1.5 inline-flex items-center gap-0.5 group-hover:text-blue-800 transition-colors">
-                    {t("stageView" as never)}
-                    <span aria-hidden>→</span>
-                  </span>
-                </Link>
-              </div>
-            ))}
+          <div className="sm:overflow-x-auto">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-1 lg:gap-2 sm:min-w-max">
+              {data.pipeline_stages.map((stage, i) => (
+                <div key={stage.name} className="flex flex-col sm:flex-row items-center">
+                  {i > 0 && (
+                    <div className="text-slate-300 sm:mx-1 lg:mx-2 my-1 sm:my-0 select-none flex items-center justify-center">
+                      <svg className="rotate-90 sm:rotate-0 w-5 h-5" fill="none" viewBox="0 0 20 20" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M5 10h10M11 6l4 4-4 4" />
+                      </svg>
+                    </div>
+                  )}
+                  <Link
+                    href={withLocale(locale, stage.href)}
+                    aria-label={`${t(STAGE_I18N[stage.name] as never)} ${t(STAGE_DESC_I18N[stage.name] as never)}`}
+                    className="group relative flex flex-col items-center justify-center w-full sm:w-40 lg:w-44 min-h-[7rem] sm:min-h-[10rem] px-3 py-3 rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 hover:from-blue-50 hover:to-white hover:border-blue-300 hover:shadow-md transition-all cursor-pointer text-center"
+                  >
+                    <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-500 text-sm font-bold group-hover:bg-blue-100 group-hover:text-blue-600 transition-colors">
+                      {STAGE_ICONS[stage.name] ?? stage.name.slice(0, 2).toUpperCase()}
+                    </span>
+                    <span className="text-[12px] font-semibold text-slate-700 mt-2 group-hover:text-slate-900">
+                      {t(STAGE_I18N[stage.name] as never)}
+                    </span>
+                    <span className="text-[11px] text-slate-600 tabular-nums mt-0.5 font-medium">
+                      {stage.count.toLocaleString()}
+                    </span>
+                    <span className="text-[10px] text-slate-500 leading-snug mt-1.5 line-clamp-2">
+                      {t(STAGE_DESC_I18N[stage.name] as never)}
+                    </span>
+                    <span className="text-[10px] font-medium text-blue-600 mt-1.5 inline-flex items-center gap-0.5 group-hover:text-blue-800 transition-colors">
+                      {t("stageView" as never)}
+                      <span aria-hidden>→</span>
+                    </span>
+                  </Link>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </section>
