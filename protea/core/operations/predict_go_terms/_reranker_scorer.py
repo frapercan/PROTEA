@@ -138,8 +138,27 @@ class RerankerScorer:
         prediction_dicts: list[dict[str, Any]],
         p: PredictGOTermsBatchPayload,
     ) -> Any:
-        """Load the booster, score predictions in-place, return the score array."""
+        """Load the booster, score predictions in-place, return the score array.
+
+        Two scoring shapes are supported:
+
+        * **per-cell** boosters: scored via ``apply_reranker`` over the
+          booster's own ``feature_name()`` order (the historical path).
+        * **universal** boosters (single, pooled, aspect-conditioned,
+          K-augmented): detected by the presence of both ``plm_id`` and
+          ``k_context`` in the booster's feature list. These carry injected
+          source constants and a fixed categorical vocabulary the generic
+          ``apply_reranker`` cannot reproduce, so they are routed through
+          :func:`protea.core._universal_reranker.score_universal` with the
+          ``categorical_codes`` + plm/k metadata recovered from the model's
+          sibling ``run.json`` (F-RERANK-UNIVERSAL inference wiring).
+        """
         import pandas as pd
+
+        from protea.core._universal_reranker import (
+            is_universal_booster,
+            score_universal,
+        )
 
         project_root = Path(__file__).resolve().parents[3]
         settings = _shim.load_settings(project_root)
@@ -151,10 +170,63 @@ class RerankerScorer:
         )
         self._attach_aspect(session, prediction_dicts)
         df = pd.DataFrame(prediction_dicts)
-        scores = _shim.apply_reranker(df, booster)
+        if is_universal_booster(booster):
+            ctx = self._load_universal_context(p.reranker_artifact_uri, store)
+            scores = score_universal(
+                booster,
+                df,
+                categorical_codes=ctx["categorical_codes"],
+                plm_id=ctx["plm_id"],
+                k_context=ctx["k_context"],
+            )
+        else:
+            scores = _shim.apply_reranker(df, booster)
         for rec, score in zip(prediction_dicts, scores.tolist(), strict=True):
             rec["reranker_score"] = float(score)
         return scores
+
+    @staticmethod
+    def _load_universal_context(
+        artifact_uri: str,
+        store: Any,
+    ) -> dict[str, Any]:
+        """Recover universal-scoring metadata from the model's sibling run.json.
+
+        The universal booster needs three pieces of state that are NOT in
+        ``model.txt``: the categorical vocabulary (``__categorical_codes__`` /
+        ``categorical_codes``), the source PLM, and the K-context. They are
+        published alongside the booster under the same prefix
+        (``runs/<id>/run.json``). We resolve that sibling key from the
+        ``model.txt`` artifact URI, read it through the same store, and pull
+        the metadata block.
+        """
+        import json
+
+        from protea.core._universal_reranker import universal_meta_from_run
+        from protea.core.reranker import _uri_to_key
+
+        run_uri = artifact_uri.rsplit("/", 1)[0] + "/run.json"
+        run_key = _uri_to_key(run_uri, store)
+        run = json.loads(store.get(run_key).decode("utf-8"))
+        categorical_codes = run.get("categorical_codes")
+        if not categorical_codes:
+            raise ValueError(
+                "universal booster run.json is missing 'categorical_codes'; "
+                "cannot reproduce the training categorical encoding "
+                f"(run.json at {run_uri})."
+            )
+        meta = universal_meta_from_run(run)
+        if meta is None:
+            raise ValueError(
+                "universal booster run.json is missing the single-source "
+                "'multi_manifest_pool' block needed for plm_id / k_context "
+                f"(run.json at {run_uri})."
+            )
+        return {
+            "categorical_codes": categorical_codes,
+            "plm_id": meta["plm_id"],
+            "k_context": meta["k_context"],
+        }
 
     @staticmethod
     def _raise_schema_sha_mismatch(

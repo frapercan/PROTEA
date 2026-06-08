@@ -286,6 +286,25 @@ def test_arg_parser_defaults() -> None:
     assert ns.self_prior is False
     assert ns.self_prior_score == 1.0
     assert ns.self_prior_neighbour_scale == 0.95
+    assert ns.universal_reranker is False
+
+
+def test_arg_parser_universal_reranker_flag() -> None:
+    parser = build_arg_parser()
+    ns = parser.parse_args(
+        [
+            "--query_file",
+            "queries.fa",
+            "--frozen_data_dir",
+            "/bundle",
+            "--output",
+            "out.tsv",
+            "--aspect_separated",
+            "--universal_reranker",
+        ]
+    )
+    assert ns.universal_reranker is True
+    assert ns.aspect_separated is True
 
 
 def test_arg_parser_required_flags() -> None:

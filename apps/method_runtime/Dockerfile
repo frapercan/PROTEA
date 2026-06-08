@@ -62,6 +62,8 @@ RUN pip install \
 WORKDIR /app
 COPY apps/method_runtime/protea_predict.py /app/protea_predict.py
 COPY apps/method_runtime/prott5_encoder.py /app/prott5_encoder.py
+COPY apps/method_runtime/self_prior.py /app/self_prior.py
+COPY apps/method_runtime/universal_scorer.py /app/universal_scorer.py
 COPY apps/method_runtime/__init__.py /app/__init__.py
 
 # Image-level metadata: callers introspect ``LABEL`` keys via
