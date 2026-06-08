@@ -132,8 +132,53 @@ next image build ships it.
    re-evaluate with `cafaeval-protea` (IA-weighted f_micro_w) vs the
    CAFA_forever groundtruth. (Done.)
 2. Port the validated self-prior into PROTEA core scoring (worktree, PR to
-   develop, local CI green). Move this doc into `docs/lafa/`. (This PR.)
+   develop, local CI green). Move this doc into `docs/lafa/`. (Done.)
 3. Rebuild and push `ghcr.io/frapercan/protea/method-runtime` and
-   `ghcr.io/frapercan/protea/knn-v1` with a new release tag. (Deferred;
-   bundled with the universal reranker.)
+   `ghcr.io/frapercan/protea/knn-v1` with a new release tag. (Build done
+   locally; push is the author step.)
 4. Resubmit the new tag to LAFA (author / An Phan step). (Deferred.)
+
+## 7. Universal reranker (F-RERANK-UNIVERSAL)
+
+The knn-v1 image now ships the single universal booster (pooled,
+aspect-conditioned, K-augmented, ProtT5 K10, 53 features). It beats KNN on
+the reserved v227-v230 LAFA window (NK+LK mean f_micro_w 0.596 vs 0.266,
+wFmax 0.661 vs 0.401, S_min 4.74 vs 46.7; candidate-set oracle-threshold).
+
+How it scores (`apps/method_runtime/universal_scorer.py`, mirrored by the
+DB-path `protea/core/_universal_reranker.py`):
+
+- The universal layout DROPS the reserved `aspect` column (a grouping key,
+  not a feature) and ADDS two source constants injected at staging time:
+  `plm_id` (vocab-encoded int) and `k_context` (float32).
+- The generic `apply_reranker` cannot score it (it would coerce the string
+  categoricals to NaN and never inject the constants), so the container
+  runs KNN + v6 features with the built-in reranker OFF, then post-hoc
+  rescores every candidate with the universal booster's own
+  `feature_name()` order, the lab's categorical vocabulary, the injected
+  `plm_id` / `k_context`, and a final sigmoid.
+- Validated bit-identical (max abs diff 0.0 over 226590 rows) against the
+  lab's authoritative `eval_universal_v227_window._score_eval_direct`. The
+  lab's `predictions.parquet` is internally misaligned and is NOT trusted;
+  scoring goes through `eval.parquet` in native row order.
+
+Bundle layout for the universal reranker (added to the frozen bundle):
+
+- `<bundle>/reranker/universal.txt`: the LightGBM booster (lab `model.txt`).
+- `<bundle>/reranker/universal_run.json`: the enriched lab run.json,
+  carrying `categorical_codes` (the per-column sorted-unique vocab) and a
+  single-source `multi_manifest_pool` (`plm_id`, `k_context`). Without this
+  file the container exits non-zero rather than silently mis-scoring.
+
+The knn-v1 entrypoint enables it by default
+(`--aspect_separated --universal_reranker --self_prior`). Set
+`PROTEA_KNN_V1_NO_UNIVERSAL=1` to fall back to the pure KNN baseline
+(`--no_v6 --no_reranker`).
+
+DB-path registration: register the booster via
+`POST /v1/reranker-models/import-by-reference` with the enriched run.json
+(`categorical_codes` + `features.families_enabled` so the recorded
+`feature_schema_sha` is the full-features sha `94e87ae6f4ed`). The
+`RerankerScorer` auto-detects the universal layout (plm_id + k_context in
+`feature_name()`) and routes to `score_universal`, reading the vocab from
+the sibling `run.json`.

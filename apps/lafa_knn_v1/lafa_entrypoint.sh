@@ -2,13 +2,19 @@
 # protea-knn-v1 LAFA submission entrypoint.
 #
 # Wraps ``protea-predict`` (from the base ``protea-method-runtime``
-# image, ADR-D15) with the v1 KNN configuration:
+# image, ADR-D15) with the knn-v1 + universal-reranker configuration:
 #
 #   * --aspect_separated   one KNN per GO aspect (P/F/C)
-#   * --no_v6              skip v6 feature enrichment
-#   * --no_reranker        skip the LightGBM rerank stage
+#   * --universal_reranker score with the single universal (pooled,
+#                          aspect-conditioned, K-augmented) booster shipped
+#                          at /bundle/reranker/universal.txt. Runs v6 feature
+#                          enrichment (required) and post-hoc rescores every
+#                          candidate; overrides --no_reranker.
 #   * --self_prior         inject each target's OWN t0 non-exp annotation
 #                          (GOA self-prior; max-combined with neighbour transfer)
+#
+# Set PROTEA_KNN_V1_NO_UNIVERSAL=1 to fall back to the pure KNN baseline
+# (--no_v6 --no_reranker) when no universal booster ships in the bundle.
 #
 # Bind-mount layout (per LAFA container guide,
 # anphan0828/LAFA_container_guide):
@@ -43,12 +49,25 @@ if [ ! -d "${OUT_DIR}" ]; then
 fi
 
 echo "[protea-knn-v1] bundle=${BUNDLE} query=${QUERY} output=${OUTPUT}"
+
+if [ "${PROTEA_KNN_V1_NO_UNIVERSAL:-0}" = "1" ]; then
+    # Legacy pure-KNN baseline (no v6, no reranker).
+    exec python /app/protea_predict.py \
+        --query_file "${QUERY}" \
+        --frozen_data_dir "${BUNDLE}" \
+        --output "${OUTPUT}" \
+        --aspect_separated \
+        --no_v6 \
+        --no_reranker \
+        --self_prior \
+        "$@"
+fi
+
 exec python /app/protea_predict.py \
     --query_file "${QUERY}" \
     --frozen_data_dir "${BUNDLE}" \
     --output "${OUTPUT}" \
     --aspect_separated \
-    --no_v6 \
-    --no_reranker \
+    --universal_reranker \
     --self_prior \
     "$@"
