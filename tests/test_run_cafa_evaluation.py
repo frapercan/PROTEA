@@ -852,6 +852,182 @@ class TestWritePredictions:
 
 
 # ---------------------------------------------------------------------------
+# universal-booster routing in the eval-artifacts path (F-RERANK-UNIVERSAL)
+# ---------------------------------------------------------------------------
+
+
+def _make_reranked_pred_mock():
+    """A GOPrediction-shaped mock carrying every column ``_record_from_pred`` reads."""
+    pred = MagicMock()
+    pred.protein_accession = "P1"
+    pred.qualifier = "enables"
+    pred.evidence_code = "EXP"
+    pred.taxonomic_relation = "same"
+    pred.distance = 0.2
+    # _record_from_pred uses getattr(pred, col, None) for numeric cols; a
+    # MagicMock would auto-create truthy attrs, so force them to plain floats.
+    from protea.core.operations._run_cafa_helpers import _NUMERIC_ORM_COLS
+
+    for col in _NUMERIC_ORM_COLS:
+        setattr(pred, col, 1.0)
+    pred.distance = 0.2
+    return pred
+
+
+def _reranked_session(pred, go_id="GO:0000001", aspect="F"):
+    session = MagicMock()
+    query = MagicMock()
+    session.query.return_value = query
+    query.join.return_value = query
+    query.filter.return_value = query
+    query.yield_per.return_value = [(pred, go_id, aspect)]
+    return session
+
+
+class TestUniversalBoosterRoutingInEval:
+    """The eval-artifacts writers must route universal boosters through
+    ``score_universal`` (not the generic ``reranker_predict``) and leave the
+    per-cell path unchanged (F-RERANK-UNIVERSAL eval wiring)."""
+
+    _UNIVERSAL_CTX = {
+        "categorical_codes": {
+            "qualifier": ["", "enables"],
+            "evidence_code": ["EXP", "IEA"],
+            "taxonomic_relation": ["same", "distant"],
+            "plm_id": ["prot_t5"],
+        },
+        "plm_id": "prot_t5",
+        "k_context": 10.0,
+    }
+
+    def test_write_predictions_reranked_routes_universal(self):
+        import numpy as np
+
+        from protea.core.operations import _run_cafa_artifacts as _art
+
+        pred = _make_reranked_pred_mock()
+        session = _reranked_session(pred)
+        with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
+            path = f.name
+        try:
+            with (
+                patch("protea.core.reranker.model_from_string", return_value=MagicMock()),
+                patch(
+                    "protea.core._universal_reranker.score_universal",
+                    return_value=np.array([0.7]),
+                ) as mock_uni,
+                patch("protea.core.reranker.predict") as mock_generic,
+            ):
+                _art.write_predictions_reranked(
+                    session,
+                    WritePredictionsContext(
+                        pred_set_id=uuid.uuid4(),
+                        delta_proteins={"P1"},
+                        max_distance=None,
+                        path=path,
+                    ),
+                    reranker_bundle={
+                        "model": "ignored-by-mock",
+                        "cat_codes": None,
+                        "universal": self._UNIVERSAL_CTX,
+                    },
+                )
+            mock_uni.assert_called_once()
+            mock_generic.assert_not_called()
+            kwargs = mock_uni.call_args.kwargs
+            assert kwargs["plm_id"] == "prot_t5"
+            assert kwargs["k_context"] == 10.0
+            assert kwargs["categorical_codes"] == self._UNIVERSAL_CTX["categorical_codes"]
+            with open(path) as fh:
+                assert fh.read().strip() == "P1\tGO:0000001\t0.7000"
+        finally:
+            os.unlink(path)
+
+    def test_write_predictions_reranked_per_cell_unchanged(self):
+        import numpy as np
+
+        from protea.core.operations import _run_cafa_artifacts as _art
+
+        pred = _make_reranked_pred_mock()
+        session = _reranked_session(pred)
+        with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
+            path = f.name
+        try:
+            with (
+                patch("protea.core.reranker.model_from_string", return_value=MagicMock()),
+                patch(
+                    "protea.core.reranker.predict", return_value=np.array([0.42])
+                ) as mock_generic,
+                patch("protea.core._universal_reranker.score_universal") as mock_uni,
+            ):
+                _art.write_predictions_reranked(
+                    session,
+                    WritePredictionsContext(
+                        pred_set_id=uuid.uuid4(),
+                        delta_proteins={"P1"},
+                        max_distance=None,
+                        path=path,
+                    ),
+                    reranker_bundle={
+                        "model": "ignored-by-mock",
+                        "cat_codes": None,
+                        "universal": None,
+                    },
+                )
+            mock_generic.assert_called_once()
+            mock_uni.assert_not_called()
+            with open(path) as fh:
+                assert fh.read().strip() == "P1\tGO:0000001\t0.4200"
+        finally:
+            os.unlink(path)
+
+    def test_apply_per_aspect_scores_routes_universal(self):
+        import numpy as np
+
+        from protea.core.operations import _run_cafa_artifacts as _art
+
+        df = pd.DataFrame(
+            [
+                {
+                    "protein_accession": "P1",
+                    "go_id": "GO:1",
+                    "aspect": "F",
+                    "distance": 0.1,
+                    "qualifier": "enables",
+                    "evidence_code": "EXP",
+                    "taxonomic_relation": "same",
+                },
+                {
+                    "protein_accession": "P2",
+                    "go_id": "GO:2",
+                    "aspect": "P",
+                    "distance": 0.3,
+                    "qualifier": "enables",
+                    "evidence_code": "EXP",
+                    "taxonomic_relation": "same",
+                },
+            ]
+        )
+        aspect_models = {
+            "F": {"model": "m-uni", "cat_codes": None, "universal": self._UNIVERSAL_CTX},
+            "P": {"model": "m-cell", "cat_codes": None, "universal": None},
+        }
+        with (
+            patch("protea.core.reranker.model_from_string", return_value=MagicMock()),
+            patch(
+                "protea.core._universal_reranker.score_universal",
+                return_value=np.array([0.9]),
+            ) as mock_uni,
+            patch("protea.core.reranker.predict", return_value=np.array([0.1])) as mock_generic,
+        ):
+            _art._apply_per_aspect_scores(df, aspect_models)
+        mock_uni.assert_called_once()
+        mock_generic.assert_called_once()
+        assert df.loc[df["aspect"] == "F", "score"].iloc[0] == 0.9
+        assert df.loc[df["aspect"] == "P", "score"].iloc[0] == 0.1
+
+
+# ---------------------------------------------------------------------------
 # execute — error paths
 # ---------------------------------------------------------------------------
 

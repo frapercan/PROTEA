@@ -100,12 +100,13 @@ def datasets_client():
     app.state.amqp_url = "amqp://stub"
     app.include_router(datasets_router)
 
-    with patch(
-        "protea.api.routers.datasets.session_scope",
-        side_effect=lambda _: _scope(session),
-    ), patch(
-        "protea.api.routers.datasets.publish_job"
-    ) as publish:
+    with (
+        patch(
+            "protea.api.routers.datasets.session_scope",
+            side_effect=lambda _: _scope(session),
+        ),
+        patch("protea.api.routers.datasets.publish_job") as publish,
+    ):
         yield TestClient(app, raise_server_exceptions=True), session, publish
 
 
@@ -154,9 +155,7 @@ class TestDatasetsRouter:
 
     def test_post_rejects_too_few_train_versions(self, datasets_client):
         client, _, publish = datasets_client
-        resp = client.post(
-            "/datasets", json=self._valid_body(train_versions=[160])
-        )
+        resp = client.post("/datasets", json=self._valid_body(train_versions=[160]))
         assert resp.status_code == 422
         publish.assert_not_called()
 
@@ -260,16 +259,12 @@ class TestDatasetsImportByReference:
         # The handler issues three reads: duplicate-name check (None),
         # embedding_config FK (resolves to a row), ontology_snapshot FK
         # (resolves to a row). Use a side_effect cycle to feed those.
-        first_returns = iter(
-            [None, MagicMock(), MagicMock()]
-        )
-        session.query.return_value.filter.return_value.first.side_effect = (
-            lambda: next(first_returns)
+        first_returns = iter([None, MagicMock(), MagicMock()])
+        session.query.return_value.filter.return_value.first.side_effect = lambda: next(
+            first_returns
         )
 
-        resp = client.post(
-            "/datasets/import-by-reference", json=self._valid_body()
-        )
+        resp = client.post("/datasets/import-by-reference", json=self._valid_body())
         assert resp.status_code == 201, resp.text
 
         body = resp.json()
@@ -303,8 +298,8 @@ class TestDatasetsImportByReference:
         # Duplicate check returns the existing row; FK lookups return
         # arbitrary MagicMocks (non-None) so the FKs are kept.
         first_returns = iter([existing, MagicMock(), MagicMock()])
-        session.query.return_value.filter.return_value.first.side_effect = (
-            lambda: next(first_returns)
+        session.query.return_value.filter.return_value.first.side_effect = lambda: next(
+            first_returns
         )
 
         resp = client.post(
@@ -376,15 +371,19 @@ def reranker_client(tmp_path):
     fake_store = MagicMock()
     fake_store.put.side_effect = lambda key, _bytes: f"file:///fake/{key}"
 
-    with patch(
-        "protea.api.routers.reranker_models.session_scope",
-        side_effect=lambda _: _scope(session),
-    ), patch(
-        "protea.api.routers.reranker_models.load_settings",
-        return_value=fake_settings,
-    ), patch(
-        "protea.api.routers.reranker_models.get_artifact_store",
-        return_value=fake_store,
+    with (
+        patch(
+            "protea.api.routers.reranker_models.session_scope",
+            side_effect=lambda _: _scope(session),
+        ),
+        patch(
+            "protea.api.routers.reranker_models.load_settings",
+            return_value=fake_settings,
+        ),
+        patch(
+            "protea.api.routers.reranker_models.get_artifact_store",
+            return_value=fake_store,
+        ),
     ):
         yield TestClient(app, raise_server_exceptions=True), session, fake_store
 
@@ -520,11 +519,12 @@ def datasets_detail_client():
     app.state.settings = fake_settings
     app.include_router(datasets_router)
 
-    with patch(
-        "protea.api.routers.datasets.session_scope",
-        side_effect=lambda _: _scope_ctx(session),
-    ), patch(
-        "protea.api.routers.datasets.publish_job"
+    with (
+        patch(
+            "protea.api.routers.datasets.session_scope",
+            side_effect=lambda _: _scope_ctx(session),
+        ),
+        patch("protea.api.routers.datasets.publish_job"),
     ):
         yield TestClient(app, raise_server_exceptions=True), session, fake_settings
 
@@ -618,3 +618,29 @@ class TestOperationCatalogWiring:
         assert "export_research_dataset" in names
         # Historical training operations remain unregistered.
         assert "research_dataset_dump_helper" not in names
+
+
+# ---------------------------------------------------------------------------
+# _compute_feature_schema_sha fallback ordering
+# ---------------------------------------------------------------------------
+
+
+class TestComputeFeatureSchemaSha:
+    """The recorded ``features.feature_schema_sha`` is used as a fallback so a
+    universal-booster run does not land a NULL ``feature_schema_sha`` when the
+    lab contracts helper is unavailable in this image."""
+
+    def test_recorded_sha_used_when_no_families(self):
+        from protea.api.routers.reranker_models import _compute_feature_schema_sha
+
+        run = {
+            "features": {"feature_schema_sha": "94e87ae6f4ed"},
+            "dataset": {"schema_sha": "datasetsha"},
+        }
+        assert _compute_feature_schema_sha(run) == "94e87ae6f4ed"
+
+    def test_dataset_schema_sha_when_no_recorded(self):
+        from protea.api.routers.reranker_models import _compute_feature_schema_sha
+
+        run = {"features": {}, "dataset": {"schema_sha": "datasetsha"}}
+        assert _compute_feature_schema_sha(run) == "datasetsha"

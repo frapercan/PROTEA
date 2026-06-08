@@ -192,41 +192,13 @@ class RerankerScorer:
     ) -> dict[str, Any]:
         """Recover universal-scoring metadata from the model's sibling run.json.
 
-        The universal booster needs three pieces of state that are NOT in
-        ``model.txt``: the categorical vocabulary (``__categorical_codes__`` /
-        ``categorical_codes``), the source PLM, and the K-context. They are
-        published alongside the booster under the same prefix
-        (``runs/<id>/run.json``). We resolve that sibling key from the
-        ``model.txt`` artifact URI, read it through the same store, and pull
-        the metadata block.
+        Delegates to
+        :func:`protea.core._universal_reranker.load_universal_context`, the
+        single source of truth shared with the evaluation-artifacts path.
         """
-        import json
+        from protea.core._universal_reranker import load_universal_context
 
-        from protea.core._universal_reranker import universal_meta_from_run
-        from protea.core.reranker import _uri_to_key
-
-        run_uri = artifact_uri.rsplit("/", 1)[0] + "/run.json"
-        run_key = _uri_to_key(run_uri, store)
-        run = json.loads(store.get(run_key).decode("utf-8"))
-        categorical_codes = run.get("categorical_codes")
-        if not categorical_codes:
-            raise ValueError(
-                "universal booster run.json is missing 'categorical_codes'; "
-                "cannot reproduce the training categorical encoding "
-                f"(run.json at {run_uri})."
-            )
-        meta = universal_meta_from_run(run)
-        if meta is None:
-            raise ValueError(
-                "universal booster run.json is missing the single-source "
-                "'multi_manifest_pool' block needed for plm_id / k_context "
-                f"(run.json at {run_uri})."
-            )
-        return {
-            "categorical_codes": categorical_codes,
-            "plm_id": meta["plm_id"],
-            "k_context": meta["k_context"],
-        }
+        return load_universal_context(artifact_uri, store)
 
     @staticmethod
     def _raise_schema_sha_mismatch(
