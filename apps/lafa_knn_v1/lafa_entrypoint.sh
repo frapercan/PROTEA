@@ -2,7 +2,7 @@
 # protea-knn-v1 LAFA submission entrypoint.
 #
 # Wraps ``protea-predict`` (from the base ``protea-method-runtime``
-# image, ADR-D15) with the v1 KNN + universal-reranker configuration:
+# image, ADR-D15) with the knn-v1 + universal-reranker configuration:
 #
 #   * --aspect_separated   one KNN per GO aspect (P/F/C)
 #   * --universal_reranker score with the single universal (pooled,
