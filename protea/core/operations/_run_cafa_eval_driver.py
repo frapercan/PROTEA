@@ -92,8 +92,7 @@ def _write_setting_predictions(
             session,
             write_ctx,
             scoring_config=ctx.scoring_config_snapshot,
-            reranker_model_str=bundle["model"],
-            reranker_cat_codes=bundle.get("cat_codes"),
+            reranker_bundle=bundle,
             known_gos=setting_known,
         )
     else:

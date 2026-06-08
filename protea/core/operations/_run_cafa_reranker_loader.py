@@ -31,8 +31,8 @@ _ASPECT_KEY_TO_CHAR = {"bpo": "P", "mfo": "F", "cco": "C"}
 
 
 def resolve_reranker_model_bundle(rm: RerankerModelORM) -> dict[str, Any]:
-    """Return ``{"model": str, "cat_codes": dict|None}`` from either the
-    legacy inline blob or the ``artifact_uri`` cache.
+    """Return ``{"model": str, "cat_codes": dict|None, "universal": dict|None}``
+    from either the legacy inline blob or the ``artifact_uri`` cache.
 
     Boosters trained by the lab and imported via
     ``/reranker-models/import`` only set ``artifact_uri`` and leave
@@ -46,10 +46,27 @@ def resolve_reranker_model_bundle(rm: RerankerModelORM) -> dict[str, Any]:
     to ``pd.factorize`` over the inference batch, which silently
     produces the wrong codes for per-aspect inference and tanks the
     LK / PK fmax. See :func:`protea.core.reranker.predict`.
+
+    ``universal`` carries the universal-booster scoring context
+    (``{"categorical_codes", "plm_id", "k_context"}``) recovered from the
+    booster's sibling ``run.json``. It is non-``None`` only when the
+    artifact-store booster is a universal (pooled, K-augmented) model
+    (detected by :func:`is_universal_booster`); such boosters carry injected
+    ``plm_id`` / ``k_context`` feature columns that the generic
+    ``reranker_predict`` cannot encode, so the eval-artifacts writers route
+    them through :func:`score_universal` instead. Legacy inline boosters never
+    take the universal path (universal models are always imported by
+    reference), so ``universal`` is ``None`` for the ``model_data`` branch.
     """
+    universal: dict[str, Any] | None = None
     if rm.model_data:
         model_str = rm.model_data
     elif rm.artifact_uri:
+        from protea.core._universal_reranker import (
+            is_universal_booster,
+            load_universal_context,
+        )
+
         project_root = Path(__file__).resolve().parents[3]
         store = _get_store_for_reranker(_load_settings_for_reranker(project_root))
         booster = load_reranker(
@@ -58,13 +75,15 @@ def resolve_reranker_model_bundle(rm: RerankerModelORM) -> dict[str, Any]:
             store=store,
         )
         model_str = booster.model_to_string()
+        if is_universal_booster(booster):
+            universal = load_universal_context(rm.artifact_uri, store)
     else:
         raise ValueError(
             f"RerankerModel {rm.id} has no booster: both ``model_data`` "
             f"(legacy inline) and ``artifact_uri`` (artifact-store path) are NULL."
         )
     cat_codes = (rm.metrics or {}).get("__categorical_codes__")
-    return {"model": model_str, "cat_codes": cat_codes}
+    return {"model": model_str, "cat_codes": cat_codes, "universal": universal}
 
 
 def _load_nested_rerankers(

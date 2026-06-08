@@ -121,32 +121,61 @@ def _score_unranked_pred(
     return compute_score(pred_dict, scoring_config)
 
 
+def _score_bundle_df(df: Any, bundle: dict[str, Any]) -> Any:
+    """Score ``df`` with a reranker ``bundle`` (``{model, cat_codes, universal}``).
+
+    A bundle carrying a non-``None`` ``universal`` block (a universal pooled,
+    K-augmented booster) is scored through
+    :func:`protea.core._universal_reranker.score_universal`: its model carries
+    injected ``plm_id`` / ``k_context`` feature columns the generic
+    ``reranker_predict`` cannot encode. Per-cell bundles keep the generic
+    ``reranker_predict`` path unchanged (F-RERANK-UNIVERSAL eval wiring).
+    """
+    from protea.core.reranker import model_from_string
+    from protea.core.reranker import predict as reranker_predict
+
+    model = model_from_string(bundle["model"])
+    universal = bundle.get("universal")
+    if universal is not None:
+        from protea.core._universal_reranker import score_universal
+
+        return score_universal(
+            model,
+            df,
+            categorical_codes=universal["categorical_codes"],
+            plm_id=universal["plm_id"],
+            k_context=universal["k_context"],
+        )
+    return reranker_predict(model, df, categorical_codes=bundle.get("cat_codes"))
+
+
 def write_predictions(
     session: Session,
     ctx: WritePredictionsContext,
     *,
     scoring_config: ScoringConfig | None = None,
-    reranker_model_str: str | None = None,
-    reranker_cat_codes: dict[str, list[str]] | None = None,
+    reranker_bundle: dict[str, Any] | None = None,
     known_gos: dict[str, set[str]] | None = None,
 ) -> None:
     """Write CAFA-format predictions (protein\\tgo_id\\tscore) for delta proteins.
 
     Scoring priority:
-      1. If ``reranker_model_str`` is provided, apply the LightGBM model to
-         all predictions and use re-ranker probabilities as scores.
+      1. If ``reranker_bundle`` is provided, apply the LightGBM model to all
+         predictions and use re-ranker probabilities as scores. The bundle is
+         ``{"model": str, "cat_codes": dict|None, "universal": dict|None}``; a
+         non-``None`` ``universal`` block routes scoring through
+         :func:`score_universal` (F-RERANK-UNIVERSAL eval wiring).
       2. If a ``ScoringConfig`` is provided, compute scores via ``compute_score()``.
       3. Otherwise fall back to ``1 - cosine_distance / 2``.
 
     ``known_gos`` carries the query's pre-cutoff annotations (LK / PK
     settings); for NK it must stay ``None``.
     """
-    if reranker_model_str is not None:
+    if reranker_bundle is not None:
         write_predictions_reranked(
             session,
             ctx,
-            reranker_model_str=reranker_model_str,
-            reranker_cat_codes=reranker_cat_codes,
+            reranker_bundle=reranker_bundle,
             known_gos=known_gos,
         )
         return
@@ -174,15 +203,20 @@ def write_predictions_reranked(
     session: Session,
     ctx: WritePredictionsContext,
     *,
-    reranker_model_str: str,
-    reranker_cat_codes: dict[str, list[str]] | None = None,
+    reranker_bundle: dict[str, Any],
     known_gos: dict[str, set[str]] | None = None,
 ) -> None:
-    """Write CAFA-format predictions using LightGBM re-ranker scores."""
-    import pandas as pd
+    """Write CAFA-format predictions using LightGBM re-ranker scores.
 
-    from protea.core.reranker import model_from_string
-    from protea.core.reranker import predict as reranker_predict
+    ``reranker_bundle`` is ``{"model": str, "cat_codes": dict|None,
+    "universal": dict|None}``. A non-``None`` ``universal`` block routes
+    scoring through :func:`_score_bundle_df` /
+    :func:`protea.core._universal_reranker.score_universal` (the universal
+    booster carries injected ``plm_id`` / ``k_context`` feature columns the
+    generic ``reranker_predict`` cannot encode); the per-cell path is
+    unchanged (F-RERANK-UNIVERSAL eval wiring).
+    """
+    import pandas as pd
 
     q = (
         session.query(GOPrediction, GOTerm.go_id, GOTerm.aspect)
@@ -194,8 +228,7 @@ def write_predictions_reranked(
         q = q.filter(GOPrediction.distance <= ctx.max_distance)
 
     records: list[dict[str, Any]] = [
-        _record_from_pred(pred, go_id, aspect=aspect)
-        for pred, go_id, aspect in q.yield_per(5000)
+        _record_from_pred(pred, go_id, aspect=aspect) for pred, go_id, aspect in q.yield_per(5000)
     ]
 
     if not records:
@@ -206,10 +239,7 @@ def write_predictions_reranked(
     df = pd.DataFrame(records)
     if known_gos:
         _patch_query_known_features(df, known_gos)
-    model = model_from_string(reranker_model_str)
-    scores = reranker_predict(model, df, categorical_codes=reranker_cat_codes)
-
-    df["score"] = scores
+    df["score"] = _score_bundle_df(df, reranker_bundle)
     df = df.sort_values("score", ascending=False).drop_duplicates(
         subset=["protein_accession", "go_id"],
         keep="first",
@@ -240,21 +270,20 @@ def _apply_per_aspect_scores(
     df: Any,
     aspect_models: dict[str, dict[str, Any]],
 ) -> None:
-    """Mutate ``df['score']`` by aspect-keyed LightGBM model; fall back to 1 - d/2."""
-    from protea.core.reranker import model_from_string
-    from protea.core.reranker import predict as reranker_predict
+    """Mutate ``df['score']`` by aspect-keyed LightGBM model; fall back to 1 - d/2.
 
+    A bundle carrying a non-``None`` ``universal`` block is scored through
+    :func:`_score_bundle_df` / ``score_universal`` (the universal booster's
+    injected ``plm_id`` / ``k_context`` columns are unencodable by the generic
+    ``reranker_predict``); per-cell bundles keep the generic path unchanged
+    (F-RERANK-UNIVERSAL eval wiring).
+    """
     df["score"] = 0.0
     for aspect_char, bundle in aspect_models.items():
         mask = df["aspect"] == aspect_char
         if not mask.any():
             continue
-        model = model_from_string(bundle["model"])
-        df.loc[mask, "score"] = reranker_predict(
-            model,
-            df.loc[mask],
-            categorical_codes=bundle.get("cat_codes"),
-        )
+        df.loc[mask, "score"] = _score_bundle_df(df.loc[mask], bundle)
     fallback_mask = ~df["aspect"].isin(set(aspect_models.keys()))
     if fallback_mask.any():
         df.loc[fallback_mask, "score"] = df.loc[fallback_mask, "distance"].apply(
