@@ -200,6 +200,30 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Skip the LightGBM reranker even if a booster ships in the bundle.",
     )
     parser.add_argument(
+        "--self_prior",
+        action="store_true",
+        help=(
+            "Inject the GOA self-prior: each query target's OWN t0 "
+            "non-experimental annotation (from the frozen bundle), scored "
+            "confidently and max-combined with neighbour transfer. Default off."
+        ),
+    )
+    parser.add_argument(
+        "--self_prior_score",
+        type=float,
+        default=1.0,
+        help="Score for own-annotation self-prior candidates (default 1.0).",
+    )
+    parser.add_argument(
+        "--self_prior_neighbour_scale",
+        type=float,
+        default=0.95,
+        help=(
+            "Multiplier on neighbour-transfer scores before combining with the "
+            "self-prior (default 0.95) so the self-prior dominates the band."
+        ),
+    )
+    parser.add_argument(
         "--model_dir",
         default=os.environ.get("HF_CACHE"),
         help="HuggingFace cache dir for ProtT5 (default: $HF_CACHE).",
@@ -329,6 +353,26 @@ def main(argv: list[str] | None = None) -> None:
         anc_idx=anc_idx,
     )
     print(f"[protea-predict] {len(predictions)} prediction rows")
+
+    if args.self_prior:
+        from self_prior import build_self_prior_rows, combine_with_self_prior
+
+        self_rows = build_self_prior_rows(
+            annotations, kept_q, self_score=args.self_prior_score,
+        )
+        n_targets = len({r["protein_accession"] for r in self_rows})
+        print(
+            f"[protea-predict] self-prior: {len(self_rows)} own-annotation "
+            f"candidates over {n_targets}/{len(kept_q)} query targets "
+            f"(neighbour_scale={args.self_prior_neighbour_scale})",
+        )
+        predictions = combine_with_self_prior(
+            predictions,
+            self_rows,
+            neighbour_scale=args.self_prior_neighbour_scale,
+            score_of=_score_for_output,
+        )
+        print(f"[protea-predict] {len(predictions)} rows after self-prior combine")
 
     n_rows = write_predictions_tsv(predictions, go_id_map, args.output)
     print(f"[protea-predict] wrote {n_rows} predictions to {args.output}")

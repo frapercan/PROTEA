@@ -283,6 +283,9 @@ def test_arg_parser_defaults() -> None:
     assert ns.aspect_separated is False
     assert ns.no_v6 is False
     assert ns.no_reranker is False
+    assert ns.self_prior is False
+    assert ns.self_prior_score == 1.0
+    assert ns.self_prior_neighbour_scale == 0.95
 
 
 def test_arg_parser_required_flags() -> None:

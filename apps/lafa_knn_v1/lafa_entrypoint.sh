@@ -7,6 +7,8 @@
 #   * --aspect_separated   one KNN per GO aspect (P/F/C)
 #   * --no_v6              skip v6 feature enrichment
 #   * --no_reranker        skip the LightGBM rerank stage
+#   * --self_prior         inject each target's OWN t0 non-exp annotation
+#                          (GOA self-prior; max-combined with neighbour transfer)
 #
 # Bind-mount layout (per LAFA container guide,
 # anphan0828/LAFA_container_guide):
@@ -48,4 +50,5 @@ exec python /app/protea_predict.py \
     --aspect_separated \
     --no_v6 \
     --no_reranker \
+    --self_prior \
     "$@"
