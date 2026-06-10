@@ -122,6 +122,13 @@ def _pick_best_evaluation(
         .join(PredictionSet, PredictionSet.id == EvaluationResult.prediction_set_id)
         .join(EmbeddingConfig, EmbeddingConfig.id == PredictionSet.embedding_config_id)
         .outerjoin(ScoringConfig, ScoringConfig.id == EvaluationResult.scoring_config_id)
+        # Reversible query curation (slice F-METHOD-EVAL-SURFACE): diagnostic
+        # probe evaluations (ADR D40) must never become the home champion or
+        # inflate the per-task headline. ``is_distinct_from`` keeps NULL +
+        # non-probe rows (so legacy results that predate the column are
+        # untouched) and drops only the explicit "probe" role. Remove this
+        # filter to surface probes again; no data is deleted.
+        .where(EvaluationResult.leakage_role.is_distinct_from("probe"))
     ).all()
     best: dict[str, Any] | None = None
     best_score: float = -1.0
