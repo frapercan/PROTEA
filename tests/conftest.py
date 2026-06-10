@@ -160,6 +160,69 @@ def _guard_external_db(user: str, host: str, port: str, db: str) -> None:
         )
 
 
+def _resolve_db_targets() -> list[tuple[str, str, str, str]]:
+    """Best-effort (user, host, port, db) for every DB this process might hit.
+
+    Covers BOTH paths that have wiped the live DB: the ``postgres_url`` fixture
+    (PROTEA_PG_* env) and direct ``load_settings().db_url`` access from a tracked
+    ``system.yaml`` (the 2026-06-10 wipe went through the latter, bypassing the
+    fixture guard).
+    """
+    from sqlalchemy.engine import make_url
+
+    from pathlib import Path
+
+    urls: list[str] = []
+    env_url = os.getenv("PROTEA_DB_URL")
+    if env_url:
+        urls.append(env_url)
+    # Only an EXPLICIT system.yaml counts, never the hard-coded default db_url, so
+    # CI and agent worktrees without a system.yaml are not falsely flagged.
+    root = Path(__file__).resolve().parents[1]
+    if (root / "protea" / "config" / "system.yaml").exists():
+        try:
+            from protea.infrastructure.settings import load_settings
+
+            urls.append(load_settings(root).db_url)
+        except Exception:
+            pass
+
+    out: list[tuple[str, str, str, str]] = []
+    for url in urls:
+        try:
+            u = make_url(url)
+            out.append((u.username or "", u.host or "", str(u.port or ""), u.database or ""))
+        except Exception:
+            continue
+    return out
+
+
+def pytest_sessionstart(session: pytest.Session) -> None:
+    """Abort the whole session if it is configured against the live dev/prod DB.
+
+    PROTEA's suite drops and recreates the schema; pointed at the live Postgres it
+    wipes it (it has happened repeatedly). Default-deny: refuse when any resolved
+    target is a protected DB name on the dev host:port, unless the operator opts in
+    with ``PROTEA_ALLOW_DESTRUCTIVE_TESTS=1``.
+    """
+    if os.getenv("PROTEA_ALLOW_DESTRUCTIVE_TESTS") == "1":
+        return
+    for user, host, port, db in _resolve_db_targets():
+        live = (
+            db.strip().lower() in _PROTECTED_DB_NAMES
+            and host.strip().lower() in _DEV_HOST_ALIASES
+            and port.strip() in ("", "5432")
+        )
+        if live:
+            raise pytest.UsageError(
+                "Refusing to start: the configured database "
+                f"({user}@{host}:{port}/{db}) is the live dev/prod store. PROTEA's "
+                "tests can DROP/recreate the schema and have wiped it this way. Point "
+                "protea/config/system.yaml or PROTEA_DB_URL at a disposable Postgres "
+                "(or use --with-postgres), or set PROTEA_ALLOW_DESTRUCTIVE_TESTS=1."
+            )
+
+
 @pytest.fixture(scope="session")
 def postgres_url(pytestconfig: pytest.Config) -> str:
     if not pytestconfig.getoption("--with-postgres"):

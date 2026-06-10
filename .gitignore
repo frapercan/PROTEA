@@ -71,3 +71,7 @@ sops_age_key.txt
 # Local deploy overrides (host-specific secrets, never commit)
 .env
 .env.local
+
+# Local DB/AMQP config — must NOT be committed (it has wiped the live DB when
+# inherited by test worktrees). Copy system.yaml.example and edit locally.
+protea/config/system.yaml

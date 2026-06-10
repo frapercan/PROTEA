@@ -1,0 +1,10 @@
+# Copy to system.yaml and edit locally. NEVER commit system.yaml, and NEVER
+# point it at the live dev/prod Postgres when running the test suite: PROTEA's
+# tests can DROP and recreate the schema (the live DB has been wiped this way).
+# For tests, use a disposable Postgres (pytest --with-postgres) instead.
+database:
+  url: postgresql+psycopg://disabled:disabled@127.0.0.1:1/disabled_set_me
+  amqp_url: amqp://guest:guest@localhost:5672/
+storage:
+  minio:
+    endpoint: localhost:9000
