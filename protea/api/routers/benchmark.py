@@ -168,6 +168,11 @@ def _make_leaderboard(
             "stage": entry["stage"],
             "evaluation_result_id": entry["evaluation_result_id"],
             "evaluation_set_id": entry["evaluation_set_id"],
+            # F-METHOD-EVAL-SURFACE provenance for the winning cell.
+            "frame": entry.get("frame"),
+            "temporal_window": entry.get("temporal_window"),
+            "arms_enabled": entry.get("arms_enabled"),
+            "leakage_role": entry.get("leakage_role"),
         }
         for cat in categories
         for asp in aspects
@@ -541,6 +546,13 @@ def _fold_evaluation_cells(
                 "coverage": _round(cell.get("coverage")),
                 "n_proteins": cell.get("n_proteins"),
                 "evaluation_result_id": str(er.id),
+                # F-METHOD-EVAL-SURFACE: per-result provenance, read through
+                # so the matrix can badge frame / window / arms / leakage
+                # without a second request. ``None`` on legacy rows.
+                "frame": er.frame,
+                "temporal_window": er.temporal_window,
+                "arms_enabled": er.arms_enabled,
+                "leakage_role": er.leakage_role,
             }
             cur_g = best_global.get(key)
             if cur_g is None or payload["primary"] > cur_g["primary"]:
