@@ -1256,6 +1256,7 @@ export type StackRepo = {
   role_label: string;
   status: "active" | "beta" | "skeleton" | "archived";
   summary: string;
+  summary_es: string | null;
   github_url: string;
   docs_url: string | null;
   package_url: string | null;

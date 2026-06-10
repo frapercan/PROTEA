@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import {
   getStack,
   getStackPulls,
@@ -36,8 +36,14 @@ function relativeTime(iso: string): string {
   return `${Math.round(sec / 86400)}d ago`;
 }
 
+function localizedSummary(repo: StackRepo, locale: string): string {
+  if (locale === "es" && repo.summary_es) return repo.summary_es;
+  return repo.summary;
+}
+
 export default function StackPage() {
   const t = useTranslations("stack");
+  const locale = useLocale();
   const [repos, setRepos] = useState<StackRepo[]>([]);
   const [thesisPdfUrl, setThesisPdfUrl] = useState<string | null>(null);
   const [pulls, setPulls] = useState<StackPullRequest[]>([]);
@@ -130,7 +136,7 @@ export default function StackPage() {
                   <td className="px-4 py-3 align-top">
                     <StatusPill status={r.status} />
                   </td>
-                  <td className="px-4 py-3 align-top text-slate-700">{r.summary}</td>
+                  <td className="px-4 py-3 align-top text-slate-700">{localizedSummary(r, locale)}</td>
                   <td className="px-4 py-3 align-top text-xs space-x-3 whitespace-nowrap">
                     <a href={r.github_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
                       GitHub

@@ -1362,6 +1362,18 @@
             "description": "One-line description shown on the stack landing page.",
             "title": "Summary",
             "type": "string"
+          },
+          "summary_es": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Spanish translation of ``summary`` shown on the ``/es`` locale; ``None`` falls back to the English ``summary``.",
+            "title": "Summary Es"
           }
         },
         "required": [
