@@ -1259,7 +1259,6 @@ export type StackRepo = {
   github_url: string;
   docs_url: string | null;
   package_url: string | null;
-  local_docs_path: string | null;
 };
 
 export type StackResponse = {

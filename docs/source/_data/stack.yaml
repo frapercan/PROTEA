@@ -20,7 +20,7 @@ repos:
     status: active
     summary: Backend platform. Hosts the ORM, job queue, FastAPI surface, frontend, and orchestration.
     github_url: https://github.com/frapercan/PROTEA
-    docs_url: https://frapercan.github.io/PROTEA/
+    docs_url: https://protea.readthedocs.io/
     package_url: null
 
   - name: protea-contracts
@@ -30,7 +30,7 @@ repos:
     status: active
     summary: Shared contract surface. ABCs, pydantic payloads, feature schema, schema_sha. Imported by every other repo.
     github_url: https://github.com/frapercan/protea-contracts
-    docs_url: null
+    docs_url: https://protea-contracts.readthedocs.io/
     package_url: https://github.com/frapercan/protea-contracts/releases
 
   - name: protea-method
@@ -40,7 +40,7 @@ repos:
     status: active
     summary: Pure inference path (KNN, feature compute, reranker apply). Delegation target for the F2C extraction; live in production since F2C.5b. Bind-mounted by the LAFA containers.
     github_url: https://github.com/frapercan/protea-method
-    docs_url: null
+    docs_url: https://protea-method.readthedocs.io/
     package_url: null
 
   - name: protea-sources
@@ -50,7 +50,7 @@ repos:
     status: active
     summary: Annotation source plugins (GOA, QuickGO, UniProt). Discovered via Python entry_points (goa, quickgo, uniprot).
     github_url: https://github.com/frapercan/protea-sources
-    docs_url: null
+    docs_url: https://protea-sources.readthedocs.io/
     package_url: null
 
   - name: protea-runners
@@ -60,7 +60,7 @@ repos:
     status: active
     summary: Experiment runner plugins (LightGBM, KNN, baseline). Discovered via Python entry_points (lightgbm, knn, baseline).
     github_url: https://github.com/frapercan/protea-runners
-    docs_url: null
+    docs_url: https://protea-runners.readthedocs.io/
     package_url: null
 
   - name: protea-backends
@@ -70,7 +70,7 @@ repos:
     status: active
     summary: Protein language model embedding backends (ESM family, T5/ProstT5, Ankh, ESM3-C). Discovered via Python entry_points (esm, t5, ankh, esm3c).
     github_url: https://github.com/frapercan/protea-backends
-    docs_url: null
+    docs_url: https://protea-backends.readthedocs.io/
     package_url: null
 
   - name: protea-reranker-lab
@@ -80,7 +80,7 @@ repos:
     status: active
     summary: LightGBM reranker training lab. Pulls datasets from PROTEA, trains boosters, publishes them back via /reranker-models/import-by-reference.
     github_url: https://github.com/frapercan/protea-reranker-lab
-    docs_url: null
+    docs_url: https://protea-reranker-lab.readthedocs.io/
     package_url: null
 
   - name: cafaeval-protea
@@ -90,5 +90,5 @@ repos:
     status: active
     summary: Standalone fork of cafaeval (CAFA-evaluator-PK) with the PK-coverage fix and a bit-exact parity guarantee against the upstream.
     github_url: https://github.com/frapercan/cafaeval-protea
-    docs_url: null
+    docs_url: https://cafaeval-protea.readthedocs.io/
     package_url: null

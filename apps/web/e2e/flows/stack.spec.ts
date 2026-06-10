@@ -16,9 +16,8 @@ const STACK_RESPONSE = {
       status: "active",
       summary: "Main embedding-based annotation pipeline.",
       github_url: "https://github.com/frapercan/PROTEA",
-      docs_url: null,
+      docs_url: "https://protea.readthedocs.io/",
       package_url: null,
-      local_docs_path: "/docs/protea",
     },
     {
       name: "protea-method",
@@ -28,9 +27,8 @@ const STACK_RESPONSE = {
       status: "beta",
       summary: "LAFA inference + benchmarking.",
       github_url: "https://github.com/frapercan/protea-method",
-      docs_url: null,
+      docs_url: "https://protea-method.readthedocs.io/",
       package_url: null,
-      local_docs_path: null,
     },
   ],
 };
