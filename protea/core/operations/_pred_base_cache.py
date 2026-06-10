@@ -29,7 +29,7 @@ _PRED_CACHE_DIR = Path(os.environ.get("PROTEA_PRED_CACHE_DIR", "data/pred_cache"
 
 def _delta_hash(delta_proteins: Iterable[str]) -> str:
     """Order-independent stable digest of the delta-protein accession set."""
-    h = hashlib.sha1()
+    h = hashlib.sha1(usedforsecurity=False)  # cache key only, not security
     for acc in sorted(delta_proteins):
         h.update(acc.encode("utf-8"))
         h.update(b"\0")
