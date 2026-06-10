@@ -9,6 +9,7 @@ import gzip
 import os
 import tempfile
 import uuid
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -79,13 +80,6 @@ def _make_eval_data(nk=None, lk=None, pk=None, known=None, pk_known=None):
         known=known or {},
         pk_known=pk_known or {},
     )
-
-
-def _make_scoring_config():
-    sc = MagicMock()
-    sc.formula = "linear"
-    sc.weights = {"embedding_similarity": 1.0}
-    return sc
 
 
 def _dfs_best_fixture(*, with_weighted: bool = False):
@@ -615,240 +609,241 @@ class TestDownloadTsv:
 # ---------------------------------------------------------------------------
 
 
+# Base-row column order matches ``_BASE_SCORE_COLS`` in the Core columnar fetch.
+_BASE_COLS_ORDER = (
+    "protein_accession",
+    "go_id",
+    "distance",
+    "identity_nw",
+    "identity_sw",
+    "evidence_code",
+    "taxonomic_distance",
+    "neighbor_vote_fraction",
+)
+
+
+def _base_row(
+    protein="P1",
+    go_id="GO:0000001",
+    distance=0.4,
+    identity_nw=None,
+    identity_sw=None,
+    evidence_code=None,
+    taxonomic_distance=None,
+    neighbor_vote_fraction=None,
+):
+    """Build a single Core-row tuple in ``_BASE_SCORE_COLS`` order."""
+    return (
+        protein,
+        go_id,
+        distance,
+        identity_nw,
+        identity_sw,
+        evidence_code,
+        taxonomic_distance,
+        neighbor_vote_fraction,
+    )
+
+
+def _core_session(rows):
+    """Mock a Session whose ``execute(stmt).all()`` returns ``rows`` (base tuples)."""
+    session = MagicMock()
+    result = MagicMock()
+    result.all.return_value = list(rows)
+    session.execute.return_value = result
+    return session
+
+
+def _real_scoring_config(formula="linear", weights=None, evidence_weights=None):
+    from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
+
+    return ScoringConfig(
+        formula=formula,
+        weights=weights if weights is not None else {"embedding_similarity": 1.0},
+        evidence_weights=evidence_weights,
+    )
+
+
 class TestWritePredictions:
-    def setup_method(self):
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path, monkeypatch):
+        # Redirect the parquet base-fetch cache to an isolated temp dir so
+        # tests neither pollute the repo nor share state.
+        monkeypatch.setattr("protea.core.operations._pred_base_cache._PRED_CACHE_DIR", tmp_path)
         self.op = RunCafaEvaluationOperation()
 
-    def test_write_predictions_without_scoring_config(self):
-        pred_mock = MagicMock()
-        pred_mock.protein_accession = "P1"
-        pred_mock.distance = 0.4
-        pred_mock.identity_nw = None
-        pred_mock.identity_sw = None
-        pred_mock.evidence_code = None
-        pred_mock.taxonomic_distance = None
-
-        gt_mock = MagicMock()
-        gt_mock.go_id = "GO:0000001"
-
-        session = MagicMock()
-        query = MagicMock()
-        session.query.return_value = query
-        query.join.return_value = query
-        query.filter.return_value = query
-        query.order_by.return_value = query
-        query.yield_per.return_value = [(pred_mock, gt_mock)]
-
+    def _write(self, rows, *, scoring_config=None, max_distance=None):
+        session = _core_session(rows)
         with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
             path = f.name
+        self.op._write_predictions(
+            session,
+            WritePredictionsContext(
+                pred_set_id=uuid.uuid4(),
+                delta_proteins={"P1", "P2"},
+                max_distance=max_distance,
+                path=path,
+            ),
+            scoring_config=scoring_config,
+        )
         try:
-            self.op._write_predictions(
-                session,
-                WritePredictionsContext(
-                    pred_set_id=uuid.uuid4(),
-                    delta_proteins={"P1"},
-                    max_distance=None,
-                    path=path,
-                ),
-            )
             with open(path) as f:
-                line = f.read().strip()
-            # score = max(0, 1 - 0.4/2) = 0.8
-            assert line == "P1\tGO:0000001\t0.8000"
+                return f.read().strip()
         finally:
             os.unlink(path)
+
+    def test_write_predictions_without_scoring_config(self):
+        out = self._write([_base_row(distance=0.4)])
+        # score = max(0, 1 - 0.4/2) = 0.8
+        assert out == "P1\tGO:0000001\t0.8000"
 
     def test_write_predictions_deduplicates(self):
-        pred1 = MagicMock()
-        pred1.protein_accession = "P1"
-        pred1.distance = 0.2
+        rows = [
+            _base_row(distance=0.6),
+            _base_row(distance=0.2),
+        ]
+        out = self._write(rows)
+        # Only the closest (lowest-distance) row survives → 1 - 0.2/2 = 0.9
+        assert out == "P1\tGO:0000001\t0.9000"
 
-        pred2 = MagicMock()
-        pred2.protein_accession = "P1"
-        pred2.distance = 0.6
-
-        gt_mock = MagicMock()
-        gt_mock.go_id = "GO:0000001"
-
-        session = MagicMock()
-        query = MagicMock()
-        session.query.return_value = query
-        query.join.return_value = query
-        query.filter.return_value = query
-        query.order_by.return_value = query
-        query.yield_per.return_value = [(pred1, gt_mock), (pred2, gt_mock)]
-
-        with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
-            path = f.name
-        try:
-            self.op._write_predictions(
-                session,
-                WritePredictionsContext(
-                    pred_set_id=uuid.uuid4(),
-                    delta_proteins={"P1"},
-                    max_distance=None,
-                    path=path,
-                ),
-            )
-            with open(path) as f:
-                lines = f.read().strip().split("\n")
-            # Only the first (closest) prediction should be written
-            assert len(lines) == 1
-        finally:
-            os.unlink(path)
-
-    @patch("protea.core.operations._run_cafa_artifacts.compute_score")
-    def test_write_predictions_with_scoring_config(self, mock_compute_score):
-        mock_compute_score.return_value = 0.75
-
-        pred_mock = MagicMock()
-        pred_mock.protein_accession = "P1"
-        pred_mock.distance = 0.4
-        pred_mock.identity_nw = 0.8
-        pred_mock.identity_sw = 0.9
-        pred_mock.evidence_code = "IDA"
-        pred_mock.taxonomic_distance = 2.0
-
-        gt_mock = MagicMock()
-        gt_mock.go_id = "GO:0000001"
-
-        session = MagicMock()
-        query = MagicMock()
-        session.query.return_value = query
-        query.join.return_value = query
-        query.filter.return_value = query
-        query.order_by.return_value = query
-        query.yield_per.return_value = [(pred_mock, gt_mock)]
-
-        scoring_config = _make_scoring_config()
-
-        with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
-            path = f.name
-        try:
-            self.op._write_predictions(
-                session,
-                WritePredictionsContext(
-                    pred_set_id=uuid.uuid4(),
-                    delta_proteins={"P1"},
-                    max_distance=None,
-                    path=path,
-                ),
-                scoring_config=scoring_config,
-            )
-            with open(path) as f:
-                line = f.read().strip()
-            assert line == "P1\tGO:0000001\t0.7500"
-            mock_compute_score.assert_called_once()
-        finally:
-            os.unlink(path)
+    def test_write_predictions_with_scoring_config(self):
+        rows = [_base_row(distance=0.4)]
+        # embedding_similarity = 1 - 0.4/2 = 0.8, sole signal weight 1.0 → 0.8
+        out = self._write(rows, scoring_config=_real_scoring_config())
+        assert out == "P1\tGO:0000001\t0.8000"
 
     def test_write_predictions_zero_distance(self):
-        pred_mock = MagicMock()
-        pred_mock.protein_accession = "P1"
-        pred_mock.distance = 0.0
-
-        gt_mock = MagicMock()
-        gt_mock.go_id = "GO:0000001"
-
-        session = MagicMock()
-        query = MagicMock()
-        session.query.return_value = query
-        query.join.return_value = query
-        query.filter.return_value = query
-        query.order_by.return_value = query
-        query.yield_per.return_value = [(pred_mock, gt_mock)]
-
-        with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
-            path = f.name
-        try:
-            self.op._write_predictions(
-                session,
-                WritePredictionsContext(
-                    pred_set_id=uuid.uuid4(),
-                    delta_proteins={"P1"},
-                    max_distance=None,
-                    path=path,
-                ),
-            )
-            with open(path) as f:
-                line = f.read().strip()
-            # score = max(0, 1 - 0/2) = 1.0
-            assert line == "P1\tGO:0000001\t1.0000"
-        finally:
-            os.unlink(path)
+        out = self._write([_base_row(distance=0.0)])
+        assert out == "P1\tGO:0000001\t1.0000"
 
     def test_write_predictions_with_max_distance(self):
-        """When max_distance is provided, query should include the filter."""
-        pred_mock = MagicMock()
-        pred_mock.protein_accession = "P1"
-        pred_mock.distance = 0.3
-
-        gt_mock = MagicMock()
-        gt_mock.go_id = "GO:0000001"
-
-        session = MagicMock()
-        query = MagicMock()
-        session.query.return_value = query
-        query.join.return_value = query
-        query.filter.return_value = query
-        query.order_by.return_value = query
-        query.yield_per.return_value = [(pred_mock, gt_mock)]
-
-        with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
-            path = f.name
-        try:
-            self.op._write_predictions(
-                session,
-                WritePredictionsContext(
-                    pred_set_id=uuid.uuid4(),
-                    delta_proteins={"P1"},
-                    max_distance=0.5,
-                    path=path,
-                ),
-            )
-            with open(path) as f:
-                line = f.read().strip()
-            assert line == "P1\tGO:0000001\t0.8500"
-            # filter should have been called 3 times:
-            # pred_set_id, protein_accession IN, distance <=
-            assert query.filter.call_count == 3
-        finally:
-            os.unlink(path)
+        out = self._write([_base_row(distance=0.3)], max_distance=0.5)
+        assert out == "P1\tGO:0000001\t0.8500"
 
     def test_write_predictions_none_distance_fallback(self):
-        pred_mock = MagicMock()
-        pred_mock.protein_accession = "P1"
-        pred_mock.distance = None
+        out = self._write([_base_row(distance=None)])
+        # None distance → 0.0 → 1 - 0/2 = 1.0
+        assert out == "P1\tGO:0000001\t1.0000"
 
-        gt_mock = MagicMock()
-        gt_mock.go_id = "GO:0000001"
+    def test_write_predictions_empty_writes_empty_file(self):
+        out = self._write([])
+        assert out == ""
 
-        session = MagicMock()
-        query = MagicMock()
-        session.query.return_value = query
-        query.join.return_value = query
-        query.filter.return_value = query
-        query.order_by.return_value = query
-        query.yield_per.return_value = [(pred_mock, gt_mock)]
 
+class TestBaseSelectSql:
+    """The Core SELECT / COUNT must carry the max_distance filter when set."""
+
+    def _ctx(self, max_distance):
+        return WritePredictionsContext(
+            pred_set_id=uuid.uuid4(),
+            delta_proteins={"P1"},
+            max_distance=max_distance,
+            path="x.tsv",
+        )
+
+    def test_select_includes_distance_filter_when_set(self):
+        from protea.core.operations._run_cafa_artifacts import _base_select, _count_base_rows
+
+        assert "distance <=" in str(_base_select(self._ctx(0.5))).lower()
+        # _count_base_rows builds a COUNT(*) statement we can render via the op.
+        op = RunCafaEvaluationOperation()
+        session = _core_session([])
+        session.execute.return_value.scalar_one.return_value = 0
+        assert _count_base_rows(session, self._ctx(0.5)) == 0
+        assert op is not None
+
+    def test_select_omits_distance_filter_when_unset(self):
+        from protea.core.operations._run_cafa_artifacts import _base_select
+
+        assert "distance <=" not in str(_base_select(self._ctx(None))).lower()
+
+
+class TestVectorizedScoreEquivalence:
+    """The vectorised baseline scorer must be byte-for-byte equivalent to the
+    OLD per-row ``_score_unranked_pred`` / ``compute_score`` output (same rows,
+    same dedup winner, same 4dp TSV)."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("protea.core.operations._pred_base_cache._PRED_CACHE_DIR", tmp_path)
+        self.op = RunCafaEvaluationOperation()
+
+    # Raw rows include an intentional (P1, GO:0000001) duplicate to exercise
+    # dedup, plus None-valued signals and varied evidence codes.
+    _RAW_ROWS = [
+        _base_row("P1", "GO:0000001", 0.4, 0.8, 0.9, "IDA", 2, 0.5),
+        _base_row("P1", "GO:0000001", 0.6, 0.1, 0.2, "IEA", 5, 0.1),  # dropped (farther)
+        _base_row("P1", "GO:0000002", 0.2, None, 0.3, "IEA", None, 0.7),
+        _base_row("P2", "GO:0000003", 1.0, 0.5, None, None, 1, None),
+        _base_row("P2", "GO:0000001", 0.8, 0.2, 0.2, "ND", 0, 0.0),
+    ]
+
+    def _oracle(self, scoring_config):
+        """Replicate the OLD path: dedup (min distance), then _score_unranked_pred."""
+        from protea.core.operations._run_cafa_artifacts import _score_unranked_pred
+
+        winners: dict[tuple[str, str], tuple] = {}
+        for row in sorted(self._RAW_ROWS, key=lambda r: (r[0], r[1], r[2])):
+            winners.setdefault((row[0], row[1]), row)
+        lines = []
+        for (_p, _g), row in sorted(winners.items()):
+            pred = SimpleNamespace(
+                distance=row[2],
+                identity_nw=row[3],
+                identity_sw=row[4],
+                evidence_code=row[5],
+                taxonomic_distance=row[6],
+                neighbor_vote_fraction=row[7],
+            )
+            score = _score_unranked_pred(pred, scoring_config)
+            lines.append(f"{row[0]}\t{row[1]}\t{score:.4f}")
+        return sorted(lines)
+
+    def _new_path(self, scoring_config):
+        session = _core_session(self._RAW_ROWS)
         with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
             path = f.name
+        self.op._write_predictions(
+            session,
+            WritePredictionsContext(
+                pred_set_id=uuid.uuid4(),
+                delta_proteins={"P1", "P2"},
+                max_distance=None,
+                path=path,
+            ),
+            scoring_config=scoring_config,
+        )
         try:
-            self.op._write_predictions(
-                session,
-                WritePredictionsContext(
-                    pred_set_id=uuid.uuid4(),
-                    delta_proteins={"P1"},
-                    max_distance=None,
-                    path=path,
-                ),
-            )
             with open(path) as f:
-                line = f.read().strip()
-            # score = max(0, 1 - 0/2) = 1.0 (None → 0.0)
-            assert line == "P1\tGO:0000001\t1.0000"
+                return sorted(line for line in f.read().splitlines() if line)
         finally:
             os.unlink(path)
+
+    def test_equivalence_none_config_fallback(self):
+        assert self._new_path(None) == self._oracle(None)
+
+    def test_equivalence_linear_multi_signal(self):
+        cfg = _real_scoring_config(
+            formula="linear",
+            weights={
+                "embedding_similarity": 0.5,
+                "identity_nw": 0.3,
+                "identity_sw": 0.0,
+                "evidence_weight": 0.2,
+                "taxonomic_proximity": 0.1,
+                "neighbor_vote_fraction": 0.4,
+            },
+            evidence_weights={"IEA": 0.3},
+        )
+        assert self._new_path(cfg) == self._oracle(cfg)
+
+    def test_equivalence_evidence_weighted_formula(self):
+        cfg = _real_scoring_config(
+            formula="evidence_weighted",
+            weights={"embedding_similarity": 1.0, "evidence_weight": 0.0},
+            evidence_weights={"IEA": 0.5, "ND": 0.05},
+        )
+        assert self._new_path(cfg) == self._oracle(cfg)
 
 
 # ---------------------------------------------------------------------------

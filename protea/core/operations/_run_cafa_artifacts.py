@@ -15,18 +15,38 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+import numpy as np
 import requests
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from protea.core.operations import _pred_base_cache
 from protea.core.operations._run_cafa_helpers import (
     _NS_LABELS,
     _patch_query_known_features,
     _record_from_pred,
 )
-from protea.core.scoring import compute_score
+from protea.core.scoring import compute_score, evidence_weight
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
-from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
+from protea.infrastructure.orm.models.embedding.scoring_config import (
+    FORMULA_EVIDENCE_WEIGHTED,
+    ScoringConfig,
+)
+
+# Columns the baseline (no-reranker) scorer reads off each prediction. Fetched
+# as a Core columnar query (never 1.2M ORM objects), deduped to the
+# lowest-distance row per (protein, go_id), then vectorised.
+_BASE_SCORE_COLS: tuple[str, ...] = (
+    "protein_accession",
+    "go_id",
+    "distance",
+    "identity_nw",
+    "identity_sw",
+    "evidence_code",
+    "taxonomic_distance",
+    "neighbor_vote_fraction",
+)
 
 
 @dataclass(frozen=True)
@@ -179,24 +199,134 @@ def write_predictions(
             known_gos=known_gos,
         )
         return
-    q = (
-        session.query(GOPrediction, GOTerm)
+    base = _pred_base_cache.load_or_build_base(
+        ctx.pred_set_id,
+        ctx.max_distance,
+        ctx.delta_proteins,
+        count_fn=lambda: _count_base_rows(session, ctx),
+        build_fn=lambda: _build_base_frame(session, ctx),
+    )
+    _write_scored_base(base, scoring_config, ctx.path)
+
+
+def _base_select(ctx: WritePredictionsContext) -> Any:
+    """Core columnar SELECT of the baseline scoring inputs for ``ctx``."""
+    stmt = (
+        select(
+            GOPrediction.protein_accession,
+            GOTerm.go_id,
+            GOPrediction.distance,
+            GOPrediction.identity_nw,
+            GOPrediction.identity_sw,
+            GOPrediction.evidence_code,
+            GOPrediction.taxonomic_distance,
+            GOPrediction.neighbor_vote_fraction,
+        )
         .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
-        .filter(GOPrediction.prediction_set_id == ctx.pred_set_id)
-        .filter(GOPrediction.protein_accession.in_(ctx.delta_proteins))
+        .where(GOPrediction.prediction_set_id == ctx.pred_set_id)
+        .where(GOPrediction.protein_accession.in_(ctx.delta_proteins))
     )
     if ctx.max_distance is not None:
-        q = q.filter(GOPrediction.distance <= ctx.max_distance)
-    q = q.order_by(GOPrediction.protein_accession, GOTerm.go_id, GOPrediction.distance)
-    seen: set[tuple[str, str]] = set()
-    with open(ctx.path, "w") as f:
-        for pred, gt in q.yield_per(1000):
-            key = (pred.protein_accession, gt.go_id)
-            if key in seen:
-                continue
-            seen.add(key)
-            score = _score_unranked_pred(pred, scoring_config)
-            f.write(f"{pred.protein_accession}\t{gt.go_id}\t{score:.4f}\n")
+        stmt = stmt.where(GOPrediction.distance <= ctx.max_distance)
+    return stmt
+
+
+def _count_base_rows(session: Session, ctx: WritePredictionsContext) -> int:
+    """Fresh ``COUNT(*)`` over the base filter (cheap cache-invalidation probe)."""
+    stmt = (
+        select(func.count())
+        .select_from(GOPrediction)
+        .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
+        .where(GOPrediction.prediction_set_id == ctx.pred_set_id)
+        .where(GOPrediction.protein_accession.in_(ctx.delta_proteins))
+    )
+    if ctx.max_distance is not None:
+        stmt = stmt.where(GOPrediction.distance <= ctx.max_distance)
+    return int(session.execute(stmt).scalar_one())
+
+
+def _build_base_frame(session: Session, ctx: WritePredictionsContext) -> tuple[Any, int]:
+    """Fetch + dedup the base frame; return ``(deduped_df, raw_row_count)``.
+
+    Dedup keeps the lowest-distance row per ``(protein, go_id)`` (a stable
+    sort by ``protein_accession, go_id, distance`` then first), matching the
+    ORM path's ``order_by(... distance).first()`` winner and leaving the
+    output ordered by ``(protein, go_id)``.
+    """
+    import pandas as pd
+
+    rows = session.execute(_base_select(ctx)).all()
+    df = pd.DataFrame.from_records([tuple(r) for r in rows], columns=list(_BASE_SCORE_COLS))
+    raw_count = int(len(df))
+    if raw_count:
+        df = (
+            df.sort_values(["protein_accession", "go_id", "distance"], kind="mergesort")
+            .drop_duplicates(subset=["protein_accession", "go_id"], keep="first")
+            .reset_index(drop=True)
+        )
+    return df, raw_count
+
+
+def _evidence_weight_array(codes: Any, overrides: dict[str, float] | None) -> np.ndarray:
+    """Vectorise :func:`evidence_weight` over the (object) evidence-code column."""
+    raw = list(codes)
+    uniq = {c if isinstance(c, str) else None for c in raw}
+    wmap = {c: evidence_weight(c, overrides=overrides) for c in uniq}
+    return np.array([wmap[c if isinstance(c, str) else None] for c in raw], dtype=np.float64)
+
+
+def _vectorized_scores(df: Any, scoring_config: ScoringConfig | None) -> np.ndarray:
+    """Exact, vectorised equivalent of per-row :func:`_score_unranked_pred`.
+
+    Returns the *unrounded* base score array; callers apply ``round(_, 6)``
+    only for the ``ScoringConfig`` path (the ``None`` fallback is unrounded,
+    matching ``compute_score`` / the distance fallback respectively).
+    """
+    distance = df["distance"].to_numpy(dtype=np.float64)
+    if scoring_config is None:
+        return np.maximum(0.0, 1.0 - np.where(np.isnan(distance), 0.0, distance) / 2.0)
+
+    weights = scoring_config.weights
+    ev_overrides = scoring_config.evidence_weights or None
+    ev_w = _evidence_weight_array(df["evidence_code"].tolist(), ev_overrides)
+    tax = df["taxonomic_distance"].to_numpy(dtype=np.float64)
+    signals: tuple[tuple[str, np.ndarray], ...] = (
+        ("embedding_similarity", np.where(np.isnan(distance), np.nan, 1.0 - distance / 2.0)),
+        ("identity_nw", df["identity_nw"].to_numpy(dtype=np.float64)),
+        ("identity_sw", df["identity_sw"].to_numpy(dtype=np.float64)),
+        ("evidence_weight", ev_w),
+        ("taxonomic_proximity", np.where(np.isnan(tax), np.nan, 1.0 / (1.0 + tax))),
+        ("neighbor_vote_fraction", df["neighbor_vote_fraction"].to_numpy(dtype=np.float64)),
+    )
+    total_w = np.zeros(len(df), dtype=np.float64)
+    weighted_sum = np.zeros(len(df), dtype=np.float64)
+    for key, values in signals:
+        w = float(weights.get(key, 0.0))
+        if w == 0.0:
+            continue
+        valid = ~np.isnan(values)
+        weighted_sum += np.where(valid, w * np.clip(values, 0.0, 1.0), 0.0)
+        total_w += np.where(valid, w, 0.0)
+    base = np.divide(weighted_sum, total_w, out=np.zeros(len(df)), where=total_w > 0.0)
+    if scoring_config.formula == FORMULA_EVIDENCE_WEIGHTED:
+        base = base * ev_w
+    return base
+
+
+def _write_scored_base(df: Any, scoring_config: ScoringConfig | None, path: str) -> None:
+    """Score the deduped base frame and write the 4dp ``protein\\tgo_id\\tscore`` TSV."""
+    if df.empty:
+        with open(path, "w"):
+            pass
+        return
+    scores = _vectorized_scores(df, scoring_config)
+    round6 = scoring_config is not None
+    proteins = df["protein_accession"].tolist()
+    go_ids = df["go_id"].tolist()
+    with open(path, "w") as f:
+        for i, (protein, go_id) in enumerate(zip(proteins, go_ids, strict=True)):
+            score = round(float(scores[i]), 6) if round6 else float(scores[i])
+            f.write(f"{protein}\t{go_id}\t{score:.4f}\n")
 
 
 def write_predictions_reranked(
