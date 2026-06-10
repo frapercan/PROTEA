@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { BenchmarkHeatmap } from "@/components/BenchmarkHeatmap";
+import { EvalProvenanceBadges } from "@/components/EvalProvenanceBadges";
 import { Skeleton } from "@/components/Skeleton";
 import { Tooltip } from "@/components/Tooltip";
 import { useUrlNumber, useUrlParam } from "@/lib/useUrlParam";
@@ -184,6 +185,10 @@ function rowsToCsv(
     "recall",
     "coverage",
     "n_proteins",
+    "frame",
+    "temporal_window",
+    "arms_enabled",
+    "leakage_role",
     "evaluation_set_id",
     "evaluation_result_id",
   ].join(",");
@@ -208,6 +213,15 @@ function rowsToCsv(
         r.recall ?? "",
         r.coverage ?? "",
         r.n_proteins ?? "",
+        r.frame ?? "",
+        r.temporal_window ?? "",
+        r.arms_enabled
+          ? Object.entries(r.arms_enabled)
+              .filter(([, on]) => on)
+              .map(([k]) => k)
+              .join("+")
+          : "",
+        r.leakage_role ?? "",
         r.evaluation_set_id,
         r.evaluation_result_id,
       ]
@@ -906,6 +920,15 @@ export default function BenchmarkPage() {
                               <span className="tabular-nums">K={best.k}</span>
                             </div>
                           </Link>
+                          {/* Method-surface provenance for the champion cell.
+                              hideWhenEmpty keeps the grid clean on legacy
+                              cells; the /evaluation page shows the explicit
+                              unknown state per result. */}
+                          <EvalProvenanceBadges
+                            provenance={best}
+                            hideWhenEmpty
+                            className="mt-1.5 justify-center"
+                          />
                         </td>
                       );
                     })}

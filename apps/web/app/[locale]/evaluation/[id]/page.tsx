@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { baseUrl } from "@/lib/api";
+import { EvalProvenanceBadges } from "@/components/EvalProvenanceBadges";
 
 type NsMetrics = {
   fmax: number;
@@ -25,6 +26,13 @@ type EvaluationResult = {
   reranker_config: Record<string, Record<string, string>> | null;
   job_id: string | null;
   created_at: string;
+  // Method-surface provenance (slice F-METHOD-EVAL-SURFACE). Optional:
+  // null on rows written before the columns existed; the badge strip then
+  // renders an explicit "unknown" state.
+  frame: string | null;
+  temporal_window: string | null;
+  arms_enabled: Record<string, boolean> | null;
+  leakage_role: string | null;
   results: Record<string, SettingResults>;
 };
 
@@ -241,10 +249,10 @@ export default function EvaluationDetailPage() {
                   {sortedResults.map((r) => {
                     const isHighlight = highlightId === r.id;
                     return (
+                      <Fragment key={r.id}>
                       <tr
-                        key={r.id}
                         ref={isHighlight ? highlightRef : null}
-                        className={`border-b text-slate-700 ${isHighlight ? "bg-amber-50 ring-2 ring-amber-300" : "hover:bg-slate-50"}`}
+                        className={`text-slate-700 ${isHighlight ? "bg-amber-50 ring-2 ring-amber-300" : "hover:bg-slate-50"}`}
                       >
                         <td className="px-3 py-2 font-mono text-xs" title={r.id}>
                           {shortId(r.id)}
@@ -304,6 +312,31 @@ export default function EvaluationDetailPage() {
                           }),
                         )}
                       </tr>
+                      {/* Provenance sub-row: frame / window / arms / leakage
+                          badges for this result. Always rendered (with an
+                          explicit "unknown" empty state) so a number is
+                          never shown without its scoring context. */}
+                      <tr className={`border-b ${isHighlight ? "bg-amber-50" : ""}`}>
+                        <td
+                          colSpan={4 + CATEGORIES.length * NAMESPACES.length}
+                          className="px-3 pb-2 pt-0"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                              {t("provenanceLabel", { default: "provenance" })}
+                            </span>
+                            <EvalProvenanceBadges
+                              provenance={{
+                                frame: r.frame,
+                                temporal_window: r.temporal_window,
+                                arms_enabled: r.arms_enabled,
+                                leakage_role: r.leakage_role,
+                              }}
+                            />
+                          </div>
+                        </td>
+                      </tr>
+                      </Fragment>
                     );
                   })}
                 </tbody>
