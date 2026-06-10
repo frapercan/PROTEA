@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import DateTime, ForeignKey, Index, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -49,6 +49,33 @@ class EvaluationResult(Base):
     (see docs/EVAL_LAFA_PARITY.md). The ``_w`` keys are populated only when a
     real IA file was supplied to cafaeval; with the uniform IC=1 fallback
     they collapse onto the unweighted values.
+
+    **Method-surface provenance** (slice F-METHOD-EVAL-SURFACE). Four
+    optional markers make every benchmark number on ``/benchmark`` and
+    ``/evaluation`` self-describing without joining back to the run that
+    produced it. All four are nullable with no server default, so legacy
+    rows and existing flows are untouched (they read back as ``None`` and
+    the UI shows an "unknown" empty state):
+
+    - ``frame``: the scoring frame the metrics live in. ``"lafa"`` marks
+      the parity-locked LAFA-frame harness (the leaderboard-comparable
+      number); ``"internal"`` marks the lab / full-GT frame. ``None`` for
+      rows scored before the frame was recorded.
+    - ``temporal_window``: the rolling-origin window label, e.g.
+      ``"SELECT_220_227"`` (selection window) or ``"FINAL_227_230"`` (the
+      report-once test window). Free text so new windows do not need a
+      schema change; ``"other"`` / ``None`` cover ad-hoc episodes.
+    - ``arms_enabled``: which method arms contributed, as a flag dict
+      (``{"knn": true, "reranker": true, "mlp_tower": false,
+      "interpro": false}``). A dict (not a bitmask) so the set of arms can
+      grow without a migration; ``None`` means the composition was not
+      recorded.
+    - ``leakage_role``: the leakage-hygiene role of this evaluation under
+      ADR D40. ``"select"`` = a result used for model / threshold
+      selection (must be on the SELECT window), ``"test"`` = the
+      report-once measurement on the held-out window, ``"probe"`` = an
+      exploratory read that must not feed selection. ``None`` for rows
+      that predate the protocol marker.
     """
 
     __tablename__ = "evaluation_result"
@@ -60,6 +87,17 @@ class EvaluationResult(Base):
             "ix_evaluation_result_eval_set_created_at",
             "evaluation_set_id",
             "created_at",
+        ),
+        # F-METHOD-EVAL-SURFACE: keep the frame + leakage-role vocabularies
+        # closed at the DB level without a native enum type (cheaper to
+        # extend later, mirrors ``ck_evaluation_set_window_role``).
+        CheckConstraint(
+            "frame IS NULL OR frame IN ('lafa', 'internal')",
+            name="ck_evaluation_result_frame",
+        ),
+        CheckConstraint(
+            "leakage_role IS NULL OR leakage_role IN ('select', 'test', 'probe')",
+            name="ck_evaluation_result_leakage_role",
         ),
     )
 
@@ -99,6 +137,13 @@ class EvaluationResult(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     results: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    # F-METHOD-EVAL-SURFACE provenance (all nullable, no server default so
+    # legacy rows and existing flows are unaffected). See the class
+    # docstring for the vocabulary of each field.
+    frame: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    temporal_window: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    arms_enabled: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    leakage_role: Mapped[str | None] = mapped_column(String(8), nullable=True)
 
     evaluation_set: Mapped[EvaluationSet] = relationship("EvaluationSet")
     prediction_set: Mapped[PredictionSet] = relationship("PredictionSet")

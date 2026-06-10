@@ -37,6 +37,12 @@ def evaluation_result_to_dict(r: EvaluationResult) -> dict[str, Any]:
         "reranker_config": r.reranker_config,
         "job_id": str(r.job_id) if r.job_id else None,
         "created_at": r.created_at.isoformat(),
+        # F-METHOD-EVAL-SURFACE provenance (read-through; ``None`` on legacy
+        # rows so the UI shows an "unknown" empty state).
+        "frame": r.frame,
+        "temporal_window": r.temporal_window,
+        "arms_enabled": r.arms_enabled,
+        "leakage_role": r.leakage_role,
         "results": r.results,
     }
 

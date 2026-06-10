@@ -1140,6 +1140,18 @@ export type BenchmarkRow = {
   fmax_std?: number | null;
   fmax_ci_low?: number | null;
   fmax_ci_high?: number | null;
+  /**
+   * Method-surface provenance (slice F-METHOD-EVAL-SURFACE). All four are
+   * optional and null on rows written before the columns existed; the UI
+   * renders an explicit "unknown" badge in that case. `frame` =
+   * lafa | internal scoring frame, `temporal_window` = rolling-origin band
+   * label (e.g. SELECT_220_227 / FINAL_227_230), `arms_enabled` = flag dict
+   * of contributing arms, `leakage_role` = select | test | probe (ADR D40).
+   */
+  frame?: string | null;
+  temporal_window?: string | null;
+  arms_enabled?: Record<string, boolean> | null;
+  leakage_role?: string | null;
 };
 
 export type BenchmarkBestCell = {
@@ -1162,6 +1174,11 @@ export type BenchmarkBestCell = {
   stage: string;
   evaluation_result_id: string;
   evaluation_set_id: string;
+  /** Method-surface provenance for the winning cell (see BenchmarkRow). */
+  frame?: string | null;
+  temporal_window?: string | null;
+  arms_enabled?: Record<string, boolean> | null;
+  leakage_role?: string | null;
 };
 
 export type BenchmarkEvalSet = {
