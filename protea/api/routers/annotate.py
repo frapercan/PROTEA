@@ -295,7 +295,9 @@ def _parse_and_dedup_records(content: str) -> list[tuple[str, str, str]]:
     return records
 
 
-def _upsert_query_set(session: Session, name: str, records: list[tuple[str, str, str]]) -> Any:
+def _upsert_query_set(
+    session: Session, name: str, records: list[tuple[str, str, str]]
+) -> uuid.UUID:
     """Upsert ``Sequence`` rows for the FASTA records and create a ``QuerySet``
     with one ``QuerySetEntry`` per record. Returns the new ``QuerySet`` id."""
     hashes = [Sequence.compute_hash(seq) for _, seq, _ in records]
@@ -316,7 +318,7 @@ def _upsert_query_set(session: Session, name: str, records: list[tuple[str, str,
 
 def _resolve_dispatch_resources(
     session: Session, cached_config_id: uuid.UUID | None = None
-) -> tuple[Any, Any, Any, Any]:
+) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID | None]:
     """Pick the best embedding config (creating the default ESM-2 if none exists),
     the newest AnnotationSet + OntologySnapshot, and the latest RerankerModel.
 
@@ -357,7 +359,9 @@ def _resolve_dispatch_resources(
     return config.id, ann.id, snap.id, reranker_id
 
 
-def _enqueue_embed_job(session: Session, config_id: Any, query_set_id: Any) -> Any:
+def _enqueue_embed_job(
+    session: Session, config_id: uuid.UUID, query_set_id: uuid.UUID
+) -> uuid.UUID:
     """Insert a ``compute_embeddings`` Job row + its ``job.created`` JobEvent.
 
     Returns the new job id; the AMQP publish happens after the session commits."""
