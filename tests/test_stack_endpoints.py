@@ -53,6 +53,16 @@ class TestStackEndpoint:
             assert required <= set(repo.keys())
             assert repo["github_url"].startswith("https://github.com/")
 
+    def test_each_repo_carries_spanish_summary(self, client: TestClient) -> None:
+        # summary_es backs the /es locale; the frontend falls back to the
+        # English summary when it is missing, but the registry ships one
+        # per repo so the Spanish chrome and the table stay consistent.
+        body = client.get("/stack").json()
+        for repo in body["repos"]:
+            assert "summary_es" in repo
+            assert repo["summary_es"]
+            assert repo["summary_es"] != repo["summary"]
+
 
 def _make_fake_client_builder(
     fake_get: Any, captured_headers: dict[str, str] | None = None

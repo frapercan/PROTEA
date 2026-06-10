@@ -70,6 +70,13 @@ class RepoEntry(BaseModel):
         ),
     )
     summary: str = Field(..., description="One-line description shown on the stack landing page.")
+    summary_es: str | None = Field(
+        default=None,
+        description=(
+            "Spanish translation of ``summary`` shown on the ``/es`` "
+            "locale; ``None`` falls back to the English ``summary``."
+        ),
+    )
     github_url: str = Field(..., description="Canonical ``https://github.com/...`` URL.")
     docs_url: str | None = Field(
         default=None,
