@@ -10,6 +10,14 @@ import { Skeleton } from "@/components/Skeleton";
 import { Tooltip } from "@/components/Tooltip";
 import { useUrlNumber, useUrlParam } from "@/lib/useUrlParam";
 import {
+  bestPerCellFromRows,
+  curateBestCells,
+  curateRows,
+  evalSetIdsWithRows,
+  lafaCellKeys,
+  perTaskFromRows,
+} from "@/lib/benchmarkCuration";
+import {
   getBenchmarkEmbeddings,
   getBenchmarkMatrix,
   type BenchmarkBestCell,
@@ -151,10 +159,6 @@ function stageLabel(stages: BenchmarkStage[], name: string): string {
   return stages.find((s) => s.name === name)?.label ?? name;
 }
 
-function evalSetLabel(evalSets: BenchmarkEvalSet[], id: string): string {
-  return evalSets.find((e) => e.id === id)?.label ?? `${id.slice(0, 8)}…`;
-}
-
 /** Pick the initial stage once the catalog is loaded. Backend already
  *  returns stages sorted by YAML preferred_default_stages, so the first
  *  entry IS the preferred one if it has data. */
@@ -271,6 +275,14 @@ export default function BenchmarkPage() {
   const [lineageRaw, setLineageRaw] = useUrlParam("lineage", null);
   const lineage = (lineageRaw ?? "all") as LineageChipKey;
   const setLineage = (v: LineageChipKey) => setLineageRaw(v === "all" ? null : v);
+  // Reversible curation (slice F-METHOD-EVAL-SURFACE). The default view hides
+  // diagnostic probe rows and legacy internal-frame rows superseded by a
+  // current LAFA-frame result; "Show all" reveals everything. Encoded as the
+  // missing param when off so a copied default URL stays clean. No data is
+  // dropped: this is a pure presentation filter on rows already in hand.
+  const [showAllRaw, setShowAllRaw] = useUrlParam("all", null);
+  const showAll = showAllRaw === "1";
+  const setShowAll = (v: boolean) => setShowAllRaw(v ? "1" : null);
   // Default view: heatmap small-multiples (#81). The full numeric matrix is
   // still one click away under the toggle for export workflows.
   const [viewMode, setViewMode] = useState<"heatmap" | "table">("heatmap");
@@ -372,37 +384,61 @@ export default function BenchmarkPage() {
       .catch((e) => setError(e.message));
   }, [stage, evalSetId, selectedK]);
 
-  const rowIndex = useMemo(
-    () => (matrix ? indexRows(matrix.rows) : new Map<string, BenchmarkRow>()),
-    [matrix],
+  // Reversible curation: drop probe + superseded-internal rows in the default
+  // view. Everything downstream (table, heatmap, leaderboards, headline) is
+  // recomputed from this curated set so the page can never point at a row it
+  // no longer shows. ``curation.rows`` === ``matrix.rows`` when showAll.
+  const curation = useMemo(
+    () => curateRows(matrix?.rows ?? [], showAll),
+    [matrix, showAll],
   );
+  const curatedRows = curation.rows;
 
+  // LAFA-frame cell keys come from the full row set so the superseded-internal
+  // test for the global leaderboard sees every frame, not just curated rows.
+  const lafaKeys = useMemo(() => lafaCellKeys(matrix?.rows ?? []), [matrix]);
+
+  const rowIndex = useMemo(() => indexRows(curatedRows), [curatedRows]);
+
+  // In-selection leaderboard recomputed from curated rows (mirrors the backend
+  // max-primary-per-cell), so a hidden probe row never wins a cell by default.
   const bestPerCell = useMemo(
-    () => (matrix ? indexBestPerCell(matrix.best_per_cell) : new Map<string, BenchmarkBestCell>()),
-    [matrix],
-  );
-
-  const bestPerCellGlobal = useMemo(
     () =>
       matrix
-        ? indexBestPerCell(matrix.best_per_cell_global ?? [])
+        ? indexBestPerCell(
+            bestPerCellFromRows(curatedRows, matrix.categories, matrix.aspects),
+          )
         : new Map<string, BenchmarkBestCell>(),
-    [matrix],
+    [matrix, curatedRows],
+  );
+
+  // Global champions ignore stage/K, so they cannot be recomputed from the
+  // (stage-filtered) row set; instead the probe / superseded entries are
+  // filtered out of the server list in the default view.
+  const bestPerCellGlobal = useMemo(
+    () =>
+      indexBestPerCell(
+        curateBestCells(matrix?.best_per_cell_global ?? [], showAll, lafaKeys),
+      ),
+    [matrix, showAll, lafaKeys],
   );
 
   const embeddingsWithData = useMemo(() => {
-    if (!embeddings || !matrix) return new Set<string>();
-    return new Set(matrix.embedding_config_ids);
-  }, [embeddings, matrix]);
+    if (!embeddings) return new Set<string>();
+    return new Set(curatedRows.map((r) => r.embedding_config_id));
+  }, [embeddings, curatedRows]);
 
-  // Honest headline: per-task mean ± 95% CI across all models in the current
-  // selection (FIX-METRIC-IA), keyed by (category|aspect). `per_task`
-  // defaults to [] so an older backend degrades to the best-cell view.
+  // Honest headline: per-task mean ± 95% CI recomputed across the curated
+  // models in the current selection (FIX-METRIC-IA), keyed by (category|aspect)
+  // so probe / superseded rows never inflate the mean.
   const perTaskIndex = useMemo(() => {
     const out = new Map<string, PerTaskAggregate>();
-    for (const t of matrix?.per_task ?? []) out.set(`${t.category}|${t.aspect}`, t);
+    if (!matrix) return out;
+    for (const t of perTaskFromRows(curatedRows, matrix.categories, matrix.aspects)) {
+      out.set(`${t.category}|${t.aspect}`, t);
+    }
     return out;
-  }, [matrix]);
+  }, [matrix, curatedRows]);
 
   if (error) {
     return (
@@ -484,9 +520,21 @@ export default function BenchmarkPage() {
     );
   }
 
-  const hasData = matrix.rows.length > 0;
+  const hasData = curatedRows.length > 0;
+  // True when curation hid every row but the raw matrix still has data — the
+  // empty state then nudges the user to the "Show all" escape hatch instead of
+  // implying the benchmark is empty.
+  const curatedToEmpty = !hasData && matrix.rows.length > 0;
   const stageList = catalog.stages.length > 0 ? catalog.stages : matrix.stages;
-  const evalSetList = catalog.evalSets.length > 0 ? catalog.evalSets : matrix.evaluation_sets;
+  const allEvalSetList = catalog.evalSets.length > 0 ? catalog.evalSets : matrix.evaluation_sets;
+  // Hide eval sets that have no curated rows (probe / test-only sets) from the
+  // selector in the default view; the currently selected set is always kept so
+  // the dropdown never loses its own value. Reversible via "Show all".
+  const curatedEsIds = evalSetIdsWithRows(curatedRows);
+  const evalSetList = showAll
+    ? allEvalSetList
+    : allEvalSetList.filter((es) => curatedEsIds.has(es.id) || es.id === evalSetId);
+  const hiddenEvalSetCount = allEvalSetList.length - evalSetList.length;
   const allCategories = catalog.categories.length > 0 ? catalog.categories : matrix.categories;
   const aspects = catalog.aspects.length > 0 ? catalog.aspects : matrix.aspects;
   const currentStageLabel = stageLabel(stageList, stage);
@@ -506,7 +554,7 @@ export default function BenchmarkPage() {
   // category was filtered out. Identical to chipCats on the happy path,
   // but defaults to "all known" when the fallback fires above.
   const effectiveCatSet = new Set(effectiveCategories);
-  const filteredRows = matrix.rows.filter((r) => effectiveCatSet.has(r.category));
+  const filteredRows = curatedRows.filter((r) => effectiveCatSet.has(r.category));
 
   // Active eval set banner: when "all" is selected and there's only one set,
   // show that one; when a specific one is selected, show its full metadata.
@@ -533,11 +581,34 @@ export default function BenchmarkPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          {/* Reversible curation toggle. Default view hides probe + legacy
+              superseded-internal rows; one click reveals everything. */}
+          <Tooltip
+            text={
+              showAll
+                ? "Showing every row, including diagnostic probes and legacy internal-frame results. Click to return to the curated default."
+                : "Curated default: diagnostic probe rows and legacy internal-frame results superseded by a current LAFA-frame number are hidden. Click to show all."
+            }
+          >
+            <button
+              type="button"
+              onClick={() => setShowAll(!showAll)}
+              aria-pressed={showAll}
+              data-testid="benchmark-show-all"
+              className={`rounded-md border px-3 py-1.5 text-sm transition-colors ${
+                showAll
+                  ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                  : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              {showAll ? "Showing all" : "Show all (incl. legacy / probes)"}
+            </button>
+          </Tooltip>
           <button
             disabled={!hasData}
             onClick={() =>
               downloadCsv(
-                `benchmark_${stage}${lineage !== "all" ? `_${lineage}` : ""}.csv`,
+                `benchmark_${stage}${lineage !== "all" ? `_${lineage}` : ""}${showAll ? "_all" : ""}.csv`,
                 rowsToCsv(embeddings, filteredRows, stage),
               )
             }
@@ -547,6 +618,67 @@ export default function BenchmarkPage() {
           </button>
         </div>
       </header>
+
+      {/* Curation banner: explains what the default view hides and offers the
+          reveal. Only shown when curation actually removed something so the
+          clean default stays uncluttered (and stays silent mid-recompute when
+          the provenance columns are still null). */}
+      {!showAll && (curation.hiddenTotal > 0 || hiddenEvalSetCount > 0) && (
+        <div
+          className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"
+          role="status"
+          data-testid="benchmark-curation-banner"
+        >
+          <span>
+            Curated view ·{" "}
+            {curation.hiddenProbe > 0 && (
+              <span>
+                <strong>{curation.hiddenProbe}</strong> probe
+                {curation.hiddenProbe === 1 ? "" : "s"}
+              </span>
+            )}
+            {curation.hiddenProbe > 0 && curation.hiddenLegacy > 0 && " · "}
+            {curation.hiddenLegacy > 0 && (
+              <span>
+                <strong>{curation.hiddenLegacy}</strong> legacy internal-frame
+              </span>
+            )}
+            {(curation.hiddenTotal > 0) && hiddenEvalSetCount > 0 && " · "}
+            {hiddenEvalSetCount > 0 && (
+              <span>
+                <strong>{hiddenEvalSetCount}</strong> eval set
+                {hiddenEvalSetCount === 1 ? "" : "s"}
+              </span>
+            )}{" "}
+            hidden. Nothing is deleted.
+          </span>
+          <button
+            type="button"
+            onClick={() => setShowAll(true)}
+            className="font-semibold text-blue-600 hover:text-blue-800 underline underline-offset-2"
+          >
+            Show all
+          </button>
+        </div>
+      )}
+      {showAll && (
+        <div
+          className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+          role="status"
+        >
+          <span>
+            Showing <strong>all</strong> rows, including diagnostic probes and
+            legacy internal-frame results that the curated default hides.
+          </span>
+          <button
+            type="button"
+            onClick={() => setShowAll(false)}
+            className="font-semibold text-amber-700 hover:text-amber-900 underline underline-offset-2"
+          >
+            Back to curated
+          </button>
+        </div>
+      )}
 
       {/* Eval set context banner */}
       {activeEvalSet && (
@@ -727,12 +859,14 @@ export default function BenchmarkPage() {
 
         <div className="text-xs text-slate-600 ml-auto self-end">
           {filteredRows.length} cells
-          {filteredRows.length !== matrix.rows.length && (
-            <span className="text-slate-400"> / {matrix.total}</span>
+          {filteredRows.length !== curatedRows.length && (
+            <span className="text-slate-400"> / {curatedRows.length}</span>
+          )}
+          {!showAll && curation.hiddenTotal > 0 && (
+            <span className="text-slate-400"> ({matrix.total} all)</span>
           )}{" "}
-          · {matrix.embedding_config_ids.length} embeddings ·{" "}
-          {matrix.evaluation_sets.length} eval set
-          {matrix.evaluation_sets.length === 1 ? "" : "s"}
+          · {embeddingsWithData.size} embeddings · {evalSetList.length} eval set
+          {evalSetList.length === 1 ? "" : "s"}
         </div>
       </div>
 
@@ -840,7 +974,7 @@ export default function BenchmarkPage() {
 
       {/* Global champions: best primary metric per (cat, asp) ignoring stage/K
           filters. Stable across filter changes — anchors the best-cell read. */}
-      {matrix.best_per_cell_global && matrix.best_per_cell_global.length > 0 && (
+      {bestPerCellGlobal.size > 0 && (
         <section className="rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50/60 via-white to-violet-50/40 shadow-sm p-4 sm:p-5">
           <div className="flex items-baseline justify-between mb-3 flex-wrap gap-2">
             <h2 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
@@ -941,7 +1075,7 @@ export default function BenchmarkPage() {
       )}
 
       {/* Leaderboard: best primary metric per (cat, asp) across every model & stage */}
-      {matrix.best_per_cell.length > 0 && (
+      {bestPerCell.size > 0 && (
         <section className="rounded-xl border bg-white shadow-sm p-4">
           <div className="flex items-baseline justify-between mb-3">
             <h2 className="text-sm font-semibold text-slate-800">
@@ -1069,14 +1203,33 @@ export default function BenchmarkPage() {
       {/* Matrix view */}
       {!hasData ? (
         <section className="rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 p-12 text-center">
-          <p className="text-slate-500 text-sm">
-            No evaluation results for{" "}
-            <span className="font-semibold">{currentStageLabel}</span> yet.
-          </p>
-          <p className="text-slate-600 text-xs mt-2">
-            Run <code>run_cafa_evaluation</code> for an embedding to populate
-            this cell of the matrix.
-          </p>
+          {curatedToEmpty ? (
+            <>
+              <p className="text-slate-500 text-sm">
+                Every result for{" "}
+                <span className="font-semibold">{currentStageLabel}</span> is a
+                probe or a legacy internal-frame run, hidden by the curated view.
+              </p>
+              <button
+                type="button"
+                onClick={() => setShowAll(true)}
+                className="mt-3 inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100"
+              >
+                Show all (incl. legacy / probes)
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-slate-500 text-sm">
+                No evaluation results for{" "}
+                <span className="font-semibold">{currentStageLabel}</span> yet.
+              </p>
+              <p className="text-slate-600 text-xs mt-2">
+                Run <code>run_cafa_evaluation</code> for an embedding to populate
+                this cell of the matrix.
+              </p>
+            </>
+          )}
         </section>
       ) : viewMode === "heatmap" ? (
         <BenchmarkHeatmap
