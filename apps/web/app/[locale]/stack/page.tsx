@@ -147,11 +147,7 @@ export default function StackPage() {
                     <a href={`${r.github_url}/issues`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
                       Issues
                     </a>
-                    {r.local_docs_path ? (
-                      <a href={r.local_docs_path} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
-                        {t("linkDocsLocal")}
-                      </a>
-                    ) : r.docs_url ? (
+                    {r.docs_url ? (
                       <a href={r.docs_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
                         {t("linkDocs")}
                       </a>

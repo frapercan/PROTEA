@@ -1301,25 +1301,13 @@
                 "type": "null"
               }
             ],
-            "description": "Sphinx docs URL when published; ``None`` for sibling repos without docs.",
+            "description": "Public ReadTheDocs URL for this repo; ``None`` if not yet published.",
             "title": "Docs Url"
           },
           "github_url": {
             "description": "Canonical ``https://github.com/...`` URL.",
             "title": "Github Url",
             "type": "string"
-          },
-          "local_docs_path": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Path under the local docs portal where this repo's Sphinx build is served (when present in the worktree).",
-            "title": "Local Docs Path"
           },
           "name": {
             "description": "Display name (human-readable, e.g. ``PROTEA``).",
@@ -9520,7 +9508,7 @@
     },
     "/v1/stack": {
       "get": {
-        "description": "Return the eight-repo PROTEA stack registry.\n\nSingle source of truth: ``docs/source/_data/stack.yaml`` in this\nrepo. Edit that file (and run ``scripts/sync_stack.py``) to refresh\nthe README block and the Sphinx page in the same commit.\n\nPer-repo ``local_docs_path`` and the top-level ``thesis_pdf_url``\nare computed from the filesystem at request time: the field is\npopulated whenever the corresponding artefact has been built into\n``docs/build/<slug>/html/`` or ``apps/web/public/thesis.pdf``\nrespectively, and is ``None`` otherwise.",
+        "description": "Return the eight-repo PROTEA stack registry.\n\nSingle source of truth: ``docs/source/_data/stack.yaml`` in this\nrepo. Edit that file (and run ``scripts/sync_stack.py``) to refresh\nthe README block and the Sphinx page in the same commit.\n\nEach repo's ``docs_url`` resolves to its public ReadTheDocs site\n(``https://<project>.readthedocs.io/``). The top-level\n``thesis_pdf_url`` is computed from the filesystem at request time:\nit is populated whenever ``apps/web/public/thesis.pdf`` exists and is\n``None`` otherwise.",
         "operationId": "get_stack_v1_stack_get",
         "responses": {
           "200": {

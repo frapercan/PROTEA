@@ -1323,7 +1323,6 @@
     "noOpenPulls": "No open pull requests in any repository. Tabula rasa.",
     "loadingPulls": "Loading pull requests...",
     "linkDocs": "Docs",
-    "linkDocsLocal": "本地文档",
     "thesisHeading": "PROTEA 学位论文",
     "thesisDescription": "已编译的论文 PDF 由该部署提供。",
     "thesisOpen": "打开 PDF"

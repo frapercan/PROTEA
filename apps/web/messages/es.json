@@ -1323,7 +1323,6 @@
     "noOpenPulls": "No hay pull requests abiertas en ningún repositorio.",
     "loadingPulls": "Cargando pull requests...",
     "linkDocs": "Docs",
-    "linkDocsLocal": "Docs locales",
     "thesisHeading": "Tesis PROTEA",
     "thesisDescription": "El PDF compilado de la tesis se sirve desde este despliegue.",
     "thesisOpen": "Abrir PDF"

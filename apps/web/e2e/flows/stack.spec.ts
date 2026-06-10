@@ -17,9 +17,8 @@ const STACK_RESPONSE = {
       summary: "Main embedding-based annotation pipeline.",
       summary_es: "Pipeline principal de anotación basada en embeddings.",
       github_url: "https://github.com/frapercan/PROTEA",
-      docs_url: null,
+      docs_url: "https://protea.readthedocs.io/",
       package_url: null,
-      local_docs_path: "/docs/protea",
     },
     {
       name: "protea-method",
@@ -30,9 +29,8 @@ const STACK_RESPONSE = {
       summary: "LAFA inference + benchmarking.",
       summary_es: null,
       github_url: "https://github.com/frapercan/protea-method",
-      docs_url: null,
+      docs_url: "https://protea-method.readthedocs.io/",
       package_url: null,
-      local_docs_path: null,
     },
   ],
 };

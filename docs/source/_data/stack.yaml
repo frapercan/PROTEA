@@ -21,7 +21,7 @@ repos:
     summary: Backend platform. Hosts the ORM, job queue, FastAPI surface, frontend, and orchestration.
     summary_es: Plataforma backend. Aloja el ORM, la cola de trabajos, la superficie FastAPI, el frontend y la orquestación.
     github_url: https://github.com/frapercan/PROTEA
-    docs_url: https://frapercan.github.io/PROTEA/
+    docs_url: https://protea.readthedocs.io/
     package_url: null
 
   - name: protea-contracts
@@ -32,7 +32,7 @@ repos:
     summary: Shared contract surface. ABCs, pydantic payloads, feature schema, schema_sha. Imported by every other repo.
     summary_es: Superficie de contratos compartida. ABCs, payloads de pydantic, esquema de features, schema_sha. Importada por todos los demás repos.
     github_url: https://github.com/frapercan/protea-contracts
-    docs_url: null
+    docs_url: https://protea-contracts.readthedocs.io/
     package_url: https://github.com/frapercan/protea-contracts/releases
 
   - name: protea-method
@@ -43,7 +43,7 @@ repos:
     summary: Pure inference path (KNN, feature compute, reranker apply). Delegation target for the F2C extraction; live in production since F2C.5b. Bind-mounted by the LAFA containers.
     summary_es: Ruta de inferencia pura (KNN, cálculo de features, aplicación del reranker). Destino de delegación de la extracción F2C; en producción desde F2C.5b. Montado por bind en los contenedores LAFA.
     github_url: https://github.com/frapercan/protea-method
-    docs_url: null
+    docs_url: https://protea-method.readthedocs.io/
     package_url: null
 
   - name: protea-sources
@@ -54,7 +54,7 @@ repos:
     summary: Annotation source plugins (GOA, QuickGO, UniProt). Discovered via Python entry_points (goa, quickgo, uniprot).
     summary_es: Plugins de fuentes de anotación (GOA, QuickGO, UniProt). Descubiertos mediante entry_points de Python (goa, quickgo, uniprot).
     github_url: https://github.com/frapercan/protea-sources
-    docs_url: null
+    docs_url: https://protea-sources.readthedocs.io/
     package_url: null
 
   - name: protea-runners
@@ -65,7 +65,7 @@ repos:
     summary: Experiment runner plugins (LightGBM, KNN, baseline). Discovered via Python entry_points (lightgbm, knn, baseline).
     summary_es: Plugins de ejecutores de experimentos (LightGBM, KNN, baseline). Descubiertos mediante entry_points de Python (lightgbm, knn, baseline).
     github_url: https://github.com/frapercan/protea-runners
-    docs_url: null
+    docs_url: https://protea-runners.readthedocs.io/
     package_url: null
 
   - name: protea-backends
@@ -76,7 +76,7 @@ repos:
     summary: Protein language model embedding backends (ESM family, T5/ProstT5, Ankh, ESM3-C). Discovered via Python entry_points (esm, t5, ankh, esm3c).
     summary_es: Backends de embeddings de modelos de lenguaje de proteínas (familia ESM, T5/ProstT5, Ankh, ESM3-C). Descubiertos mediante entry_points de Python (esm, t5, ankh, esm3c).
     github_url: https://github.com/frapercan/protea-backends
-    docs_url: null
+    docs_url: https://protea-backends.readthedocs.io/
     package_url: null
 
   - name: protea-reranker-lab
@@ -87,7 +87,7 @@ repos:
     summary: LightGBM reranker training lab. Pulls datasets from PROTEA, trains boosters, publishes them back via /reranker-models/import-by-reference.
     summary_es: Laboratorio de entrenamiento del reranker LightGBM. Descarga datasets de PROTEA, entrena boosters y los publica de vuelta mediante /reranker-models/import-by-reference.
     github_url: https://github.com/frapercan/protea-reranker-lab
-    docs_url: null
+    docs_url: https://protea-reranker-lab.readthedocs.io/
     package_url: null
 
   - name: cafaeval-protea
@@ -98,5 +98,5 @@ repos:
     summary: Standalone fork of cafaeval (CAFA-evaluator-PK) with the PK-coverage fix and a bit-exact parity guarantee against the upstream.
     summary_es: Fork independiente de cafaeval (CAFA-evaluator-PK) con la corrección de cobertura PK y una garantía de paridad bit a bit con el upstream.
     github_url: https://github.com/frapercan/cafaeval-protea
-    docs_url: null
+    docs_url: https://cafaeval-protea.readthedocs.io/
     package_url: null

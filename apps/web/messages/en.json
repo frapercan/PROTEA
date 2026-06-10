@@ -1323,7 +1323,6 @@
     "noOpenPulls": "No open pull requests in any repository. Tabula rasa.",
     "loadingPulls": "Loading pull requests...",
     "linkDocs": "Docs",
-    "linkDocsLocal": "Local docs",
     "thesisHeading": "PROTEA thesis",
     "thesisDescription": "The compiled thesis PDF is being served from this deploy.",
     "thesisOpen": "Open PDF"
