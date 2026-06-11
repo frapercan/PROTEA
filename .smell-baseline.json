@@ -7,13 +7,49 @@
   },
   "offenders": [
     {
-      "key": "method::protea/api/routers/annotate.py::annotate",
+      "key": "method::protea/core/operations/predict_go_terms/_batch_op_reference.py::_ReferenceMixin._load_reference_data_per_aspect",
       "kind": "method",
-      "path": "protea/api/routers/annotate.py",
-      "name": "annotate",
-      "line": 99,
-      "metric": 61,
+      "path": "protea/core/operations/predict_go_terms/_batch_op_reference.py",
+      "name": "_ReferenceMixin._load_reference_data_per_aspect",
+      "line": 250,
+      "metric": 74,
       "threshold": 60
+    },
+    {
+      "key": "method::protea/core/operations/predict_go_terms/_post_knn_pipeline.py::apply_v6_features",
+      "kind": "method",
+      "path": "protea/core/operations/predict_go_terms/_post_knn_pipeline.py",
+      "name": "apply_v6_features",
+      "line": 69,
+      "metric": 63,
+      "threshold": 60
+    },
+    {
+      "key": "params::protea/core/operations/predict_go_terms/_batch_op_reference.py::_ReferenceMixin._load_reference_data",
+      "kind": "params",
+      "path": "protea/core/operations/predict_go_terms/_batch_op_reference.py",
+      "name": "_ReferenceMixin._load_reference_data",
+      "line": 126,
+      "metric": 7,
+      "threshold": 6
+    },
+    {
+      "key": "params::protea/core/operations/predict_go_terms/_batch_op_reference.py::_ReferenceMixin._load_reference_data_per_aspect",
+      "kind": "params",
+      "path": "protea/core/operations/predict_go_terms/_batch_op_reference.py",
+      "name": "_ReferenceMixin._load_reference_data_per_aspect",
+      "line": 250,
+      "metric": 7,
+      "threshold": 6
+    },
+    {
+      "key": "params::protea/core/operations/predict_go_terms/_batch_op_reference.py::_ReferenceMixin._assemble_all_aspect_views",
+      "kind": "params",
+      "path": "protea/core/operations/predict_go_terms/_batch_op_reference.py",
+      "name": "_ReferenceMixin._assemble_all_aspect_views",
+      "line": 325,
+      "metric": 8,
+      "threshold": 6
     }
   ]
 }
