@@ -1630,6 +1630,19 @@
             "title": "Name",
             "type": "string"
           },
+          "params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional advanced scoring knobs. ``None`` reproduces the legacy behaviour exactly. Recognised blocks: ``ia_prior`` (term-specificity prior, axis E: ``enabled``/``gamma``/``source`` in {frequency, ia}), ``soft_vote`` (axis T temperature; stored here but applied at predict time), and ``calibration`` (post-score hook; no-op stub).",
+            "title": "Params"
+          },
           "weights": {
             "additionalProperties": {
               "type": "number"
@@ -1692,6 +1705,19 @@
             "description": "Unique human-readable name.",
             "title": "Name",
             "type": "string"
+          },
+          "params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Advanced scoring knobs (IA prior, soft-vote temperature, calibration); ``None`` means none configured.",
+            "title": "Params"
           },
           "weights": {
             "additionalProperties": true,
