@@ -187,17 +187,26 @@ def _csr_lookup(
 def _derive_reference_views(
     accessions: list[str],
     embeddings_f16: np.ndarray,
+    *,
+    need_cos: bool = True,
+    need_plain: bool = True,
 ) -> dict[str, Any]:
     """Build the per-process reference view dict used by the KNN path.
 
-    Stores one f32 copy of the embeddings plus an L2-normalised f32 copy
-    for cosine similarity. These are the inputs the search path consumes —
-    keeping them precomputed avoids an ``astype(np.float32)`` and an
-    ``np.linalg.norm`` on every batch (together ~9 s per batch at 555k × 1280).
+    Stores precomputed f32 copies of the embeddings so the hot path avoids an
+    ``astype(np.float32)`` and an ``np.linalg.norm`` on every batch (together
+    ~9 s per batch at 555k × 1280). The KNN search reads exactly one of them
+    per run: ``embeddings_f32_cos`` (L2-normalised) for cosine, otherwise the
+    raw ``embeddings_f32``. ``need_cos`` / ``need_plain`` let callers skip the
+    copy this run will not read, load-bearing for high-dim PLMs where each
+    copy is tens of GB (ESM2-3B at 2560 dims). The unused slot is set to
+    ``None``; downstream readers already select by metric and the PCA pool
+    builder guards with ``is not None``. Both default to ``True`` so existing
+    callers keep the old behaviour.
 
     The original f16 array is also kept on the result dict for any consumer
-    that still expects it (e.g. size reporting), but the hot path reads
-    ``embeddings_f32`` and ``embeddings_f32_cos`` directly.
+    that still expects it (e.g. size reporting), but the hot path reads the
+    f32 views directly.
     """
     if not accessions or embeddings_f16.size == 0:
         return {
@@ -207,12 +216,14 @@ def _derive_reference_views(
             "embeddings_f32_cos": np.empty((0,), dtype=np.float32),
         }
     emb_f32 = embeddings_f16.astype(np.float32)
-    norms = np.linalg.norm(emb_f32, axis=1, keepdims=True)
-    emb_f32_cos = emb_f32 / (norms + 1e-9)
+    emb_f32_cos = None
+    if need_cos:
+        norms = np.linalg.norm(emb_f32, axis=1, keepdims=True)
+        emb_f32_cos = emb_f32 / (norms + 1e-9)
     return {
         "accessions": accessions,
         "embeddings": embeddings_f16,
-        "embeddings_f32": emb_f32,
+        "embeddings_f32": emb_f32 if need_plain else None,
         "embeddings_f32_cos": emb_f32_cos,
     }
 
