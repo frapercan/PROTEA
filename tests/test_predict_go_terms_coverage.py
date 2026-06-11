@@ -1438,10 +1438,13 @@ class TestEnsureReferenceCacheMode:
             annotation_set_id=uuid.uuid4(),
         )
         sentinel = {"cached": True}
+        need_cos, need_plain = op._reference_dtype_needs(ctx.p)
         key = (
             ctx.p.embedding_config_id,
             ctx.p.annotation_set_id,
             ctx.p.aspect_separated_knn,
+            need_cos,
+            need_plain,
         )
         monkeypatch.setattr(_batch_op_reference, "_REF_CACHE", {key: sentinel})
         with (

@@ -98,7 +98,12 @@ def apply_v6_features(
         ]
         pca_pool = np.concatenate(pools, axis=0) if pools else np.empty((0,), dtype=np.float32)
     else:
-        pca_pool = ref_data.get("embeddings_f32", np.empty((0,), dtype=np.float32))
+        # ``embeddings_f32`` may be explicitly None when this run skipped the
+        # raw f32 copy (cosine metric + PCA state already cached); coalesce to
+        # an empty pool so the (cache-hit) fit ignores it without touching .size.
+        pca_pool = ref_data.get("embeddings_f32")
+        if pca_pool is None:
+            pca_pool = np.empty((0,), dtype=np.float32)
 
     pca_state = _batch_op._load_or_fit_pca_state(ctx.embedding_config_id, pca_pool)
     _batch_op.enrich_v6_features(
