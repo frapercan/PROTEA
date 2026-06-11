@@ -6,6 +6,7 @@ helpers extracted in this slice (``_pred_score_inputs`` and
 ``_scored_tsv_row``) are pure functions that the generator now composes,
 so unit-testing them in isolation is enough to pin the wire shape.
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -40,7 +41,7 @@ def _make_pred(**overrides):
 
 
 class TestPredScoreInputs:
-    def test_lifts_six_signal_fields(self) -> None:
+    def test_lifts_signal_fields(self) -> None:
         pred = _make_pred()
         out = _pred_score_inputs(pred)
         assert set(out.keys()) == {
@@ -50,6 +51,16 @@ class TestPredScoreInputs:
             "evidence_code",
             "taxonomic_distance",
             "neighbor_vote_fraction",
+            # A-SCORE rich axes
+            "alignment_length_nw",
+            "gaps_pct_nw",
+            "alignment_length_sw",
+            "gaps_pct_sw",
+            "length_query",
+            "ref_annotation_density",
+            "anc2vec_neighbor_cos",
+            "anc2vec_neighbor_maxcos",
+            "go_term_frequency",
         }
 
     def test_passes_through_none_signals(self) -> None:

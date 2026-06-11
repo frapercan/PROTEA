@@ -33,6 +33,7 @@ def _make_config(name="test", formula=FORMULA_LINEAR, weights=None, ev_weights=N
     cfg.formula = formula
     cfg.weights = weights or {"embedding_similarity": 1.0}
     cfg.evidence_weights = ev_weights
+    cfg.params = None
     cfg.description = None
     cfg.created_at = datetime(2026, 1, 1, tzinfo=UTC)
     return cfg
@@ -303,10 +304,15 @@ class TestScoredTSV:
         factory = MagicMock()
         app.state.session_factory = factory
         app.include_router(router)
-        with patch(
-                        "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session),
-        ), patch(
-            "protea.services._scoring_streaming_helpers.session_scope", side_effect=lambda _: _mock_scope(session)
+        with (
+            patch(
+                "protea.api.routers.scoring.session_scope",
+                side_effect=lambda _: _mock_scope(session),
+            ),
+            patch(
+                "protea.services._scoring_streaming_helpers.session_scope",
+                side_effect=lambda _: _mock_scope(session),
+            ),
         ):
             with TestClient(app) as c:
                 resp = c.get(
@@ -358,10 +364,15 @@ class TestScoredTSV:
         factory = MagicMock()
         app.state.session_factory = factory
         app.include_router(router)
-        with patch(
-                        "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session),
-        ), patch(
-            "protea.services._scoring_streaming_helpers.session_scope", side_effect=lambda _: _mock_scope(session)
+        with (
+            patch(
+                "protea.api.routers.scoring.session_scope",
+                side_effect=lambda _: _mock_scope(session),
+            ),
+            patch(
+                "protea.services._scoring_streaming_helpers.session_scope",
+                side_effect=lambda _: _mock_scope(session),
+            ),
         ):
             with TestClient(app) as c:
                 resp = c.get(
@@ -412,10 +423,15 @@ class TestScoredTSV:
         factory = MagicMock()
         app.state.session_factory = factory
         app.include_router(router)
-        with patch(
-                        "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session),
-        ), patch(
-            "protea.services._scoring_streaming_helpers.session_scope", side_effect=lambda _: _mock_scope(session)
+        with (
+            patch(
+                "protea.api.routers.scoring.session_scope",
+                side_effect=lambda _: _mock_scope(session),
+            ),
+            patch(
+                "protea.services._scoring_streaming_helpers.session_scope",
+                side_effect=lambda _: _mock_scope(session),
+            ),
         ):
             with TestClient(app) as c:
                 resp = c.get(
@@ -435,9 +451,7 @@ class TestScoredTSV:
 
 
 class TestSignalCoverageGuard:
-    def _wire_session(
-        self, session, cfg, *, total: int, counts: dict[str, int]
-    ) -> None:
+    def _wire_session(self, session, cfg, *, total: int, counts: dict[str, int]) -> None:
         """Configure session.get and session.execute for the guard test."""
         from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
         from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
@@ -778,10 +792,15 @@ class TestTrainingDataEndpoint:
         app = FastAPI()
         app.state.session_factory = MagicMock()
         app.include_router(router)
-        with patch(
-            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session),
-        ), patch(
-            "protea.services._scoring_streaming_helpers.session_scope", side_effect=lambda _: _mock_scope(session)
+        with (
+            patch(
+                "protea.api.routers.scoring.session_scope",
+                side_effect=lambda _: _mock_scope(session),
+            ),
+            patch(
+                "protea.services._scoring_streaming_helpers.session_scope",
+                side_effect=lambda _: _mock_scope(session),
+            ),
         ):
             with TestClient(app) as c:
                 resp = c.get(self._url(ps.id, es.id, "nk"))
@@ -824,10 +843,15 @@ class TestTrainingDataEndpoint:
         app = FastAPI()
         app.state.session_factory = MagicMock()
         app.include_router(router)
-        with patch(
-            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session),
-        ), patch(
-            "protea.services._scoring_streaming_helpers.session_scope", side_effect=lambda _: _mock_scope(session)
+        with (
+            patch(
+                "protea.api.routers.scoring.session_scope",
+                side_effect=lambda _: _mock_scope(session),
+            ),
+            patch(
+                "protea.services._scoring_streaming_helpers.session_scope",
+                side_effect=lambda _: _mock_scope(session),
+            ),
         ):
             with TestClient(app) as c:
                 resp = c.get(self._url(ps.id, es.id, "nk"))
@@ -864,10 +888,15 @@ class TestTrainingDataEndpoint:
         app = FastAPI()
         app.state.session_factory = MagicMock()
         app.include_router(router)
-        with patch(
-            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session),
-        ), patch(
-            "protea.services._scoring_streaming_helpers.session_scope", side_effect=lambda _: _mock_scope(session)
+        with (
+            patch(
+                "protea.api.routers.scoring.session_scope",
+                side_effect=lambda _: _mock_scope(session),
+            ),
+            patch(
+                "protea.services._scoring_streaming_helpers.session_scope",
+                side_effect=lambda _: _mock_scope(session),
+            ),
         ):
             with TestClient(app) as c:
                 resp = c.get(self._url(ps.id, es.id))
@@ -907,10 +936,15 @@ class TestTrainingDataEndpoint:
         app = FastAPI()
         app.state.session_factory = MagicMock()
         app.include_router(router)
-        with patch(
-            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session),
-        ), patch(
-            "protea.services._scoring_streaming_helpers.session_scope", side_effect=lambda _: _mock_scope(session)
+        with (
+            patch(
+                "protea.api.routers.scoring.session_scope",
+                side_effect=lambda _: _mock_scope(session),
+            ),
+            patch(
+                "protea.services._scoring_streaming_helpers.session_scope",
+                side_effect=lambda _: _mock_scope(session),
+            ),
         ):
             with TestClient(app) as c:
                 resp = c.get(self._url(ps.id, es.id, "pk"))
@@ -953,10 +987,15 @@ class TestTrainingDataEndpoint:
         app = FastAPI()
         app.state.session_factory = MagicMock()
         app.include_router(router)
-        with patch(
-            "protea.api.routers.scoring.session_scope", side_effect=lambda _: _mock_scope(session),
-        ), patch(
-            "protea.services._scoring_streaming_helpers.session_scope", side_effect=lambda _: _mock_scope(session)
+        with (
+            patch(
+                "protea.api.routers.scoring.session_scope",
+                side_effect=lambda _: _mock_scope(session),
+            ),
+            patch(
+                "protea.services._scoring_streaming_helpers.session_scope",
+                side_effect=lambda _: _mock_scope(session),
+            ),
         ):
             with TestClient(app) as c:
                 resp = c.get(self._url(ps.id, es.id))
