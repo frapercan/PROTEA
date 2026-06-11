@@ -148,6 +148,34 @@ class TestPayload:
                 th_step=0.0,
             )
 
+    def test_protein_fold_defaults_to_full_cohort(self):
+        p = BatchRescoreEvaluationPayload(
+            evaluation_set_id="e", prediction_set_id="p", scoring_config_ids=["a"]
+        )
+        assert p.protein_folds == 1
+        assert p.protein_fold == 0
+
+    def test_protein_fold_must_be_below_folds(self):
+        with pytest.raises(ValidationError):
+            BatchRescoreEvaluationPayload(
+                evaluation_set_id="e",
+                prediction_set_id="p",
+                scoring_config_ids=["a"],
+                protein_folds=2,
+                protein_fold=2,
+            )
+
+    def test_valid_two_fold_split(self):
+        p = BatchRescoreEvaluationPayload(
+            evaluation_set_id="e",
+            prediction_set_id="p",
+            scoring_config_ids=["a"],
+            protein_folds=2,
+            protein_fold=1,
+            protein_seed=7,
+        )
+        assert (p.protein_folds, p.protein_fold, p.protein_seed) == (2, 1, 7)
+
 
 # ---------------------------------------------------------------------------
 # Registration
@@ -221,6 +249,141 @@ class TestGoldenScoringParity:
             with open(p2) as f:
                 s2 = f.read()
         assert s1 != s2  # IA prior must move the scores
+
+
+# ---------------------------------------------------------------------------
+# Step 0: real-IA prior wiring (source="ia" -> term_ia from the IA file)
+# ---------------------------------------------------------------------------
+
+
+class TestRealIaPrior:
+    """The IA file maps onto the base frame as a normalised ``term_ia`` column.
+
+    Without this, ``ia_prior source="ia"`` no-ops (no ``term_ia`` on the frame);
+    with it, the prior aligns with the cafaeval ``f_micro_w`` IA weighting.
+    """
+
+    def test_load_ia_map_parses_go_id_ia(self, tmp_path):
+        ia_file = tmp_path / "ia.tsv"
+        ia_file.write_text("GO:0000001\t-0.0\nGO:0000006\t7.35\nbad_line\nGO:0000007\t12.0\n")
+        ia_map = _artifacts.load_ia_map(str(ia_file))
+        assert ia_map == {"GO:0000001": -0.0, "GO:0000006": 7.35, "GO:0000007": 12.0}
+
+    def test_attach_term_ia_normalises_to_unit_interval(self):
+        base = _base_frame()
+        ia_map = {"GO:0000001": 2.0, "GO:0000003": 20.0}  # GO:0000002 absent
+        _artifacts.attach_term_ia(base, ia_map)
+        vals = dict(zip(base["go_id"], base["term_ia"], strict=True))
+        # Present terms map into [0, 1]; absent term -> NaN (no penalty).
+        assert 0.0 <= vals["GO:0000001"] <= 1.0
+        assert 0.0 <= vals["GO:0000003"] <= 1.0
+        assert pd.isna(vals["GO:0000002"])
+        # Higher raw IA -> higher (or equal, if both clip to 1) normalised prior.
+        assert vals["GO:0000003"] >= vals["GO:0000001"]
+
+    def test_ia_source_moves_scores_once_term_ia_present(self):
+        # source="ia" is a no-op without term_ia, and bends scores once attached.
+        base_no_ia = _base_frame()
+        base_with_ia = _base_frame()
+        _artifacts.attach_term_ia(
+            base_with_ia, {"GO:0000001": 1.0, "GO:0000002": 18.0, "GO:0000003": 9.0}
+        )
+        cfg = _composite_config({"ia_prior": {"enabled": True, "source": "ia", "gamma": 1.0}})
+        with tempfile.TemporaryDirectory() as d:
+            p_no = os.path.join(d, "no_ia.tsv")
+            p_yes = os.path.join(d, "with_ia.tsv")
+            _artifacts._write_scored_base(base_no_ia, cfg, p_no)
+            _artifacts._write_scored_base(base_with_ia, cfg, p_yes)
+            with open(p_no) as f:
+                s_no = f.read()
+            with open(p_yes) as f:
+                s_yes = f.read()
+        # No term_ia -> prior 1.0 everywhere -> identical to a plain composite.
+        plain = _composite_config()
+        with tempfile.TemporaryDirectory() as d:
+            p_plain = os.path.join(d, "plain.tsv")
+            _artifacts._write_scored_base(_base_frame(), plain, p_plain)
+            with open(p_plain) as f:
+                s_plain = f.read()
+        assert s_no == s_plain  # source="ia" is inert without term_ia
+        assert s_yes != s_no  # attaching IA moves the scores
+
+    def test_uses_ia_source_detection(self):
+        op = BatchRescoreEvaluationOperation()
+        assert op._uses_ia_source(None) is False
+        assert op._uses_ia_source(_composite_config()) is False
+        assert (
+            op._uses_ia_source(
+                _composite_config({"ia_prior": {"enabled": True, "source": "frequency"}})
+            )
+            is False
+        )
+        assert (
+            op._uses_ia_source(
+                _composite_config({"ia_prior": {"enabled": True, "source": "ia"}})
+            )
+            is True
+        )
+
+
+# ---------------------------------------------------------------------------
+# LEAN internal train/valid split (beat-pooled-or-revert guard primitive)
+# ---------------------------------------------------------------------------
+
+
+class TestProteinFoldSplit:
+    """``restrict_data_to_protein_fold`` deterministically partitions the cohort."""
+
+    @staticmethod
+    def _data():
+        from protea.core.evaluation import EvaluationData
+
+        proteins = [f"P{i:04d}" for i in range(400)]
+        return EvaluationData(
+            nk={p: {"GO:0000001"} for p in proteins[:200]},
+            lk={p: {"GO:0000002"} for p in proteins[200:300]},
+            pk={p: {"GO:0000003"} for p in proteins[300:]},
+            pk_known={p: {"GO:0000004"} for p in proteins[300:]},
+            known={p: {"GO:0000005"} for p in proteins[300:]},
+        )
+
+    def test_folds_le_one_is_identity(self):
+        from protea.core.operations import _run_cafa_data_helpers as dh
+
+        d = self._data()
+        out = dh.restrict_data_to_protein_fold(
+            d, folds=1, fold=0, seed=0, emit=lambda *a, **k: None
+        )
+        assert out is d
+
+    def test_two_folds_partition_disjoint_and_cover(self):
+        from protea.core.operations import _run_cafa_data_helpers as dh
+
+        d = self._data()
+        f0 = dh.restrict_data_to_protein_fold(
+            d, folds=2, fold=0, seed=11, emit=lambda *a, **k: None
+        )
+        f1 = dh.restrict_data_to_protein_fold(
+            d, folds=2, fold=1, seed=11, emit=lambda *a, **k: None
+        )
+        all_nk = set(d.nk)
+        s0, s1 = set(f0.nk), set(f1.nk)
+        assert s0.isdisjoint(s1)
+        assert s0 | s1 == all_nk
+        # Roughly balanced split (hash uniformity), not all on one side.
+        assert 0.3 < len(s0) / len(all_nk) < 0.7
+
+    def test_fold_assignment_is_seed_stable(self):
+        from protea.core.operations import _run_cafa_data_helpers as dh
+
+        d = self._data()
+        a = dh.restrict_data_to_protein_fold(
+            d, folds=3, fold=2, seed=5, emit=lambda *a, **k: None
+        )
+        b = dh.restrict_data_to_protein_fold(
+            d, folds=3, fold=2, seed=5, emit=lambda *a, **k: None
+        )
+        assert set(a.nk) == set(b.nk)
 
 
 # ---------------------------------------------------------------------------

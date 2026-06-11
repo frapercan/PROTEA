@@ -82,6 +82,21 @@ class BatchRescoreEvaluationPayload(ProteaPayload, frozen=True):
     temporal_window: str | None = Field(default=None)
     leakage_role: str | None = Field(default=None)
     window_role: str | None = Field(default=None)
+    # LEAN internal train/valid split for A-SCORE.2 score HPO. ``protein_folds
+    # <= 1`` (default) evaluates the full cohort; otherwise the GT cohort is
+    # deterministically partitioned by ``blake2b(seed:protein) % folds`` and only
+    # ``protein_fold`` is kept. No new EvaluationSet rows, no homology clustering.
+    protein_folds: int = Field(default=1, ge=1, le=20)
+    protein_fold: int = Field(default=0, ge=0)
+    protein_seed: int = Field(default=0, ge=0)
+
+    @field_validator("protein_fold")
+    @classmethod
+    def _fold_in_range(cls, v: int, info: Any) -> int:
+        folds = (info.data or {}).get("protein_folds", 1)
+        if folds and v >= folds:
+            raise ValueError(f"protein_fold {v} must be < protein_folds {folds}")
+        return v
 
     @field_validator("evaluation_set_id", "prediction_set_id", mode="before")
     @classmethod
@@ -97,6 +112,23 @@ class BatchRescoreEvaluationPayload(ProteaPayload, frozen=True):
         if not cleaned:
             raise ValueError("scoring_config_ids must contain at least one non-empty id")
         return cleaned
+
+
+@dataclass(frozen=True)
+class _StageCtx:
+    """Inputs for the once-per-batch shared staging, bundled under the §3 ceiling.
+
+    Carries the loaded ``inputs`` + derived single-eval ``base_payload`` plus the
+    optional staging knobs: ``needs_term_ia`` triggers the IA-file -> ``term_ia``
+    injection (only when a config uses ``ia_prior source="ia"``), and
+    ``fold_spec`` is the ``(folds, fold, seed)`` internal train/valid split
+    (``folds<=1`` = full cohort).
+    """
+
+    base_payload: RunCafaEvaluationPayload
+    inputs: Any
+    needs_term_ia: bool = False
+    fold_spec: tuple[int, int, int] = (1, 0, 0)
 
 
 @dataclass(frozen=True)
@@ -149,10 +181,17 @@ class BatchRescoreEvaluationOperation:
 
         configs = self._load_scoring_snapshots(session, p.scoring_config_ids)
         artifact_store = get_artifact_store(load_settings(Path(__file__).resolve().parents[3]))
+        needs_term_ia = any(self._uses_ia_source(snap) for _, snap in configs)
 
         result_ids: list[str] = []
         with tempfile.TemporaryDirectory(prefix="protea_cafa_batch_") as tmpdir:
-            staged = self._stage_shared_inputs(session, base_payload, inputs, Path(tmpdir), emit)
+            stage_ctx = _StageCtx(
+                base_payload=base_payload,
+                inputs=inputs,
+                needs_term_ia=needs_term_ia,
+                fold_spec=(p.protein_folds, p.protein_fold, p.protein_seed),
+            )
+            staged = self._stage_shared_inputs(session, stage_ctx, Path(tmpdir), emit)
             # Release the DB connection before cafaeval forks its pool (same
             # rationale as run_cafa_evaluation's no-op commit), then run every
             # config against the in-memory shared base frame.
@@ -207,37 +246,51 @@ class BatchRescoreEvaluationOperation:
             window_role=p.window_role,
         )
 
+    @staticmethod
+    def _uses_ia_source(snapshot: ScoringConfig | None) -> bool:
+        """True if the config's ``ia_prior`` is enabled with ``source="ia"``.
+
+        Only then does the batch need to attach the (cost-bearing) per-row
+        ``term_ia`` column from the IA file; frequency-source and disabled
+        priors read columns already present on the base frame.
+        """
+        from protea.infrastructure.orm.models.embedding.scoring_config import (
+            IA_PRIOR_SOURCE_IA,
+        )
+
+        params = getattr(snapshot, "params", None)
+        block = (params or {}).get("ia_prior") if isinstance(params, dict) else None
+        if not isinstance(block, dict) or not block.get("enabled"):
+            return False
+        return block.get("source") == IA_PRIOR_SOURCE_IA
+
     def _stage_shared_inputs(
         self,
         session: Session,
-        base_payload: RunCafaEvaluationPayload,
-        inputs: Any,
+        ctx: _StageCtx,
         tmpdir: Path,
         emit: EmitFn,
     ) -> dict[str, Any]:
         """Download OBO + IA, restrict GT, write GT/TOI, and fetch the base frame.
 
         Everything here is config-independent, so it runs ONCE per batch. The
-        deduped base frame is held in memory and reused for every config.
+        deduped base frame is held in memory and reused for every config. When
+        ``ctx.needs_term_ia`` (any batched config uses the ``ia_prior``
+        ``source="ia"`` lever), the IA file is also mapped onto the frame as a
+        normalised ``term_ia`` column so the prior aligns exactly with the
+        cafaeval ``f_micro_w`` IA weighting.
         """
+        base_payload, inputs = ctx.base_payload, ctx.inputs
         obo_path = os.path.join(str(tmpdir), "go.obo")
-        emit(
-            "batch_rescore_evaluation.downloading_obo",
-            None,
-            {"url": inputs.snapshot.obo_url},
-            "info",
-        )
+        emit("batch_rescore_evaluation.downloading_obo", None, {"url": inputs.snapshot.obo_url},
+             "info")
         _artifacts.download_obo(inputs.snapshot.obo_url, obo_path)
         ia_path = self._single._resolve_ia_file(
             str(tmpdir), inputs.snapshot, base_payload.ia_file, emit
         )
         self._single._enforce_band(base_payload.band, inputs.snapshot, base_payload.ia_file, emit)
 
-        data = inputs.data
-        if base_payload.restrict_gt_to_predicted:
-            data = _data.restrict_data_to_predicted(
-                session, prediction_set_id=inputs.pred_set_id, data=data, emit=emit
-            )
+        data = self._restrict_cohort(session, base_payload, inputs, ctx.fold_spec, emit)
         gt_root = tmpdir / "gt"
         gt_root.mkdir(parents=True, exist_ok=True)
         gt_paths = _data.write_ground_truth_files(gt_root, data)
@@ -247,6 +300,8 @@ class BatchRescoreEvaluationOperation:
         base_frame = self._fetch_base_frame(
             session, inputs.pred_set_id, delta_proteins, base_payload.max_distance, emit
         )
+        if ctx.needs_term_ia and ia_path:
+            self._attach_term_ia(base_frame, ia_path, emit)
         return {
             "tmpdir": tmpdir,
             "obo_path": obo_path,
@@ -256,6 +311,39 @@ class BatchRescoreEvaluationOperation:
             "delta_proteins": delta_proteins,
             "base_frame": base_frame,
         }
+
+    @staticmethod
+    def _restrict_cohort(
+        session: Session,
+        base_payload: RunCafaEvaluationPayload,
+        inputs: Any,
+        fold_spec: tuple[int, int, int],
+        emit: EmitFn,
+    ) -> Any:
+        """Restrict the GT cohort to the predicted set, then the internal fold."""
+        data = inputs.data
+        if base_payload.restrict_gt_to_predicted:
+            data = _data.restrict_data_to_predicted(
+                session, prediction_set_id=inputs.pred_set_id, data=data, emit=emit
+            )
+        folds, fold, fold_seed = fold_spec
+        if folds > 1:
+            data = _data.restrict_data_to_protein_fold(
+                data, folds=folds, fold=fold, seed=fold_seed, emit=emit
+            )
+        return data
+
+    @staticmethod
+    def _attach_term_ia(base_frame: Any, ia_path: str, emit: EmitFn) -> None:
+        """Map the IA file onto the base frame as a normalised ``term_ia`` column."""
+        ia_map = _artifacts.load_ia_map(ia_path)
+        _artifacts.attach_term_ia(base_frame, ia_map)
+        emit(
+            "batch_rescore_evaluation.term_ia_attached",
+            None,
+            {"ia_terms": len(ia_map), "rows": int(len(base_frame))},
+            "info",
+        )
 
     @staticmethod
     def _fetch_base_frame(

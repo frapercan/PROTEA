@@ -10,6 +10,7 @@ query coverage from hurting Fmax / coverage.
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from typing import Any
 
@@ -63,6 +64,56 @@ def restrict_data_to_predicted(
         None,
         {
             "predicted_proteins": len(predicted_set),
+            "nk_before": orig_counts[0],
+            "nk_after": len(new_data.nk),
+            "lk_before": orig_counts[1],
+            "lk_after": len(new_data.lk),
+            "pk_before": orig_counts[2],
+            "pk_after": len(new_data.pk),
+        },
+        "info",
+    )
+    return new_data
+
+
+def restrict_data_to_protein_fold(
+    data: EvaluationData,
+    *,
+    folds: int,
+    fold: int,
+    seed: int,
+    emit: EmitFn,
+) -> EvaluationData:
+    """Keep only proteins whose deterministic hash-fold equals ``fold``.
+
+    A LEAN internal train/valid split for score HPO (A-SCORE.2 beat-pooled
+    guard): the per-cell champion is selected on one fold and confirmed on the
+    held-out fold, with no new EvaluationSet rows and no homology clustering. The
+    fold is ``blake2b(f"{seed}:{protein}") % folds`` so it is stable across runs
+    and independent of cell / config. ``folds <= 1`` returns the data unchanged.
+    """
+    if folds <= 1:
+        return data
+
+    def _in_fold(protein: str) -> bool:
+        h = hashlib.blake2b(f"{seed}:{protein}".encode(), digest_size=8).digest()
+        return (int.from_bytes(h, "big") % folds) == fold
+
+    orig_counts = (len(data.nk), len(data.lk), len(data.pk))
+    new_data = type(data)(
+        nk={k: v for k, v in data.nk.items() if _in_fold(k)},
+        lk={k: v for k, v in data.lk.items() if _in_fold(k)},
+        pk={k: v for k, v in data.pk.items() if _in_fold(k)},
+        pk_known={k: v for k, v in data.pk_known.items() if _in_fold(k)},
+        known={k: v for k, v in data.known.items() if _in_fold(k)},
+    )
+    emit(
+        "run_cafa_evaluation.gt_restricted_to_fold",
+        None,
+        {
+            "folds": folds,
+            "fold": fold,
+            "seed": seed,
             "nk_before": orig_counts[0],
             "nk_after": len(new_data.nk),
             "lk_before": orig_counts[1],
