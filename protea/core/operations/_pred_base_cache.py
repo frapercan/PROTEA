@@ -79,14 +79,36 @@ def load_or_build_base(
             return df
     df, raw_count = build_fn()
     parquet_path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_parquet(parquet_path, index=False)
-    count_path.write_text(str(int(raw_count)))
+    _atomic_write_cache(df, raw_count, parquet_path, count_path)
     if emit is not None:
         emit(
             "pred_base.cache_write",
             {"path": str(parquet_path), "rows": int(len(df)), "raw_rows": int(raw_count)},
         )
     return df
+
+
+def _atomic_write_cache(df: Any, raw_count: int, parquet_path: Path, count_path: Path) -> None:
+    """Write the parquet + count sidecar so concurrent readers never tear.
+
+    Under ``manage.sh scale protea.evaluations N`` several workers re-score the
+    same prediction set at once, so the cache writer and reader race. Two
+    invariants make that safe:
+
+    1. Each file is written to a unique ``.<pid>.tmp`` sibling and ``os.replace``
+       d into place (atomic on POSIX), so a reader never observes a half-written
+       parquet.
+    2. The count sidecar is the validity gate (``load_or_build_base`` only trusts
+       the parquet when the sidecar matches a fresh COUNT). It is renamed LAST,
+       so a reader that sees the count is guaranteed the parquet is already
+       complete.
+    """
+    tmp_parquet = parquet_path.with_suffix(parquet_path.suffix + f".{os.getpid()}.tmp")
+    tmp_count = count_path.with_suffix(count_path.suffix + f".{os.getpid()}.tmp")
+    df.to_parquet(tmp_parquet, index=False)
+    os.replace(tmp_parquet, parquet_path)
+    tmp_count.write_text(str(int(raw_count)))
+    os.replace(tmp_count, count_path)
 
 
 def _read_count(count_path: Path) -> int | None:
