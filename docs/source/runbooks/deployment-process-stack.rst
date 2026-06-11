@@ -108,6 +108,31 @@ For MinIO storage add ``PROTEA_MINIO_ENDPOINT``, ``PROTEA_MINIO_BUCKET``,
 Bootstrap on a fresh machine
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+One-shot bring-up (powered-off box)
+"""""""""""""""""""""""""""""""""""
+
+Once the deploy worktree and secrets exist (the one-time setup in steps 2
+and 3 below), every later power-on is a single command:
+
+.. code-block:: bash
+
+   bash scripts/cold-boot.sh            # full: infra + deploy.sh + ngrok
+   bash scripts/cold-boot.sh --fast     # nothing changed: skips deps + build
+   bash scripts/cold-boot.sh --no-ngrok # local only, no public tunnel
+
+``cold-boot.sh`` starts the infra containers, delegates the whole app
+bring-up to ``scripts/deploy.sh`` (sync ``origin/develop`` + ``poetry
+install`` + GPU torch flip + frontend/Sphinx build + ``manage.sh start`` +
+health wait), then launches the ngrok tunnels detached. ``--fast`` forwards
+``--no-deps --no-build`` to ``deploy.sh`` for a warm reboot where neither
+dependencies nor the frontend changed since the last boot; the on-disk
+``.venv`` (with its GPU torch) persists across reboots, so the heavy
+reinstall is unnecessary then. Any extra argument is passed straight to
+``deploy.sh`` (for example a git ref to deploy instead of ``origin/develop``).
+
+The manual breakdown below documents each step ``cold-boot.sh`` automates;
+run it directly only for first-time host setup or to debug one stage.
+
 **Step 1: start the infrastructure containers**
 
 .. code-block:: bash
