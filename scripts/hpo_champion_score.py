@@ -107,7 +107,7 @@ class Client:
         return str(r.json()["id"])
 
     def dispatch_batch(self, pred_set_id: str, config_ids: list[str], *,
-                       folds: int, fold: int, seed: int) -> str:
+                       folds: int, fold: int, seed: int, th_step: float = 0.01) -> str:
         payload = {
             "evaluation_set_id": EVAL_SET_ID,
             "prediction_set_id": pred_set_id,
@@ -116,6 +116,7 @@ class Client:
             "protein_folds": folds,
             "protein_fold": fold,
             "protein_seed": seed,
+            "th_step": th_step,
         }
         body = {"operation": "batch_rescore_evaluation", "queue_name": EVAL_QUEUE,
                 "payload": payload}
@@ -276,7 +277,8 @@ def _wait_jobs(client: Client, jobs: list[str], poll: float = 15.0) -> None:
 
 
 def evaluate_trials(client: Client, trials: list[Trial], *, tag: str, folds: int,
-                    fold: int, seed: int, max_inflight: int) -> dict[str, dict]:
+                    fold: int, seed: int, max_inflight: int, th_step: float = 0.01
+                    ) -> dict[str, dict]:
     """Register configs, dispatch batched eval jobs (one per K), collect results.
 
     Returns {config_id: {trial, cells: {cell: f_micro_w}}}.
@@ -289,7 +291,8 @@ def evaluate_trials(client: Client, trials: list[Trial], *, tag: str, folds: int
     job_ids: list[str] = []
     inflight: list[str] = []
     for k, cids in by_k.items():
-        jid = client.dispatch_batch(PRED_SETS_BY_K[k], cids, folds=folds, fold=fold, seed=seed)
+        jid = client.dispatch_batch(PRED_SETS_BY_K[k], cids, folds=folds, fold=fold, seed=seed,
+                                    th_step=th_step)
         job_ids.append(jid)
         inflight.append(jid)
         if len(inflight) >= max_inflight:
@@ -331,7 +334,7 @@ def best_per_cell(evald: dict[str, dict], cells: list[str]) -> dict[str, tuple[s
 
 def run_hpo(client: Client, cells: list[str], *, ks: list[int], seed: int,
             refine_per_cell: int, max_inflight: int, out_dir: str,
-            ia_source: str = "ia", folds: int = 2) -> dict:
+            ia_source: str = "ia", folds: int = 2, th_step: float = 0.01) -> dict:
     rng = random.Random(seed)
     os.makedirs(out_dir, exist_ok=True)
     train_fold = 0
@@ -341,7 +344,7 @@ def run_hpo(client: Client, cells: list[str], *, ks: list[int], seed: int,
     coarse = coarse_trials(ks, ia_source=ia_source)
     print(f"[gen1] {len(coarse)} coarse trials over K={ks} ia_source={ia_source} folds={folds}")
     train = evaluate_trials(client, coarse, tag="g1train", folds=folds, fold=train_fold, seed=seed,
-                            max_inflight=max_inflight)
+                            max_inflight=max_inflight, th_step=th_step)
 
     # --- Generation 2: refine around each cell's train leader ---
     leaders = best_per_cell(train, cells)
@@ -349,7 +352,7 @@ def run_hpo(client: Client, cells: list[str], *, ks: list[int], seed: int,
     for _cell, (cid, _score) in leaders.items():
         refine.extend(refine_trials(train[cid]["trial"], refine_per_cell, rng))
     refine_train = evaluate_trials(client, refine, tag="g2train", folds=folds, fold=train_fold,
-                                   seed=seed, max_inflight=max_inflight) if refine else {}
+                                   seed=seed, max_inflight=max_inflight, th_step=th_step) if refine else {}
 
     all_train = {**train, **refine_train}
     train_best = best_per_cell(all_train, cells)
@@ -362,7 +365,7 @@ def run_hpo(client: Client, cells: list[str], *, ks: list[int], seed: int,
     candidate_cids = {cid for cid, _ in train_best.values()} | {pooled_cid}
     candidate_trials = [all_train[c]["trial"] for c in candidate_cids]
     valid = evaluate_trials(client, candidate_trials, tag="valid", folds=folds, fold=valid_fold,
-                            seed=seed, max_inflight=max_inflight)
+                            seed=seed, max_inflight=max_inflight, th_step=th_step)
     valid_by_trial_sig = {info["trial"].signature(): info for info in valid.values()}
 
     champions: dict[str, dict] = {}
@@ -458,6 +461,9 @@ def main() -> int:
     ap.add_argument("--folds", type=int, default=2,
                     help="Internal train/valid protein folds (2 = held-out guard; "
                          "1 = degraded same-cohort guard when the fold split is not deployed).")
+    ap.add_argument("--th-step", type=float, default=0.01,
+                    help="cafaeval tau-sweep step. 0.01 = full resolution (slow); a coarser "
+                         "value (e.g. 0.05) speeds search trials at a small metric-resolution cost.")
     ap.add_argument("--out-dir", default=os.environ.get("ASCORE2_OUT", "/tmp/ascore2_hpo"))
     ap.add_argument("--register", action="store_true",
                     help="Register the champions as named ScoringConfigs after the search.")
@@ -472,6 +478,7 @@ def main() -> int:
         client, args.cells, ks=args.ks, seed=args.seed,
         refine_per_cell=args.refine_per_cell, max_inflight=args.max_inflight,
         out_dir=args.out_dir, ia_source=args.ia_source, folds=args.folds,
+        th_step=args.th_step,
     )
     report["runtime_s"] = round(time.time() - t0, 1)
 
