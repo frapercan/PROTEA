@@ -275,6 +275,118 @@ class TestRunCafaEvaluationPayload:
         with pytest.raises(ValidationError):
             p.evaluation_set_id = "new_value"
 
+    def test_provenance_fields_accepted(self):
+        p = RunCafaEvaluationPayload(
+            evaluation_set_id=EVAL_SET_ID,
+            prediction_set_id=PRED_SET_ID,
+            frame="internal",
+            temporal_window="SELECT_220_227",
+            leakage_role="select",
+            window_role="valid",
+            arms_enabled={"knn": True, "reranker": False},
+        )
+        assert p.frame == "internal"
+        assert p.temporal_window == "SELECT_220_227"
+        assert p.leakage_role == "select"
+        assert p.window_role == "valid"
+        assert p.arms_enabled == {"knn": True, "reranker": False}
+
+    def test_provenance_defaults_are_none(self):
+        p = RunCafaEvaluationPayload(
+            evaluation_set_id=EVAL_SET_ID,
+            prediction_set_id=PRED_SET_ID,
+        )
+        assert p.frame is None
+        assert p.temporal_window is None
+        assert p.leakage_role is None
+        assert p.window_role is None
+        assert p.arms_enabled is None
+
+    @pytest.mark.parametrize(
+        "field,value",
+        [
+            ("frame", "bogus"),
+            ("leakage_role", "bogus"),
+            ("window_role", "bogus"),
+            ("window_role", "probe"),  # valid leakage_role but not a window_role
+        ],
+    )
+    def test_provenance_vocab_enforced(self, field, value):
+        with pytest.raises(ValidationError):
+            RunCafaEvaluationPayload(
+                evaluation_set_id=EVAL_SET_ID,
+                prediction_set_id=PRED_SET_ID,
+                **{field: value},
+            )
+
+
+# ---------------------------------------------------------------------------
+# Provenance stamping helpers (FIX-UI-PROVENANCE)
+# ---------------------------------------------------------------------------
+
+
+class TestEvalProvenanceStamping:
+    def test_stamp_window_role_sets_when_blank(self):
+        es = _make_eval_set()
+        es.window_role = None
+        RunCafaEvaluationOperation._stamp_window_role(es, "valid", _make_emit())
+        assert es.window_role == "valid"
+
+    def test_stamp_window_role_never_overwrites(self):
+        es = _make_eval_set()
+        es.window_role = "test"
+        RunCafaEvaluationOperation._stamp_window_role(es, "valid", _make_emit())
+        assert es.window_role == "test"
+
+    def test_stamp_window_role_noop_when_payload_none(self):
+        es = _make_eval_set()
+        es.window_role = None
+        RunCafaEvaluationOperation._stamp_window_role(es, None, _make_emit())
+        assert es.window_role is None
+
+    def test_build_provenance_derives_leakage_from_window_role(self):
+        es = _make_eval_set()
+        es.window_role = "valid"
+        p = RunCafaEvaluationPayload(
+            evaluation_set_id=EVAL_SET_ID, prediction_set_id=PRED_SET_ID
+        )
+        frame, window, role, arms = RunCafaEvaluationOperation._build_eval_provenance(
+            p, es, has_rerankers=False
+        )
+        assert role == "select"
+        assert arms == {"knn": True, "reranker": False, "mlp_tower": False, "interpro": False}
+        assert frame is None and window is None
+
+    def test_build_provenance_explicit_wins(self):
+        es = _make_eval_set()
+        es.window_role = "valid"
+        p = RunCafaEvaluationPayload(
+            evaluation_set_id=EVAL_SET_ID,
+            prediction_set_id=PRED_SET_ID,
+            frame="internal",
+            temporal_window="SELECT_220_227",
+            leakage_role="probe",
+            arms_enabled={"knn": True, "reranker": True},
+        )
+        frame, window, role, arms = RunCafaEvaluationOperation._build_eval_provenance(
+            p, es, has_rerankers=False
+        )
+        assert (frame, window, role) == ("internal", "SELECT_220_227", "probe")
+        assert arms == {"knn": True, "reranker": True}
+
+    def test_build_provenance_reranker_arm_reflects_run(self):
+        es = _make_eval_set()
+        es.window_role = None
+        p = RunCafaEvaluationPayload(
+            evaluation_set_id=EVAL_SET_ID, prediction_set_id=PRED_SET_ID
+        )
+        _, _, role, arms = RunCafaEvaluationOperation._build_eval_provenance(
+            p, es, has_rerankers=True
+        )
+        # No window_role on the set and none in the payload -> leakage unknown.
+        assert role is None
+        assert arms["reranker"] is True
+
 
 # ---------------------------------------------------------------------------
 # Operation name

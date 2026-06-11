@@ -214,6 +214,15 @@ class PredictGOTermsBatchOperation(
                 "         >= COALESCE((meta->>'expected_batches')::int, 2147483647)"
                 "    THEN NOW()"
                 "    ELSE finished_at"
+                "  END,"
+                # FIX-UI-PROVENANCE: on the terminal SUCCEEDED transition snap
+                # progress_current up to progress_total so the UI shows 100%
+                # instead of a stale sub-total left by the last batch emit.
+                "  progress_current = CASE"
+                "    WHEN COALESCE((meta->>'batches_completed')::int, 0) + 1"
+                "         >= COALESCE((meta->>'expected_batches')::int, 2147483647)"
+                "    THEN COALESCE(progress_total, progress_current)"
+                "    ELSE progress_current"
                 "  END "
                 "WHERE id = :pid AND status = 'RUNNING'::job_status "
                 "RETURNING (status = 'SUCCEEDED'::job_status) AS finalized, "

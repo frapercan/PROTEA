@@ -141,12 +141,80 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
         ),
     )
 
+    frame: str | None = Field(
+        default=None,
+        description=(
+            "Scoring frame this result lives in, stamped onto the EvaluationResult "
+            "so /benchmark and /evaluation are self-describing (slice "
+            "F-METHOD-EVAL-SURFACE). 'lafa' = the parity-locked LAFA frame "
+            "(leaderboard-comparable); 'internal' = the lab / full-GT frame. None "
+            "leaves the row unstamped (UI shows an 'unknown' chip)."
+        ),
+    )
+    temporal_window: str | None = Field(
+        default=None,
+        description=(
+            "Rolling-origin window label stamped onto the EvaluationResult, e.g. "
+            "'SELECT_220_227' (selection window) or 'FINAL_227_230' (report-once "
+            "test window). Free text so new windows need no schema change."
+        ),
+    )
+    leakage_role: str | None = Field(
+        default=None,
+        description=(
+            "ADR D40 leakage-hygiene role stamped onto the EvaluationResult: "
+            "'select' (feeds model/threshold selection), 'test' (report-once "
+            "held-out measurement), or 'probe' (exploratory, must not feed "
+            "selection). When None it is derived from the EvaluationSet "
+            "window_role ('valid'->'select', 'test'->'test')."
+        ),
+    )
+    arms_enabled: dict[str, bool] | None = Field(
+        default=None,
+        description=(
+            "Method-arm composition flag dict stamped onto the EvaluationResult, "
+            "e.g. {'knn': true, 'reranker': true, 'mlp_tower': false, "
+            "'interpro': false}. When None it is derived from the run (knn always "
+            "on; reranker on when a reranker model is supplied)."
+        ),
+    )
+    window_role: str | None = Field(
+        default=None,
+        description=(
+            "Rolling-origin protocol window binding ('valid' or 'test', ADR D40). "
+            "When set, stamped onto the EvaluationSet if it does not already carry "
+            "one, so re-staged sets become self-describing without a separate "
+            "generate_evaluation_set rebind."
+        ),
+    )
+
     @field_validator("evaluation_set_id", "prediction_set_id", mode="before")
     @classmethod
     def must_be_non_empty(cls, v: str) -> str:
         if not isinstance(v, str) or not v.strip():
             raise ValueError("must be a non-empty string")
         return v.strip()
+
+    @field_validator("frame")
+    @classmethod
+    def _frame_vocab(cls, v: str | None) -> str | None:
+        if v is not None and v not in ("lafa", "internal"):
+            raise ValueError("frame must be 'lafa', 'internal', or None")
+        return v
+
+    @field_validator("leakage_role")
+    @classmethod
+    def _leakage_role_vocab(cls, v: str | None) -> str | None:
+        if v is not None and v not in ("select", "test", "probe"):
+            raise ValueError("leakage_role must be 'select', 'test', 'probe', or None")
+        return v
+
+    @field_validator("window_role")
+    @classmethod
+    def _window_role_vocab(cls, v: str | None) -> str | None:
+        if v is not None and v not in ("valid", "test"):
+            raise ValueError("window_role must be 'valid', 'test', or None")
+        return v
 
 
 class RunCafaEvaluationOperation:
@@ -186,6 +254,7 @@ class RunCafaEvaluationOperation:
     ) -> OperationResult:
         p = RunCafaEvaluationPayload.model_validate(payload)
         inputs = self._load_evaluation_inputs(session, p, emit)
+        self._stamp_window_role(inputs.eval_set, p.window_role, emit)
         scoring_snapshot = self._resolve_scoring_snapshot(session, p.scoring_config_id)
         reranker_models, reranker_config_snapshot = load_reranker_models_for_payload(
             session,
@@ -209,6 +278,9 @@ class RunCafaEvaluationOperation:
         first_reranker_id, reranker_config_snapshot = self._finalize_reranker_config(
             reranker_config_snapshot, reranker_models, p
         )
+        frame, temporal_window, leakage_role, arms_enabled = self._build_eval_provenance(
+            p, inputs.eval_set, bool(reranker_models)
+        )
         eval_result = EvaluationResult(
             id=result_id,
             evaluation_set_id=inputs.eval_set_id,
@@ -217,6 +289,10 @@ class RunCafaEvaluationOperation:
             reranker_model_id=first_reranker_id,
             reranker_config=reranker_config_snapshot,
             results=results,
+            frame=frame,
+            temporal_window=temporal_window,
+            leakage_role=leakage_role,
+            arms_enabled=arms_enabled,
         )
         session.add(eval_result)
         session.flush()
@@ -268,6 +344,52 @@ class RunCafaEvaluationOperation:
         if data.delta_proteins == 0:
             raise ValueError("No delta proteins found; cannot evaluate")
         return inputs
+
+    @staticmethod
+    def _stamp_window_role(
+        eval_set: EvaluationSet, window_role: str | None, emit: EmitFn
+    ) -> None:
+        """Stamp ``window_role`` onto the EvaluationSet when the payload carries
+        one and the set is not already bound. Non-destructive: an existing
+        window_role is never overwritten (use generate_evaluation_set's rebind
+        path for that). Persisted by the no-op commit in the eval pipeline."""
+        if window_role is None or eval_set.window_role is not None:
+            return
+        eval_set.window_role = window_role
+        emit(
+            "run_cafa_evaluation.window_role_stamped",
+            None,
+            {"evaluation_set_id": str(eval_set.id), "window_role": window_role},
+            "info",
+        )
+
+    @staticmethod
+    def _build_eval_provenance(
+        p: RunCafaEvaluationPayload, eval_set: EvaluationSet, has_rerankers: bool
+    ) -> tuple[str | None, str | None, str | None, dict[str, bool] | None]:
+        """Resolve the four EvaluationResult provenance markers (slice
+        F-METHOD-EVAL-SURFACE) from the payload, with safe derivations so a
+        caller only has to pass ``window_role`` to get a self-describing row:
+
+        - ``leakage_role``: explicit, else derived from the (now possibly
+          stamped) EvaluationSet ``window_role`` ('valid'->'select',
+          'test'->'test').
+        - ``arms_enabled``: explicit, else derived from the run (KNN always on;
+          reranker on when a reranker model was supplied).
+        """
+        leakage_role = p.leakage_role
+        if leakage_role is None:
+            leakage_role = {"valid": "select", "test": "test"}.get(eval_set.window_role or "")
+            leakage_role = leakage_role or None
+        arms_enabled = p.arms_enabled
+        if arms_enabled is None:
+            arms_enabled = {
+                "knn": True,
+                "reranker": has_rerankers,
+                "mlp_tower": False,
+                "interpro": False,
+            }
+        return p.frame, p.temporal_window, leakage_role, arms_enabled
 
     @staticmethod
     def _resolve_scoring_snapshot(
