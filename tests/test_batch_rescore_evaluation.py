@@ -148,6 +148,34 @@ class TestPayload:
                 th_step=0.0,
             )
 
+    def test_protein_fold_defaults_to_full_cohort(self):
+        p = BatchRescoreEvaluationPayload(
+            evaluation_set_id="e", prediction_set_id="p", scoring_config_ids=["a"]
+        )
+        assert p.protein_folds == 1
+        assert p.protein_fold == 0
+
+    def test_protein_fold_must_be_below_folds(self):
+        with pytest.raises(ValidationError):
+            BatchRescoreEvaluationPayload(
+                evaluation_set_id="e",
+                prediction_set_id="p",
+                scoring_config_ids=["a"],
+                protein_folds=2,
+                protein_fold=2,
+            )
+
+    def test_valid_two_fold_split(self):
+        p = BatchRescoreEvaluationPayload(
+            evaluation_set_id="e",
+            prediction_set_id="p",
+            scoring_config_ids=["a"],
+            protein_folds=2,
+            protein_fold=1,
+            protein_seed=7,
+        )
+        assert (p.protein_folds, p.protein_fold, p.protein_seed) == (2, 1, 7)
+
 
 # ---------------------------------------------------------------------------
 # Registration
@@ -296,6 +324,66 @@ class TestRealIaPrior:
             )
             is True
         )
+
+
+# ---------------------------------------------------------------------------
+# LEAN internal train/valid split (beat-pooled-or-revert guard primitive)
+# ---------------------------------------------------------------------------
+
+
+class TestProteinFoldSplit:
+    """``restrict_data_to_protein_fold`` deterministically partitions the cohort."""
+
+    @staticmethod
+    def _data():
+        from protea.core.evaluation import EvaluationData
+
+        proteins = [f"P{i:04d}" for i in range(400)]
+        return EvaluationData(
+            nk={p: {"GO:0000001"} for p in proteins[:200]},
+            lk={p: {"GO:0000002"} for p in proteins[200:300]},
+            pk={p: {"GO:0000003"} for p in proteins[300:]},
+            pk_known={p: {"GO:0000004"} for p in proteins[300:]},
+            known={p: {"GO:0000005"} for p in proteins[300:]},
+        )
+
+    def test_folds_le_one_is_identity(self):
+        from protea.core.operations import _run_cafa_data_helpers as dh
+
+        d = self._data()
+        out = dh.restrict_data_to_protein_fold(
+            d, folds=1, fold=0, seed=0, emit=lambda *a, **k: None
+        )
+        assert out is d
+
+    def test_two_folds_partition_disjoint_and_cover(self):
+        from protea.core.operations import _run_cafa_data_helpers as dh
+
+        d = self._data()
+        f0 = dh.restrict_data_to_protein_fold(
+            d, folds=2, fold=0, seed=11, emit=lambda *a, **k: None
+        )
+        f1 = dh.restrict_data_to_protein_fold(
+            d, folds=2, fold=1, seed=11, emit=lambda *a, **k: None
+        )
+        all_nk = set(d.nk)
+        s0, s1 = set(f0.nk), set(f1.nk)
+        assert s0.isdisjoint(s1)
+        assert s0 | s1 == all_nk
+        # Roughly balanced split (hash uniformity), not all on one side.
+        assert 0.3 < len(s0) / len(all_nk) < 0.7
+
+    def test_fold_assignment_is_seed_stable(self):
+        from protea.core.operations import _run_cafa_data_helpers as dh
+
+        d = self._data()
+        a = dh.restrict_data_to_protein_fold(
+            d, folds=3, fold=2, seed=5, emit=lambda *a, **k: None
+        )
+        b = dh.restrict_data_to_protein_fold(
+            d, folds=3, fold=2, seed=5, emit=lambda *a, **k: None
+        )
+        assert set(a.nk) == set(b.nk)
 
 
 # ---------------------------------------------------------------------------

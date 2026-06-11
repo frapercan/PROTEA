@@ -82,6 +82,21 @@ class BatchRescoreEvaluationPayload(ProteaPayload, frozen=True):
     temporal_window: str | None = Field(default=None)
     leakage_role: str | None = Field(default=None)
     window_role: str | None = Field(default=None)
+    # LEAN internal train/valid split for A-SCORE.2 score HPO. ``protein_folds
+    # <= 1`` (default) evaluates the full cohort; otherwise the GT cohort is
+    # deterministically partitioned by ``blake2b(seed:protein) % folds`` and only
+    # ``protein_fold`` is kept. No new EvaluationSet rows, no homology clustering.
+    protein_folds: int = Field(default=1, ge=1, le=20)
+    protein_fold: int = Field(default=0, ge=0)
+    protein_seed: int = Field(default=0, ge=0)
+
+    @field_validator("protein_fold")
+    @classmethod
+    def _fold_in_range(cls, v: int, info: Any) -> int:
+        folds = (info.data or {}).get("protein_folds", 1)
+        if folds and v >= folds:
+            raise ValueError(f"protein_fold {v} must be < protein_folds {folds}")
+        return v
 
     @field_validator("evaluation_set_id", "prediction_set_id", mode="before")
     @classmethod
@@ -154,7 +169,13 @@ class BatchRescoreEvaluationOperation:
         result_ids: list[str] = []
         with tempfile.TemporaryDirectory(prefix="protea_cafa_batch_") as tmpdir:
             staged = self._stage_shared_inputs(
-                session, base_payload, inputs, Path(tmpdir), emit, needs_term_ia=needs_term_ia
+                session,
+                base_payload,
+                inputs,
+                Path(tmpdir),
+                emit,
+                needs_term_ia=needs_term_ia,
+                fold_spec=(p.protein_folds, p.protein_fold, p.protein_seed),
             )
             # Release the DB connection before cafaeval forks its pool (same
             # rationale as run_cafa_evaluation's no-op commit), then run every
@@ -237,6 +258,7 @@ class BatchRescoreEvaluationOperation:
         emit: EmitFn,
         *,
         needs_term_ia: bool = False,
+        fold_spec: tuple[int, int, int] = (1, 0, 0),
     ) -> dict[str, Any]:
         """Download OBO + IA, restrict GT, write GT/TOI, and fetch the base frame.
 
@@ -263,6 +285,11 @@ class BatchRescoreEvaluationOperation:
         if base_payload.restrict_gt_to_predicted:
             data = _data.restrict_data_to_predicted(
                 session, prediction_set_id=inputs.pred_set_id, data=data, emit=emit
+            )
+        folds, fold, fold_seed = fold_spec
+        if folds > 1:
+            data = _data.restrict_data_to_protein_fold(
+                data, folds=folds, fold=fold, seed=fold_seed, emit=emit
             )
         gt_root = tmpdir / "gt"
         gt_root.mkdir(parents=True, exist_ok=True)
