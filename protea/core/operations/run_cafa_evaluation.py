@@ -346,9 +346,7 @@ class RunCafaEvaluationOperation:
         return inputs
 
     @staticmethod
-    def _stamp_window_role(
-        eval_set: EvaluationSet, window_role: str | None, emit: EmitFn
-    ) -> None:
+    def _stamp_window_role(eval_set: EvaluationSet, window_role: str | None, emit: EmitFn) -> None:
         """Stamp ``window_role`` onto the EvaluationSet when the payload carries
         one and the set is not already bound. Non-destructive: an existing
         window_role is never overwritten (use generate_evaluation_set's rebind
@@ -402,7 +400,11 @@ class RunCafaEvaluationOperation:
         sc = session.get(ScoringConfig, uuid.UUID(scoring_config_id))
         if sc is None:
             raise ValueError(f"ScoringConfig {scoring_config_id} not found")
-        return ScoringConfig(formula=sc.formula, weights=dict(sc.weights))
+        return ScoringConfig(
+            formula=sc.formula,
+            weights=dict(sc.weights),
+            params=dict(sc.params) if sc.params else None,
+        )
 
     def _run_evaluation_pipeline(
         self,

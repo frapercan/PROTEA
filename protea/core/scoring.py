@@ -26,6 +26,7 @@ configs.
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from typing import Any
 
@@ -34,6 +35,7 @@ from protea.infrastructure.orm.models.embedding.scoring_config import (
     DEFAULT_EVIDENCE_WEIGHT_FALLBACK,
     DEFAULT_EVIDENCE_WEIGHTS,
     FORMULA_EVIDENCE_WEIGHTED,
+    IA_PRIOR_SOURCE_IA,
     ScoringConfig,
 )
 
@@ -43,6 +45,11 @@ __all__ = [
     "FORMULA_EVIDENCE_WEIGHTED",
     "evidence_weight",
     "compute_score",
+    "coverage_signal",
+    "ref_density_signal",
+    "anc2vec_unit_signal",
+    "ia_prior_multiplier",
+    "apply_calibration",
     "score_predictions",
     "propagate_scores_to_ancestors",
     "propagate_ground_truth_to_ancestors",
@@ -98,6 +105,136 @@ def evidence_weight(
 # ---------------------------------------------------------------------------
 
 
+def coverage_signal(pred: dict[str, Any]) -> float | None:
+    """Single principled alignment-coverage signal in [0, 1] (axis A3).
+
+    Coverage answers *how much of the query is spanned by the aligned region*.
+    We prefer the Smith-Waterman **local** alignment: the Needleman-Wunsch
+    **global** ``alignment_length`` is always ~``max(len_query, len_ref)`` so
+    its coverage saturates near 1 and is uninformative; the local span captures
+    the domain-level match extent that actually discriminates transfers.
+
+    Definition (``alignment_length`` is the aligned column count, ``gaps_pct``
+    is the gap *fraction* in [0, 1], not a percentage)::
+
+        ungapped_aligned = alignment_length_sw * (1 - gaps_pct_sw)
+        coverage = clip(ungapped_aligned / length_query, 0, 1)
+
+    ``ungapped_aligned`` is the number of non-gap aligned columns, i.e. the
+    count of query residues inside the alignment core; dividing by the query
+    length gives the covered fraction. Falls back to the NW fields when the SW
+    fields are absent, and drops out (``None``) when ``length_query`` is
+    missing / non-positive or no alignment length is available.
+    """
+    length_query = pred.get("length_query")
+    if length_query is None or float(length_query) <= 0.0:
+        return None
+    aln = pred.get("alignment_length_sw")
+    gap = pred.get("gaps_pct_sw")
+    if aln is None:
+        aln = pred.get("alignment_length_nw")
+        gap = pred.get("gaps_pct_nw")
+    if aln is None:
+        return None
+    gap_frac = 0.0 if gap is None else max(0.0, min(1.0, float(gap)))
+    ungapped = float(aln) * (1.0 - gap_frac)
+    return max(0.0, min(1.0, ungapped / float(length_query)))
+
+
+def ref_density_signal(pred: dict[str, Any]) -> float | None:
+    """Reference-annotation-density signal in (0, 1] (axis F).
+
+    ``ref_annotation_density`` is the number of GO annotations carried by the
+    reference (neighbour) protein. A reference with *fewer* annotations is more
+    specific, so a term transferred from it is a more pointed claim. We squash
+    the raw count with ``1 / (1 + density)``: density 0 → 1.0, large density →
+    →0, monotonically decreasing. Drops out (``None``) when the column is
+    absent.
+    """
+    density = pred.get("ref_annotation_density")
+    if density is None:
+        return None
+    return 1.0 / (1.0 + max(0.0, float(density)))
+
+
+def anc2vec_unit_signal(value: float | None) -> float | None:
+    """Map an anc2vec cosine in [-1, 1] onto [0, 1] (axis G).
+
+    ``anc2vec_neighbor_cos`` / ``anc2vec_neighbor_maxcos`` are cosine
+    similarities of the candidate term against the neighbour's annotation
+    centroid, so they live in [-1, 1]. The affine map ``(x + 1) / 2`` preserves
+    ordering while landing in the [0, 1] range the weighted average expects.
+    Drops out (``None``) when the column is absent.
+    """
+    if value is None:
+        return None
+    return (float(value) + 1.0) / 2.0
+
+
+def ia_prior_multiplier(pred: dict[str, Any], params: dict[str, Any] | None) -> float:
+    """Multiplicative term-specificity prior in [0, 1] (axis E).
+
+    The IA-weighted ``f_micro_w`` objective rewards specific (high-IA) terms,
+    yet the base composite ignores term specificity entirely. This prior closes
+    that gap: the composite score is multiplied by ``prior_t ** gamma`` where
+    ``prior_t in (0, 1]`` is a specificity weight and ``gamma >= 0`` tunes its
+    strength (``gamma = 0`` → multiplier 1 → no effect, a second off-switch).
+
+    Gated by ``params["ia_prior"]["enabled"]`` (default off → returns ``1.0``,
+    preserving the legacy score exactly). Two sources:
+
+    - ``"frequency"`` (default): from the term's corpus count
+      ``go_term_frequency``. ``prior = 1 / (1 + log1p(freq))`` — common terms
+      (large freq) are down-weighted, rare/specific terms keep ~1.
+    - ``"ia"``: from a normalised information-accretion value in [0, 1] supplied
+      on the pred as ``term_ia`` (the caller resolves it from the
+      config-referenced IA file / ``OntologySnapshot``; A-SCORE.2 plug point).
+      ``prior = clip(term_ia, 0, 1)``.
+
+    When the source field is missing on the pred the prior is ``1.0`` (no
+    penalty) rather than 0, so a partially-featured row is never silently
+    zeroed.
+    """
+    block = (params or {}).get("ia_prior") or {}
+    if not block.get("enabled"):
+        return 1.0
+    gamma = float(block.get("gamma", 1.0))
+    source = block.get("source", "frequency")
+    if source == IA_PRIOR_SOURCE_IA:
+        ia = pred.get("term_ia")
+        prior = 1.0 if ia is None else max(0.0, min(1.0, float(ia)))
+    else:
+        freq = pred.get("go_term_frequency")
+        prior = 1.0 if freq is None else 1.0 / (1.0 + math.log1p(max(0.0, float(freq))))
+    if prior <= 0.0:
+        return 0.0
+    return float(prior**gamma)
+
+
+def apply_calibration(
+    score: float,
+    *,
+    aspect: str | None = None,
+    ia_bin: int | None = None,
+    calibration: dict[str, Any] | None = None,
+) -> float:
+    """Post-score per-(aspect, IA-bin) calibration hook (axis: calibration).
+
+    No-op stub with a fixed interface so A-SCORE.2 can drop in isotonic
+    mappings without touching any caller. Returns ``score`` unchanged unless
+    ``calibration["enabled"]`` is set *and* a populated table is supplied
+    (none ships today). Gated off by default → byte-identical to the legacy
+    score.
+    """
+    block = calibration or {}
+    if not block.get("enabled"):
+        return score
+    # Future (A-SCORE.2): look up an isotonic mapping keyed by (aspect, ia_bin)
+    # in block["tables"] and apply it. Until those tables exist this is a
+    # transparent pass-through.
+    return score
+
+
 def _resolve_signal_values(
     pred: dict[str, Any],
     evidence_w: float,
@@ -115,6 +252,10 @@ def _resolve_signal_values(
     - ``identity_nw`` / ``identity_sw`` (float | None): NW / SW identity in [0, 1].
     - ``taxonomic_distance`` (float | None): mapped via 1 / (1 + d).
     - ``neighbor_vote_fraction`` (float | None): already in [0, 1].
+    - ``coverage`` (axis A3): see :func:`coverage_signal`.
+    - ``ref_annotation_density`` (axis F): see :func:`ref_density_signal`.
+    - ``anc2vec_neighbor_cos`` / ``anc2vec_neighbor_maxcos`` (axis G):
+      see :func:`anc2vec_unit_signal`.
     """
     distance = pred.get("distance")
     embedding_sim = 1.0 - float(distance) / 2.0 if distance is not None else None
@@ -127,6 +268,10 @@ def _resolve_signal_values(
         ("evidence_weight", evidence_w),
         ("taxonomic_proximity", tax_proximity),
         ("neighbor_vote_fraction", pred.get("neighbor_vote_fraction")),
+        ("coverage", coverage_signal(pred)),
+        ("ref_annotation_density", ref_density_signal(pred)),
+        ("anc2vec_neighbor_cos", anc2vec_unit_signal(pred.get("anc2vec_neighbor_cos"))),
+        ("anc2vec_neighbor_maxcos", anc2vec_unit_signal(pred.get("anc2vec_neighbor_maxcos"))),
     ]
 
 
@@ -140,7 +285,15 @@ def compute_score(pred: dict[str, Any], config: ScoringConfig) -> float:
     the average by the resolved evidence weight even when the
     evidence_weight signal carries weight 0 — so IEA / ND annotations
     get down-ranked regardless of feature configuration.
+
+    Composition order (each step is a no-op when its config knob is off, so a
+    config without ``params`` scores exactly as before these knobs existed):
+    weighted average, then ``x evidence_weight`` for the evidence_weighted
+    formula, then ``x ia_prior_multiplier`` (axis E), then ``apply_calibration``.
     """
+    params = getattr(config, "params", None)
+    if not isinstance(params, dict):
+        params = {}
     signal_weights = config.weights
     ev_overrides = config.evidence_weights or None
     ev_w = evidence_weight(pred.get("evidence_code"), overrides=ev_overrides)
@@ -159,6 +312,13 @@ def compute_score(pred: dict[str, Any], config: ScoringConfig) -> float:
     base_score = weighted_sum / total_w
     if config.formula == FORMULA_EVIDENCE_WEIGHTED:
         base_score *= ev_w
+    base_score *= ia_prior_multiplier(pred, params)
+    base_score = apply_calibration(
+        base_score,
+        aspect=pred.get("aspect"),
+        ia_bin=pred.get("ia_bin"),
+        calibration=params.get("calibration"),
+    )
     return round(base_score, 6)
 
 

@@ -31,6 +31,7 @@ from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
 from protea.infrastructure.orm.models.embedding.scoring_config import (
     FORMULA_EVIDENCE_WEIGHTED,
+    IA_PRIOR_SOURCE_IA,
     ScoringConfig,
 )
 
@@ -46,6 +47,16 @@ _BASE_SCORE_COLS: tuple[str, ...] = (
     "evidence_code",
     "taxonomic_distance",
     "neighbor_vote_fraction",
+    # --- A-SCORE rich axes (coverage A3 / ref-density F / anc2vec G / IA-prior E) ---
+    "alignment_length_nw",
+    "gaps_pct_nw",
+    "alignment_length_sw",
+    "gaps_pct_sw",
+    "length_query",
+    "ref_annotation_density",
+    "anc2vec_neighbor_cos",
+    "anc2vec_neighbor_maxcos",
+    "go_term_frequency",
 )
 
 
@@ -137,6 +148,16 @@ def _score_unranked_pred(
         "evidence_code": pred.evidence_code,
         "taxonomic_distance": pred.taxonomic_distance,
         "neighbor_vote_fraction": pred.neighbor_vote_fraction,
+        # A-SCORE rich axes (coverage A3 / ref-density F / anc2vec G / IA-prior E)
+        "alignment_length_nw": getattr(pred, "alignment_length_nw", None),
+        "gaps_pct_nw": getattr(pred, "gaps_pct_nw", None),
+        "alignment_length_sw": getattr(pred, "alignment_length_sw", None),
+        "gaps_pct_sw": getattr(pred, "gaps_pct_sw", None),
+        "length_query": getattr(pred, "length_query", None),
+        "ref_annotation_density": getattr(pred, "ref_annotation_density", None),
+        "anc2vec_neighbor_cos": getattr(pred, "anc2vec_neighbor_cos", None),
+        "anc2vec_neighbor_maxcos": getattr(pred, "anc2vec_neighbor_maxcos", None),
+        "go_term_frequency": getattr(pred, "go_term_frequency", None),
     }
     return compute_score(pred_dict, scoring_config)
 
@@ -221,6 +242,15 @@ def _base_select(ctx: WritePredictionsContext) -> Any:
             GOPrediction.evidence_code,
             GOPrediction.taxonomic_distance,
             GOPrediction.neighbor_vote_fraction,
+            GOPrediction.alignment_length_nw,
+            GOPrediction.gaps_pct_nw,
+            GOPrediction.alignment_length_sw,
+            GOPrediction.gaps_pct_sw,
+            GOPrediction.length_query,
+            GOPrediction.ref_annotation_density,
+            GOPrediction.anc2vec_neighbor_cos,
+            GOPrediction.anc2vec_neighbor_maxcos,
+            GOPrediction.go_term_frequency,
         )
         .join(GOTerm, GOPrediction.go_term_id == GOTerm.id)
         .where(GOPrediction.prediction_set_id == ctx.pred_set_id)
@@ -275,6 +305,63 @@ def _evidence_weight_array(codes: Any, overrides: dict[str, float] | None) -> np
     return np.array([wmap[c if isinstance(c, str) else None] for c in raw], dtype=np.float64)
 
 
+def _float_col(df: Any, name: str) -> np.ndarray:
+    """Column ``name`` as a float64 array (``None`` → ``nan``); all-``nan`` if absent."""
+    if name in df.columns:
+        return df[name].to_numpy(dtype=np.float64)
+    return np.full(len(df), np.nan, dtype=np.float64)
+
+
+def _coverage_array(df: Any) -> np.ndarray:
+    """Vectorised mirror of :func:`protea.core.scoring.coverage_signal` (axis A3)."""
+    lq = _float_col(df, "length_query")
+    aln_sw = _float_col(df, "alignment_length_sw")
+    gap_sw = _float_col(df, "gaps_pct_sw")
+    aln_nw = _float_col(df, "alignment_length_nw")
+    gap_nw = _float_col(df, "gaps_pct_nw")
+    use_sw = ~np.isnan(aln_sw)
+    aln = np.where(use_sw, aln_sw, aln_nw)
+    gap = np.where(use_sw, gap_sw, gap_nw)
+    gap_frac = np.where(np.isnan(gap), 0.0, np.clip(gap, 0.0, 1.0))
+    valid = (lq > 0.0) & ~np.isnan(aln)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        cov = np.clip(aln * (1.0 - gap_frac) / lq, 0.0, 1.0)
+    return np.where(valid, cov, np.nan)
+
+
+def _ref_density_array(df: Any) -> np.ndarray:
+    """Vectorised mirror of :func:`protea.core.scoring.ref_density_signal` (axis F)."""
+    dens = _float_col(df, "ref_annotation_density")
+    return np.where(np.isnan(dens), np.nan, 1.0 / (1.0 + np.maximum(0.0, dens)))
+
+
+def _anc2vec_array(df: Any, name: str) -> np.ndarray:
+    """Vectorised mirror of :func:`protea.core.scoring.anc2vec_unit_signal` (axis G)."""
+    x = _float_col(df, name)
+    return np.where(np.isnan(x), np.nan, (x + 1.0) / 2.0)
+
+
+def _ia_prior_array(df: Any, params: dict[str, Any]) -> np.ndarray | None:
+    """Vectorised mirror of :func:`protea.core.scoring.ia_prior_multiplier` (axis E).
+
+    Returns ``None`` when the prior is disabled (caller skips the multiply),
+    otherwise a per-row multiplier array.
+    """
+    block = (params or {}).get("ia_prior") or {}
+    if not block.get("enabled"):
+        return None
+    gamma = float(block.get("gamma", 1.0))
+    source = block.get("source", "frequency")
+    if source == IA_PRIOR_SOURCE_IA:
+        ia = _float_col(df, "term_ia")
+        prior = np.where(np.isnan(ia), 1.0, np.clip(ia, 0.0, 1.0))
+    else:
+        freq = _float_col(df, "go_term_frequency")
+        prior = np.where(np.isnan(freq), 1.0, 1.0 / (1.0 + np.log1p(np.maximum(0.0, freq))))
+    prior = np.where(prior <= 0.0, 0.0, prior)
+    return np.power(prior, gamma)
+
+
 def _vectorized_scores(df: Any, scoring_config: ScoringConfig | None) -> np.ndarray:
     """Exact, vectorised equivalent of per-row :func:`_score_unranked_pred`.
 
@@ -286,6 +373,9 @@ def _vectorized_scores(df: Any, scoring_config: ScoringConfig | None) -> np.ndar
     if scoring_config is None:
         return np.maximum(0.0, 1.0 - np.where(np.isnan(distance), 0.0, distance) / 2.0)
 
+    params = getattr(scoring_config, "params", None)
+    if not isinstance(params, dict):
+        params = {}
     weights = scoring_config.weights
     ev_overrides = scoring_config.evidence_weights or None
     ev_w = _evidence_weight_array(df["evidence_code"].tolist(), ev_overrides)
@@ -297,6 +387,10 @@ def _vectorized_scores(df: Any, scoring_config: ScoringConfig | None) -> np.ndar
         ("evidence_weight", ev_w),
         ("taxonomic_proximity", np.where(np.isnan(tax), np.nan, 1.0 / (1.0 + tax))),
         ("neighbor_vote_fraction", df["neighbor_vote_fraction"].to_numpy(dtype=np.float64)),
+        ("coverage", _coverage_array(df)),
+        ("ref_annotation_density", _ref_density_array(df)),
+        ("anc2vec_neighbor_cos", _anc2vec_array(df, "anc2vec_neighbor_cos")),
+        ("anc2vec_neighbor_maxcos", _anc2vec_array(df, "anc2vec_neighbor_maxcos")),
     )
     total_w = np.zeros(len(df), dtype=np.float64)
     weighted_sum = np.zeros(len(df), dtype=np.float64)
@@ -310,6 +404,11 @@ def _vectorized_scores(df: Any, scoring_config: ScoringConfig | None) -> np.ndar
     base = np.divide(weighted_sum, total_w, out=np.zeros(len(df)), where=total_w > 0.0)
     if scoring_config.formula == FORMULA_EVIDENCE_WEIGHTED:
         base = base * ev_w
+    prior = _ia_prior_array(df, params)
+    if prior is not None:
+        base = base * prior
+    # Calibration (params["calibration"]) is a no-op stub today; the scalar
+    # path's apply_calibration() is also a pass-through, so the two stay equal.
     return base
 
 

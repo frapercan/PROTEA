@@ -347,9 +347,7 @@ class TestEvalProvenanceStamping:
     def test_build_provenance_derives_leakage_from_window_role(self):
         es = _make_eval_set()
         es.window_role = "valid"
-        p = RunCafaEvaluationPayload(
-            evaluation_set_id=EVAL_SET_ID, prediction_set_id=PRED_SET_ID
-        )
+        p = RunCafaEvaluationPayload(evaluation_set_id=EVAL_SET_ID, prediction_set_id=PRED_SET_ID)
         frame, window, role, arms = RunCafaEvaluationOperation._build_eval_provenance(
             p, es, has_rerankers=False
         )
@@ -377,9 +375,7 @@ class TestEvalProvenanceStamping:
     def test_build_provenance_reranker_arm_reflects_run(self):
         es = _make_eval_set()
         es.window_role = None
-        p = RunCafaEvaluationPayload(
-            evaluation_set_id=EVAL_SET_ID, prediction_set_id=PRED_SET_ID
-        )
+        p = RunCafaEvaluationPayload(evaluation_set_id=EVAL_SET_ID, prediction_set_id=PRED_SET_ID)
         _, _, role, arms = RunCafaEvaluationOperation._build_eval_provenance(
             p, es, has_rerankers=True
         )
@@ -743,6 +739,16 @@ def _base_row(
     evidence_code=None,
     taxonomic_distance=None,
     neighbor_vote_fraction=None,
+    *,
+    alignment_length_nw=None,
+    gaps_pct_nw=None,
+    alignment_length_sw=None,
+    gaps_pct_sw=None,
+    length_query=None,
+    ref_annotation_density=None,
+    anc2vec_neighbor_cos=None,
+    anc2vec_neighbor_maxcos=None,
+    go_term_frequency=None,
 ):
     """Build a single Core-row tuple in ``_BASE_SCORE_COLS`` order."""
     return (
@@ -754,6 +760,15 @@ def _base_row(
         evidence_code,
         taxonomic_distance,
         neighbor_vote_fraction,
+        alignment_length_nw,
+        gaps_pct_nw,
+        alignment_length_sw,
+        gaps_pct_sw,
+        length_query,
+        ref_annotation_density,
+        anc2vec_neighbor_cos,
+        anc2vec_neighbor_maxcos,
+        go_term_frequency,
     )
 
 
@@ -906,6 +921,15 @@ class TestVectorizedScoreEquivalence:
                 evidence_code=row[5],
                 taxonomic_distance=row[6],
                 neighbor_vote_fraction=row[7],
+                alignment_length_nw=row[8],
+                gaps_pct_nw=row[9],
+                alignment_length_sw=row[10],
+                gaps_pct_sw=row[11],
+                length_query=row[12],
+                ref_annotation_density=row[13],
+                anc2vec_neighbor_cos=row[14],
+                anc2vec_neighbor_maxcos=row[15],
+                go_term_frequency=row[16],
             )
             score = _score_unranked_pred(pred, scoring_config)
             lines.append(f"{row[0]}\t{row[1]}\t{score:.4f}")
@@ -956,6 +980,127 @@ class TestVectorizedScoreEquivalence:
             evidence_weights={"IEA": 0.5, "ND": 0.05},
         )
         assert self._new_path(cfg) == self._oracle(cfg)
+
+    # --- A-SCORE rich axes: vectorised path must still match the per-row scorer ---
+    _RICH_ROWS = [
+        _base_row(
+            "P1",
+            "GO:0000001",
+            0.4,
+            0.8,
+            0.9,
+            "IDA",
+            2,
+            0.5,
+            alignment_length_sw=120.0,
+            gaps_pct_sw=0.1,
+            length_query=200,
+            ref_annotation_density=7,
+            anc2vec_neighbor_cos=0.6,
+            anc2vec_neighbor_maxcos=0.8,
+            go_term_frequency=5000,
+        ),
+        _base_row(
+            "P2",
+            "GO:0000003",
+            0.2,
+            None,
+            0.3,
+            "IEA",
+            None,
+            0.7,
+            alignment_length_nw=180.0,
+            gaps_pct_nw=0.0,
+            length_query=200,
+            ref_annotation_density=0,
+            anc2vec_neighbor_cos=-0.4,
+            anc2vec_neighbor_maxcos=None,
+            go_term_frequency=10,
+        ),
+        _base_row(
+            "P2",
+            "GO:0000005",
+            0.8,
+            0.2,
+            0.2,
+            "ND",
+            1,
+            0.1,
+            alignment_length_sw=None,
+            length_query=None,
+            ref_annotation_density=None,
+            go_term_frequency=None,
+        ),
+    ]
+
+    def _oracle_rich(self, scoring_config):
+        from protea.core.operations._run_cafa_artifacts import _score_unranked_pred
+
+        winners: dict[tuple[str, str], tuple] = {}
+        for row in sorted(self._RICH_ROWS, key=lambda r: (r[0], r[1], r[2])):
+            winners.setdefault((row[0], row[1]), row)
+        lines = []
+        for (_p, _g), row in sorted(winners.items()):
+            pred = SimpleNamespace(
+                distance=row[2],
+                identity_nw=row[3],
+                identity_sw=row[4],
+                evidence_code=row[5],
+                taxonomic_distance=row[6],
+                neighbor_vote_fraction=row[7],
+                alignment_length_nw=row[8],
+                gaps_pct_nw=row[9],
+                alignment_length_sw=row[10],
+                gaps_pct_sw=row[11],
+                length_query=row[12],
+                ref_annotation_density=row[13],
+                anc2vec_neighbor_cos=row[14],
+                anc2vec_neighbor_maxcos=row[15],
+                go_term_frequency=row[16],
+            )
+            lines.append(f"{row[0]}\t{row[1]}\t{_score_unranked_pred(pred, scoring_config):.4f}")
+        return sorted(lines)
+
+    def _new_path_rich(self, scoring_config):
+        session = _core_session(self._RICH_ROWS)
+        with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
+            path = f.name
+        self.op._write_predictions(
+            session,
+            WritePredictionsContext(
+                pred_set_id=uuid.uuid4(),
+                delta_proteins={"P1", "P2"},
+                max_distance=None,
+                path=path,
+            ),
+            scoring_config=scoring_config,
+        )
+        try:
+            with open(path) as f:
+                return sorted(line for line in f.read().splitlines() if line)
+        finally:
+            os.unlink(path)
+
+    def test_equivalence_rich_signals(self):
+        cfg = _real_scoring_config(
+            formula="linear",
+            weights={
+                "embedding_similarity": 0.4,
+                "coverage": 0.3,
+                "ref_annotation_density": 0.1,
+                "anc2vec_neighbor_cos": 0.1,
+                "anc2vec_neighbor_maxcos": 0.1,
+            },
+        )
+        assert self._new_path_rich(cfg) == self._oracle_rich(cfg)
+
+    def test_equivalence_ia_prior_frequency(self):
+        cfg = _real_scoring_config(
+            formula="linear",
+            weights={"embedding_similarity": 1.0, "coverage": 0.5},
+        )
+        cfg.params = {"ia_prior": {"enabled": True, "gamma": 1.5, "source": "frequency"}}
+        assert self._new_path_rich(cfg) == self._oracle_rich(cfg)
 
 
 # ---------------------------------------------------------------------------
@@ -1661,6 +1806,7 @@ class TestExecuteHappyPath:
         scoring_cfg = MagicMock()
         scoring_cfg.formula = "linear"
         scoring_cfg.weights = {"embedding_similarity": 1.0}
+        scoring_cfg.params = None
         session.get.side_effect = [eval_set, pred_set, snapshot, scoring_cfg]
 
         query = MagicMock()
@@ -1693,6 +1839,7 @@ class TestExecuteHappyPath:
         mock_sc_cls.assert_called_once_with(
             formula="linear",
             weights={"embedding_similarity": 1.0},
+            params=None,
         )
         assert "evaluation_result_id" in result.result
 
