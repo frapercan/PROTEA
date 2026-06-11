@@ -596,9 +596,28 @@ class TestPredictBatchParentCancellation:
         assert result.result["skipped"] is True
 
 
-# ---------------------------------------------------------------------------
-# Pure helper functions
-# ---------------------------------------------------------------------------
+class TestFinalizeParentProgress:
+    """FIX-UI-PROVENANCE: the terminal SUCCEEDED transition of the
+    predict_go_terms coordinator must snap progress_current up to
+    progress_total so the UI never shows a stale sub-100% bar."""
+
+    def test_finalize_sql_snaps_progress_current_to_total(self) -> None:
+        op = PredictGOTermsBatchOperation()
+        session = MagicMock()
+        row = MagicMock()
+        row.finalized = True
+        row.done = 26
+        row.expected = 26
+        session.execute.return_value.first.return_value = row
+        emit = MagicMock()
+
+        op._finalize_parent_if_last(session, uuid.uuid4(), emit)
+
+        sql = str(session.execute.call_args[0][0]).lower()
+        # The single finalize UPDATE bumps progress_current alongside status.
+        assert "progress_current = case" in sql
+        assert "coalesce(progress_total, progress_current)" in sql
+        emit.assert_called_once()
 
 
 class TestBuildAnnoCsr:
