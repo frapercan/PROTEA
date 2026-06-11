@@ -238,6 +238,10 @@ later revision).
      - :doc:`Leakage-free temporal evaluation protocol (rolling-origin TRAIN/VALID/TEST) <D40-leakage-free-temporal-eval-protocol>`
      - Accepted
      - F-EVAL
+   * - D41
+     - :doc:`Lean f32 reference pool for high-dimensional PLMs <D41-lean-f32-refpool-highdim-plm>`
+     - Accepted
+     - fix/refpool-lean-f32-highdim-plm
 
 .. toctree::
    :maxdepth: 1
@@ -290,3 +294,4 @@ later revision).
    D38-neural-head-deferred-dataset-pack-pivot
    D39-destructive-op-guards
    D40-leakage-free-temporal-eval-protocol
+   D41-lean-f32-refpool-highdim-plm
