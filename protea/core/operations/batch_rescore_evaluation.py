@@ -115,6 +115,23 @@ class BatchRescoreEvaluationPayload(ProteaPayload, frozen=True):
 
 
 @dataclass(frozen=True)
+class _StageCtx:
+    """Inputs for the once-per-batch shared staging, bundled under the §3 ceiling.
+
+    Carries the loaded ``inputs`` + derived single-eval ``base_payload`` plus the
+    optional staging knobs: ``needs_term_ia`` triggers the IA-file -> ``term_ia``
+    injection (only when a config uses ``ia_prior source="ia"``), and
+    ``fold_spec`` is the ``(folds, fold, seed)`` internal train/valid split
+    (``folds<=1`` = full cohort).
+    """
+
+    base_payload: RunCafaEvaluationPayload
+    inputs: Any
+    needs_term_ia: bool = False
+    fold_spec: tuple[int, int, int] = (1, 0, 0)
+
+
+@dataclass(frozen=True)
 class _BatchRun:
     """Per-batch shared state, fixed once before the per-config loop.
 
@@ -168,15 +185,13 @@ class BatchRescoreEvaluationOperation:
 
         result_ids: list[str] = []
         with tempfile.TemporaryDirectory(prefix="protea_cafa_batch_") as tmpdir:
-            staged = self._stage_shared_inputs(
-                session,
-                base_payload,
-                inputs,
-                Path(tmpdir),
-                emit,
+            stage_ctx = _StageCtx(
+                base_payload=base_payload,
+                inputs=inputs,
                 needs_term_ia=needs_term_ia,
                 fold_spec=(p.protein_folds, p.protein_fold, p.protein_seed),
             )
+            staged = self._stage_shared_inputs(session, stage_ctx, Path(tmpdir), emit)
             # Release the DB connection before cafaeval forks its pool (same
             # rationale as run_cafa_evaluation's no-op commit), then run every
             # config against the in-memory shared base frame.
@@ -252,35 +267,60 @@ class BatchRescoreEvaluationOperation:
     def _stage_shared_inputs(
         self,
         session: Session,
-        base_payload: RunCafaEvaluationPayload,
-        inputs: Any,
+        ctx: _StageCtx,
         tmpdir: Path,
         emit: EmitFn,
-        *,
-        needs_term_ia: bool = False,
-        fold_spec: tuple[int, int, int] = (1, 0, 0),
     ) -> dict[str, Any]:
         """Download OBO + IA, restrict GT, write GT/TOI, and fetch the base frame.
 
         Everything here is config-independent, so it runs ONCE per batch. The
         deduped base frame is held in memory and reused for every config. When
-        any batched config uses the ``ia_prior`` ``source="ia"`` lever, the IA
-        file is also mapped onto the frame as a normalised ``term_ia`` column so
-        the prior aligns exactly with the cafaeval ``f_micro_w`` IA weighting.
+        ``ctx.needs_term_ia`` (any batched config uses the ``ia_prior``
+        ``source="ia"`` lever), the IA file is also mapped onto the frame as a
+        normalised ``term_ia`` column so the prior aligns exactly with the
+        cafaeval ``f_micro_w`` IA weighting.
         """
+        base_payload, inputs = ctx.base_payload, ctx.inputs
         obo_path = os.path.join(str(tmpdir), "go.obo")
-        emit(
-            "batch_rescore_evaluation.downloading_obo",
-            None,
-            {"url": inputs.snapshot.obo_url},
-            "info",
-        )
+        emit("batch_rescore_evaluation.downloading_obo", None, {"url": inputs.snapshot.obo_url},
+             "info")
         _artifacts.download_obo(inputs.snapshot.obo_url, obo_path)
         ia_path = self._single._resolve_ia_file(
             str(tmpdir), inputs.snapshot, base_payload.ia_file, emit
         )
         self._single._enforce_band(base_payload.band, inputs.snapshot, base_payload.ia_file, emit)
 
+        data = self._restrict_cohort(session, base_payload, inputs, ctx.fold_spec, emit)
+        gt_root = tmpdir / "gt"
+        gt_root.mkdir(parents=True, exist_ok=True)
+        gt_paths = _data.write_ground_truth_files(gt_root, data)
+        toi_path = self._single._resolve_toi_file(gt_root, base_payload, inputs.toi_go_ids, emit)
+
+        delta_proteins = set(data.nk) | set(data.lk) | set(data.pk)
+        base_frame = self._fetch_base_frame(
+            session, inputs.pred_set_id, delta_proteins, base_payload.max_distance, emit
+        )
+        if ctx.needs_term_ia and ia_path:
+            self._attach_term_ia(base_frame, ia_path, emit)
+        return {
+            "tmpdir": tmpdir,
+            "obo_path": obo_path,
+            "ia_path": ia_path,
+            "toi_path": toi_path,
+            "gt_paths": gt_paths,
+            "delta_proteins": delta_proteins,
+            "base_frame": base_frame,
+        }
+
+    @staticmethod
+    def _restrict_cohort(
+        session: Session,
+        base_payload: RunCafaEvaluationPayload,
+        inputs: Any,
+        fold_spec: tuple[int, int, int],
+        emit: EmitFn,
+    ) -> Any:
+        """Restrict the GT cohort to the predicted set, then the internal fold."""
         data = inputs.data
         if base_payload.restrict_gt_to_predicted:
             data = _data.restrict_data_to_predicted(
@@ -291,33 +331,19 @@ class BatchRescoreEvaluationOperation:
             data = _data.restrict_data_to_protein_fold(
                 data, folds=folds, fold=fold, seed=fold_seed, emit=emit
             )
-        gt_root = tmpdir / "gt"
-        gt_root.mkdir(parents=True, exist_ok=True)
-        gt_paths = _data.write_ground_truth_files(gt_root, data)
-        toi_path = self._single._resolve_toi_file(gt_root, base_payload, inputs.toi_go_ids, emit)
+        return data
 
-        delta_proteins = set(data.nk) | set(data.lk) | set(data.pk)
-        base_frame = self._fetch_base_frame(
-            session, inputs.pred_set_id, delta_proteins, base_payload.max_distance, emit
+    @staticmethod
+    def _attach_term_ia(base_frame: Any, ia_path: str, emit: EmitFn) -> None:
+        """Map the IA file onto the base frame as a normalised ``term_ia`` column."""
+        ia_map = _artifacts.load_ia_map(ia_path)
+        _artifacts.attach_term_ia(base_frame, ia_map)
+        emit(
+            "batch_rescore_evaluation.term_ia_attached",
+            None,
+            {"ia_terms": len(ia_map), "rows": int(len(base_frame))},
+            "info",
         )
-        if needs_term_ia and ia_path:
-            ia_map = _artifacts.load_ia_map(ia_path)
-            _artifacts.attach_term_ia(base_frame, ia_map)
-            emit(
-                "batch_rescore_evaluation.term_ia_attached",
-                None,
-                {"ia_terms": len(ia_map), "rows": int(len(base_frame))},
-                "info",
-            )
-        return {
-            "tmpdir": tmpdir,
-            "obo_path": obo_path,
-            "ia_path": ia_path,
-            "toi_path": toi_path,
-            "gt_paths": gt_paths,
-            "delta_proteins": delta_proteins,
-            "base_frame": base_frame,
-        }
 
     @staticmethod
     def _fetch_base_frame(
