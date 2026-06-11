@@ -224,6 +224,81 @@ class TestGoldenScoringParity:
 
 
 # ---------------------------------------------------------------------------
+# Step 0: real-IA prior wiring (source="ia" -> term_ia from the IA file)
+# ---------------------------------------------------------------------------
+
+
+class TestRealIaPrior:
+    """The IA file maps onto the base frame as a normalised ``term_ia`` column.
+
+    Without this, ``ia_prior source="ia"`` no-ops (no ``term_ia`` on the frame);
+    with it, the prior aligns with the cafaeval ``f_micro_w`` IA weighting.
+    """
+
+    def test_load_ia_map_parses_go_id_ia(self, tmp_path):
+        ia_file = tmp_path / "ia.tsv"
+        ia_file.write_text("GO:0000001\t-0.0\nGO:0000006\t7.35\nbad_line\nGO:0000007\t12.0\n")
+        ia_map = _artifacts.load_ia_map(str(ia_file))
+        assert ia_map == {"GO:0000001": -0.0, "GO:0000006": 7.35, "GO:0000007": 12.0}
+
+    def test_attach_term_ia_normalises_to_unit_interval(self):
+        base = _base_frame()
+        ia_map = {"GO:0000001": 2.0, "GO:0000003": 20.0}  # GO:0000002 absent
+        _artifacts.attach_term_ia(base, ia_map)
+        vals = dict(zip(base["go_id"], base["term_ia"], strict=True))
+        # Present terms map into [0, 1]; absent term -> NaN (no penalty).
+        assert 0.0 <= vals["GO:0000001"] <= 1.0
+        assert 0.0 <= vals["GO:0000003"] <= 1.0
+        assert pd.isna(vals["GO:0000002"])
+        # Higher raw IA -> higher (or equal, if both clip to 1) normalised prior.
+        assert vals["GO:0000003"] >= vals["GO:0000001"]
+
+    def test_ia_source_moves_scores_once_term_ia_present(self):
+        # source="ia" is a no-op without term_ia, and bends scores once attached.
+        base_no_ia = _base_frame()
+        base_with_ia = _base_frame()
+        _artifacts.attach_term_ia(
+            base_with_ia, {"GO:0000001": 1.0, "GO:0000002": 18.0, "GO:0000003": 9.0}
+        )
+        cfg = _composite_config({"ia_prior": {"enabled": True, "source": "ia", "gamma": 1.0}})
+        with tempfile.TemporaryDirectory() as d:
+            p_no = os.path.join(d, "no_ia.tsv")
+            p_yes = os.path.join(d, "with_ia.tsv")
+            _artifacts._write_scored_base(base_no_ia, cfg, p_no)
+            _artifacts._write_scored_base(base_with_ia, cfg, p_yes)
+            with open(p_no) as f:
+                s_no = f.read()
+            with open(p_yes) as f:
+                s_yes = f.read()
+        # No term_ia -> prior 1.0 everywhere -> identical to a plain composite.
+        plain = _composite_config()
+        with tempfile.TemporaryDirectory() as d:
+            p_plain = os.path.join(d, "plain.tsv")
+            _artifacts._write_scored_base(_base_frame(), plain, p_plain)
+            with open(p_plain) as f:
+                s_plain = f.read()
+        assert s_no == s_plain  # source="ia" is inert without term_ia
+        assert s_yes != s_no  # attaching IA moves the scores
+
+    def test_uses_ia_source_detection(self):
+        op = BatchRescoreEvaluationOperation()
+        assert op._uses_ia_source(None) is False
+        assert op._uses_ia_source(_composite_config()) is False
+        assert (
+            op._uses_ia_source(
+                _composite_config({"ia_prior": {"enabled": True, "source": "frequency"}})
+            )
+            is False
+        )
+        assert (
+            op._uses_ia_source(
+                _composite_config({"ia_prior": {"enabled": True, "source": "ia"}})
+            )
+            is True
+        )
+
+
+# ---------------------------------------------------------------------------
 # Win #4: the base-frame disk cache is parallel-safe (atomic writes)
 # ---------------------------------------------------------------------------
 

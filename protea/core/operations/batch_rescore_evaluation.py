@@ -149,10 +149,13 @@ class BatchRescoreEvaluationOperation:
 
         configs = self._load_scoring_snapshots(session, p.scoring_config_ids)
         artifact_store = get_artifact_store(load_settings(Path(__file__).resolve().parents[3]))
+        needs_term_ia = any(self._uses_ia_source(snap) for _, snap in configs)
 
         result_ids: list[str] = []
         with tempfile.TemporaryDirectory(prefix="protea_cafa_batch_") as tmpdir:
-            staged = self._stage_shared_inputs(session, base_payload, inputs, Path(tmpdir), emit)
+            staged = self._stage_shared_inputs(
+                session, base_payload, inputs, Path(tmpdir), emit, needs_term_ia=needs_term_ia
+            )
             # Release the DB connection before cafaeval forks its pool (same
             # rationale as run_cafa_evaluation's no-op commit), then run every
             # config against the in-memory shared base frame.
@@ -207,6 +210,24 @@ class BatchRescoreEvaluationOperation:
             window_role=p.window_role,
         )
 
+    @staticmethod
+    def _uses_ia_source(snapshot: ScoringConfig | None) -> bool:
+        """True if the config's ``ia_prior`` is enabled with ``source="ia"``.
+
+        Only then does the batch need to attach the (cost-bearing) per-row
+        ``term_ia`` column from the IA file; frequency-source and disabled
+        priors read columns already present on the base frame.
+        """
+        from protea.infrastructure.orm.models.embedding.scoring_config import (
+            IA_PRIOR_SOURCE_IA,
+        )
+
+        params = getattr(snapshot, "params", None)
+        block = (params or {}).get("ia_prior") if isinstance(params, dict) else None
+        if not isinstance(block, dict) or not block.get("enabled"):
+            return False
+        return block.get("source") == IA_PRIOR_SOURCE_IA
+
     def _stage_shared_inputs(
         self,
         session: Session,
@@ -214,11 +235,16 @@ class BatchRescoreEvaluationOperation:
         inputs: Any,
         tmpdir: Path,
         emit: EmitFn,
+        *,
+        needs_term_ia: bool = False,
     ) -> dict[str, Any]:
         """Download OBO + IA, restrict GT, write GT/TOI, and fetch the base frame.
 
         Everything here is config-independent, so it runs ONCE per batch. The
-        deduped base frame is held in memory and reused for every config.
+        deduped base frame is held in memory and reused for every config. When
+        any batched config uses the ``ia_prior`` ``source="ia"`` lever, the IA
+        file is also mapped onto the frame as a normalised ``term_ia`` column so
+        the prior aligns exactly with the cafaeval ``f_micro_w`` IA weighting.
         """
         obo_path = os.path.join(str(tmpdir), "go.obo")
         emit(
@@ -247,6 +273,15 @@ class BatchRescoreEvaluationOperation:
         base_frame = self._fetch_base_frame(
             session, inputs.pred_set_id, delta_proteins, base_payload.max_distance, emit
         )
+        if needs_term_ia and ia_path:
+            ia_map = _artifacts.load_ia_map(ia_path)
+            _artifacts.attach_term_ia(base_frame, ia_map)
+            emit(
+                "batch_rescore_evaluation.term_ia_attached",
+                None,
+                {"ia_terms": len(ia_map), "rows": int(len(base_frame))},
+                "info",
+            )
         return {
             "tmpdir": tmpdir,
             "obo_path": obo_path,

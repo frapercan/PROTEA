@@ -362,6 +362,57 @@ def _ia_prior_array(df: Any, params: dict[str, Any]) -> np.ndarray | None:
     return np.power(prior, gamma)
 
 
+def load_ia_map(ia_path: str) -> dict[str, float]:
+    """Parse a cafaeval IA TSV (``go_id<TAB>raw_ia``) into ``{go_id: raw_ia}``.
+
+    The IA file is the SAME ``go_id``-keyed information-accretion table the
+    cafaeval ``f_micro_w`` metric weights with, so attaching it as the scorer's
+    ``ia_prior`` source aligns the prior exactly with the objective. Raw IA is
+    unbounded (0 .. ~19); :func:`attach_term_ia` normalises it to [0, 1] before
+    the scorer consumes it as ``term_ia``.
+    """
+    ia_map: dict[str, float] = {}
+    with open(ia_path, encoding="utf-8") as fh:
+        for line in fh:
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) < 2:
+                continue
+            go_id = parts[0].strip()
+            if not go_id or go_id.lower() in ("go_id", "term"):
+                continue
+            try:
+                ia_map[go_id] = float(parts[1])
+            except ValueError:
+                continue
+    return ia_map
+
+
+def attach_term_ia(df: Any, ia_map: dict[str, float]) -> None:
+    """Inject a normalised ``term_ia`` column (in-place) keyed by ``go_id``.
+
+    Maps each row's ``go_id`` to its raw IA, then min-max-normalises against the
+    99th percentile of the positive IA values (clipped to [0, 1]). The p99 anchor
+    (rather than the raw max) keeps the common dynamic range from being squashed
+    by a handful of extreme-IA terms, while preserving the monotone ordering the
+    specificity prior relies on. Terms absent from the IA file get ``NaN`` so the
+    scorer leaves them at multiplier 1.0 (no penalty), matching the cafaeval
+    uniform-IC fallback. Always overwrites any pre-existing ``term_ia`` column.
+    """
+    if not ia_map:
+        df["term_ia"] = np.nan
+        return
+    positive = np.array([v for v in ia_map.values() if v > 0.0], dtype=np.float64)
+    anchor = float(np.percentile(positive, 99)) if positive.size else 1.0
+    if anchor <= 0.0:
+        anchor = 1.0
+    go_ids = df["go_id"].tolist()
+    out = np.empty(len(go_ids), dtype=np.float64)
+    for i, gid in enumerate(go_ids):
+        raw = ia_map.get(gid)
+        out[i] = np.nan if raw is None else min(1.0, max(0.0, raw / anchor))
+    df["term_ia"] = out
+
+
 def _vectorized_scores(df: Any, scoring_config: ScoringConfig | None) -> np.ndarray:
     """Exact, vectorised equivalent of per-row :func:`_score_unranked_pred`.
 
