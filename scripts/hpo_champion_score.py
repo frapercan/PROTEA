@@ -10,10 +10,12 @@ everything through PROTEA's HTTP surface:
   read f_micro_w per cell from GET .../results.
 
 Search strategy (no Optuna dependency): a coarse grid over the cheap re-scorable
-axes (ia_prior gamma, a small set of signal-weight vectors, evidence-tier
-presets) crossed with the OUTER K axis (which Ankh-base prediction_set), then a
-local random refine around the per-cell leaders. Soft-vote temperature is
-predict-time only (#628) and is deliberately excluded.
+axes (a set of signal-weight vectors crossed with evidence-code presets) and the
+OUTER K axis (which Ankh-base prediction_set), then a local random refine around
+the per-cell leaders (refine stays inside the leader's evidence preset). The
+ia_prior gamma axis is fixed at 0.0 by default (it lost in all 9 held-out cells
+on 2026-06-12; --gammas reopens it). Soft-vote temperature is predict-time only
+(#628) and is deliberately excluded.
 
 Guard (LEAN, beat-pooled-or-revert): every config is evaluated on TWO disjoint
 protein folds of the SAME validation window (the batch op's ``protein_folds``
@@ -36,10 +38,15 @@ import os
 import random
 import time
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 import requests
+
+from protea.infrastructure.orm.models.embedding.scoring_config import (
+    DEFAULT_EVIDENCE_WEIGHTS,
+)
 
 # --- Fixed inputs (A-SCORE.2 spawn context) -------------------------------
 
@@ -78,6 +85,43 @@ SIGNAL_KEYS = (
     "anc2vec_neighbor_cos",
     "anc2vec_neighbor_maxcos",
 )
+
+# --- Evidence-code axis -----------------------------------------------------
+# Full GO-evidence-code set the default table knows; kept in sync with the ORM
+# DEFAULT_EVIDENCE_WEIGHTS so the experimental_only / iea_excluded presets cover
+# every code explicitly (no silent fallback to the default weight).
+ALL_EVIDENCE_CODES: tuple[str, ...] = tuple(DEFAULT_EVIDENCE_WEIGHTS.keys())
+
+# Core experimental codes kept at full weight by ev_experimental_only.
+_EXPERIMENTAL_CORE: frozenset[str] = frozenset(
+    {"EXP", "IDA", "IEP", "IGI", "IMP", "IPI"}
+)
+
+# Tier weights for ev_tierweighted (matches the deployed scoring_config table).
+_TIERWEIGHTED: dict[str, float] = {
+    "EXP": 1.0, "IDA": 1.0, "IEP": 1.0, "IGI": 1.0, "IMP": 1.0, "IPI": 1.0,
+    "IBA": 0.7, "IC": 0.5, "ISS": 0.5, "ISA": 0.5, "ISM": 0.5, "ISO": 0.5,
+    "NAS": 0.4, "TAS": 0.4, "IEA": 0.2, "ND": 0.0,
+}
+
+
+def _experimental_only_weights() -> dict[str, float]:
+    return {c: (1.0 if c in _EXPERIMENTAL_CORE else 0.0) for c in ALL_EVIDENCE_CODES}
+
+
+def _iea_excluded_weights() -> dict[str, float]:
+    return {c: (0.0 if c == "IEA" else 1.0) for c in ALL_EVIDENCE_CODES}
+
+
+# (label, formula, evidence_weights). evidence_weights=None means "use the
+# deployed default table" (ev_uniform) or "no evidence weighting" (linear).
+EVIDENCE_PRESETS: list[tuple[str, str, dict[str, float] | None]] = [
+    ("linear", "linear", None),
+    ("ev_uniform", "evidence_weighted", None),
+    ("ev_experimental_only", "evidence_weighted", _experimental_only_weights()),
+    ("ev_iea_excluded", "evidence_weighted", _iea_excluded_weights()),
+    ("ev_tierweighted", "evidence_weighted", dict(_TIERWEIGHTED)),
+]
 
 
 # --------------------------------------------------------------------------
@@ -185,10 +229,23 @@ def base_weight_vectors() -> list[dict[str, float]]:
          "anc2vec_neighbor_maxcos": 0.5},
         {"embedding_similarity": 1.0, "neighbor_vote_fraction": 0.5, "taxonomic_proximity": 0.5,
          "ref_annotation_density": 0.3},
+        # "mas scores": exercise the under-used density/coverage/anc2vec/identity
+        # signals plus a vote-dominant mix (PK-BPO champion liked vote=1.28).
+        {"embedding_similarity": 1.0, "neighbor_vote_fraction": 1.0, "coverage": 0.5},
+        {"embedding_similarity": 1.0, "neighbor_vote_fraction": 0.5,
+         "ref_annotation_density": 0.5, "coverage": 0.3},
+        {"embedding_similarity": 1.0, "neighbor_vote_fraction": 1.0,
+         "anc2vec_neighbor_cos": 0.5},
+        {"embedding_similarity": 1.0, "neighbor_vote_fraction": 0.5,
+         "taxonomic_proximity": 0.5, "identity_nw": 0.3},
+        {"embedding_similarity": 0.6, "neighbor_vote_fraction": 1.3},
     ]
 
 
-GAMMAS = (0.0, 0.25, 0.5, 1.0)  # ia_prior gamma; 0.0 = prior off
+# ia_prior gamma. The full 9-cell held-out run (2026-06-12) returned gamma=0 in
+# ALL 9 cells (the IA prior never wins), so the default axis is a single 0.0
+# point. The plumbing stays (--gammas overrides it); the ia_prior code is intact.
+GAMMAS = (0.0,)
 
 # The IA-exact prior (source="ia", reads the real IA file as term_ia) needs the
 # Step-0 scorer wiring deployed. Until that PR merges + redeploys, the live stack
@@ -204,6 +261,7 @@ class Trial:
     ia_source: str
     formula: str = "linear"
     evidence_weights: dict | None = None
+    evidence_label: str = "linear"
 
     def params(self) -> dict | None:
         if self.gamma <= 0.0:
@@ -212,13 +270,23 @@ class Trial:
 
     def signature(self) -> str:
         w = ",".join(f"{k}:{v}" for k, v in sorted(self.weights.items()))
-        return f"k{self.k}|{self.formula}|g{self.gamma}|{self.ia_source}|{w}"
+        # evidence_label keeps two evidence_weighted trials with different code
+        # tables distinct (the raw formula+weights would dedupe-collide otherwise).
+        return f"k{self.k}|{self.formula}|ev:{self.evidence_label}|g{self.gamma}|{self.ia_source}|{w}"
 
 
-def coarse_trials(ks: list[int], ia_source: str = "ia") -> list[Trial]:
+def coarse_trials(ks: list[int], ia_source: str = "ia",
+                  gammas: Sequence[float] = GAMMAS) -> list[Trial]:
     trials: list[Trial] = []
-    for k, wv, gamma in itertools.product(ks, base_weight_vectors(), GAMMAS):
-        trials.append(Trial(k=k, weights=dict(wv), gamma=gamma, ia_source=ia_source))
+    for k, wv, preset, gamma in itertools.product(
+        ks, base_weight_vectors(), EVIDENCE_PRESETS, gammas
+    ):
+        label, formula, ev = preset
+        trials.append(Trial(
+            k=k, weights=dict(wv), gamma=gamma, ia_source=ia_source,
+            formula=formula, evidence_weights=dict(ev) if ev else None,
+            evidence_label=label,
+        ))
     # de-dup by signature
     seen: dict[str, Trial] = {}
     for t in trials:
@@ -242,7 +310,12 @@ def refine_trials(leader: Trial, n: int, rng: random.Random) -> list[Trial]:
             extra = rng.choice(SIGNAL_KEYS[1:])
             w[extra] = round(rng.uniform(0.2, 0.8), 2)
         gamma = round(max(0.0, leader.gamma + rng.uniform(-0.3, 0.3)), 3)
-        out.append(Trial(k=leader.k, weights=w, gamma=gamma, ia_source=leader.ia_source))
+        # Refine stays inside the leader's evidence preset (formula + code table).
+        out.append(Trial(
+            k=leader.k, weights=w, gamma=gamma, ia_source=leader.ia_source,
+            formula=leader.formula, evidence_weights=leader.evidence_weights,
+            evidence_label=leader.evidence_label,
+        ))
     return out
 
 
@@ -334,14 +407,15 @@ def best_per_cell(evald: dict[str, dict], cells: list[str]) -> dict[str, tuple[s
 
 def run_hpo(client: Client, cells: list[str], *, ks: list[int], seed: int,
             refine_per_cell: int, max_inflight: int, out_dir: str,
-            ia_source: str = "ia", folds: int = 2, th_step: float = 0.01) -> dict:
+            ia_source: str = "ia", folds: int = 2, th_step: float = 0.01,
+            gammas: Sequence[float] = GAMMAS) -> dict:
     rng = random.Random(seed)
     os.makedirs(out_dir, exist_ok=True)
     train_fold = 0
     valid_fold = 1 if folds > 1 else 0  # folds==1 -> degraded guard on full cohort
 
     # --- Generation 1: coarse grid on the train fold ---
-    coarse = coarse_trials(ks, ia_source=ia_source)
+    coarse = coarse_trials(ks, ia_source=ia_source, gammas=gammas)
     print(f"[gen1] {len(coarse)} coarse trials over K={ks} ia_source={ia_source} folds={folds}")
     train = evaluate_trials(client, coarse, tag="g1train", folds=folds, fold=train_fold, seed=seed,
                             max_inflight=max_inflight, th_step=th_step)
@@ -452,6 +526,9 @@ def main() -> int:
     ap.add_argument("--cells", nargs="+", default=["NK-MFO", "PK-BPO"],
                     help="Cells to optimise (smoke = NK-MFO PK-BPO).")
     ap.add_argument("--ks", nargs="+", type=int, default=[3, 5, 10, 30])
+    ap.add_argument("--gammas", nargs="+", type=float, default=[0.0],
+                    help="ia_prior gamma values to sweep. Default [0.0] (the IA prior "
+                         "lost in all 9 held-out cells on 2026-06-12); override to revisit.")
     ap.add_argument("--seed", type=int, default=20260611)
     ap.add_argument("--refine-per-cell", type=int, default=6)
     ap.add_argument("--max-inflight", type=int, default=2)
@@ -478,7 +555,7 @@ def main() -> int:
         client, args.cells, ks=args.ks, seed=args.seed,
         refine_per_cell=args.refine_per_cell, max_inflight=args.max_inflight,
         out_dir=args.out_dir, ia_source=args.ia_source, folds=args.folds,
-        th_step=args.th_step,
+        th_step=args.th_step, gammas=args.gammas,
     )
     report["runtime_s"] = round(time.time() - t0, 1)
 
