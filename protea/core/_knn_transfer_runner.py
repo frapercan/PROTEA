@@ -248,6 +248,11 @@ class _KnnTransferRunner:
             else {}
         )
         self._lineage_known: dict[str, set[str]] = self.query_known_gos or {}
+        # InterPro GO-prediction table (contracts 1.1.0 feature family),
+        # loaded once from the env-configured path on first use. ``None``
+        # is the not-yet-loaded sentinel; an empty dict is a valid loaded
+        # value (env var unset -> all records keep the zero-fill defaults).
+        self._interpro_table: dict[tuple[str, str], Any] | None = None
 
     def run(self) -> list[dict[str, Any]] | dict[str, Any]:
         """Drive the full KNN-transfer-label pipeline."""
@@ -529,6 +534,7 @@ class _KnnTransferRunner:
             # leaves and synthesised ancestor rows under the same known
             # set; the parquet boundary invariant requires them present.
             self._apply_lineage_features(q_acc, leaf_by_gid, synth)
+            self._apply_interpro_features(leaf_by_gid, synth)
             for rec in leaf_by_gid.values():
                 self._emit(rec)
             for rec in synth.values():
@@ -564,6 +570,38 @@ class _KnnTransferRunner:
             parents=self._lineage_parents,
             known_by_protein={q_acc: self._lineage_known.get(q_acc, set())},
         )
+
+    def _apply_interpro_features(
+        self,
+        leaf_by_gid: dict[str, dict[str, Any]],
+        synth: dict[str, dict[str, Any]],
+    ) -> None:
+        """Fill the 11 InterPro columns on this group's records (S3).
+
+        Left-joins the env-configured InterPro GO-prediction table on
+        ``(protein, go_id)`` and overwrites the zero-fill defaults for
+        matched leaves and synthesised ancestors. When the table is empty
+        (env var unset) every record keeps the defaults the builder set,
+        so all 11 columns stay present unconditionally. Does not change
+        the candidate row-set: union with InterPro-only candidates is a
+        separate follow-up (S3b).
+        """
+        table = self._get_interpro_table()
+        if not table:
+            return
+        from protea.core._interpro_features import apply_interpro_features
+
+        apply_interpro_features(
+            [*leaf_by_gid.values(), *synth.values()], table
+        )
+
+    def _get_interpro_table(self) -> dict[tuple[str, str], Any]:
+        """Load the InterPro GO-prediction table once, then cache it."""
+        if self._interpro_table is None:
+            from protea.core._interpro_features import load_interpro_go_pred
+
+            self._interpro_table = load_interpro_go_pred()
+        return self._interpro_table
 
     # ── phase 10: streaming buffer + per-query state cleanup ──────────
 
