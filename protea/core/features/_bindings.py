@@ -126,6 +126,23 @@ def _compute_lineage_producer() -> Callable[..., Any]:
     return compute_lineage_features
 
 
+def _interpro_producer() -> Callable[..., Any]:
+    """Lazy reference for the InterPro signature->GO feature family.
+
+    The 11 ``interpro_*`` / presence columns (contracts 1.1.0) are
+    materialised as a post-pass over the KNN leaf records by
+    :func:`protea.core._interpro_features.apply_interpro_features`,
+    keyed on ``(protein, go_id)`` against an env-configured InterPro
+    GO-prediction table. The marker keeps the registry's producer
+    coverage complete; the default zero-fill lives in
+    ``_leaf_record_builder._interpro_default_fields`` so every record
+    carries all 11 columns unconditionally.
+    """
+    from protea.core._interpro_features import apply_interpro_features
+
+    return apply_interpro_features
+
+
 def _annotation_metadata_producer() -> Callable[..., Any]:
     """Reference for categorical metadata columns sourced from annotation rows.
 
@@ -195,6 +212,20 @@ _LINEAGE_FEATURES: tuple[str, ...] = (
     "lineage_descendant_of_count",
 )
 
+_INTERPRO_FEATURES: tuple[str, ...] = (
+    "interpro_hit",
+    "interpro_score",
+    "interpro_n_signatures",
+    "interpro_db_pfam",
+    "interpro_db_panther",
+    "interpro_db_superfamily",
+    "interpro_db_smart",
+    "interpro_db_cdd",
+    "interpro_db_prosite",
+    "knn_present",
+    "interpro_present",
+)
+
 _ANNOTATION_METADATA_FEATURES: tuple[str, ...] = tuple(
     name for name in CATEGORICAL_FEATURES if name != "taxonomic_relation"
 )
@@ -217,6 +248,8 @@ def _build_feature_to_producer() -> dict[str, tuple[Callable[..., Any], str]]:
         mapping[name] = (_enrich_v6_producer, "enrich_v6_features")
     for name in _LINEAGE_FEATURES:
         mapping[name] = (_compute_lineage_producer, "compute_lineage_features")
+    for name in _INTERPRO_FEATURES:
+        mapping[name] = (_interpro_producer, "interpro_features")
     for name in _ANNOTATION_METADATA_FEATURES:
         mapping[name] = (_annotation_metadata_producer, "annotation_metadata")
     missing = [name for name in ALL_FEATURES if name not in mapping]

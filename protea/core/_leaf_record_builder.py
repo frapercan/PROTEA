@@ -131,7 +131,39 @@ class _LeafRecordBuilder:
             {f"emb_pca_query_{i}": inputs.q_pca_row[i] for i in range(EMBEDDING_PCA_DIM)}
         )
         rec.update(self._lineage_default_fields())
+        rec.update(self._interpro_default_fields())
         return rec
+
+    @staticmethod
+    def _interpro_default_fields() -> dict[str, Any]:
+        """Zero-filled defaults for the 11 InterPro columns (contracts 1.1.0).
+
+        Every KNN leaf record carries all 11 ``interpro_*`` / presence
+        columns unconditionally so the T1.8 canonical-column boundary
+        (:func:`protea.core.parquet_export._assert_canonical_columns`)
+        and the contracts producer-coverage guard never fail the dump
+        after hours of compute. The real values are filled in by a
+        post-pass keyed on ``(protein, go_id)`` against the InterPro
+        GO-prediction table; see
+        :func:`protea.core._interpro_features.apply_interpro_features`.
+        Records with no InterPro evidence keep these defaults: a
+        well-defined zero/False with ``interpro_present`` False so a true
+        zero is distinguishable from an absent source. ``knn_present`` is
+        True because this slice only emits on KNN candidates.
+        """
+        return {
+            "interpro_hit": False,
+            "interpro_score": 0.0,
+            "interpro_n_signatures": 0,
+            "interpro_db_pfam": False,
+            "interpro_db_panther": False,
+            "interpro_db_superfamily": False,
+            "interpro_db_smart": False,
+            "interpro_db_cdd": False,
+            "interpro_db_prosite": False,
+            "knn_present": True,
+            "interpro_present": False,
+        }
 
     @staticmethod
     def _lineage_default_fields() -> dict[str, Any]:

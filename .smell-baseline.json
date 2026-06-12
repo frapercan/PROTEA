@@ -7,6 +7,15 @@
   },
   "offenders": [
     {
+      "key": "class::protea/core/_knn_transfer_runner.py::_KnnTransferRunner",
+      "kind": "class",
+      "path": "protea/core/_knn_transfer_runner.py",
+      "name": "_KnnTransferRunner",
+      "line": 124,
+      "metric": 525,
+      "threshold": 500
+    },
+    {
       "key": "method::protea/core/operations/predict_go_terms/_batch_op_reference.py::_ReferenceMixin._load_reference_data_per_aspect",
       "kind": "method",
       "path": "protea/core/operations/predict_go_terms/_batch_op_reference.py",
