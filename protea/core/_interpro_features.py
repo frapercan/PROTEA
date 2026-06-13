@@ -1,11 +1,13 @@
 """InterPro signature->GO feature producer for the research-dataset export.
 
 S3 of the reranker-vNext + InterPro chain. Materialises the 11
-``interpro_*`` / presence columns (contracts 1.1.0) on the existing KNN
-leaf records, keyed by ``(protein, go_id)``. This slice does NOT change
-the candidate row-set (no KNN+InterPro union); it only annotates the KNN
-candidates already emitted by the leaf-record builder. The union
-expansion is a separate follow-up (S3b).
+``interpro_*`` / presence columns (contracts 1.1.0), keyed by
+``(protein, go_id)``. S3 annotated the existing KNN leaf records; S3b
+adds the union, so InterPro-predicted terms absent from the KNN set are
+emitted as new InterPro-only candidates (``knn_present`` False, KNN
+features NaN). :func:`index_by_protein` and
+:func:`select_interpro_only_go_ids` drive that union; the KNN runner
+calls them per ``(protein, aspect)`` group.
 
 Data source. The producer left-joins an InterPro GO-prediction table loaded from the
 path in :data:`INTERPRO_GO_PRED_PATH_ENV` (``PROTEA_INTERPRO_GO_PRED_PATH``).
@@ -27,7 +29,7 @@ signature count. A 3-column table yields empty member-DBs and a count of
 from __future__ import annotations
 
 import os
-from collections.abc import Iterable, Mapping
+from collections.abc import Container, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -116,6 +118,50 @@ def load_interpro_go_pred(
                 n_sig = explicit_n if explicit_n is not None else prev.n_signatures + 1
                 table[key] = _InterProMatch(max(prev.score, score), n_sig, merged_dbs)
     return table
+
+
+def index_by_protein(
+    table: Mapping[tuple[str, str], _InterProMatch],
+) -> dict[str, set[str]]:
+    """Group an InterPro GO-prediction table by protein accession.
+
+    Returns ``protein -> {go_id, ...}``. Used by the S3b union pass to
+    enumerate, per query, the InterPro-predicted GO terms that may need
+    adding as InterPro-only candidates (those absent from the KNN set).
+    """
+    out: dict[str, set[str]] = {}
+    for protein, go_id in table:
+        out.setdefault(protein, set()).add(go_id)
+    return out
+
+
+def select_interpro_only_go_ids(
+    protein_go_ids: Iterable[str],
+    go_aspect: Mapping[str, str],
+    aspect: str,
+    excluded: Container[str],
+) -> list[str]:
+    """Pick the InterPro-only GO ids for one ``(protein, aspect)`` group.
+
+    The S3b union is ``KNN_candidates UNION InterPro_terms`` per protein.
+    This returns the second-set-minus-first slice for a single aspect: the
+    protein's InterPro GO ids that (a) belong to ``aspect`` and (b) are not
+    already KNN candidates (``excluded`` = the KNN leaves + their
+    synthesised ancestors). The dedup guarantees a ``(protein, go_id)``
+    that is BOTH KNN and InterPro is emitted once (the KNN "both" row),
+    never twice. ``go_aspect`` maps each GO id to its single-char aspect
+    code; ids outside the ontology snapshot (absent from the map) are
+    skipped because they have no aspect to group on and would be dropped
+    by the pivot filter anyway.
+    """
+    out: list[str] = []
+    for go_id in protein_go_ids:
+        if go_aspect.get(go_id) != aspect:
+            continue
+        if go_id in excluded:
+            continue
+        out.append(go_id)
+    return out
 
 
 def apply_interpro_features(
