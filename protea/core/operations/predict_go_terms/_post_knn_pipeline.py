@@ -197,32 +197,20 @@ def apply_association(
     """Set the cross-aspect ``association_*`` features per candidate.
 
     For each query protein with pre-cutoff EXPERIMENTAL known terms ``K(p)``
-    (loaded from the same ``annotation_set_id`` the KNN reference pool uses,
-    never a post-cutoff set), each candidate term ``t`` scores from the
-    per-set co-occurrence table (``build_go_cooccurrence``):
+    (from the same ``annotation_set_id`` the KNN pool uses, never post-cutoff),
+    each candidate term ``t`` is scored from the per-set co-occurrence table
+    (``build_go_cooccurrence``). The actual scoring lives in
+    :func:`_score_association_candidates`: ``association_total`` /
+    ``association_cross`` / ``association_present``.
 
-    - ``association_total``   = sum over ``k in K(p)`` of ``P(t | k)`` where
-      ``P(t | k) = cooccurrence(k, t) / freq(k)``.
-    - ``association_cross``   = same sum but only over ``k`` whose ontology
-      aspect differs from ``t``'s aspect (the genuine prior-knowledge
-      transfer that drives PK; same-aspect is largely ancestor-trivial).
-    - ``association_present`` = ``1.0`` if ``association_total > 0`` else
-      ``0.0``.
-
-    Leakage guardrails mirror :func:`apply_self_prior`: known terms come from
-    the pre-cutoff annotation set, NOT-qualified rows are dropped upstream,
-    and only experimental codes are kept. If the co-occurrence table is empty
-    for this set every candidate stays at the zero-fill default.
+    Leakage guardrails mirror :func:`apply_self_prior`. If the co-occurrence
+    table is empty for this set every candidate stays at the zero-fill default.
     """
     from protea.core.operations.predict_go_terms._association_loader import (
         load_cooccurrence_for_known,
     )
 
-    accessions = {acc for acc in valid_accessions if acc}
-    if not accessions:
-        return
-    annotations = op._load_annotations_for(session, annotation_set_id, accessions)
-    own_exp = _own_exp_terms(annotations)
+    own_exp = _load_own_exp_for_association(op, session, annotation_set_id, valid_accessions)
     if not own_exp:
         emit(
             "predict_go_terms_batch.association_done",
@@ -244,6 +232,45 @@ def apply_association(
     }
     aspect_by_id = _load_known_aspects(session, candidate_ids | all_known)
 
+    scored = _score_association_candidates(
+        prediction_dicts, own_exp, cooc_by_known, freq, aspect_by_id
+    )
+
+    emit(
+        "predict_go_terms_batch.association_done",
+        None,
+        {"queries_with_known": len(own_exp), "candidates_scored": scored},
+        "info",
+    )
+
+
+def _load_own_exp_for_association(
+    op: PredictGOTermsBatchOperation,
+    session: Session,
+    annotation_set_id: uuid.UUID,
+    valid_accessions: list[str],
+) -> dict[str, set[int]]:
+    """Pre-cutoff experimental known terms per query accession (leakage-clean)."""
+    accessions = {acc for acc in valid_accessions if acc}
+    if not accessions:
+        return {}
+    annotations = op._load_annotations_for(session, annotation_set_id, accessions)
+    return _own_exp_terms(annotations)
+
+
+def _score_association_candidates(
+    prediction_dicts: list[dict[str, Any]],
+    own_exp: dict[str, set[int]],
+    cooc_by_known: dict[int, dict[int, int]],
+    freq: dict[int, int],
+    aspect_by_id: dict[int, str],
+) -> int:
+    """Write ``association_*`` features per candidate; return rows scored.
+
+    For each candidate term ``t`` and the query's known terms ``K(p)``,
+    ``association_total`` sums ``P(t | k) = cooccurrence(k, t) / freq(k)``;
+    ``association_cross`` sums only the cross-aspect ``k``.
+    """
     scored = 0
     for rec in prediction_dicts:
         gtid = rec.get("go_term_id")
@@ -272,13 +299,7 @@ def apply_association(
             rec["association_cross"] = cross
             rec["association_present"] = 1.0
             scored += 1
-
-    emit(
-        "predict_go_terms_batch.association_done",
-        None,
-        {"queries_with_known": len(own_exp), "candidates_scored": scored},
-        "info",
-    )
+    return scored
 
 
 def _load_known_aspects(session: Session, term_ids: set[int]) -> dict[int, str]:

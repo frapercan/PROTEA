@@ -139,13 +139,9 @@ class PredictGOTermsOperation:
             ),
             {"n": n_batches, "jid": parent_job_id},
         )
-        operations = [
-            (
-                _BATCH_QUEUE,
-                self._build_batch_message(p, prediction_set.id, parent_job_id, accs, binding),
-            )
-            for accs in batches
-        ]
+        operations = self._build_batch_operations(
+            p, prediction_set.id, parent_job_id, batches, binding
+        )
         return OperationResult(
             result={
                 "batches": n_batches,
@@ -284,6 +280,23 @@ class PredictGOTermsOperation:
                 "reranker_feature_schema_sha": binding.feature_schema_sha if binding else None,
             },
         }
+
+    def _build_batch_operations(
+        self,
+        p: PredictGOTermsPayload,
+        prediction_set_id: uuid.UUID,
+        parent_job_id: UUID,
+        batches: list[list[str]],
+        binding: _RerankerBinding | None,
+    ) -> list[tuple[str, dict[str, Any]]]:
+        """Build the predict_go_terms_batch dispatch operations for each batch."""
+        return [
+            (
+                _BATCH_QUEUE,
+                self._build_batch_message(p, prediction_set_id, parent_job_id, accs, binding),
+            )
+            for accs in batches
+        ]
 
     def _load_query_accessions(
         self,
