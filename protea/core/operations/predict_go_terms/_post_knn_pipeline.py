@@ -77,6 +77,14 @@ def run_post_knn_pipeline(
             prediction_dicts,
             emit,
         )
+    if getattr(p, "compute_classifier", False):
+        prediction_dicts = apply_classifier(
+            session,
+            uuid.UUID(p.ontology_snapshot_id),
+            knn_result.query_batch.valid_accessions,
+            prediction_dicts,
+            emit,
+        )
     reranker_stats: dict[str, Any] | None = None
     if p.reranker_model_id and prediction_dicts:
         scorer = op._reranker_scorer
@@ -473,8 +481,103 @@ def resolve_synthetic_fks(
     ]
 
 
+def apply_classifier(
+    session: Session,
+    snapshot_id: uuid.UUID,
+    valid_accessions: list[str],
+    prediction_dicts: list[dict[str, Any]],
+    emit: EmitFn,
+) -> list[dict[str, Any]]:
+    """Merge full-vocabulary classifier terms as ADDITIONAL candidates.
+
+    The classifier proposes GO terms from the query's 6-PLM embeddings across
+    the whole training vocabulary (not just neighbour-carried terms). For a
+    ``(protein, go_term_id)`` already present, ``classifier_score`` is set and
+    ``classifier_present`` becomes ``1.0``; otherwise a new candidate dict is
+    created with the classifier marker. Returns the (possibly grown) list.
+    KNN candidates are never removed, so this is a strict union.
+    """
+    from protea.core.classifier_producer import (
+        get_classifier,
+        load_concat_features,
+        resolve_go_term_ids,
+    )
+
+    accessions = [acc for acc in valid_accessions if acc]
+    features, valid = load_concat_features(session, accessions)
+    if not valid:
+        _emit_classifier_done(emit, 0, 0)
+        return prediction_dicts
+    preds = get_classifier().predict(features, valid)
+    go_ids = {pr.go_id for pr in preds}
+    gid_by_go = resolve_go_term_ids(session, go_ids, snapshot_id)
+    merged, added = _merge_classifier_preds(prediction_dicts, preds, gid_by_go)
+    _emit_classifier_done(emit, len(valid), added)
+    return merged
+
+
+def _merge_classifier_preds(
+    prediction_dicts: list[dict[str, Any]],
+    preds: list[Any],
+    gid_by_go: dict[str, int],
+) -> tuple[list[dict[str, Any]], int]:
+    """Union classifier terms into ``prediction_dicts``; return (list, n_new)."""
+    by_key: dict[tuple[str, int], dict[str, Any]] = {}
+    for rec in prediction_dicts:
+        gtid = rec.get("go_term_id")
+        if gtid is not None:
+            by_key[(rec.get("protein_accession", ""), int(gtid))] = rec
+    added = 0
+    for pr in preds:
+        gtid = gid_by_go.get(pr.go_id)
+        if gtid is None:
+            continue
+        existing = by_key.get((pr.accession, gtid))
+        if existing is not None:
+            existing["classifier_score"] = float(pr.score)
+            existing["classifier_present"] = 1.0
+            continue
+        rec = _new_classifier_record(pr.accession, gtid, pr.go_id, float(pr.score))
+        by_key[(pr.accession, gtid)] = rec
+        prediction_dicts.append(rec)
+        added += 1
+    return prediction_dicts, added
+
+
+def _new_classifier_record(
+    accession: str, go_term_id: int, go_id: str, score: float
+) -> dict[str, Any]:
+    """Build a classifier-only candidate dict (KNN features zero/default)."""
+    return {
+        "protein_accession": accession,
+        "go_term_id": go_term_id,
+        "go_id": go_id,
+        "ref_protein_accession": "classifier",
+        "distance": float("nan"),
+        "qualifier": "",
+        "evidence_code": "",
+        "classifier_score": score,
+        "classifier_present": 1.0,
+        "self_prior_score": 0.0,
+        "association_total": 0.0,
+        "association_cross": 0.0,
+        "association_present": 0.0,
+    }
+
+
+def _emit_classifier_done(emit: EmitFn, queries: int, candidates_added: int) -> None:
+    """Emit the classifier completion event."""
+    emit(
+        "predict_go_terms_batch.classifier_done",
+        None,
+        {"queries_scored": queries, "candidates_added": candidates_added},
+        "info",
+    )
+
+
 __all__ = (
     "apply_association",
+    "apply_classifier",
     "apply_self_prior",
     "apply_v6_features",
     "expand_to_ancestors",
