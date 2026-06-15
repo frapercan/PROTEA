@@ -49,6 +49,7 @@ from pydantic import BaseModel, ValidationError
 
 from protea.core.operation_catalog import build_operation_registry
 from protea.core.operations.batch_rescore_evaluation import BatchRescoreEvaluationPayload
+from protea.core.operations.build_go_cooccurrence import BuildGoCooccurrencePayload
 from protea.core.operations.compute_embeddings import (
     ComputeEmbeddingsBatchPayload,
     ComputeEmbeddingsPayload,
@@ -268,6 +269,13 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
         RefreshGoaReleaseDatesPayload,
         {"timeout_seconds": 0},
         ("timeout_seconds",),
+    ),
+    # missing-required: annotation_set_id
+    (
+        "build_go_cooccurrence",
+        BuildGoCooccurrencePayload,
+        {"known_freq_cap": 1000},
+        ("annotation_set_id",),
     ),
     # missing-required: output_name
     (

@@ -68,6 +68,15 @@ def run_post_knn_pipeline(
             prediction_dicts,
             emit,
         )
+    if getattr(p, "compute_association", False) and prediction_dicts:
+        apply_association(
+            op,
+            session,
+            ctx.annotation_set_id,
+            knn_result.query_batch.valid_accessions,
+            prediction_dicts,
+            emit,
+        )
     reranker_stats: dict[str, Any] | None = None
     if p.reranker_model_id and prediction_dicts:
         scorer = op._reranker_scorer
@@ -148,6 +157,159 @@ def _own_nonexp_terms(
         if terms:
             own_nonexp[acc] = terms
     return own_nonexp
+
+
+def _own_exp_terms(
+    annotations: dict[str, list[dict[str, Any]]],
+) -> dict[str, set[int]]:
+    """Per-accession set of OWN EXPERIMENTAL annotated go_term_ids.
+
+    The inverse filter of :func:`_own_nonexp_terms`: keeps only experimental
+    evidence via :func:`protea.core.evidence_codes.is_experimental`. NOT-
+    qualified rows were already excluded by ``_load_annotations_for``. These
+    are the pre-cutoff "known" terms ``K(p)`` the cross-aspect association
+    feature transfers from.
+    """
+    from protea.core.evidence_codes import is_experimental
+
+    own_exp: dict[str, set[int]] = {}
+    for acc, anns in annotations.items():
+        terms: set[int] = set()
+        for ann in anns:
+            if not is_experimental(ann.get("evidence_code") or ""):
+                continue
+            gtid = ann.get("go_term_id")
+            if gtid is not None:
+                terms.add(int(gtid))
+        if terms:
+            own_exp[acc] = terms
+    return own_exp
+
+
+def apply_association(
+    op: PredictGOTermsBatchOperation,
+    session: Session,
+    annotation_set_id: uuid.UUID,
+    valid_accessions: list[str],
+    prediction_dicts: list[dict[str, Any]],
+    emit: EmitFn,
+) -> None:
+    """Set the cross-aspect ``association_*`` features per candidate.
+
+    For each query protein with pre-cutoff EXPERIMENTAL known terms ``K(p)``
+    (from the same ``annotation_set_id`` the KNN pool uses, never post-cutoff),
+    each candidate term ``t`` is scored from the per-set co-occurrence table
+    (``build_go_cooccurrence``). The actual scoring lives in
+    :func:`_score_association_candidates`: ``association_total`` /
+    ``association_cross`` / ``association_present``.
+
+    Leakage guardrails mirror :func:`apply_self_prior`. If the co-occurrence
+    table is empty for this set every candidate stays at the zero-fill default.
+    """
+    from protea.core.operations.predict_go_terms._association_loader import (
+        load_cooccurrence_for_known,
+    )
+
+    own_exp = _load_own_exp_for_association(op, session, annotation_set_id, valid_accessions)
+    if not own_exp:
+        emit(
+            "predict_go_terms_batch.association_done",
+            None,
+            {"queries_with_known": 0, "candidates_scored": 0},
+            "info",
+        )
+        return
+
+    # Union of all known terms across the batch -> one table lookup.
+    all_known: set[int] = set()
+    for terms in own_exp.values():
+        all_known |= terms
+    cooc_by_known, freq = load_cooccurrence_for_known(session, annotation_set_id, all_known)
+
+    # Candidate aspects for every predicted go_term_id.
+    candidate_ids = {
+        int(rec["go_term_id"]) for rec in prediction_dicts if rec.get("go_term_id") is not None
+    }
+    aspect_by_id = _load_known_aspects(session, candidate_ids | all_known)
+
+    scored = _score_association_candidates(
+        prediction_dicts, own_exp, cooc_by_known, freq, aspect_by_id
+    )
+
+    emit(
+        "predict_go_terms_batch.association_done",
+        None,
+        {"queries_with_known": len(own_exp), "candidates_scored": scored},
+        "info",
+    )
+
+
+def _load_own_exp_for_association(
+    op: PredictGOTermsBatchOperation,
+    session: Session,
+    annotation_set_id: uuid.UUID,
+    valid_accessions: list[str],
+) -> dict[str, set[int]]:
+    """Pre-cutoff experimental known terms per query accession (leakage-clean)."""
+    accessions = {acc for acc in valid_accessions if acc}
+    if not accessions:
+        return {}
+    annotations = op._load_annotations_for(session, annotation_set_id, accessions)
+    return _own_exp_terms(annotations)
+
+
+def _score_association_candidates(
+    prediction_dicts: list[dict[str, Any]],
+    own_exp: dict[str, set[int]],
+    cooc_by_known: dict[int, dict[int, int]],
+    freq: dict[int, int],
+    aspect_by_id: dict[int, str],
+) -> int:
+    """Write ``association_*`` features per candidate; return rows scored.
+
+    For each candidate term ``t`` and the query's known terms ``K(p)``,
+    ``association_total`` sums ``P(t | k) = cooccurrence(k, t) / freq(k)``;
+    ``association_cross`` sums only the cross-aspect ``k``.
+    """
+    scored = 0
+    for rec in prediction_dicts:
+        gtid = rec.get("go_term_id")
+        if gtid is None:
+            continue
+        t = int(gtid)
+        known = own_exp.get(rec.get("protein_accession", ""))
+        if not known:
+            continue
+        t_aspect = aspect_by_id.get(t, "")
+        total = 0.0
+        cross = 0.0
+        for k in known:
+            f = freq.get(k, 0)
+            if f <= 0:
+                continue
+            count = cooc_by_known.get(k, {}).get(t, 0)
+            if count <= 0:
+                continue
+            p_t_given_k = count / f
+            total += p_t_given_k
+            if aspect_by_id.get(k, "") != t_aspect:
+                cross += p_t_given_k
+        if total > 0.0:
+            rec["association_total"] = total
+            rec["association_cross"] = cross
+            rec["association_present"] = 1.0
+            scored += 1
+    return scored
+
+
+def _load_known_aspects(session: Session, term_ids: set[int]) -> dict[int, str]:
+    """``{go_term_id: aspect}`` for the given ids (empty string when NULL)."""
+    from sqlalchemy import select
+
+    if not term_ids:
+        return {}
+    rows = session.execute(select(GOTerm.id, GOTerm.aspect).where(GOTerm.id.in_(term_ids))).all()
+    return {gid: (aspect or "") for gid, aspect in rows}
 
 
 def apply_v6_features(
@@ -312,6 +474,7 @@ def resolve_synthetic_fks(
 
 
 __all__ = (
+    "apply_association",
     "apply_self_prior",
     "apply_v6_features",
     "expand_to_ancestors",
