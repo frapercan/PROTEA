@@ -54,8 +54,10 @@ EVAL_FIXTURE = FIXTURE_DIR / "parquet_export_golden_eval.parquet"
 # after ``protea-contracts`` v0.3.0 added the lineage family. S3
 # rolls it forward again: ``protea-contracts`` 0.4.0 added the
 # 11-column interpro feature family (67 columns total), superseding
-# the prior ``"6d97a624b8a7"``.
-_LEGACY_FIXTURE_SHA = "ebb8af49befd"
+# the prior ``"6d97a624b8a7"``. lafa-integrate adds the 6 classifier /
+# self_prior / association columns (73 columns total), superseding
+# the prior ``"ebb8af49befd"``.
+_LEGACY_FIXTURE_SHA = "775611822dd9"
 
 
 def _full_feature_row() -> dict[str, object]:

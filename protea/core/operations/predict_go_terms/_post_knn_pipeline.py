@@ -59,11 +59,95 @@ def run_post_knn_pipeline(
     prediction_dicts = knn_result.prediction_dicts
     if p.expand_votes_to_ancestors and prediction_dicts:
         prediction_dicts = op._expand_to_ancestors(session, p, prediction_dicts, emit)
+    if getattr(p, "compute_self_prior", False) and prediction_dicts:
+        apply_self_prior(
+            op,
+            session,
+            ctx.annotation_set_id,
+            knn_result.query_batch.valid_accessions,
+            prediction_dicts,
+            emit,
+        )
     reranker_stats: dict[str, Any] | None = None
     if p.reranker_model_id and prediction_dicts:
         scorer = op._reranker_scorer
         reranker_stats = scorer.apply_if_aligned(session, prediction_dicts, p, emit)
     return prediction_dicts, reranker_stats
+
+
+def apply_self_prior(
+    op: PredictGOTermsBatchOperation,
+    session: Session,
+    annotation_set_id: uuid.UUID,
+    valid_accessions: list[str],
+    prediction_dicts: list[dict[str, Any]],
+    emit: EmitFn,
+) -> None:
+    """Set ``self_prior_score`` from each query's OWN pre-cutoff annotation.
+
+    The self-prior re-injects the GOA Non-exp signal the KNN scoring
+    discards (it excludes the neighbour self-hit by accession). For every
+    candidate ``(protein, go_term_id)`` the query already carries among
+    its OWN pre-cutoff NON-experimental annotations, ``self_prior_score``
+    is set to ``1.0``; all other candidates keep the zero-fill default.
+
+    Leakage guardrails (load-bearing): annotations come from the same
+    pre-cutoff ``annotation_set_id`` the KNN reference pool uses (NEVER a
+    post-cutoff set); NOT-qualified rows are dropped by
+    :meth:`_FeatureLoadingMixin._load_annotations_for`; experimental
+    evidence codes are filtered out via
+    :func:`protea.core.evidence_codes.is_experimental` so no experimental
+    self annotation can leak in.
+    """
+    accessions = {acc for acc in valid_accessions if acc}
+    if not accessions:
+        return
+    annotations = op._load_annotations_for(session, annotation_set_id, accessions)
+    own_nonexp = _own_nonexp_terms(annotations)
+
+    hits = 0
+    for rec in prediction_dicts:
+        gtid = rec.get("go_term_id")
+        if gtid is None:
+            continue
+        if int(gtid) in own_nonexp.get(rec.get("protein_accession", ""), ()):
+            rec["self_prior_score"] = 1.0
+            hits += 1
+
+    emit(
+        "predict_go_terms_batch.self_prior_done",
+        None,
+        {
+            "queries_with_self_prior": len(own_nonexp),
+            "candidates_marked": hits,
+        },
+        "info",
+    )
+
+
+def _own_nonexp_terms(
+    annotations: dict[str, list[dict[str, Any]]],
+) -> dict[str, set[int]]:
+    """Per-accession set of OWN non-experimental annotated go_term_ids.
+
+    Drops experimental evidence via
+    :func:`protea.core.evidence_codes.is_experimental`; NOT-qualified rows
+    were already excluded by ``_load_annotations_for``.
+    """
+    from protea.core.evidence_codes import is_experimental
+
+    own_nonexp: dict[str, set[int]] = {}
+    for acc, anns in annotations.items():
+        terms: set[int] = set()
+        for ann in anns:
+            if is_experimental(ann.get("evidence_code") or ""):
+                continue
+            gtid = ann.get("go_term_id")
+            if gtid is not None:
+                terms.add(int(gtid))
+        if terms:
+            own_nonexp[acc] = terms
+    return own_nonexp
 
 
 def apply_v6_features(
@@ -228,6 +312,7 @@ def resolve_synthetic_fks(
 
 
 __all__ = (
+    "apply_self_prior",
     "apply_v6_features",
     "expand_to_ancestors",
     "resolve_synthetic_fks",
