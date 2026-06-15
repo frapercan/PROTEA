@@ -272,6 +272,7 @@ class PredictGOTermsOperation:
                 "compute_taxonomy": p.compute_taxonomy,
                 "compute_reranker_features": p.compute_reranker_features,
                 "compute_v6_features": p.compute_v6_features,
+                "compute_self_prior": p.compute_self_prior,
                 "expand_votes_to_ancestors": p.expand_votes_to_ancestors,
                 "aspect_separated_knn": p.aspect_separated_knn,
                 "reranker_model_id": p.reranker_model_id,

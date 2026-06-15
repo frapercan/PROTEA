@@ -154,6 +154,7 @@ class _LeafRecordBuilder:
         rec.update({f"emb_pca_query_{i}": inputs.q_pca_row[i] for i in range(EMBEDDING_PCA_DIM)})
         rec.update(self._lineage_default_fields())
         rec.update(self._interpro_default_fields())
+        rec.update(self._lafa_default_fields())
         return rec
 
     # ── InterPro-only candidate materialisation (S3b union) ───────────
@@ -221,6 +222,7 @@ class _LeafRecordBuilder:
         rec.update({f"emb_pca_query_{i}": ctx.q_pca_row[i] for i in range(EMBEDDING_PCA_DIM)})
         rec.update(self._lineage_default_fields())
         rec.update(self._interpro_default_fields())
+        rec.update(self._lafa_default_fields())
         rec["knn_present"] = False
         return rec
 
@@ -307,6 +309,33 @@ class _LeafRecordBuilder:
             "lineage_is_descendant_of_known": 0.0,
             "lineage_ancestor_of_count": 0.0,
             "lineage_descendant_of_count": 0.0,
+        }
+
+    @staticmethod
+    def _lafa_default_fields() -> dict[str, Any]:
+        """Zero-filled defaults for the 6 LAFA columns (contracts 0.5.0).
+
+        The ``classifier``, ``self_prior`` and ``association`` families
+        added in lafa-integrate INT-2 are JSONB-blob features: no
+        GOPrediction column migration. Every KNN leaf (and InterPro-only)
+        record carries all six columns unconditionally so the T1.8
+        canonical-column boundary
+        (:func:`protea.core.parquet_export._assert_canonical_columns`)
+        and the contracts producer-coverage guard never fail the dump.
+        ``self_prior_score`` is overwritten by the native compute when
+        the ``compute_self_prior`` payload flag is set (see
+        :func:`protea.core.operations.predict_go_terms._post_knn_pipeline.apply_self_prior`);
+        the ``classifier_*`` and ``association_*`` columns stay zero
+        until later lafa-integrate slices wire their producers. A
+        well-defined zero, not NaN, matching the lineage convention.
+        """
+        return {
+            "classifier_score": 0.0,
+            "classifier_present": 0.0,
+            "self_prior_score": 0.0,
+            "association_total": 0.0,
+            "association_cross": 0.0,
+            "association_present": 0.0,
         }
 
     @staticmethod
