@@ -175,17 +175,20 @@ def _classifier_producer() -> Callable[..., Any]:
 
 
 def _association_producer() -> Callable[..., Any]:
-    """Reference for the cross-aspect association feature family (INT-2).
+    """Reference for the cross-aspect association feature family (INT-3).
 
-    The three ``association_*`` columns stay zero-filled in this slice; a
-    later lafa-integrate slice wires the cross-aspect conditional
-    probability compute. The default zero-fill lives in
-    ``_leaf_record_builder._lafa_default_fields``. The marker keeps the
-    registry's producer coverage complete.
+    ``association_total`` / ``association_cross`` / ``association_present``
+    are filled in by the native compute in
+    :func:`protea.core.operations.predict_go_terms._post_knn_pipeline.apply_association`,
+    gated by the ``compute_association`` payload flag. When the flag is off
+    (default) every record keeps the zero-fill default emitted by
+    ``_leaf_record_builder._lafa_default_fields`` so the canonical-column
+    boundary holds without a compute pass. The marker keeps the registry's
+    producer coverage complete.
     """
-    from protea.core._leaf_record_builder import _LeafRecordBuilder
+    from protea.core.operations.predict_go_terms._post_knn_pipeline import apply_association
 
-    return _LeafRecordBuilder._lafa_default_fields
+    return apply_association
 
 
 def _annotation_metadata_producer() -> Callable[..., Any]:

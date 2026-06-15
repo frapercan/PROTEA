@@ -12,6 +12,7 @@ from protea.core.contracts.registry import OperationRegistry
 from protea.core.operations.batch_rescore_evaluation import (
     BatchRescoreEvaluationOperation,
 )
+from protea.core.operations.build_go_cooccurrence import BuildGoCooccurrenceOperation
 from protea.core.operations.compute_embeddings import (
     ComputeEmbeddingsBatchOperation,
     ComputeEmbeddingsOperation,
@@ -72,6 +73,7 @@ def build_operation_registry() -> OperationRegistry:
     registry.register(StorePredictionsOperation())
     registry.register(PredictGOTermsFromInterProOperation())
     registry.register(RefreshGoaReleaseDatesOperation())
+    registry.register(BuildGoCooccurrenceOperation())
     # TrainRerankerOperation / TrainRerankerAutoOperation are no longer
     # publicly registered: all re-ranker training moves to
     # protea-reranker-lab. They remain importable as internal helpers —
