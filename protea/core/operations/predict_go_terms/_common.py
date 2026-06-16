@@ -7,7 +7,7 @@ as part of T2B.6. No behaviour change; only module location.
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -34,6 +34,21 @@ class _RerankerBinding:
 
     artifact_uri: str
     feature_schema_sha: str
+
+
+@dataclass(frozen=True)
+class _RerankerDispatch:
+    """Reranker pointers snapshotted by the coordinator for the batch payload.
+
+    ``single`` is the legacy one-booster binding (``reranker_model_id`` path).
+    ``per_category`` carries the three NK / LK / PK bindings for INT-5 dispatch;
+    it is empty when per-category dispatch was not requested. The two paths are
+    mutually independent: a payload may set either, both, or neither, and the
+    batch worker prefers per-category when all three are present.
+    """
+
+    single: _RerankerBinding | None = None
+    per_category: dict[str, _RerankerBinding] = field(default_factory=dict)
 
 
 # GO aspect single-character codes used in GOTerm.aspect are imported from
