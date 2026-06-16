@@ -277,9 +277,11 @@ class TestLoadQueryAccessions:
 
 
 class TestBuildBatchMessageRerankerNulls:
-    """Cover the ``binding=None`` branch of ``_build_batch_message``."""
+    """Cover the empty-dispatch branch of ``_build_batch_message``."""
 
     def test_no_binding_sets_null_reranker_fields(self) -> None:
+        from protea.core.operations.predict_go_terms._common import _RerankerDispatch
+
         p = pgt.PredictGOTermsPayload.model_validate(
             {
                 "embedding_config_id": str(uuid.uuid4()),
@@ -292,10 +294,13 @@ class TestBuildBatchMessageRerankerNulls:
             prediction_set_id=uuid.uuid4(),
             parent_job_id=uuid.uuid4(),
             batch_accs=["Q1"],
-            binding=None,
+            dispatch=_RerankerDispatch(),
         )
         assert msg["payload"]["reranker_artifact_uri"] is None
         assert msg["payload"]["reranker_feature_schema_sha"] is None
+        # INT-5: per-category fields default to None (single-booster path).
+        assert msg["payload"]["reranker_nk_artifact_uri"] is None
+        assert msg["payload"]["reranker_pk_feature_schema_sha"] is None
 
 
 class TestResolveRerankerBindingNoMid:

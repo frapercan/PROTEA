@@ -86,10 +86,24 @@ def run_post_knn_pipeline(
             emit,
         )
     reranker_stats: dict[str, Any] | None = None
-    if p.reranker_model_id and prediction_dicts:
+    if _reranker_requested(p) and prediction_dicts:
         scorer = op._reranker_scorer
-        reranker_stats = scorer.apply_if_aligned(session, prediction_dicts, p, emit)
+        reranker_stats = scorer.apply(session, prediction_dicts, p, emit)
     return prediction_dicts, reranker_stats
+
+
+def _reranker_requested(p: PredictGOTermsBatchPayload) -> bool:
+    """True when a single booster OR all three per-category boosters are bound.
+
+    Per-category dispatch (INT-5) does not set ``reranker_model_id``; it carries
+    three ``reranker_<cat>_artifact_uri`` pointers instead, so the gate must also
+    fire when those are present.
+    """
+    if p.reranker_model_id:
+        return True
+    return all(
+        getattr(p, f"reranker_{cat}_artifact_uri", None) for cat in ("nk", "lk", "pk")
+    )
 
 
 def apply_self_prior(

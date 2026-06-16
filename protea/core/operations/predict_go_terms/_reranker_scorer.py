@@ -26,7 +26,9 @@ Design notes:
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +36,10 @@ from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn
 from protea.core.operations.predict_go_terms import _batch_op_reranker as _shim
+from protea.core.operations.predict_go_terms._category_dispatch import (
+    CATEGORIES,
+    attach_query_category,
+)
 from protea.core.operations.predict_go_terms._common import (
     PredictGOTermsBatchPayload,
 )
@@ -41,6 +47,22 @@ from protea.core.operations.predict_go_terms._common import (
 logger = logging.getLogger(__name__)
 
 AttachAspectFn = Callable[[Session, list[dict[str, Any]]], None]
+#: Loader for the per-(protein, aspect) CAFA category, injected so unit
+#: tests can stub the DB-bound annotation lookup. Signature mirrors
+#: :func:`._category_dispatch.attach_query_category` (op is supplied by the
+#: scorer's owner when wired; ``None`` falls back to the module default).
+AttachCategoryFn = Callable[
+    [Session, "uuid.UUID", list[dict[str, Any]]], dict[str, int]
+]
+
+
+@dataclass(frozen=True)
+class _CategoryBinding:
+    """One per-category booster pointer (artifact_uri + schema fingerprint)."""
+
+    category: str
+    artifact_uri: str
+    feature_schema_sha: str
 
 
 class SchemaShaMismatchError(Exception):
@@ -96,8 +118,14 @@ class RerankerScorer:
     :class:`PredictGOTermsBatchOperation` via constructor injection.
     """
 
-    def __init__(self, *, attach_aspect: AttachAspectFn) -> None:
+    def __init__(
+        self,
+        *,
+        attach_aspect: AttachAspectFn,
+        attach_category: AttachCategoryFn | None = None,
+    ) -> None:
         self._attach_aspect = attach_aspect
+        self._attach_category = attach_category
 
     def resolve_live_schema_sha(
         self,
@@ -153,6 +181,25 @@ class RerankerScorer:
           ``categorical_codes`` + plm/k metadata recovered from the model's
           sibling ``run.json`` (F-RERANK-UNIVERSAL inference wiring).
         """
+        self._attach_aspect(session, prediction_dicts)
+        return self._score_with(
+            prediction_dicts,
+            artifact_uri=p.reranker_artifact_uri,
+            feature_schema_sha=p.reranker_feature_schema_sha,
+        )
+
+    def _score_with(
+        self,
+        prediction_dicts: list[dict[str, Any]],
+        *,
+        artifact_uri: str,
+        feature_schema_sha: str,
+    ) -> Any:
+        """Load one booster by uri and score the dicts in-place.
+
+        Aspect attachment is the caller's responsibility (it is shared
+        across per-category subsets so it runs once, not per booster).
+        """
         import pandas as pd
 
         from protea.core._universal_reranker import (
@@ -164,14 +211,13 @@ class RerankerScorer:
         settings = _shim.load_settings(project_root)
         store = _shim.get_artifact_store(settings)
         booster = _shim.load_reranker(
-            p.reranker_artifact_uri,
-            feature_schema_sha=p.reranker_feature_schema_sha,
+            artifact_uri,
+            feature_schema_sha=feature_schema_sha,
             store=store,
         )
-        self._attach_aspect(session, prediction_dicts)
         df = pd.DataFrame(prediction_dicts)
         if is_universal_booster(booster):
-            ctx = self._load_universal_context(p.reranker_artifact_uri, store)
+            ctx = self._load_universal_context(artifact_uri, store)
             scores = score_universal(
                 booster,
                 df,
@@ -298,5 +344,165 @@ class RerankerScorer:
             "feature_schema_sha": live_sha,
         }
 
+    @staticmethod
+    def _category_bindings(
+        p: PredictGOTermsBatchPayload,
+    ) -> list[_CategoryBinding] | None:
+        """Extract the NK / LK / PK bindings from the payload, or ``None``.
 
-__all__ = ["AttachAspectFn", "RerankerScorer", "SchemaShaMismatchError"]
+        Read defensively via ``getattr`` so an image whose ``protea_contracts``
+        predates INT-5 simply falls back to the single-booster path. Returns
+        a list of three bindings only when every ``(artifact_uri,
+        feature_schema_sha)`` pair is present; otherwise ``None``.
+        """
+        out: list[_CategoryBinding] = []
+        for cat in CATEGORIES:
+            prefix = cat.lower()
+            uri = getattr(p, f"reranker_{prefix}_artifact_uri", None)
+            sha = getattr(p, f"reranker_{prefix}_feature_schema_sha", None)
+            if not (uri and sha):
+                return None
+            out.append(_CategoryBinding(category=cat, artifact_uri=uri, feature_schema_sha=sha))
+        return out
+
+    def apply(
+        self,
+        session: Session,
+        prediction_dicts: list[dict[str, Any]],
+        p: PredictGOTermsBatchPayload,
+        emit: EmitFn,
+    ) -> dict[str, Any] | None:
+        """Entry point: per-category dispatch when bound, else single booster.
+
+        When the payload carries all three per-category bindings the batch is
+        split by each candidate's CAFA category (computed from the protein's
+        pre-cutoff experimental annotations) and each subset is scored with the
+        matching booster. Otherwise behaviour is identical to
+        :meth:`apply_if_aligned` (no regression; default off).
+        """
+        bindings = self._category_bindings(p)
+        if bindings is None:
+            return self.apply_if_aligned(session, prediction_dicts, p, emit)
+        return self._apply_per_category(session, prediction_dicts, p, bindings, emit)
+
+    def _apply_per_category(
+        self,
+        session: Session,
+        prediction_dicts: list[dict[str, Any]],
+        p: PredictGOTermsBatchPayload,
+        bindings: list[_CategoryBinding],
+        emit: EmitFn,
+    ) -> dict[str, Any] | None:
+        """Split by category and score each subset with its own booster."""
+        live_sha = self.resolve_live_schema_sha(p, emit)
+        if live_sha is None:
+            return None
+        self._guard_category_shas(p, bindings, live_sha, emit)
+        self._attach_aspect(session, prediction_dicts)
+        hist = self._attach_categories(session, p, prediction_dicts)
+        scored = 0
+        for binding in bindings:
+            subset = [r for r in prediction_dicts if r.get("category") == binding.category]
+            if not subset:
+                continue
+            self._score_with(
+                subset,
+                artifact_uri=binding.artifact_uri,
+                feature_schema_sha=binding.feature_schema_sha,
+            )
+            scored += len(subset)
+        emit(
+            "reranker.per_category_applied",
+            None,
+            {"by_category": hist, "rows_scored": scored, "feature_schema_sha": live_sha},
+            "info",
+        )
+        return {"applied": True, "per_category": True, "rows": scored, "by_category": hist}
+
+    @staticmethod
+    def _guard_category_shas(
+        p: PredictGOTermsBatchPayload,
+        bindings: list[_CategoryBinding],
+        live_sha: str,
+        emit: EmitFn,
+    ) -> None:
+        """Reject the run if any per-category booster's schema sha drifted.
+
+        Same FARM-EXP.5 guard as the single-booster path: all three boosters
+        share the one extended LAFA feature layout, so each recorded
+        ``feature_schema_sha`` must equal the live one.
+        """
+        for binding in bindings:
+            if binding.feature_schema_sha != live_sha:
+                RerankerScorer._raise_schema_sha_mismatch_for(
+                    reranker_model_id=getattr(p, f"reranker_model_id_{binding.category.lower()}", None),
+                    expected_sha=binding.feature_schema_sha,
+                    live_sha=live_sha,
+                    emit=emit,
+                )
+
+    def _attach_categories(
+        self,
+        session: Session,
+        p: PredictGOTermsBatchPayload,
+        prediction_dicts: list[dict[str, Any]],
+    ) -> dict[str, int]:
+        """Resolve the per-(protein, aspect) category onto every dict."""
+        attach = self._attach_category or _default_attach_category
+        return attach(session, uuid.UUID(p.annotation_set_id), prediction_dicts)
+
+    @staticmethod
+    def _raise_schema_sha_mismatch_for(
+        *,
+        reranker_model_id: str | None,
+        expected_sha: str,
+        live_sha: str,
+        emit: EmitFn,
+    ) -> None:
+        """Emit + log + raise on a per-category feature_schema_sha mismatch."""
+        emit(
+            "reranker.schema_mismatch",
+            None,
+            {
+                "reason": SchemaShaMismatchError.reason,
+                "reranker_model_id": reranker_model_id,
+                "expected_sha": expected_sha,
+                "live_sha": live_sha,
+            },
+            "error",
+        )
+        logger.error(
+            "reranker schema_sha mismatch (per-category): "
+            "reranker_model_id=%s expected_sha=%s live_sha=%s reason=%s",
+            reranker_model_id,
+            expected_sha,
+            live_sha,
+            SchemaShaMismatchError.reason,
+        )
+        raise SchemaShaMismatchError(
+            reranker_model_id=reranker_model_id,
+            expected_sha=expected_sha,
+            live_sha=live_sha,
+        )
+
+
+def _default_attach_category(
+    session: Session,
+    annotation_set_id: uuid.UUID,
+    prediction_dicts: list[dict[str, Any]],
+) -> dict[str, int]:
+    """Module-level category attach used when the op was not injected.
+
+    Builds a throwaway feature-loading op only to reuse its
+    ``_load_annotations_for`` chunked loader; the category assignment itself
+    is pure (:func:`._category_dispatch.attach_query_category`).
+    """
+    from protea.core.operations.predict_go_terms._batch_op import (
+        PredictGOTermsBatchOperation,
+    )
+
+    op = PredictGOTermsBatchOperation()
+    return attach_query_category(op, session, annotation_set_id, prediction_dicts)
+
+
+__all__ = ["AttachAspectFn", "AttachCategoryFn", "RerankerScorer", "SchemaShaMismatchError"]
