@@ -242,6 +242,10 @@ later revision).
      - :doc:`Lean f32 reference pool for high-dimensional PLMs <D41-lean-f32-refpool-highdim-plm>`
      - Accepted
      - fix/refpool-lean-f32-highdim-plm
+   * - D42
+     - :doc:`Export decouple via a content-addressed stable-feature cache <D42-export-stable-feature-cache>`
+     - Accepted
+     - feat/export-stable-feature-cache
 
 .. toctree::
    :maxdepth: 1
@@ -295,3 +299,4 @@ later revision).
    D39-destructive-op-guards
    D40-leakage-free-temporal-eval-protocol
    D41-lean-f32-refpool-highdim-plm
+   D42-export-stable-feature-cache
