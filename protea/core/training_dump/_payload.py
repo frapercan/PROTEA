@@ -116,6 +116,24 @@ class TrainRerankerAutoPayload(ProteaPayload, frozen=True):  # type: ignore[misc
     dump_to: str | None = None
     dump_only: bool = False
 
+    # NFR-ARCH "export decouple". When True, the STABLE per-candidate feature
+    # table (everything except the classifier columns) is content-addressed and
+    # cached in the artifact store, so a later export with the same stable
+    # config but a different classifier reuses the cached table and only
+    # recomputes the classifier column(s). Default False so the heavy pipeline
+    # and the golden parquet are byte-identical when the flag is off. The cache
+    # is keyed by ``_stable_feature_cache.compute_stable_cache_key`` (classifier
+    # config is deliberately excluded from the key).
+    stable_feature_cache: bool = False
+    # Phase-2 SKETCH: a list of classifier-variant specs (each a label + a seed
+    # dir / seed paths / model path). When given, the export emits one
+    # ``classifier_score__<label>`` / ``classifier_present__<label>`` column
+    # family per variant in a single pass over the (cached) stable table, so
+    # the lab trains a booster per variant from the same parquet. ``None`` keeps
+    # the canonical single ``classifier_score`` / ``classifier_present``
+    # columns. Wired in phase 2; carried here so the payload contract is stable.
+    classifier_variants: list[dict[str, str]] | None = None
+
     @field_validator("embedding_config_id", "ontology_snapshot_id", "name", mode="before")
     @classmethod
     def must_be_non_empty(cls, v: str) -> str:

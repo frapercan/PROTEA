@@ -81,6 +81,24 @@ class ExportResearchDatasetPayload(ProteaPayload, frozen=True):
     compute_association: bool = False
     compute_classifier: bool = False
 
+    # NFR-ARCH "export decouple". When True, the STABLE per-candidate feature
+    # table (every column except the classifier columns) is content-addressed
+    # and cached in the artifact store under ``stable_features/<hash>/``. A
+    # later export with the SAME stable config (embedding_config / ontology /
+    # versions / k / distance / stable feature flags) but a DIFFERENT
+    # classifier reuses the cached table and only recomputes the classifier
+    # column(s), turning a classifier A/B from ~8h into the classifier-compute
+    # time alone. Default False so the default export path and the golden
+    # parquet are byte-identical. See ``training_dump._stable_feature_cache``.
+    stable_feature_cache: bool = False
+    # Phase-2 SKETCH (carried so the payload contract is stable): a list of
+    # classifier-variant specs, each ``{"label": ..., "seed_dir"|"seed_paths"|
+    # "model_path": ...}``. When given, the export emits one
+    # ``classifier_score__<label>`` family per variant in a single pass over the
+    # cached stable table. ``None`` keeps the canonical single classifier
+    # columns. Multi-column emission is wired in phase 2.
+    classifier_variants: list[dict[str, str]] | None = None
+
     @field_validator("output_name", "embedding_config_id", "ontology_snapshot_id", mode="before")
     @classmethod
     def must_be_non_empty(cls, v: str) -> str:
@@ -200,8 +218,11 @@ class ExportResearchDatasetOperation:
         key_prefix = f"datasets/{p.output_name}/"
         with tempfile.TemporaryDirectory(prefix="protea_export_") as tmp:
             stage_dir = Path(tmp)
-            with session_scope(factory) as compute_session:
-                auto_result = self._dump_to_stage(compute_session, p, stage_dir, emit)
+            if p.stable_feature_cache:
+                auto_result = self._compute_with_stable_cache(p, factory, store, stage_dir, emit)
+            else:
+                with session_scope(factory) as compute_session:
+                    auto_result = self._dump_to_stage(compute_session, p, stage_dir, emit)
             uploaded, manifest_data, manifest_sha = self._upload_outputs(
                 stage_dir, store, key_prefix
             )
@@ -225,6 +246,40 @@ class ExportResearchDatasetOperation:
             manifest_sha=manifest_sha,
         )
         return outcome, auto_result
+
+    def _compute_with_stable_cache(
+        self,
+        p: ExportResearchDatasetPayload,
+        factory: Any,
+        store: Any,
+        stage_dir: Path,
+        emit: EmitFn,
+    ) -> OperationResult:
+        """NFR-ARCH decouple: stage parquets via the stable-feature cache.
+
+        Delegates to ``_export_stable_cache_runner`` (kept out of this module so
+        the operation stays under the smell budget). The runner hits the cache
+        on the stable config and only recomputes the classifier column(s),
+        producing the SAME staged ``train.parquet`` / ``eval.parquet`` the
+        default path would.
+        """
+        from protea.core.operations._export_stable_cache_runner import run_with_stable_cache
+
+        def _dump_fn(
+            session: Session,
+            payload: ExportResearchDatasetPayload,
+            stage: Path,
+            relay: EmitFn,
+            *,
+            classifier_on: bool,
+        ) -> OperationResult:
+            # Heavy pass on a cache MISS runs the classifier OFF so the staged
+            # parquet is purely stable / cacheable; the runner re-stamps it.
+            return self._dump_to_stage(
+                session, payload, stage, relay, compute_classifier_override=classifier_on
+            )
+
+        return run_with_stable_cache(p, factory, store, stage_dir, emit, _dump_fn)
 
     @staticmethod
     def _merge_result(
@@ -255,12 +310,19 @@ class ExportResearchDatasetOperation:
         p: ExportResearchDatasetPayload,
         stage_dir: Path,
         emit: EmitFn,
+        *,
+        compute_classifier_override: bool | None = None,
     ) -> OperationResult:
         """Run the inner dump-only path of TrainRerankerAutoOperation.
 
         Routes its events under this operation's namespace via the
         ``dump_helper.`` → ``export_research_dataset.`` prefix swap so the
         job event log reads naturally.
+
+        ``compute_classifier_override`` lets the stable-feature-cache path force
+        the classifier OFF for the heavy pass (so the staged parquet is purely
+        stable / cacheable); ``None`` keeps the payload's own flag for the
+        default path, leaving it byte-identical.
         """
 
         def _relay(event: str, scope: str | None, evt_payload: dict[str, Any], level: str) -> None:
@@ -268,6 +330,11 @@ class ExportResearchDatasetOperation:
                 event = "export_research_dataset." + event[len("dump_helper.") :]
             emit(event, scope, evt_payload, level)  # type: ignore[arg-type]
 
+        compute_classifier = (
+            p.compute_classifier
+            if compute_classifier_override is None
+            else compute_classifier_override
+        )
         auto_payload: dict[str, Any] = {
             "name": p.output_name,
             "embedding_config_id": p.embedding_config_id,
@@ -283,7 +350,7 @@ class ExportResearchDatasetOperation:
             "use_embedding_pca": p.use_embedding_pca,
             "compute_self_prior": p.compute_self_prior,
             "compute_association": p.compute_association,
-            "compute_classifier": p.compute_classifier,
+            "compute_classifier": compute_classifier,
             "training_scope": "per_cell",
             "dump_to": str(stage_dir),
             "dump_only": True,
