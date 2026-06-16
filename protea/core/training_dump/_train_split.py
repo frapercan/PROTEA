@@ -109,6 +109,7 @@ def _knn_and_filter_to_pivot(
     q_inputs: _TestQueryInputs,
     eval_data: Any,
     sequences: _TestSequences,
+    t0_set_id: uuid.UUID | None = None,
 ) -> list[dict[str, Any]]:
     """Run KNN+transfer for one train split and filter to the pivot universe."""
     p = ctx.payload
@@ -127,6 +128,9 @@ def _knn_and_filter_to_pivot(
             ia_weights=ctx.ia_weights,
             pca_state=ctx.pca_state,
             embedding_pool=ctx.embedding_pool,
+            # INT-6: t0 set for the optional self_prior/association/classifier
+            # parity features (the pre-cutoff reference version's set).
+            t0_annotation_set_id=t0_set_id,
         ),
         sequence_context=SequenceContext(
             query_sequences=sequences.query_sequences,
@@ -240,7 +244,7 @@ def _run_train_split(
     )
     session.expire_all()
     unlabeled_preds = _knn_and_filter_to_pivot(
-        session, ctx, q_inputs, eval_data, sequences
+        session, ctx, q_inputs, eval_data, sequences, ctx.version_to_set[v_old]
     )
     gc.collect()
     split_stats: dict[str, Any] = {

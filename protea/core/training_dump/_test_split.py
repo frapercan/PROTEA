@@ -109,6 +109,9 @@ def _stream_test_predictions(
             pca_state=ctx.pca_state,
             pivot_go_ids=ctx.pivot_go_ids,
             embedding_pool=ctx.embedding_pool,
+            # INT-6: t0 set for the optional parity features (the pre-cutoff
+            # test reference version's annotation set).
+            t0_annotation_set_id=ctx.test_old_set_id,
         ),
         sequence_context=SequenceContext(
             query_sequences=sequences.query_sequences,

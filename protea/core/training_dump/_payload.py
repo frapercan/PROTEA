@@ -65,6 +65,18 @@ class TrainRerankerAutoPayload(ProteaPayload, frozen=True):  # type: ignore[misc
     compute_alignments: bool = False
     compute_taxonomy: bool = False
 
+    # lafa-integrate INT-6: train/serve feature parity. When set, the export
+    # computes the SAME real self_prior / association / classifier feature
+    # values the predict path serves (the producers in
+    # ``predict_go_terms._post_knn_pipeline`` and ``classifier_producer``),
+    # instead of the zero-fill defaults. Default False so existing exports are
+    # bit-identical. Leakage-clean: every value reads only the pre-cutoff t0
+    # annotation set (``version_to_set[v_old]`` / ``test_old_set_id``), the same
+    # source the KNN reference pool uses, never a post-cutoff set.
+    compute_self_prior: bool = False
+    compute_association: bool = False
+    compute_classifier: bool = False
+
     # IA weighting: path to IA TSV file (go_id\tia_value, no header).
     # When set, sample_weight = IA(go_term) during training so the model
     # focuses on informative (rare, specific) GO terms aligned with

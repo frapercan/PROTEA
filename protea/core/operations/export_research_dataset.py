@@ -72,6 +72,15 @@ class ExportResearchDatasetPayload(ProteaPayload, frozen=True):
     expand_votes_to_ancestors: bool = False
     use_embedding_pca: bool = False
 
+    # lafa-integrate INT-6: train/serve feature parity. When set, the exported
+    # train/eval parquet carries the REAL self_prior / association / classifier
+    # feature values the predict path serves (not the zero-fill defaults), so
+    # the lab trains the per-category boosters on exactly the served features
+    # (NFR-REPRO). Default False so existing exports stay bit-identical.
+    compute_self_prior: bool = False
+    compute_association: bool = False
+    compute_classifier: bool = False
+
     @field_validator("output_name", "embedding_config_id", "ontology_snapshot_id", mode="before")
     @classmethod
     def must_be_non_empty(cls, v: str) -> str:
@@ -272,6 +281,9 @@ class ExportResearchDatasetOperation:
             "compute_taxonomy": p.compute_taxonomy,
             "expand_votes_to_ancestors": p.expand_votes_to_ancestors,
             "use_embedding_pca": p.use_embedding_pca,
+            "compute_self_prior": p.compute_self_prior,
+            "compute_association": p.compute_association,
+            "compute_classifier": p.compute_classifier,
             "training_scope": "per_cell",
             "dump_to": str(stage_dir),
             "dump_only": True,

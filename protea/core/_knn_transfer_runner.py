@@ -16,6 +16,7 @@ from __future__ import annotations
 import gc
 import logging
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -34,6 +35,7 @@ from protea.core.knn_search import search_knn
 from protea.core.reranker import EMBEDDING_PCA_DIM
 
 if TYPE_CHECKING:
+    from protea.core.training_dump._export_features import ExportParityFlags
     from protea.core.training_dump_helpers import (
         KnnTransferContext,
         SequenceContext,
@@ -121,6 +123,51 @@ def run_knn_transfer_and_label(
     return runner.run()
 
 
+def _build_parity_flags(p: TrainRerankerAutoPayload) -> ExportParityFlags:
+    """Read the INT-6 ``compute_*`` flags off the dump payload (default off)."""
+    from protea.core.training_dump._export_features import ExportParityFlags
+
+    return ExportParityFlags(
+        self_prior=bool(getattr(p, "compute_self_prior", False)),
+        association=bool(getattr(p, "compute_association", False)),
+        classifier=bool(getattr(p, "compute_classifier", False)),
+    )
+
+
+def _apply_query_parity_features(
+    runner: _KnnTransferRunner, q_acc: str, records: list[dict[str, Any]]
+) -> None:
+    """INT-6: fill real self_prior/association/classifier values in place.
+
+    Reuses the predict-path producers on this query's full candidate set so the
+    exported six LAFA columns match what predict serves (train/serve parity).
+    Leakage-clean: reads only the pre-cutoff ``t0_annotation_set_id`` handed
+    down from the split context. Export records key candidates by ``go_id``
+    string; the producers key by integer ``go_term_id``, so the int id is
+    stamped transiently for the producer pass then removed, leaving the
+    exported parquet schema unchanged.
+    """
+    from protea.core.training_dump._export_features import apply_export_parity_features
+
+    assert runner.t0_annotation_set_id is not None  # guarded by ``_parity_on``
+    if runner._go_str_to_int is None:
+        runner._go_str_to_int = {gid: tid for tid, gid in runner.go_id_map.items()}
+    for rec in records:
+        tid = runner._go_str_to_int.get(rec.get("go_id", ""))
+        if tid is not None:
+            rec["go_term_id"] = tid
+    apply_export_parity_features(
+        runner.session,
+        runner.t0_annotation_set_id,
+        uuid.UUID(str(runner.p.ontology_snapshot_id)),
+        [q_acc],
+        records,
+        runner._parity_flags,
+    )
+    for rec in records:
+        rec.pop("go_term_id", None)
+
+
 class _KnnTransferRunner:
     """Method Object for ``_knn_transfer_and_label``.
 
@@ -167,6 +214,7 @@ class _KnnTransferRunner:
         self.pca_state = ctx.pca_state
         self.pivot_go_ids = ctx.pivot_go_ids
         self.embedding_pool = ctx.embedding_pool
+        self.t0_annotation_set_id = ctx.t0_annotation_set_id  # INT-6 parity t0 set
 
     def _unpack_sequence_context(self, sequence_context: SequenceContext | None) -> None:
         """Unpack the optional ``SequenceContext`` and resolve toggles."""
@@ -248,6 +296,12 @@ class _KnnTransferRunner:
             else {}
         )
         self._lineage_known: dict[str, set[str]] = self.query_known_gos or {}
+        # INT-6 parity flags. Only fire when a t0 set is bound (the predict-side
+        # single-version dump path has none). The go_id->int reverse map (export
+        # records key by ``go_id``; producers by int id) is built lazily.
+        self._parity_flags = _build_parity_flags(self.p)
+        self._parity_on = self.t0_annotation_set_id is not None and self._parity_flags.any
+        self._go_str_to_int: dict[str, int] | None = None
 
     def run(self) -> list[dict[str, Any]] | dict[str, Any]:
         """Drive the full KNN-transfer-label pipeline."""
@@ -499,7 +553,12 @@ class _KnnTransferRunner:
         return self.records
 
     def _build_records_for_query(self, q_idx: int, q_acc: str) -> None:
-        """Build leaves + ancestor expansion for one query, all aspects."""
+        """Build leaves + ancestor expansion for one query, all aspects.
+
+        Records are collected across aspects before emit so the INT-6 parity
+        producers (``apply_association`` is cross-aspect) see the query's full
+        candidate set; emit order / streaming is unchanged when parity is off.
+        """
         q_pca_row = (
             self.pca_query_proj[q_idx].tolist()
             if self.pca_query_proj is not None
@@ -508,6 +567,7 @@ class _KnnTransferRunner:
         q_known_cent, q_known_mat, q_known_n = self.query_known_info.get(q_acc, (None, None, 0))
         q_pairs_features = self.pair_features.get(q_acc, {})
         builder = self._builder
+        query_records: list[dict[str, Any]] = []
         for aspect in _ASPECTS:
             nbs = self.neighbors_by_aspect[aspect]
             if q_idx >= len(nbs):
@@ -531,15 +591,16 @@ class _KnnTransferRunner:
             builder.add_interpro_only(leaf_ctx, leaf_by_gid, synth)
             self._apply_lineage_features(q_acc, leaf_by_gid, synth)
             self._apply_interpro_features(leaf_by_gid, synth)
-            for rec in leaf_by_gid.values():
-                self._emit(rec)
-            for rec in synth.values():
-                self._emit(rec)
+            query_records.extend((*leaf_by_gid.values(), *synth.values()))
             # Free per-(q, aspect) state. Keeps neighbor_info / nbs[q_idx]
             # bounded to "queries not yet processed".
             self.neighbor_info.pop((q_acc, aspect), None)
             if q_idx < len(nbs):
                 nbs[q_idx] = []
+        if self._parity_on:
+            _apply_query_parity_features(self, q_acc, query_records)  # INT-6 parity
+        for rec in query_records:
+            self._emit(rec)
 
     def _apply_lineage_features(
         self,
