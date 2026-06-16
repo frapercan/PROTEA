@@ -30,8 +30,10 @@ missing terms).
 
 from __future__ import annotations
 
+import glob
 import os
 import uuid
+from collections import defaultdict
 from dataclasses import dataclass
 
 import numpy as np
@@ -61,6 +63,17 @@ _DEFAULT_ANC2VEC_PATH = (
 )
 _MODEL_ENV = "PROTEA_CLASSIFIER_MODEL_PATH"
 _ANC2VEC_ENV = "PROTEA_CLASSIFIER_ANC2VEC_PATH"
+
+# Seed-averaging (INT-7). When either of these is set, ``get_classifier``
+# loads N self-contained seed checkpoints and averages their TOP-K outputs
+# with the lab's consensus rule (see :class:`SeedAveragedClassifier`).
+#  - ``PROTEA_CLASSIFIER_SEED_DIR``: a directory; every ``*.pt`` inside is a
+#    seed checkpoint (sorted by filename for determinism).
+#  - ``PROTEA_CLASSIFIER_SEED_PATHS``: an explicit ``os.pathsep``-separated
+#    list (or a single glob) of checkpoint paths; takes precedence over the
+#    directory env when both are set.
+_SEED_DIR_ENV = "PROTEA_CLASSIFIER_SEED_DIR"
+_SEED_PATHS_ENV = "PROTEA_CLASSIFIER_SEED_PATHS"
 
 
 @dataclass(frozen=True)
@@ -138,9 +151,7 @@ class FullVocabClassifier:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.mu = torch.as_tensor(np.asarray(ckpt["mu"]), dtype=torch.float32).to(self.device)
         self.sd = torch.as_tensor(np.asarray(ckpt["sd"]), dtype=torch.float32).to(self.device)
-        label_matrix = _label_matrix_for_vocab(
-            self.vocab, anc2vec_path, int(ckpt["label_dim"])
-        )
+        label_matrix = _label_matrix_for_vocab(self.vocab, anc2vec_path, int(ckpt["label_dim"]))
         self.label_matrix = torch.as_tensor(label_matrix, dtype=torch.float32).to(self.device)
         model = build_hybrid(
             self.in_dim, int(ckpt["hidden"]), len(self.vocab), int(ckpt["label_dim"])
@@ -189,22 +200,113 @@ class FullVocabClassifier:
         return rows
 
 
+def resolve_seed_paths(seed_dir: str | None = None, seed_paths: str | None = None) -> list[str]:
+    """Return the sorted seed-checkpoint paths, or ``[]`` when none configured.
+
+    ``PROTEA_CLASSIFIER_SEED_PATHS`` (an ``os.pathsep``-separated list, or a
+    single glob expanded with :func:`glob.glob`) takes precedence over
+    ``PROTEA_CLASSIFIER_SEED_DIR`` (every ``*.pt`` in the directory). The
+    result is ALWAYS sorted so seed-averaging is order-independent and
+    deterministic across processes.
+    """
+    raw_paths = seed_paths if seed_paths is not None else os.environ.get(_SEED_PATHS_ENV)
+    if raw_paths:
+        parts = [s for s in raw_paths.split(os.pathsep) if s]
+        expanded: list[str] = []
+        for part in parts:
+            hits = glob.glob(part)
+            expanded.extend(hits if hits else [part])
+        return sorted(expanded)
+    raw_dir = seed_dir if seed_dir is not None else os.environ.get(_SEED_DIR_ENV)
+    if raw_dir:
+        return sorted(glob.glob(os.path.join(raw_dir, "*.pt")))
+    return []
+
+
+class SeedAveragedClassifier:
+    """N independently-trained seed checkpoints, output-averaged for inference.
+
+    Seed-averaging the M2 anc2vec classifier (the champion's
+    ``classifier = "M2 anc2vec seed-avg (7 seeds ..., consensus union top-100,
+    score=sum/n)"``) is the anti-winner's-curse lever that lifts the head
+    above any single seed. The averaging is done on the OUTPUT SCORES, never
+    on the weights (the net is nonlinear, so weight-averaging is invalid).
+
+    The contract is a faithful port of
+    ``protea-reranker-lab/fullgo/seed_average.py``: each seed proposes its own
+    top-K terms per protein (``FullVocabClassifier.predict`` already applies
+    ``argsort -> top_n -> min_score`` exactly as the lab's
+    ``train_classifier_m2.py`` did). The consensus is the UNION of every
+    seed's ``(protein, term)`` pairs; the score of a pair is the SUM of that
+    term's scores across the seeds where it surfaced, divided by the TOTAL
+    number of seeds ``n`` (a seed that did not surface the pair contributes
+    ``0``). So a term present in only 1 of ``n`` seeds gets ``its_score / n``.
+
+    All seeds share the one anc2vec label matrix and the same vocab, so the
+    rule is well defined on a single index space.
+    """
+
+    def __init__(self, seed_paths: list[str], anc2vec_path: str | None = None) -> None:
+        if not seed_paths:
+            raise ValueError("SeedAveragedClassifier requires at least one seed path")
+        self.seed_paths = list(seed_paths)
+        self.n_seeds = len(self.seed_paths)
+        self.seeds = [FullVocabClassifier(path, anc2vec_path) for path in self.seed_paths]
+        self.vocab = self.seeds[0].vocab
+
+    def predict(
+        self, features: np.ndarray, accessions: list[str], top_n: int = 100, min_score: float = 0.01
+    ) -> list[ClassifierPrediction]:
+        """Union-top-K consensus across the seeds; score = sum-present / n_seeds.
+
+        Each seed contributes its own top-``top_n`` terms (above ``min_score``)
+        per protein; the union is scored with the lab's ``sum / n`` rule.
+        Deterministic: seed order is fixed at construction, the accumulation is
+        commutative, and the output is sorted by ``(accession, go_id)``.
+        """
+        accumulator: dict[tuple[str, str], float] = defaultdict(float)
+        for seed in self.seeds:
+            for pr in seed.predict(features, accessions, top_n=top_n, min_score=min_score):
+                accumulator[(pr.accession, pr.go_id)] += pr.score
+        rows = [
+            ClassifierPrediction(acc, go_id, total / self.n_seeds)
+            for (acc, go_id), total in accumulator.items()
+        ]
+        rows.sort(key=lambda r: (r.accession, r.go_id))
+        return rows
+
+
 # Process-level cache: load the (large) model once per batch worker.
 _CLASSIFIER_CACHE: dict[tuple[str, str], FullVocabClassifier] = {}
+_SEED_CLASSIFIER_CACHE: dict[tuple[tuple[str, ...], str], SeedAveragedClassifier] = {}
 
 
 def get_classifier(
     model_path: str | None = None, anc2vec_path: str | None = None
-) -> FullVocabClassifier:
-    """Return a cached :class:`FullVocabClassifier`, loading it on first use."""
-    key = (
-        model_path or os.environ.get(_MODEL_ENV, _DEFAULT_MODEL_PATH),
-        anc2vec_path or os.environ.get(_ANC2VEC_ENV, _DEFAULT_ANC2VEC_PATH),
-    )
-    cached = _CLASSIFIER_CACHE.get(key)
+) -> FullVocabClassifier | SeedAveragedClassifier:
+    """Return a cached classifier, seed-averaged when a seed env is configured.
+
+    When ``PROTEA_CLASSIFIER_SEED_DIR`` / ``PROTEA_CLASSIFIER_SEED_PATHS``
+    resolve to one-or-more checkpoints, a cached
+    :class:`SeedAveragedClassifier` is returned (the champion path). Otherwise
+    behaviour is byte-identical to the historical single-checkpoint
+    :class:`FullVocabClassifier`. An explicit ``model_path`` argument always
+    forces the single-checkpoint path (it is how unit tests pin one file).
+    """
+    anc = anc2vec_path or os.environ.get(_ANC2VEC_ENV, _DEFAULT_ANC2VEC_PATH)
+    seed_paths = [] if model_path else resolve_seed_paths()
+    if seed_paths:
+        key = (tuple(seed_paths), anc)
+        cached_seed = _SEED_CLASSIFIER_CACHE.get(key)
+        if cached_seed is None:
+            cached_seed = SeedAveragedClassifier(seed_paths, anc2vec_path)
+            _SEED_CLASSIFIER_CACHE[key] = cached_seed
+        return cached_seed
+    single_key = (model_path or os.environ.get(_MODEL_ENV, _DEFAULT_MODEL_PATH), anc)
+    cached = _CLASSIFIER_CACHE.get(single_key)
     if cached is None:
         cached = FullVocabClassifier(model_path, anc2vec_path)
-        _CLASSIFIER_CACHE[key] = cached
+        _CLASSIFIER_CACHE[single_key] = cached
     return cached
 
 
@@ -229,9 +331,7 @@ def _load_one_plm(session: object, config_id: str, accessions: list[str]) -> dic
     return {acc: np.asarray(emb.to_list(), dtype=np.float32) for acc, emb in rows}
 
 
-def load_concat_features(
-    session: object, accessions: list[str]
-) -> tuple[np.ndarray, list[str]]:
+def load_concat_features(session: object, accessions: list[str]) -> tuple[np.ndarray, list[str]]:
     """Build the 8320-d 6-PLM concat per accession in :data:`PLM_CONCAT_ORDER`.
 
     Only accessions that have ALL six embeddings (right dims) are returned, so
