@@ -36,6 +36,24 @@ class WorkerConfig:
     worker_name: str
 
 
+def _renew_lease_sql(session: Session, job_id: UUID, lease_seconds: int) -> None:
+    """Issue the lease-renewal UPDATE for a RUNNING job that holds a lease.
+
+    The ``leased_until IS NOT NULL`` guard never resurrects a deferred
+    coordinator's deliberately cleared lease (C4 / NFR-INFRA). Caller owns
+    the commit/rollback.
+    """
+    session.execute(
+        sa_update(Job)
+        .where(
+            Job.id == job_id,
+            Job.status == JobStatus.RUNNING,
+            Job.leased_until.isnot(None),
+        )
+        .values(leased_until=utcnow() + timedelta(seconds=lease_seconds))
+    )
+
+
 class BaseWorker:
     """
     Executes queued jobs using a two-session pattern.
@@ -154,22 +172,20 @@ class BaseWorker:
             session.close()
 
     def extend_lease(self, job_id: UUID) -> None:
-        """Extend the ``leased_until`` timestamp for a running job.
+        """Renew ``leased_until`` for a RUNNING job that still holds a lease.
 
-        Called periodically by the consumer heartbeat loop while a job
-        is in progress. Uses a fresh session so the heartbeat never
-        interferes with the execute session's transaction. No-op when the
-        job is no longer in RUNNING state (e.g. already succeeded or was
-        externally cancelled).
+        Called by the heartbeat loop and once per JobEvent from the emit
+        closure (C4 / NFR-INFRA): a job emitting progress is alive, so this
+        keeps a long single-threaded job off the reaper's expired-lease radar
+        even when the heartbeat thread starves under GIL contention. The
+        ``leased_until IS NOT NULL`` guard leaves a deferred coordinator's
+        deliberately cleared lease untouched (kept alive by child *.done
+        events); the consumer stops the heartbeat once ``handle_job`` returns,
+        so this only runs mid-operation. Fresh session, non-fatal on error.
         """
         session = self._factory()
         try:
-            now = utcnow()
-            session.execute(
-                sa_update(Job)
-                .where(Job.id == job_id, Job.status == JobStatus.RUNNING)
-                .values(leased_until=now + timedelta(seconds=self._LEASE_SECONDS))
-            )
+            _renew_lease_sql(session, job_id, self._LEASE_SECONDS)
             session.commit()
         except Exception as exc:
             logger.warning("Lease extension failed (non-fatal). job_id=%s error=%s", job_id, exc)
@@ -251,6 +267,8 @@ class BaseWorker:
                 event_session.commit()
             finally:
                 event_session.close()
+            # C4 / NFR-INFRA: a progressing job is alive; renew its lease.
+            self.extend_lease(job_id)
 
         return raw_emit
 
