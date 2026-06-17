@@ -45,9 +45,19 @@ class TestBuildReaperConfig:
     def test_to_timedeltas_reflects_tuning_values(self) -> None:
         wt = WorkerTuning(reaper_main_timeout_seconds=3600, reaper_stall_seconds=600)
         cfg = _build_reaper_config(wt)
-        timeout_td, stall_td, _ = cfg.to_timedeltas()
+        timeout_td, stall_td, _queued_td, _grace_td = cfg.to_timedeltas()
         assert timeout_td == timedelta(seconds=3600)
         assert stall_td == timedelta(seconds=600)
+
+    def test_event_grace_seconds_mapped(self) -> None:
+        wt = WorkerTuning(reaper_event_grace_seconds=3300)
+        cfg = _build_reaper_config(wt)
+        assert cfg.event_grace_seconds == 3300
+
+    def test_to_timedeltas_includes_event_grace(self) -> None:
+        cfg = StaleJobReaperConfig(event_grace_seconds=1234)
+        _timeout, _stall, _queued, grace_td = cfg.to_timedeltas()
+        assert grace_td == timedelta(seconds=1234)
 
     def test_default_tuning_produces_valid_config(self) -> None:
         wt = WorkerTuning()
