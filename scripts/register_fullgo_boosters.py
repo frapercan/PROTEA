@@ -33,6 +33,24 @@ families (``infer_active_feature_families`` with all predict flags on, the
 exact set the scorer uses) via ``protea_contracts`` so a single source of truth
 is used. Each booster is registered with ``training.cell`` set to its category
 (``nk`` / ``lk`` / ``pk``) so the router stamps ``RerankerModel.category``.
+
+Categorical features
+--------------------
+A booster trained WITH the four categorical columns (``aspect`` /
+``qualifier`` / ``evidence_code`` / ``taxonomic_relation``) must carry its
+per-column ``pd.factorize`` vocabulary so the predict-time scorer encodes the
+strings against the same codes seen at training. Pass
+``--categorical-codes-json`` to record that vocabulary on the run body; the
+router persists it to ``RerankerModel.metrics['__categorical_codes__']`` for
+audit / UI. The LOAD-BEARING predict-time copy, however, is the booster's
+SIBLING ``run.json`` in the artifact store (``runs/<id>/run.json`` next to
+``model.txt``): the live scorer recovers ``categorical_codes`` from there
+(``load_per_category_categorical_codes``), exactly as the universal path does,
+because the batch payload only carries the artifact URI. So the lab must upload
+that sibling run.json with the ``categorical_codes`` block alongside the
+booster blob. Omit ``--categorical-codes-json`` (and the sibling block) for
+numeric-only boosters; the scorer then falls back to the historical bare
+``apply_reranker`` path with no behaviour change.
 """
 
 from __future__ import annotations
@@ -93,7 +111,45 @@ def _args() -> argparse.Namespace:
         action="store_true",
         help="Replace any existing RerankerModel rows with the same name",
     )
+    p.add_argument(
+        "--categorical-codes-json",
+        default=None,
+        help=(
+            "Path to a JSON file with the per-column categorical vocabulary "
+            "({column: [val0, val1, ...]}) the boosters were trained on. When "
+            "given, it is recorded on every run body under "
+            "``run.categorical_codes`` so the router stamps "
+            "``RerankerModel.metrics['__categorical_codes__']`` and the "
+            "predict-time scorer can encode the categorical features "
+            "consistently. Omit when the boosters are numeric-only."
+        ),
+    )
     return p.parse_args()
+
+
+def _load_categorical_codes(path: str | None) -> dict[str, list[str]] | None:
+    """Read the per-column categorical vocabulary JSON, or ``None``.
+
+    The file must decode to a ``{column: [val0, val1, ...]}`` mapping (the
+    ``pd.factorize`` order the boosters trained on). Raises ``SystemExit`` on a
+    malformed file so a misconfigured registration fails loudly rather than
+    silently dropping the vocabulary.
+    """
+    if path is None:
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            codes = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"--categorical-codes-json could not be read: {exc}") from exc
+    if not isinstance(codes, dict) or not all(
+        isinstance(k, str) and isinstance(v, list) for k, v in codes.items()
+    ):
+        raise SystemExit(
+            "--categorical-codes-json must decode to {column: [value, ...]} "
+            f"(got {type(codes).__name__})"
+        )
+    return codes
 
 
 def live_feature_families() -> list[str]:
@@ -148,6 +204,7 @@ def build_request_body(
     external_source: str | None,
     force: bool,
     families: list[str] | None = None,
+    categorical_codes: dict[str, list[str]] | None = None,
 ) -> dict[str, Any]:
     """Build one ``import-by-reference`` body for a per-category booster.
 
@@ -156,6 +213,10 @@ def build_request_body(
     not importable in the API image. ``spec_yaml`` sets ``training.cell`` to the
     category so ``RerankerModel.category`` is stamped for INT-5 dispatch.
     ``families`` (when given) is recorded as ``run.features.families_enabled``.
+    ``categorical_codes`` (when given) is recorded as ``run.categorical_codes``,
+    which the router persists to ``RerankerModel.metrics['__categorical_codes__']``
+    so the predict-time scorer can encode the categorical features against the
+    booster's training vocabulary.
     """
     cat = category.lower()
     if cat not in CATEGORIES:
@@ -164,10 +225,13 @@ def build_request_body(
     features: dict[str, Any] = {"feature_schema_sha": feature_schema_sha}
     if families is not None:
         features["families_enabled"] = list(families)
+    run_block: dict[str, Any] = {"run_id": run_id, "features": features}
+    if categorical_codes is not None:
+        run_block["categorical_codes"] = categorical_codes
     body: dict[str, Any] = {
         "artifact_uri": artifact_uri,
         "spec_yaml": f"name: {run_id}\ntraining:\n  cell: {cat}\n",
-        "run": {"run_id": run_id, "features": features},
+        "run": run_block,
         "name": run_id,
         "force": bool(force),
     }
@@ -187,6 +251,7 @@ def build_all_bodies(
     external_source: str | None,
     force: bool,
     families: list[str] | None = None,
+    categorical_codes: dict[str, list[str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Build the three NK / LK / PK request bodies in canonical order."""
     return [
@@ -199,6 +264,7 @@ def build_all_bodies(
             external_source=external_source,
             force=force,
             families=families,
+            categorical_codes=categorical_codes,
         )
         for cat in CATEGORIES
     ]
@@ -237,6 +303,7 @@ def main() -> None:
     api_key = a.api_key or os.environ.get("PROTEA_API_KEY")
     schema_sha = _resolve_schema_sha(a.feature_schema_sha)
     families = _families_or_none()
+    categorical_codes = _load_categorical_codes(a.categorical_codes_json)
     boosters = _BoosterArgs(uris={"nk": a.nk_uri, "lk": a.lk_uri, "pk": a.pk_uri})
     bodies = build_all_bodies(
         boosters,
@@ -246,6 +313,7 @@ def main() -> None:
         external_source=a.external_source,
         force=a.force,
         families=families,
+        categorical_codes=categorical_codes,
     )
     results = []
     for body in bodies:
