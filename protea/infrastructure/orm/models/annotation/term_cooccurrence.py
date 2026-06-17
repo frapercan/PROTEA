@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, ForeignKey, Index, Integer
+from sqlalchemy import BigInteger, ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -27,6 +27,14 @@ class TermCooccurrence(Base):
     terms (training frequency below a cap) so uninformative high-frequency
     terms are never stored.
 
+    Snapshot invariance: GO term integer ids are per ``ontology_snapshot_id``,
+    so a build keyed only on int ids only matches candidates that share the t0
+    set's snapshot. ``known_go_id`` / ``candidate_go_id`` carry the
+    snapshot-INVARIANT ``go_id`` STRING alongside the int FK; the loader and
+    scorer match on those strings so association is correct whether or not the
+    t0 set's snapshot equals the candidate snapshot. The int FK columns stay
+    (nullable) for ``go_term`` integrity and backward readability.
+
     This table is populated offline by the ``build_go_cooccurrence`` operation
     and read at predict time; it is never written on the prediction path.
     """
@@ -37,6 +45,11 @@ class TermCooccurrence(Base):
             "ix_term_cooccurrence_set_known",
             "annotation_set_id",
             "known_term_id",
+        ),
+        Index(
+            "ix_term_cooccurrence_set_known_go",
+            "annotation_set_id",
+            "known_go_id",
         ),
     )
 
@@ -55,6 +68,9 @@ class TermCooccurrence(Base):
         ForeignKey("go_term.id", ondelete="CASCADE"),
         primary_key=True,
     )
+    # Snapshot-invariant string keys (the matching keys at score time).
+    known_go_id: Mapped[str | None] = mapped_column(String(15), nullable=True)
+    candidate_go_id: Mapped[str | None] = mapped_column(String(15), nullable=True)
     cooccurrence_count: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
@@ -66,9 +82,20 @@ class TermFrequency(Base):
     the denominator of ``P(t | k) = cooccurrence(k, t) / freq(k)`` used by the
     cross-aspect association feature. Populated alongside
     :class:`TermCooccurrence` by ``build_go_cooccurrence``.
+
+    ``go_id`` carries the snapshot-invariant string for ``term_id`` so the
+    scorer can look up ``freq(k)`` by go_id string (see
+    :class:`TermCooccurrence`).
     """
 
     __tablename__ = "term_frequency"
+    __table_args__ = (
+        Index(
+            "ix_term_frequency_set_go",
+            "annotation_set_id",
+            "go_id",
+        ),
+    )
 
     annotation_set_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -80,4 +107,6 @@ class TermFrequency(Base):
         ForeignKey("go_term.id", ondelete="CASCADE"),
         primary_key=True,
     )
+    # Snapshot-invariant string key for the term (the freq lookup key).
+    go_id: Mapped[str | None] = mapped_column(String(15), nullable=True)
     freq: Mapped[int] = mapped_column(Integer, nullable=False)

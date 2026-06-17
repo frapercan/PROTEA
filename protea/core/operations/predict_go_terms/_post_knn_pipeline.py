@@ -101,9 +101,7 @@ def _reranker_requested(p: PredictGOTermsBatchPayload) -> bool:
     """
     if p.reranker_model_id:
         return True
-    return all(
-        getattr(p, f"reranker_{cat}_artifact_uri", None) for cat in ("nk", "lk", "pk")
-    )
+    return all(getattr(p, f"reranker_{cat}_artifact_uri", None) for cat in ("nk", "lk", "pk"))
 
 
 def apply_self_prior(
@@ -242,28 +240,52 @@ def apply_association(
         )
         return
 
-    # Union of all known terms across the batch -> one table lookup.
-    all_known: set[int] = set()
-    for terms in own_exp.values():
-        all_known |= terms
-    cooc_by_known, freq = load_cooccurrence_for_known(session, annotation_set_id, all_known)
-
-    # Candidate aspects for every predicted go_term_id.
-    candidate_ids = {
-        int(rec["go_term_id"]) for rec in prediction_dicts if rec.get("go_term_id") is not None
-    }
-    aspect_by_id = _load_known_aspects(session, candidate_ids | all_known)
+    go_id_by_int, aspect_by_go, own_exp_go = _resolve_association_go_ids(
+        session, own_exp, prediction_dicts
+    )
+    all_known_go = {go for gos in own_exp_go.values() for go in gos}
+    cooc_by_known, freq = load_cooccurrence_for_known(session, annotation_set_id, all_known_go)
 
     scored = _score_association_candidates(
-        prediction_dicts, own_exp, cooc_by_known, freq, aspect_by_id
+        prediction_dicts, own_exp_go, cooc_by_known, freq, go_id_by_int, aspect_by_go
     )
 
     emit(
         "predict_go_terms_batch.association_done",
         None,
-        {"queries_with_known": len(own_exp), "candidates_scored": scored},
+        {"queries_with_known": len(own_exp_go), "candidates_scored": scored},
         "info",
     )
+
+
+def _resolve_association_go_ids(
+    session: Session,
+    own_exp: dict[str, set[int]],
+    prediction_dicts: list[dict[str, Any]],
+) -> tuple[dict[int, str], dict[str, str], dict[str, set[str]]]:
+    """Resolve known + candidate int ids to snapshot-invariant go_id strings.
+
+    One GOTerm lookup over the union of known ids (t0-set snapshot) and
+    candidate ids (export/predict snapshot) yields ``({go_term_id: go_id},
+    {go_id: aspect})``; both id-spaces map into the SAME go_id namespace, which
+    is what decouples the feature from the cooccurrence table's build snapshot.
+    Returns those two maps plus ``own_exp_go`` (each query's known terms as
+    go_id strings, the cooccurrence lookup keys).
+    """
+    all_known: set[int] = set()
+    for terms in own_exp.values():
+        all_known |= terms
+    candidate_ids = {
+        int(rec["go_term_id"]) for rec in prediction_dicts if rec.get("go_term_id") is not None
+    }
+    go_id_by_int, aspect_by_go = _load_go_id_and_aspect(session, candidate_ids | all_known)
+
+    own_exp_go: dict[str, set[str]] = {}
+    for acc, terms in own_exp.items():
+        gos = {go_id_by_int[k] for k in terms if k in go_id_by_int}
+        if gos:
+            own_exp_go[acc] = gos
+    return go_id_by_int, aspect_by_go, own_exp_go
 
 
 def _load_own_exp_for_association(
@@ -282,27 +304,33 @@ def _load_own_exp_for_association(
 
 def _score_association_candidates(
     prediction_dicts: list[dict[str, Any]],
-    own_exp: dict[str, set[int]],
-    cooc_by_known: dict[int, dict[int, int]],
-    freq: dict[int, int],
-    aspect_by_id: dict[int, str],
+    own_exp_go: dict[str, set[str]],
+    cooc_by_known: dict[str, dict[str, int]],
+    freq: dict[str, int],
+    go_id_by_int: dict[int, str],
+    aspect_by_go: dict[str, str],
 ) -> int:
     """Write ``association_*`` features per candidate; return rows scored.
 
-    For each candidate term ``t`` and the query's known terms ``K(p)``,
+    Everything is keyed on the snapshot-invariant ``go_id`` string so a
+    candidate scores identically whether or not its snapshot matches the t0
+    set's. For each candidate go_id ``t`` and the query's known go_ids ``K(p)``,
     ``association_total`` sums ``P(t | k) = cooccurrence(k, t) / freq(k)``;
-    ``association_cross`` sums only the cross-aspect ``k``.
+    ``association_cross`` sums only the cross-aspect ``k`` (aspect by go_id).
     """
     scored = 0
     for rec in prediction_dicts:
         gtid = rec.get("go_term_id")
         if gtid is None:
             continue
-        t = int(gtid)
-        known = own_exp.get(rec.get("protein_accession", ""))
+        # Prefer the go_id already stamped on the rec; fall back to the resolver.
+        t = rec.get("go_id") or go_id_by_int.get(int(gtid))
+        if t is None:
+            continue
+        known = own_exp_go.get(rec.get("protein_accession", ""))
         if not known:
             continue
-        t_aspect = aspect_by_id.get(t, "")
+        t_aspect = aspect_by_go.get(t, "")
         total = 0.0
         cross = 0.0
         for k in known:
@@ -314,7 +342,7 @@ def _score_association_candidates(
                 continue
             p_t_given_k = count / f
             total += p_t_given_k
-            if aspect_by_id.get(k, "") != t_aspect:
+            if aspect_by_go.get(k, "") != t_aspect:
                 cross += p_t_given_k
         if total > 0.0:
             rec["association_total"] = total
@@ -325,13 +353,42 @@ def _score_association_candidates(
 
 
 def _load_known_aspects(session: Session, term_ids: set[int]) -> dict[int, str]:
-    """``{go_term_id: aspect}`` for the given ids (empty string when NULL)."""
+    """``{go_term_id: aspect}`` for the given ids (empty string when NULL).
+
+    Aspect is intrinsic to a GOTerm row, so this int-keyed lookup is safe
+    within a single snapshot; it backs the CAFA category split in
+    ``_category_dispatch`` (NK / LK / PK), which never crosses snapshots.
+    """
     from sqlalchemy import select
 
     if not term_ids:
         return {}
     rows = session.execute(select(GOTerm.id, GOTerm.aspect).where(GOTerm.id.in_(term_ids))).all()
     return {gid: (aspect or "") for gid, aspect in rows}
+
+
+def _load_go_id_and_aspect(
+    session: Session, term_ids: set[int]
+) -> tuple[dict[int, str], dict[str, str]]:
+    """Resolve int ids to ``({go_term_id: go_id}, {go_id: aspect})``.
+
+    The aspect is keyed on the snapshot-invariant go_id string so the
+    cross-aspect split is itself snapshot-independent (the same go_id carries
+    the same aspect across snapshots). Aspect is the empty string when NULL.
+    """
+    from sqlalchemy import select
+
+    if not term_ids:
+        return {}, {}
+    rows = session.execute(
+        select(GOTerm.id, GOTerm.go_id, GOTerm.aspect).where(GOTerm.id.in_(term_ids))
+    ).all()
+    go_id_by_int: dict[int, str] = {}
+    aspect_by_go: dict[str, str] = {}
+    for gid, go_id, aspect in rows:
+        go_id_by_int[int(gid)] = go_id
+        aspect_by_go[go_id] = aspect or ""
+    return go_id_by_int, aspect_by_go
 
 
 def apply_v6_features(
