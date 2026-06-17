@@ -246,6 +246,10 @@ later revision).
      - :doc:`Export decouple via a content-addressed stable-feature cache <D42-export-stable-feature-cache>`
      - Accepted
      - feat/export-stable-feature-cache
+   * - D43
+     - :doc:`Stacked meta-reranker (evidence scorers plus a shallow per-category combiner) <D43-stacked-meta-reranker>`
+     - Accepted
+     - feat/mr-foundation
 
 .. toctree::
    :maxdepth: 1
@@ -300,3 +304,4 @@ later revision).
    D40-leakage-free-temporal-eval-protocol
    D41-lean-f32-refpool-highdim-plm
    D42-export-stable-feature-cache
+   D43-stacked-meta-reranker
