@@ -22,16 +22,21 @@ from protea.core.domain.category import CATEGORY_CODES, Category
 from protea.core.operations.predict_go_terms import _category_dispatch
 from protea.core.operations.predict_go_terms import _post_knn_pipeline as pkp
 from protea.core.reranking import (
+    AlignmentScorer,
     AssociationScorer,
     ClassifierScorer,
     Combiner,
     EvidenceScorer,
+    InterproScorer,
     KnnSimilarityScorer,
+    LabelEmbeddingScorer,
     LinearCombiner,
     PassThroughCombiner,
     QueryContext,
     ScorerRegistry,
     SelfPriorScorer,
+    TaxonomyScorer,
+    TermFrequencyScorer,
     default_scorer_registry,
 )
 
@@ -99,17 +104,38 @@ def test_registry_unknown_name_raises() -> None:
 
 def test_default_registry_order_and_membership() -> None:
     reg = default_scorer_registry()
-    assert reg.names() == ["knn_similarity", "classifier", "self_prior", "association"]
-    assert len(reg) == 4
+    # canonical score-vector order: base evidence first, then the original four.
+    assert reg.names() == [
+        "alignment",
+        "taxonomy",
+        "label_embedding",
+        "interpro",
+        "term_frequency",
+        "knn_similarity",
+        "classifier",
+        "self_prior",
+        "association",
+    ]
+    assert len(reg) == 9
 
 
 def test_registry_for_category_excludes_priors_on_nk() -> None:
     reg = default_scorer_registry()
     nk_names = [s.name for s in reg.for_category(NK)]
     pk_names = [s.name for s in reg.for_category(PK)]
-    # priors are NOT available to NK proteins.
-    assert nk_names == ["knn_similarity", "classifier"]
-    assert pk_names == ["knn_similarity", "classifier", "self_prior", "association"]
+    # base evidence + KNN + classifier apply everywhere; priors are NOT
+    # available to NK proteins.
+    base_plus_seq = [
+        "alignment",
+        "taxonomy",
+        "label_embedding",
+        "interpro",
+        "term_frequency",
+        "knn_similarity",
+        "classifier",
+    ]
+    assert nk_names == base_plus_seq
+    assert pk_names == [*base_plus_seq, "self_prior", "association"]
 
 
 def test_scorers_satisfy_the_port_protocol() -> None:
@@ -123,10 +149,81 @@ def test_scorers_satisfy_the_port_protocol() -> None:
 
 
 def test_applies_to_declarations() -> None:
+    # base evidence + KNN + classifier propose from sequence / embeddings /
+    # domains for every protein.
+    assert AlignmentScorer().applies_to == {NK, LK, PK}
+    assert TaxonomyScorer().applies_to == {NK, LK, PK}
+    assert LabelEmbeddingScorer().applies_to == {NK, LK, PK}
+    assert InterproScorer().applies_to == {NK, LK, PK}
+    assert TermFrequencyScorer().applies_to == {NK, LK, PK}
     assert KnnSimilarityScorer().applies_to == {NK, LK, PK}
     assert ClassifierScorer().applies_to == {NK, LK, PK}
+    # priors need the query's own known terms.
     assert SelfPriorScorer().applies_to == {LK, PK}
     assert AssociationScorer().applies_to == {LK, PK}
+
+
+# --------------------------------------------------------------------------- #
+# Base-evidence adapters: read their stored key, coerce, omit on missing / NaN
+# --------------------------------------------------------------------------- #
+
+
+def test_alignment_scorer_reads_sw_key() -> None:
+    cands = [
+        {"go_id": "GO:0000001", "alignment_score_sw": 123.5},
+        {"go_id": "GO:0000002", "alignment_score_sw": float("nan")},
+        {"go_id": "GO:0000003"},  # key missing
+        {"alignment_score_sw": 9.0},  # no go_id
+    ]
+    out = AlignmentScorer().score(_ctx(cands), cands)
+    assert out == {"GO:0000001": pytest.approx(123.5)}
+
+
+def test_taxonomy_scorer_reads_distance_as_is() -> None:
+    cands = [
+        {"go_id": "GO:0000001", "taxonomic_distance": 7.0},
+        {"go_id": "GO:0000002", "taxonomic_distance": float("nan")},
+        {"go_id": "GO:0000003"},
+    ]
+    out = TaxonomyScorer().score(_ctx(cands), cands)
+    # emitted as-is (no inversion); the combiner learns the sign.
+    assert out == {"GO:0000001": pytest.approx(7.0)}
+
+
+def test_label_embedding_scorer_reads_anc2vec_maxcos() -> None:
+    cands = [
+        {"go_id": "GO:0000001", "anc2vec_neighbor_maxcos": 0.83},
+        {"go_id": "GO:0000002", "anc2vec_neighbor_maxcos": float("nan")},
+        {"go_id": "GO:0000003"},
+    ]
+    out = LabelEmbeddingScorer().score(_ctx(cands), cands)
+    assert out == {"GO:0000001": pytest.approx(0.83)}
+
+
+def test_interpro_scorer_reads_interpro_score() -> None:
+    cands = [
+        {"go_id": "GO:0000001", "interpro_score": 4.2},
+        {"go_id": "GO:0000002", "interpro_score": float("nan")},
+        {"go_id": "GO:0000003"},
+    ]
+    out = InterproScorer().score(_ctx(cands), cands)
+    assert out == {"GO:0000001": pytest.approx(4.2)}
+
+
+def test_term_frequency_scorer_reads_go_term_frequency() -> None:
+    cands = [
+        {"go_id": "GO:0000001", "go_term_frequency": 0.015},
+        {"go_id": "GO:0000002", "go_term_frequency": float("nan")},
+        {"go_id": "GO:0000003"},
+    ]
+    out = TermFrequencyScorer().score(_ctx(cands), cands)
+    assert out == {"GO:0000001": pytest.approx(0.015)}
+
+
+def test_base_evidence_scorers_coerce_string_values() -> None:
+    # the JSONB rehydration path can hand back stringified numbers.
+    cands = [{"go_id": "GO:0000001", "alignment_score_sw": "42.0"}]
+    assert AlignmentScorer().score(_ctx(cands), cands) == {"GO:0000001": pytest.approx(42.0)}
 
 
 # --------------------------------------------------------------------------- #

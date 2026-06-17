@@ -3,12 +3,22 @@
 Each adapter wraps an ALREADY-COMPUTED per-candidate signal as an
 :class:`EvidenceScorer` emitting one score per candidate keyed on ``go_id``. The
 adapters do NOT reimplement any producer: they read the exact values the live
-producers stamp on each prediction dict in
-:mod:`protea.core.operations.predict_go_terms._post_knn_pipeline`, namely:
+producers stamp on each prediction dict (the ``GOPrediction`` columns / the keys
+the candidate dict already carries), namely:
 
-* KNN similarity      <- ``distance`` (cosine) + ``neighbor_vote_fraction``
-* M2 classifier       <- ``classifier_score`` (``apply_classifier`` / ``classifier_producer``)
-* self_prior          <- ``self_prior_score`` (``apply_self_prior``)
+Base sequence / taxonomy / domain / label-embedding evidence (applies to all):
+
+* alignment            <- ``alignment_score_sw`` (Smith-Waterman local alignment, higher is stronger)
+* taxonomy             <- ``taxonomic_distance`` (lower is closer; emitted as-is, the combiner learns the sign)
+* label_embedding      <- ``anc2vec_neighbor_maxcos`` (GO label-embedding KNN cosine)
+* interpro             <- ``interpro_score`` (InterPro domain-signature evidence)
+* term_frequency       <- ``go_term_frequency`` (base-rate / calibration signal)
+
+The original four MR-1 producer signals:
+
+* KNN similarity       <- ``distance`` (cosine) + ``neighbor_vote_fraction``
+* M2 classifier        <- ``classifier_score`` (``apply_classifier`` / ``classifier_producer``)
+* self_prior           <- ``self_prior_score`` (``apply_self_prior``)
 * association          <- ``association_total`` (``apply_association``, snapshot-agnostic per #644)
 
 Because those keys are also persisted on ``GOPrediction.features`` (#643), an
@@ -17,10 +27,14 @@ predict path or was rehydrated from the JSONB blob for the eval / combiner path
 (MR-2). The adapters are thin by design: the producer owns the computation, the
 adapter owns only the port contract (``name``, ``applies_to``, ``score``).
 
-``applies_to`` follows the CAFA evidence model: KNN and the classifier propose
-from sequence / embeddings for every protein, so they apply to NK / LK / PK; the
-two priors (``self_prior``, ``association``) need the query's own pre-cutoff
-known terms, which NK proteins by definition lack, so they apply to LK / PK only.
+``applies_to`` follows the CAFA evidence model: the base-evidence scorers
+(alignment, taxonomy, label_embedding, interpro, term_frequency), KNN, and the
+classifier all propose from sequence / embeddings / domains for every protein, so
+they apply to NK / LK / PK; the two priors (``self_prior``, ``association``) need
+the query's own pre-cutoff known terms, which NK proteins by definition lack, so
+they apply to LK / PK only. This base-evidence set recovers the sequence /
+taxonomy / label-embedding signals the priors-plus-classifier-plus-KNN vector
+omitted (the omission that lost NK / LK in the combiner).
 """
 
 from __future__ import annotations
@@ -80,6 +94,83 @@ class _KeyedScorer:
             if value is not None:
                 out[go_id] = value
         return out
+
+
+class AlignmentScorer(_KeyedScorer):
+    """Sequence-homology evidence from the stored Smith-Waterman score.
+
+    Reads the per-candidate ``alignment_score_sw`` (Smith-Waterman local
+    alignment score against the carrying neighbour, the strongest
+    sequence-homology signal). Higher is stronger. Applies to every category
+    (homology is defined from sequence alone, no known terms needed).
+    """
+
+    name = "alignment"
+    applies_to = _ALL_CATEGORIES
+
+    def _value(self, candidate: Candidate) -> float | None:
+        return _as_float(candidate.get("alignment_score_sw"))
+
+
+class TaxonomyScorer(_KeyedScorer):
+    """Taxonomic-proximity evidence from the stored ``taxonomic_distance``.
+
+    Reads the per-candidate ``taxonomic_distance`` (lower is closer). The raw
+    value is emitted as-is (no inversion): the combiner learns the sign, so the
+    adapter stays a thin read. Applies to every category.
+    """
+
+    name = "taxonomy"
+    applies_to = _ALL_CATEGORIES
+
+    def _value(self, candidate: Candidate) -> float | None:
+        return _as_float(candidate.get("taxonomic_distance"))
+
+
+class LabelEmbeddingScorer(_KeyedScorer):
+    """GO label-embedding evidence from the stored anc2vec neighbour cosine.
+
+    Reads the per-candidate ``anc2vec_neighbor_maxcos`` (the max cosine of the
+    candidate term against the neighbour-carried terms in anc2vec GO
+    label-embedding space). Higher is stronger. Applies to every category.
+    """
+
+    name = "label_embedding"
+    applies_to = _ALL_CATEGORIES
+
+    def _value(self, candidate: Candidate) -> float | None:
+        return _as_float(candidate.get("anc2vec_neighbor_maxcos"))
+
+
+class InterproScorer(_KeyedScorer):
+    """InterPro domain-signature evidence from the stored ``interpro_score``.
+
+    Reads the per-candidate ``interpro_score`` (domain-signature support for the
+    candidate term). Higher is stronger. Applies to every category (domain
+    signatures are defined from sequence alone, no known terms needed).
+    """
+
+    name = "interpro"
+    applies_to = _ALL_CATEGORIES
+
+    def _value(self, candidate: Candidate) -> float | None:
+        return _as_float(candidate.get("interpro_score"))
+
+
+class TermFrequencyScorer(_KeyedScorer):
+    """Base-rate / calibration evidence from the stored ``go_term_frequency``.
+
+    Reads the per-candidate ``go_term_frequency`` (how common the candidate term
+    is in the reference pool). It is a base-rate / calibration signal the
+    combiner uses to discount ubiquitous terms; emitted as-is so the combiner
+    learns the sign. Applies to every category.
+    """
+
+    name = "term_frequency"
+    applies_to = _ALL_CATEGORIES
+
+    def _value(self, candidate: Candidate) -> float | None:
+        return _as_float(candidate.get("go_term_frequency"))
 
 
 class KnnSimilarityScorer(_KeyedScorer):
@@ -155,12 +246,19 @@ class AssociationScorer(_KeyedScorer):
 
 
 def default_scorer_registry() -> ScorerRegistry:
-    """A :class:`ScorerRegistry` pre-loaded with the four MR-1 adapters.
+    """A :class:`ScorerRegistry` pre-loaded with the MR-1 adapters.
 
     Registration order is the canonical score-vector order the MR-2 combiner
-    will consume: knn_similarity, classifier, self_prior, association.
+    will consume (base evidence first, then the original four producer signals):
+    alignment, taxonomy, label_embedding, interpro, term_frequency,
+    knn_similarity, classifier, self_prior, association.
     """
     registry = ScorerRegistry()
+    registry.register(AlignmentScorer())
+    registry.register(TaxonomyScorer())
+    registry.register(LabelEmbeddingScorer())
+    registry.register(InterproScorer())
+    registry.register(TermFrequencyScorer())
     registry.register(KnnSimilarityScorer())
     registry.register(ClassifierScorer())
     registry.register(SelfPriorScorer())
@@ -169,9 +267,14 @@ def default_scorer_registry() -> ScorerRegistry:
 
 
 __all__ = [
+    "AlignmentScorer",
     "AssociationScorer",
     "ClassifierScorer",
+    "InterproScorer",
     "KnnSimilarityScorer",
+    "LabelEmbeddingScorer",
     "SelfPriorScorer",
+    "TaxonomyScorer",
+    "TermFrequencyScorer",
     "default_scorer_registry",
 ]

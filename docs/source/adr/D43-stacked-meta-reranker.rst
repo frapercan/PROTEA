@@ -76,6 +76,32 @@ Consequences
   thresholded ``f_micro_w`` behaves rather than fighting an internal ranking
   objective.
 
+MR-1 base-evidence scorers
+--------------------------
+The first combiner pass over only the four producer signals (knn_similarity,
+classifier, self_prior, association) fixed PK calibration but LOST NK and LK,
+because that score vector omitted the **base sequence / taxonomy / domain /
+label-embedding evidence** the old monolith consumed. Five additional thin
+adapter ports recover it, each reading a first-class ``GOPrediction`` column the
+producers already stamp:
+
+* **alignment** (``alignment_score_sw``): Smith-Waterman local alignment, the
+  strongest sequence-homology evidence (higher is stronger).
+* **taxonomy** (``taxonomic_distance``): taxonomic proximity, emitted as-is
+  (lower is closer; the combiner learns the sign).
+* **label_embedding** (``anc2vec_neighbor_maxcos``): GO label-embedding KNN
+  cosine.
+* **interpro** (``interpro_score``): InterPro domain-signature evidence.
+* **term_frequency** (``go_term_frequency``): base-rate / calibration signal.
+
+All five **apply to NK / LK / PK** (defined from sequence / embeddings / domains,
+no known terms needed). The canonical score-vector order becomes base evidence
+first, then the original four: alignment, taxonomy, label_embedding, interpro,
+term_frequency, knn_similarity, classifier, self_prior, association. This is
+ADDITIVE (the ports are still not wired into the live predict / eval path); it
+gives the MR-2 combiner the NK / LK evidence the priors-plus-classifier-plus-KNN
+vector lacked.
+
 Resolution
 ----------
 Open. Foundation (MR-0 ports plus registry, MR-1 producer adapters) landed on
