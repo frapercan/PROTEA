@@ -14,6 +14,7 @@ The integration test is the load-bearing one: it catches any future
 writer site that bypasses ``_row_from_prediction`` (which is the only
 path through which the dual-write runs).
 """
+
 from __future__ import annotations
 
 import math
@@ -233,6 +234,88 @@ class TestRowFromPredictionDualWrite:
         )
 
 
+class TestLafaFeaturePersistence:
+    """LAFA per-category families (classifier / self_prior / association)
+    have no typed ``GOPrediction`` column; they must ride the ``features``
+    JSONB blob, and ONLY when the prediction dict carries them (i.e. the
+    matching compute flag was on at predict time).
+    """
+
+    def test_lafa_keys_persisted_when_present(self) -> None:
+        from protea.core.operations.predict_go_terms._common import (
+            _LAFA_JSONB_FEATURE_KEYS,
+        )
+
+        pred_set_id = uuid.uuid4()
+        pred = {
+            "protein_accession": "P12345",
+            "go_term_id": 42,
+            "ref_protein_accession": "Q99999",
+            "distance": 0.15,
+            # A compute_* flag was on, so the family keys ride the dict.
+            "classifier_score": 0.73,
+            "classifier_present": 1.0,
+            "self_prior_score": 1.0,
+            "association_total": 0.4,
+            "association_cross": 0.1,
+            "association_present": 1.0,
+        }
+        blob = _row_from_prediction(pred, pred_set_id)["features"]
+        for key in _LAFA_JSONB_FEATURE_KEYS:
+            assert blob[key] == pred[key], f"mismatch on {key}"
+
+    def test_default_run_writes_no_lafa_keys(self) -> None:
+        """Flags off: the dict carries no LAFA keys, so the blob keeps its
+        canonical shape exactly (golden / parity stay unchanged)."""
+        from protea.core.operations.predict_go_terms._common import (
+            _LAFA_JSONB_FEATURE_KEYS,
+        )
+
+        pred_set_id = uuid.uuid4()
+        pred = {
+            "protein_accession": "P12345",
+            "go_term_id": 42,
+            "ref_protein_accession": "Q99999",
+            "distance": 0.15,
+            "vote_count": 3,
+        }
+        blob = _row_from_prediction(pred, pred_set_id)["features"]
+        # No LAFA key leaked in; the canonical key set is unchanged.
+        assert set(blob.keys()) == set(FEATURE_JSONB_KEYS)
+        for key in _LAFA_JSONB_FEATURE_KEYS:
+            assert key not in blob
+
+    def test_lafa_keys_partial_presence(self) -> None:
+        """Only the families whose flag was on are written; the rest stay
+        absent (a self_prior-only run carries just ``self_prior_score``)."""
+        pred_set_id = uuid.uuid4()
+        pred = {
+            "protein_accession": "P1",
+            "go_term_id": 7,
+            "ref_protein_accession": "Q1",
+            "distance": 0.2,
+            "self_prior_score": 1.0,
+        }
+        blob = _row_from_prediction(pred, pred_set_id)["features"]
+        assert blob["self_prior_score"] == 1.0
+        assert "classifier_score" not in blob
+        assert "association_total" not in blob
+
+    def test_lafa_nan_cleaned(self) -> None:
+        """Non-finite LAFA values are scrubbed to ``None`` like the typed
+        dual-write, so the JSONB never carries a non-finite float."""
+        pred_set_id = uuid.uuid4()
+        pred = {
+            "protein_accession": "P1",
+            "go_term_id": 7,
+            "ref_protein_accession": "Q1",
+            "distance": 0.2,
+            "association_total": float("nan"),
+        }
+        blob = _row_from_prediction(pred, pred_set_id)["features"]
+        assert blob["association_total"] is None
+
+
 # ---------------------------------------------------------------------------
 # Unit test of StorePredictionsOperation hand-off (no DB)
 # ---------------------------------------------------------------------------
@@ -348,9 +431,7 @@ def test_dual_write_roundtrip_features_blob_matches_typed(postgres_url: str):
         )
         session.add(go_term)
 
-        ann_set = AnnotationSet(
-            ontology_snapshot_id=snap.id, source="test", source_version="v1"
-        )
+        ann_set = AnnotationSet(ontology_snapshot_id=snap.id, source="test", source_version="v1")
         session.add(ann_set)
         session.flush()
 
@@ -411,11 +492,7 @@ def test_dual_write_roundtrip_features_blob_matches_typed(postgres_url: str):
         session.commit()
 
     with Session(engine, future=True) as session:
-        rows = (
-            session.query(GOPrediction)
-            .filter_by(prediction_set_id=pred_set_id)
-            .all()
-        )
+        rows = session.query(GOPrediction).filter_by(prediction_set_id=pred_set_id).all()
         assert len(rows) == 1
         row = rows[0]
 
