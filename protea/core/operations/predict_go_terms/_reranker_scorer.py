@@ -51,9 +51,7 @@ AttachAspectFn = Callable[[Session, list[dict[str, Any]]], None]
 #: tests can stub the DB-bound annotation lookup. Signature mirrors
 #: :func:`._category_dispatch.attach_query_category` (op is supplied by the
 #: scorer's owner when wired; ``None`` falls back to the module default).
-AttachCategoryFn = Callable[
-    [Session, "uuid.UUID", list[dict[str, Any]]], dict[str, int]
-]
+AttachCategoryFn = Callable[[Session, "uuid.UUID", list[dict[str, Any]]], dict[str, int]]
 
 
 @dataclass(frozen=True)
@@ -199,13 +197,22 @@ class RerankerScorer:
 
         Aspect attachment is the caller's responsibility (it is shared
         across per-category subsets so it runs once, not per booster).
+
+        Three scoring shapes:
+
+        * **universal** booster (``plm_id`` + ``k_context`` features): routed
+          through :func:`score_universal` with the categorical vocab + plm/k
+          recovered from the sibling run.json.
+        * **per-category / per-cell** booster WITH a recorded categorical
+          vocabulary in its sibling run.json: scored via
+          ``protea_method.reranker.predict(booster, df, categorical_codes=...)``
+          so the string categoricals (``aspect`` / ``qualifier`` /
+          ``evidence_code`` / ``taxonomic_relation``) are label-encoded against
+          the training ``pd.factorize`` order rather than numeric-coerced to NaN.
+        * **per-cell** booster WITHOUT a recorded vocabulary: the historical
+          bare ``apply_reranker`` path (backward compatible).
         """
         import pandas as pd
-
-        from protea.core._universal_reranker import (
-            is_universal_booster,
-            score_universal,
-        )
 
         project_root = Path(__file__).resolve().parents[3]
         settings = _shim.load_settings(project_root)
@@ -216,20 +223,49 @@ class RerankerScorer:
             store=store,
         )
         df = pd.DataFrame(prediction_dicts)
+        scores = self._compute_scores(booster, df, artifact_uri=artifact_uri, store=store)
+        for rec, score in zip(prediction_dicts, scores.tolist(), strict=True):
+            rec["reranker_score"] = float(score)
+        return scores
+
+    def _compute_scores(
+        self,
+        booster: Any,
+        df: Any,
+        *,
+        artifact_uri: str,
+        store: Any,
+    ) -> Any:
+        """Return the score array for ``df`` under the right booster shape.
+
+        Universal boosters go through :func:`score_universal`; non-universal
+        boosters go through ``predict(..., categorical_codes=...)`` when the
+        booster's sibling run.json records the training categorical vocabulary
+        (so ``aspect`` / ``qualifier`` / ``evidence_code`` /
+        ``taxonomic_relation`` are label-encoded against the SAME ``factorize``
+        order seen at training instead of being numeric-coerced to NaN by the
+        bare ``apply_reranker``), and through the historical bare
+        ``apply_reranker`` otherwise (backward compatible).
+        """
+        from protea.core._universal_reranker import (
+            is_universal_booster,
+            load_per_category_categorical_codes,
+            score_universal,
+        )
+
         if is_universal_booster(booster):
             ctx = self._load_universal_context(artifact_uri, store)
-            scores = score_universal(
+            return score_universal(
                 booster,
                 df,
                 categorical_codes=ctx["categorical_codes"],
                 plm_id=ctx["plm_id"],
                 k_context=ctx["k_context"],
             )
-        else:
-            scores = _shim.apply_reranker(df, booster)
-        for rec, score in zip(prediction_dicts, scores.tolist(), strict=True):
-            rec["reranker_score"] = float(score)
-        return scores
+        cat_codes = load_per_category_categorical_codes(artifact_uri, store)
+        if cat_codes:
+            return _shim.predict(booster, df, categorical_codes=cat_codes)
+        return _shim.apply_reranker(df, booster)
 
     @staticmethod
     def _load_universal_context(
@@ -435,7 +471,9 @@ class RerankerScorer:
         for binding in bindings:
             if binding.feature_schema_sha != live_sha:
                 RerankerScorer._raise_schema_sha_mismatch_for(
-                    reranker_model_id=getattr(p, f"reranker_model_id_{binding.category.lower()}", None),
+                    reranker_model_id=getattr(
+                        p, f"reranker_model_id_{binding.category.lower()}", None
+                    ),
                     expected_sha=binding.feature_schema_sha,
                     live_sha=live_sha,
                     emit=emit,

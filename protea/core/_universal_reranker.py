@@ -249,6 +249,49 @@ def load_universal_context(artifact_uri: str, store: Any) -> dict[str, Any]:
     }
 
 
+def load_per_category_categorical_codes(
+    artifact_uri: str,
+    store: Any,
+) -> dict[str, list[str]] | None:
+    """Recover a non-universal booster's categorical vocabulary, tolerantly.
+
+    Per-category (NK / LK / PK) boosters are NOT universal: they carry no
+    ``plm_id`` / ``k_context`` injected columns, so they route through the
+    generic ``protea_method.reranker`` helpers rather than
+    :func:`score_universal`. But they ARE trained with the same
+    ``pd.factorize`` categorical label-encoding as the universal model, so
+    when they are scored with the bare ``apply_reranker`` (which numeric-
+    coerces every column) the string categoricals collapse to NaN and the
+    booster sees a train/predict mismatch.
+
+    This helper recovers the per-column string vocabulary from the booster's
+    sibling ``run.json`` (``runs/<id>/run.json`` next to ``model.txt`` in the
+    artifact store), the SAME ``categorical_codes`` block the lab records for
+    the universal path. It is deliberately TOLERANT: any failure (missing
+    sibling, malformed JSON, absent ``categorical_codes`` key) returns
+    ``None`` so the caller falls back to the historical bare-``apply_reranker``
+    behaviour. Booster blobs registered before this slice (no recorded
+    vocabulary) therefore keep scoring exactly as before.
+
+    Returns the ``{column: [val0, val1, ...]}`` vocabulary, or ``None`` when
+    it cannot be recovered.
+    """
+    import json
+
+    from protea.core.reranker import _uri_to_key
+
+    try:
+        run_uri = artifact_uri.rsplit("/", 1)[0] + "/run.json"
+        run_key = _uri_to_key(run_uri, store)
+        run = json.loads(store.get(run_key).decode("utf-8"))
+    except Exception:
+        return None
+    codes = run.get("categorical_codes")
+    if not codes or not isinstance(codes, dict):
+        return None
+    return codes
+
+
 def universal_meta_from_run(run: dict[str, Any]) -> dict[str, Any] | None:
     """Extract the universal-scoring metadata block from a lab ``run.json``.
 
@@ -273,6 +316,7 @@ __all__ = [
     "INJECTED_COLUMNS",
     "UNIVERSAL_CATEGORICAL_COLUMNS",
     "is_universal_booster",
+    "load_per_category_categorical_codes",
     "load_universal_context",
     "score_universal",
     "universal_meta_from_run",

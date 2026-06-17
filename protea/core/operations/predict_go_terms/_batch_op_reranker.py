@@ -16,6 +16,7 @@ from protea.core.reranker import (
     apply_reranker,
     infer_active_feature_families,
     load_reranker,
+    predict,
 )
 from protea.infrastructure.settings import load_settings
 from protea.infrastructure.storage import get_artifact_store
@@ -26,4 +27,5 @@ __all__ = [
     "infer_active_feature_families",
     "load_reranker",
     "load_settings",
+    "predict",
 ]
