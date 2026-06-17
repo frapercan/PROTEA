@@ -9,9 +9,16 @@ oracle: ``freq[t]`` = distinct proteins carrying ``t`` after propagation, and
 
 from __future__ import annotations
 
+import uuid
+from unittest.mock import MagicMock
+
 from protea.core.operations.build_go_cooccurrence import (
     BuildGoCooccurrenceOperation,
     BuildGoCooccurrencePayload,
+)
+from protea.infrastructure.orm.models.annotation.term_cooccurrence import (
+    TermCooccurrence,
+    TermFrequency,
 )
 
 
@@ -92,3 +99,43 @@ def test_operation_metadata() -> None:
     assert op.name == "build_go_cooccurrence"
     summary = op.summarize_payload({"annotation_set_id": "abc", "known_freq_cap": 500})
     assert "abc" in summary and "500" in summary
+
+
+def _captured_rows(session: MagicMock, model: type) -> list[dict]:
+    """Flatten the row dicts passed to ``bulk_insert_mappings`` for ``model``."""
+    rows: list[dict] = []
+    for call in session.bulk_insert_mappings.call_args_list:
+        if call.args and call.args[0] is model:
+            rows.extend(call.args[1])
+    return rows
+
+
+def test_write_freq_stamps_snapshot_invariant_go_id() -> None:
+    # The freq rows must carry the go_id string so the predict path can match
+    # on it across snapshots; the int term_id stays for FK / backward-read.
+    session = MagicMock()
+    set_id = uuid.uuid4()
+    go_id_by_int = {10: "GO:0000010", 20: "GO:0000020"}
+    _op()._write_freq(session, set_id, {10: 3, 20: 1}, go_id_by_int, batch_size=50_000)
+    rows = {r["term_id"]: r for r in _captured_rows(session, TermFrequency)}
+    assert rows[10]["go_id"] == "GO:0000010"
+    assert rows[10]["freq"] == 3
+    assert rows[20]["go_id"] == "GO:0000020"
+
+
+def test_write_cooccurrence_stamps_both_go_id_sides() -> None:
+    # Both the known (k) and candidate (t) sides carry their go_id strings so
+    # the cooccurrence row is snapshot-invariant on each end.
+    session = MagicMock()
+    set_id = uuid.uuid4()
+    go_id_by_int = {10: "GO:0000010", 99: "GO:0000099"}
+    cooc = {(10, 99): 2}
+    _op()._write_cooccurrence(session, set_id, cooc, go_id_by_int, batch_size=50_000)
+    rows = _captured_rows(session, TermCooccurrence)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["known_term_id"] == 10
+    assert row["candidate_term_id"] == 99
+    assert row["known_go_id"] == "GO:0000010"
+    assert row["candidate_go_id"] == "GO:0000099"
+    assert row["cooccurrence_count"] == 2

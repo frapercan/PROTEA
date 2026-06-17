@@ -123,16 +123,9 @@ class BuildGoCooccurrenceOperation:
             "info",
         )
 
-        # Reset any prior build for this set so the operation is idempotent.
-        session.execute(delete(TermFrequency).where(TermFrequency.annotation_set_id == set_id))
-        session.execute(
-            delete(TermCooccurrence).where(TermCooccurrence.annotation_set_id == set_id)
-        )
-        freq_written = self._write_freq(session, set_id, freq, p.write_batch_size)
-
         known_terms = {t for t, f in freq.items() if f <= p.known_freq_cap}
         cooc = self._compute_cooccurrence(terms_by_protein, known_terms)
-        pairs_written = self._write_cooccurrence(session, set_id, cooc, p.write_batch_size)
+        freq_written, pairs_written = self._persist(session, set_id, freq, cooc, p.write_batch_size)
 
         session.commit()
         result = {
@@ -178,6 +171,21 @@ class BuildGoCooccurrenceOperation:
         for child, parent in rows:
             parent_map[int(child)].add(int(parent))
         return parent_map
+
+    def _load_go_id_map(self, session: Session, term_ids: set[int]) -> dict[int, str]:
+        """``{go_term_id: go_id}`` for the given int ids (the string anchor).
+
+        Resolves each per-snapshot ``GOTerm.id`` to its snapshot-invariant
+        ``go_id`` so the written rows carry a key the predict path can match
+        across snapshots. Empty input yields an empty map.
+        """
+        if not term_ids:
+            return {}
+        rows = session.execute(
+            text("SELECT id, go_id FROM go_term WHERE id = ANY(:ids)"),
+            {"ids": list(term_ids)},
+        ).fetchall()
+        return {int(gid): go_id for gid, go_id in rows}
 
     def _propagate(
         self,
@@ -231,18 +239,51 @@ class BuildGoCooccurrenceOperation:
                     cooc[(k, t)] += 1
         return cooc
 
+    def _persist(
+        self,
+        session: Session,
+        set_id: uuid.UUID,
+        freq: dict[int, int],
+        cooc: dict[tuple[int, int], int],
+        batch_size: int,
+    ) -> tuple[int, int]:
+        """Reset + rewrite both tables for this set; return ``(freq, pairs)``.
+
+        Resolves the snapshot-invariant go_id strings for every int id in play
+        first, so each written row carries the key the predict path matches on
+        (so cooccurrence is correct even when the candidate snapshot differs
+        from this set's snapshot). The delete makes the build idempotent.
+        """
+        go_id_by_int = self._load_go_id_map(session, set(freq))
+        session.execute(delete(TermFrequency).where(TermFrequency.annotation_set_id == set_id))
+        session.execute(
+            delete(TermCooccurrence).where(TermCooccurrence.annotation_set_id == set_id)
+        )
+        freq_written = self._write_freq(session, set_id, freq, go_id_by_int, batch_size)
+        pairs_written = self._write_cooccurrence(session, set_id, cooc, go_id_by_int, batch_size)
+        return freq_written, pairs_written
+
     def _write_freq(
         self,
         session: Session,
         set_id: uuid.UUID,
         freq: dict[int, int],
+        go_id_by_int: dict[int, str],
         batch_size: int,
     ) -> int:
         written = 0
         for batch in _iter_batches(freq.items(), batch_size):
             session.bulk_insert_mappings(
                 TermFrequency,
-                [{"annotation_set_id": set_id, "term_id": term, "freq": f} for term, f in batch],
+                [
+                    {
+                        "annotation_set_id": set_id,
+                        "term_id": term,
+                        "go_id": go_id_by_int.get(term),
+                        "freq": f,
+                    }
+                    for term, f in batch
+                ],
             )
             written += len(batch)
             session.commit()
@@ -253,6 +294,7 @@ class BuildGoCooccurrenceOperation:
         session: Session,
         set_id: uuid.UUID,
         cooc: dict[tuple[int, int], int],
+        go_id_by_int: dict[int, str],
         batch_size: int,
     ) -> int:
         written = 0
@@ -264,6 +306,8 @@ class BuildGoCooccurrenceOperation:
                         "annotation_set_id": set_id,
                         "known_term_id": k,
                         "candidate_term_id": t,
+                        "known_go_id": go_id_by_int.get(k),
+                        "candidate_go_id": go_id_by_int.get(t),
                         "cooccurrence_count": count,
                     }
                     for (k, t), count in batch

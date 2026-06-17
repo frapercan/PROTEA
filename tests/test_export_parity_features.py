@@ -59,9 +59,12 @@ def _records() -> list[dict]:
 # Q1 KNOWS term 10 experimentally (aspect F) and non-experimentally too.
 _NONEXP_ANN = {"Q1": [{"go_term_id": 10, "evidence_code": "IEA"}]}
 _EXP_ANN = {"Q1": [{"go_term_id": 10, "evidence_code": "IDA"}]}
-_COOC = {10: {99: 1}}  # known 10 co-occurs once with candidate 99
-_FREQ = {10: 2}  # P(99|10) = 1/2
-_ASPECTS = {10: "F", 99: "P"}  # candidate 99 is a DIFFERENT aspect -> cross
+# Co-occurrence + frequency are now keyed on the snapshot-invariant go_id string.
+_COOC = {"GO:0000010": {"GO:0000099": 1}}  # known GO:0000010 co-occurs once with GO:0000099
+_FREQ = {"GO:0000010": 2}  # P(GO:0000099 | GO:0000010) = 1/2
+# int -> go_id resolver + go_id -> aspect (candidate is a DIFFERENT aspect -> cross).
+_GO_ID_BY_INT = {10: "GO:0000010", 99: "GO:0000099"}
+_ASPECT_BY_GO = {"GO:0000010": "F", "GO:0000099": "P"}
 _CLF_PREDS = [ClassifierPrediction("Q1", "GO:0000099", 0.9)]
 _GID_BY_GO = {"GO:0000099": 99}
 
@@ -79,7 +82,7 @@ def _run_export(records, flags: ExportParityFlags):
             "load_cooccurrence_for_known",
             return_value=(_COOC, _FREQ),
         ),
-        patch.object(pkp, "_load_known_aspects", return_value=_ASPECTS),
+        patch.object(pkp, "_load_go_id_and_aspect", return_value=(_GO_ID_BY_INT, _ASPECT_BY_GO)),
         patch(
             "protea.core.classifier_producer.load_concat_features",
             return_value=(np.zeros((1, 8320), dtype=np.float32), ["Q1"]),
@@ -158,7 +161,7 @@ def test_parity_association_matches_predict_producer() -> None:
             "load_cooccurrence_for_known",
             return_value=(_COOC, _FREQ),
         ),
-        patch.object(pkp, "_load_known_aspects", return_value=_ASPECTS),
+        patch.object(pkp, "_load_go_id_and_aspect", return_value=(_GO_ID_BY_INT, _ASPECT_BY_GO)),
     ):
         pkp.apply_association(op, MagicMock(), _SET_ID, ["Q1"], oracle, lambda *_a, **_k: None)
 
