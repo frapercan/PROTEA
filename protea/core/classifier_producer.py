@@ -31,14 +31,25 @@ missing terms).
 from __future__ import annotations
 
 import glob
+import hashlib
+import json
+import logging
 import os
+import sqlite3
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
 from torch import nn
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+_LOG = logging.getLogger(__name__)
 
 # Canonical 6-PLM concat order (ADR D35 config ids). The order is
 # load-bearing: it MUST match the order the classifier trained on
@@ -145,6 +156,10 @@ class FullVocabClassifier:
     def __init__(self, model_path: str | None = None, anc2vec_path: str | None = None) -> None:
         model_path = model_path or os.environ.get(_MODEL_ENV, _DEFAULT_MODEL_PATH)
         anc2vec_path = anc2vec_path or os.environ.get(_ANC2VEC_ENV, _DEFAULT_ANC2VEC_PATH)
+        # The resolved checkpoint paths identify the model weights for the
+        # export classifier-output cache key (P2). A single-checkpoint model
+        # is identified by its one path.
+        self.checkpoint_paths: tuple[str, ...] = (model_path,)
         ckpt = torch.load(model_path, map_location="cpu", weights_only=False)
         self.vocab: list[str] = [str(t) for t in ckpt["vocab"]]
         self.in_dim = int(ckpt["in_dim"])
@@ -250,6 +265,9 @@ class SeedAveragedClassifier:
         if not seed_paths:
             raise ValueError("SeedAveragedClassifier requires at least one seed path")
         self.seed_paths = list(seed_paths)
+        # The full ordered seed set identifies the averaged model for the
+        # export classifier-output cache key (P2).
+        self.checkpoint_paths: tuple[str, ...] = tuple(self.seed_paths)
         self.n_seeds = len(self.seed_paths)
         self.seeds = [FullVocabClassifier(path, anc2vec_path) for path in self.seed_paths]
         self.vocab = self.seeds[0].vocab
@@ -373,3 +391,226 @@ def resolve_go_term_ids(
         )
     ).all()
     return {go_id: gid for go_id, gid in rows}
+
+
+# ---------------------------------------------------------------------------
+# Export classifier-output cache (P2).
+#
+# The classifier output for a protein is t0-INDEPENDENT: it depends ONLY on the
+# protein's frozen 6-PLM concat (the same :data:`PLM_CONCAT_ORDER` embeddings)
+# and the classifier checkpoint, NEVER on the annotation set / snapshot pair.
+# The export iterates the 13 train snapshot pairs (+ the test pair) and the same
+# proteins recur heavily across consecutive pairs, so recomputing the classifier
+# per pair wastes ~12/13 of the classifier GPU compute. This cache memoises the
+# classifier's top-100 output per protein, keyed by ``(accession,
+# plm_concat_signature, classifier_checkpoint_sha)`` so it is correctly
+# invalidated when the embedding configs or the checkpoint change. Subsequent
+# pairs (and subsequent queries within a pair) hit the cache.
+#
+# This is an EXPORT-RUN-scoped optimisation. The live predict path
+# (``apply_classifier``) stays per-request and does NOT use this cache.
+# ---------------------------------------------------------------------------
+
+# Signature of the frozen 6-PLM concat identity: the ordered ``(plm_key,
+# embedding_config_id, dim)`` tuples. If any embedding config id (or the concat
+# order / dims) changes, the signature changes and old cache rows miss.
+_PLM_CONCAT_SIGNATURE = hashlib.sha256(
+    json.dumps([[k, cid, dim] for k, cid, dim in PLM_CONCAT_ORDER], sort_keys=True).encode()
+).hexdigest()[:16]
+
+# Process-level memo of checkpoint-file content shas, keyed by absolute path so
+# the (potentially large) file is hashed at most once per process.
+_CHECKPOINT_SHA_CACHE: dict[str, str] = {}
+
+# Process-level classifier-output cache: ``cache_key -> [(go_id, score), ...]``.
+_CLF_OUTPUT_CACHE: dict[str, list[tuple[str, float]]] = {}
+
+_CLF_CACHE_DIR_ENV = "PROTEA_CLASSIFIER_CACHE_DIR"
+
+
+def _checkpoint_sha(paths: Iterable[str]) -> str:
+    """Content sha256 over the ordered classifier checkpoint files.
+
+    Memoised per path so a multi-seed model hashes each seed file at most once
+    per process. A missing path falls back to its string (so tests pinning a
+    synthetic in-memory model still get a stable, distinct key).
+    """
+    parts: list[str] = []
+    for path in paths:
+        cached = _CHECKPOINT_SHA_CACHE.get(path)
+        if cached is None:
+            try:
+                h = hashlib.sha256()
+                with open(path, "rb") as fh:
+                    for block in iter(lambda: fh.read(1 << 20), b""):
+                        h.update(block)
+                cached = h.hexdigest()
+            except OSError:
+                cached = hashlib.sha256(path.encode()).hexdigest()
+            _CHECKPOINT_SHA_CACHE[path] = cached
+        parts.append(cached)
+    return hashlib.sha256("\x00".join(parts).encode()).hexdigest()[:16]
+
+
+def _clf_cache_key(accession: str, checkpoint_sha: str) -> str:
+    """Cache key for one protein's classifier output."""
+    return f"{accession}\x1f{_PLM_CONCAT_SIGNATURE}\x1f{checkpoint_sha}"
+
+
+def _resolve_clf_cache_dir() -> Path | None:
+    """On-disk classifier-output cache directory, or ``None`` to disable.
+
+    Mirrors the alignment cache pattern (``_pair_feature_compute``).
+    ``PROTEA_CLASSIFIER_CACHE_DIR`` overrides; set it empty to disable on-disk
+    persistence. The default is OFF (``None``) so the process-level memo is the
+    safe minimum and no stray sqlite file appears unless opted in.
+    """
+    raw = os.environ.get(_CLF_CACHE_DIR_ENV)
+    if raw is None:
+        return None
+    return Path(raw) if raw.strip() else None
+
+
+class _ClassifierOutputDiskCache:
+    """Thin sqlite-backed ``key -> json [[go_id, score], ...]`` store."""
+
+    def __init__(self, cache_dir: Path) -> None:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(str(cache_dir / "classifier_output.sqlite"))
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
+        self._conn.execute("CREATE TABLE IF NOT EXISTS clf (k TEXT PRIMARY KEY, v TEXT NOT NULL)")
+        self._conn.commit()
+
+    def get_many(self, keys: list[str]) -> dict[str, list[tuple[str, float]]]:
+        out: dict[str, list[tuple[str, float]]] = {}
+        for i in range(0, len(keys), 800):
+            chunk = keys[i : i + 800]
+            qs = ",".join("?" * len(chunk))
+            rows = self._conn.execute(
+                f"SELECT k, v FROM clf WHERE k IN ({qs})",  # noqa: S608
+                chunk,
+            ).fetchall()
+            for k, v in rows:
+                out[k] = [(str(go), float(sc)) for go, sc in json.loads(v)]
+        return out
+
+    def put_many(self, items: list[tuple[str, list[tuple[str, float]]]]) -> None:
+        if not items:
+            return
+        self._conn.executemany(
+            "INSERT OR IGNORE INTO clf (k, v) VALUES (?, ?)",
+            [(k, json.dumps([[go, sc] for go, sc in v])) for k, v in items],
+        )
+        self._conn.commit()
+
+    def close(self) -> None:
+        self._conn.close()
+
+
+def reset_classifier_output_cache() -> None:
+    """Clear the process-level classifier-output memo (test hook)."""
+    _CLF_OUTPUT_CACHE.clear()
+
+
+def predict_proteins_cached(
+    session: object,
+    accessions: list[str],
+    classifier: FullVocabClassifier | SeedAveragedClassifier | None = None,
+) -> list[ClassifierPrediction]:
+    """Classifier top-100 per protein, memoised across snapshot pairs (P2).
+
+    Returns the SAME rows ``get_classifier().predict(load_concat_features(...))``
+    would (same ``(accession, go_id, score)`` per protein), but the per-protein
+    classifier compute runs at most once per export run: the output is cached by
+    ``(accession, plm_concat_signature, classifier_checkpoint_sha)`` so later
+    snapshot pairs reuse it. Only the proteins missing from the cache go through
+    ``load_concat_features`` + ``predict``; cache hits skip both the embedding
+    load and the GPU forward pass.
+
+    ``classifier`` defaults to the env-selected :func:`get_classifier` (the
+    seed-averaged champion when configured), matching the export's inline
+    applier. An on-disk sqlite tier is engaged when
+    ``PROTEA_CLASSIFIER_CACHE_DIR`` is set (mirrors the alignment cache), so the
+    output survives across export runs / processes.
+    """
+    clf = classifier if classifier is not None else get_classifier()
+    checkpoint_sha = _checkpoint_sha(clf.checkpoint_paths)
+    # De-dup while preserving order so a protein appearing twice is scored once.
+    wanted = [a for a in dict.fromkeys(accessions) if a]
+    key_by_acc = {a: _clf_cache_key(a, checkpoint_sha) for a in wanted}
+
+    cached: dict[str, list[tuple[str, float]]] = {}
+    misses: list[str] = []
+    for acc in wanted:
+        memo = _CLF_OUTPUT_CACHE.get(key_by_acc[acc])
+        if memo is not None:
+            cached[acc] = memo
+        else:
+            misses.append(acc)
+
+    disk = _open_disk_cache()
+    try:
+        if disk is not None and misses:
+            hits = disk.get_many([key_by_acc[a] for a in misses])
+            still_missing: list[str] = []
+            for acc in misses:
+                rows = hits.get(key_by_acc[acc])
+                if rows is not None:
+                    cached[acc] = rows
+                    _CLF_OUTPUT_CACHE[key_by_acc[acc]] = rows
+                else:
+                    still_missing.append(acc)
+            misses = still_missing
+        if misses:
+            _compute_and_store_misses(session, clf, misses, key_by_acc, cached, disk)
+    finally:
+        if disk is not None:
+            disk.close()
+
+    out: list[ClassifierPrediction] = []
+    for acc in wanted:
+        for go_id, score in cached.get(acc, []):
+            out.append(ClassifierPrediction(acc, go_id, score))
+    return out
+
+
+def _open_disk_cache() -> _ClassifierOutputDiskCache | None:
+    """Open the on-disk classifier-output cache when configured, else ``None``."""
+    cache_dir = _resolve_clf_cache_dir()
+    if cache_dir is None:
+        return None
+    try:
+        return _ClassifierOutputDiskCache(cache_dir)
+    except sqlite3.Error as exc:  # pragma: no cover - defensive
+        _LOG.warning("classifier-output disk cache disabled (%s)", exc)
+        return None
+
+
+def _compute_and_store_misses(
+    session: object,
+    clf: FullVocabClassifier | SeedAveragedClassifier,
+    misses: list[str],
+    key_by_acc: dict[str, str],
+    cached: dict[str, list[tuple[str, float]]],
+    disk: _ClassifierOutputDiskCache | None,
+) -> None:
+    """Compute the classifier output for the cache MISSES and populate caches.
+
+    A protein with all six PLM embeddings present gets its real top-100; a
+    protein dropped by :func:`load_concat_features` (missing a PLM) is cached as
+    an EMPTY output so repeated pairs do not re-attempt the (failing) load.
+    """
+    features, valid = load_concat_features(session, misses)
+    by_acc: dict[str, list[tuple[str, float]]] = {a: [] for a in misses}
+    if valid:
+        for pr in clf.predict(features, valid):
+            by_acc[pr.accession].append((pr.go_id, pr.score))
+    to_disk: list[tuple[str, list[tuple[str, float]]]] = []
+    for acc in misses:
+        rows = by_acc[acc]
+        _CLF_OUTPUT_CACHE[key_by_acc[acc]] = rows
+        cached[acc] = rows
+        to_disk.append((key_by_acc[acc], rows))
+    if disk is not None:
+        disk.put_many(to_disk)
