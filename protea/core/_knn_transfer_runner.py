@@ -136,7 +136,7 @@ def _build_parity_flags(p: TrainRerankerAutoPayload) -> ExportParityFlags:
 
 def _apply_query_parity_features(
     runner: _KnnTransferRunner, q_acc: str, records: list[dict[str, Any]]
-) -> None:
+) -> list[dict[str, Any]]:
     """INT-6: fill real self_prior/association/classifier values in place.
 
     Reuses the predict-path producers on this query's full candidate set so the
@@ -146,8 +146,21 @@ def _apply_query_parity_features(
     string; the producers key by integer ``go_term_id``, so the int id is
     stamped transiently for the producer pass then removed, leaving the
     exported parquet schema unchanged.
+
+    When the classifier flag is on the applier UNIONs the classifier's
+    full-vocabulary proposals into the candidate pool (matching the predict
+    path's ``apply_classifier``): proposals absent from the KNN + ancestor +
+    InterPro set become NEW full-canonical rows via the builder's
+    ``build_classifier_only_record`` factory, closing the train/eval pool
+    MISMATCH. Returns the (possibly grown) record list so the caller can rebind.
     """
-    from protea.core.training_dump._export_features import apply_export_parity_features
+    from functools import partial
+
+    from protea.core._leaf_record_builder import build_classifier_only_record
+    from protea.core.training_dump._export_features import (
+        ClassifierUnionSpec,
+        apply_export_parity_features,
+    )
 
     assert runner.t0_annotation_set_id is not None  # guarded by ``_parity_on``
     if runner._go_str_to_int is None:
@@ -156,16 +169,21 @@ def _apply_query_parity_features(
         tid = runner._go_str_to_int.get(rec.get("go_id", ""))
         if tid is not None:
             rec["go_term_id"] = tid
-    apply_export_parity_features(
+    records = apply_export_parity_features(
         runner.session,
         runner.t0_annotation_set_id,
-        uuid.UUID(str(runner.p.ontology_snapshot_id)),
         [q_acc],
         records,
         runner._parity_flags,
+        ClassifierUnionSpec(
+            ontology_snapshot_id=uuid.UUID(str(runner.p.ontology_snapshot_id)),
+            record_factory=partial(build_classifier_only_record, runner._builder),
+            aspect_by_term_id=runner.aspect_map,
+        ),
     )
     for rec in records:
         rec.pop("go_term_id", None)
+    return records
 
 
 class _KnnTransferRunner:
@@ -598,7 +616,8 @@ class _KnnTransferRunner:
             if q_idx < len(nbs):
                 nbs[q_idx] = []
         if self._parity_on:
-            _apply_query_parity_features(self, q_acc, query_records)  # INT-6 parity
+            # Rebind: the classifier union may APPEND new candidate rows.
+            query_records = _apply_query_parity_features(self, q_acc, query_records)
         for rec in query_records:
             self._emit(rec)
 

@@ -220,11 +220,21 @@ class _LeafRecordBuilder:
             )
         )
         rec.update({f"emb_pca_query_{i}": ctx.q_pca_row[i] for i in range(EMBEDDING_PCA_DIM)})
+        self._apply_non_knn_defaults(rec)
+        return rec
+
+    def _apply_non_knn_defaults(self, rec: dict[str, Any]) -> None:
+        """Stamp the lineage / interpro / lafa default blocks + ``knn_present``.
+
+        Shared tail of the two non-KNN candidate rows (InterPro-only and
+        classifier-only): both carry the full canonical column set with the
+        lineage / interpro / lafa families at their zero-fill defaults and
+        ``knn_present`` False (no KNN neighbour proposed the term).
+        """
         rec.update(self._lineage_default_fields())
         rec.update(self._interpro_default_fields())
         rec.update(self._lafa_default_fields())
         rec["knn_present"] = False
-        return rec
 
     def get_interpro_table(self) -> dict[tuple[str, str], Any]:
         """Load + cache the InterPro GO-prediction table once.
@@ -541,3 +551,44 @@ class _LeafRecordBuilder:
                     1.0,
                     float(entry["neighbor_vote_fraction"]) + w / runner.k_limit_f,
                 )
+
+
+def build_classifier_only_record(
+    builder: _LeafRecordBuilder, q_acc: str, go_id: str, aspect: str, score: float
+) -> dict[str, Any]:
+    """Materialise one classifier-only candidate record (native pool-union).
+
+    Module-level twin of :meth:`_LeafRecordBuilder.make_interpro_only_record`
+    (kept out of the class so the class stays under the §3 LOC ceiling). The
+    classifier proposes ``go_id`` from the query's PLM embeddings, not from a
+    KNN neighbour, so this row carries no KNN / alignment / taxonomy / Anc2Vec /
+    emb_pca evidence: every such column is NaN (LightGBM reads it as missing),
+    matching the distribution the predict path's ``_new_classifier_record``
+    serves at inference. Only the classifier family is real (``classifier_score``
+    / ``classifier_present`` 1.0); the self_prior / association columns stay at
+    the zero-fill default until the per-query parity producers run over the
+    unioned record list. Carries the FULL canonical column set so the T1.8
+    parquet boundary holds, and gets the SAME ``(protein, go_id)`` GT label
+    downstream the KNN rows do (a leakage-free placeholder, re-applied per
+    category by the train / test split labelers).
+    """
+    nan = float("nan")
+    rec: dict[str, Any] = {
+        "protein_accession": q_acc,
+        "go_id": go_id,
+        "aspect": aspect,
+        LABEL_COLUMN: 1 if (q_acc, go_id) in builder.runner.gt_pairs else 0,
+        "distance": nan,
+        "ref_protein_accession": "classifier",
+        "qualifier": "",
+        "evidence_code": "",
+    }
+    rec.update(builder._alignment_fields({}))
+    rec.update(builder._taxonomy_fields({}))
+    rec.update(_interpro_only_knn_fields())
+    rec.update(builder._anc2vec_fields(nan, nan, 0.0, nan, nan, 0))
+    rec.update({f"emb_pca_query_{i}": nan for i in range(EMBEDDING_PCA_DIM)})
+    builder._apply_non_knn_defaults(rec)
+    rec["classifier_score"] = float(score)
+    rec["classifier_present"] = 1.0
+    return rec

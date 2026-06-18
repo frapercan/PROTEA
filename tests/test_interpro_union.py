@@ -124,6 +124,47 @@ def test_interpro_only_record_flags_label_and_nan() -> None:
         assert col in rec
 
 
+def test_classifier_only_record_is_full_canonical_row() -> None:
+    """The classifier-only union row carries the FULL canonical column set.
+
+    Mirrors the InterPro-only row contract: ``knn_present`` False, every
+    KNN-derived feature NaN, the classifier family real, GT label propagated.
+    The full canonical set is required so the T1.8 parquet boundary holds when
+    the row is unioned into the export training pool (native 0.391 parity).
+    """
+    from protea.core._leaf_record_builder import build_classifier_only_record
+    from protea.core.reranker import ALL_FEATURES
+
+    builder = _fake_builder(gt_pairs={("Q1", "GO:0000099")})
+    rec = build_classifier_only_record(builder, "Q1", "GO:0000099", "P", 0.9)
+
+    # Every canonical feature column is present (T1.8 boundary).
+    for col in ALL_FEATURES:
+        assert col in rec, col
+
+    # Classifier-only markers.
+    assert rec["knn_present"] is False
+    assert rec["classifier_score"] == 0.9
+    assert rec["classifier_present"] == 1.0
+    assert rec["ref_protein_accession"] == "classifier"
+    assert rec["aspect"] == "P"
+    # GT label propagated from the same gt_pairs as KNN candidates.
+    assert rec[LABEL_COLUMN] == 1
+
+    # No KNN evidence: KNN-derived features are NaN (read as missing).
+    for col in _KNN_NAN_FEATURES:
+        assert math.isnan(rec[col]), col
+    # emb_pca + query-side anc2vec carry no neighbour/query context -> NaN.
+    assert math.isnan(rec["emb_pca_query_0"])
+    assert math.isnan(rec["anc2vec_query_known_cos"])
+
+    # The self_prior / association columns stay at the zero-fill default until
+    # the per-query parity producers run over the unioned record.
+    assert rec["self_prior_score"] == 0.0
+    assert rec["association_total"] == 0.0
+    assert rec["association_present"] == 0.0
+
+
 def test_add_interpro_only_three_unique_candidates_end_to_end() -> None:
     # KNN candidate set {GO:A, GO:B}; InterPro predicts {GO:B, GO:C}.
     # Union -> 3 unique candidates; GO:B is the dedup overlap (KNN row),

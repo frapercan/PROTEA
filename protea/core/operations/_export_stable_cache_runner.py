@@ -70,6 +70,16 @@ def run_with_stable_cache(
     """
     from protea.infrastructure.session import session_scope
 
+    # KNOWN LIMITATION (see PR description): the stable-feature-cache path builds
+    # the stable table with the classifier OFF and re-stamps scores onto the
+    # frozen frame via ``_restamp_classifier`` (stamp-only, no row union). The
+    # native-0.391 parity fix unions NEW classifier candidate rows into the pool
+    # on the INLINE export path, which is a STABLE (candidate-pool) concern the
+    # variable re-stamp cannot reproduce. A classifier-on export that goes
+    # through this cache therefore still emits a KNN-only pool. The parity
+    # export does NOT use the stable cache (the default ``_runner`` flow does the
+    # inline union); promoting ``compute_classifier`` into the stable cache key
+    # is the follow-up that would close this on the cached path.
     key = compute_stable_cache_key(p)
     prefix = stable_cache_prefix(key)
     hit = all(store.exists(prefix + name) for name in _STABLE_PARQUETS)
