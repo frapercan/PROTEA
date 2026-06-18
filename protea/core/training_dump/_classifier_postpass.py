@@ -9,11 +9,19 @@ classifier A/B re-runs once the stable table is cached.
 It reuses the EXACT predict-path classifier producer (``load_concat_features``
 / ``get_classifier`` / ``resolve_go_term_ids``), so the values are identical to
 what the inline export applier
-(``_export_features._mark_classifier_candidates``) stamps. The only difference
-is the carrier: a pandas frame keyed by ``(protein_accession, go_term_id)``
-instead of the per-query record dicts. The classifier reads ONLY the query
-protein's frozen PLM embeddings, so this post-pass is leakage-equivalent to the
-inline producer no matter which stable table it re-stamps.
+(``_export_features._union_classifier_candidates``) stamps onto existing rows.
+The only difference is the carrier: a pandas frame keyed by
+``(protein_accession, go_term_id)`` instead of the per-query record dicts. The
+classifier reads ONLY the query protein's frozen PLM embeddings, so this
+post-pass is leakage-equivalent to the inline producer no matter which stable
+table it re-stamps.
+
+NOTE: this frame re-stamp is STAMP-ONLY: it sets the score on candidates the
+frozen stable table already carries and cannot APPEND the classifier-only rows
+the inline applier unions into the pool. It is the variable half of the
+stable-feature cache (a per-classifier-score A/B knob), not the candidate-pool
+union; see ``_export_stable_cache_runner.run_with_stable_cache`` for the
+limitation this implies for a classifier-on cached export.
 
 The consolidated export frame names the GO id column ``go_term_id`` but stores
 the GO id STRING (``GO:0000099``) there -- ``parquet_export._load_train_shards``

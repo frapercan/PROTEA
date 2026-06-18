@@ -23,7 +23,7 @@ import numpy as np
 from protea.core.classifier_producer import ClassifierPrediction
 from protea.core.operations.predict_go_terms import _post_knn_pipeline as pkp
 from protea.core.training_dump import _export_features as ef
-from protea.core.training_dump._export_features import ExportParityFlags
+from protea.core.training_dump._export_features import ClassifierUnionSpec, ExportParityFlags
 
 _SET_ID = MagicMock(name="t0_annotation_set_id")
 _SNAPSHOT_ID = MagicMock(name="ontology_snapshot_id")
@@ -69,8 +69,13 @@ _CLF_PREDS = [ClassifierPrediction("Q1", "GO:0000099", 0.9)]
 _GID_BY_GO = {"GO:0000099": 99}
 
 
-def _run_export(records, flags: ExportParityFlags):
-    """Drive the export applier with every DB call mocked."""
+def _run_export(records, flags: ExportParityFlags, *, classifier_record_factory=None):
+    """Drive the export applier with every DB call mocked.
+
+    Returns the (possibly grown) record list the applier emits, so a caller can
+    assert on classifier-unioned rows when a ``classifier_record_factory`` is
+    supplied.
+    """
     op = MagicMock()
     op._load_annotations_for.side_effect = lambda *_a, **_k: (
         _EXP_ANN if flags.association else _NONEXP_ANN
@@ -96,8 +101,18 @@ def _run_export(records, flags: ExportParityFlags):
             return_value=_GID_BY_GO,
         ),
     ):
-        ef.apply_export_parity_features(MagicMock(), _SET_ID, _SNAPSHOT_ID, ["Q1"], records, flags)
-    return records
+        return ef.apply_export_parity_features(
+            MagicMock(),
+            _SET_ID,
+            ["Q1"],
+            records,
+            flags,
+            ClassifierUnionSpec(
+                ontology_snapshot_id=_SNAPSHOT_ID,
+                record_factory=classifier_record_factory,
+                aspect_by_term_id={99: "P", 10: "F"},
+            ),
+        )
 
 
 def test_flags_off_is_a_noop_zeros_preserved() -> None:
@@ -129,12 +144,84 @@ def test_association_scores_cross_aspect_candidate() -> None:
 
 
 def test_classifier_marks_existing_candidate_only() -> None:
+    # No factory supplied -> stamp-only (the isolated, legacy contract): the
+    # matching candidate is marked and no new row is appended.
     out = _run_export(_records(), ExportParityFlags(classifier=True))
     by_term = {r["go_term_id"]: r for r in out}
     assert by_term[99]["classifier_score"] == 0.9
     assert by_term[99]["classifier_present"] == 1.0
-    # No classifier-only candidate is appended (row count unchanged).
     assert len(out) == 2
+
+
+def _fake_classifier_record(q_acc: str, go_id: str, aspect: str, score: float) -> dict:
+    """Stand-in for ``_LeafRecordBuilder.build_classifier_only_record``.
+
+    Emits a minimal canonical-shaped classifier-only row (the production factory
+    fills the full ~60-column block; the union wiring only needs these markers).
+    """
+    return {
+        "protein_accession": q_acc,
+        "go_id": go_id,
+        "aspect": aspect,
+        "label": 0,
+        "distance": float("nan"),
+        "knn_present": False,
+        "classifier_score": score,
+        "classifier_present": 1.0,
+        "self_prior_score": 0.0,
+        "association_total": 0.0,
+        "association_cross": 0.0,
+        "association_present": 0.0,
+    }
+
+
+def test_classifier_unions_new_candidate_when_factory_supplied() -> None:
+    """REGRESSION (native 0.391 parity): a classifier proposal absent from the
+    KNN candidate set is APPENDED as a new classifier-only row, not dropped.
+
+    This proves the export training pool matches the predict pool
+    ``union(knn, classifier, ...)``. Without it the booster trains on a
+    KNN-only pool but evals on a KNN+classifier pool, capping native f_micro_w
+    well below the offline champion.
+    """
+    # Only term 10 is a KNN candidate; the classifier proposes GO:0000099 (gid
+    # 99), which is NOT in the candidate set -> it must be unioned in.
+    knn_only = [
+        {
+            "protein_accession": "Q1",
+            "go_term_id": 10,
+            "go_id": "GO:0000010",
+            "aspect": "F",
+            "self_prior_score": 0.0,
+            "association_total": 0.0,
+            "association_cross": 0.0,
+            "association_present": 0.0,
+            "classifier_score": 0.0,
+            "classifier_present": 0.0,
+        },
+    ]
+    out = _run_export(
+        knn_only,
+        ExportParityFlags(classifier=True),
+        classifier_record_factory=_fake_classifier_record,
+    )
+    # The classifier-only candidate was appended (KNN row + 1 new row).
+    assert len(out) == 2
+    new_rows = [r for r in out if r["go_id"] == "GO:0000099"]
+    assert len(new_rows) == 1
+    added = new_rows[0]
+    # Classifier-only row markers: present in the classifier family, absent from
+    # KNN evidence (knn_present False, distance NaN). These are exactly the
+    # out-of-distribution rows a KNN-only export was missing.
+    assert added["classifier_present"] == 1.0
+    assert added["classifier_score"] == 0.9
+    assert added["knn_present"] is False
+    assert np.isnan(added["distance"])
+    # The appended row carries the proposal's aspect (resolved via the gid).
+    assert added["aspect"] == "P"
+    # It carries a transient ``go_term_id`` (the runner strips it pre-emit) so
+    # the downstream ``(protein, go_id)`` labelers can label it like a KNN row.
+    assert added["go_term_id"] == 99
 
 
 def test_parity_self_prior_matches_predict_producer() -> None:
