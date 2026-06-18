@@ -22,10 +22,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-import pyarrow as pa
 import pyarrow.parquet as pq
 from sqlalchemy.orm import Session
 
+from protea.core._export_schema import (
+    CANONICAL_EXPORT_SCHEMA,
+    export_table_from_records,
+)
 from protea.core._pair_feature_compute import (
     build_pair_feature_dict,
     precompute_alignment_features,
@@ -753,9 +756,12 @@ class _KnnTransferRunner:
     def _flush(self) -> None:
         if not self.buffer:
             return
-        table = pa.Table.from_pylist(self.buffer)
+        # Build every batch under the ONE explicit canonical schema (not
+        # pyarrow per-batch inference), ending the schema-drift write
+        # failure between all-KNN and classifier-only-NaN chunks.
+        table = export_table_from_records(self.buffer)
         if self.writer is None:
-            self.writer = pq.ParquetWriter(str(self.output_parquet), table.schema)
+            self.writer = pq.ParquetWriter(str(self.output_parquet), CANONICAL_EXPORT_SCHEMA)
         self.writer.write_table(table)
         self.n_rows += len(self.buffer)
         self.buffer.clear()
