@@ -81,15 +81,16 @@ def apply_classifier_to_frame(
         return
     if "go_term_id" not in frame.columns:
         return
-    from protea.core.classifier_producer import load_concat_features, resolve_go_term_ids
+    from protea.core.classifier_producer import predict_proteins_cached, resolve_go_term_ids
 
     accessions = [a for a in dict.fromkeys(frame["protein_accession"].tolist()) if a]
     if not accessions:
         return
-    features, valid = load_concat_features(session, accessions)
-    if not valid:
+    # P2: reuse the per-protein classifier-output cache (t0-independent) so a
+    # multi-frame re-stamp (train + eval) computes each protein at most once.
+    preds = predict_proteins_cached(session, accessions, classifier=_classifier_for_spec(spec))
+    if not preds:
         return
-    preds = _classifier_for_spec(spec).predict(features, valid)
     go_ids = {pr.go_id for pr in preds}
     gid_by_go = resolve_go_term_ids(session, go_ids, ontology_snapshot_id)
     _stamp_predictions(frame, preds, gid_by_go, spec.score_column, spec.present_column)

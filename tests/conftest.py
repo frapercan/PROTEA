@@ -105,6 +105,20 @@ def _disable_authn_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PROTEA_ENVIRONMENT", "test")
 
 
+@pytest.fixture(autouse=True)
+def _reset_classifier_output_cache() -> None:
+    """Clear the P2 process-level classifier-output memo between tests.
+
+    The export classifier-output cache (``classifier_producer``) is
+    process-level by design (one export run reuses a protein's output across
+    snapshot pairs). Tests that mock the classifier and reuse the same
+    accession must each start from an empty cache, so reset it per test.
+    """
+    from protea.core.classifier_producer import reset_classifier_output_cache
+
+    reset_classifier_output_cache()
+
+
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--with-postgres",

@@ -153,9 +153,7 @@ def apply_export_parity_features(
     # Union the classifier proposals FIRST so the prior producers below see the
     # appended rows (a query's known terms can prime the appended candidate).
     if flags.classifier and classifier_union is not None:
-        records = _union_classifier_candidates(
-            session, valid_accessions, records, classifier_union
-        )
+        records = _union_classifier_candidates(session, valid_accessions, records, classifier_union)
     if flags.self_prior:
         apply_self_prior(op, session, t0_annotation_set_id, valid_accessions, records, _noop_emit)
     if flags.association:
@@ -179,16 +177,19 @@ def _union_classifier_candidates(
     pool), so an isolated caller stays safe. Returns the (possibly grown) list.
     """
     from protea.core.classifier_producer import (
-        get_classifier,
-        load_concat_features,
+        predict_proteins_cached,
         resolve_go_term_ids,
     )
 
     accessions = [acc for acc in valid_accessions if acc]
-    features, valid = load_concat_features(session, accessions)
-    if not valid:
+    # P2: the classifier output is t0-independent, so memoise it per protein and
+    # reuse it across the 13 train snapshot pairs (and the test pair) instead of
+    # recomputing it from scratch each pair. Cache hits skip both the embedding
+    # load and the GPU forward pass; the rows are identical to the fresh
+    # ``get_classifier().predict(load_concat_features(...))`` output.
+    preds = predict_proteins_cached(session, accessions)
+    if not preds:
         return records
-    preds = get_classifier().predict(features, valid)
     go_ids = {pr.go_id for pr in preds}
     gid_by_go = resolve_go_term_ids(session, go_ids, spec.ontology_snapshot_id)
     by_key: dict[tuple[str, int], dict[str, Any]] = {}
