@@ -31,12 +31,17 @@ if TYPE_CHECKING:
     )
 
 
-def _interpro_only_knn_fields() -> dict[str, Any]:
-    """KNN-derived feature block for an InterPro-only row (S3b).
+def _reranker_default_fields() -> dict[str, Any]:
+    """KNN reranker-feature block for a non-KNN row (InterPro-only / classifier).
 
-    Distances / ranks / per-voter consensus are NaN (no KNN evidence). The
-    two genuine zero-counts stay 0: zero KNN neighbours voted, a true
-    absence rather than a missing measurement.
+    Distances / ranks are NaN (no KNN evidence). The two genuine zero-counts
+    stay 0: zero KNN neighbours voted, a true absence rather than a missing
+    measurement. Column ORDER mirrors
+    :meth:`_LeafRecordBuilder._reranker_fields` exactly (the tax_voters block is
+    emitted separately, AFTER anc2vec, by :func:`_tax_consensus_default_fields`)
+    so a non-KNN record's column order is byte-identical to a KNN leaf and the
+    pyarrow ParquetWriter schema (fixed by the first batch) accepts later
+    batches.
     """
     nan = float("nan")
     return {
@@ -48,6 +53,17 @@ def _interpro_only_knn_fields() -> dict[str, Any]:
         "neighbor_vote_fraction": 0.0,
         "neighbor_min_distance": nan,
         "neighbor_mean_distance": nan,
+    }
+
+
+def _tax_consensus_default_fields() -> dict[str, Any]:
+    """Taxonomy-consensus block for a non-KNN row (no per-voter measurement).
+
+    Emitted AFTER the anc2vec block to match the canonical KNN column order
+    produced by :meth:`_LeafRecordBuilder._tax_consensus_fields`.
+    """
+    nan = float("nan")
+    return {
         "tax_voters_same_frac": nan,
         "tax_voters_close_frac": nan,
         "tax_voters_mean_common_ancestors": nan,
@@ -213,12 +229,13 @@ class _LeafRecordBuilder:
         }
         rec.update(self._alignment_fields({}))
         rec.update(self._taxonomy_fields({}))
-        rec.update(_interpro_only_knn_fields())
+        rec.update(_reranker_default_fields())
         rec.update(
             self._anc2vec_fields(
                 float("nan"), float("nan"), anc_has, anc_q_cos, anc_q_maxcos, ctx.q_known_n
             )
         )
+        rec.update(_tax_consensus_default_fields())
         rec.update({f"emb_pca_query_{i}": ctx.q_pca_row[i] for i in range(EMBEDDING_PCA_DIM)})
         self._apply_non_knn_defaults(rec)
         return rec
@@ -585,8 +602,9 @@ def build_classifier_only_record(
     }
     rec.update(builder._alignment_fields({}))
     rec.update(builder._taxonomy_fields({}))
-    rec.update(_interpro_only_knn_fields())
+    rec.update(_reranker_default_fields())
     rec.update(builder._anc2vec_fields(nan, nan, 0.0, nan, nan, 0))
+    rec.update(_tax_consensus_default_fields())
     rec.update({f"emb_pca_query_{i}": nan for i in range(EMBEDDING_PCA_DIM)})
     builder._apply_non_knn_defaults(rec)
     rec["classifier_score"] = float(score)
