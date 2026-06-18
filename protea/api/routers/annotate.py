@@ -131,6 +131,29 @@ class AnnotateFormOptions(BaseModel):
             "Disable to skip these families and reduce compute time."
         ),
     )
+    compute_classifier: bool = Field(
+        default=False,
+        description=(
+            "Run the direct full-catalogue classifier producer (first-place "
+            "LAFA lever). Persists the classifier feature and contributes "
+            "additional candidate terms on every GOPrediction row."
+        ),
+    )
+    compute_self_prior: bool = Field(
+        default=False,
+        description=(
+            "Compute the self_prior feature from the query protein's own "
+            "pre-cutoff non-experimental annotations (first-place LAFA lever)."
+        ),
+    )
+    compute_association: bool = Field(
+        default=False,
+        description=(
+            "Compute the cross-aspect association prior, the conditional "
+            "probability of each candidate given the protein's known "
+            "pre-cutoff terms (first-place LAFA lever)."
+        ),
+    )
     # NOTE: use_embedding_pca is ONLY supported in the export_research_dataset
     # (datasets.py) path and is NOT accepted by predict_go_terms. Do not add
     # it here; adding it would silently be ignored by the coordinator payload.
@@ -155,7 +178,7 @@ async def annotate(
     families (lineage, anc2vec, anc2vec_query, emb_pca, annotation_meta) are
     included in the downstream ``predict_go_terms`` job. Default: ``True``.
     """
-    file, fasta_text, name, compute_reranker_features = await _parse_annotate_request(request)
+    file, fasta_text, name, options = await _parse_annotate_request(request)
 
     content = await _read_fasta_content(file, fasta_text)
     records = _parse_and_dedup_records(content)
@@ -176,7 +199,7 @@ async def annotate(
     publish_job(amqp_url, "protea.embeddings", embed_job_id)
 
     predict_payload = _predict_payload(
-        config_id, annotation_set_id, ontology_snapshot_id, query_set_id, compute_reranker_features
+        config_id, annotation_set_id, ontology_snapshot_id, query_set_id, options
     )
     return {
         "query_set_id": str(query_set_id),
@@ -190,12 +213,26 @@ async def annotate(
     }
 
 
+def _form_bool(form: Any, key: str, default: bool) -> bool:
+    """Parse a checkbox-style multipart field into a bool.
+
+    Absent value falls back to ``default``. Present values are truthy unless
+    they spell out a negative ("false", "0", "no", "off").
+    """
+    raw = form.get(key)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() not in ("false", "0", "no", "off")
+
+
 async def _parse_annotate_request(
     request: Request,
-) -> tuple[UploadFile | None, str | None, str, bool]:
+) -> tuple[UploadFile | None, str | None, str, AnnotateFormOptions]:
     """Parse and validate the multipart request body for /annotate.
 
-    Returns (file, fasta_text, name, compute_reranker_features).
+    Returns (file, fasta_text, name, options) where ``options`` is the parsed
+    :class:`AnnotateFormOptions` (compute_reranker_features plus the opt-in
+    classifier / self_prior / association LAFA levers).
     Enforces the configured multipart size limit before FastAPI auto-parsing
     would reject it with a generic 400, allowing _read_fasta_content to run
     and produce a more helpful 413 message if the FASTA itself is too large.
@@ -220,13 +257,13 @@ async def _parse_annotate_request(
     fasta_text = raw_text if isinstance(raw_text, str) else None
     raw_name = form.get("name")
     name = raw_name if isinstance(raw_name, str) and raw_name else "Quick annotation"
-    raw_crf = form.get("compute_reranker_features")
-    compute_reranker_features = (
-        True
-        if raw_crf is None
-        else str(raw_crf).strip().lower() not in ("false", "0", "no", "off")
+    options = AnnotateFormOptions(
+        compute_reranker_features=_form_bool(form, "compute_reranker_features", True),
+        compute_classifier=_form_bool(form, "compute_classifier", False),
+        compute_self_prior=_form_bool(form, "compute_self_prior", False),
+        compute_association=_form_bool(form, "compute_association", False),
     )
-    return file, fasta_text, name, compute_reranker_features
+    return file, fasta_text, name, options
 
 
 def _predict_payload(
@@ -234,7 +271,7 @@ def _predict_payload(
     annotation_set_id: uuid.UUID,
     ontology_snapshot_id: uuid.UUID,
     query_set_id: uuid.UUID,
-    compute_reranker_features: bool,
+    options: AnnotateFormOptions,
 ) -> dict[str, Any]:
     """Build the predict_go_terms chaining payload returned by /annotate."""
     return {
@@ -246,7 +283,10 @@ def _predict_payload(
         "aspect_separated_knn": True,
         "compute_alignments": True,
         "compute_taxonomy": True,
-        "compute_reranker_features": compute_reranker_features,
+        "compute_reranker_features": options.compute_reranker_features,
+        "compute_classifier": options.compute_classifier,
+        "compute_self_prior": options.compute_self_prior,
+        "compute_association": options.compute_association,
     }
 
 
