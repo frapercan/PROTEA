@@ -165,6 +165,86 @@ def test_classifier_only_record_is_full_canonical_row() -> None:
     assert rec["association_present"] == 0.0
 
 
+def _knn_capable_builder(gt_pairs: set[tuple[str, str]]) -> _LeafRecordBuilder:
+    """A ``_LeafRecordBuilder`` whose runner stub satisfies ``make_leaf_record``.
+
+    Carries the empty-default attributes the KNN canonical path reads so a real
+    KNN leaf record can be materialised for column-order comparison. ``do_taxonomy``
+    is True so the tax_voters block resolves to real (zero) values rather than
+    being short-circuited.
+    """
+    runner = SimpleNamespace(
+        gt_pairs=gt_pairs,
+        idx_of_go={},
+        go_id_map={},
+        aspect_map={},
+        rr_vote_count={},
+        rr_k_position={},
+        go_term_freq={},
+        ref_ann_density={},
+        rr_distance_std={},
+        rr_vote_min_d={},
+        rr_vote_sum_d={},
+        k_limit=10,
+        do_taxonomy=True,
+        tax_same_cnt={},
+        tax_close_cnt={},
+        tax_ca_n={},
+        tax_ca_sum={},
+    )
+    return _LeafRecordBuilder(runner)  # type: ignore[arg-type]
+
+
+def _knn_leaf_keys() -> list[str]:
+    """Column ORDER of a canonical KNN leaf record (the parquet schema authority)."""
+    from protea.core._knn_transfer_runner import _LeafInputs
+
+    builder = _knn_capable_builder(gt_pairs=set())
+    inputs = _LeafInputs(
+        q_acc="Q1",
+        go_id="GO:0000099",
+        go_term_id=99,
+        ref_acc="R1",
+        distance=0.3,
+        ann={},
+        pf={},
+        centroid_unit=None,
+        nmat=None,
+        q_known_cent=None,
+        q_known_mat=None,
+        q_known_n=0,
+        q_pca_row=[0.1 * i for i in range(EMBEDDING_PCA_DIM)],
+    )
+    return list(builder.make_leaf_record(inputs).keys())
+
+
+def test_classifier_only_record_key_order_matches_knn_leaf() -> None:
+    """REGRESSION: the classifier-only record's column ORDER is byte-identical to
+    the KNN leaf record's.
+
+    The pyarrow ``ParquetWriter`` fixes the file schema from the first batch
+    (KNN leaves) and rejects any later batch whose column order differs ("Table
+    schema does not match schema used to create file"). The union of classifier
+    candidates (#649) appended records whose ``tax_voters_*`` block preceded the
+    ``anc2vec_*`` block, the opposite of the KNN order, tripping the writer. This
+    asserts the ORDER, not just the SET (the gap the original #649 test left).
+    """
+    from protea.core._leaf_record_builder import build_classifier_only_record
+
+    builder = _knn_capable_builder(gt_pairs=set())
+    rec = build_classifier_only_record(builder, "Q1", "GO:0000099", "P", 0.9)
+    assert list(rec.keys()) == _knn_leaf_keys()
+
+
+def test_interpro_only_record_key_order_matches_knn_leaf() -> None:
+    """REGRESSION: the InterPro-only record's column ORDER is byte-identical to
+    the KNN leaf record's (same latent ordering bug, never tripped because the
+    interpro-only path was never exercised in a real export). Write-safe now."""
+    builder = _knn_capable_builder(gt_pairs=set())
+    rec = builder.make_interpro_only_record(_ctx("Q1", "P"), "GO:0000099")
+    assert list(rec.keys()) == _knn_leaf_keys()
+
+
 def test_add_interpro_only_three_unique_candidates_end_to_end() -> None:
     # KNN candidate set {GO:A, GO:B}; InterPro predicts {GO:B, GO:C}.
     # Union -> 3 unique candidates; GO:B is the dedup overlap (KNN row),
