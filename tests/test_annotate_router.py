@@ -377,6 +377,38 @@ class TestAnnotateSuccess:
         assert resp.status_code == 200
         assert resp.json()["predict_payload"]["compute_reranker_features"] is True
 
+    def test_lafa_flags_round_trip(self, client):
+        """compute_classifier / self_prior / association flow into predict_payload."""
+        c, session, _ = client
+        fasta = _fasta_content([("P12345", "MKVLWAGS")])
+        self._setup_happy_session(session)
+        resp = c.post(
+            "/annotate",
+            data={
+                "fasta_text": fasta,
+                "compute_classifier": "true",
+                "compute_self_prior": "true",
+                "compute_association": "true",
+            },
+        )
+        assert resp.status_code == 200
+        payload = resp.json()["predict_payload"]
+        assert payload["compute_classifier"] is True
+        assert payload["compute_self_prior"] is True
+        assert payload["compute_association"] is True
+
+    def test_lafa_flags_default_false(self, client):
+        """When omitted, the LAFA levers default to False in predict_payload."""
+        c, session, _ = client
+        fasta = _fasta_content([("P12345", "MKVLWAGS")])
+        self._setup_happy_session(session)
+        resp = c.post("/annotate", data={"fasta_text": fasta})
+        assert resp.status_code == 200
+        payload = resp.json()["predict_payload"]
+        assert payload["compute_classifier"] is False
+        assert payload["compute_self_prior"] is False
+        assert payload["compute_association"] is False
+
 
 # ---------------------------------------------------------------------------
 # Helper functions

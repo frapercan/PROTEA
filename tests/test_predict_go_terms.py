@@ -415,6 +415,58 @@ class TestPredictGOTermsCoordinatorDispatch:
         assert msg["payload"]["compute_taxonomy"] is True
         assert msg["payload"]["aspect_separated_knn"] is True
 
+    def test_lafa_flags_propagate_to_batch_payload(self) -> None:
+        """compute_classifier / self_prior / association flow coordinator -> batch.
+
+        Regression guard for the GATING fix: the coordinator must copy the
+        three first-place LAFA producer flags from the incoming payload into
+        every batch payload it builds. Before the fix compute_classifier was
+        dropped, so the batch worker always abstained (native f_micro_w
+        capped at the classifier-off ceiling).
+        """
+        op = self._op()
+        session = MagicMock()
+        session.get.side_effect = make_session_get()
+
+        def add_side_effect(obj):
+            if not hasattr(obj, "id") or obj.id is None:
+                obj.id = uuid.uuid4()
+
+        session.add.side_effect = add_side_effect
+
+        payload = self._base_payload()
+        payload["compute_classifier"] = True
+        payload["compute_self_prior"] = True
+        payload["compute_association"] = True
+
+        with patch.object(op, "_load_query_accessions", return_value=["P1"]):
+            result = op.execute(session, payload, emit=_noop_emit)
+
+        _, msg = result.publish_operations[0]
+        assert msg["payload"]["compute_classifier"] is True
+        assert msg["payload"]["compute_self_prior"] is True
+        assert msg["payload"]["compute_association"] is True
+
+    def test_lafa_flags_default_false_in_batch_payload(self) -> None:
+        """The three LAFA flags default to False when the caller omits them."""
+        op = self._op()
+        session = MagicMock()
+        session.get.side_effect = make_session_get()
+
+        def add_side_effect(obj):
+            if not hasattr(obj, "id") or obj.id is None:
+                obj.id = uuid.uuid4()
+
+        session.add.side_effect = add_side_effect
+
+        with patch.object(op, "_load_query_accessions", return_value=["P1"]):
+            result = op.execute(session, self._base_payload(), emit=_noop_emit)
+
+        _, msg = result.publish_operations[0]
+        assert msg["payload"]["compute_classifier"] is False
+        assert msg["payload"]["compute_self_prior"] is False
+        assert msg["payload"]["compute_association"] is False
+
 
 # ---------------------------------------------------------------------------
 # StorePredictionsOperation
