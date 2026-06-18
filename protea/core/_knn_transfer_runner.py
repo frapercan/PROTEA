@@ -756,11 +756,9 @@ class _KnnTransferRunner:
     def _flush(self) -> None:
         if not self.buffer:
             return
-        # Build every batch under the ONE explicit canonical schema rather
-        # than letting pyarrow infer it from the batch contents. This ends
-        # the recurring "schema used to create file" failure: a chunk that
-        # is all-KNN (k_position int) vs one with classifier-only NaNs
-        # (k_position float) no longer produce different inferred schemas.
+        # Build every batch under the ONE explicit canonical schema (not
+        # pyarrow per-batch inference), ending the schema-drift write
+        # failure between all-KNN and classifier-only-NaN chunks.
         table = export_table_from_records(self.buffer)
         if self.writer is None:
             self.writer = pq.ParquetWriter(str(self.output_parquet), CANONICAL_EXPORT_SCHEMA)
