@@ -77,6 +77,14 @@ class TrainRerankerAutoPayload(ProteaPayload, frozen=True):  # type: ignore[misc
     compute_association: bool = False
     compute_classifier: bool = False
 
+    # Parity-producer batching: the self_prior / association / classifier
+    # producers run ONCE per chunk of this many query proteins rather than once
+    # per protein (the historical hotspot: a per-protein SQL + GPU
+    # forward-pass storm). Value-preserving (they key strictly by
+    # ``(protein_accession, go_term_id)`` and never mix proteins). 512 bounds
+    # the records held in RAM; set 0 for per-split (one call over all queries).
+    parity_chunk_size: int = 512
+
     # IA weighting: path to IA TSV file (go_id\tia_value, no header).
     # When set, sample_weight = IA(go_term) during training so the model
     # focuses on informative (rare, specific) GO terms aligned with

@@ -134,25 +134,23 @@ def _build_parity_flags(p: TrainRerankerAutoPayload) -> ExportParityFlags:
     )
 
 
-def _apply_query_parity_features(
-    runner: _KnnTransferRunner, q_acc: str, records: list[dict[str, Any]]
+def _apply_batch_parity_features(
+    runner: _KnnTransferRunner,
+    accessions: list[str],
+    records: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """INT-6: fill real self_prior/association/classifier values in place.
 
-    Reuses the predict-path producers on this query's full candidate set so the
-    exported six LAFA columns match what predict serves (train/serve parity).
-    Leakage-clean: reads only the pre-cutoff ``t0_annotation_set_id`` handed
-    down from the split context. Export records key candidates by ``go_id``
-    string; the producers key by integer ``go_term_id``, so the int id is
-    stamped transiently for the producer pass then removed, leaving the
-    exported parquet schema unchanged.
-
-    When the classifier flag is on the applier UNIONs the classifier's
-    full-vocabulary proposals into the candidate pool (matching the predict
-    path's ``apply_classifier``): proposals absent from the KNN + ancestor +
-    InterPro set become NEW full-canonical rows via the builder's
-    ``build_classifier_only_record`` factory, closing the train/eval pool
-    MISMATCH. Returns the (possibly grown) record list so the caller can rebind.
+    Reuses the predict-path producers on a BATCH of queries' full candidate
+    sets at once. The producers key strictly by ``(protein_accession,
+    go_term_id)`` and never mix candidates across proteins, so feeding all
+    queries in the chunk through one call yields byte-identical values to the
+    historical per-query invocation while collapsing the per-protein SQL + GPU
+    storm into one batched pass. Leakage-clean (reads only the pre-cutoff
+    ``t0_annotation_set_id``). Records key by ``go_id``; the producers by int
+    ``go_term_id``, so the int id is stamped transiently then stripped (schema
+    unchanged). The classifier flag UNIONs full-vocabulary proposals into the
+    pool like the predict path. Returns the (possibly grown) list to rebind.
     """
     from functools import partial
 
@@ -163,27 +161,117 @@ def _apply_query_parity_features(
     )
 
     assert runner.t0_annotation_set_id is not None  # guarded by ``_parity_on``
+    if not records or not accessions:
+        return records
+    _stamp_int_go_term_ids(runner, records)
+    t_clf0 = time.perf_counter()
+    spec = ClassifierUnionSpec(
+        ontology_snapshot_id=uuid.UUID(str(runner.p.ontology_snapshot_id)),
+        record_factory=partial(build_classifier_only_record, runner._builder),
+        aspect_by_term_id=runner.aspect_map,
+    )
+    records = apply_export_parity_features(
+        runner.session,
+        runner.t0_annotation_set_id,
+        accessions,
+        records,
+        runner._parity_flags,
+        spec,
+    )
+    _LOG.info(
+        "parity chunk done: queries=%d records=%d flags=%r elapsed=%.1fs",
+        len(accessions),
+        len(records),
+        runner._parity_flags,
+        time.perf_counter() - t_clf0,
+    )
+    for rec in records:
+        rec.pop("go_term_id", None)
+    return records
+
+
+def _stamp_int_go_term_ids(
+    runner: _KnnTransferRunner, records: list[dict[str, Any]]
+) -> None:
+    """Transiently stamp int ``go_term_id`` from each rec's ``go_id`` string.
+
+    The producers key by int id; the runner strips it again before emit so the
+    parquet schema stays unchanged. The reverse map is built once and cached.
+    """
     if runner._go_str_to_int is None:
         runner._go_str_to_int = {gid: tid for tid, gid in runner.go_id_map.items()}
     for rec in records:
         tid = runner._go_str_to_int.get(rec.get("go_id", ""))
         if tid is not None:
             rec["go_term_id"] = tid
-    records = apply_export_parity_features(
-        runner.session,
-        runner.t0_annotation_set_id,
-        [q_acc],
-        records,
-        runner._parity_flags,
-        ClassifierUnionSpec(
-            ontology_snapshot_id=uuid.UUID(str(runner.p.ontology_snapshot_id)),
-            record_factory=partial(build_classifier_only_record, runner._builder),
-            aspect_by_term_id=runner.aspect_map,
-        ),
+
+
+def _run_build_records(
+    runner: _KnnTransferRunner,
+) -> list[dict[str, Any]] | dict[str, Any]:
+    """Drive the per-query record loop with chunked parity batching + emit."""
+    hb_t0 = time.perf_counter()
+    hb_last = hb_t0
+    chunk_accessions: list[str] = []
+    chunk_records: list[dict[str, Any]] = []
+    n_queries = len(runner.valid_queries)
+    for q_idx, q_acc in enumerate(runner.valid_queries):
+        query_records = runner._build_records_for_query(q_idx, q_acc)
+        if runner._parity_on:
+            chunk_accessions.append(q_acc)
+            chunk_records.extend(query_records)
+            if runner._parity_chunk_size and len(chunk_accessions) >= runner._parity_chunk_size:
+                _flush_parity_chunk(runner, chunk_accessions, chunk_records)
+                chunk_accessions, chunk_records = [], []
+        else:
+            for rec in query_records:
+                runner._emit(rec)
+        runner._cleanup_query_state(q_idx, q_acc)
+        hb_last = _build_records_heartbeat(runner, q_idx, n_queries, hb_t0, hb_last)
+    if runner._parity_on and chunk_accessions:
+        _flush_parity_chunk(runner, chunk_accessions, chunk_records)
+    if runner.streaming:
+        runner._flush()
+        if runner.writer is not None:
+            runner.writer.close()
+        return {"parquet_path": str(runner.output_parquet), "n_rows": runner.n_rows}
+    return runner.records
+
+
+def _flush_parity_chunk(
+    runner: _KnnTransferRunner,
+    chunk_accessions: list[str],
+    chunk_records: list[dict[str, Any]],
+) -> None:
+    """Run the batched parity pass over one chunk, then emit its records."""
+    chunk_records = _apply_batch_parity_features(runner, chunk_accessions, chunk_records)
+    for rec in chunk_records:
+        runner._emit(rec)
+
+
+def _build_records_heartbeat(
+    runner: _KnnTransferRunner, q_idx: int, n_queries: int, hb_t0: float, hb_last: float
+) -> float:
+    """Log query-loop progress every ~30s so the silent stage is visible.
+
+    ``emit`` is swallowed by ``_noop_emit`` in the export, so this uses
+    ``logging`` to surface progress in ``worker-training.log``. Returns the
+    (possibly updated) last-beat timestamp.
+    """
+    now = time.perf_counter()
+    if now - hb_last < 30.0:
+        return hb_last
+    done = q_idx + 1
+    _LOG.info(
+        "build_records heartbeat: queries=%d/%d records_emitted=%d "
+        "elapsed=%.1fs rate=%.1f q/s",
+        done,
+        n_queries,
+        runner.n_rows + len(runner.buffer) + len(runner.records),
+        now - hb_t0,
+        done / max(1e-9, now - hb_t0),
     )
-    for rec in records:
-        rec.pop("go_term_id", None)
-    return records
+    return now
 
 
 class _KnnTransferRunner:
@@ -320,6 +408,10 @@ class _KnnTransferRunner:
         self._parity_flags = _build_parity_flags(self.p)
         self._parity_on = self.t0_annotation_set_id is not None and self._parity_flags.any
         self._go_str_to_int: dict[str, int] | None = None
+        # Batch the parity producers over CHUNKS of queries, not one at a time
+        # (see :func:`_apply_batch_parity_features`); 0 => per-split.
+        raw_chunk = getattr(self.p, "parity_chunk_size", 512)
+        self._parity_chunk_size = int(raw_chunk) if raw_chunk else 0
 
     def run(self) -> list[dict[str, Any]] | dict[str, Any]:
         """Drive the full KNN-transfer-label pipeline."""
@@ -552,30 +644,22 @@ class _KnnTransferRunner:
     # ── phase 9: per-(q_acc, aspect) record builder + emit ────────────
 
     def _build_records(self) -> list[dict[str, Any]] | dict[str, Any]:
-        """Per-``(q_acc, aspect)`` record-building loop.
+        """Per-``(q_acc, aspect)`` record-building loop (delegates to module fn).
 
-        Iterating per group keeps ancestor expansion local and bounds
-        intermediate state to one group's worth of records. In list mode
-        (the legacy default) records accumulate in memory. In streaming
-        mode (``output_parquet`` given) each group flushes through a
-        pyarrow ParquetWriter in ``chunk_rows`` batches.
+        List mode accumulates in memory; streaming flushes via a ParquetWriter.
+        With INT-6 parity on, per-query candidate lists batch into a CHUNK
+        (``parity_chunk_size``; 0 => per-split) and the producers run ONCE over
+        the chunk (value-preserving; see :func:`_apply_batch_parity_features`).
         """
-        for q_idx, q_acc in enumerate(self.valid_queries):
-            self._build_records_for_query(q_idx, q_acc)
-            self._cleanup_query_state(q_idx, q_acc)
-        if self.streaming:
-            self._flush()
-            if self.writer is not None:
-                self.writer.close()
-            return {"parquet_path": str(self.output_parquet), "n_rows": self.n_rows}
-        return self.records
+        return _run_build_records(self)
 
-    def _build_records_for_query(self, q_idx: int, q_acc: str) -> None:
+    def _build_records_for_query(self, q_idx: int, q_acc: str) -> list[dict[str, Any]]:
         """Build leaves + ancestor expansion for one query, all aspects.
 
-        Records are collected across aspects before emit so the INT-6 parity
+        Records are collected across aspects before return so the INT-6 parity
         producers (``apply_association`` is cross-aspect) see the query's full
-        candidate set; emit order / streaming is unchanged when parity is off.
+        candidate set. Returns the per-query record list; the caller emits it
+        directly (parity off) or accumulates it into a chunk (parity on).
         """
         q_pca_row = (
             self.pca_query_proj[q_idx].tolist()
@@ -615,11 +699,7 @@ class _KnnTransferRunner:
             self.neighbor_info.pop((q_acc, aspect), None)
             if q_idx < len(nbs):
                 nbs[q_idx] = []
-        if self._parity_on:
-            # Rebind: the classifier union may APPEND new candidate rows.
-            query_records = _apply_query_parity_features(self, q_acc, query_records)
-        for rec in query_records:
-            self._emit(rec)
+        return query_records
 
     def _apply_lineage_features(
         self,
