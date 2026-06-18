@@ -237,6 +237,177 @@ def test_parity_self_prior_matches_predict_producer() -> None:
     assert export_scores == oracle_scores
 
 
+# ── batched-vs-per-query equivalence (perf refactor: batch parity per-split) ──
+
+# Two proteins, each with its OWN known terms + classifier proposal, so a
+# value-preserving batch pass must reproduce exactly what per-query passes do.
+_MULTI_NONEXP_ANN = {
+    "Q1": [{"go_term_id": 10, "evidence_code": "IEA"}],
+    "Q2": [{"go_term_id": 20, "evidence_code": "IEA"}],
+}
+_MULTI_EXP_ANN = {
+    "Q1": [{"go_term_id": 10, "evidence_code": "IDA"}],
+    "Q2": [{"go_term_id": 20, "evidence_code": "IDA"}],
+}
+_MULTI_COOC = {
+    "GO:0000010": {"GO:0000099": 1},  # Q1's known term co-occurs with its candidate
+    "GO:0000020": {"GO:0000088": 3},  # Q2's known term co-occurs with its candidate
+}
+_MULTI_FREQ = {"GO:0000010": 2, "GO:0000020": 4}  # P(99|10)=1/2, P(88|20)=3/4
+_MULTI_GO_ID_BY_INT = {
+    10: "GO:0000010",
+    20: "GO:0000020",
+    99: "GO:0000099",
+    88: "GO:0000088",
+}
+_MULTI_ASPECT_BY_GO = {
+    "GO:0000010": "F",
+    "GO:0000020": "C",
+    "GO:0000099": "P",  # cross-aspect to Q1's known F
+    "GO:0000088": "P",  # cross-aspect to Q2's known C
+}
+_MULTI_CLF_PREDS = [
+    ClassifierPrediction("Q1", "GO:0000099", 0.9),
+    ClassifierPrediction("Q2", "GO:0000088", 0.7),
+]
+_MULTI_GID_BY_GO = {"GO:0000099": 99, "GO:0000088": 88}
+
+
+def _multi_records() -> list[dict]:
+    """One KNN-only candidate per protein (the classifier proposal is unioned)."""
+    return [
+        {
+            "protein_accession": "Q1",
+            "go_term_id": 10,
+            "go_id": "GO:0000010",
+            "aspect": "F",
+            "self_prior_score": 0.0,
+            "association_total": 0.0,
+            "association_cross": 0.0,
+            "association_present": 0.0,
+            "classifier_score": 0.0,
+            "classifier_present": 0.0,
+        },
+        {
+            "protein_accession": "Q2",
+            "go_term_id": 20,
+            "go_id": "GO:0000020",
+            "aspect": "C",
+            "self_prior_score": 0.0,
+            "association_total": 0.0,
+            "association_cross": 0.0,
+            "association_present": 0.0,
+            "classifier_score": 0.0,
+            "classifier_present": 0.0,
+        },
+    ]
+
+
+def _run_multi(records, accessions, flags: ExportParityFlags):
+    """Drive the applier over ``accessions`` with per-accession-aware mocks.
+
+    The annotation loader filters by the accession set it receives and the
+    classifier returns only proposals for the ``valid`` accessions, so calling
+    the applier per-protein vs over the whole batch is a fair comparison: any
+    cross-protein mixing would diverge.
+    """
+    op = MagicMock()
+
+    def _load_anns(_session, _set_id, accs):
+        src = _MULTI_EXP_ANN if flags.association else _MULTI_NONEXP_ANN
+        return {a: v for a, v in src.items() if a in set(accs)}
+
+    op._load_annotations_for.side_effect = _load_anns
+
+    def _load_concat(_session, accs):
+        valid = [a for a in accs if a in {"Q1", "Q2"}]
+        return np.zeros((len(valid), 8320), dtype=np.float32), valid
+
+    def _predict(_features, valid):
+        return [pr for pr in _MULTI_CLF_PREDS if pr.accession in set(valid)]
+
+    with (
+        patch.object(ef, "_ExportFeatureOp", return_value=op),
+        patch(
+            "protea.core.operations.predict_go_terms._association_loader."
+            "load_cooccurrence_for_known",
+            return_value=(_MULTI_COOC, _MULTI_FREQ),
+        ),
+        patch.object(
+            pkp, "_load_go_id_and_aspect", return_value=(_MULTI_GO_ID_BY_INT, _MULTI_ASPECT_BY_GO)
+        ),
+        patch("protea.core.classifier_producer.load_concat_features", side_effect=_load_concat),
+        patch(
+            "protea.core.classifier_producer.get_classifier",
+            return_value=MagicMock(predict=MagicMock(side_effect=_predict)),
+        ),
+        patch(
+            "protea.core.classifier_producer.resolve_go_term_ids",
+            return_value=_MULTI_GID_BY_GO,
+        ),
+    ):
+        return ef.apply_export_parity_features(
+            MagicMock(),
+            _SET_ID,
+            accessions,
+            records,
+            flags,
+            ClassifierUnionSpec(
+                ontology_snapshot_id=_SNAPSHOT_ID,
+                record_factory=_fake_classifier_record,
+                aspect_by_term_id={99: "P", 88: "P", 10: "F", 20: "C"},
+            ),
+        )
+
+
+def _record_key(rec: dict) -> tuple:
+    return (rec["protein_accession"], rec.get("go_id"), rec.get("go_term_id"))
+
+
+def _record_values(rec: dict) -> dict:
+    """The six LAFA parity columns the refactor must keep byte-identical."""
+    keys = (
+        "self_prior_score",
+        "association_total",
+        "association_cross",
+        "association_present",
+        "classifier_score",
+        "classifier_present",
+    )
+    return {k: rec.get(k) for k in keys}
+
+
+def test_batched_parity_equals_per_query_all_flags() -> None:
+    """The perf refactor's invariant: running the producers ONCE over a batch
+    of proteins yields the byte-identical record set (same keys + same six LAFA
+    values + same classifier-unioned candidates) as running them per-query.
+
+    This is the proof that hoisting the parity pass out of the per-query loop
+    (batched per-split / per-chunk) is value-preserving.
+    """
+    flags = ExportParityFlags(self_prior=True, association=True, classifier=True)
+
+    # Per-query: each protein scored in isolation (the historical path).
+    per_query: list[dict] = []
+    for acc, rec in (("Q1", _multi_records()[0]), ("Q2", _multi_records()[1])):
+        per_query.extend(_run_multi([rec], [acc], flags))
+
+    # Batched: both proteins in one call (the refactor).
+    batched = _run_multi(_multi_records(), ["Q1", "Q2"], flags)
+
+    pq_by_key = {_record_key(r): _record_values(r) for r in per_query}
+    b_by_key = {_record_key(r): _record_values(r) for r in batched}
+    # Same set of (protein, go_id, go_term_id) keys, including classifier-only
+    # unioned candidates (no protein dropped, none mixed).
+    assert set(b_by_key) == set(pq_by_key)
+    # Byte-identical parity values per key.
+    assert b_by_key == pq_by_key
+    # Sanity: the classifier proposals were unioned in for BOTH proteins, so
+    # the batch carries the 2 KNN rows + 2 classifier-only rows.
+    assert len(batched) == 4
+    assert {r["protein_accession"] for r in batched} == {"Q1", "Q2"}
+
+
 def test_parity_association_matches_predict_producer() -> None:
     """The export association values must equal the predict producer's, exactly."""
     oracle = _records()
