@@ -118,6 +118,36 @@ class TestBuildFeatureJsonb:
                 continue
             assert blob[key] == value, f"mismatch on {key}"
 
+    def test_non_finite_floats_scrubbed_to_none(self) -> None:
+        # The classifier path adds candidates whose KNN distance is NaN
+        # (a deliberate "no KNN neighbor" marker); +/-inf can also slip in.
+        # The typed float8 column keeps them, but the mirrored JSONB blob
+        # must scrub them to None or Postgres rejects the JSON.
+        row: dict[str, object] = {
+            "prediction_set_id": uuid.uuid4(),
+            "protein_accession": "P00001",
+            "go_term_id": 1,
+            "ref_protein_accession": "Q00001",
+            "distance": float("nan"),
+            "neighbor_distance_std": float("inf"),
+            "neighbor_min_distance": float("-inf"),
+            # Finite floats / ints / strings pass through unchanged.
+            "neighbor_mean_distance": 0.12,
+            "vote_count": 4,
+            "qualifier": "enables",
+        }
+        blob = build_feature_jsonb(row)
+        assert blob["distance"] is None
+        assert blob["neighbor_distance_std"] is None
+        assert blob["neighbor_min_distance"] is None
+        # No non-finite float survives anywhere in the blob.
+        for value in blob.values():
+            assert not (isinstance(value, float) and not math.isfinite(value))
+        # Finite / non-float values untouched.
+        assert blob["neighbor_mean_distance"] == 0.12
+        assert blob["vote_count"] == 4
+        assert blob["qualifier"] == "enables"
+
     def test_full_canonical_key_count(self) -> None:
         # Lock the canonical key count: 3 (distance + 2 categoricals)
         # + 10 alignment + 2 lengths + 5 reranker + 3 consensus
