@@ -35,6 +35,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import sqlite3
 import uuid
 from collections import defaultdict
@@ -328,25 +329,77 @@ def get_classifier(
     return cached
 
 
-def _load_one_plm(session: object, config_id: str, accessions: list[str]) -> dict[str, np.ndarray]:
-    """``{accession: vector}`` for one embedding config (query-protein path)."""
-    from protea.infrastructure.orm.models.embedding.sequence_embedding import (  # noqa: PLC0415
-        SequenceEmbedding,
-    )
-    from protea.infrastructure.orm.models.protein.protein import Protein  # noqa: PLC0415
+# Validated UniProt-accession shape. Accessions reach the loader as
+# ground-truth / query-set strings, but they are inlined verbatim into a COPY
+# SELECT (which cannot take bound params, exactly like the cooccurrence loader
+# in ``_association_loader._load_into_cache``), so each is re-validated against
+# this pattern before inlining to guarantee no SQL-injection surface. The shape
+# covers canonical accessions, isoforms (``<canonical>-<n>``) and the synthetic
+# accessions unit tests use (``Q1``); an unexpected shape is a programming error
+# and raises rather than silently inlining attacker-controlled text.
+_ACCESSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]*$")
 
-    rows = (
-        session.query(Protein.accession, SequenceEmbedding.embedding)  # type: ignore[attr-defined]
-        .join(Protein.sequence)
-        .join(
-            SequenceEmbedding,
-            (SequenceEmbedding.sequence_id == Protein.sequence_id)
-            & (SequenceEmbedding.embedding_config_id == uuid.UUID(config_id)),
-        )
-        .filter(Protein.accession.in_(accessions))
-        .all()
+
+def _quote_accession_list(accessions: list[str]) -> str:
+    """Validate + SQL-quote accessions into a ``'a', 'b'`` IN-list literal.
+
+    Mirrors ``_association_loader._quote_go_id_list``: COPY (SELECT ...) TO
+    STDOUT cannot take bound params, so the accession filter is inlined into the
+    SELECT text. Each accession is re-validated against :data:`_ACCESSION_RE`
+    and the quote escaped defensively before inlining.
+    """
+    quoted: list[str] = []
+    for acc in accessions:
+        if not _ACCESSION_RE.match(acc):
+            raise ValueError(f"refusing to inline non-accession literal: {acc!r}")
+        quoted.append("'" + acc.replace("'", "''") + "'")
+    return ", ".join(quoted)
+
+
+def _load_one_plm(session: object, config_id: str, accessions: list[str]) -> dict[str, np.ndarray]:
+    """``{accession: vector}`` for one embedding config (query-protein path).
+
+    Reads ``(protein.accession, sequence_embedding.embedding)`` for the given
+    config with a raw psycopg3 ``COPY (SELECT ...) TO STDOUT`` on the live DBAPI
+    connection rather than an ORM ``.all()`` + per-row ``emb.to_list()``. The
+    Row-object materialization plus ``HalfVector`` decode under the ORM path was
+    the dominant export build-records cost (~22% of profiled samples, the same
+    pattern #660 replaced for the cooccurrence loader); COPY streams the halfvec
+    TEXT literal and parses it straight into ``np.float32``.
+
+    Bit-exact parity with the prior ``.to_list()`` path: pgvector emits each
+    ``halfvec`` element as the shortest decimal that round-trips its stored
+    half-precision value, and ``np.fromstring(..., dtype=np.float32)`` recovers
+    exactly that float (a float16 value is exactly representable in float32), so
+    the returned vectors are byte-identical to the ORM load for any input.
+
+    The original ORM query joined ``Protein.sequence`` then ``SequenceEmbedding``
+    on ``sequence_id == Protein.sequence_id``; both legs key on the same
+    ``sequence_id``, so a protein with a NULL ``sequence_id`` matched nothing
+    either way. The COPY join (``sequence_embedding.sequence_id =
+    protein.sequence_id``) is therefore the same row set.
+    """
+    if not accessions:
+        return {}
+    raw = session.connection().connection  # type: ignore[attr-defined]  # psycopg3 DBAPI conn
+    in_list = _quote_accession_list(accessions)
+    config_literal = str(uuid.UUID(config_id))
+    sql = (
+        "COPY (SELECT protein.accession, sequence_embedding.embedding "
+        "FROM protein "
+        "JOIN sequence_embedding "
+        "ON sequence_embedding.sequence_id = protein.sequence_id "
+        f"AND sequence_embedding.embedding_config_id = '{config_literal}' "
+        f"WHERE protein.accession IN ({in_list})"
+        ") TO STDOUT"
     )
-    return {acc: np.asarray(emb.to_list(), dtype=np.float32) for acc, emb in rows}
+    out: dict[str, np.ndarray] = {}
+    with raw.cursor() as cur, cur.copy(sql) as cp:
+        for acc, emb_txt in cp.rows():
+            # halfvec TEXT literal is ``[a,b,c,...]``; strip the brackets and
+            # parse the comma-separated decimals straight into float32.
+            out[acc] = np.fromstring(emb_txt[1:-1], sep=",", dtype=np.float32)
+    return out
 
 
 def load_concat_features(session: object, accessions: list[str]) -> tuple[np.ndarray, list[str]]:

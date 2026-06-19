@@ -68,32 +68,62 @@ def _write_tiny_classifier(tmp_path: Path) -> FullVocabClassifier:
     return FullVocabClassifier(str(model_path), str(anc_path))
 
 
-class _FakeVec:
-    def __init__(self, dim: int) -> None:
-        self._v = [0.1] * dim
-
-    def to_list(self) -> list[float]:
-        return self._v
+def _halfvec_text(dim: int) -> str:
+    """Bracketed comma list, the wire shape pgvector emits for a halfvec."""
+    return "[" + ",".join(["0.1"] * dim) + "]"
 
 
-class _FakeQuery:
-    def __init__(self, rows: list[tuple[str, _FakeVec]]) -> None:
+class _FakeCopy:
+    def __init__(self, rows: list[tuple[str, str]]) -> None:
         self._rows = rows
 
-    def join(self, *_a: Any, **_k: Any) -> _FakeQuery:
+    def __enter__(self) -> _FakeCopy:
         return self
 
-    def filter(self, *_a: Any, **_k: Any) -> _FakeQuery:
+    def __exit__(self, *_a: Any) -> None:
+        return None
+
+    def rows(self) -> Any:
+        return iter(self._rows)
+
+
+class _FakeCursor:
+    def __init__(self, rows: list[tuple[str, str]]) -> None:
+        self._rows = rows
+
+    def __enter__(self) -> _FakeCursor:
         return self
 
-    def all(self) -> list[tuple[str, _FakeVec]]:
-        return self._rows
+    def __exit__(self, *_a: Any) -> None:
+        return None
+
+    def copy(self, _sql: str) -> _FakeCopy:
+        return _FakeCopy(self._rows)
+
+
+class _FakeRawConn:
+    def __init__(self, session: _FakeSession) -> None:
+        self._session = session
+
+    def cursor(self) -> _FakeCursor:
+        s = self._session
+        dim = s._dims[s._call % len(s._dims)]
+        s._call += 1
+        s.query_calls += 1
+        return _FakeCursor([(acc, _halfvec_text(dim)) for acc in s._accessions])
+
+
+class _FakeConnection:
+    def __init__(self, raw: _FakeRawConn) -> None:
+        self.connection = raw
 
 
 class _FakeSession:
     """Returns one full-dim embedding per (config, accession) so concat is full.
 
-    Counts ``query`` calls so a test can prove the embedding load (and hence the
+    Exposes the raw psycopg3 ``connection().connection.cursor().copy(...)`` chain
+    the COPY-based ``_load_one_plm`` walks, and counts those COPY cursors
+    (``query_calls``) so a test can still prove the embedding load (and hence the
     classifier compute) ran once across two pairs.
     """
 
@@ -102,12 +132,10 @@ class _FakeSession:
         self._dims = [dim for _, _, dim in PLM_CONCAT_ORDER]
         self._call = 0
         self.query_calls = 0
+        self._raw = _FakeRawConn(self)
 
-    def query(self, *_a: Any, **_k: Any) -> _FakeQuery:
-        dim = self._dims[self._call % len(self._dims)]
-        self._call += 1
-        self.query_calls += 1
-        return _FakeQuery([(acc, _FakeVec(dim)) for acc in self._accessions])
+    def connection(self) -> _FakeConnection:
+        return _FakeConnection(self._raw)
 
 
 def _as_pairs(preds: list[ClassifierPrediction]) -> set[tuple[str, str, float]]:
