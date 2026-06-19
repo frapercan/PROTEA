@@ -41,6 +41,7 @@ dependencies = [
     "protea-contracts @ git+https://github.com/frapercan/protea-contracts.git@main",
     "argon2-cffi (>=23.1.0,<26.0.0)",
     "minio (>=7.2,<8.0)",
+    "scipy (>=1.11.0,<2.0.0)",
 ]
 
 
