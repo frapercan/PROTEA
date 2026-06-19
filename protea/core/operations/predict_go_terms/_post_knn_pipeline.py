@@ -317,8 +317,18 @@ def _score_association_candidates(
     set's. For each candidate go_id ``t`` and the query's known go_ids ``K(p)``,
     ``association_total`` sums ``P(t | k) = cooccurrence(k, t) / freq(k)``;
     ``association_cross`` sums only the cross-aspect ``k`` (aspect by go_id).
+
+    Hot path: this used to be an O(candidates x known) nested loop with a
+    dict-of-dict re-fetch per candidate, which throttled the export build
+    (~39 -> ~7 q/s once the feature went live). It is restructured to group
+    candidates by protein and accumulate ``P(t | k)`` once per (protein, known)
+    pair, doing an O(1) read-back per candidate. Float addition order is pinned
+    to ``sorted(known)`` so the per-candidate sums are deterministic and match
+    the reference summation order exactly (see ``test_apply_association``).
     """
-    scored = 0
+    # Group candidate recs by protein so each known term's cooccurrence row is
+    # walked once per protein instead of once per candidate.
+    recs_by_protein: dict[str, list[tuple[dict[str, Any], str]]] = {}
     for rec in prediction_dicts:
         gtid = rec.get("go_term_id")
         if gtid is None:
@@ -327,29 +337,66 @@ def _score_association_candidates(
         t = rec.get("go_id") or go_id_by_int.get(int(gtid))
         if t is None:
             continue
-        known = own_exp_go.get(rec.get("protein_accession", ""))
+        acc = rec.get("protein_accession", "")
+        known = own_exp_go.get(acc)
         if not known:
             continue
-        t_aspect = aspect_by_go.get(t, "")
-        total = 0.0
-        cross = 0.0
-        for k in known:
-            f = freq.get(k, 0)
-            if f <= 0:
-                continue
-            count = cooc_by_known.get(k, {}).get(t, 0)
+        recs_by_protein.setdefault(acc, []).append((rec, t))
+
+    scored = 0
+    for acc, rec_pairs in recs_by_protein.items():
+        # Candidate go_ids for this protein (dedup; the read-back is O(1) by go_id).
+        candidate_gos = {t for _rec, t in rec_pairs}
+        assoc_total, assoc_cross = _accumulate_association(
+            own_exp_go[acc], candidate_gos, cooc_by_known, freq, aspect_by_go
+        )
+        for rec, t in rec_pairs:
+            total = assoc_total.get(t, 0.0)
+            if total > 0.0:
+                rec["association_total"] = total
+                rec["association_cross"] = assoc_cross.get(t, 0.0)
+                rec["association_present"] = 1.0
+                scored += 1
+    return scored
+
+
+def _accumulate_association(
+    known: set[str],
+    candidate_gos: set[str],
+    cooc_by_known: dict[str, dict[str, int]],
+    freq: dict[str, int],
+    aspect_by_go: dict[str, str],
+) -> tuple[dict[str, float], dict[str, float]]:
+    """Accumulate ``association_total`` / ``association_cross`` for one protein.
+
+    Walks each known term's cooccurrence row ONCE (vs once per candidate in the
+    old loop), accumulating ``P(t | k)`` into the per-candidate totals. Float
+    additions are ordered by ``sorted(known)`` so totals are deterministic and
+    bit-identical to the reference summation order.
+    """
+    assoc_total: dict[str, float] = {}
+    assoc_cross: dict[str, float] = {}
+    for k in sorted(known):
+        f = freq.get(k, 0)
+        if f <= 0:
+            continue
+        ck = cooc_by_known.get(k)
+        if not ck:
+            continue
+        k_aspect = aspect_by_go.get(k, "")
+        # Iterate the smaller side: the protein's candidates vs k's coocs.
+        if len(candidate_gos) <= len(ck):
+            pairs = ((t, ck.get(t, 0)) for t in candidate_gos)
+        else:
+            pairs = ((t, c) for t, c in ck.items() if t in candidate_gos)
+        for t, count in pairs:
             if count <= 0:
                 continue
             p_t_given_k = count / f
-            total += p_t_given_k
-            if aspect_by_go.get(k, "") != t_aspect:
-                cross += p_t_given_k
-        if total > 0.0:
-            rec["association_total"] = total
-            rec["association_cross"] = cross
-            rec["association_present"] = 1.0
-            scored += 1
-    return scored
+            assoc_total[t] = assoc_total.get(t, 0.0) + p_t_given_k
+            if k_aspect != aspect_by_go.get(t, ""):
+                assoc_cross[t] = assoc_cross.get(t, 0.0) + p_t_given_k
+    return assoc_total, assoc_cross
 
 
 def _load_known_aspects(session: Session, term_ids: set[int]) -> dict[int, str]:

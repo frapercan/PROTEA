@@ -18,6 +18,8 @@ as when they share one id-space.
 
 from __future__ import annotations
 
+import random
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 from protea.core.operations.predict_go_terms import _post_knn_pipeline as pkp
@@ -257,6 +259,125 @@ def test_candidate_go_id_on_record_is_used_when_present() -> None:
     )
     assert out[0]["association_total"] == 0.5
     assert out[0]["association_present"] == 1.0
+
+
+def _reference_score(
+    prediction_dicts: list[dict[str, Any]],
+    own_exp_go: dict[str, set[str]],
+    cooc_by_known: dict[str, dict[str, int]],
+    freq: dict[str, int],
+    go_id_by_int: dict[int, str],
+    aspect_by_go: dict[str, str],
+) -> int:
+    """Pure-Python oracle: the original per-candidate loop over sorted(known).
+
+    Pins the same float-addition order (sorted(known)) the optimized impl uses,
+    so the comparison is bit-identical, not just within tolerance.
+    """
+    scored = 0
+    for rec in prediction_dicts:
+        gtid = rec.get("go_term_id")
+        if gtid is None:
+            continue
+        t = rec.get("go_id") or go_id_by_int.get(int(gtid))
+        if t is None:
+            continue
+        known = own_exp_go.get(rec.get("protein_accession", ""))
+        if not known:
+            continue
+        t_aspect = aspect_by_go.get(t, "")
+        total = 0.0
+        cross = 0.0
+        for k in sorted(known):
+            f = freq.get(k, 0)
+            if f <= 0:
+                continue
+            count = cooc_by_known.get(k, {}).get(t, 0)
+            if count <= 0:
+                continue
+            p_t_given_k = count / f
+            total += p_t_given_k
+            if aspect_by_go.get(k, "") != t_aspect:
+                cross += p_t_given_k
+        if total > 0.0:
+            rec["association_total"] = total
+            rec["association_cross"] = cross
+            rec["association_present"] = 1.0
+            scored += 1
+    return scored
+
+
+def test_optimized_matches_reference_bit_identical_random() -> None:
+    """Randomized equivalence: optimized impl == reference, bit-for-bit.
+
+    Covers multiple proteins with shared/distinct known terms, candidates that
+    do and do not co-occur, cross-aspect cases, freq=0 known terms (skipped),
+    and candidates whose total stays 0 (must NOT get association_present).
+    """
+    rng = random.Random(20260619)
+    aspects = ("F", "P", "C")
+    # Shared go_id universe for known + candidate terms.
+    go_ids = [f"GO:{i:07d}" for i in range(1, 41)]
+    aspect_by_go = {g: aspects[i % 3] for i, g in enumerate(go_ids)}
+    go_id_by_int = {1000 + i: g for i, g in enumerate(go_ids)}
+    int_by_go = {g: i for i, g in go_id_by_int.items()}
+
+    for _trial in range(40):
+        # Per-known cooccurrence rows; freq sometimes 0 (k contributes nothing).
+        cooc: dict[str, dict[str, int]] = {}
+        freq: dict[str, int] = {}
+        for k in go_ids:
+            if rng.random() < 0.3:
+                continue
+            freq[k] = rng.choice([0, 0, 1, 2, 3, 5, 7])
+            row = {}
+            for t in go_ids:
+                if rng.random() < 0.25:
+                    row[t] = rng.randint(0, 6)  # 0 must be treated as no-cooc
+            if row:
+                cooc[k] = row
+
+        own_exp_go: dict[str, set[str]] = {}
+        preds: list[dict[str, Any]] = []
+        n_proteins = rng.randint(1, 6)
+        for p in range(n_proteins):
+            acc = f"Q{p}"
+            n_known = rng.randint(0, 6)
+            known = set(rng.sample(go_ids, n_known)) if n_known else set()
+            if known:
+                own_exp_go[acc] = known
+            # Some proteins have no known terms (must stay zero-fill).
+            n_cand = rng.randint(0, 8)
+            for t in rng.sample(go_ids, n_cand):
+                rec = {
+                    "protein_accession": acc,
+                    "go_term_id": int_by_go[t],
+                    "association_total": 0.0,
+                    "association_cross": 0.0,
+                    "association_present": 0.0,
+                }
+                # Half the recs carry a stamped go_id (the predict path does this).
+                if rng.random() < 0.5:
+                    rec["go_id"] = t
+                preds.append(rec)
+
+        # Deep-ish copies so the two impls write independent records.
+        ref_preds = [dict(r) for r in preds]
+        new_preds = [dict(r) for r in preds]
+
+        ref_scored = _reference_score(
+            ref_preds, own_exp_go, cooc, freq, go_id_by_int, aspect_by_go
+        )
+        new_scored = pkp._score_association_candidates(
+            new_preds, own_exp_go, cooc, freq, go_id_by_int, aspect_by_go
+        )
+
+        assert new_scored == ref_scored
+        for ref, new in zip(ref_preds, new_preds, strict=True):
+            # Bit-identical float equality (same summation order).
+            assert new["association_total"] == ref["association_total"]
+            assert new["association_cross"] == ref["association_cross"]
+            assert new["association_present"] == ref["association_present"]
 
 
 def test_own_exp_terms_filters_evidence_and_dedups() -> None:
