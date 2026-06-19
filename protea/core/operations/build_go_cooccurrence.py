@@ -30,6 +30,7 @@ from __future__ import annotations
 import time
 import uuid
 from collections import defaultdict
+from collections.abc import Iterable, Iterator
 from itertools import islice
 from typing import Annotated, Any
 
@@ -75,6 +76,89 @@ def _iter_batches(items: Any, size: int) -> Any:
         if not chunk:
             return
         yield chunk
+
+
+# COPY column order: exactly the table column order the rows are written in.
+# The row helpers below MUST emit values in this order (psycopg3 adapts each
+# Python value, with ``None`` becoming SQL NULL, so the COPY rows are
+# byte-identical to what the old ``bulk_insert_mappings`` produced).
+_FREQ_COLUMNS = ("annotation_set_id", "term_id", "go_id", "freq")
+_COOCCURRENCE_COLUMNS = (
+    "annotation_set_id",
+    "known_term_id",
+    "candidate_term_id",
+    "known_go_id",
+    "candidate_go_id",
+    "cooccurrence_count",
+)
+
+
+def _freq_copy_row(
+    set_id_str: str,
+    term: int,
+    freq_value: int,
+    go_id_by_int: dict[int, str],
+) -> tuple[str, int, str | None, int]:
+    """One ``term_frequency`` COPY row in ``_FREQ_COLUMNS`` order.
+
+    ``go_id`` is resolved via ``go_id_by_int.get(term)`` exactly as the old
+    insert; a missing id yields ``None`` (SQL NULL). Values match the prior
+    bulk_insert mapping one for one.
+    """
+    return (set_id_str, term, go_id_by_int.get(term), freq_value)
+
+
+def _cooccurrence_copy_row(
+    set_id_str: str,
+    known_term: int,
+    candidate_term: int,
+    count: int,
+    go_id_by_int: dict[int, str],
+) -> tuple[str, int, int, str | None, str | None, int]:
+    """One ``term_cooccurrence`` COPY row in ``_COOCCURRENCE_COLUMNS`` order.
+
+    The known (``k``) and candidate (``t``) go_id strings are each resolved
+    via ``go_id_by_int.get(...)``; a missing id yields ``None`` (SQL NULL).
+    Values match the prior bulk_insert mapping one for one.
+    """
+    return (
+        set_id_str,
+        known_term,
+        candidate_term,
+        go_id_by_int.get(known_term),
+        go_id_by_int.get(candidate_term),
+        count,
+    )
+
+
+def _copy_rows(
+    session: Session,
+    table: str,
+    columns: tuple[str, ...],
+    rows: Iterable[tuple[Any, ...]],
+    *,
+    chunk_size: int,
+) -> int:
+    """Stream ``rows`` into ``table`` via ``COPY ... FROM STDIN`` (psycopg3).
+
+    Uses the raw DBAPI connection under the SQLAlchemy session so the COPY
+    runs inside the session's transaction. Rows are written one at a time
+    through psycopg3's binary COPY writer (``cp.write_row``), so memory stays
+    bounded regardless of total row count; ``chunk_size`` only governs the
+    per-chunk commit cadence (matching the old per-batch commit semantics).
+    Returns the number of rows written.
+    """
+    col_list = ", ".join(columns)
+    stmt = f"COPY {table} ({col_list}) FROM STDIN"
+    written = 0
+    raw = session.connection().connection  # psycopg3 DBAPI connection
+    for chunk in _iter_batches(rows, chunk_size):
+        with raw.cursor() as cur, cur.copy(stmt) as cp:
+            for row in chunk:
+                cp.write_row(row)
+        written += len(chunk)
+        session.commit()
+    return written
 
 
 class BuildGoCooccurrenceOperation:
@@ -305,23 +389,26 @@ class BuildGoCooccurrenceOperation:
         go_id_by_int: dict[int, str],
         batch_size: int,
     ) -> int:
-        written = 0
-        for batch in _iter_batches(freq.items(), batch_size):
-            session.bulk_insert_mappings(
-                TermFrequency,
-                [
-                    {
-                        "annotation_set_id": set_id,
-                        "term_id": term,
-                        "go_id": go_id_by_int.get(term),
-                        "freq": f,
-                    }
-                    for term, f in batch
-                ],
-            )
-            written += len(batch)
-            session.commit()
-        return written
+        """COPY the ``term_frequency`` rows for this set (psycopg3 STDIN).
+
+        Replaces ``bulk_insert_mappings`` (~40 min/set at the cooccurrence
+        scale) with a streamed ``COPY ... FROM STDIN``. The emitted rows are
+        byte-identical to the old mapping: same columns, same values, same
+        NULL handling for missing go_id strings.
+        """
+        set_id_str = str(set_id)
+
+        def rows() -> Iterator[tuple[Any, ...]]:
+            for term, f in freq.items():
+                yield _freq_copy_row(set_id_str, term, f, go_id_by_int)
+
+        return _copy_rows(
+            session,
+            TermFrequency.__tablename__,
+            _FREQ_COLUMNS,
+            rows(),
+            chunk_size=batch_size,
+        )
 
     def _write_cooccurrence(
         self,
@@ -331,22 +418,22 @@ class BuildGoCooccurrenceOperation:
         go_id_by_int: dict[int, str],
         batch_size: int,
     ) -> int:
-        written = 0
-        for batch in _iter_batches(cooc.items(), batch_size):
-            session.bulk_insert_mappings(
-                TermCooccurrence,
-                [
-                    {
-                        "annotation_set_id": set_id,
-                        "known_term_id": k,
-                        "candidate_term_id": t,
-                        "known_go_id": go_id_by_int.get(k),
-                        "candidate_go_id": go_id_by_int.get(t),
-                        "cooccurrence_count": count,
-                    }
-                    for (k, t), count in batch
-                ],
-            )
-            written += len(batch)
-            session.commit()
-        return written
+        """COPY the ``term_cooccurrence`` rows for this set (psycopg3 STDIN).
+
+        Replaces ``bulk_insert_mappings`` for the ~24M rows/set that dominated
+        the build cost. Streamed row by row so memory stays bounded; the
+        emitted rows are byte-identical to the old mapping.
+        """
+        set_id_str = str(set_id)
+
+        def rows() -> Iterator[tuple[Any, ...]]:
+            for (k, t), count in cooc.items():
+                yield _cooccurrence_copy_row(set_id_str, k, t, count, go_id_by_int)
+
+        return _copy_rows(
+            session,
+            TermCooccurrence.__tablename__,
+            _COOCCURRENCE_COLUMNS,
+            rows(),
+            chunk_size=batch_size,
+        )

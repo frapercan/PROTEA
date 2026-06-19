@@ -10,15 +10,17 @@ oracle: ``freq[t]`` = distinct proteins carrying ``t`` after propagation, and
 from __future__ import annotations
 
 import uuid
+from typing import Any
 from unittest.mock import MagicMock
 
 from protea.core.operations.build_go_cooccurrence import (
+    _COOCCURRENCE_COLUMNS,
+    _FREQ_COLUMNS,
     BuildGoCooccurrenceOperation,
     BuildGoCooccurrencePayload,
-)
-from protea.infrastructure.orm.models.annotation.term_cooccurrence import (
-    TermCooccurrence,
-    TermFrequency,
+    _cooccurrence_copy_row,
+    _copy_rows,
+    _freq_copy_row,
 )
 
 
@@ -160,41 +162,157 @@ def test_operation_metadata() -> None:
     assert "abc" in summary and "500" in summary
 
 
-def _captured_rows(session: MagicMock, model: type) -> list[dict]:
-    """Flatten the row dicts passed to ``bulk_insert_mappings`` for ``model``."""
-    rows: list[dict] = []
-    for call in session.bulk_insert_mappings.call_args_list:
-        if call.args and call.args[0] is model:
-            rows.extend(call.args[1])
-    return rows
+# --- COPY row serialization (the byte-identical replacement for the old
+#     bulk_insert_mappings persist). These pure helpers are unit-tested here;
+#     _copy_rows is exercised with a fake psycopg3 cursor/copy below. ---
 
 
-def test_write_freq_stamps_snapshot_invariant_go_id() -> None:
-    # The freq rows must carry the go_id string so the predict path can match
-    # on it across snapshots; the int term_id stays for FK / backward-read.
+def test_freq_copy_row_column_order_and_values() -> None:
+    # Row must be in _FREQ_COLUMNS order: (annotation_set_id, term_id, go_id,
+    # freq). set_id is a str (UUID stringified), go_id resolved via .get().
+    set_id_str = "11111111-1111-1111-1111-111111111111"
+    go_id_by_int = {10: "GO:0000010"}
+    row = _freq_copy_row(set_id_str, 10, 3, go_id_by_int)
+    assert _FREQ_COLUMNS == ("annotation_set_id", "term_id", "go_id", "freq")
+    assert row == (set_id_str, 10, "GO:0000010", 3)
+
+
+def test_freq_copy_row_missing_go_id_is_none() -> None:
+    # A term with no go_id mapping must emit None (-> SQL NULL), never a stub.
+    row = _freq_copy_row("set-x", 20, 1, {})
+    assert row == ("set-x", 20, None, 1)
+    assert row[2] is None
+
+
+def test_cooccurrence_copy_row_column_order_and_values() -> None:
+    # Row in _COOCCURRENCE_COLUMNS order with both go_id sides resolved.
+    set_id_str = "22222222-2222-2222-2222-222222222222"
+    go_id_by_int = {10: "GO:0000010", 99: "GO:0000099"}
+    row = _cooccurrence_copy_row(set_id_str, 10, 99, 2, go_id_by_int)
+    assert _COOCCURRENCE_COLUMNS == (
+        "annotation_set_id",
+        "known_term_id",
+        "candidate_term_id",
+        "known_go_id",
+        "candidate_go_id",
+        "cooccurrence_count",
+    )
+    assert row == (set_id_str, 10, 99, "GO:0000010", "GO:0000099", 2)
+
+
+def test_cooccurrence_copy_row_missing_go_ids_are_none() -> None:
+    # Both sides independently fall back to None when unmapped.
+    go_id_by_int = {10: "GO:0000010"}  # 99 missing
+    row = _cooccurrence_copy_row("set-y", 10, 99, 5, go_id_by_int)
+    assert row == ("set-y", 10, 99, "GO:0000010", None, 5)
+    assert row[3] == "GO:0000010"  # known side present
+    assert row[4] is None  # candidate side missing
+
+
+def test_cooccurrence_copy_row_diagonal_self_pair() -> None:
+    # The k == t diagonal must repeat the same go_id on both sides.
+    go_id_by_int = {7: "GO:0000007"}
+    row = _cooccurrence_copy_row("set-z", 7, 7, 4, go_id_by_int)
+    assert row == ("set-z", 7, 7, "GO:0000007", "GO:0000007", 4)
+
+
+class _FakeCopy:
+    """Captures rows passed to ``cp.write_row`` for one COPY statement."""
+
+    def __init__(self, sink: list[tuple]) -> None:
+        self._sink = sink
+
+    def __enter__(self) -> _FakeCopy:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def write_row(self, row: tuple) -> None:
+        self._sink.append(row)
+
+
+class _FakeCursor:
+    def __init__(self, sink: list[tuple], stmts: list[str]) -> None:
+        self._sink = sink
+        self._stmts = stmts
+
+    def __enter__(self) -> _FakeCursor:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def copy(self, stmt: str) -> _FakeCopy:
+        self._stmts.append(stmt)
+        return _FakeCopy(self._sink)
+
+
+def _fake_session(sink: list[tuple], stmts: list[str]) -> Any:
+    """A session whose raw connection yields cursors recording COPY rows."""
     session = MagicMock()
+    raw = MagicMock()
+    raw.cursor.side_effect = lambda: _FakeCursor(sink, stmts)
+    session.connection.return_value.connection = raw
+    return session
+
+
+def test_write_freq_copies_rows_and_commits_per_chunk() -> None:
+    # The freq rows reach COPY in column order, carry the go_id string, and
+    # the per-chunk commit semantics are preserved (one commit per chunk).
+    sink: list[tuple] = []
+    stmts: list[str] = []
+    session = _fake_session(sink, stmts)
     set_id = uuid.uuid4()
-    go_id_by_int = {10: "GO:0000010", 20: "GO:0000020"}
-    _op()._write_freq(session, set_id, {10: 3, 20: 1}, go_id_by_int, batch_size=50_000)
-    rows = {r["term_id"]: r for r in _captured_rows(session, TermFrequency)}
-    assert rows[10]["go_id"] == "GO:0000010"
-    assert rows[10]["freq"] == 3
-    assert rows[20]["go_id"] == "GO:0000020"
+    go_id_by_int = {10: "GO:0000010", 20: "GO:0000020", 30: "GO:0000030"}
+    written = _op()._write_freq(session, set_id, {10: 3, 20: 1, 30: 2}, go_id_by_int, batch_size=2)
+    assert written == 3
+    by_term = {r[1]: r for r in sink}
+    assert by_term[10] == (str(set_id), 10, "GO:0000010", 3)
+    assert by_term[20] == (str(set_id), 20, "GO:0000020", 1)
+    # COPY targets the term_frequency table with the expected column list.
+    assert all(s.startswith("COPY term_frequency (") for s in stmts)
+    assert "annotation_set_id, term_id, go_id, freq" in stmts[0]
+    # 3 rows, chunk 2 -> 2 chunks -> 2 commits.
+    assert session.commit.call_count == 2
 
 
-def test_write_cooccurrence_stamps_both_go_id_sides() -> None:
-    # Both the known (k) and candidate (t) sides carry their go_id strings so
-    # the cooccurrence row is snapshot-invariant on each end.
-    session = MagicMock()
+def test_write_cooccurrence_copies_rows_and_commits() -> None:
+    # Both go_id sides stamped; diagonal and missing-id rows handled; commit
+    # fires once for the single chunk.
+    sink: list[tuple] = []
+    stmts: list[str] = []
+    session = _fake_session(sink, stmts)
     set_id = uuid.uuid4()
     go_id_by_int = {10: "GO:0000010", 99: "GO:0000099"}
-    cooc = {(10, 99): 2}
-    _op()._write_cooccurrence(session, set_id, cooc, go_id_by_int, batch_size=50_000)
-    rows = _captured_rows(session, TermCooccurrence)
-    assert len(rows) == 1
-    row = rows[0]
-    assert row["known_term_id"] == 10
-    assert row["candidate_term_id"] == 99
-    assert row["known_go_id"] == "GO:0000010"
-    assert row["candidate_go_id"] == "GO:0000099"
-    assert row["cooccurrence_count"] == 2
+    cooc = {(10, 99): 2, (10, 10): 4, (10, 7): 1}  # 7 unmapped -> candidate NULL
+    written = _op()._write_cooccurrence(session, set_id, cooc, go_id_by_int, batch_size=50_000)
+    assert written == 3
+    by_pair = {(r[1], r[2]): r for r in sink}
+    assert by_pair[(10, 99)] == (str(set_id), 10, 99, "GO:0000010", "GO:0000099", 2)
+    assert by_pair[(10, 10)] == (str(set_id), 10, 10, "GO:0000010", "GO:0000010", 4)
+    assert by_pair[(10, 7)] == (str(set_id), 10, 7, "GO:0000010", None, 1)
+    assert all(s.startswith("COPY term_cooccurrence (") for s in stmts)
+    assert session.commit.call_count == 1
+
+
+def test_copy_rows_streams_lazily_without_materialising_all() -> None:
+    # _copy_rows must consume the generator chunk by chunk, not build one big
+    # list (memory bound). We assert it pulls exactly the rows it writes.
+    sink: list[tuple] = []
+    stmts: list[str] = []
+    session = _fake_session(sink, stmts)
+    pulled = 0
+
+    def gen() -> Any:
+        nonlocal pulled
+        for i in range(5):
+            pulled += 1
+            yield ("s", i)
+
+    written = _copy_rows(session, "t", ("a", "b"), gen(), chunk_size=2)
+    assert written == 5
+    assert pulled == 5
+    assert sink == [("s", 0), ("s", 1), ("s", 2), ("s", 3), ("s", 4)]
+    # 5 rows, chunk 2 -> 3 chunks -> 3 commits.
+    assert session.commit.call_count == 3
