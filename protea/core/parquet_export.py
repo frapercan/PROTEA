@@ -27,6 +27,8 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 from protea_contracts import compute_schema_sha as _canonical_schema_sha
 
 from protea.core.features import REGISTRY as _FEATURE_REGISTRY
@@ -59,6 +61,22 @@ def _registry_feature_names() -> list[str]:
 
 _ASPECT_NAMES = {"P": "bpo", "F": "mfo", "C": "cco"}
 _CATEGORIES = ("nk", "lk", "pk")
+
+# Number of rows materialised at once while streaming a shard into the
+# consolidated split parquet. One batch (~200k rows) is resident at a
+# time instead of the whole ~76M-row training set, which keeps the
+# final dump-assembly RSS well under 1 GB (twin of the per-split
+# streaming fix in #654, which left this final assembly on the old
+# ``pd.concat`` path that spiked to ~108 GB committed).
+_STREAM_BATCH_ROWS = 200_000
+
+_RESERVED_COLUMNS = [
+    "protein_accession",
+    "go_term_id",
+    LABEL_COLUMN,
+    "category",
+    "snapshot_pair",
+]
 
 
 @dataclass(frozen=True)
@@ -137,10 +155,15 @@ def _validate_manifest_with_contracts(manifest: dict[str, Any]) -> None:
 
 
 class _ExportMetrics(NamedTuple):
-    """Frame metadata threaded through manifest + result builders."""
+    """Split metadata threaded through manifest + result builders.
 
-    train_df: pd.DataFrame
-    eval_df: pd.DataFrame
+    Carries the streamed row counts (not the frames themselves) so the
+    consolidated dataset is never materialised in memory for the
+    manifest / result payloads.
+    """
+
+    n_train_rows: int
+    n_eval_rows: int
     train_snapshot_pairs: list[str]
     eval_pair: str
     schema_sha: str
@@ -156,32 +179,18 @@ def export_reranker_parquets(ctx: ParquetExportContext) -> dict[str, Any]:
     """
     ctx.stage_dir.mkdir(parents=True, exist_ok=True)
     aspect_norm = dict(_ASPECT_NAMES)
-    train_df, train_snapshot_pairs = _load_train_shards(ctx, aspect_norm)
     eval_pair = f"v{ctx.test_old_v}-v{ctx.test_new_v}"
-    eval_df = _load_eval_shards(ctx, eval_pair, aspect_norm)
-
-    reserved = [
-        "protein_accession",
-        "go_term_id",
-        LABEL_COLUMN,
-        "category",
-        "snapshot_pair",
-    ]
-    train_df = _reorder(train_df, reserved)
-    eval_df = _reorder(eval_df, reserved)
-    _assert_canonical_columns(train_df, eval_df, reserved)
 
     train_path = ctx.stage_dir / "train.parquet"
     eval_path = ctx.stage_dir / "eval.parquet"
     manifest_path = ctx.stage_dir / "manifest.json"
-    if not train_df.empty:
-        train_df.to_parquet(train_path, index=False, compression="snappy")
-    if not eval_df.empty:
-        eval_df.to_parquet(eval_path, index=False, compression="snappy")
+
+    n_train_rows, train_snapshot_pairs = _stream_train_shards(ctx, aspect_norm, train_path)
+    n_eval_rows = _stream_eval_shards(ctx, eval_pair, aspect_norm, eval_path)
 
     metrics = _ExportMetrics(
-        train_df=train_df,
-        eval_df=eval_df,
+        n_train_rows=n_train_rows,
+        n_eval_rows=n_eval_rows,
         train_snapshot_pairs=train_snapshot_pairs,
         eval_pair=eval_pair,
         schema_sha=_compute_schema_sha(),
@@ -217,8 +226,8 @@ def _build_and_write_manifest(
         "train_snapshot_pairs": metrics.train_snapshot_pairs,
         "eval_snapshot_pair": metrics.eval_pair,
         "schema_sha": metrics.schema_sha,
-        "n_train_rows": int(len(metrics.train_df)),
-        "n_eval_rows": int(len(metrics.eval_df)),
+        "n_train_rows": int(metrics.n_train_rows),
+        "n_eval_rows": int(metrics.n_eval_rows),
         "format": "parquet",
         "producer_version": ctx.producer_version,
         "producer_git_sha": ctx.producer_git_sha,
@@ -233,83 +242,146 @@ def _build_result(ctx: ParquetExportContext, metrics: _ExportMetrics) -> dict[st
     optional artefact-store upload runs)."""
     return {
         "stage_dir": str(ctx.stage_dir),
-        "n_train_rows": int(len(metrics.train_df)),
-        "n_eval_rows": int(len(metrics.eval_df)),
+        "n_train_rows": int(metrics.n_train_rows),
+        "n_eval_rows": int(metrics.n_eval_rows),
         "train_snapshot_pairs": metrics.train_snapshot_pairs,
         "eval_snapshot_pair": metrics.eval_pair,
         "schema_sha": metrics.schema_sha,
     }
 
 
-def _load_train_shards(
-    ctx: ParquetExportContext, aspect_norm: dict[str, str]
-) -> tuple[pd.DataFrame, list[str]]:
-    """Read every per-cat training shard, stamp ``category`` + ``snapshot_pair``,
-    and concat into a single frame. Returns ``(df, snapshot_pairs)`` where the
-    snapshot_pairs list keeps insertion order."""
-    train_frames: list[pd.DataFrame] = []
-    train_snapshot_pairs: list[str] = []
-    for cat in _CATEGORIES:
-        shards = ctx.split_files.get(cat, [])
-        for shard_idx, shard_path in enumerate(shards):
-            v_old, v_new = ctx.valid_split_versions[shard_idx]
-            snap_pair = f"v{v_old}-v{v_new}"
-            if snap_pair not in train_snapshot_pairs:
-                train_snapshot_pairs.append(snap_pair)
-            sdf = pd.read_parquet(shard_path)
-            sdf["category"] = cat
-            sdf["snapshot_pair"] = snap_pair
-            if "aspect" in sdf.columns:
-                sdf["aspect"] = sdf["aspect"].map(aspect_norm).fillna(sdf["aspect"])
-            sdf = sdf.rename(columns={"go_id": "go_term_id"})
-            train_frames.append(sdf)
-    train_df = pd.concat(train_frames, ignore_index=True) if train_frames else pd.DataFrame()
-    return train_df, train_snapshot_pairs
-
-
-def _load_eval_shards(
-    ctx: ParquetExportContext, eval_pair: str, aspect_norm: dict[str, str]
+def _stamp_and_reorder_batch(
+    pdf: pd.DataFrame,
+    cat: str,
+    snap_pair: str,
+    aspect_norm: dict[str, str],
 ) -> pd.DataFrame:
-    """Read each per-cat test shard, stamp ``category`` + ``snapshot_pair``, concat."""
-    eval_frames: list[pd.DataFrame] = []
-    for cat in _CATEGORIES:
-        path = ctx.test_files.get(cat)
-        if path is None:
-            continue
-        edf = pd.read_parquet(path)
-        edf["category"] = cat
-        edf["snapshot_pair"] = eval_pair
-        if "aspect" in edf.columns:
-            edf["aspect"] = edf["aspect"].map(aspect_norm).fillna(edf["aspect"])
-        edf = edf.rename(columns={"go_id": "go_term_id"})
-        eval_frames.append(edf)
-    return pd.concat(eval_frames, ignore_index=True) if eval_frames else pd.DataFrame()
+    """Apply the per-shard transforms to one batch frame.
+
+    Stamps ``category`` + ``snapshot_pair``, normalises ``aspect``,
+    renames ``go_id`` -> ``go_term_id`` and reorders to the canonical
+    ``reserved + feature`` layout. Identical to the legacy per-shard
+    pandas path, just applied one batch at a time so a whole shard is
+    never resident.
+    """
+    pdf["category"] = cat
+    pdf["snapshot_pair"] = snap_pair
+    if "aspect" in pdf.columns:
+        pdf["aspect"] = pdf["aspect"].map(aspect_norm).fillna(pdf["aspect"])
+    pdf = pdf.rename(columns={"go_id": "go_term_id"})
+    return _reorder(pdf, _RESERVED_COLUMNS)
 
 
-def _assert_canonical_columns(
-    train_df: pd.DataFrame, eval_df: pd.DataFrame, reserved: list[str]
-) -> None:
-    """T1.8 boundary check: every non-empty shard's feature columns must equal
+class _SplitWriter:
+    """Streaming writer for one consolidated split parquet.
+
+    Owns a single :class:`pyarrow.parquet.ParquetWriter` opened lazily on
+    the first non-empty batch (so an all-empty split leaves no file on
+    disk, matching the legacy ``if not df.empty`` guard). Each shard is
+    read in ``_STREAM_BATCH_ROWS`` chunks and only one batch is ever
+    resident, replacing the ``pd.concat`` of the whole split.
+    """
+
+    def __init__(self, out_path: Path, split_name: str, aspect_norm: dict[str, str]) -> None:
+        self._out_path = out_path
+        self._split_name = split_name
+        self._aspect_norm = aspect_norm
+        self._writer: pq.ParquetWriter | None = None
+        self.n_rows = 0
+
+    def write_shard(self, shard_path: Path, cat: str, snap_pair: str) -> None:
+        """Stream one shard into the split, batch by batch."""
+        pf = pq.ParquetFile(str(shard_path))
+        for batch in pf.iter_batches(batch_size=_STREAM_BATCH_ROWS):
+            pdf = _stamp_and_reorder_batch(batch.to_pandas(), cat, snap_pair, self._aspect_norm)
+            if pdf.empty:
+                continue
+            _assert_canonical_columns(self._split_name, pdf, _RESERVED_COLUMNS)
+            table = pa.Table.from_pandas(pdf, preserve_index=False)
+            if self._writer is None:
+                self._writer = pq.ParquetWriter(
+                    str(self._out_path), table.schema, compression="snappy"
+                )
+            self._writer.write_table(table)
+            self.n_rows += len(pdf)
+
+    def close(self) -> None:
+        if self._writer is not None:
+            self._writer.close()
+
+
+def _stream_train_shards(
+    ctx: ParquetExportContext, aspect_norm: dict[str, str], out_path: Path
+) -> tuple[int, list[str]]:
+    """Stream every per-cat training shard into ``out_path``.
+
+    Replaces the legacy ``pd.read_parquet`` + ``pd.concat`` +
+    ``to_parquet`` assembly (which materialised the entire ~76M-row
+    training set, ~108 GB committed). Only one batch is resident at a
+    time. Returns ``(n_rows, snapshot_pairs)`` with snapshot_pairs in
+    insertion order. No file is written when no shard yields a row,
+    preserving the legacy empty-split behaviour.
+    """
+    writer = _SplitWriter(out_path, "train", aspect_norm)
+    snapshot_pairs: list[str] = []
+    try:
+        for cat in _CATEGORIES:
+            shards = ctx.split_files.get(cat, [])
+            for shard_idx, shard_path in enumerate(shards):
+                v_old, v_new = ctx.valid_split_versions[shard_idx]
+                snap_pair = f"v{v_old}-v{v_new}"
+                if snap_pair not in snapshot_pairs:
+                    snapshot_pairs.append(snap_pair)
+                writer.write_shard(shard_path, cat, snap_pair)
+    finally:
+        writer.close()
+    return writer.n_rows, snapshot_pairs
+
+
+def _stream_eval_shards(
+    ctx: ParquetExportContext,
+    eval_pair: str,
+    aspect_norm: dict[str, str],
+    out_path: Path,
+) -> int:
+    """Stream every per-cat test shard into ``out_path``. Returns row count.
+
+    Streaming twin of the legacy ``_load_eval_shards`` concat path; one
+    batch resident at a time, no file written when there are no rows.
+    """
+    writer = _SplitWriter(out_path, "eval", aspect_norm)
+    try:
+        for cat in _CATEGORIES:
+            path = ctx.test_files.get(cat)
+            if path is None:
+                continue
+            writer.write_shard(path, cat, eval_pair)
+    finally:
+        writer.close()
+    return writer.n_rows
+
+
+def _assert_canonical_columns(split_name: str, shard: pd.DataFrame, reserved: list[str]) -> None:
+    """T1.8 boundary check: a streamed batch's feature columns must equal
     the registry's canonical feature set exactly under the lab schema sha.
-    Raises ``ValueError`` with the missing/extras diff before any parquet is
+    Raises ``ValueError`` with the missing/extras diff before the batch is
     written.
     """
     canonical_features = _registry_feature_names()
     canonical_set = set(canonical_features)
     canonical_features_sha = _canonical_schema_sha(canonical_features)
-    for shard_name, shard in (("train", train_df), ("eval", eval_df)):
-        if shard.empty:
-            continue
-        present_features = [c for c in shard.columns if c in canonical_set]
-        if _canonical_schema_sha(present_features) == canonical_features_sha:
-            continue
-        missing = [c for c in canonical_features if c not in shard.columns]
-        extras = [c for c in shard.columns if c not in canonical_set and c not in reserved]
-        raise ValueError(
-            f"{shard_name} shard fails the canonical column invariant. "
-            f"missing={missing!r} extras={extras!r}. "
-            "All canonical feature columns must be present before write."
-        )
+    if shard.empty:
+        return
+    present_features = [c for c in shard.columns if c in canonical_set]
+    if _canonical_schema_sha(present_features) == canonical_features_sha:
+        return
+    missing = [c for c in canonical_features if c not in shard.columns]
+    extras = [c for c in shard.columns if c not in canonical_set and c not in reserved]
+    raise ValueError(
+        f"{split_name} shard fails the canonical column invariant. "
+        f"missing={missing!r} extras={extras!r}. "
+        "All canonical feature columns must be present before write."
+    )
 
 
 def _publish_to_store(
