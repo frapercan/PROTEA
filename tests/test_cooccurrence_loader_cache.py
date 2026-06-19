@@ -8,11 +8,17 @@ across nearly every chunk's known set, so the same 318M-row
 ``(annotation_set_id, known_go_id)`` so each known term is read from the DB
 ONCE and reused across chunks.
 
-These tests drive the loader with a fake session that records which keys each DB
-query was asked for, asserting (a) the DB is only queried for the uncached
-subset on each call (overlapping known terms served from cache), and (b) the
-returned ``(cooc_by_known, freq)`` is byte-identical to a no-cache reference
-implementation for any sequence of calls.
+These tests drive the loader with a fake psycopg3 connection that records which
+keys each ``COPY (SELECT ...) TO STDOUT`` was asked for, asserting (a) the DB is
+only queried for the uncached subset on each call (overlapping known terms
+served from cache), and (b) the returned ``(cooc_by_known, freq)`` is
+byte-identical to a no-cache reference implementation for any sequence of calls.
+
+The loader bulk-reads both tables with COPY on the raw psycopg3 connection (not
+SQLAlchemy ``.all()``) to skip the Row-object materialization that profiling
+flagged as ~48% of export samples. The fake reproduces psycopg3's COPY contract:
+``cursor.copy(sql)`` returns a context manager whose ``.rows()`` yields TEXT
+rows as tuples of strings (NULLs as ``None``).
 """
 
 from __future__ import annotations
@@ -26,52 +32,106 @@ import pytest
 from protea.core.operations.predict_go_terms import _association_loader as loader
 
 
-class _FakeResult:
+class _FakeCopy:
+    """Stand-in for a psycopg3 COPY-TO-STDOUT result.
+
+    ``rows()`` yields TEXT-format rows: each value is a string (the loader casts
+    counts via ``int(...)``); a SQL NULL would arrive as ``None`` (psycopg3 maps
+    the TEXT ``\\N`` sentinel to ``None`` in ``rows()``).
+    """
+
     def __init__(self, rows: list[tuple[Any, ...]]) -> None:
         self._rows = rows
 
-    def all(self) -> list[tuple[Any, ...]]:
+    def __enter__(self) -> _FakeCopy:
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        return None
+
+    def rows(self) -> list[tuple[Any, ...]]:
         return self._rows
 
 
-class _FakeSession:
-    """Records the ``IN`` lists each cooc/freq query was issued with.
+class _FakeCursor:
+    def __init__(self, conn: _FakeRawConnection) -> None:
+        self._conn = conn
 
-    The loader emits exactly two queries per cache-miss batch (cooccurrence then
-    frequency). We pull the ``IN`` clause's literal values out of the compiled
-    SQLAlchemy statement so the test can assert which keys hit the DB.
+    def __enter__(self) -> _FakeCursor:
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        return None
+
+    def copy(self, sql: str) -> _FakeCopy:
+        return self._conn._copy(sql)
+
+
+class _FakeRawConnection:
+    """Raw psycopg3 DBAPI connection: serves COPY SELECTs from in-memory dicts.
+
+    The IN-list of go_ids is parsed back out of the inlined COPY SQL so the test
+    can assert exactly which keys hit the DB on each cache-miss batch.
     """
 
-    def __init__(self, cooc: dict[str, dict[str, int]], freq: dict[str, int | None]) -> None:
+    def __init__(
+        self, cooc: dict[str, dict[str, int]], freq: dict[str, int | None]
+    ) -> None:
         self._cooc = cooc
         self._freq = freq
         self.cooc_query_keys: list[set[str]] = []
         self.freq_query_keys: list[set[str]] = []
 
-    def execute(self, stmt: Any) -> _FakeResult:
-        # Pull the IN-list literals from the compiled statement.
-        wanted = _in_clause_values(stmt)
-        text = str(stmt).lower()
-        if "term_cooccurrence" in text:
+    def cursor(self) -> _FakeCursor:
+        return _FakeCursor(self)
+
+    def _copy(self, sql: str) -> _FakeCopy:
+        wanted = _in_clause_values(sql)
+        if "term_cooccurrence" in sql:
             self.cooc_query_keys.append(set(wanted))
             rows: list[tuple[Any, ...]] = []
             for k in wanted:
                 for t, c in self._cooc.get(k, {}).items():
-                    rows.append((k, t, c))
-            return _FakeResult(rows)
-        # frequency query
+                    # TEXT format: every column is a string.
+                    rows.append((k, t, str(c)))
+            return _FakeCopy(rows)
+        # term_frequency query
         self.freq_query_keys.append(set(wanted))
         frows: list[tuple[Any, ...]] = []
         for k in wanted:
             f = self._freq.get(k)
             if f is not None:
-                frows.append((k, f))
-        return _FakeResult(frows)
+                frows.append((k, str(f)))
+        return _FakeCopy(frows)
 
 
-def _in_clause_values(stmt: Any) -> list[str]:
-    """Extract the go_id IN-list literal values from a compiled select."""
-    sql = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+class _FakeConnectionProxy:
+    """What ``session.connection()`` returns: a ``.connection`` raw handle."""
+
+    def __init__(self, raw: _FakeRawConnection) -> None:
+        self.connection = raw
+
+
+class _FakeSession:
+    """Minimal session exposing ``connection().connection`` (the raw psycopg3)."""
+
+    def __init__(self, cooc: dict[str, dict[str, int]], freq: dict[str, int | None]) -> None:
+        self._raw = _FakeRawConnection(cooc, freq)
+
+    def connection(self) -> _FakeConnectionProxy:
+        return _FakeConnectionProxy(self._raw)
+
+    @property
+    def cooc_query_keys(self) -> list[set[str]]:
+        return self._raw.cooc_query_keys
+
+    @property
+    def freq_query_keys(self) -> list[set[str]]:
+        return self._raw.freq_query_keys
+
+
+def _in_clause_values(sql: str) -> list[str]:
+    """Extract the go_id IN-list literal values from an inlined COPY SELECT."""
     return re.findall(r"GO:\d{7}", sql)
 
 
@@ -230,3 +290,70 @@ def test_sequence_of_overlapping_calls_matches_reference() -> None:
     queried: list[str] = [k for ks in sess.cooc_query_keys for k in ks]
     assert len(queried) == len(set(queried))
     assert set(queried) == {k for _s, k in seen_keys}
+
+
+def test_copy_text_strings_parsed_to_exact_ints() -> None:
+    """COPY TEXT rows arrive as strings; counts/freqs parse to exact ints."""
+    set_id = uuid.uuid4()
+    cooc = {"GO:0000001": {"GO:0000099": 123456789, "GO:0000100": 1}}
+    freq = {"GO:0000001": 987654321}
+    sess = _FakeSession(cooc, freq)
+    cooc_out, freq_out = loader.load_cooccurrence_for_known(sess, set_id, {"GO:0000001"})
+    assert cooc_out == {"GO:0000001": {"GO:0000099": 123456789, "GO:0000100": 1}}
+    assert freq_out == {"GO:0000001": 987654321}
+    # Values are genuine ints, not the source strings.
+    assert all(isinstance(v, int) for v in cooc_out["GO:0000001"].values())
+    assert isinstance(freq_out["GO:0000001"], int)
+
+
+def test_copy_path_matches_reference_oracle() -> None:
+    """The COPY-based load equals the no-cache .all()-era oracle byte-for-byte."""
+    set_id = uuid.uuid4()
+    cooc = {
+        "GO:0000001": {"GO:0000099": 4, "GO:0000100": 7},
+        "GO:0000002": {"GO:0000099": 2},
+    }
+    freq = {"GO:0000001": 9, "GO:0000002": 3, "GO:0000004": 5}
+    known = {"GO:0000001", "GO:0000002", "GO:0000004"}
+    sess = _FakeSession(cooc, freq)
+    out = loader.load_cooccurrence_for_known(sess, set_id, known)
+    assert out == _reference_load(cooc, freq, known)
+
+
+def test_null_legacy_rows_excluded_by_sql() -> None:
+    """Legacy NULL go_id rows are filtered in the COPY SELECT, not returned.
+
+    The COPY SELECT carries ``known_go_id IS NOT NULL AND candidate_go_id IS NOT
+    NULL`` (and ``go_id IS NOT NULL`` for frequency), so NULL legacy rows never
+    reach the parser. We assert the SQL the loader issues contains those guards.
+    """
+    captured: list[str] = []
+    set_id = uuid.uuid4()
+
+    class _CapturingRaw(_FakeRawConnection):
+        def _copy(self, sql: str) -> _FakeCopy:
+            captured.append(sql)
+            return super()._copy(sql)
+
+    class _CapturingSession(_FakeSession):
+        def __init__(self) -> None:
+            super().__init__({"GO:0000001": {"GO:0000099": 1}}, {"GO:0000001": 2})
+            self._raw = _CapturingRaw(
+                {"GO:0000001": {"GO:0000099": 1}}, {"GO:0000001": 2}
+            )
+
+    sess = _CapturingSession()
+    loader.load_cooccurrence_for_known(sess, set_id, {"GO:0000001"})
+    cooc_sql = next(s for s in captured if "term_cooccurrence" in s)
+    freq_sql = next(s for s in captured if "term_frequency" in s)
+    assert "known_go_id IS NOT NULL" in cooc_sql
+    assert "candidate_go_id IS NOT NULL" in cooc_sql
+    assert "go_id IS NOT NULL" in freq_sql
+
+
+def test_non_go_id_known_refused_before_inlining() -> None:
+    """A known token that is not a GO-id string never reaches the SQL (no injection)."""
+    set_id = uuid.uuid4()
+    sess = _FakeSession({}, {})
+    with pytest.raises(ValueError, match="non-GO-id"):
+        loader.load_cooccurrence_for_known(sess, set_id, {"'; DROP TABLE x; --"})

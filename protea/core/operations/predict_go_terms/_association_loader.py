@@ -13,15 +13,16 @@ the feature correct across any snapshot pair.
 
 from __future__ import annotations
 
+import re
 import uuid
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from protea.infrastructure.orm.models.annotation.term_cooccurrence import (
-    TermCooccurrence,
-    TermFrequency,
-)
+# Validated GO-id string shape (e.g. ``GO:0005515``). Known go_ids reach the
+# loader as ground-truth-derived strings, but they are inlined verbatim into a
+# COPY SELECT (which cannot take bound params), so each is re-validated against
+# this pattern before inlining to guarantee no SQL injection surface.
+_GO_ID_RE = re.compile(r"^GO:\d+$")
 
 # Module-level memo: each (annotation_set_id, known_go_id) loaded from the DB
 # ONCE per process, reused across every parity chunk of a split.
@@ -99,6 +100,23 @@ def load_cooccurrence_for_known(
     return cooc_by_known, freq
 
 
+def _quote_go_id_list(go_ids: list[str]) -> str:
+    """Validate + SQL-quote go_ids into a ``'a', 'b'`` IN-list literal.
+
+    COPY (SELECT ...) TO STDOUT cannot take bound params, so the known go_id
+    filter must be inlined into the SELECT text. Each go_id is re-validated
+    against :data:`_GO_ID_RE` (so only ``GO:<digits>`` reaches the SQL) and the
+    quote is escaped defensively; an unexpected shape is a programming error and
+    raises rather than silently inlining attacker-controlled text.
+    """
+    quoted: list[str] = []
+    for go_id in go_ids:
+        if not _GO_ID_RE.match(go_id):
+            raise ValueError(f"refusing to inline non-GO-id literal: {go_id!r}")
+        quoted.append("'" + go_id.replace("'", "''") + "'")
+    return ", ".join(quoted)
+
+
 def _load_into_cache(
     session: Session,
     annotation_set_id: uuid.UUID,
@@ -106,37 +124,49 @@ def _load_into_cache(
 ) -> None:
     """Query the DB for the uncached known go_ids and populate the memo.
 
+    Bulk-reads both tables with ``COPY (SELECT ...) TO STDOUT`` on the raw
+    psycopg3 connection rather than ``select(...).all()``. The Row-object
+    materialization under ``.all()`` (``_raw_all_rows``) was the dominant
+    export cost (~48% of profiled samples); COPY streams plain TEXT rows and
+    skips the per-row Row + protocol overhead.
+
     Every requested key gets a cache entry (an empty dict / ``None`` freq when it
     has no rows) so a known go_id with no cooccurrence or frequency row is not
-    re-queried on a later call.
+    re-queried on a later call. The populated maps are byte-identical to the
+    previous ``.all()``-based load for any input.
     """
-    cooc_rows = session.execute(
-        select(
-            TermCooccurrence.known_go_id,
-            TermCooccurrence.candidate_go_id,
-            TermCooccurrence.cooccurrence_count,
-        ).where(
-            TermCooccurrence.annotation_set_id == annotation_set_id,
-            TermCooccurrence.known_go_id.in_(uncached),
-        )
-    ).all()
-    rows_by_known: dict[str, dict[str, int]] = {}
-    for known_go, candidate_go, count in cooc_rows:
-        if known_go is None or candidate_go is None:
-            continue
-        rows_by_known.setdefault(str(known_go), {})[str(candidate_go)] = int(count)
+    raw = session.connection().connection  # psycopg3 DBAPI connection
+    set_literal = str(annotation_set_id)
+    in_list = _quote_go_id_list(uncached)
 
-    freq_rows = session.execute(
-        select(TermFrequency.go_id, TermFrequency.freq).where(
-            TermFrequency.annotation_set_id == annotation_set_id,
-            TermFrequency.go_id.in_(uncached),
-        )
-    ).all()
+    # COPY TEXT format: NULLs arrive as ``\N``. Legacy pre-string-key builds may
+    # carry NULL go_id columns; the original ``.all()`` path skipped those rows
+    # (``if known_go is None``), so exclude them in SQL to keep parity. Casting
+    # the count to text is implicit in COPY TEXT output.
+    cooc_sql = (
+        "COPY (SELECT known_go_id, candidate_go_id, cooccurrence_count "
+        "FROM term_cooccurrence "
+        f"WHERE annotation_set_id = '{set_literal}' "
+        f"AND known_go_id IN ({in_list}) "
+        "AND known_go_id IS NOT NULL AND candidate_go_id IS NOT NULL"
+        ") TO STDOUT"
+    )
+    rows_by_known: dict[str, dict[str, int]] = {}
+    with raw.cursor() as cur, cur.copy(cooc_sql) as cp:
+        for known_go, candidate_go, count in cp.rows():
+            rows_by_known.setdefault(known_go, {})[candidate_go] = int(count)
+
+    freq_sql = (
+        "COPY (SELECT go_id, freq FROM term_frequency "
+        f"WHERE annotation_set_id = '{set_literal}' "
+        f"AND go_id IN ({in_list}) "
+        "AND go_id IS NOT NULL"
+        ") TO STDOUT"
+    )
     freq_by_known: dict[str, int] = {}
-    for go_id, f in freq_rows:
-        if go_id is None:
-            continue
-        freq_by_known[str(go_id)] = int(f)
+    with raw.cursor() as cur, cur.copy(freq_sql) as cp:
+        for go_id, f in cp.rows():
+            freq_by_known[go_id] = int(f)
 
     # Cache an entry for EVERY uncached key (empty dict / None when absent) so
     # the no-cooccurrence / no-frequency case is never re-queried.
