@@ -29,6 +29,7 @@ from protea.core._export_schema import (
     CANONICAL_EXPORT_SCHEMA,
     export_table_from_records,
 )
+from protea.core._feature_enricher_helpers import compute_lineage_into
 from protea.core._pair_feature_compute import (
     build_pair_feature_dict,
     precompute_alignment_features,
@@ -193,9 +194,7 @@ def _apply_batch_parity_features(
     return records
 
 
-def _stamp_int_go_term_ids(
-    runner: _KnnTransferRunner, records: list[dict[str, Any]]
-) -> None:
+def _stamp_int_go_term_ids(runner: _KnnTransferRunner, records: list[dict[str, Any]]) -> None:
     """Transiently stamp int ``go_term_id`` from each rec's ``go_id`` string.
 
     The producers key by int id; the runner strips it again before emit so the
@@ -266,8 +265,7 @@ def _build_records_heartbeat(
         return hb_last
     done = q_idx + 1
     _LOG.info(
-        "build_records heartbeat: queries=%d/%d records_emitted=%d "
-        "elapsed=%.1fs rate=%.1f q/s",
+        "build_records heartbeat: queries=%d/%d records_emitted=%d elapsed=%.1fs rate=%.1f q/s",
         done,
         n_queries,
         runner.n_rows + len(runner.buffer) + len(runner.records),
@@ -405,6 +403,10 @@ class _KnnTransferRunner:
             else {}
         )
         self._lineage_known: dict[str, set[str]] = self.query_known_gos or {}
+        # Runner-scoped lineage ancestor-closure memo: reused across every
+        # per-(query, aspect) call (the library rebuilds it per call). See
+        # :func:`protea.core._feature_enricher_helpers.compute_lineage_into`.
+        self._lineage_closure_cache: dict[str, frozenset[str]] = {}
         # INT-6 parity flags. Only fire when a t0 set is bound (the predict-side
         # single-version dump path has none). The go_id->int reverse map (export
         # records key by ``go_id``; producers by int id) is built lazily.
@@ -710,24 +712,20 @@ class _KnnTransferRunner:
         leaf_by_gid: dict[str, dict[str, Any]],
         synth: dict[str, dict[str, Any]],
     ) -> None:
-        """Invoke ``compute_lineage_features`` on this group's records.
+        """Compute the 4 ``lineage_*`` columns for this group's records.
 
-        Mutates each record in place with the 4 ``lineage_*`` columns.
-        Lazy import keeps the GO-DAG dependency out of the runner's
-        import graph for unrelated unit tests.
+        Delegates to :func:`compute_lineage_into` with the runner-scoped closure
+        cache so closures are reused across every (query, aspect) call (the
+        library rebuilds them per call). See that helper for the rationale.
         """
-        from protea_method.lineage import compute_lineage_features
-
-        combined: list[dict[str, Any]] = [
-            *leaf_by_gid.values(),
-            *synth.values(),
-        ]
+        combined: list[dict[str, Any]] = [*leaf_by_gid.values(), *synth.values()]
         if not combined:
             return
-        compute_lineage_features(
+        compute_lineage_into(
             combined,
             parents=self._lineage_parents,
-            known_by_protein={q_acc: self._lineage_known.get(q_acc, set())},
+            known=self._lineage_known.get(q_acc, set()),
+            cache=self._lineage_closure_cache,
         )
 
     def _apply_interpro_features(

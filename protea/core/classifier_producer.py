@@ -343,10 +343,12 @@ _ACCESSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]*$")
 def _quote_accession_list(accessions: list[str]) -> str:
     """Validate + SQL-quote accessions into a ``'a', 'b'`` IN-list literal.
 
-    Mirrors ``_association_loader._quote_go_id_list``: COPY (SELECT ...) TO
-    STDOUT cannot take bound params, so the accession filter is inlined into the
-    SELECT text. Each accession is re-validated against :data:`_ACCESSION_RE`
-    and the quote escaped defensively before inlining.
+    Inlines the accession filter into the COPY (SELECT ...) TO STDOUT text. Each
+    accession is re-validated against :data:`_ACCESSION_RE` and the quote escaped
+    defensively before inlining. (The cooccurrence loader in
+    ``_association_loader`` instead binds its go_id filter as a ``= ANY(%s)``
+    array parameter; psycopg3 ``cursor.copy`` accepts bound params, so a future
+    cleanup could move this loader to the same parameterized form.)
     """
     quoted: list[str] = []
     for acc in accessions:

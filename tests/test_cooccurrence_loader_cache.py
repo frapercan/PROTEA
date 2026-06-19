@@ -16,14 +16,16 @@ byte-identical to a no-cache reference implementation for any sequence of calls.
 
 The loader bulk-reads both tables with COPY on the raw psycopg3 connection (not
 SQLAlchemy ``.all()``) to skip the Row-object materialization that profiling
-flagged as ~48% of export samples. The fake reproduces psycopg3's COPY contract:
-``cursor.copy(sql)`` returns a context manager whose ``.rows()`` yields TEXT
-rows as tuples of strings (NULLs as ``None``).
+flagged as ~48% of export samples. The known-go_id filter is bound as an
+``= ANY(%s)`` array parameter (psycopg3 ``cursor.copy(sql, params)``) rather than
+an inlined IN-list literal, so the fake reproduces psycopg3's parameterized COPY
+contract: ``cursor.copy(sql, params)`` returns a context manager whose
+``.rows()`` yields TEXT rows as tuples of strings (NULLs as ``None``). The go_id
+filter values are read out of ``params`` (the bound array), not parsed from SQL.
 """
 
 from __future__ import annotations
 
-import re
 import uuid
 from typing import Any
 
@@ -63,20 +65,20 @@ class _FakeCursor:
     def __exit__(self, *exc: Any) -> None:
         return None
 
-    def copy(self, sql: str) -> _FakeCopy:
-        return self._conn._copy(sql)
+    def copy(self, sql: str, params: tuple[Any, ...] | None = None) -> _FakeCopy:
+        return self._conn._copy(sql, params)
 
 
 class _FakeRawConnection:
     """Raw psycopg3 DBAPI connection: serves COPY SELECTs from in-memory dicts.
 
-    The IN-list of go_ids is parsed back out of the inlined COPY SQL so the test
-    can assert exactly which keys hit the DB on each cache-miss batch.
+    The go_id filter list is the SECOND bound parameter (``= ANY(%s)``); the
+    fake reads it straight out of ``params`` so the test can assert exactly which
+    keys hit the DB on each cache-miss batch. ``params`` is
+    ``(annotation_set_id, [go_id, ...])``.
     """
 
-    def __init__(
-        self, cooc: dict[str, dict[str, int]], freq: dict[str, int | None]
-    ) -> None:
+    def __init__(self, cooc: dict[str, dict[str, int]], freq: dict[str, int | None]) -> None:
         self._cooc = cooc
         self._freq = freq
         self.cooc_query_keys: list[set[str]] = []
@@ -85,8 +87,9 @@ class _FakeRawConnection:
     def cursor(self) -> _FakeCursor:
         return _FakeCursor(self)
 
-    def _copy(self, sql: str) -> _FakeCopy:
-        wanted = _in_clause_values(sql)
+    def _copy(self, sql: str, params: tuple[Any, ...] | None) -> _FakeCopy:
+        assert params is not None, "loader must bind COPY params"
+        wanted = list(params[1])
         if "term_cooccurrence" in sql:
             self.cooc_query_keys.append(set(wanted))
             rows: list[tuple[Any, ...]] = []
@@ -128,11 +131,6 @@ class _FakeSession:
     @property
     def freq_query_keys(self) -> list[set[str]]:
         return self._raw.freq_query_keys
-
-
-def _in_clause_values(sql: str) -> list[str]:
-    """Extract the go_id IN-list literal values from an inlined COPY SELECT."""
-    return re.findall(r"GO:\d{7}", sql)
 
 
 def _reference_load(
@@ -331,16 +329,14 @@ def test_null_legacy_rows_excluded_by_sql() -> None:
     set_id = uuid.uuid4()
 
     class _CapturingRaw(_FakeRawConnection):
-        def _copy(self, sql: str) -> _FakeCopy:
+        def _copy(self, sql: str, params: tuple[Any, ...] | None) -> _FakeCopy:
             captured.append(sql)
-            return super()._copy(sql)
+            return super()._copy(sql, params)
 
     class _CapturingSession(_FakeSession):
         def __init__(self) -> None:
             super().__init__({"GO:0000001": {"GO:0000099": 1}}, {"GO:0000001": 2})
-            self._raw = _CapturingRaw(
-                {"GO:0000001": {"GO:0000099": 1}}, {"GO:0000001": 2}
-            )
+            self._raw = _CapturingRaw({"GO:0000001": {"GO:0000099": 1}}, {"GO:0000001": 2})
 
     sess = _CapturingSession()
     loader.load_cooccurrence_for_known(sess, set_id, {"GO:0000001"})
@@ -351,9 +347,35 @@ def test_null_legacy_rows_excluded_by_sql() -> None:
     assert "go_id IS NOT NULL" in freq_sql
 
 
-def test_non_go_id_known_refused_before_inlining() -> None:
-    """A known token that is not a GO-id string never reaches the SQL (no injection)."""
+def test_known_value_bound_as_param_never_inlined_into_sql() -> None:
+    """The known go_id list is a bound array param, never SQL text (no injection).
+
+    With ``= ANY(%s)`` the go_id values are passed through the extended-query
+    protocol, so even an injection-shaped token is just data: it is carried in
+    ``params``, the COPY SQL string never contains it, and nothing raises.
+    """
+    captured_sql: list[str] = []
+    captured_params: list[tuple[Any, ...] | None] = []
     set_id = uuid.uuid4()
-    sess = _FakeSession({}, {})
-    with pytest.raises(ValueError, match="non-GO-id"):
-        loader.load_cooccurrence_for_known(sess, set_id, {"'; DROP TABLE x; --"})
+    evil = "'; DROP TABLE x; --"
+
+    class _CapturingRaw(_FakeRawConnection):
+        def _copy(self, sql: str, params: tuple[Any, ...] | None) -> _FakeCopy:
+            captured_sql.append(sql)
+            captured_params.append(params)
+            return super()._copy(sql, params)
+
+    class _CapturingSession(_FakeSession):
+        def __init__(self) -> None:
+            super().__init__({}, {})
+            self._raw = _CapturingRaw({}, {})
+
+    sess = _CapturingSession()
+    # No raise: the value is data, not SQL.
+    out = loader.load_cooccurrence_for_known(sess, set_id, {evil})
+    assert out == ({}, {})
+    # The injection-shaped token appears ONLY in the bound params, never in SQL.
+    for sql in captured_sql:
+        assert "DROP TABLE" not in sql
+        assert "%s" in sql
+    assert any(evil in list(p[1]) for p in captured_params if p is not None)
