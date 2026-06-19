@@ -228,15 +228,49 @@ class BuildGoCooccurrenceOperation:
         terms_by_protein: dict[str, set[int]],
         known_terms: set[int],
     ) -> dict[tuple[int, int], int]:
-        """``{(known_k, candidate_t): distinct_proteins}`` for k in known_terms."""
-        cooc: dict[tuple[int, int], int] = defaultdict(int)
-        for terms in terms_by_protein.values():
-            known_here = [k for k in terms if k in known_terms]
-            if not known_here:
-                continue
-            for k in known_here:
-                for t in terms:
-                    cooc[(k, t)] += 1
+        """``{(known_k, candidate_t): distinct_proteins}`` for k in known_terms.
+
+        ``cooccurrence(k, t)`` is the number of proteins carrying both term k
+        and term t (after propagation), restricted to anchor terms k in
+        ``known_terms``. This equals ``(M.T @ M)[k, t]`` where M is the
+        proteins x terms binary incidence matrix (per protein the term set is
+        already deduplicated, so M is binary). We build M as a sparse CSR
+        matrix over a contiguous dense term index, take the known-row slice,
+        and the matmul yields exactly the same counts (diagonal included: a
+        protein co-occurs with itself, so ``(k, k)`` = freq of k among the
+        proteins carrying it). Empty input yields an empty dict.
+        """
+        import numpy as np
+        from scipy import sparse
+
+        # Map every distinct term id to a contiguous 0..N-1 column index.
+        all_terms = sorted({t for terms in terms_by_protein.values() for t in terms})
+        if not all_terms:
+            return {}
+        col_of = {t: i for i, t in enumerate(all_terms)}
+
+        rows: list[int] = []
+        cols: list[int] = []
+        for r, terms in enumerate(terms_by_protein.values()):
+            for t in terms:
+                rows.append(r)
+                cols.append(col_of[t])
+        n_proteins = len(terms_by_protein)
+        n_terms = len(all_terms)
+        m = sparse.csr_matrix(
+            (np.ones(len(rows), dtype=np.int64), (rows, cols)),
+            shape=(n_proteins, n_terms),
+        )
+
+        # Known-row slice (anchor side k) times the full matrix (candidate t).
+        known_cols = [col_of[k] for k in all_terms if k in known_terms]
+        if not known_cols:
+            return {}
+        cooc_mat = (m[:, known_cols].T @ m).tocoo()
+
+        cooc: dict[tuple[int, int], int] = {}
+        for ki, tj, count in zip(cooc_mat.row, cooc_mat.col, cooc_mat.data, strict=True):
+            cooc[(all_terms[known_cols[ki]], all_terms[tj])] = int(count)
         return cooc
 
     def _persist(

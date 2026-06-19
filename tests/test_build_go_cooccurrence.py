@@ -86,6 +86,65 @@ def test_conditional_probability_matches_oracle() -> None:
     assert p_2_given_1 == 1.0
 
 
+def _reference_cooccurrence(
+    terms_by_protein: dict[str, set[int]],
+    known_terms: set[int],
+) -> dict[tuple[int, int], int]:
+    """Pure-Python triple-loop oracle (the original implementation)."""
+    cooc: dict[tuple[int, int], int] = {}
+    for terms in terms_by_protein.values():
+        known_here = [k for k in terms if k in known_terms]
+        if not known_here:
+            continue
+        for k in known_here:
+            for t in terms:
+                cooc[(k, t)] = cooc.get((k, t), 0) + 1
+    return cooc
+
+
+def test_compute_cooccurrence_byte_identical_to_reference() -> None:
+    # The scipy sparse-matmul implementation must produce EXACTLY the same
+    # dict as the original Python triple loop, including the k==t diagonal,
+    # terms that are both known and candidate, and proteins with no known
+    # term (they contribute nothing). Counts must be plain Python ints.
+    terms_by_protein = {
+        "P1": {1, 2, 5},
+        "P2": {1, 2, 3},
+        "P3": {2, 4},  # carries no known term once cap excludes 2 -> contributes nothing
+        "P4": {1, 3, 4, 5},
+        "P5": {6},  # isolated term, never known here
+    }
+    known = {1, 3, 4, 5}  # 2 (common) and 6 deliberately excluded from anchors
+    expected = _reference_cooccurrence(terms_by_protein, known)
+    got = _op()._compute_cooccurrence(terms_by_protein, known)
+    assert got == expected
+    # Diagonal is present and equals the term's own frequency among carriers.
+    assert got[(1, 1)] == 3  # P1, P2, P4 carry term 1
+    assert all(isinstance(v, int) and not isinstance(v, bool) for v in got.values())
+
+
+def test_compute_cooccurrence_empty_input() -> None:
+    assert _op()._compute_cooccurrence({}, set()) == {}
+    assert _reference_cooccurrence({}, set()) == {}
+
+
+def test_compute_cooccurrence_no_known_terms() -> None:
+    # Proteins exist but none of their terms are known anchors -> empty dict.
+    terms_by_protein = {"P1": {7, 8}, "P2": {8, 9}}
+    known: set[int] = {100, 200}
+    got = _op()._compute_cooccurrence(terms_by_protein, known)
+    assert got == _reference_cooccurrence(terms_by_protein, known) == {}
+
+
+def test_compute_cooccurrence_known_and_candidate_overlap() -> None:
+    # A term that is BOTH an anchor (known) and a candidate of another anchor.
+    terms_by_protein = {"P1": {1, 2}, "P2": {1, 2}, "P3": {2}}
+    known = {1, 2}
+    got = _op()._compute_cooccurrence(terms_by_protein, known)
+    assert got == _reference_cooccurrence(terms_by_protein, known)
+    assert got[(1, 2)] == 2 and got[(2, 1)] == 2 and got[(2, 2)] == 3
+
+
 def test_payload_defaults() -> None:
     p = BuildGoCooccurrencePayload.model_validate(
         {"annotation_set_id": "11111111-1111-1111-1111-111111111111"}
