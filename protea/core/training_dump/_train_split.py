@@ -37,6 +37,9 @@ from protea.core._training_dump_loaders import (
 )
 from protea.core.contracts.operation import EmitFn
 from protea.core.evaluation import load_evaluation_data_for_set
+from protea.core.operations.predict_go_terms._association_loader import (
+    clear_cooccurrence_cache,
+)
 from protea.core.reranker import LABEL_COLUMN
 from protea.core.training_dump._constants import _CATEGORIES
 from protea.core.training_dump._contexts import (
@@ -298,6 +301,11 @@ def _run_train_split(
     emit: EmitFn,
 ) -> _TrainSplitOutcome:
     """Run one training-split iteration end-to-end."""
+    # Each split uses a different t0 annotation_set, so the per-(set, known_go_id)
+    # cooccurrence memo from prior splits is dead weight. Clear it at the split
+    # boundary to bound the cache to one split's t0 vocabulary (~1-2 GB) and to
+    # stop the observed per-split rate degradation as the cache grew unbounded.
+    clear_cooccurrence_cache()
     p = ctx.payload
     v_old = p.train_versions[split_index]
     v_new = p.train_versions[split_index + 1]
