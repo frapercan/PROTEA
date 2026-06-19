@@ -13,16 +13,9 @@ the feature correct across any snapshot pair.
 
 from __future__ import annotations
 
-import re
 import uuid
 
 from sqlalchemy.orm import Session
-
-# Validated GO-id string shape (e.g. ``GO:0005515``). Known go_ids reach the
-# loader as ground-truth-derived strings, but they are inlined verbatim into a
-# COPY SELECT (which cannot take bound params), so each is re-validated against
-# this pattern before inlining to guarantee no SQL injection surface.
-_GO_ID_RE = re.compile(r"^GO:\d+$")
 
 # Module-level memo: each (annotation_set_id, known_go_id) loaded from the DB
 # ONCE per process, reused across every parity chunk of a split.
@@ -100,23 +93,6 @@ def load_cooccurrence_for_known(
     return cooc_by_known, freq
 
 
-def _quote_go_id_list(go_ids: list[str]) -> str:
-    """Validate + SQL-quote go_ids into a ``'a', 'b'`` IN-list literal.
-
-    COPY (SELECT ...) TO STDOUT cannot take bound params, so the known go_id
-    filter must be inlined into the SELECT text. Each go_id is re-validated
-    against :data:`_GO_ID_RE` (so only ``GO:<digits>`` reaches the SQL) and the
-    quote is escaped defensively; an unexpected shape is a programming error and
-    raises rather than silently inlining attacker-controlled text.
-    """
-    quoted: list[str] = []
-    for go_id in go_ids:
-        if not _GO_ID_RE.match(go_id):
-            raise ValueError(f"refusing to inline non-GO-id literal: {go_id!r}")
-        quoted.append("'" + go_id.replace("'", "''") + "'")
-    return ", ".join(quoted)
-
-
 def _load_into_cache(
     session: Session,
     annotation_set_id: uuid.UUID,
@@ -125,46 +101,41 @@ def _load_into_cache(
     """Query the DB for the uncached known go_ids and populate the memo.
 
     Bulk-reads both tables with ``COPY (SELECT ...) TO STDOUT`` on the raw
-    psycopg3 connection rather than ``select(...).all()``. The Row-object
-    materialization under ``.all()`` (``_raw_all_rows``) was the dominant
-    export cost (~48% of profiled samples); COPY streams plain TEXT rows and
-    skips the per-row Row + protocol overhead.
+    psycopg3 connection (skips the ``.all()`` Row-object materialization that was
+    ~48% of profiled export samples). The known go_id filter is bound as a single
+    ``= ANY(%s)`` array PARAMETER (psycopg3 ``cursor.copy(sql, params)`` accepts
+    bound params) instead of an inlined quoted IN-list literal: the prior inline
+    path re-parsed a megabyte-class SQL string server-side every call (profiled
+    ~5.4% of build_records as ``_split_query`` under ``apply_association``) and
+    needed a hand-rolled quoting / injection guard, both of which the array bind
+    eliminates. ``known_go_id IS NOT NULL`` keeps the legacy-NULL skip.
 
-    Every requested key gets a cache entry (an empty dict / ``None`` freq when it
-    has no rows) so a known go_id with no cooccurrence or frequency row is not
-    re-queried on a later call. The populated maps are byte-identical to the
-    previous ``.all()``-based load for any input.
+    Every requested key gets a cache entry (empty dict / ``None`` freq when
+    absent) so a no-row key is not re-queried. Byte-identical to the prior load.
     """
     raw = session.connection().connection  # psycopg3 DBAPI connection
-    set_literal = str(annotation_set_id)
-    in_list = _quote_go_id_list(uncached)
-
-    # COPY TEXT format: NULLs arrive as ``\N``. Legacy pre-string-key builds may
-    # carry NULL go_id columns; the original ``.all()`` path skipped those rows
-    # (``if known_go is None``), so exclude them in SQL to keep parity. Casting
-    # the count to text is implicit in COPY TEXT output.
     cooc_sql = (
         "COPY (SELECT known_go_id, candidate_go_id, cooccurrence_count "
         "FROM term_cooccurrence "
-        f"WHERE annotation_set_id = '{set_literal}' "
-        f"AND known_go_id IN ({in_list}) "
+        "WHERE annotation_set_id = %s "
+        "AND known_go_id = ANY(%s) "
         "AND known_go_id IS NOT NULL AND candidate_go_id IS NOT NULL"
         ") TO STDOUT"
     )
     rows_by_known: dict[str, dict[str, int]] = {}
-    with raw.cursor() as cur, cur.copy(cooc_sql) as cp:
+    with raw.cursor() as cur, cur.copy(cooc_sql, (annotation_set_id, uncached)) as cp:
         for known_go, candidate_go, count in cp.rows():
             rows_by_known.setdefault(known_go, {})[candidate_go] = int(count)
 
     freq_sql = (
         "COPY (SELECT go_id, freq FROM term_frequency "
-        f"WHERE annotation_set_id = '{set_literal}' "
-        f"AND go_id IN ({in_list}) "
+        "WHERE annotation_set_id = %s "
+        "AND go_id = ANY(%s) "
         "AND go_id IS NOT NULL"
         ") TO STDOUT"
     )
     freq_by_known: dict[str, int] = {}
-    with raw.cursor() as cur, cur.copy(freq_sql) as cp:
+    with raw.cursor() as cur, cur.copy(freq_sql, (annotation_set_id, uncached)) as cp:
         for go_id, f in cp.rows():
             freq_by_known[go_id] = int(f)
 

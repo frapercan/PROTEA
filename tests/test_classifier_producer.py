@@ -205,7 +205,7 @@ def test_quote_accession_list_rejects_injection() -> None:
     # cleanly; the surface is bracketed and escaped.
     assert _quote_accession_list(["P12345", "P12345-2", "Q1"]) == "'P12345', 'P12345-2', 'Q1'"
     # Anything outside the accession shape is a programming error, not silently
-    # inlined (matches ``_association_loader._quote_go_id_list``).
+    # inlined into the COPY SELECT.
     for bad in ["P1' OR '1'='1", "drop table protein;--", "", "P1 P2"]:
         with pytest.raises(ValueError, match="non-accession"):
             _quote_accession_list([bad])
