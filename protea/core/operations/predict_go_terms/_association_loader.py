@@ -40,9 +40,18 @@ def clear_cooccurrence_cache() -> None:
     Call between splits/sets in a long-running worker so the cache does not grow
     unbounded across many annotation sets. Within a single split the cache stays
     bounded by that split's t0 known-term vocabulary.
+
+    Also clears the in-memory CSR cooccurrence memo (the optional
+    :mod:`_association_csr` path), since cooccurrence is t0-specific and must be
+    dropped on the same per-split boundary regardless of which loader is active.
     """
     _COOC_CACHE.clear()
     _FREQ_CACHE.clear()
+    from protea.core.operations.predict_go_terms._association_csr import (
+        clear_csr_cooccurrence_cache,
+    )
+
+    clear_csr_cooccurrence_cache()
 
 
 def load_cooccurrence_for_known(
@@ -51,6 +60,11 @@ def load_cooccurrence_for_known(
     known_go_ids: set[str],
 ) -> tuple[dict[str, dict[str, int]], dict[str, int]]:
     """Load co-occurrence rows + term frequencies for one annotation set.
+
+    When ``PROTEA_ASSOCIATION_CSR`` is set, delegates to the in-memory CSR loader
+    (:mod:`_association_csr`): one whole-set COPY scan into ``scipy.sparse``, then
+    every per-chunk lookup from RAM (the export is disk-I/O-bound, not CPU-bound).
+    Bit-exact with the per-chunk DB path below; default (env unset) is that path.
 
     Keyed on the snapshot-invariant ``go_id`` strings. ``known_go_ids`` are the
     go_id strings of the query proteins' known (anchor) terms.
@@ -73,6 +87,13 @@ def load_cooccurrence_for_known(
     calls with overlapping known sets serve those keys from the cache. The
     return value is identical to a no-cache DB-only load for any input.
     """
+    from protea.core.operations.predict_go_terms import _association_csr
+
+    if _association_csr.csr_enabled():
+        return _association_csr.load_cooccurrence_for_known(
+            session, annotation_set_id, known_go_ids
+        )
+
     cooc_by_known: dict[str, dict[str, int]] = {}
     freq: dict[str, int] = {}
     if not known_go_ids:
