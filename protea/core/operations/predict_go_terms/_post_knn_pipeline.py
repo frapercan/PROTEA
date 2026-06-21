@@ -134,27 +134,12 @@ def apply_self_prior(
     annotations = op._load_annotations_for(session, annotation_set_id, accessions)
     own_nonexp = _own_nonexp_terms(annotations)
 
-    # Snapshot-invariant matching (mirrors ``apply_association``). The query's
-    # own-annotation ids come from the t0 set's ontology snapshot, while the
-    # candidate ids come from the export/predict snapshot. Comparing the raw
-    # ``go_term_id`` ints silently fails whenever those two snapshots differ --
-    # which is EVERY training pair in a multi-snapshot export (the 13 rolling t0
-    # sets each carry their own snapshot), leaving ``self_prior_score`` all-zero
-    # in the dump. Resolve both id-spaces into the shared, snapshot-invariant
-    # ``go_id`` string namespace and match on that. At predict time (single
-    # snapshot) this is equivalent to the int match, so it is regression-free.
-    all_own: set[int] = set()
-    for terms in own_nonexp.values():
-        all_own |= terms
-    candidate_ids = {
-        int(rec["go_term_id"]) for rec in prediction_dicts if rec.get("go_term_id") is not None
-    }
-    go_id_by_int, _aspect = _load_go_id_and_aspect(session, candidate_ids | all_own)
-    own_nonexp_go: dict[str, set[str]] = {}
-    for acc, terms in own_nonexp.items():
-        gos = {go_id_by_int[k] for k in terms if k in go_id_by_int}
-        if gos:
-            own_nonexp_go[acc] = gos
+    # Snapshot-invariant matching (mirrors ``apply_association``): resolve the own
+    # non-exp ids and the candidate ids to the shared go_id string namespace so the
+    # match survives the multi-snapshot export (see ``_resolve_self_prior_go_ids``).
+    own_nonexp_go, go_id_by_int = _resolve_self_prior_go_ids(
+        session, own_nonexp, prediction_dicts
+    )
 
     hits = 0
     for rec in prediction_dicts:
@@ -177,6 +162,37 @@ def apply_self_prior(
         },
         "info",
     )
+
+
+def _resolve_self_prior_go_ids(
+    session: Session,
+    own_nonexp: dict[str, set[int]],
+    prediction_dicts: list[dict[str, Any]],
+) -> tuple[dict[str, set[str]], dict[int, str]]:
+    """Resolve own-non-exp + candidate int ids to snapshot-invariant go_id strings.
+
+    ``self_prior`` marks a candidate that the query already carries among its OWN
+    pre-cutoff non-exp annotations. Those own-term ids come from the t0 set's
+    ontology snapshot while candidate ids come from the export/predict snapshot, so
+    a raw ``go_term_id`` int match silently fails across the multi-snapshot export
+    (the 13 rolling t0 sets each carry their own snapshot), leaving the feature
+    all-zero in the dump. One GOTerm lookup over the union maps both id-spaces into
+    the shared go_id namespace (mirrors :func:`_resolve_association_go_ids`); returns
+    ``own_nonexp`` as go_id strings plus the int->go_id resolver for the candidates.
+    """
+    all_own: set[int] = set()
+    for terms in own_nonexp.values():
+        all_own |= terms
+    candidate_ids = {
+        int(rec["go_term_id"]) for rec in prediction_dicts if rec.get("go_term_id") is not None
+    }
+    go_id_by_int, _aspect = _load_go_id_and_aspect(session, candidate_ids | all_own)
+    own_nonexp_go: dict[str, set[str]] = {}
+    for acc, terms in own_nonexp.items():
+        gos = {go_id_by_int[k] for k in terms if k in go_id_by_int}
+        if gos:
+            own_nonexp_go[acc] = gos
+    return own_nonexp_go, go_id_by_int
 
 
 def _own_nonexp_terms(

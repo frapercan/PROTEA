@@ -283,7 +283,11 @@ def test_self_prior_adapter_matches_producer() -> None:
         {"protein_accession": "Q1", "go_term_id": 11, "go_id": "GO:0000011"},
         {"protein_accession": "Q1", "go_term_id": 22, "go_id": "GO:0000022"},
     ]
-    pkp.apply_self_prior(op, MagicMock(), MagicMock(), ["Q1"], cands, _emit)
+    # apply_self_prior now resolves int ids -> snapshot-invariant go_id strings.
+    with patch.object(
+        pkp, "_load_go_id_and_aspect", return_value=({11: "GO:0000011", 22: "GO:0000022"}, {})
+    ):
+        pkp.apply_self_prior(op, MagicMock(), MagicMock(), ["Q1"], cands, _emit)
 
     out = SelfPriorScorer().score(_ctx(cands), cands)
     # only the owned term carries the producer's self_prior_score=1.0.
