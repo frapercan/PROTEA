@@ -90,6 +90,14 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
             "of a frozen lab dump where this filter has already been applied)."
         ),
     )
+    softprop: bool = Field(
+        default=False,
+        description=(
+            "Apply averaged soft Pmin/Pmax GO-DAG propagation (ProtBoost 4.5) to the "
+            "prediction frame per protein right before cafaeval, as a scorer-agnostic "
+            "post-processing step. Off by default so existing evals are bit-identical."
+        ),
+    )
     th_step: float = Field(
         default=0.01,
         gt=0.0,
@@ -488,6 +496,7 @@ class RunCafaEvaluationOperation:
             shared_pred_dir=os.path.join(str(artifacts_root), "predictions"),
             th_step=p.th_step,
             max_terms=p.max_terms,
+            softprop=p.softprop,
         )
 
     @staticmethod
