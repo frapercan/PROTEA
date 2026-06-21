@@ -134,6 +134,29 @@ def test_self_prior_marks_own_nonexp_known_term() -> None:
     assert by_term[99]["self_prior_score"] == 0.0
 
 
+def test_cross_snapshot_self_prior_fires_via_go_id_string() -> None:
+    """The fix: own annotation + candidate in DIFFERENT int id-spaces still match.
+
+    Q1's own non-exp annotation resolves to int 510 (a t0-snapshot GOTerm id) and
+    the candidate carries int 99 (an export-snapshot GOTerm id) for the SAME go_id
+    (GO:0000010). Because GOTerm ids are per snapshot, the raw-int match (510 vs
+    99) never fires across the 13-snapshot export -- which left ``self_prior_score``
+    all-zero in the dump. Resolving both id-spaces to the snapshot-invariant go_id
+    string makes the match fire (1.0), identical to the single-snapshot case; the
+    old int-keyed match would have left it 0.0.
+    """
+    op = MagicMock()
+    op._load_annotations_for.return_value = {"Q1": [{"go_term_id": 510, "evidence_code": "IEA"}]}
+    preds = [{"protein_accession": "Q1", "go_term_id": 99, "self_prior_score": 0.0}]
+    with patch.object(
+        pkp,
+        "_load_go_id_and_aspect",
+        return_value=({510: "GO:0000010", 99: "GO:0000010"}, {"GO:0000010": "F"}),
+    ):
+        pkp.apply_self_prior(op, MagicMock(), _SET_ID, ["Q1"], preds, lambda *_a, **_k: None)
+    assert preds[0]["self_prior_score"] == 1.0  # bridged by the go_id string
+
+
 def test_association_scores_cross_aspect_candidate() -> None:
     out = _run_export(_records(), ExportParityFlags(association=True))
     by_term = {r["go_term_id"]: r for r in out}
@@ -229,7 +252,8 @@ def test_parity_self_prior_matches_predict_producer() -> None:
     oracle = _records()
     op = MagicMock()
     op._load_annotations_for.return_value = _NONEXP_ANN
-    pkp.apply_self_prior(op, MagicMock(), _SET_ID, ["Q1"], oracle, lambda *_a, **_k: None)
+    with patch.object(pkp, "_load_go_id_and_aspect", return_value=(_GO_ID_BY_INT, _ASPECT_BY_GO)):
+        pkp.apply_self_prior(op, MagicMock(), _SET_ID, ["Q1"], oracle, lambda *_a, **_k: None)
 
     export = _run_export(_records(), ExportParityFlags(self_prior=True))
     oracle_scores = {r["go_term_id"]: r["self_prior_score"] for r in oracle}

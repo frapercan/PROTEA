@@ -134,12 +134,37 @@ def apply_self_prior(
     annotations = op._load_annotations_for(session, annotation_set_id, accessions)
     own_nonexp = _own_nonexp_terms(annotations)
 
+    # Snapshot-invariant matching (mirrors ``apply_association``). The query's
+    # own-annotation ids come from the t0 set's ontology snapshot, while the
+    # candidate ids come from the export/predict snapshot. Comparing the raw
+    # ``go_term_id`` ints silently fails whenever those two snapshots differ --
+    # which is EVERY training pair in a multi-snapshot export (the 13 rolling t0
+    # sets each carry their own snapshot), leaving ``self_prior_score`` all-zero
+    # in the dump. Resolve both id-spaces into the shared, snapshot-invariant
+    # ``go_id`` string namespace and match on that. At predict time (single
+    # snapshot) this is equivalent to the int match, so it is regression-free.
+    all_own: set[int] = set()
+    for terms in own_nonexp.values():
+        all_own |= terms
+    candidate_ids = {
+        int(rec["go_term_id"]) for rec in prediction_dicts if rec.get("go_term_id") is not None
+    }
+    go_id_by_int, _aspect = _load_go_id_and_aspect(session, candidate_ids | all_own)
+    own_nonexp_go: dict[str, set[str]] = {}
+    for acc, terms in own_nonexp.items():
+        gos = {go_id_by_int[k] for k in terms if k in go_id_by_int}
+        if gos:
+            own_nonexp_go[acc] = gos
+
     hits = 0
     for rec in prediction_dicts:
         gtid = rec.get("go_term_id")
         if gtid is None:
             continue
-        if int(gtid) in own_nonexp.get(rec.get("protein_accession", ""), ()):
+        cand_go = rec.get("go_id") or go_id_by_int.get(int(gtid))
+        if cand_go is not None and cand_go in own_nonexp_go.get(
+            rec.get("protein_accession", ""), ()
+        ):
             rec["self_prior_score"] = 1.0
             hits += 1
 
@@ -147,7 +172,7 @@ def apply_self_prior(
         "predict_go_terms_batch.self_prior_done",
         None,
         {
-            "queries_with_self_prior": len(own_nonexp),
+            "queries_with_self_prior": len(own_nonexp_go),
             "candidates_marked": hits,
         },
         "info",
