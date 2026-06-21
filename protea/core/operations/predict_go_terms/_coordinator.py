@@ -294,6 +294,8 @@ class PredictGOTermsOperation:
             "compute_classifier": p.compute_classifier,
             "compute_self_prior": p.compute_self_prior,
             "compute_association": p.compute_association,
+            "compute_ia": getattr(p, "compute_ia", False),
+            "ia_file": getattr(p, "ia_file", None),
             "expand_votes_to_ancestors": p.expand_votes_to_ancestors,
             "aspect_separated_knn": p.aspect_separated_knn,
             "reranker_model_id": p.reranker_model_id,

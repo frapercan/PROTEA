@@ -289,6 +289,7 @@ class TestLafaFeaturePersistence:
             "association_total": 0.4,
             "association_cross": 0.1,
             "association_present": 1.0,
+            "IA": 7.5,
         }
         blob = _row_from_prediction(pred, pred_set_id)["features"]
         for key in _LAFA_JSONB_FEATURE_KEYS:

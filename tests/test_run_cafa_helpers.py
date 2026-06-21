@@ -120,6 +120,7 @@ class TestRecordFromPred:
             "association_total": 0.4,
             "association_cross": 0.1,
             "association_present": 1.0,
+            "IA": 7.5,
         }
         pred = self._make_pred(features=blob)
         rec = helpers._record_from_pred(pred, "GO:1")
@@ -168,6 +169,7 @@ class TestLafaPersistEvalRoundTrip:
             "association_total": 0.55,
             "association_cross": 0.2,
             "association_present": 1.0,
+            "IA": 9.0,
         }
         # Half 1: persist -> the JSONB blob the store column receives.
         blob = _row_from_prediction(pred_dict, uuid.uuid4())["features"]

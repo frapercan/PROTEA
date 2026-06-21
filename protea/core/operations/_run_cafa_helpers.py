@@ -90,6 +90,7 @@ _LAFA_JSONB_FEATURE_COLS: tuple[str, ...] = (
     "association_total",
     "association_cross",
     "association_present",
+    "IA",
 )
 
 

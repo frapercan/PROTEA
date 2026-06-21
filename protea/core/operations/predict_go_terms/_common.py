@@ -124,6 +124,7 @@ _LAFA_JSONB_FEATURE_KEYS: tuple[str, ...] = (
     "association_total",
     "association_cross",
     "association_present",
+    "IA",
 )
 
 
