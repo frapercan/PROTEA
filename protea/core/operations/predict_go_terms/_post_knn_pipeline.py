@@ -60,32 +60,8 @@ def run_post_knn_pipeline(
     prediction_dicts = knn_result.prediction_dicts
     if p.expand_votes_to_ancestors and prediction_dicts:
         prediction_dicts = op._expand_to_ancestors(session, p, prediction_dicts, emit)
-    if getattr(p, "compute_self_prior", False) and prediction_dicts:
-        apply_self_prior(
-            op,
-            session,
-            ctx.annotation_set_id,
-            knn_result.query_batch.valid_accessions,
-            prediction_dicts,
-            emit,
-        )
-    if getattr(p, "compute_association", False) and prediction_dicts:
-        apply_association(
-            op,
-            session,
-            ctx.annotation_set_id,
-            knn_result.query_batch.valid_accessions,
-            prediction_dicts,
-            emit,
-        )
-    if getattr(p, "compute_ia", False) and prediction_dicts:
-        apply_ia(
-            session,
-            uuid.UUID(p.ontology_snapshot_id),
-            prediction_dicts,
-            emit,
-            ia_file=getattr(p, "ia_file", None),
-        )
+    if prediction_dicts:
+        _apply_lafa_score_features(op, session, ctx, knn_result, prediction_dicts, emit)
     if getattr(p, "compute_classifier", False):
         prediction_dicts = apply_classifier(
             session,
@@ -99,6 +75,38 @@ def run_post_knn_pipeline(
         scorer = op._reranker_scorer
         reranker_stats = scorer.apply(session, prediction_dicts, p, emit)
     return prediction_dicts, reranker_stats
+
+
+def _apply_lafa_score_features(
+    op: PredictGOTermsBatchOperation,
+    session: Session,
+    ctx: _BatchExecCtx,
+    knn_result: _KnnResult,
+    prediction_dicts: list[dict[str, Any]],
+    emit: EmitFn,
+) -> None:
+    """Apply the LAFA per-candidate score features (self_prior / association / IA).
+
+    Each is gated by its own ``compute_*`` payload flag and mutates
+    ``prediction_dicts`` in place. Classifier is handled separately by the
+    caller because it can also append NEW candidate rows; these three only
+    annotate existing candidates. Extracted from ``run_post_knn_pipeline`` to
+    keep it under the master plan §3 method-length ceiling.
+    """
+    p = ctx.p
+    accessions = knn_result.query_batch.valid_accessions
+    if getattr(p, "compute_self_prior", False):
+        apply_self_prior(op, session, ctx.annotation_set_id, accessions, prediction_dicts, emit)
+    if getattr(p, "compute_association", False):
+        apply_association(op, session, ctx.annotation_set_id, accessions, prediction_dicts, emit)
+    if getattr(p, "compute_ia", False):
+        apply_ia(
+            session,
+            uuid.UUID(p.ontology_snapshot_id),
+            prediction_dicts,
+            emit,
+            ia_file=getattr(p, "ia_file", None),
+        )
 
 
 def _reranker_requested(p: PredictGOTermsBatchPayload) -> bool:
@@ -589,7 +597,7 @@ def _download_ia_table(url: str) -> str:
 
     from protea.core.operations._run_cafa_artifacts import download_tsv
 
-    digest = hashlib.sha1(url.encode()).hexdigest()[:12]
+    digest = hashlib.sha256(url.encode()).hexdigest()[:12]
     dest = os.path.join(tempfile.gettempdir(), f"protea_ia_feature_{digest}.tsv")
     if not os.path.exists(dest):
         download_tsv(url, dest)
