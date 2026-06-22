@@ -178,6 +178,16 @@ function ResultsTable({ results }: { results: Record<string, SettingResults> }) 
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600 ring-1 ring-inset ring-slate-200">
+          Fmax
+        </span>
+        <span className="text-[11px] text-slate-500">
+          Per-cell threshold-optimal F1 (not IA-weighted). For the
+          IA-weighted f_micro_w matrix used on the LAFA / CAFA leaderboards,
+          see <span className="font-mono">/benchmark</span>.
+        </span>
+      </div>
       {settings.map((setting) => (
         <div key={setting} className={`rounded-lg border p-4 ${SETTING_COLORS[setting] ?? ""}`}>
           <div className="text-sm font-semibold text-slate-700 mb-3">
