@@ -250,6 +250,10 @@ later revision).
      - :doc:`Stacked meta-reranker (evidence scorers plus a shallow per-category combiner) <D43-stacked-meta-reranker>`
      - Accepted
      - feat/mr-foundation
+   * - D44
+     - :doc:`Continuous local deployment of the LAFA container at the current best <D44-continuous-lafa-container>`
+     - Proposed
+     - T-PRODUCTO
 
 .. toctree::
    :maxdepth: 1
@@ -305,3 +309,4 @@ later revision).
    D41-lean-f32-refpool-highdim-plm
    D42-export-stable-feature-cache
    D43-stacked-meta-reranker
+   D44-continuous-lafa-container
