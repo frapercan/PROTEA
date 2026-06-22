@@ -254,6 +254,10 @@ later revision).
      - :doc:`Continuous local deployment of the LAFA container at the current best <D44-continuous-lafa-container>`
      - Proposed
      - T-PRODUCTO
+   * - D45
+     - :doc:`Governing the JSONB-blob feature seam <D45-jsonb-blob-feature-governance>`
+     - Proposed
+     - T-GOBERNANZA
 
 .. toctree::
    :maxdepth: 1
@@ -310,3 +314,4 @@ later revision).
    D42-export-stable-feature-cache
    D43-stacked-meta-reranker
    D44-continuous-lafa-container
+   D45-jsonb-blob-feature-governance
