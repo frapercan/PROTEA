@@ -1192,11 +1192,18 @@ export default function BenchmarkPage() {
               );
             })}
           </div>
-          <p className="text-xs text-slate-500">
-            {viewMode === "heatmap"
-              ? "Visual ranking per cell. Bars sorted by IA-weighted f_micro_w."
-              : "Full matrix with raw numbers. Useful for export."}
-          </p>
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <Tooltip text={FMICRO_TOOLTIP}>
+              <span className="inline-flex items-center rounded-md bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 ring-1 ring-inset ring-emerald-200 font-mono cursor-help">
+                f_micro_w · IA-weighted
+              </span>
+            </Tooltip>
+            <span>
+              {viewMode === "heatmap"
+                ? "Visual ranking per cell. Bars sorted by IA-weighted f_micro_w."
+                : "Full matrix with raw numbers. Useful for export."}
+            </span>
+          </div>
         </div>
       )}
 
@@ -1353,6 +1360,11 @@ export default function BenchmarkPage() {
                               </Link>
                             ) : (
                               <span className="text-slate-300">—</span>
+                            )}
+                            {row && hasCiBand(row) && (
+                              <span className="mt-0.5 block text-[9px] leading-none text-slate-400 tabular-nums">
+                                CI [{row.fmax_ci_low!.toFixed(3)}, {row.fmax_ci_high!.toFixed(3)}]
+                              </span>
                             )}
                           </td>
                         );
