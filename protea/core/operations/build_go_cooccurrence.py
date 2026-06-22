@@ -151,8 +151,11 @@ def _copy_rows(
     col_list = ", ".join(columns)
     stmt = f"COPY {table} ({col_list}) FROM STDIN"
     written = 0
-    raw = session.connection().connection  # psycopg3 DBAPI connection
     for chunk in _iter_batches(rows, chunk_size):
+        # Re-fetch the raw DBAPI connection each chunk: session.commit() below
+        # ends the transaction and invalidates the prior reference (psycopg3
+        # asserts if a stale post-commit connection is reused for COPY).
+        raw = session.connection().connection
         with raw.cursor() as cur, cur.copy(stmt) as cp:
             for row in chunk:
                 cp.write_row(row)
