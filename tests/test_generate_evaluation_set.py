@@ -70,6 +70,34 @@ class TestGenerateEvaluationSetPayload:
                 window_role="train",
             )
 
+    def test_native_overrides_default_none(self):
+        p = GenerateEvaluationSetPayload(
+            old_annotation_set_id=str(uuid.uuid4()),
+            new_annotation_set_id=str(uuid.uuid4()),
+        )
+        assert p.old_native_snapshot_id is None
+        assert p.new_native_snapshot_id is None
+
+    def test_native_overrides_accept_uuid_strings(self):
+        on = str(uuid.uuid4())
+        nn = str(uuid.uuid4())
+        p = GenerateEvaluationSetPayload(
+            old_annotation_set_id=str(uuid.uuid4()),
+            new_annotation_set_id=str(uuid.uuid4()),
+            old_native_snapshot_id=f"  {on}  ",
+            new_native_snapshot_id=nn,
+        )
+        assert p.old_native_snapshot_id == on  # stripped
+        assert p.new_native_snapshot_id == nn
+
+    def test_native_override_rejects_empty(self):
+        with pytest.raises(ValueError):
+            GenerateEvaluationSetPayload(
+                old_annotation_set_id=str(uuid.uuid4()),
+                new_annotation_set_id=str(uuid.uuid4()),
+                old_native_snapshot_id="   ",
+            )
+
 
 # ---------------------------------------------------------------------------
 # Operation execute — mocked session
@@ -303,3 +331,57 @@ class TestGenerateEvaluationSetExecute:
         assert result.result["evaluation_set_id"] == str(existing.id)
         events = [call.args[0] for call in self.emit.call_args_list]
         assert "generate_evaluation_set.window_role_set" in events
+
+    def test_native_override_passed_to_reconciled(self):
+        """Explicit native snapshots drive the reconcile DAG, decoupled from the set binding."""
+        session = MagicMock()
+        old_set = _make_annotation_set(uuid.uuid4())
+        new_set = _make_annotation_set(uuid.uuid4())
+        old_native = uuid.uuid4()
+        new_native = uuid.uuid4()
+        # get: old set, new set, then OntologySnapshot existence for each override.
+        session.get.side_effect = [old_set, new_set, MagicMock(), MagicMock()]
+        session.query.return_value.filter_by.return_value.one_or_none.return_value = None
+        session.add.side_effect = lambda obj: setattr(obj, "id", uuid.uuid4())
+        session.flush = MagicMock()
+
+        payload = self._payload()
+        payload["old_native_snapshot_id"] = str(old_native)
+        payload["new_native_snapshot_id"] = str(new_native)
+
+        with patch(
+            "protea.core.operations.generate_evaluation_set.compute_evaluation_data_reconciled",
+            return_value=_make_eval_data(),
+        ) as mock_reconciled:
+            with patch(
+                "protea.core.operations.generate_evaluation_set.compute_evaluation_data",
+            ) as mock_same:
+                self.op.execute(session, payload, emit=self.emit)
+
+        assert mock_reconciled.called
+        assert not mock_same.called
+        args = mock_reconciled.call_args.args
+        assert args[3] == old_native  # old native DAG = override, NOT old_set's binding
+        assert args[4] == new_native  # new native DAG = override
+
+    def test_native_override_with_existing_pair_raises(self):
+        """A native override must not silently reuse/overwrite the unique-per-pair set."""
+        session = MagicMock()
+        old_set = _make_annotation_set(uuid.uuid4())
+        new_set = _make_annotation_set(uuid.uuid4())
+        old_native = uuid.uuid4()
+        session.get.side_effect = [old_set, new_set, MagicMock()]
+        existing = MagicMock()
+        existing.id = uuid.uuid4()
+        existing.window_role = None
+        session.query.return_value.filter_by.return_value.one_or_none.return_value = existing
+
+        payload = self._payload()
+        payload["old_native_snapshot_id"] = str(old_native)
+
+        with patch(
+            "protea.core.operations.generate_evaluation_set.compute_evaluation_data_reconciled",
+        ) as mock_reconciled:
+            with pytest.raises(ValueError, match="already exists"):
+                self.op.execute(session, payload, emit=self.emit)
+        assert not mock_reconciled.called
