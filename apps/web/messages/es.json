@@ -875,7 +875,7 @@
       "nEval": "Filas eval",
       "created": "Creado",
       "kTooltip": "Número de vecinos KNN por proteína de consulta. Un K mayor produce más pares de entrenamiento pero un volcado más pesado.",
-      "trainWindowTooltip": "Versiones de snapshot GOA usadas para la división temporal de entrenamiento. Empareja proteínas anotadas en el snapshot más antiguo contra nuevas anotaciones ganadas en el más reciente.",
+      "trainWindowTooltip": "Versiones de snapshot GOA usadas para la ventana de entrenamiento por fechas (estilo LAFA). Empareja proteínas anotadas en el snapshot de fecha más antigua contra nuevas anotaciones ganadas en el de fecha más reciente, nunca divisiones aleatorias.",
       "testTooltip": "Par de snapshot de evaluación reservado. No puede solaparse con la ventana de entrenamiento para que la evaluación mida generalización genuina.",
       "schemaShaTooltip": "Huella del conjunto de features. Cualquier booster entrenado en este dataset debe presentar este valor exacto en inferencia; una discrepancia hace que PROTEA rechace el scoring.",
       "manifestShaTooltip": "SHA-256 del manifest.json serializado. Un cambio aquí significa que el laboratorio entrenó con un volcado diferente al publicado aquí."

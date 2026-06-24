@@ -876,7 +876,7 @@
       "nEval": "Linhas eval",
       "created": "Criado",
       "kTooltip": "Número de vizinhos KNN por proteína de consulta. Um K maior produz mais pares de treino mas um dump mais pesado.",
-      "trainWindowTooltip": "Versões de snapshot GOA usadas para a divisão temporal de treino. Emparelha proteínas anotadas no snapshot mais antigo com novas anotações ganhas no mais recente.",
+      "trainWindowTooltip": "Versões de snapshot GOA usadas para a janela de treino por datas (estilo LAFA). Emparelha proteínas anotadas no snapshot de data mais antiga com novas anotações ganhas no de data mais recente, nunca divisões aleatórias.",
       "testTooltip": "Par de snapshot de avaliação reservado. Não pode sobrepor-se à janela de treino para que a avaliação meça generalização genuína.",
       "schemaShaTooltip": "Impressão digital do conjunto de features. Qualquer booster treinado neste dataset deve apresentar este valor exato na inferência; uma discrepância faz com que o PROTEA recuse o scoring.",
       "manifestShaTooltip": "SHA-256 do manifest.json serializado. Uma mudança aqui significa que o laboratório treinou com um dump diferente do publicado aqui."

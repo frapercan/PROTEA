@@ -875,7 +875,7 @@
       "nEval": "评估行数",
       "created": "创建时间",
       "kTooltip": "每个查询蛋白质的 KNN 邻居数量。K 越大产生的训练对越多，但转储文件也越大。",
-      "trainWindowTooltip": "用于时间训练分割的 GOA 快照版本。将较旧快照中已注释的蛋白质与较新快照中获得的新注释配对。",
+      "trainWindowTooltip": "用于按日期划分的训练窗口的 GOA 快照版本（LAFA 风格）。将较早日期快照中已注释的蛋白质与较晚日期快照中获得的新注释配对，绝不使用随机划分。",
       "testTooltip": "保留的评估快照对。不能与训练窗口重叠，以确保评估衡量真实的泛化能力。",
       "schemaShaTooltip": "特征集指纹。在此数据集上训练的任何 Booster 在推理时必须呈现完全相同的值；不匹配会导致 PROTEA 拒绝评分。",
       "manifestShaTooltip": "序列化 manifest.json 的 SHA-256。此处的变化意味着实验室使用了与此处发布的不同转储进行训练。"

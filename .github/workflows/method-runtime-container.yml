@@ -1,11 +1,6 @@
 name: Method Runtime Container
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'apps/method_runtime/**'
-      - '.github/workflows/method-runtime-container.yml'
   release:
     types: [published]
   workflow_dispatch:

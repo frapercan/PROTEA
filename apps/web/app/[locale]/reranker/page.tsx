@@ -748,7 +748,9 @@ export default function RerankerPage() {
         nextStep={{ label: "Evaluation", href: "/evaluation" }}
       />
       <p className="text-sm text-slate-500 mb-6">
-        LightGBM binary classifiers trained on temporal holdout data (CAFA protocol).
+        LightGBM binary classifiers trained on dated GOA windows, LAFA-style: the model sees only
+        annotations known at the earlier release date and is scored against those that appeared by the
+        later one, never random splits.
         A re-ranker uses alignment, taxonomy, and aggregate features to re-score GO predictions
         with calibrated probabilities, replacing the raw embedding distance ranking.
       </p>

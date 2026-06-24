@@ -876,7 +876,7 @@
       "nEval": "Eval-Zeilen",
       "created": "Erstellt",
       "kTooltip": "Anzahl der KNN-Nachbarn pro Abfrageprotein. Höheres K erzeugt mehr Trainingspaare, aber einen schwereren Dump.",
-      "trainWindowTooltip": "GOA-Snapshot-Versionen für den zeitlichen Trainings-Split. Paart Proteine, die im älteren Snapshot annotiert wurden, mit neuen Annotationen aus dem neueren.",
+      "trainWindowTooltip": "GOA-Snapshot-Versionen für das datierte Trainingsfenster (LAFA-Stil). Paart Proteine, die im früher datierten Snapshot annotiert wurden, mit neuen Annotationen aus dem später datierten, niemals zufällige Splits.",
       "testTooltip": "Das zurückgehaltene Evaluierungs-Snapshot-Paar. Darf sich nicht mit dem Trainingsfenster überschneiden.",
       "schemaShaTooltip": "Feature-Set-Fingerabdruck. Jeder auf diesem Datensatz trainierte Booster muss bei der Inferenz genau diesen Wert vorlegen; eine Abweichung führt dazu, dass PROTEA das Scoring ablehnt.",
       "manifestShaTooltip": "SHA-256 des serialisierten manifest.json. Eine Änderung bedeutet, dass das Labor auf einem anderen Dump trainiert hat."

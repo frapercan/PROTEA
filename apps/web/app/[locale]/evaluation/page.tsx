@@ -848,7 +848,7 @@ export default function EvaluationPage() {
 
       <ContextBanner
         title="Benchmark prediction quality with CAFA metrics"
-        description="Compare two GOA releases (temporal holdout) to evaluate prediction accuracy. Computes Fmax, precision, recall, and coverage per aspect and category."
+        description="Compare two dated GOA releases (a temporal holdout window, e.g. 2024-04-16 -> 2025-12-04) to evaluate prediction accuracy, LAFA-style rather than on random splits. Computes Fmax, precision, recall, and coverage per aspect and category."
         prerequisites={[
           { label: `${annotationSets.length} annotation set(s)`, met: annotationSets.length >= 2, href: "/annotations" },
           { label: `${predictionSets.length} prediction set(s)`, met: predictionSets.length > 0, href: "/functional-annotation" },
