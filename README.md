@@ -1,6 +1,6 @@
 # PROTEA
 
-**PROtein funcTional Embedding-based Annotation**. A distributed platform for large-scale GO term prediction, sequence embedding, and functional analysis.
+**PROtein functional Embedding-based Annotation**. A distributed platform for large-scale GO term prediction, sequence embedding, and functional analysis.
 
 PROTEA provides a unified backend for ingesting protein data from UniProt, computing protein language model embeddings (ESMC, ProstT5, ESM2), and predicting Gene Ontology terms via KNN transfer plus a learned LightGBM re-ranker, with a full job queue, REST API, and web interface.
 
@@ -93,7 +93,7 @@ poetry install
 cp protea/config/system.yaml.example protea/config/system.yaml
 # Edit system.yaml: set DB and AMQP URLs
 
-# Environment variables — keep secrets in ~/.secrets/protea.env and source
+# Environment variables: keep secrets in ~/.secrets/protea.env and source
 # before starting the stack:
 #   set -a && source ~/.secrets/protea.env && set +a && bash scripts/manage.sh start
 # See the env vars table below for the full list.
