@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/frapercan/PROTEA/compare/v0.10.0...v0.10.1) (2026-06-24)
+
+
+### Documentation
+
+* **readme:** dated temporal split (160/220/227/230) + named levers + framing ([#680](https://github.com/frapercan/PROTEA/issues/680)) ([306ffa1](https://github.com/frapercan/PROTEA/commit/306ffa1de14b2af49795c637e88269a3570d181e))
+
 ## [0.10.0](https://github.com/frapercan/PROTEA/compare/v0.9.1...v0.10.0) (2026-06-24)
 
 
