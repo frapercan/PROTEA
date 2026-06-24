@@ -654,7 +654,7 @@ name = "cafaeval-protea"
 version = "0.1.0"
 description = "Speedup fork of cafaeval (CAFA-evaluator-PK) with a bit-exact parity harness"
 optional = false
-python-versions = ">=3.9"
+python-versions = ">=3.12"
 groups = ["main"]
 files = []
 develop = false
@@ -663,6 +663,7 @@ develop = false
 matplotlib = "*"
 numpy = "*"
 pandas = "*"
+scipy = "*"
 
 [package.extras]
 dev = ["mypy (>=1.8)", "pytest (>=7)", "ruff (>=0.4)"]
@@ -674,7 +675,7 @@ test = ["pytest (>=7)"]
 type = "git"
 url = "https://github.com/frapercan/cafaeval-protea.git"
 reference = "main"
-resolved_reference = "299e26507a847b6fc7e3ff15d93d29137a2bc3cf"
+resolved_reference = "52acad754ed5b7ee08c0e038e8a0575103d7c044"
 
 [[package]]
 name = "certifi"

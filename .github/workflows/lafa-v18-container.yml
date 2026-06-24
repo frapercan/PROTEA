@@ -1,11 +1,6 @@
 name: LAFA v18 Container
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'apps/lafa_v18/**'
-      - '.github/workflows/lafa-v18-container.yml'
   release:
     types: [published]
   workflow_dispatch:

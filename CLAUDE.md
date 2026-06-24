@@ -8,6 +8,16 @@ PROTEA is the target platform for the progressive consolidation of the **PIS** (
 
 New capabilities and data model extensions are expected continuously. Architectural decisions must accommodate evolution without regression, and computational efficiency must be preserved or improved at each step.
 
+## Branch and release model
+
+Two branches map to two environments (full runbook: `docs/source/runbooks/release-process.rst`).
+
+- **`develop` = trunk + development environment.** Every change lands here via a PR gated by the test/lint/docs/integration checks. The dev box tracks `develop` HEAD and redeploys from source. A push to `develop` runs the cheap gates only: it never builds a container and never publishes a package.
+- **`main` = production line.** A clean sequence of single-commit snapshots of `develop`'s tree, versioned by release-please. Production runs a tagged release, not `main` HEAD.
+- **Promote with `scripts/promote.sh [--auto]`.** It snapshots `develop`'s tree onto `main` as one commit (O(1), conflict-free regardless of divergence; never a `git merge`). Merging the promotion PR then lets release-please open the release PR; merging THAT cuts the tag, which is the only event that builds containers and publishes packages (`docker.yml` and the `*-container.yml` workflows are gated to `release: published`).
+
+PRs base `develop`. Never commit to `main` directly; reach it only through `promote.sh`.
+
 ## Commands
 
 All commands run from `repositories/PROTEA/`.

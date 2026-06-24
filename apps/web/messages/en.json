@@ -869,7 +869,7 @@
       "k": "K",
       "kTooltip": "Number of KNN neighbours per query protein. Higher K produces more training pairs but a heavier dump.",
       "trainWindow": "Train window",
-      "trainWindowTooltip": "GOA snapshot versions used for the temporal training split. Pairs proteins annotated in the older snapshot against new annotations gained by the newer one.",
+      "trainWindowTooltip": "GOA snapshot versions used for the dated training window (LAFA-style). Pairs proteins annotated in the earlier-dated snapshot against new annotations gained by the later-dated one, never random splits.",
       "test": "Test pair",
       "testTooltip": "The held-out evaluation snapshot pair. Must not overlap with the training window so the evaluation measures genuine generalization.",
       "schemaSha": "schema_sha",
