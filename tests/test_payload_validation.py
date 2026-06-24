@@ -48,6 +48,7 @@ from protea_contracts import (
 from pydantic import BaseModel, ValidationError
 
 from protea.core.operation_catalog import build_operation_registry
+from protea.core.operations.apply_learned_encoder import ApplyLearnedEncoderPayload
 from protea.core.operations.batch_rescore_evaluation import BatchRescoreEvaluationPayload
 from protea.core.operations.build_go_cooccurrence import BuildGoCooccurrencePayload
 from protea.core.operations.compute_embeddings import (
@@ -329,6 +330,13 @@ PAYLOAD_NEGATIVE_CASES: list[PayloadNegativeCase] = [
             "annotation_set_id": "ann",
         },
         ("pair_id",),
+    ),
+    # missing-required: source_embedding_config_id
+    (
+        "apply_learned_encoder",
+        ApplyLearnedEncoderPayload,
+        {"encoder_artifact_path": "/tmp/enc.pt"},
+        ("source_embedding_config_id",),
     ),
 ]
 
