@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/frapercan/PROTEA/compare/v0.9.1...v0.10.0) (2026-06-24)
+
+
+### Features
+
+* promote develop to main for the v0.10.0 release ([c867da7](https://github.com/frapercan/PROTEA/commit/c867da76f56683193ca6878408b49a42363d21c8))
+
 ## [0.9.1](https://github.com/frapercan/PROTEA/compare/v0.9.0...v0.9.1) (2026-06-03)
 
 
