@@ -178,6 +178,30 @@ In the `run_cafa_evaluation` payload:
 - pass `toi_file` pointing at LAFA's release
   `groundtruth_terms_of_interest.txt` for strict MFO parity.
 
+## Provenance: /benchmark and a manual dispatch agree
+
+`/benchmark` is read-only. It aggregates persisted `EvaluationResult`
+rows; it never runs an evaluation. So a `/benchmark` number agrees with a
+manual `POST /jobs` dispatch exactly when the manual dispatch used the
+recipe above (same `th_step`, `ia_file`, `toi_file`, OBO, prediction set).
+There is no second scoring path to drift from.
+
+Every eval row is now born job-backed. `BaseWorker` injects the claimed
+job's id as `_job_id` into the payload, and both eval operations thread it
+onto the persisted row (`protea.core.utils.job_id_from_payload`):
+`generate_evaluation_set` stamps `EvaluationSet.job_id`,
+`run_cafa_evaluation` stamps `EvaluationResult.job_id`. A row with
+`job_id = None` is an orphan artifact (the score-archaeology trap that
+blocked reproducing the prior champion) and is not part of the clean
+frame. The `/benchmark/matrix` per-cell payload surfaces `job_id`
+alongside `frame` / `temporal_window` / `leakage_role` / `arms_enabled`,
+so an operator can confirm a benchmarked cell is job-backed and
+frame-stamped (not an orphan) without a second request.
+
+The exact clean-frame invocation (asymmetric cross-OBO pins, IA, TOI, the
+bit-identical two-run reproducibility check) is the
+`runbooks/reproducible-eval-frame` runbook.
+
 ## Obsolete metrics (front-end guidance)
 
 The front-end should label these as deprecated and de-emphasize them, with
