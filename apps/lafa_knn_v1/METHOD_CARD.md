@@ -2,7 +2,8 @@
 
 LAFA v2 submission #1 from PROTEA. KNN baseline: ProtT5 PLM, cosine
 distance, per-aspect K-nearest-neighbour transfer of GO annotations,
-no learned reranker. Companion submissions `protea-knn-8plm`
+plus a self-prior (each target's own t0 non-experimental annotations
+injected as a prior), no learned reranker. Companion submissions `protea-knn-8plm`
 (ensemble of eight PLMs) and `protea-v18` (full pipeline with v6
 features and per-aspect LightGBM rerank) follow in the same v2 cycle.
 
@@ -71,9 +72,11 @@ The image follows the LAFA container guide bind-mount layout:
 ```
 
 Default entrypoint runs `protea-predict --aspect_separated --no_v6
---no_reranker` against the bind-mounted bundle. Extra positional args
-are forwarded to `protea-predict`, so the evaluator can sweep K or
-distance metrics without rebuilding (the three baseline flags are
+--no_reranker --self_prior` against the bind-mounted bundle (this is the
+no-booster path; when a universal booster ships in the bundle the
+entrypoint runs `--universal_reranker --self_prior` instead). Extra
+positional args are forwarded to `protea-predict`, so the evaluator can
+sweep K or distance metrics without rebuilding (the baseline flags are
 pinned and cannot be undone from the command line).
 
 ## Frozen-data bundle
@@ -92,7 +95,8 @@ consulted:
 ```
 
 `pca_state.npz`, `anc2vec.npz`, and `reranker/` are ignored by the
-v1 baseline (the entrypoint pins `--no_v6 --no_reranker`).
+v1 baseline (the entrypoint pins `--no_v6 --no_reranker`); the
+`--self_prior` term draws only on `reference_annotations.parquet`.
 
 ## Output format
 
