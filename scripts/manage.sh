@@ -18,6 +18,27 @@ PID_DIR="$ROOT/logs/pids"
 GREEN="\033[32m"; RED="\033[31m"; YELLOW="\033[33m"
 CYAN="\033[36m"; BOLD="\033[1m"; RESET="\033[0m"
 
+# ── env sourcing ──────────────────────────────────────────────────────────────
+# A naive `manage.sh start` (no caller-side env sourcing) used to crash the API
+# with `RuntimeError: PROTEA_JWT_SECRET not set` and leave the stack down
+# (incident project_stack_env_not_sourced_outage). manage.sh now sources its own
+# env so it is correct regardless of caller. `.env` is the canonical bundle (a
+# symlink to ~/.secrets/protea.env in the deploy slot); `.env.local` holds any
+# non-tracked per-host overrides and is sourced last so it wins. Both are
+# optional: on hosts without them (CI, fresh clones) sourcing is a silent no-op.
+_source_env() {
+    local f
+    for f in "$ROOT/.env" "$ROOT/.env.local"; do
+        if [[ -f "$f" ]]; then
+            printf "  ${CYAN}sourcing %s${RESET}\n" "$(basename "$f")"
+            set -a
+            # shellcheck disable=SC1090
+            source "$f"
+            set +a
+        fi
+    done
+}
+
 # ── helpers ───────────────────────────────────────────────────────────────────
 _start_bg() {
     local name="$1"; shift
@@ -25,6 +46,12 @@ _start_bg() {
     setsid "$@" >> "$LOG_DIR/${name}.log" 2>&1 &
     local pid=$!
     echo "$pid" > "$PID_DIR/${name}.pid"
+    # Record the launch command so the watchdog can restart a dead worker
+    # with the identical invocation (one arg per line, NUL-safe enough for
+    # our fixed worker.py/poetry argv). Env vars (PORT/HOSTNAME) set inline by
+    # the caller are NOT captured; only the api/frontend carry those and the
+    # watchdog restarts them via their own dedicated paths, not from .cmd.
+    printf '%s\n' "$@" > "$PID_DIR/${name}.cmd"
     printf "  ${GREEN}✓${RESET} %-35s PID %s\n" "$name" "$pid"
 }
 
@@ -37,7 +64,7 @@ _stop_pid() {
             kill -15 -- -"$pid" 2>/dev/null || kill -15 "$pid" 2>/dev/null
             printf "  ${RED}✗${RESET} %-35s stopping (PID %s) — SIGTERM sent\n" "$name" "$pid"
         fi
-        rm -f "$pidfile"
+        rm -f "$pidfile" "$PID_DIR/$name.cmd"
     fi
 }
 
@@ -59,6 +86,11 @@ cmd_start() {
 
     printf "\n${BOLD}=== PROTEA dev stack (${BATCH_WORKERS} batch worker(s)) ===${RESET}\n\n"
 
+    # Source env BEFORE touching the API so AUTHN_REQUIRED + JWT secret are set;
+    # a naive caller that forgot to source .env must not crash the API.
+    printf "${BOLD}[0] Environment${RESET}\n"
+    _source_env
+
     # Stop survivors
     printf "${BOLD}[1] Stopping previous processes...${RESET}\n"
     for f in "$PID_DIR"/*.pid; do
@@ -67,8 +99,21 @@ cmd_start() {
     # Kill API and frontend (no long-running jobs, safe to force-kill)
     kill -9 $(pgrep -f "uvicorn protea.api" 2>/dev/null) 2>/dev/null || true
     kill -9 $(pgrep -f "next-server" 2>/dev/null) 2>/dev/null || true
-    # Workers that were tracked received SIGTERM above; untracked ones are left
-    # running so long-running jobs (e.g. run_cafa_evaluation) are not interrupted.
+    # Kill ALL worker.py processes, tracked or not. Leaving orphaned workers
+    # from a previous start alive accumulates duplicate queue consumers (4x
+    # observed), duplicated job processing, stale-code execution after a
+    # redeploy, and unbounded RAM growth (each predictions.batch worker pins a
+    # ~1 GB+ reference pool; three orphans reached ~45 GB). The fresh set takes
+    # over the queues; any in-flight job is requeued at-least-once and the
+    # reaper reclaims its expired lease. SIGTERM for a graceful drain, then
+    # SIGKILL the stragglers. The "scripts/worker[.]py" char-class keeps this
+    # command from matching its own argv.
+    pkill -TERM -f "scripts/worker[.]py" 2>/dev/null || true
+    for _ in 1 2 3; do
+        pgrep -f "scripts/worker[.]py" >/dev/null 2>&1 || break
+        sleep 1
+    done
+    pkill -KILL -f "scripts/worker[.]py" 2>/dev/null || true
     sleep 1
 
     # Database migrations
@@ -388,6 +433,108 @@ cmd_scale() {
     printf "\n"
 }
 
+# ── self-healing watchdog ─────────────────────────────────────────────────────
+# Health probes return 0 (healthy) / 1 (down). Kept tiny so a watch loop can
+# poll them cheaply every WATCH_INTERVAL seconds without forking the world.
+
+_api_healthy() {
+    curl -sf http://localhost:8000/health -o /dev/null 2>&1
+}
+
+_frontend_healthy() {
+    curl -sf http://localhost:3000 -o /dev/null 2>&1
+}
+
+# Restart the API in-place (no full stack bounce). Env is re-sourced so the
+# restarted process gets PROTEA_JWT_SECRET etc. even if the watchdog was
+# launched from a bare shell.
+_restart_api() {
+    _source_env
+    _stop_pid api
+    kill -9 "$(pgrep -f 'uvicorn protea.api' 2>/dev/null)" 2>/dev/null || true
+    cd "$ROOT"
+    _start_bg api poetry run uvicorn protea.api.app:create_app \
+        --factory --host 0.0.0.0 --port 8000 --root-path /api-proxy
+}
+
+# Restart any tracked worker whose process is dead, replaying its recorded
+# launch command. Idempotent: a worker whose PID is still alive is left alone,
+# so this never duplicates workers. Untracked (manually launched) workers and
+# the api/frontend are skipped here — the api has its own probe-driven restart
+# and long-running manual jobs must not be disturbed.
+_heal_dead_workers() {
+    local healed=0 f name pid
+    for f in "$PID_DIR"/*.pid; do
+        [[ -e "$f" ]] || continue
+        name="$(basename "$f" .pid)"
+        # api/frontend are not "$@"-replayable workers (they carry inline env /
+        # node argv); the API is handled by _restart_api, frontend by its probe.
+        [[ "$name" == "api" || "$name" == "frontend" ]] && continue
+        [[ -f "$PID_DIR/$name.cmd" ]] || continue
+        pid="$(cat "$f" 2>/dev/null || echo)"
+        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+            continue  # still alive — leave it
+        fi
+        # Dead: replay the recorded command (one arg per line).
+        local -a argv=()
+        mapfile -t argv < "$PID_DIR/$name.cmd"
+        [[ ${#argv[@]} -gt 0 ]] || continue
+        printf "  ${YELLOW}↻${RESET} restarting dead worker %-28s\n" "$name"
+        ( cd "$ROOT" && _start_bg "$name" "${argv[@]}" )
+        healed=$((healed + 1))
+    done
+    return "$healed"
+}
+
+# One-shot health check + heal. Returns 0 if everything was already healthy,
+# non-zero (count of components healed) otherwise. Safe to run from cron.
+cmd_health() {
+    _source_env
+    local healed=0
+    if ! _api_healthy; then
+        printf "  ${RED}●${RESET} API down — restarting\n"
+        _restart_api
+        # Give it a moment to bind before reporting.
+        for _ in $(seq 1 30); do _api_healthy && break; sleep 1; done
+        healed=$((healed + 1))
+    else
+        printf "  ${GREEN}●${RESET} API healthy\n"
+    fi
+
+    _heal_dead_workers || healed=$((healed + $?))
+
+    if [[ $healed -eq 0 ]]; then
+        printf "  ${GREEN}stack healthy${RESET}\n"
+    else
+        printf "  ${YELLOW}healed %s component(s)${RESET}\n" "$healed"
+    fi
+    return 0
+}
+
+# Supervised loop: probe + heal every WATCH_INTERVAL seconds (default 30) until
+# killed. Run under `nohup`/systemd/tmux for a persistent watchdog. Idempotent:
+# a second `watch` invocation refuses to start if a watchdog pidfile is already
+# live, so it never double-supervises (which would race two restarts).
+cmd_watch() {
+    local interval="${WATCH_INTERVAL:-30}"
+    mkdir -p "$PID_DIR"
+    local self_pidfile="$PID_DIR/watchdog.pid"
+    if [[ -f "$self_pidfile" ]]; then
+        local prev; prev="$(cat "$self_pidfile" 2>/dev/null || echo)"
+        if [[ -n "$prev" ]] && kill -0 "$prev" 2>/dev/null; then
+            printf "${YELLOW}watchdog already running (PID %s)${RESET}\n" "$prev"
+            exit 0
+        fi
+    fi
+    echo "$$" > "$self_pidfile"
+    trap 'rm -f "$self_pidfile"' EXIT
+    printf "${BOLD}watchdog up${RESET} (interval ${interval}s, PID $$). Probing API + workers.\n"
+    while true; do
+        cmd_health >> "$LOG_DIR/watchdog.log" 2>&1 || true
+        sleep "$interval"
+    done
+}
+
 # ── dispatch ──────────────────────────────────────────────────────────────────
 CMD="${1:-help}"
 shift || true
@@ -398,18 +545,23 @@ case "$CMD" in
     status) cmd_status ;;
     logs)   cmd_logs "${1:-}" ;;
     scale)  cmd_scale "${1:-}" "${2:-1}" ;;
+    health) cmd_health ;;
+    watch)  cmd_watch ;;
     help|--help|-h)
         printf "\n${BOLD}PROTEA dev stack manager${RESET}\n\n"
         printf "  ${CYAN}bash scripts/manage.sh start [N]${RESET}           Start stack (N batch workers per pipeline)\n"
         printf "  ${CYAN}bash scripts/manage.sh stop${RESET}                Stop all processes\n"
         printf "  ${CYAN}bash scripts/manage.sh status${RESET}              Show worker status + RAM\n"
         printf "  ${CYAN}bash scripts/manage.sh logs [name]${RESET}         Tail logs (interactive if no name)\n"
-        printf "  ${CYAN}bash scripts/manage.sh scale <queue> [N]${RESET}   Add N extra workers to a queue\n\n"
+        printf "  ${CYAN}bash scripts/manage.sh scale <queue> [N]${RESET}   Add N extra workers to a queue\n"
+        printf "  ${CYAN}bash scripts/manage.sh health${RESET}              One-shot probe + heal dead components\n"
+        printf "  ${CYAN}bash scripts/manage.sh watch${RESET}               Supervised self-heal loop (WATCH_INTERVAL=30s)\n\n"
         printf "Examples:\n"
         printf "  bash scripts/manage.sh start          # 1 batch worker per pipeline\n"
         printf "  bash scripts/manage.sh start 2        # 2 batch workers per pipeline\n"
         printf "  bash scripts/manage.sh scale protea.predictions.batch 2\n"
-        printf "  bash scripts/manage.sh logs predictions\n\n"
+        printf "  bash scripts/manage.sh logs predictions\n"
+        printf "  nohup bash scripts/manage.sh watch &  # background watchdog\n\n"
         ;;
     *)
         printf "${RED}Unknown command: %s${RESET}\n" "$CMD"

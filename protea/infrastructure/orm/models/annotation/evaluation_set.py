@@ -4,7 +4,15 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, UniqueConstraint, func
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -27,6 +35,15 @@ class EvaluationSet(Base):
     Delta proteins are those that gained at least one new experimental annotation
     between old → new.  NK/LK classification and NOT-qualifier propagation are
     applied during both generation and export.
+
+    ``window_role`` binds this set to one of the rolling-origin protocol
+    windows of ADR D40: ``"valid"`` marks the selection / threshold-tuning
+    window (t-1 -> t0), ``"test"`` marks the report-once window (t0 -> t1),
+    and ``None`` leaves the set unbound (ad-hoc episodes). A cell can be
+    scored on the VALID set first and only then on the TEST set, which is
+    the structural piece that lets selection happen off the reported
+    window (no winner's-curse). The field is metadata only: it does not
+    change how the delta is computed.
     """
 
     __tablename__ = "evaluation_set"
@@ -41,6 +58,12 @@ class EvaluationSet(Base):
             "old_annotation_set_id",
             "new_annotation_set_id",
             name="uq_evaluation_set_old_new_annotation_set",
+        ),
+        # ADR D40: keep the protocol-window vocabulary closed at the DB
+        # level without a native enum type (cheaper to extend later).
+        CheckConstraint(
+            "window_role IS NULL OR window_role IN ('valid', 'test')",
+            name="ck_evaluation_set_window_role",
         ),
     )
 
@@ -68,6 +91,11 @@ class EvaluationSet(Base):
     )
     stats: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     groundtruth_uri: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # ADR D40: rolling-origin protocol window this set is bound to.
+    # ``"valid"`` | ``"test"`` | ``None`` (unbound). Nullable so legacy
+    # rows and ad-hoc episodes carry no role; a CHECK constraint keeps
+    # the value set closed without a native enum (cheaper to evolve).
+    window_role: Mapped[str | None] = mapped_column(String(8), nullable=True)
 
     old_annotation_set: Mapped[AnnotationSet] = relationship(
         "AnnotationSet", foreign_keys=[old_annotation_set_id]

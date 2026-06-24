@@ -97,8 +97,11 @@ class Settings:
     # full resolution chain (env > artifact store > repo fallback).
     anc2vec_path: str | None = None
     # FARM-AUTH.6: anonymous quick-annotate calls per IP hash per UTC day.
-    # Override with env var PROTEA_ANON_QUOTA_PER_DAY.
-    anon_quota_per_day: int = 5
+    # Override with env var PROTEA_ANON_QUOTA_PER_DAY. Default is set
+    # effectively-unlimited on purpose: the public PROTEA instance is meant
+    # to be freely usable (open research demo), so the anon gate is a soft
+    # backstop against pathological abuse, not a real throttle.
+    anon_quota_per_day: int = 1_000_000_000
     # FARM-AUTH.7: per-user daily quota limits keyed by operation name.
     # Override via PROTEA_USER_QUOTA_JSON='{"predict": 50}' (JSON string).
     user_quota_per_day: dict[str, int] = field(
@@ -240,7 +243,7 @@ def _make_settings_cls(env_prefix: str, env_file: Path | None) -> type[BaseSetti
         minio_secret_key: str | None = None
         minio_secure: bool = False
         anc2vec_path: str | None = None
-        anon_quota_per_day: int = 5
+        anon_quota_per_day: int = 1_000_000_000
         # FARM-AUTH.7: JSON string override for per-user daily quota limits.
         user_quota_json: str | None = None
         smtp_enabled: bool = False

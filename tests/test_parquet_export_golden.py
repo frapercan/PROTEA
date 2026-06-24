@@ -51,8 +51,13 @@ EVAL_FIXTURE = FIXTURE_DIR / "parquet_export_golden_eval.parquet"
 # the contracts ``ALL_FEATURES`` order under which the golden was
 # captured. Rolled forward in T-RES.1b: the prior
 # ``"0d9b7219433f"`` (52 columns) is superseded by the value below
-# after ``protea-contracts`` v0.3.0 added the lineage family.
-_LEGACY_FIXTURE_SHA = "6d97a624b8a7"
+# after ``protea-contracts`` v0.3.0 added the lineage family. S3
+# rolls it forward again: ``protea-contracts`` 0.4.0 added the
+# 11-column interpro feature family (67 columns total), superseding
+# the prior ``"6d97a624b8a7"``. lafa-integrate adds the 6 classifier /
+# self_prior / association columns (73 columns total), superseding
+# the prior ``"ebb8af49befd"``.
+_LEGACY_FIXTURE_SHA = "775611822dd9"
 
 
 def _full_feature_row() -> dict[str, object]:
@@ -138,8 +143,8 @@ class TestGoldenParquetBitExact:
         produced = (tmp_path / "train.parquet").read_bytes()
         reference = TRAIN_FIXTURE.read_bytes()
         assert produced == reference, (
-            "train.parquet bytes diverged from the T-RES.1b golden "
-            f"(sha256[:12]=7c93f376b7bd, schema_sha={_LEGACY_FIXTURE_SHA}). "
+            "train.parquet bytes diverged from the S3 interpro golden "
+            f"(sha256[:12]=2f93adeaa892, schema_sha={_LEGACY_FIXTURE_SHA}). "
             f"produced_size={len(produced)} reference_size={len(reference)}. "
             "Either the FeatureRegistry column order drifted from "
             "protea_contracts.ALL_FEATURES, or parquet writer flags changed. "
@@ -152,8 +157,8 @@ class TestGoldenParquetBitExact:
         produced = (tmp_path / "eval.parquet").read_bytes()
         reference = EVAL_FIXTURE.read_bytes()
         assert produced == reference, (
-            "eval.parquet bytes diverged from the T-RES.1b golden "
-            f"(sha256[:12]=a5085fd1814b, schema_sha={_LEGACY_FIXTURE_SHA}). "
+            "eval.parquet bytes diverged from the S3 interpro golden "
+            f"(sha256[:12]=fb49af9d1e16, schema_sha={_LEGACY_FIXTURE_SHA}). "
             f"produced_size={len(produced)} reference_size={len(reference)}. "
             "Same root causes as the train check; see that test for context."
         )

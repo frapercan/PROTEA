@@ -1,0 +1,227 @@
+"""Train/serve feature parity for the dataset export (lafa-integrate INT-6).
+
+The PREDICT path computes the ``self_prior`` / ``association`` / ``classifier``
+feature families behind the ``compute_self_prior`` / ``compute_association`` /
+``compute_classifier`` flags (see
+``protea.core.operations.predict_go_terms._post_knn_pipeline``). The EXPORT
+path (``export_research_dataset`` reusing ``TrainRerankerAutoOperation`` in
+``dump_only`` mode) historically emitted the zero-fill defaults for those six
+columns, so a booster trained on an exported dataset saw zeros for families the
+predict path actually serves: a train/serve mismatch (NFR-REPRO).
+
+This module closes that gap by REUSING the exact predict producers on the
+export's per-query candidate records. It does not duplicate the scoring math:
+
+* ``apply_self_prior`` / ``apply_association`` are imported verbatim from
+  ``_post_knn_pipeline`` (pure list mutators keyed by
+  ``(protein_accession, go_term_id)``).
+* the classifier reuses ``classifier_producer.load_concat_features`` /
+  ``get_classifier`` / ``resolve_go_term_ids`` and UNIONs the classifier's
+  full-vocabulary proposals into the export candidate set, exactly like the
+  predict path's ``apply_classifier`` / ``_merge_classifier_preds``: existing
+  ``(protein, go_id)`` candidates are stamped (``classifier_score`` /
+  ``classifier_present``); proposals absent from the KNN + ancestor + InterPro
+  set are APPENDED as brand-new full-canonical rows (``knn_present`` False,
+  ``distance`` NaN, KNN-derived features NaN). This closes the train/eval pool
+  MISMATCH: the predict path serves a ``union(knn, classifier, ...)`` candidate
+  pool, so a booster trained on a KNN-only export saw the classifier-added rows
+  as out-of-distribution at inference. The new rows carry every canonical
+  feature column (the T1.8 boundary holds) and pick up their GT label from the
+  SAME downstream ``(protein, go_id)`` labeling the KNN candidates use.
+
+Leakage discipline (load-bearing): every feature value is derived ONLY from the
+pre-cutoff t0 annotation set (the same ``annotation_set_id`` the KNN reference
+pool was built from, never a post-cutoff set), so the features for a row use
+only data at or before that row's prediction cutoff. The producers themselves
+drop NOT-qualified rows and split experimental vs. non-experimental evidence.
+The applier runs per query (all of that query's candidates together), so it is
+invoked identically in the list (train) and streaming (test) record paths.
+"""
+
+from __future__ import annotations
+
+import uuid
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, cast
+
+from protea.core.operations.predict_go_terms._batch_op_feature import _FeatureLoadingMixin
+from protea.core.operations.predict_go_terms._post_knn_pipeline import (
+    apply_association,
+    apply_self_prior,
+)
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
+    from protea.core.operations.predict_go_terms._batch_op import (
+        PredictGOTermsBatchOperation,
+    )
+
+
+@dataclass(frozen=True)
+class ExportParityFlags:
+    """Which INT-6 parity feature families the export should compute.
+
+    Each flag independently enables one predict-path producer. All False (the
+    default) makes :func:`apply_export_parity_features` a no-op, so the default
+    export keeps the leaf builder's zero-fill defaults (bit-identical).
+    """
+
+    self_prior: bool = False
+    association: bool = False
+    classifier: bool = False
+
+    @property
+    def any(self) -> bool:
+        return self.self_prior or self.association or self.classifier
+
+
+class _ExportFeatureOp(_FeatureLoadingMixin):
+    """Minimal adapter exposing the annotation loader the producers need.
+
+    ``apply_self_prior`` / ``apply_association`` take an ``op`` purely to call
+    ``op._load_annotations_for``; that method lives on ``_FeatureLoadingMixin``
+    and has no other instance state, so a bare mixin instance is a faithful,
+    leakage-equivalent stand-in for the live ``PredictGOTermsBatchOperation``.
+    """
+
+
+def _noop_emit(*_args: Any, **_kwargs: Any) -> None:
+    """Swallow producer audit events; the dump pipeline has its own logging."""
+    return None
+
+
+# A factory that builds one full-canonical classifier-only candidate row for a
+# ``(protein, go_id, aspect, score)`` the classifier proposes but the KNN +
+# ancestor + InterPro candidate set does not already carry. Supplied by the
+# runner (it owns the leaf-record builder + aspect map).
+ClassifierRecordFactory = Callable[[str, str, str, float], dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class ClassifierUnionSpec:
+    """Inputs the classifier candidate-pool union needs beyond the records.
+
+    Bundles the snapshot id (to resolve proposals to term ids), the row
+    ``record_factory`` and the ``aspect_by_term_id`` map so
+    :func:`apply_export_parity_features` stays under the §3 6-arg ceiling.
+    ``record_factory`` ``None`` keeps the legacy STAMP-ONLY behaviour (no new
+    rows appended), so the isolated unit-tests and any caller that cannot
+    materialise a full canonical row stay safe.
+    """
+
+    ontology_snapshot_id: uuid.UUID
+    record_factory: ClassifierRecordFactory | None = None
+    aspect_by_term_id: dict[int, str] | None = None
+
+
+def apply_export_parity_features(
+    session: Session,
+    t0_annotation_set_id: uuid.UUID,
+    valid_accessions: list[str],
+    records: list[dict[str, Any]],
+    flags: ExportParityFlags,
+    classifier_union: ClassifierUnionSpec | None = None,
+) -> list[dict[str, Any]]:
+    """Fill the real self_prior / association / classifier values in place.
+
+    Mutates ``records`` (the export's per-query candidate dicts) so the six
+    LAFA columns carry the SAME values the predict path serves, matching what a
+    lab booster sees at inference time. Each flag is independent; when all are
+    off this is a no-op and the records keep their zero-fill defaults (default
+    export stays bit-identical). ``records`` must already carry the six
+    zero-filled columns (the leaf builder guarantees this).
+
+    The classifier step UNIONs the classifier's full-vocabulary proposals into
+    the candidate pool exactly like the predict path: existing candidates are
+    stamped, proposals absent from the pool are APPENDED as new canonical rows
+    via ``classifier_union.record_factory`` (when supplied). This closes the
+    train/eval candidate-pool MISMATCH. The self_prior / association producers
+    run AFTER the union so the appended rows also pick up their priors when the
+    query has known terms.
+
+    Returns the (possibly grown) record list; callers must rebind it. The
+    classifier flag requires ``classifier_union`` (the snapshot id is mandatory
+    to resolve proposals); when ``flags.classifier`` is off it is ignored.
+    """
+    if not flags.any or not records or not valid_accessions:
+        return records
+    # ``_ExportFeatureOp`` only provides ``_load_annotations_for`` (all the
+    # producers touch on ``op``); cast to satisfy their stricter annotation.
+    op = cast("PredictGOTermsBatchOperation", _ExportFeatureOp())
+    # Union the classifier proposals FIRST so the prior producers below see the
+    # appended rows (a query's known terms can prime the appended candidate).
+    if flags.classifier and classifier_union is not None:
+        records = _union_classifier_candidates(session, valid_accessions, records, classifier_union)
+    if flags.self_prior:
+        apply_self_prior(op, session, t0_annotation_set_id, valid_accessions, records, _noop_emit)
+    if flags.association:
+        apply_association(op, session, t0_annotation_set_id, valid_accessions, records, _noop_emit)
+    return records
+
+
+def _union_classifier_candidates(
+    session: Session,
+    valid_accessions: list[str],
+    records: list[dict[str, Any]],
+    spec: ClassifierUnionSpec,
+) -> list[dict[str, Any]]:
+    """Stamp existing candidates and APPEND classifier-only proposals.
+
+    Reuses the predict-path classifier producer's loaders verbatim, then mirrors
+    ``_post_knn_pipeline._merge_classifier_preds``: a proposal matching an
+    existing ``(protein, go_term_id)`` candidate stamps it; a proposal with no
+    match becomes a new full-canonical row built by ``spec.record_factory``.
+    With no factory only the stamping runs (the export keeps its prior KNN-only
+    pool), so an isolated caller stays safe. Returns the (possibly grown) list.
+    """
+    from protea.core.classifier_producer import (
+        predict_proteins_cached,
+        resolve_go_term_ids,
+    )
+
+    accessions = [acc for acc in valid_accessions if acc]
+    # P2: the classifier output is t0-independent, so memoise it per protein and
+    # reuse it across the 13 train snapshot pairs (and the test pair) instead of
+    # recomputing it from scratch each pair. Cache hits skip both the embedding
+    # load and the GPU forward pass; the rows are identical to the fresh
+    # ``get_classifier().predict(load_concat_features(...))`` output.
+    preds = predict_proteins_cached(session, accessions)
+    if not preds:
+        return records
+    go_ids = {pr.go_id for pr in preds}
+    gid_by_go = resolve_go_term_ids(session, go_ids, spec.ontology_snapshot_id)
+    by_key: dict[tuple[str, int], dict[str, Any]] = {}
+    for rec in records:
+        gtid = rec.get("go_term_id")
+        if gtid is not None:
+            by_key[(rec.get("protein_accession", ""), int(gtid))] = rec
+    aspect_map = spec.aspect_by_term_id or {}
+    for pr in preds:
+        gtid = gid_by_go.get(pr.go_id)
+        if gtid is None:
+            continue
+        existing = by_key.get((pr.accession, gtid))
+        if existing is not None:
+            existing["classifier_score"] = float(pr.score)
+            existing["classifier_present"] = 1.0
+            continue
+        if spec.record_factory is None:
+            continue
+        rec = spec.record_factory(pr.accession, pr.go_id, aspect_map.get(gtid, ""), float(pr.score))
+        # Carry the int id transiently so the prior producers (which key by
+        # ``go_term_id``) can score the appended row; the runner strips it
+        # before emit, leaving the parquet schema unchanged.
+        rec["go_term_id"] = gtid
+        by_key[(pr.accession, gtid)] = rec
+        records.append(rec)
+    return records
+
+
+__all__ = (
+    "ClassifierRecordFactory",
+    "ClassifierUnionSpec",
+    "ExportParityFlags",
+    "apply_export_parity_features",
+)

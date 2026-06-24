@@ -66,6 +66,16 @@ def _pred_score_inputs(pred: GOPrediction) -> dict[str, Any]:
         "evidence_code": pred.evidence_code,
         "taxonomic_distance": pred.taxonomic_distance,
         "neighbor_vote_fraction": pred.neighbor_vote_fraction,
+        # A-SCORE rich axes (coverage A3 / ref-density F / anc2vec G / IA-prior E)
+        "alignment_length_nw": pred.alignment_length_nw,
+        "gaps_pct_nw": pred.gaps_pct_nw,
+        "alignment_length_sw": pred.alignment_length_sw,
+        "gaps_pct_sw": pred.gaps_pct_sw,
+        "length_query": pred.length_query,
+        "ref_annotation_density": pred.ref_annotation_density,
+        "anc2vec_neighbor_cos": pred.anc2vec_neighbor_cos,
+        "anc2vec_neighbor_maxcos": pred.anc2vec_neighbor_maxcos,
+        "go_term_frequency": pred.go_term_frequency,
     }
 
 

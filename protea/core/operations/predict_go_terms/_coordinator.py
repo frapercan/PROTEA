@@ -17,6 +17,7 @@ from protea.core.operations.predict_go_terms._common import (
     _BATCH_QUEUE,
     PredictGOTermsPayload,
     _RerankerBinding,
+    _RerankerDispatch,
 )
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
@@ -26,6 +27,24 @@ from protea.infrastructure.orm.models.embedding.reranker_model import RerankerMo
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.orm.models.query.query_set import QuerySet, QuerySetEntry
+
+
+def _category_payload_fields(
+    per_category: dict[str, _RerankerBinding],
+) -> dict[str, str | None]:
+    """Flatten per-category bindings into batch-payload fields.
+
+    Always emits the six ``reranker_<cat>_*`` keys so the batch payload shape is
+    stable; values are ``None`` when per-category dispatch was not requested.
+    """
+    fields: dict[str, str | None] = {}
+    for cat in ("nk", "lk", "pk"):
+        binding = per_category.get(cat.upper())
+        fields[f"reranker_{cat}_artifact_uri"] = binding.artifact_uri if binding else None
+        fields[f"reranker_{cat}_feature_schema_sha"] = (
+            binding.feature_schema_sha if binding else None
+        )
+    return fields
 
 
 class PredictGOTermsOperation:
@@ -105,7 +124,10 @@ class PredictGOTermsOperation:
             self._validate_inputs(session, p)
         )
         self._emit_start(emit, p, config.model_name)
-        binding = self._resolve_reranker_binding(session, p, emit)
+        dispatch = _RerankerDispatch(
+            single=self._resolve_reranker_binding(session, p, emit),
+            per_category=self._resolve_category_bindings(session, p, emit),
+        )
 
         query_accessions = self._load_query_accessions(session, p, embedding_config_id, emit)
         if not query_accessions:
@@ -139,10 +161,9 @@ class PredictGOTermsOperation:
             ),
             {"n": n_batches, "jid": parent_job_id},
         )
-        operations = [
-            (_BATCH_QUEUE, self._build_batch_message(p, prediction_set.id, parent_job_id, accs, binding))
-            for accs in batches
-        ]
+        operations = self._build_batch_operations(
+            p, prediction_set.id, parent_job_id, batches, dispatch
+        )
         return OperationResult(
             result={
                 "batches": n_batches,
@@ -245,40 +266,108 @@ class PredictGOTermsOperation:
         prediction_set_id: uuid.UUID,
         parent_job_id: UUID,
         batch_accs: list[str],
-        binding: _RerankerBinding | None,
+        dispatch: _RerankerDispatch,
     ) -> dict[str, Any]:
         """Serialise one batch into the predict_go_terms_batch dispatch payload."""
+        binding = dispatch.single
+        payload = {
+            "embedding_config_id": p.embedding_config_id,
+            "annotation_set_id": p.annotation_set_id,
+            "ontology_snapshot_id": p.ontology_snapshot_id,
+            "prediction_set_id": str(prediction_set_id),
+            "parent_job_id": str(parent_job_id),
+            "query_accessions": batch_accs,
+            "query_set_id": p.query_set_id,
+            "limit_per_entry": p.limit_per_entry,
+            "distance_threshold": p.distance_threshold,
+            "search_backend": p.search_backend,
+            "metric": p.metric,
+            "faiss_index_type": p.faiss_index_type,
+            "faiss_nlist": p.faiss_nlist,
+            "faiss_nprobe": p.faiss_nprobe,
+            "faiss_hnsw_m": p.faiss_hnsw_m,
+            "faiss_hnsw_ef_search": p.faiss_hnsw_ef_search,
+            "compute_alignments": p.compute_alignments,
+            "compute_taxonomy": p.compute_taxonomy,
+            "compute_reranker_features": p.compute_reranker_features,
+            "compute_v6_features": p.compute_v6_features,
+            "compute_classifier": p.compute_classifier,
+            "compute_self_prior": p.compute_self_prior,
+            "compute_association": p.compute_association,
+            "compute_ia": getattr(p, "compute_ia", False),
+            "ia_file": getattr(p, "ia_file", None),
+            "expand_votes_to_ancestors": p.expand_votes_to_ancestors,
+            "aspect_separated_knn": p.aspect_separated_knn,
+            "reranker_model_id": p.reranker_model_id,
+            "reranker_artifact_uri": binding.artifact_uri if binding else None,
+            "reranker_feature_schema_sha": binding.feature_schema_sha if binding else None,
+        }
+        payload.update(_category_payload_fields(dispatch.per_category))
         return {
             "operation": "predict_go_terms_batch",
             "job_id": str(parent_job_id),
-            "payload": {
-                "embedding_config_id": p.embedding_config_id,
-                "annotation_set_id": p.annotation_set_id,
-                "ontology_snapshot_id": p.ontology_snapshot_id,
-                "prediction_set_id": str(prediction_set_id),
-                "parent_job_id": str(parent_job_id),
-                "query_accessions": batch_accs,
-                "query_set_id": p.query_set_id,
-                "limit_per_entry": p.limit_per_entry,
-                "distance_threshold": p.distance_threshold,
-                "search_backend": p.search_backend,
-                "metric": p.metric,
-                "faiss_index_type": p.faiss_index_type,
-                "faiss_nlist": p.faiss_nlist,
-                "faiss_nprobe": p.faiss_nprobe,
-                "faiss_hnsw_m": p.faiss_hnsw_m,
-                "faiss_hnsw_ef_search": p.faiss_hnsw_ef_search,
-                "compute_alignments": p.compute_alignments,
-                "compute_taxonomy": p.compute_taxonomy,
-                "compute_reranker_features": p.compute_reranker_features,
-                "compute_v6_features": p.compute_v6_features,
-                "expand_votes_to_ancestors": p.expand_votes_to_ancestors,
-                "aspect_separated_knn": p.aspect_separated_knn,
-                "reranker_model_id": p.reranker_model_id,
-                "reranker_artifact_uri": binding.artifact_uri if binding else None,
-                "reranker_feature_schema_sha": binding.feature_schema_sha if binding else None,
-            },
+            "payload": payload,
         }
+
+    def _build_batch_operations(
+        self,
+        p: PredictGOTermsPayload,
+        prediction_set_id: uuid.UUID,
+        parent_job_id: UUID,
+        batches: list[list[str]],
+        dispatch: _RerankerDispatch,
+    ) -> list[tuple[str, dict[str, Any]]]:
+        """Build the predict_go_terms_batch dispatch operations for each batch."""
+        return [
+            (
+                _BATCH_QUEUE,
+                self._build_batch_message(p, prediction_set_id, parent_job_id, accs, dispatch),
+            )
+            for accs in batches
+        ]
+
+    def _resolve_category_bindings(
+        self, session: Session, p: PredictGOTermsPayload, emit: EmitFn
+    ) -> dict[str, _RerankerBinding]:
+        """Resolve the NK / LK / PK RerankerModel rows into per-category bindings.
+
+        Returns ``{}`` unless all three ``reranker_model_id_<cat>`` ids are set
+        (per-category dispatch is all-or-nothing). Reuses the same artifact /
+        schema validation as the single-booster resolver so a misconfigured
+        per-category model fails loudly at coordination time, not mid-batch.
+        """
+        ids = {
+            cat: getattr(p, f"reranker_model_id_{cat}", None)
+            for cat in ("nk", "lk", "pk")
+        }
+        if not all(ids.values()):
+            return {}
+        bindings = {
+            cat.upper(): self._binding_for_model(session, model_id)
+            for cat, model_id in ids.items()
+        }
+        emit(
+            "predict_go_terms.per_category_reranker_bound",
+            None,
+            {cat: ids[cat.lower()] for cat in bindings},
+            "info",
+        )
+        return bindings
+
+    @staticmethod
+    def _binding_for_model(session: Session, model_id: str) -> _RerankerBinding:
+        """Validate one RerankerModel row and return its artifact binding."""
+        row = session.get(RerankerModel, uuid.UUID(model_id))
+        if row is None:
+            raise ValueError(f"RerankerModel {model_id} not found")
+        if not row.artifact_uri:
+            raise ValueError(f"RerankerModel {model_id} has no artifact_uri")
+        if not row.feature_schema_sha:
+            raise ValueError(f"RerankerModel {model_id} has no feature_schema_sha")
+        return _RerankerBinding(
+            artifact_uri=row.artifact_uri,
+            feature_schema_sha=row.feature_schema_sha,
+        )
 
     def _load_query_accessions(
         self,

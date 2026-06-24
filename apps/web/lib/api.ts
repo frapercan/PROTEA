@@ -147,6 +147,24 @@ export function getJob(id: string) {
   return http<any>(`/jobs/${id}`);
 }
 
+export type GpuAvailability = {
+  busy: boolean;
+  running_fresh: number;
+  queued: number;
+  running_stale: number;
+  gpu_present?: boolean;
+  active_operation?: string | null;
+  progress_current?: number | null;
+  progress_total?: number | null;
+};
+
+// Truthful GPU busy/free signal (FIX-ANNOTATE-BANNER-ACCURACY). The
+// backend gates `busy` on freshly-leased RUNNING jobs + genuinely queued
+// work, so stale/zombie rows never falsely block the annotation form.
+export function getGpuAvailability() {
+  return http<GpuAvailability>(`/jobs/gpu-availability`);
+}
+
 export function getJobEvents(id: string, limit = 200) {
   return http<JobEvent[]>(`/jobs/${id}/events?limit=${limit}`);
 }
@@ -503,6 +521,22 @@ export function launchPredictGoTerms(body: {
 
 export function listPredictionSets() {
   return http<PredictionSet[]>(`/embeddings/prediction-sets/`);
+}
+
+/**
+ * Resolve the newest prediction set for a (query_set_id, embedding_config_id)
+ * pair via a cheap, uncached backend lookup. Used by the quick-annotate flow
+ * to redirect to results immediately, instead of scanning the 5-min-cached
+ * `listPredictionSets()` (which would not yet contain a just-created set).
+ */
+export function resolvePredictionSet(querySetId: string, embeddingConfigId: string) {
+  const qs = new URLSearchParams({
+    query_set_id: querySetId,
+    embedding_config_id: embeddingConfigId,
+  });
+  return http<{ id: string; created_at: string }>(
+    `/embeddings/prediction-sets/resolve?${qs.toString()}`,
+  );
 }
 
 export function getPredictionSet(id: string) {
@@ -960,9 +994,32 @@ export type ShowcasePipelineStage = {
 export type ShowcaseBestCell = {
   category: string;
   aspect: string;
-  fmax: number;
+  /** IA-weighted headline score for this cell (f_micro_w, fmax fallback for
+   *  legacy cells). Always present; `primary_metric` says which one drives it. */
+  primary: number;
+  /** Which metric `primary` carries: "f_micro_w" (LAFA-comparable) or the
+   *  legacy unweighted "fmax" fallback. */
+  primary_metric: "f_micro_w" | "fmax";
+  /** Raw IA-weighted score, null on cells that predate real-IA evaluation. */
+  f_micro_w: number | null;
+  fmax: number | null;
   precision: number | null;
   recall: number | null;
+};
+
+/** Per-(category, aspect) honest aggregate across every model: the mean
+ *  primary metric + a normal-approx 95% CI half-width. The home + benchmark
+ *  pages headline `mean ± ci95`, NOT the best-cell `max` (winner's-curse,
+ *  FIX-METRIC-IA). */
+export type PerTaskAggregate = {
+  category: string;
+  aspect: string;
+  metric: "f_micro_w" | "fmax";
+  mean: number;
+  ci95: number;
+  max: number;
+  min: number;
+  n_models: number;
 };
 
 export type ShowcaseEmbedding = {
@@ -978,7 +1035,12 @@ export type ShowcaseBest = {
   evaluation_result_id: string;
   evaluation_set_id: string;
   stage: "baseline" | "alignment_weighted" | "reranker";
-  avg_fmax: number;
+  /** Mean IA-weighted primary metric across this evaluation's 9 cells. This
+   *  is the BEST-CELL spotlight (max model); label it as such, never headline.*/
+  avg_primary: number;
+  /** "f_micro_w" when every contributing cell was IA-weighted, else "fmax"
+   *  (one or more legacy cells) so the spotlight can flag a non-IA result. */
+  primary_metric: "f_micro_w" | "fmax";
   embedding: ShowcaseEmbedding;
   per_cell: ShowcaseBestCell[];
 };
@@ -986,6 +1048,10 @@ export type ShowcaseBest = {
 export type ShowcaseData = {
   protein_stats: { total: number; canonical: number };
   best: ShowcaseBest | null;
+  /** Primary headline metric for the whole showcase (always "f_micro_w"). */
+  primary_metric: "f_micro_w";
+  /** Honest per-task mean ± 95% CI across all models. The home headline. */
+  per_task: PerTaskAggregate[];
   counts: {
     proteins: number;
     sequences: number;
@@ -1049,6 +1115,14 @@ export type BenchmarkRow = {
   k: number;
   category: string;
   aspect: string;
+  /** IA-weighted headline score for this cell (f_micro_w, fmax fallback). The
+   *  number the matrix ranks + displays; `primary_metric` flags which one. */
+  primary: number;
+  primary_metric: "f_micro_w" | "fmax";
+  /** Raw IA-weighted metrics; null on cells that predate real-IA evaluation. */
+  f_micro_w: number | null;
+  precision_w: number | null;
+  recall_w: number | null;
   fmax: number;
   precision: number | null;
   recall: number | null;
@@ -1066,11 +1140,31 @@ export type BenchmarkRow = {
   fmax_std?: number | null;
   fmax_ci_low?: number | null;
   fmax_ci_high?: number | null;
+  /**
+   * Method-surface provenance (slice F-METHOD-EVAL-SURFACE). All four are
+   * optional and null on rows written before the columns existed; the UI
+   * renders an explicit "unknown" badge in that case. `frame` =
+   * lafa | internal scoring frame, `temporal_window` = rolling-origin band
+   * label (e.g. SELECT_220_227 / FINAL_227_230), `arms_enabled` = flag dict
+   * of contributing arms, `leakage_role` = select | test | probe (ADR D40).
+   */
+  frame?: string | null;
+  temporal_window?: string | null;
+  arms_enabled?: Record<string, boolean> | null;
+  leakage_role?: string | null;
 };
 
 export type BenchmarkBestCell = {
   category: string;
   aspect: string;
+  /** IA-weighted best-cell score (f_micro_w, fmax fallback). This is the
+   *  per-cell MAXIMUM across models: label it "best cell", never as the
+   *  headline number (winner's-curse, FIX-METRIC-IA). */
+  primary: number;
+  primary_metric: "f_micro_w" | "fmax";
+  f_micro_w: number | null;
+  precision_w: number | null;
+  recall_w: number | null;
   fmax: number;
   precision: number | null;
   recall: number | null;
@@ -1080,6 +1174,11 @@ export type BenchmarkBestCell = {
   stage: string;
   evaluation_result_id: string;
   evaluation_set_id: string;
+  /** Method-surface provenance for the winning cell (see BenchmarkRow). */
+  frame?: string | null;
+  temporal_window?: string | null;
+  arms_enabled?: Record<string, boolean> | null;
+  leakage_role?: string | null;
 };
 
 export type BenchmarkEvalSet = {
@@ -1106,6 +1205,11 @@ export type BenchmarkEvalSet = {
 export type BenchmarkMatrixResponse = {
   rows: BenchmarkRow[];
   total: number;
+  /** Headline metric for the matrix: always "f_micro_w" (IA-weighted). */
+  primary_metric: "f_micro_w";
+  /** Honest per-task mean ± 95% CI across models, in the current selection.
+   *  The benchmark headline; the best-cell tables remain max-labelled. */
+  per_task: PerTaskAggregate[];
   evaluation_sets: BenchmarkEvalSet[];
   embedding_config_ids: string[];
   stages: BenchmarkStage[];
@@ -1152,10 +1256,10 @@ export type StackRepo = {
   role_label: string;
   status: "active" | "beta" | "skeleton" | "archived";
   summary: string;
+  summary_es: string | null;
   github_url: string;
   docs_url: string | null;
   package_url: string | null;
-  local_docs_path: string | null;
 };
 
 export type StackResponse = {

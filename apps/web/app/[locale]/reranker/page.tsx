@@ -662,6 +662,12 @@ export default function RerankerPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [registerOpen, setRegisterOpen] = useState(false);
 
+  // Pagination: the registry holds ~50 boosters, each card is tall, so the
+  // un-paginated page renders ~49k px and is impossible to navigate on a
+  // projector. Reveal PAGE_SIZE at a time behind a "Load more" control.
+  const PAGE_SIZE = 10;
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+
   async function loadAll() {
     setLoading(true);
     setError(null);
@@ -693,9 +699,16 @@ export default function RerankerPage() {
   useEffect(() => {
     const hash = targetHashRef.current;
     if (!hash || rerankers.length === 0) return;
+    // If the deep-linked card sits past the current page window, reveal
+    // enough cards so it exists in the DOM before we scroll to it.
+    const idx = rerankers.findIndex((r) => r.id === hash);
+    if (idx >= 0 && idx >= visibleCount) {
+      setVisibleCount(idx + 1);
+      return;
+    }
     const el = document.getElementById(hash);
     if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [rerankers]);
+  }, [rerankers, visibleCount]);
 
   return (
     <>
@@ -757,7 +770,7 @@ export default function RerankerPage() {
       )}
 
       <div className="space-y-3">
-        {rerankers.map((model) => (
+        {rerankers.slice(0, visibleCount).map((model) => (
           <RerankerCard
             key={model.id}
             model={model}
@@ -770,6 +783,23 @@ export default function RerankerPage() {
           />
         ))}
       </div>
+
+      {/* Load-more pager: keeps the initial render to ~10 cards so the
+          page is navigable on a projector instead of ~49k px tall. */}
+      {!loading && rerankers.length > visibleCount && (
+        <div className="mt-4 flex flex-col items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
+            className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 transition-colors"
+          >
+            Load more rerankers
+          </button>
+          <span className="text-xs text-slate-500 tabular-nums">
+            Showing {Math.min(visibleCount, rerankers.length)} of {rerankers.length}
+          </span>
+        </div>
+      )}
 
       {/* Lab-bridge dialogs: both reload the reranker list on success so
           the newly registered booster card materialises in place. */}

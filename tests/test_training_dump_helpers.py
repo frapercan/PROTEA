@@ -26,9 +26,9 @@ from protea.core._training_dump_loaders import (
     _TrainSplitOutcome,
 )
 from protea.core.training_dump_helpers import (
+    _build_train_knn_context,
     _compute_test_cat_membership,
     _emit_split_skipped,
-    _knn_and_filter_to_pivot,
     _label_and_write_train_split_shards,
     _label_test_split_per_category,
     _load_sequences,
@@ -39,7 +39,9 @@ from protea.core.training_dump_helpers import (
     _resolve_train_split_eval,
     _run_test_split,
     _run_train_split,
+    _stream_train_predictions,
     _write_labeled_test_batches,
+    _write_labeled_train_batches,
 )
 
 # ---------------------------------------------------------------------------
@@ -149,15 +151,14 @@ class TestLoadTestSequencesAndTaxonomy:
             "F": {"accessions": ["R3"]},
             "C": {"accessions": []},
         }
-        with patch(
-            "protea.core.training_dump._test_split._load_sequences",
-            side_effect=[{"P1": "M"}, {"R1": "AA", "R2": "BB", "R3": "CC"}],
-        ) as mock_seq, patch(
-            "protea.core.training_dump._test_split._load_taxonomy_ids"
-        ) as mock_tax:
-            out = _load_test_sequences_and_taxonomy(
-                MagicMock(), payload, ["P1"], test_ref
-            )
+        with (
+            patch(
+                "protea.core.training_dump._test_split._load_sequences",
+                side_effect=[{"P1": "M"}, {"R1": "AA", "R2": "BB", "R3": "CC"}],
+            ) as mock_seq,
+            patch("protea.core.training_dump._test_split._load_taxonomy_ids") as mock_tax,
+        ):
+            out = _load_test_sequences_and_taxonomy(MagicMock(), payload, ["P1"], test_ref)
         assert out.query_sequences == {"P1": "M"}
         assert out.ref_sequences == {"R1": "AA", "R2": "BB", "R3": "CC"}
         assert out.query_tax_ids is None
@@ -168,15 +169,14 @@ class TestLoadTestSequencesAndTaxonomy:
     def test_loads_taxonomy_when_only_taxonomy_enabled(self) -> None:
         payload = MagicMock(compute_alignments=False, compute_taxonomy=True)
         test_ref = {a: {"accessions": []} for a in ("P", "F", "C")}
-        with patch(
-            "protea.core.training_dump._test_split._load_sequences"
-        ) as mock_seq, patch(
-            "protea.core.training_dump._test_split._load_taxonomy_ids",
-            side_effect=[{"P1": 9606}, {}],
-        ) as mock_tax:
-            out = _load_test_sequences_and_taxonomy(
-                MagicMock(), payload, ["P1"], test_ref
-            )
+        with (
+            patch("protea.core.training_dump._test_split._load_sequences") as mock_seq,
+            patch(
+                "protea.core.training_dump._test_split._load_taxonomy_ids",
+                side_effect=[{"P1": 9606}, {}],
+            ) as mock_tax,
+        ):
+            out = _load_test_sequences_and_taxonomy(MagicMock(), payload, ["P1"], test_ref)
         assert out.query_tax_ids == {"P1": 9606}
         assert out.ref_tax_ids == {}
         assert out.query_sequences is None
@@ -288,12 +288,13 @@ class TestRunTestSplit:
             tmp_dir=tmp_path,
         )
         ref_stub = {a: {"accessions": []} for a in ("P", "F", "C")}
-        with patch(
-            "protea.core.training_dump._test_split._build_reference_from_cache",
-            return_value=ref_stub,
-        ), patch(
-            "protea.core.training_dump._test_split._knn_transfer_and_label"
-        ) as mock_knn:
+        with (
+            patch(
+                "protea.core.training_dump._test_split._build_reference_from_cache",
+                return_value=ref_stub,
+            ),
+            patch("protea.core.training_dump._test_split._knn_transfer_and_label") as mock_knn,
+        ):
             out = _run_test_split(MagicMock(), ctx, MagicMock())
         assert out == {"nk": None, "lk": None, "pk": None}
         mock_knn.assert_not_called()
@@ -306,15 +307,19 @@ class TestRunTestSplit:
             tmp_dir=tmp_path,
         )
         ref_stub = {a: {"accessions": []} for a in ("P", "F", "C")}
-        with patch(
-            "protea.core.training_dump._test_split._build_reference_from_cache",
-            return_value=ref_stub,
-        ), patch(
-            "protea.core.training_dump._test_split._knn_transfer_and_label",
-            return_value={"n_rows": 0},
-        ), patch(
-            "protea.core.training_dump._test_split._label_test_split_per_category"
-        ) as mock_label:
+        with (
+            patch(
+                "protea.core.training_dump._test_split._build_reference_from_cache",
+                return_value=ref_stub,
+            ),
+            patch(
+                "protea.core.training_dump._test_split._knn_transfer_and_label",
+                return_value={"n_rows": 0},
+            ),
+            patch(
+                "protea.core.training_dump._test_split._label_test_split_per_category"
+            ) as mock_label,
+        ):
             out = _run_test_split(MagicMock(), ctx, MagicMock())
         assert out == {"nk": None, "lk": None, "pk": None}
         mock_label.assert_not_called()
@@ -443,7 +448,9 @@ def _make_train_split_context(
     return _TrainSplitContext(
         payload=payload,
         version_to_set=version_to_set or {170: uuid.uuid4(), 200: uuid.uuid4(), 230: uuid.uuid4()},
-        embedding_pool=embedding_pool if embedding_pool is not None else np.zeros((0, 4), dtype=np.float16),
+        embedding_pool=embedding_pool
+        if embedding_pool is not None
+        else np.zeros((0, 4), dtype=np.float16),
         all_accessions=list((acc_to_idx or {}).keys()),
         acc_to_idx=acc_to_idx or {},
         go_id_map=go_id_map or {},
@@ -500,9 +507,7 @@ class TestResolveTrainSplitEval:
         assert out is eval_data
 
     def test_missing_eset_raises_runtime_error(self) -> None:
-        ctx = _make_train_split_context(
-            version_to_set={170: uuid.uuid4(), 200: uuid.uuid4()}
-        )
+        ctx = _make_train_split_context(version_to_set={170: uuid.uuid4(), 200: uuid.uuid4()})
         session = MagicMock()
         session.query.return_value.filter_by.return_value.one_or_none.return_value = None
         with pytest.raises(RuntimeError, match="EvaluationSet missing for train pair"):
@@ -537,34 +542,90 @@ class TestPrepareSplitQueryInputs:
             "protea.core.training_dump._train_split._build_reference_from_cache",
             return_value=ref_stub,
         ):
-            out = _prepare_split_query_inputs(
-                MagicMock(), ctx, uuid.uuid4(), {"P1"}, MagicMock()
-            )
+            out = _prepare_split_query_inputs(MagicMock(), ctx, uuid.uuid4(), {"P1"}, MagicMock())
         assert out.valid == []
         assert out.emb.shape == (0, 4)
 
 
-class TestKnnAndFilterToPivot:
-    def test_filters_predictions_to_pivot_universe(self) -> None:
+class TestBuildTrainKnnContext:
+    def test_threads_pivot_and_known_into_context(self) -> None:
+        # The runner's _emit filters to pivot inline, so the context carries
+        # pivot_go_ids (replacing the old explicit post-filter on the list).
         ctx = _make_train_split_context(pivot_go_ids={"GO:0001", "GO:0002"})
         q_inputs = _TestQueryInputs(
             ref_by_aspect={a: {"accessions": []} for a in ("P", "F", "C")},
             valid=["P1"],
             emb=np.zeros((1, 4), dtype=np.float32),
         )
+        eval_data = MagicMock(known={"P1": {"GO:0001"}})
+        t0 = uuid.uuid4()
+        knn_ctx = _build_train_knn_context(ctx, q_inputs, eval_data, t0)
+        assert knn_ctx.pivot_go_ids == {"GO:0001", "GO:0002"}
+        assert knn_ctx.query_known_gos == {"P1": {"GO:0001"}}
+        assert knn_ctx.t0_annotation_set_id == t0
+
+
+class TestStreamTrainPredictions:
+    def test_streams_and_returns_info(self, tmp_path: Path) -> None:
         sequences = _TestSequences(None, None, None, None)
-        eval_data = MagicMock(known={})
-        raw_preds = [
-            {"protein_accession": "P1", "go_id": "GO:0001", "aspect": "P"},
-            {"protein_accession": "P1", "go_id": "GO:9999", "aspect": "P"},  # outside pivot
-            {"protein_accession": "P1", "go_id": "GO:0002", "aspect": "C"},
-        ]
+        knn_ctx = MagicMock()
+        out_path = tmp_path / "train_unlabeled_split0.parquet"
+        info = {"parquet_path": str(out_path), "n_rows": 2}
         with patch(
             "protea.core.training_dump._train_split._knn_transfer_and_label",
-            return_value=raw_preds,
-        ):
-            out = _knn_and_filter_to_pivot(MagicMock(), ctx, q_inputs, eval_data, sequences)
-        assert {r["go_id"] for r in out} == {"GO:0001", "GO:0002"}
+            return_value=info,
+        ) as mock_knn:
+            out = _stream_train_predictions(MagicMock(), MagicMock(), knn_ctx, sequences, out_path)
+        assert out == info
+        assert mock_knn.call_args.args[2] is knn_ctx
+        assert mock_knn.call_args.kwargs["stream_output"].output_parquet == out_path
+
+
+class TestWriteLabeledTrainBatches:
+    def test_writes_shards_and_tallies_stats(self, tmp_path: Path) -> None:
+        unlabeled = tmp_path / "u.parquet"
+        _write_unlabeled_parquet(
+            unlabeled,
+            [
+                ("P1", "GO:0001", "P"),  # NK + positive
+                ("P1", "GO:0099", "P"),  # NK + negative
+                ("P2", "GO:0002", "C"),  # LK + positive
+                ("P9", "GO:0001", "P"),  # belongs to no cat
+            ],
+        )
+        membership = {
+            "nk": {("P1", "P")},
+            "lk": {("P2", "C")},
+            "pk": set(),
+        }
+        cat_gt = {
+            "nk": {("P1", "GO:0001")},
+            "lk": {("P2", "GO:0002")},
+            "pk": set(),
+        }
+        cat_paths = {cat: tmp_path / f"train_{cat}_split0.parquet" for cat in ("nk", "lk", "pk")}
+        split_stats: dict = {}
+        pf = pq.ParquetFile(str(unlabeled))
+        written = _write_labeled_train_batches(
+            pf,
+            ["protein_accession", "go_id", "aspect"],
+            membership,
+            cat_gt,
+            cat_paths,
+            split_stats,
+        )
+        assert set(written) == {"nk", "lk"}
+        assert cat_paths["nk"].exists()
+        assert not cat_paths["pk"].exists()
+        # NK: 1 positive (GO:0001) + 1 negative (GO:0099).
+        assert split_stats["nk_positives"] == 1
+        assert split_stats["nk_negatives"] == 1
+        assert split_stats["lk_positives"] == 1
+        assert split_stats["lk_negatives"] == 0
+        assert split_stats["pk_positives"] == 0
+        assert split_stats["pk_negatives"] == 0
+        nk_labels = pq.read_table(str(cat_paths["nk"])).column("label").to_pylist()
+        assert sorted(nk_labels) == [0, 1]
 
 
 class TestLabelAndWriteTrainSplitShards:
@@ -585,15 +646,21 @@ class TestLabelAndWriteTrainSplitShards:
             "lk": {("P2", "GO:0002")},
             "pk": set(),
         }
-        unlabeled = [
-            {"protein_accession": "P1", "go_id": "GO:0001", "aspect": "P"},
-            {"protein_accession": "P2", "go_id": "GO:0002", "aspect": "C"},
-            {"protein_accession": "P9", "go_id": "GO:0001", "aspect": "P"},  # not in any cat
-        ]
+        unlabeled = tmp_path / "train_unlabeled_split0.parquet"
+        _write_unlabeled_parquet(
+            unlabeled,
+            [
+                ("P1", "GO:0001", "P"),
+                ("P2", "GO:0002", "C"),
+                ("P9", "GO:0001", "P"),  # not in any cat
+            ],
+        )
         split_stats: dict = {}
         cat_paths = _label_and_write_train_split_shards(
             unlabeled, ctx, cat_gt_pairs, eval_data, split_index=0, split_stats=split_stats
         )
+        # Intermediate parquet unlinked once writers close.
+        assert not unlabeled.exists()
         assert "nk" in cat_paths and cat_paths["nk"].exists()
         assert "lk" in cat_paths and cat_paths["lk"].exists()
         assert "pk" not in cat_paths
@@ -608,7 +675,7 @@ class TestRunTrainSplit:
             "_resolve_train_split_eval": "protea.core.training_dump._train_split._resolve_train_split_eval",
             "_prepare_split_query_inputs": "protea.core.training_dump._train_split._prepare_split_query_inputs",
             "_load_test_sequences_and_taxonomy": "protea.core.training_dump._train_split._load_test_sequences_and_taxonomy",
-            "_knn_and_filter_to_pivot": "protea.core.training_dump._train_split._knn_and_filter_to_pivot",
+            "_stream_train_predictions": "protea.core.training_dump._train_split._stream_train_predictions",
             "_label_and_write_train_split_shards": "protea.core.training_dump._train_split._label_and_write_train_split_shards",
         }
 
@@ -634,10 +701,9 @@ class TestRunTrainSplit:
             valid=[],
             emb=np.empty((0, 4), dtype=np.float32),
         )
-        with patch(
-            self._patch_targets()["_resolve_train_split_eval"], return_value=eval_data
-        ), patch(
-            self._patch_targets()["_prepare_split_query_inputs"], return_value=empty_q
+        with (
+            patch(self._patch_targets()["_resolve_train_split_eval"], return_value=eval_data),
+            patch(self._patch_targets()["_prepare_split_query_inputs"], return_value=empty_q),
         ):
             outcome = _run_train_split(MagicMock(), ctx, 0, emit)
         assert outcome.skipped is True
@@ -660,15 +726,17 @@ class TestRunTrainSplit:
         sequences = _TestSequences(None, None, None, None)
         cat_paths = {"nk": tmp_path / "train_nk_split0.parquet"}
         cat_paths["nk"].write_text("dummy")
+        # The streamed unlabeled parquet must exist for the label step to run.
+        unlabeled = tmp_path / "train_unlabeled_split0.parquet"
+        unlabeled.write_text("dummy")
+        info = {"parquet_path": str(unlabeled), "n_rows": 1}
         targets = self._patch_targets()
-        with patch(targets["_resolve_train_split_eval"], return_value=eval_data), patch(
-            targets["_prepare_split_query_inputs"], return_value=q
-        ), patch(
-            targets["_load_test_sequences_and_taxonomy"], return_value=sequences
-        ), patch(
-            targets["_knn_and_filter_to_pivot"], return_value=[{"go_id": "GO:0001"}]
-        ), patch(
-            targets["_label_and_write_train_split_shards"], return_value=cat_paths
+        with (
+            patch(targets["_resolve_train_split_eval"], return_value=eval_data),
+            patch(targets["_prepare_split_query_inputs"], return_value=q),
+            patch(targets["_load_test_sequences_and_taxonomy"], return_value=sequences),
+            patch(targets["_stream_train_predictions"], return_value=info),
+            patch(targets["_label_and_write_train_split_shards"], return_value=cat_paths),
         ):
             outcome = _run_train_split(MagicMock(), ctx, 0, emit)
         assert outcome.skipped is False

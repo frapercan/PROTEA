@@ -148,6 +148,21 @@ class WorkerTuning(BaseModel):
         ge=60,
         description=("Tiempo sin JobEvent antes de considerar un job stalled candidato a reapear."),
     )
+    reaper_event_grace_seconds: int = Field(
+        default=2700,
+        ge=60,
+        description=(
+            "Ventana de liveness por evento (C4 / NFR-INFRA). Un job RUNNING "
+            "con lease expirado se considera VIVO (nunca se re-enquea ni se "
+            "marca FAILED) si emitio un JobEvent dentro de esta ventana. El "
+            "hilo heartbeat del lease puede starve bajo contienda del GIL en "
+            "splits largos single-threaded (export_research_dataset / "
+            "predict_go_terms emiten eventos cada 30-40 min), asi que un evento "
+            "reciente es prueba fiable de que la operacion sigue trabajando. "
+            "Default 2700s (45 min). Override: PROTEA_REAPER_EVENT_GRACE_SECONDS "
+            "o PROTEA_TUNING__worker__reaper_event_grace_seconds."
+        ),
+    )
     worker_shutdown_grace_seconds: int = Field(
         default=30,
         ge=1,
@@ -258,6 +273,19 @@ class OperationTuning(BaseModel):
             "por lo que la ganancia es real. 1 desactiva la paralelización."
         ),
     )
+    gpu_busy_retry_seconds: int = Field(
+        default=8,
+        ge=1,
+        description=(
+            "Backoff en segundos cuando el coordinador compute_embeddings "
+            "encuentra la GPU ocupada por otro job y se re-encola. Bajo = la "
+            "cola de embeddings drena rápido cuando varios usuarios envían a la "
+            "vez (la GPU se serializa igual, pero el relevo es casi inmediato). "
+            "Antes estaba hardcodeado en 60s, que dejaba a los que esperan "
+            "parados hasta un minuto tras liberarse la GPU. "
+            "Override: PROTEA_TUNING__operation__gpu_busy_retry_seconds."
+        ),
+    )
 
 
 class APILimits(BaseModel):
@@ -317,6 +345,7 @@ _SHORT_ALIASES: dict[str, tuple[str, str]] = {
     # that deserve a one-liner env var instead of the full
     # PROTEA_TUNING__group__field path.
     "PROTEA_AMQP_HEARTBEAT": ("queue", "amqp_heartbeat"),
+    "PROTEA_REAPER_EVENT_GRACE_SECONDS": ("worker", "reaper_event_grace_seconds"),
 }
 
 

@@ -31,6 +31,45 @@ if TYPE_CHECKING:
     )
 
 
+def _reranker_default_fields() -> dict[str, Any]:
+    """KNN reranker-feature block for a non-KNN row (InterPro-only / classifier).
+
+    Distances / ranks are NaN (no KNN evidence). The two genuine zero-counts
+    stay 0: zero KNN neighbours voted, a true absence rather than a missing
+    measurement. Column ORDER mirrors
+    :meth:`_LeafRecordBuilder._reranker_fields` exactly (the tax_voters block is
+    emitted separately, AFTER anc2vec, by :func:`_tax_consensus_default_fields`)
+    so a non-KNN record's column order is byte-identical to a KNN leaf and the
+    pyarrow ParquetWriter schema (fixed by the first batch) accepts later
+    batches.
+    """
+    nan = float("nan")
+    return {
+        "vote_count": 0,
+        "k_position": nan,
+        "go_term_frequency": nan,
+        "ref_annotation_density": nan,
+        "neighbor_distance_std": nan,
+        "neighbor_vote_fraction": 0.0,
+        "neighbor_min_distance": nan,
+        "neighbor_mean_distance": nan,
+    }
+
+
+def _tax_consensus_default_fields() -> dict[str, Any]:
+    """Taxonomy-consensus block for a non-KNN row (no per-voter measurement).
+
+    Emitted AFTER the anc2vec block to match the canonical KNN column order
+    produced by :meth:`_LeafRecordBuilder._tax_consensus_fields`.
+    """
+    nan = float("nan")
+    return {
+        "tax_voters_same_frac": nan,
+        "tax_voters_close_frac": nan,
+        "tax_voters_mean_common_ancestors": nan,
+    }
+
+
 class _LeafRecordBuilder:
     """Builds the per-(query, candidate-GO) record dicts + ancestor expansion.
 
@@ -42,12 +81,13 @@ class _LeafRecordBuilder:
 
     def __init__(self, runner: _KnnTransferRunner) -> None:
         self.runner = runner
+        # S3b InterPro union caches, derived once on first use.
+        self._interpro_table: dict[tuple[str, str], Any] | None = None
+        self._union_maps: tuple[dict[str, set[str]], dict[str, str]] | None = None
 
     # ── leaf record materialisation ───────────────────────────────────
 
-    def build_leaves_for_aspect(
-        self, ctx: _LeafContext
-    ) -> dict[str, dict[str, Any]]:
+    def build_leaves_for_aspect(self, ctx: _LeafContext) -> dict[str, dict[str, Any]]:
         """Build the leaf record dict for one ``(q_acc, aspect)`` pair."""
         from protea.core._knn_transfer_runner import _LeafInputs
 
@@ -127,11 +167,154 @@ class _LeafRecordBuilder:
             )
         )
         rec.update(self._tax_consensus_fields(inputs.q_acc, inputs.go_term_id, vote_count))
-        rec.update(
-            {f"emb_pca_query_{i}": inputs.q_pca_row[i] for i in range(EMBEDDING_PCA_DIM)}
-        )
+        rec.update({f"emb_pca_query_{i}": inputs.q_pca_row[i] for i in range(EMBEDDING_PCA_DIM)})
         rec.update(self._lineage_default_fields())
+        rec.update(self._interpro_default_fields())
+        rec.update(self._lafa_default_fields())
         return rec
+
+    # ── InterPro-only candidate materialisation (S3b union) ───────────
+
+    def add_interpro_only(
+        self,
+        ctx: _LeafContext,
+        leaf_by_gid: dict[str, dict[str, Any]],
+        synth: dict[str, dict[str, Any]],
+    ) -> None:
+        """Merge InterPro-only candidates into ``leaf_by_gid`` in place.
+
+        Implements ``candidates = KNN UNION InterPro``: the protein's
+        InterPro terms for ``ctx.aspect`` not already a KNN candidate
+        (leaves + ``synth`` ancestors) become new rows; dedup keeps a
+        both-source term as its single KNN row. The table is true-path
+        propagated, so a direct hit's ancestors enter via the same union.
+        No-op without a configured table; runs after ``expand_ancestors``
+        so KNN vote weighting is untouched.
+        """
+        from protea.core._interpro_features import select_interpro_only_go_ids
+
+        if not self.get_interpro_table():
+            return
+        protein_index, go_aspect = self._union_maps_cached()
+        protein_go_ids = protein_index.get(ctx.q_acc)
+        if not protein_go_ids:
+            return
+        excluded: set[str] = set(leaf_by_gid) | set(synth)
+        for go_id in select_interpro_only_go_ids(protein_go_ids, go_aspect, ctx.aspect, excluded):
+            leaf_by_gid[go_id] = self.make_interpro_only_record(ctx, go_id)
+
+    def make_interpro_only_record(self, ctx: _LeafContext, go_id: str) -> dict[str, Any]:
+        """Materialise one InterPro-only candidate record.
+
+        Carries the SAME canonical column set as a KNN leaf (T1.8 holds)
+        but with KNN-derived features NaN (read as missing). Query-side
+        features stay real: the query PCA row and the Anc2Vec query-known
+        cosines (no neighbour context). The GT label is propagated from the
+        same ``runner.gt_pairs`` as KNN candidates: the recall gain.
+        """
+        # No KNN neighbours -> neighbour Anc2Vec cosines come back NaN;
+        # the query-known cosines stay real (query-side, not KNN-derived).
+        _, _, anc_has, anc_q_cos, anc_q_maxcos = self._anc2vec_features(
+            go_id, None, None, ctx.q_known_cent, ctx.q_known_mat
+        )
+        rec: dict[str, Any] = {
+            "protein_accession": ctx.q_acc,
+            "go_id": go_id,
+            "aspect": ctx.aspect,
+            LABEL_COLUMN: 1 if (ctx.q_acc, go_id) in self.runner.gt_pairs else 0,
+            "distance": float("nan"),
+            "ref_protein_accession": "",
+            "qualifier": "",
+            "evidence_code": "",
+        }
+        rec.update(self._alignment_fields({}))
+        rec.update(self._taxonomy_fields({}))
+        rec.update(_reranker_default_fields())
+        rec.update(
+            self._anc2vec_fields(
+                float("nan"), float("nan"), anc_has, anc_q_cos, anc_q_maxcos, ctx.q_known_n
+            )
+        )
+        rec.update(_tax_consensus_default_fields())
+        rec.update({f"emb_pca_query_{i}": ctx.q_pca_row[i] for i in range(EMBEDDING_PCA_DIM)})
+        self._apply_non_knn_defaults(rec)
+        return rec
+
+    def _apply_non_knn_defaults(self, rec: dict[str, Any]) -> None:
+        """Stamp the lineage / interpro / lafa default blocks + ``knn_present``.
+
+        Shared tail of the two non-KNN candidate rows (InterPro-only and
+        classifier-only): both carry the full canonical column set with the
+        lineage / interpro / lafa families at their zero-fill defaults and
+        ``knn_present`` False (no KNN neighbour proposed the term).
+        """
+        rec.update(self._lineage_default_fields())
+        rec.update(self._interpro_default_fields())
+        rec.update(self._lafa_default_fields())
+        rec["knn_present"] = False
+
+    def get_interpro_table(self) -> dict[tuple[str, str], Any]:
+        """Load + cache the InterPro GO-prediction table once.
+
+        ``None`` is the not-yet-loaded sentinel; an empty dict is a valid
+        loaded value (env var unset -> records keep the zero-fill
+        defaults). Shared by the S3 feature post-pass and the S3b union.
+        """
+        if self._interpro_table is None:
+            from protea.core._interpro_features import load_interpro_go_pred
+
+            self._interpro_table = load_interpro_go_pred()
+        return self._interpro_table
+
+    def _union_maps_cached(self) -> tuple[dict[str, set[str]], dict[str, str]]:
+        """Build + cache the ``(protein->go_ids, go_id->aspect)`` maps.
+
+        The first groups the InterPro table by protein; the second inverts
+        the runner's id-keyed maps so InterPro-only candidates land in the
+        right aspect group (terms with no aspect are skipped).
+        """
+        if self._union_maps is None:
+            from protea.core._interpro_features import index_by_protein
+
+            runner = self.runner
+            go_aspect = {
+                go_id: aspect
+                for term_id, aspect in runner.aspect_map.items()
+                if (go_id := runner.go_id_map.get(term_id))
+            }
+            self._union_maps = index_by_protein(self.get_interpro_table()), go_aspect
+        return self._union_maps
+
+    @staticmethod
+    def _interpro_default_fields() -> dict[str, Any]:
+        """Zero-filled defaults for the 11 InterPro columns (contracts 1.1.0).
+
+        Every KNN leaf record carries all 11 ``interpro_*`` / presence
+        columns unconditionally so the T1.8 canonical-column boundary
+        (:func:`protea.core.parquet_export._assert_canonical_columns`)
+        and the contracts producer-coverage guard never fail the dump
+        after hours of compute. The real values are filled in by a
+        post-pass keyed on ``(protein, go_id)`` against the InterPro
+        GO-prediction table; see
+        :func:`protea.core._interpro_features.apply_interpro_features`.
+        Records with no InterPro evidence keep these defaults: a
+        well-defined zero/False with ``interpro_present`` False so a true
+        zero is distinguishable from an absent source. ``knn_present`` is
+        True because this slice only emits on KNN candidates.
+        """
+        return {
+            "interpro_hit": False,
+            "interpro_score": 0.0,
+            "interpro_n_signatures": 0,
+            "interpro_db_pfam": False,
+            "interpro_db_panther": False,
+            "interpro_db_superfamily": False,
+            "interpro_db_smart": False,
+            "interpro_db_cdd": False,
+            "interpro_db_prosite": False,
+            "knn_present": True,
+            "interpro_present": False,
+        }
 
     @staticmethod
     def _lineage_default_fields() -> dict[str, Any]:
@@ -153,6 +336,33 @@ class _LeafRecordBuilder:
             "lineage_is_descendant_of_known": 0.0,
             "lineage_ancestor_of_count": 0.0,
             "lineage_descendant_of_count": 0.0,
+        }
+
+    @staticmethod
+    def _lafa_default_fields() -> dict[str, Any]:
+        """Zero-filled defaults for the 6 LAFA columns (contracts 0.5.0).
+
+        The ``classifier``, ``self_prior`` and ``association`` families
+        added in lafa-integrate INT-2 are JSONB-blob features: no
+        GOPrediction column migration. Every KNN leaf (and InterPro-only)
+        record carries all six columns unconditionally so the T1.8
+        canonical-column boundary
+        (:func:`protea.core.parquet_export._assert_canonical_columns`)
+        and the contracts producer-coverage guard never fail the dump.
+        ``self_prior_score`` is overwritten by the native compute when
+        the ``compute_self_prior`` payload flag is set (see
+        :func:`protea.core.operations.predict_go_terms._post_knn_pipeline.apply_self_prior`);
+        the ``classifier_*`` and ``association_*`` columns stay zero
+        until later lafa-integrate slices wire their producers. A
+        well-defined zero, not NaN, matching the lineage convention.
+        """
+        return {
+            "classifier_score": 0.0,
+            "classifier_present": 0.0,
+            "self_prior_score": 0.0,
+            "association_total": 0.0,
+            "association_cross": 0.0,
+            "association_present": 0.0,
         }
 
     @staticmethod
@@ -224,9 +434,7 @@ class _LeafRecordBuilder:
             "anc2vec_query_known_count": float(q_known_n),
         }
 
-    def _tax_consensus_fields(
-        self, q_acc: str, go_term_id: int, vote_count: int
-    ) -> dict[str, Any]:
+    def _tax_consensus_fields(self, q_acc: str, go_term_id: int, vote_count: int) -> dict[str, Any]:
         return {
             "tax_voters_same_frac": self._tax_same_frac(q_acc, go_term_id, vote_count),
             "tax_voters_close_frac": self._tax_close_frac(q_acc, go_term_id, vote_count),
@@ -247,23 +455,11 @@ class _LeafRecordBuilder:
         if cand_i < 0 or not runner.has_emb_mask[cand_i]:
             return float("nan"), float("nan"), 0.0, float("nan"), float("nan")
         cand_vec = runner.all_norm[cand_i]
-        anc_cos = (
-            float(cand_vec @ centroid_unit)
-            if centroid_unit is not None
-            else float("nan")
-        )
-        anc_maxcos = (
-            float((nmat @ cand_vec).max()) if nmat is not None else float("nan")
-        )
-        anc_q_cos = (
-            float(cand_vec @ q_known_cent)
-            if q_known_cent is not None
-            else float("nan")
-        )
+        anc_cos = float(cand_vec @ centroid_unit) if centroid_unit is not None else float("nan")
+        anc_maxcos = float((nmat @ cand_vec).max()) if nmat is not None else float("nan")
+        anc_q_cos = float(cand_vec @ q_known_cent) if q_known_cent is not None else float("nan")
         anc_q_maxcos = (
-            float((q_known_mat @ cand_vec).max())
-            if q_known_mat is not None
-            else float("nan")
+            float((q_known_mat @ cand_vec).max()) if q_known_mat is not None else float("nan")
         )
         return anc_cos, anc_maxcos, 1.0, anc_q_cos, anc_q_maxcos
 
@@ -352,8 +548,7 @@ class _LeafRecordBuilder:
                 leaf_anc = leaf_by_gid[anc]
                 leaf_anc["neighbor_vote_fraction"] = min(
                     1.0,
-                    float(leaf_anc.get("neighbor_vote_fraction", 0.0))
-                    + w / runner.k_limit_f,
+                    float(leaf_anc.get("neighbor_vote_fraction", 0.0)) + w / runner.k_limit_f,
                 )
                 lmd = float(leaf_rec.get("neighbor_min_distance", leaf_d))
                 cur_md = float(leaf_anc.get("neighbor_min_distance", leaf_d))
@@ -365,9 +560,7 @@ class _LeafRecordBuilder:
                 base = dict(leaf_rec)
                 base["go_id"] = anc
                 base[LABEL_COLUMN] = 1 if (q_acc, anc) in runner.gt_pairs else 0
-                prior_frac = (
-                    float(entry["neighbor_vote_fraction"]) if entry is not None else 0.0
-                )
+                prior_frac = float(entry["neighbor_vote_fraction"]) if entry is not None else 0.0
                 base["neighbor_vote_fraction"] = min(1.0, prior_frac + w / runner.k_limit_f)
                 synth[anc] = base
             else:
@@ -375,3 +568,45 @@ class _LeafRecordBuilder:
                     1.0,
                     float(entry["neighbor_vote_fraction"]) + w / runner.k_limit_f,
                 )
+
+
+def build_classifier_only_record(
+    builder: _LeafRecordBuilder, q_acc: str, go_id: str, aspect: str, score: float
+) -> dict[str, Any]:
+    """Materialise one classifier-only candidate record (native pool-union).
+
+    Module-level twin of :meth:`_LeafRecordBuilder.make_interpro_only_record`
+    (kept out of the class so the class stays under the §3 LOC ceiling). The
+    classifier proposes ``go_id`` from the query's PLM embeddings, not from a
+    KNN neighbour, so this row carries no KNN / alignment / taxonomy / Anc2Vec /
+    emb_pca evidence: every such column is NaN (LightGBM reads it as missing),
+    matching the distribution the predict path's ``_new_classifier_record``
+    serves at inference. Only the classifier family is real (``classifier_score``
+    / ``classifier_present`` 1.0); the self_prior / association columns stay at
+    the zero-fill default until the per-query parity producers run over the
+    unioned record list. Carries the FULL canonical column set so the T1.8
+    parquet boundary holds, and gets the SAME ``(protein, go_id)`` GT label
+    downstream the KNN rows do (a leakage-free placeholder, re-applied per
+    category by the train / test split labelers).
+    """
+    nan = float("nan")
+    rec: dict[str, Any] = {
+        "protein_accession": q_acc,
+        "go_id": go_id,
+        "aspect": aspect,
+        LABEL_COLUMN: 1 if (q_acc, go_id) in builder.runner.gt_pairs else 0,
+        "distance": nan,
+        "ref_protein_accession": "classifier",
+        "qualifier": "",
+        "evidence_code": "",
+    }
+    rec.update(builder._alignment_fields({}))
+    rec.update(builder._taxonomy_fields({}))
+    rec.update(_reranker_default_fields())
+    rec.update(builder._anc2vec_fields(nan, nan, 0.0, nan, nan, 0))
+    rec.update(_tax_consensus_default_fields())
+    rec.update({f"emb_pca_query_{i}": nan for i in range(EMBEDDING_PCA_DIM)})
+    builder._apply_non_knn_defaults(rec)
+    rec["classifier_score"] = float(score)
+    rec["classifier_present"] = 1.0
+    return rec

@@ -76,6 +76,24 @@ _NUMERIC_ORM_COLS: tuple[str, ...] = (
 )
 
 
+# LAFA per-category booster features (INT-2/3/4) have NO typed GOPrediction
+# column; they ride the ``features`` JSONB blob, written by
+# ``_attach_lafa_features`` at store time. The per-category boosters trained
+# on these families, so the eval record must carry them or the booster sees
+# them as missing and cannot reproduce the predict-time score. ``self_prior``
+# contributes a single column (``self_prior_score``); there is no
+# ``self_prior_present`` in PROTEA.
+_LAFA_JSONB_FEATURE_COLS: tuple[str, ...] = (
+    "classifier_score",
+    "classifier_present",
+    "self_prior_score",
+    "association_total",
+    "association_cross",
+    "association_present",
+    "IA",
+)
+
+
 def _record_from_pred(
     pred: GOPrediction,
     go_id: str,
@@ -85,6 +103,13 @@ def _record_from_pred(
 
     ``aspect`` is only needed when the caller routes by aspect (per-aspect
     models). For category-level reranking pass ``None``.
+
+    Base feature columns come from the typed ORM columns
+    (:data:`_NUMERIC_ORM_COLS`). The three LAFA families
+    (:data:`_LAFA_JSONB_FEATURE_COLS`) have no typed column, so they are read
+    back from ``pred.features`` (the JSONB blob). When the blob is absent
+    (legacy rows / default runs that never computed them) each LAFA column is
+    ``None``, which LightGBM routes through its native missing branch.
     """
     record: dict[str, Any] = {
         "protein_accession": pred.protein_accession,
@@ -96,6 +121,9 @@ def _record_from_pred(
     }
     for col in _NUMERIC_ORM_COLS:
         record[col] = getattr(pred, col, None)
+    blob = getattr(pred, "features", None) or {}
+    for col in _LAFA_JSONB_FEATURE_COLS:
+        record[col] = blob.get(col)
     return record
 
 

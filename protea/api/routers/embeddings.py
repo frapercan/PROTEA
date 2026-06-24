@@ -8,11 +8,12 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
 
-from protea.api.auth.user_quota import require_user_quota
+from protea.api.auth.anon_quota import require_anon_quota
 from protea.api.cache import cached, invalidate
 from protea.api.deps import get_amqp_url, get_session_factory
 from protea.api.roles import ROLE_OPERATOR, require_role
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
+from protea.infrastructure.orm.models.embedding.prediction_set import PredictionSet
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 from protea.infrastructure.queue.publisher import publish_job
 from protea.infrastructure.session import session_scope
@@ -186,8 +187,7 @@ def delete_embedding_config(
     "/predict",
     summary="Trigger GO term prediction",
     dependencies=[
-        Depends(require_role(ROLE_OPERATOR)),
-        Depends(require_user_quota("predict")),
+        Depends(require_anon_quota),
     ],
 )
 def predict_go_terms(
@@ -196,6 +196,11 @@ def predict_go_terms(
     amqp_url: str = Depends(get_amqp_url),
 ) -> dict[str, Any]:
     """Queue a `predict_go_terms` job that runs KNN-based GO term transfer.
+
+    Open to anonymous callers under the IP-hash daily quota
+    (`require_anon_quota`), mirroring `/annotate`, so the one-click
+    annotation chain (annotate -> embeddings -> predict) completes for
+    logged-out demo visitors. Authenticated callers bypass the anon gate.
 
     The coordinator partitions query proteins into batches, each dispatched to
     `protea.predictions.batch` workers for KNN search (numpy or FAISS) + GO annotation transfer.
@@ -278,6 +283,44 @@ def prewarm_prediction_sets(
         PREDICTION_SETS_TTL_SECONDS,
         lambda: _compute_prediction_sets(factory),
     )
+
+
+@router.get(
+    "/prediction-sets/resolve",
+    summary="Resolve the newest prediction set for a query set + embedding config",
+)
+def resolve_prediction_set(
+    query_set_id: UUID = Query(..., description="Query set the prediction was run over"),
+    embedding_config_id: UUID = Query(..., description="Embedding config the prediction used"),
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+) -> dict[str, Any]:
+    """Cheap, uncached lookup of the most recent prediction set matching a
+    ``(query_set_id, embedding_config_id)`` pair.
+
+    The quick-annotate flow uses this to redirect straight to results the
+    moment a predict job finishes. It deliberately bypasses
+    ``list_prediction_sets`` (which is cached for 5 minutes and computed via
+    an expensive DISTINCT-over-JOIN): a just-created set would not yet appear
+    in that cached listing, which previously left the flow stuck on
+    "redirecting" forever. This is a single indexed lookup on two foreign
+    keys ordered by ``created_at``, so it stays fast and always current.
+    """
+    with session_scope(factory) as session:
+        row = (
+            session.query(PredictionSet)
+            .filter(
+                PredictionSet.query_set_id == query_set_id,
+                PredictionSet.embedding_config_id == embedding_config_id,
+            )
+            .order_by(PredictionSet.created_at.desc())
+            .first()
+        )
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail="No prediction set exists yet for that query set and embedding config",
+            )
+        return {"id": str(row.id), "created_at": row.created_at.isoformat()}
 
 
 @router.get("/prediction-sets/{set_id}", summary="Get prediction set details")

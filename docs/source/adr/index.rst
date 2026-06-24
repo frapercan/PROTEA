@@ -230,6 +230,34 @@ later revision).
      - :doc:`Defer neural-head champion; pivot to curated dataset packaging (F-DATA-PACK) <D38-neural-head-deferred-dataset-pack-pivot>`
      - Accepted
      - F-DATA-PACK
+   * - D39
+     - :doc:`Defense-in-depth guards on destructive database operations <D39-destructive-op-guards>`
+     - Accepted
+     - F-SEC
+   * - D40
+     - :doc:`Leakage-free temporal evaluation protocol (rolling-origin TRAIN/VALID/TEST) <D40-leakage-free-temporal-eval-protocol>`
+     - Accepted
+     - F-EVAL
+   * - D41
+     - :doc:`Lean f32 reference pool for high-dimensional PLMs <D41-lean-f32-refpool-highdim-plm>`
+     - Accepted
+     - fix/refpool-lean-f32-highdim-plm
+   * - D42
+     - :doc:`Export decouple via a content-addressed stable-feature cache <D42-export-stable-feature-cache>`
+     - Accepted
+     - feat/export-stable-feature-cache
+   * - D43
+     - :doc:`Stacked meta-reranker (evidence scorers plus a shallow per-category combiner) <D43-stacked-meta-reranker>`
+     - Accepted
+     - feat/mr-foundation
+   * - D44
+     - :doc:`Continuous local deployment of the LAFA container at the current best <D44-continuous-lafa-container>`
+     - Proposed
+     - T-PRODUCTO
+   * - D45
+     - :doc:`Governing the JSONB-blob feature seam <D45-jsonb-blob-feature-governance>`
+     - Proposed
+     - T-GOBERNANZA
 
 .. toctree::
    :maxdepth: 1
@@ -281,3 +309,9 @@ later revision).
    D37-feat-auth-users-roles-multi-instance
    D38-neural-head-deferred-dataset-pack-pivot
    D39-destructive-op-guards
+   D40-leakage-free-temporal-eval-protocol
+   D41-lean-f32-refpool-highdim-plm
+   D42-export-stable-feature-cache
+   D43-stacked-meta-reranker
+   D44-continuous-lafa-container
+   D45-jsonb-blob-feature-governance

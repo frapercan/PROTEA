@@ -3,7 +3,12 @@ name = "protea"
 version = "0.9.1"
 description = "PROtein funcTional Embedding-based Annotation: distributed platform for GO term prediction via PLM embeddings, KNN transfer, and learned re-ranking."
 authors = [
-    {name = "frapercan",email = "frapercan1@alum.us.es"}
+    {name = "Francisco Miguel Pérez Canales",email = "frapercan1@alum.us.es"}
+]
+license = "Unlicense"
+classifiers = [
+    "License :: OSI Approved :: The Unlicense (Unlicense)",
+    "Programming Language :: Python :: 3.12",
 ]
 requires-python = ">=3.12,<4.0"
 dependencies = [
@@ -36,6 +41,7 @@ dependencies = [
     "protea-contracts @ git+https://github.com/frapercan/protea-contracts.git@main",
     "argon2-cffi (>=23.1.0,<26.0.0)",
     "minio (>=7.2,<8.0)",
+    "scipy (>=1.11.0,<2.0.0)",
 ]
 
 

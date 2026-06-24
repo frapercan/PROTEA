@@ -19,6 +19,7 @@ The fixture mirrors ``test_knn_streaming_smoke``: synthetic two-query
 fixtures, mocked Anc2Vec index, no database. The CI cost is one
 runner pass on ~10 records.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -49,9 +50,7 @@ class _StubAnc2Vec:
 
     dim = 8
 
-    def batch(
-        self, go_ids: list[str], *, zero_if_missing: bool = True
-    ) -> np.ndarray:
+    def batch(self, go_ids: list[str], *, zero_if_missing: bool = True) -> np.ndarray:
         return np.zeros((len(go_ids), self.dim), dtype=np.float32)
 
 
@@ -210,9 +209,9 @@ def test_lineage_columns_present_with_known_ancestor_signal() -> None:
     # depends on KNN topology; we only require the flag is set on the
     # candidate when it appears.)
     q1_desc_signal = [
-        r for r in records
-        if r["protein_accession"] == "Q1"
-        and r["go_id"] in {"GO:0000001", "GO:0000002"}
+        r
+        for r in records
+        if r["protein_accession"] == "Q1" and r["go_id"] in {"GO:0000001", "GO:0000002"}
     ]
     if q1_desc_signal:
         for rec in q1_desc_signal:
@@ -323,6 +322,65 @@ def test_lineage_records_pass_canonical_invariant(tmp_path: Any) -> None:
     assert (tmp_path / "manifest.json").exists()
 
 
+@pytest.mark.parametrize(
+    "known",
+    [
+        None,
+        {"Q1": {"GO:0000010"}},
+        {"Q1": {"GO:0000001", "GO:0000010"}, "Q2": {"GO:0000020"}},
+        {"Q1": {"GO:0000010", "GO:0000020"}, "Q2": {"GO:0000003", "GO:0000004"}},
+    ],
+)
+def test_lineage_cached_path_byte_identical_to_library(
+    known: dict[str, set[str]] | None,
+) -> None:
+    """Bit-exactness guard for the runner-scoped lineage closure cache.
+
+    The runner replaced the per-(query, aspect) call into
+    ``protea_method.lineage.compute_lineage_features`` (which allocates a fresh
+    closure cache on every call) with an in-runner reimplementation that reuses
+    the library's ``_ancestor_closure`` against a persistent cache. The
+    reimplementation must be byte-identical to the library for any input.
+
+    This recomputes the four ``lineage_*`` columns from scratch with the
+    UNMODIFIED library function over the runner's own emitted records and
+    asserts every value matches exactly (same float, same type).
+    """
+    from protea_method.lineage import compute_lineage_features
+
+    records = _run(expand=True, taxonomy=False, known=known)
+    assert records
+
+    # Group the runner's records by protein and recompute lineage with the
+    # stock library function (fresh cache per call, the original behaviour).
+    # The runner builds records per-query, so grouping by protein_accession
+    # reproduces the original per-query call boundary exactly.
+    by_protein: dict[str, list[dict[str, Any]]] = {}
+    for rec in records:
+        by_protein.setdefault(rec["protein_accession"], []).append(rec)
+
+    for prot, recs in by_protein.items():
+        # Clone so the library writes into a separate copy we can diff against.
+        clones = [dict(r) for r in recs]
+        compute_lineage_features(
+            clones,
+            parents={
+                "GO:0000001": ["GO:0000010"],
+                "GO:0000002": ["GO:0000010"],
+                "GO:0000003": ["GO:0000020"],
+                "GO:0000004": ["GO:0000020"],
+            },
+            known_by_protein={prot: (known or {}).get(prot, set())},
+        )
+        for runner_rec, lib_rec in zip(recs, clones, strict=True):
+            for col in _LINEAGE_COLS:
+                assert runner_rec[col] == lib_rec[col], (
+                    f"lineage mismatch for {prot}/{runner_rec['go_id']} {col}: "
+                    f"runner={runner_rec[col]!r} library={lib_rec[col]!r}"
+                )
+                assert type(runner_rec[col]) is type(lib_rec[col])
+
+
 @pytest.mark.parametrize("expand", [False, True])
 def test_lineage_emitted_in_both_expand_modes(expand: bool) -> None:
     """The four columns must land regardless of the expand toggle.
@@ -335,6 +393,4 @@ def test_lineage_emitted_in_both_expand_modes(expand: bool) -> None:
     assert records
     for rec in records:
         for col in _LINEAGE_COLS:
-            assert col in rec, (
-                f"expand={expand}: record missing {col!r}: {rec!r}"
-            )
+            assert col in rec, f"expand={expand}: record missing {col!r}: {rec!r}"

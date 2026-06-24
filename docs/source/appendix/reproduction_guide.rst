@@ -118,8 +118,8 @@ The full experimental campaign used:
 - **Query set** consisting of the ~20 000 proteins present in the delta.
 - **Evaluator**: ``cafaeval`` with IA weighting.
 
-The key reference UUIDs from the original campaign are recorded in
-``EXPERIMENTS.md`` at the root of the repository. Reproducing the experiments
+The key reference UUIDs from the original campaign are synthesised on the
+results page (:doc:`/results`). Reproducing the experiments
 on a new deployment regenerates these UUIDs; the shell variables below are
 placeholders that the user fills in after each preparation step.
 
@@ -246,8 +246,8 @@ approximately 6–8 hours on a single GPU. Monitor ``manage.sh status`` and the
 Stage 2: Baseline KNN experiments
 ----------------------------------
 
-Stage 2 reproduces experiments 1 and 2 from ``EXPERIMENTS.md``:
-the ``k`` sweep and the ``aspect_separated_knn`` ablation.
+Stage 2 reproduces experiments 1 and 2 from the results page
+(:doc:`/results`): the ``k`` sweep and the ``aspect_separated_knn`` ablation.
 
 Experiment 1: ``k`` sweep
 ~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -8,6 +8,7 @@ dragging the larger orchestration code into the import graph.
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -75,3 +76,8 @@ class KnnTransferContext:
     pca_state: tuple[np.ndarray, np.ndarray] | None = None
     pivot_go_ids: set[str] | frozenset[str] | None = None
     embedding_pool: np.ndarray | None = None
+    # lafa-integrate INT-6: the pre-cutoff t0 annotation set id (the SAME set
+    # the KNN reference pool was built from). Carries the leakage-clean source
+    # the self_prior / association / classifier producers read when the export
+    # ``compute_*`` flags are on. ``None`` when no parity feature is requested.
+    t0_annotation_set_id: uuid.UUID | None = None

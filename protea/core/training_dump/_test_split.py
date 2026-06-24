@@ -24,6 +24,9 @@ from protea.core._training_dump_loaders import (
 )
 from protea.core.contracts.operation import EmitFn
 from protea.core.domain.aspect import ASPECT_CODES as _ASPECTS
+from protea.core.operations.predict_go_terms._association_loader import (
+    clear_cooccurrence_cache,
+)
 from protea.core.reranker import LABEL_COLUMN
 from protea.core.training_dump._constants import _CATEGORIES
 from protea.core.training_dump._contexts import (
@@ -109,6 +112,9 @@ def _stream_test_predictions(
             pca_state=ctx.pca_state,
             pivot_go_ids=ctx.pivot_go_ids,
             embedding_pool=ctx.embedding_pool,
+            # INT-6: t0 set for the optional parity features (the pre-cutoff
+            # test reference version's annotation set).
+            t0_annotation_set_id=ctx.test_old_set_id,
         ),
         sequence_context=SequenceContext(
             query_sequences=sequences.query_sequences,
@@ -231,6 +237,9 @@ def _run_test_split(
     in memory. Returns ``{cat: Path | None}``; ``None`` for cats with
     no rows in the test pair.
     """
+    # The test split uses its own t0 annotation_set; drop the prior splits'
+    # cooccurrence memo so the cache stays bounded to this split's t0 vocabulary.
+    clear_cooccurrence_cache()
     test_files: dict[str, Path | None] = {c: None for c in _CATEGORIES}
     if not ctx.test_all_queries:
         return test_files

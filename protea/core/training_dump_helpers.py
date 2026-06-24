@@ -58,12 +58,14 @@ from protea.core.training_dump._test_split import (
     _write_labeled_test_batches,
 )
 from protea.core.training_dump._train_split import (
+    _build_train_knn_context,
     _emit_split_skipped,
-    _knn_and_filter_to_pivot,
     _label_and_write_train_split_shards,
     _prepare_split_query_inputs,
     _resolve_train_split_eval,
     _run_train_split,
+    _stream_train_predictions,
+    _write_labeled_train_batches,
 )
 
 __all__ = (
@@ -77,9 +79,9 @@ __all__ = (
     "_CATEGORIES",
     "_DumpRunner",
     "_build_reference_from_cache",
+    "_build_train_knn_context",
     "_compute_test_cat_membership",
     "_emit_split_skipped",
-    "_knn_and_filter_to_pivot",
     "_knn_transfer_and_label",
     "_label_and_write_train_split_shards",
     "_label_test_split_per_category",
@@ -94,6 +96,8 @@ __all__ = (
     "_run_test_split",
     "_run_train_split",
     "_stream_test_predictions",
+    "_stream_train_predictions",
     "_write_labeled_test_batches",
+    "_write_labeled_train_batches",
     "load_evaluation_data_for_set",
 )

@@ -6,28 +6,18 @@ import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import {
   annotateProteins,
+  getGpuAvailability,
   getJob,
   launchPredictGoTerms,
-  listJobs,
-  listPredictionSets,
+  resolvePredictionSet,
   type AnnotateResult,
-  type Job,
+  type GpuAvailability,
 } from "@/lib/api";
 
 type Stage = "idle" | "uploading" | "embedding" | "predicting" | "done" | "error";
 
 const POLL_MS = 3_000;
 const QUEUE_POLL_MS = 30_000;
-
-// Operations that occupy the shared GPU pipeline. While any of these is
-// queued or running we block new user annotation requests, since they won't
-// actually enter the queue in a reasonable time frame.
-const BLOCKING_OPERATIONS = new Set([
-  "compute_embeddings",
-  "compute_embeddings_batch",
-  "predict_go_terms",
-  "predict_go_terms_batch",
-]);
 
 const EXAMPLE_FASTA = `>sp|P01116|RASK_HUMAN GTPase KRas OS=Homo sapiens OX=9606 GN=KRAS PE=1 SV=1
 MTEYKLVVVGAGGVGKSALTIQLIQNHFVDEYDPTIEDSYRKQVVIDGETCLLDILDTAG
@@ -60,10 +50,12 @@ export function AnnotateForm() {
   // Drag-and-drop state
   const [dragOver, setDragOver] = useState(false);
 
-  // Queue-awareness: poll active jobs and block submission while any
-  // embedding/prediction operation is queued or running, because our
-  // single-GPU setup can't absorb another request in reasonable time.
-  const [blockingJobs, setBlockingJobs] = useState<Job[] | null>(null);
+  // Queue-awareness: poll the backend GPU-availability signal and block
+  // submission only while real GPU work is in flight. The backend gates
+  // `busy` on freshly-leased running jobs + genuinely queued work, so
+  // stale/zombie rows (dead worker, no RMQ message) never falsely block
+  // the form (FIX-ANNOTATE-BANNER-ACCURACY).
+  const [gpu, setGpu] = useState<GpuAvailability | null>(null);
   // Whether the user has opened the technical-details disclosure of the
   // queue-blocked banner. Default closed so first-time visitors do not
   // see opaque operation names.
@@ -90,12 +82,18 @@ export function AnnotateForm() {
       while (!abortRef.current) {
         try {
           const job = await getJob(jobId);
+          // Only surface a percentage once there is genuine forward motion.
+          // Coordinator jobs that finalize in deferred child batches sit at
+          // a stale 0/1, so a naive "0%" would freeze on screen and read as
+          // stuck. When there's no real percent yet, leave `progress` empty
+          // and let the animated stage bar carry the sense of liveness.
           if (job.progress_total && job.progress_current) {
             const pct = Math.round((job.progress_current / job.progress_total) * 100);
-            setProgress(`${pct}%`);
+            if (pct > 0) setProgress(`${pct}%`);
           }
-          if (job.status === "succeeded") return "succeeded";
-          if (job.status === "failed" || job.status === "cancelled") return "failed";
+          const st = String(job.status ?? "").toLowerCase();
+          if (st === "succeeded") return "succeeded";
+          if (st === "failed" || st === "cancelled") return "failed";
         } catch {
           // transient error, keep polling
         }
@@ -123,7 +121,7 @@ export function AnnotateForm() {
 
       // Step 2: Poll embedding job
       setStage("embedding");
-      setProgress("0%");
+      setProgress("");
       const embedResult = await pollJob(result.embedding_job_id);
       if (embedResult === "failed") {
         throw new Error("Embedding computation failed");
@@ -131,7 +129,7 @@ export function AnnotateForm() {
 
       // Step 3: Launch prediction
       setStage("predicting");
-      setProgress("0%");
+      setProgress("");
       const predictJob = await launchPredictGoTerms(result.predict_payload as Parameters<typeof launchPredictGoTerms>[0]);
 
       // Step 4: Poll prediction job
@@ -140,15 +138,29 @@ export function AnnotateForm() {
         throw new Error("Prediction failed");
       }
 
-      // Step 5: Find the prediction set created for this query_set
-      const sets = await listPredictionSets();
-      const match = sets.find(
-        (s) =>
-          (s as any).query_set_id === result.query_set_id &&
-          s.embedding_config_id === result.embedding_config_id,
-      );
-      if (match) {
-        setPredictionSetId(match.id);
+      // Step 5: Resolve the prediction set created for this query_set via a
+      // cheap, uncached lookup. The predict job can report SUCCEEDED a moment
+      // before the row is queryable, so retry briefly. (The old approach
+      // scanned the 5-min-cached listing, which would not yet contain the new
+      // set and left the flow stuck on "redirecting" forever.)
+      let resolvedId: string | null = null;
+      for (let attempt = 0; attempt < 8 && !abortRef.current; attempt++) {
+        try {
+          const hit = await resolvePredictionSet(
+            result.query_set_id,
+            result.embedding_config_id,
+          );
+          if (hit?.id) {
+            resolvedId = hit.id;
+            break;
+          }
+        } catch {
+          // 404 until the row lands; keep retrying
+        }
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+      if (resolvedId) {
+        setPredictionSetId(resolvedId);
       }
       if (result.reranker_id) {
         setRerankerId(result.reranker_id);
@@ -162,15 +174,20 @@ export function AnnotateForm() {
     }
   };
 
-  // Auto-redirect when done
+  // Auto-redirect when done. If the prediction set resolved, go straight to
+  // its results; otherwise fall back to the functional-annotation listing so
+  // the flow never dead-ends on "redirecting" with nowhere to go.
   useEffect(() => {
-    if (stage === "done" && predictionSetId) {
-      const timer = setTimeout(() => {
+    if (stage !== "done") return;
+    const timer = setTimeout(() => {
+      if (predictionSetId) {
         const qs = rerankerId ? `?reranker_id=${rerankerId}` : "";
         router.push(`/${locale}/functional-annotation/${predictionSetId}${qs}`);
-      }, 1500);
-      return () => clearTimeout(timer);
-    }
+      } else {
+        router.push(`/${locale}/functional-annotation`);
+      }
+    }, 1500);
+    return () => clearTimeout(timer);
   }, [stage, predictionSetId, rerankerId, router, locale]);
 
   // Cleanup on unmount
@@ -180,30 +197,25 @@ export function AnnotateForm() {
     };
   }, []);
 
-  // Poll for active embedding/prediction jobs to know whether the GPU
-  // pipeline is currently saturated.
+  // Poll the truthful GPU-availability signal to know whether the GPU
+  // pipeline is genuinely busy (vs. a stale row left behind by a dead
+  // worker).
   useEffect(() => {
     let cancelled = false;
-    const fetchBlocking = async () => {
+    const fetchAvailability = async () => {
       if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
       try {
-        const [queued, running] = await Promise.all([
-          listJobs({ limit: 100, status: "queued" }),
-          listJobs({ limit: 100, status: "running" }),
-        ]);
+        const next = await getGpuAvailability();
         if (cancelled) return;
-        const merged = [...running, ...queued].filter((j) =>
-          BLOCKING_OPERATIONS.has(j.operation),
-        );
-        setBlockingJobs(merged);
+        setGpu(next);
       } catch {
         // ignore transient errors; keep prior state
       }
     };
-    fetchBlocking();
-    const id = setInterval(fetchBlocking, QUEUE_POLL_MS);
+    fetchAvailability();
+    const id = setInterval(fetchAvailability, QUEUE_POLL_MS);
     const onVisibility = () => {
-      if (document.visibilityState === "visible") fetchBlocking();
+      if (document.visibilityState === "visible") fetchAvailability();
     };
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
@@ -213,16 +225,20 @@ export function AnnotateForm() {
     };
   }, []);
 
+  // Surface CPU-only mode so users understand why a novel sequence is slow.
+  // `gpu_present` is undefined on older backends; only warn when explicitly false.
+  const cpuOnly = gpu?.gpu_present === false;
   const isRunning = stage === "uploading" || stage === "embedding" || stage === "predicting";
   // A running local annotation flow already owns the UI; don't double-block.
-  const isQueueBlocked = !isRunning && (blockingJobs?.length ?? 0) > 0;
-  const runningJob = blockingJobs?.find((j) => j.status === "running") ?? null;
+  // Only block on genuinely-active GPU work (backend `busy`), never on
+  // stale/zombie rows.
+  const isQueueBlocked = !isRunning && (gpu?.busy ?? false);
+  const runningOperation = (gpu?.running_fresh ?? 0) > 0 ? gpu?.active_operation ?? null : null;
   const runningPct =
-    runningJob && runningJob.progress_total && runningJob.progress_current
-      ? Math.round((runningJob.progress_current / runningJob.progress_total) * 100)
+    gpu && gpu.progress_total && gpu.progress_current
+      ? Math.round((gpu.progress_current / gpu.progress_total) * 100)
       : null;
-  const queuedCount =
-    blockingJobs?.filter((j) => j.status === "queued").length ?? 0;
+  const queuedCount = gpu?.queued ?? 0;
 
   return (
     <section className="rounded-2xl border-2 border-blue-100 bg-gradient-to-b from-blue-50/60 to-white p-6 sm:p-8">
@@ -273,9 +289,9 @@ export function AnnotateForm() {
               </div>
               {showQueueDetails && (
                 <ul className="mt-3 space-y-0.5 text-xs text-amber-800 border-t border-amber-200 pt-2">
-                  {runningJob && (
+                  {runningOperation && (
                     <li>
-                      <span className="font-mono break-all">{runningJob.operation}</span>
+                      <span className="font-mono break-all">{runningOperation}</span>
                       {", "}
                       {t("annotateQueueRunningLabel" as any)}
                       {runningPct != null ? ` (${runningPct}%)` : ""}
@@ -289,6 +305,21 @@ export function AnnotateForm() {
                 </ul>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* CPU-only notice: no CUDA GPU is visible to the workers, so embedding
+          a sequence not already in the database runs on CPU and is slower.
+          Purely informational, never blocks submission. */}
+      {cpuOnly && !isQueueBlocked && (
+        <div
+          role="status"
+          className="mb-5 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700"
+        >
+          <div className="flex items-start gap-2">
+            <span aria-hidden className="text-base leading-none">🖥️</span>
+            <p className="flex-1 min-w-0">{t("annotateCpuModeNotice" as any)}</p>
           </div>
         </div>
       )}

@@ -1,15 +1,18 @@
 # PROTEA
 
-**PROtein funcTional Embedding-based Annotation**. A distributed platform for large-scale GO term prediction, sequence embedding, and functional analysis.
+**PROtein functional Embedding-based Annotation**. A distributed platform for large-scale GO term prediction, sequence embedding, and functional analysis.
 
 PROTEA provides a unified backend for ingesting protein data from UniProt, computing protein language model embeddings (ESMC, ProstT5, ESM2), and predicting Gene Ontology terms via KNN transfer plus a learned LightGBM re-ranker, with a full job queue, REST API, and web interface.
+
+It is built as a **contracts-first plugin platform**: this repository holds the core (SQLAlchemy ORM, a RabbitMQ-backed job queue of 10 queues, a versioned FastAPI surface of two dozen routers, a Next.js frontend, and the orchestration that ties them together), while embedding backends, annotation sources, experiment runners, and the offline re-ranker lab live in **seven satellite repositories** that plug in through a shared contract package and Python entry points. See [Repositories in the PROTEA stack](#repositories-in-the-protea-stack).
 
 [![Lint](https://github.com/frapercan/PROTEA/actions/workflows/lint.yml/badge.svg)](https://github.com/frapercan/PROTEA/actions/workflows/lint.yml)
 [![Tests](https://github.com/frapercan/PROTEA/actions/workflows/test.yml/badge.svg)](https://github.com/frapercan/PROTEA/actions/workflows/test.yml)
 [![Docs](https://github.com/frapercan/PROTEA/actions/workflows/docs.yml/badge.svg)](https://github.com/frapercan/PROTEA/actions/workflows/docs.yml)
 [![Documentation](https://readthedocs.org/projects/protea/badge/?version=latest)](https://protea.readthedocs.io/en/latest/)
-[![codecov](https://codecov.io/gh/frapercan/PROTEA/branch/main/graph/badge.svg)](https://codecov.io/gh/frapercan/PROTEA)
+[![codecov](https://codecov.io/gh/frapercan/PROTEA/branch/develop/graph/badge.svg)](https://codecov.io/gh/frapercan/PROTEA/branch/develop)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
+[![License: Unlicense](https://img.shields.io/badge/license-Unlicense-blue.svg)](https://unlicense.org/)
 
 **Status:** v0.8.0, production. The platform is actively deployed and drives live CAFA 6 evaluation and research dataset exports. The public REST API is not yet stable across minor releases.
 
@@ -33,6 +36,12 @@ PROTEA is the successor to [PIS](https://github.com/CBBIO/protein-information-sy
 
 ---
 
+## Context: CAFA 6
+
+PROTEA is the productisation of the method that placed **#19 in the final ranking of CAFA 6** (Critical Assessment of protein Function Annotation). That ranking is a **team result**: the author was the technical motor behind the submission, not an individual entrant. The `#19` belongs to the research; PROTEA is the post-CAFA platform that consolidates that method into a maintainable, deployable system. The temporal-holdout evaluation and information-accretion weighting baked into the pipeline come directly from this lineage.
+
+---
+
 ## What PROTEA does
 
 | Capability | Details |
@@ -46,7 +55,7 @@ PROTEA is the successor to [PIS](https://github.com/CBBIO/protein-information-sy
 | **CAFA evaluation** | Benchmark pipeline with `cafaeval` integration, Fmax + IA-weighted scoring, per-aspect (BPO/MFO/CCO) results, NK/LK/PK tier breakdown with CI bands (PR #451) |
 | **Dataset export** | `POST /datasets` dispatches `export_research_dataset`; parallelised pair-feature compute with persistent alignment cache (PR #421); `/datasets` registry view in the web UI (PR #453) |
 | **Reranker UI** | Import-by-reference dialog, compute-embeddings dialog, feature-schema SHA + manifest SHA provenance on collapsed cards (PR #452, #455); reranker-features toggle on the annotation page (PR #444) |
-| **Job queue** | RabbitMQ-backed, 11 queues (ingestion, embeddings, predictions, training, InterPro), full audit trail per job |
+| **Job queue** | RabbitMQ-backed, 10 queues (ingestion, embeddings, predictions, evaluations, training), full audit trail per job |
 | **REST API** | FastAPI routers for jobs, proteins, embeddings, query sets, scoring, evaluation, datasets, reranker models, and admin |
 | **Web UI** | Next.js frontend with responsive sidebar shell, protein explorer, annotation viewer, prediction browser with benchmark CI bands, live job widget, and onboarding stepper |
 | **Observability** | OpenTelemetry SDK (OTLP traces/metrics), SQLAlchemy + pika instrumentation, Grafana dashboards for API latency, queues, workers, DB, and embeddings; Loki log aggregation via Promtail |
@@ -84,7 +93,7 @@ poetry install
 cp protea/config/system.yaml.example protea/config/system.yaml
 # Edit system.yaml: set DB and AMQP URLs
 
-# Environment variables — keep secrets in ~/.secrets/protea.env and source
+# Environment variables: keep secrets in ~/.secrets/protea.env and source
 # before starting the stack:
 #   set -a && source ~/.secrets/protea.env && set +a && bash scripts/manage.sh start
 # See the env vars table below for the full list.
@@ -172,6 +181,22 @@ curl -s http://localhost:8000/runners | jq '.plugins[].name'
 
 ---
 
+## Deployment
+
+The same service set (api, workers, Postgres, RabbitMQ, optional MinIO, frontend) runs under **five deployment modes**; pick the entry point that matches your infrastructure. Per-mode assets live under [`deploy/`](deploy/README.md); the narrative guide is in the [docs](https://protea.readthedocs.io).
+
+| Mode | Best for | Entry point |
+|---|---|---|
+| **Docker Compose** | Local development on a single host, fastest iteration | `docker compose up -d` |
+| **Compose bundle** | Smoke test from pre-built images, laptop or CI | `docker compose -f docker-compose.bundle.yml --env-file .env.bundle up -d` |
+| **Docker Swarm** | Multi-host production cluster without Kubernetes | `docker stack deploy -c deploy/swarm/stack.yml protea` |
+| **Helm / Kubernetes** | Existing K8s cluster, GitOps-style rollouts | `helm install protea deploy/helm/protea/` |
+| **SLURM** | HPC batch site, worker fleet on a scheduler | `sbatch deploy/slurm/<worker>.sbatch` |
+
+For bare-metal development without a Docker daemon, `bash scripts/manage.sh start` runs the api, worker fleet, and frontend as supervised host processes (see [Getting started](#getting-started)).
+
+---
+
 ## Documentation
 
 Full documentation at **https://protea.readthedocs.io**
@@ -182,6 +207,7 @@ Topics covered: architecture, data model, operations, job lifecycle, deployment,
 
 ## Contributing
 
+PROTEA is written and maintained by **Francisco Miguel Pérez Canales** (author and sole maintainer).
 Contributions from research institutions and individual developers are welcome.
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the branching strategy and development workflow.
 
@@ -227,8 +253,8 @@ Single source of truth: [`docs/source/_data/stack.yaml`](https://github.com/frap
 |------|------|--------|---------|
 | **PROTEA** (this repo) | Platform | `active` | Backend platform. Hosts the ORM, job queue, FastAPI surface, frontend, and orchestration. |
 | [protea-contracts](https://github.com/frapercan/protea-contracts) | Contracts | `active` | Shared contract surface. ABCs, pydantic payloads, feature schema, schema_sha. Imported by every other repo. |
-| [protea-method](https://github.com/frapercan/protea-method) | Inference | `active` | LAFA submission layer. Pure inference path (KNN, feature compute, reranker apply). Published to DockerHub; bind-mounted by LAFA containers for FunctionBench submissions. |
-| [protea-sources](https://github.com/frapercan/protea-sources) | Source plugin | `active` | Annotation source plugins (GOA, QuickGO, UniProt, InterPro). Discovered via Python entry_points (goa, quickgo, uniprot, interpro). |
+| [protea-method](https://github.com/frapercan/protea-method) | Inference | `active` | Pure inference path (KNN, feature compute, reranker apply). Delegation target for the F2C extraction; live in production since F2C.5b. Bind-mounted by the LAFA containers. |
+| [protea-sources](https://github.com/frapercan/protea-sources) | Source plugin | `active` | Annotation source plugins (GOA, QuickGO, UniProt). Discovered via Python entry_points (goa, quickgo, uniprot). |
 | [protea-runners](https://github.com/frapercan/protea-runners) | Runner plugin | `active` | Experiment runner plugins (LightGBM, KNN, baseline). Discovered via Python entry_points (lightgbm, knn, baseline). |
 | [protea-backends](https://github.com/frapercan/protea-backends) | Backend plugin | `active` | Protein language model embedding backends (ESM family, T5/ProstT5, Ankh, ESM3-C). Discovered via Python entry_points (esm, t5, ankh, esm3c). |
 | [protea-reranker-lab](https://github.com/frapercan/protea-reranker-lab) | Lab | `active` | LightGBM reranker training lab. Pulls datasets from PROTEA, trains boosters, publishes them back via /reranker-models/import-by-reference. |

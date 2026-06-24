@@ -62,6 +62,11 @@ VALID_FORMULAS = (FORMULA_LINEAR, FORMULA_EVIDENCE_WEIGHTED)
 # Signal weight defaults
 # ---------------------------------------------------------------------------
 # Pure embedding similarity by default; all other signals must be opted in.
+#
+# The block below ``neighbor_vote_fraction`` are the A-SCORE "rich" axes
+# (coverage A3, ref-density F, anc2vec G). They default to 0.0 so any config
+# that does not mention them scores exactly as it did before they existed
+# (a 0-weight signal is skipped in both numerator and denominator).
 
 DEFAULT_WEIGHTS: dict[str, float] = {
     "embedding_similarity": 1.0,
@@ -70,6 +75,55 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "evidence_weight": 0.0,
     "taxonomic_proximity": 0.0,
     "neighbor_vote_fraction": 0.0,
+    # --- A-SCORE rich signals (opt-in) ---
+    "coverage": 0.0,
+    "ref_annotation_density": 0.0,
+    "anc2vec_neighbor_cos": 0.0,
+    "anc2vec_neighbor_maxcos": 0.0,
+}
+
+# ---------------------------------------------------------------------------
+# Advanced scoring knobs (the ``params`` JSONB column)
+# ---------------------------------------------------------------------------
+# Everything below lives in the optional ``ScoringConfig.params`` JSONB. A
+# ``None`` / empty params dict reproduces the pre-A-SCORE behaviour byte for
+# byte. Each block is independently gated by an ``enabled`` flag (default
+# off). See :mod:`protea.core.scoring` for the exact formulas.
+
+IA_PRIOR_SOURCE_FREQUENCY = "frequency"
+IA_PRIOR_SOURCE_IA = "ia"
+VALID_IA_PRIOR_SOURCES = (IA_PRIOR_SOURCE_FREQUENCY, IA_PRIOR_SOURCE_IA)
+
+#: Allowed top-level keys inside ``ScoringConfig.params``.
+VALID_PARAM_KEYS = ("ia_prior", "soft_vote", "calibration")
+
+#: Canonical default for every advanced knob (all off). Used for
+#: documentation and as the merge base when reading a partial params dict.
+DEFAULT_PARAMS: dict[str, Any] = {
+    # IA / term-specificity prior (axis E). Multiplies the composite score by
+    # ``prior_t ** gamma`` where ``prior_t in (0, 1]`` is a specificity weight
+    # derived either from the term's corpus frequency or from a normalised IA.
+    "ia_prior": {
+        "enabled": False,
+        "gamma": 1.0,
+        "source": IA_PRIOR_SOURCE_FREQUENCY,
+    },
+    # Soft-vote temperature (axis T). RESERVED: a faithful ``exp(sim/T)``
+    # neighbour aggregation needs the per-neighbour similarities, which are
+    # NOT persisted on ``GOPrediction`` (only the precomputed flat
+    # ``neighbor_vote_fraction`` survives). The knob is stored and validated
+    # here so A-SCORE.2 can drive it, but it is applied at PREDICT time, not
+    # at score time; the score-time scorer treats it as a no-op.
+    "soft_vote": {
+        "enabled": False,
+        "temperature": 1.0,
+    },
+    # Post-score calibration hook (no-op stub). A-SCORE.2 fills the
+    # per-(aspect, IA-bin) isotonic tables; the interface is fixed now so
+    # callers never change.
+    "calibration": {
+        "enabled": False,
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -196,6 +250,11 @@ class ScoringConfig(Base):
     formula: Mapped[str] = mapped_column(String(50), nullable=False, default=FORMULA_LINEAR)
     weights: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     evidence_weights: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    #: Optional advanced scoring knobs (IA prior, soft-vote temperature,
+    #: calibration). ``None`` reproduces the pre-A-SCORE behaviour exactly.
+    #: See :data:`DEFAULT_PARAMS` for the schema and :mod:`protea.core.scoring`
+    #: for the formulas.
+    params: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -205,5 +264,6 @@ class ScoringConfig(Base):
         return (
             f"<ScoringConfig id={self.id} name={self.name!r}"
             f" formula={self.formula!r}"
-            f" evidence_weights={'custom' if self.evidence_weights else 'default'}>"
+            f" evidence_weights={'custom' if self.evidence_weights else 'default'}"
+            f" params={'custom' if self.params else 'default'}>"
         )

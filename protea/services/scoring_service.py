@@ -123,6 +123,7 @@ def create_scoring_config_data(
         formula=body.formula,
         weights=body.weights,
         evidence_weights=body.evidence_weights,
+        params=body.params,
         description=body.description,
     )
     session.add(config)
@@ -182,6 +183,7 @@ def snapshot_config(c: ScoringConfig) -> ScoringConfig:
         formula=c.formula,
         weights=c.weights,
         evidence_weights=c.evidence_weights,
+        params=c.params,
         description=c.description,
     )
 
