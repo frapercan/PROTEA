@@ -50,6 +50,46 @@ def make_ancestor_closure(
     return _ancestors
 
 
+def compute_lineage_into(
+    records: list[dict[str, Any]],
+    *,
+    parents: dict[str, list[str]],
+    known: set[str],
+    cache: dict[str, frozenset[str]],
+) -> None:
+    """Write the 4 ``lineage_*`` columns into each record in place.
+
+    Mirrors ``protea_method.lineage.compute_lineage_features`` exactly but takes a
+    caller-owned ``cache`` reused across every per-(query, aspect) call (the
+    library rebuilds it per call). Ancestor closures are split-invariant for a
+    fixed ``parents`` map, so cache reuse is byte-identical to the library while
+    collapsing the repeated BFS walks profiling flagged as a hot leaf
+    (``compute_lineage_features`` + ``_ancestor_closure``, ~8% of build_records).
+    Lazy import keeps the GO-DAG dependency out of the import graph for unrelated
+    unit tests.
+    """
+    from protea_method.lineage import _ancestor_closure
+
+    for pred in records:
+        cand = pred.get("go_id", "")
+        if not known or not cand:
+            pred["lineage_is_ancestor_of_known"] = 0.0
+            pred["lineage_is_descendant_of_known"] = 0.0
+            pred["lineage_ancestor_of_count"] = 0.0
+            pred["lineage_descendant_of_count"] = 0.0
+            continue
+        ancestor_of_count = sum(1 for k in known if cand in _ancestor_closure(k, parents, cache))
+        cand_ancestors = _ancestor_closure(cand, parents, cache)
+        descendant_of_count = sum(1 for k in known if k in cand_ancestors)
+        if cand in known:
+            ancestor_of_count -= 1
+            descendant_of_count -= 1
+        pred["lineage_is_ancestor_of_known"] = 1.0 if ancestor_of_count > 0 else 0.0
+        pred["lineage_is_descendant_of_known"] = 1.0 if descendant_of_count > 0 else 0.0
+        pred["lineage_ancestor_of_count"] = float(ancestor_of_count)
+        pred["lineage_descendant_of_count"] = float(descendant_of_count)
+
+
 def compute_ia_weight(
     anc_gid: str,
     leaf_gid: str,
@@ -134,13 +174,9 @@ def update_synth_entry(
         base["go_id"] = anc
         if label_ctx.present:
             base[label_ctx.column] = (
-                1
-                if label_ctx.gt_pairs and (label_ctx.q_acc, anc) in label_ctx.gt_pairs
-                else 0
+                1 if label_ctx.gt_pairs and (label_ctx.q_acc, anc) in label_ctx.gt_pairs else 0
             )
-        prior_frac = (
-            float(entry["neighbor_vote_fraction"]) if entry is not None else 0.0
-        )
+        prior_frac = float(entry["neighbor_vote_fraction"]) if entry is not None else 0.0
         base["neighbor_vote_fraction"] = min(1.0, prior_frac + vote_increment)
         synth[anc] = base
     else:

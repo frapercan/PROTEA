@@ -16,7 +16,7 @@ from protea.core.contracts.operation import OperationResult, RetryLaterError
 from protea.core.contracts.registry import OperationRegistry
 from protea.infrastructure.orm.models.job import Job, JobStatus
 from protea.workers.base_worker import BaseWorker, WorkerConfig
-from protea.workers.stale_job_reaper import StaleJobReaper
+from protea.workers.stale_job_reaper import StaleJobReaper, StaleJobReaperConfig
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -314,7 +314,7 @@ class TestStaleJobReaper:
         factory = MagicMock(return_value=session)
 
         # No amqp_url → reaper has no re-enqueue path, falls straight to FAILED.
-        reaper = StaleJobReaper(factory, timeout_seconds=3600)
+        reaper = StaleJobReaper(factory)
         count = reaper._reap()
 
         assert count == 1
@@ -343,7 +343,10 @@ class TestStaleJobReaper:
         ) - timedelta(minutes=5)
         factory = MagicMock(return_value=session)
 
-        reaper = StaleJobReaper(factory, timeout_seconds=3600, stall_seconds=1800)
+        reaper = StaleJobReaper(
+            factory,
+            config=StaleJobReaperConfig(timeout_seconds=3600, stall_seconds=1800),
+        )
         count = reaper._reap()
 
         assert count == 0
@@ -371,7 +374,10 @@ class TestStaleJobReaper:
         ]
         factory = MagicMock(return_value=session)
 
-        reaper = StaleJobReaper(factory, timeout_seconds=3600, stall_seconds=1800)
+        reaper = StaleJobReaper(
+            factory,
+            config=StaleJobReaperConfig(timeout_seconds=3600, stall_seconds=1800),
+        )
         count = reaper._reap()
 
         assert count == 1
@@ -384,7 +390,7 @@ class TestStaleJobReaper:
         session.query.return_value.filter.return_value.all.return_value = []
         factory = MagicMock(return_value=session)
 
-        reaper = StaleJobReaper(factory, timeout_seconds=3600)
+        reaper = StaleJobReaper(factory)
         count = reaper._reap()
 
         assert count == 0
@@ -396,7 +402,7 @@ class TestStaleJobReaper:
         session.query.side_effect = RuntimeError("DB connection lost")
         factory = MagicMock(return_value=session)
 
-        reaper = StaleJobReaper(factory, timeout_seconds=3600)
+        reaper = StaleJobReaper(factory)
         with pytest.raises(RuntimeError, match="DB connection lost"):
             reaper._reap()
         session.rollback.assert_called_once()
@@ -408,7 +414,7 @@ class TestStaleJobReaper:
         session.rollback.side_effect = RuntimeError("rollback failed too")
         factory = MagicMock(return_value=session)
 
-        reaper = StaleJobReaper(factory, timeout_seconds=3600)
+        reaper = StaleJobReaper(factory)
         with pytest.raises(RuntimeError, match="DB gone"):
             reaper._reap()
         session.rollback.assert_called_once()
@@ -417,7 +423,7 @@ class TestStaleJobReaper:
     def test_run_registers_signal_handlers(self):
         """run() should register SIGINT and SIGTERM handlers."""
         factory = MagicMock()
-        reaper = StaleJobReaper(factory, timeout_seconds=3600)
+        reaper = StaleJobReaper(factory)
         # Make _reap set _stop=True so the loop exits after one iteration
         reaper._stop = False
         call_count = [0]
@@ -443,7 +449,7 @@ class TestStaleJobReaper:
     def test_run_loops_and_stops_on_flag(self):
         """run() calls _reap repeatedly until _stop is set."""
         factory = MagicMock()
-        reaper = StaleJobReaper(factory, timeout_seconds=3600)
+        reaper = StaleJobReaper(factory)
         reap_count = [0]
 
         def fake_reap():
@@ -465,7 +471,7 @@ class TestStaleJobReaper:
     def test_run_logs_reaped_count(self):
         """When _reap returns non-zero, run() logs it."""
         factory = MagicMock()
-        reaper = StaleJobReaper(factory, timeout_seconds=3600)
+        reaper = StaleJobReaper(factory)
 
         def fake_reap():
             reaper._stop = True
@@ -487,7 +493,7 @@ class TestStaleJobReaper:
     def test_run_catches_reap_exception(self):
         """If _reap raises, run() logs the error and continues."""
         factory = MagicMock()
-        reaper = StaleJobReaper(factory, timeout_seconds=3600)
+        reaper = StaleJobReaper(factory)
         call_count = [0]
 
         def failing_reap():
@@ -513,7 +519,7 @@ class TestStaleJobReaper:
     def test_handle_stop_sets_flag(self):
         """_handle_stop sets the _stop flag."""
         factory = MagicMock()
-        reaper = StaleJobReaper(factory, timeout_seconds=3600)
+        reaper = StaleJobReaper(factory)
         assert reaper._stop is False
         reaper._handle_stop(signal.SIGINT, None)
         assert reaper._stop is True
@@ -782,6 +788,28 @@ class TestBaseWorkerDeferredResult:
         # written to the job — not that the in-memory object became RUNNING.
         assert job.status != JobStatus.SUCCEEDED
 
+    def test_deferred_result_clears_lease(self):
+        """FIX-PREDICT-COORD-RELIABLE: a deferred coordinator clears
+        ``leased_until`` so the consumer (which stops heartbeating after the
+        deferred return) does not leave a stale claim-time lease that the
+        reaper would requeue mid-flight."""
+        job = _make_job()
+        job.leased_until = datetime.now(UTC) + timedelta(seconds=120)
+        session = MagicMock()
+        session.get.return_value = job
+        factory = MagicMock(return_value=session)
+        registry, _ = _make_registry(
+            result=OperationResult(result={"dispatched": True}, deferred=True)
+        )
+
+        worker = BaseWorker(factory, registry, WorkerConfig(worker_name="test"))
+        worker.handle_job(job.id)
+
+        assert job.status != JobStatus.SUCCEEDED
+        # Lease cleared → reaper falls back to event-based liveness, never the
+        # 120s lease-expiry requeue path.
+        assert job.leased_until is None
+
 
 class TestBaseWorkerPublishAfterCommit:
     """Cover publish_after_commit and publish_operations (lines 169-176)."""
@@ -894,6 +922,41 @@ class TestBaseWorkerEmitProgress:
         # Find the session where progress was set
         assert job.progress_current == 5
         assert job.progress_total == 20
+
+
+class TestBaseWorkerEmitHeartbeat:
+    """C4 / NFR-INFRA: every JobEvent emit also renews the lease so a long
+    single-threaded job whose dedicated heartbeat thread starves under GIL
+    contention is never mistaken for dead by the stale-job reaper."""
+
+    def test_emit_renews_lease_for_running_job(self):
+        """Emitting a JobEvent must trigger a lease renewal via extend_lease."""
+        job = _make_job()
+
+        def make_session():
+            s = MagicMock()
+            s.get.return_value = job
+            return s
+
+        factory = MagicMock(side_effect=make_session)
+
+        def _execute(sess, payload, *, emit):
+            emit("progress", "tick", {"_progress_current": 1}, "info")
+            return OperationResult()
+
+        op = MagicMock()
+        op.name = "ping"
+        op.execute.side_effect = _execute
+        registry = OperationRegistry()
+        registry.register(op)
+
+        worker = BaseWorker(factory, registry, WorkerConfig(worker_name="test"))
+        with patch.object(worker, "extend_lease") as mock_extend:
+            worker.handle_job(job.id)
+
+        # The emit closure must have renewed the lease at least once.
+        assert mock_extend.call_count >= 1
+        assert mock_extend.call_args.args[0] == job.id
 
 
 class TestBaseWorkerForceFailJob:
@@ -1593,16 +1656,20 @@ class TestStaleJobReaperLeaseRequeue:
         marking it FAILED."""
         stale = self._stale_job()
         session = MagicMock()
-        session.query.return_value.filter.return_value.all.return_value = [stale]
+        # First call to all() is for RUNNING candidates in _reap
+        # Second call to all() is for QUEUED candidates in _reap_orphaned_queued
+        session.query.return_value.filter.return_value.all.side_effect = [[stale], []]
         # last_event_ts irrelevant when leased_until is present; count() = 0.
         session.query.return_value.filter.return_value.scalar.side_effect = [None, 0]
         factory = MagicMock(return_value=session)
 
         reaper = StaleJobReaper(
             factory,
-            timeout_seconds=3600,
             amqp_url="amqp://test/",
-            max_lease_requeues=3,
+            config=StaleJobReaperConfig(
+                timeout_seconds=3600,
+                max_lease_requeues=3,
+            ),
         )
         with patch("protea.workers.stale_job_reaper.publish_job") as mock_publish:
             count = reaper._reap()
@@ -1618,16 +1685,20 @@ class TestStaleJobReaperLeaseRequeue:
         lease miss flips the job to FAILED with ``error_code=lease_expired``."""
         stale = self._stale_job()
         session = MagicMock()
-        session.query.return_value.filter.return_value.all.return_value = [stale]
+        # First call to all() is for RUNNING candidates in _reap
+        # Second call to all() is for QUEUED candidates in _reap_orphaned_queued
+        session.query.return_value.filter.return_value.all.side_effect = [[stale], []]
         # Three prior re-enqueues already happened — budget exhausted.
         session.query.return_value.filter.return_value.scalar.side_effect = [None, 3]
         factory = MagicMock(return_value=session)
 
         reaper = StaleJobReaper(
             factory,
-            timeout_seconds=3600,
             amqp_url="amqp://test/",
-            max_lease_requeues=3,
+            config=StaleJobReaperConfig(
+                timeout_seconds=3600,
+                max_lease_requeues=3,
+            ),
         )
         with patch("protea.workers.stale_job_reaper.publish_job") as mock_publish:
             count = reaper._reap()
@@ -1643,15 +1714,19 @@ class TestStaleJobReaperLeaseRequeue:
         is available — there is nowhere to republish."""
         stale = self._stale_job()
         session = MagicMock()
-        session.query.return_value.filter.return_value.all.return_value = [stale]
+        # First call to all() is for RUNNING candidates in _reap
+        # Second call to all() is for QUEUED candidates in _reap_orphaned_queued
+        session.query.return_value.filter.return_value.all.side_effect = [[stale], []]
         session.query.return_value.filter.return_value.scalar.side_effect = [None, 0]
         factory = MagicMock(return_value=session)
 
         reaper = StaleJobReaper(
             factory,
-            timeout_seconds=3600,
             amqp_url=None,
-            max_lease_requeues=3,
+            config=StaleJobReaperConfig(
+                timeout_seconds=3600,
+                max_lease_requeues=3,
+            ),
         )
         with patch("protea.workers.stale_job_reaper.publish_job") as mock_publish:
             count = reaper._reap()
@@ -1667,15 +1742,19 @@ class TestStaleJobReaperLeaseRequeue:
         and a sibling consumer or manual re-dispatch recovers."""
         stale = self._stale_job()
         session = MagicMock()
-        session.query.return_value.filter.return_value.all.return_value = [stale]
+        # First call to all() is for RUNNING candidates in _reap
+        # Second call to all() is for QUEUED candidates in _reap_orphaned_queued
+        session.query.return_value.filter.return_value.all.side_effect = [[stale], []]
         session.query.return_value.filter.return_value.scalar.side_effect = [None, 0]
         factory = MagicMock(return_value=session)
 
         reaper = StaleJobReaper(
             factory,
-            timeout_seconds=3600,
             amqp_url="amqp://test/",
-            max_lease_requeues=3,
+            config=StaleJobReaperConfig(
+                timeout_seconds=3600,
+                max_lease_requeues=3,
+            ),
         )
         with patch(
             "protea.workers.stale_job_reaper.publish_job",
@@ -1687,3 +1766,177 @@ class TestStaleJobReaperLeaseRequeue:
         # but it is left QUEUED so the next reaper cycle will not see it.
         assert count == 1
         assert stale.status == JobStatus.QUEUED
+
+
+class TestStaleJobReaperEventGrace:
+    """C4 / NFR-INFRA: a leased RUNNING job whose lease lapsed (heartbeat
+    thread starved under GIL contention) but which emitted a JobEvent within
+    ``event_grace_seconds`` is treated as ALIVE and never re-enqueued as a
+    phantom duplicate. A genuinely silent job (no events) still flows through
+    the requeue budget and ultimately FAILED."""
+
+    def _leased_expired_job(self, *, queue_name="protea.training"):
+        job = MagicMock(spec=Job)
+        job.id = uuid4()
+        job.status = JobStatus.RUNNING
+        job.operation = "export_research_dataset"
+        job.started_at = datetime.now(UTC) - timedelta(hours=5)
+        # Lease lapsed two minutes ago (heartbeat thread starved).
+        job.leased_until = datetime.now(UTC) - timedelta(minutes=2)
+        job.queue_name = queue_name
+        return job
+
+    def test_recent_event_protects_leased_job_from_requeue(self):
+        """A leased-expired job that emitted an event 30 min ago (well inside
+        the 45-min event grace) is left RUNNING and NOT republished."""
+        job = self._leased_expired_job()
+        session = MagicMock()
+        # _reap RUNNING candidates, then _reap_orphaned_queued QUEUED candidates.
+        session.query.return_value.filter.return_value.all.side_effect = [[job], []]
+        # last_event_ts = 30 min ago (inside event_grace=2700s/45min).
+        session.query.return_value.filter.return_value.scalar.return_value = datetime.now(
+            UTC
+        ) - timedelta(minutes=30)
+        factory = MagicMock(return_value=session)
+
+        reaper = StaleJobReaper(
+            factory,
+            amqp_url="amqp://test/",
+            config=StaleJobReaperConfig(
+                timeout_seconds=3600,
+                max_lease_requeues=3,
+                event_grace_seconds=2700,
+            ),
+        )
+        with patch("protea.workers.stale_job_reaper.publish_job") as mock_publish:
+            count = reaper._reap()
+
+        assert count == 0
+        assert job.status == JobStatus.RUNNING  # untouched
+        mock_publish.assert_not_called()
+
+    def test_stale_event_past_grace_is_requeued(self):
+        """A leased-expired job whose last event is OLDER than the event grace
+        is genuinely stalled and gets requeued (budget available)."""
+        job = self._leased_expired_job()
+        session = MagicMock()
+        session.query.return_value.filter.return_value.all.side_effect = [[job], []]
+        # last_event_ts = 90 min ago (past event_grace=45min); then requeue
+        # attempt count = 0.
+        session.query.return_value.filter.return_value.scalar.side_effect = [
+            datetime.now(UTC) - timedelta(minutes=90),
+            0,
+        ]
+        factory = MagicMock(return_value=session)
+
+        reaper = StaleJobReaper(
+            factory,
+            amqp_url="amqp://test/",
+            config=StaleJobReaperConfig(
+                timeout_seconds=3600,
+                max_lease_requeues=3,
+                event_grace_seconds=2700,
+            ),
+        )
+        with patch("protea.workers.stale_job_reaper.publish_job") as mock_publish:
+            count = reaper._reap()
+
+        assert count == 1
+        assert job.status == JobStatus.QUEUED
+        mock_publish.assert_called_once()
+
+    def test_no_events_leased_job_is_requeued(self):
+        """A leased-expired job that never emitted any event (last_event_ts is
+        None) is genuinely dead and flows through the requeue path."""
+        job = self._leased_expired_job()
+        session = MagicMock()
+        session.query.return_value.filter.return_value.all.side_effect = [[job], []]
+        session.query.return_value.filter.return_value.scalar.side_effect = [None, 0]
+        factory = MagicMock(return_value=session)
+
+        reaper = StaleJobReaper(
+            factory,
+            amqp_url="amqp://test/",
+            config=StaleJobReaperConfig(
+                timeout_seconds=3600,
+                max_lease_requeues=3,
+                event_grace_seconds=2700,
+            ),
+        )
+        with patch("protea.workers.stale_job_reaper.publish_job") as mock_publish:
+            count = reaper._reap()
+
+        assert count == 1
+        assert job.status == JobStatus.QUEUED
+        mock_publish.assert_called_once()
+
+    def test_orphaned_queued_with_recent_event_not_republished(self):
+        """A QUEUED row that emitted an event within the event grace (e.g. a
+        row the lease-requeue flipped back to QUEUED whose real worker is still
+        emitting) is NOT re-published as a duplicate."""
+        job = MagicMock(spec=Job)
+        job.id = uuid4()
+        job.status = JobStatus.QUEUED
+        job.operation = "export_research_dataset"
+        job.created_at = datetime.now(UTC) - timedelta(hours=5)
+        job.queue_name = "protea.training"
+
+        session = MagicMock()
+        # No RUNNING candidates; one QUEUED candidate.
+        session.query.return_value.filter.return_value.all.side_effect = [[], [job]]
+        # last_event_ts = 20 min ago: past queued_stall (10min) but well
+        # inside event_grace (45min) -> must be skipped.
+        session.query.return_value.filter.return_value.scalar.return_value = datetime.now(
+            UTC
+        ) - timedelta(minutes=20)
+        factory = MagicMock(return_value=session)
+
+        reaper = StaleJobReaper(
+            factory,
+            amqp_url="amqp://test/",
+            config=StaleJobReaperConfig(
+                timeout_seconds=3600,
+                queued_stall_seconds=600,
+                event_grace_seconds=2700,
+            ),
+        )
+        with patch("protea.workers.stale_job_reaper.publish_job") as mock_publish:
+            count = reaper._reap()
+
+        assert count == 0
+        mock_publish.assert_not_called()
+
+    def test_orphaned_queued_silent_is_republished(self):
+        """A QUEUED row whose last event is older than BOTH queued_stall and
+        event_grace is genuinely orphaned and gets re-published."""
+        job = MagicMock(spec=Job)
+        job.id = uuid4()
+        job.status = JobStatus.QUEUED
+        job.operation = "export_research_dataset"
+        job.created_at = datetime.now(UTC) - timedelta(hours=5)
+        job.queue_name = "protea.training"
+
+        session = MagicMock()
+        session.query.return_value.filter.return_value.all.side_effect = [[], [job]]
+        # last_event_ts = 90 min ago (past event_grace); then the
+        # QUEUE_STALL_REQUEUE_EVENT prior-count = 0.
+        session.query.return_value.filter.return_value.scalar.side_effect = [
+            datetime.now(UTC) - timedelta(minutes=90),
+            0,
+        ]
+        factory = MagicMock(return_value=session)
+
+        reaper = StaleJobReaper(
+            factory,
+            amqp_url="amqp://test/",
+            config=StaleJobReaperConfig(
+                timeout_seconds=3600,
+                queued_stall_seconds=600,
+                event_grace_seconds=2700,
+            ),
+        )
+        with patch("protea.workers.stale_job_reaper.publish_job") as mock_publish:
+            count = reaper._reap()
+
+        assert count == 1
+        mock_publish.assert_called_once()

@@ -11,6 +11,7 @@ so a future reader cut-over is a column-rename-free swap.
 """
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from typing import Any
 
@@ -81,6 +82,18 @@ FEATURE_JSONB_KEYS: tuple[str, ...] = (
 )
 
 
+def _json_safe_float(value: Any) -> Any:
+    """Scrub non-finite floats (NaN/Inf) to None so the JSONB stays valid JSON.
+
+    Postgres JSON(B) rejects the NaN/Infinity tokens; the typed float8 columns
+    accept them, but the mirrored blob must not carry them (classifier-added
+    candidates set distance to NaN). Non-float values pass through unchanged.
+    """
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
+
+
 def build_feature_jsonb(typed_row: Mapping[str, Any]) -> dict[str, Any]:
     """Mirror the typed-column values into a JSONB-shaped dict.
 
@@ -94,7 +107,7 @@ def build_feature_jsonb(typed_row: Mapping[str, Any]) -> dict[str, Any]:
     to ``None`` so the blob shape stays stable across writer sites.
     """
     return {
-        key: typed_row.get(key)
+        key: _json_safe_float(typed_row.get(key))
         for key in FEATURE_JSONB_KEYS
         if key not in _IDENTITY_KEYS
     }

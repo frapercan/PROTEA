@@ -65,6 +65,26 @@ class TrainRerankerAutoPayload(ProteaPayload, frozen=True):  # type: ignore[misc
     compute_alignments: bool = False
     compute_taxonomy: bool = False
 
+    # lafa-integrate INT-6: train/serve feature parity. When set, the export
+    # computes the SAME real self_prior / association / classifier feature
+    # values the predict path serves (the producers in
+    # ``predict_go_terms._post_knn_pipeline`` and ``classifier_producer``),
+    # instead of the zero-fill defaults. Default False so existing exports are
+    # bit-identical. Leakage-clean: every value reads only the pre-cutoff t0
+    # annotation set (``version_to_set[v_old]`` / ``test_old_set_id``), the same
+    # source the KNN reference pool uses, never a post-cutoff set.
+    compute_self_prior: bool = False
+    compute_association: bool = False
+    compute_classifier: bool = False
+
+    # Parity-producer batching: the self_prior / association / classifier
+    # producers run ONCE per chunk of this many query proteins rather than once
+    # per protein (the historical hotspot: a per-protein SQL + GPU
+    # forward-pass storm). Value-preserving (they key strictly by
+    # ``(protein_accession, go_term_id)`` and never mix proteins). 512 bounds
+    # the records held in RAM; set 0 for per-split (one call over all queries).
+    parity_chunk_size: int = 512
+
     # IA weighting: path to IA TSV file (go_id\tia_value, no header).
     # When set, sample_weight = IA(go_term) during training so the model
     # focuses on informative (rare, specific) GO terms aligned with
@@ -103,6 +123,24 @@ class TrainRerankerAutoPayload(ProteaPayload, frozen=True):  # type: ignore[misc
     # Used by the protea-reranker-lab repo to iterate on frozen datasets.
     dump_to: str | None = None
     dump_only: bool = False
+
+    # NFR-ARCH "export decouple". When True, the STABLE per-candidate feature
+    # table (everything except the classifier columns) is content-addressed and
+    # cached in the artifact store, so a later export with the same stable
+    # config but a different classifier reuses the cached table and only
+    # recomputes the classifier column(s). Default False so the heavy pipeline
+    # and the golden parquet are byte-identical when the flag is off. The cache
+    # is keyed by ``_stable_feature_cache.compute_stable_cache_key`` (classifier
+    # config is deliberately excluded from the key).
+    stable_feature_cache: bool = False
+    # Phase-2 SKETCH: a list of classifier-variant specs (each a label + a seed
+    # dir / seed paths / model path). When given, the export emits one
+    # ``classifier_score__<label>`` / ``classifier_present__<label>`` column
+    # family per variant in a single pass over the (cached) stable table, so
+    # the lab trains a booster per variant from the same parquet. ``None`` keeps
+    # the canonical single ``classifier_score`` / ``classifier_present``
+    # columns. Wired in phase 2; carried here so the payload contract is stable.
+    classifier_variants: list[dict[str, str]] | None = None
 
     @field_validator("embedding_config_id", "ontology_snapshot_id", "name", mode="before")
     @classmethod

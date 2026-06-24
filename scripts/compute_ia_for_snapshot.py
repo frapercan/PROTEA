@@ -26,7 +26,6 @@ Outputs
 from __future__ import annotations
 
 import argparse
-import math
 import sys
 import time
 import uuid
@@ -35,10 +34,9 @@ from pathlib import Path
 
 from sqlalchemy import text
 
+from protea.core.ia import PROPAGATE_RELATIONS, build_ancestors, term_ia
 from protea.infrastructure.session import build_session_factory
 from protea.infrastructure.settings import load_settings
-
-PROPAGATE_RELATIONS = ("is_a", "part_of")
 
 
 def _log(msg: str) -> None:
@@ -84,26 +82,12 @@ def compute_ia(
     _log(f"parent edges: {sum(len(v) for v in parents.values())} "
          f"({len(parents)} terms with parents)")
 
-    # 3. precompute ancestors (including self) via memoized DFS
-    ancestors_cache: dict[str, frozenset[str]] = {}
-
-    def ancestors(go_id: str) -> frozenset[str]:
-        if go_id in ancestors_cache:
-            return ancestors_cache[go_id]
-        acc = {go_id}
-        stack = list(parents.get(go_id, ()))
-        while stack:
-            p = stack.pop()
-            if p in acc:
-                continue
-            acc.add(p)
-            stack.extend(parents.get(p, ()))
-        fs = frozenset(acc)
-        ancestors_cache[go_id] = fs
-        return fs
-
+    # 3. precompute ancestors (including self) via the shared IA module so the
+    #    script and the unit-tested core never drift.
+    ancestors_cache = build_ancestors(parents)
     for go_id in pivot_goid_by_id.values():
-        ancestors(go_id)
+        if go_id not in ancestors_cache:
+            ancestors_cache[go_id] = frozenset({go_id})
     _log(f"ancestor closures computed: {len(ancestors_cache)}")
 
     # 4. load corpus annotations — stream to avoid loading 5M rows into mem at once
@@ -124,7 +108,7 @@ def compute_ia(
         if go_id not in pivot_id_by_goid:
             continue
         count_used += 1
-        for anc in ancestors(go_id):
+        for anc in ancestors_cache[go_id]:
             proteins_per_term[anc].add(protein)
         if count_raw % 500000 == 0:
             _log(f"  processed {count_raw:,} raw annotations "
@@ -132,31 +116,11 @@ def compute_ia(
     _log(f"raw={count_raw:,} used={count_used:,} "
          f"terms_with_proteins={len(proteins_per_term)}")
 
-    # 5. compute IA
-    ia: dict[str, float] = {}
-    for go_id in pivot_goid_by_id.values():
-        pp = parents.get(go_id)
-        if not pp:
-            ia[go_id] = 0.0
-            continue
-        child_set = proteins_per_term.get(go_id)
-        if not child_set:
-            ia[go_id] = 0.0
-            continue
-        parent_sets = [proteins_per_term.get(p) for p in pp]
-        if any(ps is None for ps in parent_sets):
-            ia[go_id] = 0.0
-            continue
-        denom_set = set.intersection(*parent_sets)
-        denom = len(denom_set)
-        if denom == 0:
-            ia[go_id] = 0.0
-            continue
-        num = len(child_set)
-        if num == 0 or num > denom:
-            ia[go_id] = 0.0
-            continue
-        ia[go_id] = -math.log2(num / denom)
+    # 5. compute IA via the shared core (LAFA-faithful dummy-protein formula)
+    ia: dict[str, float] = {
+        go_id: term_ia(go_id, parents.get(go_id), proteins_per_term)
+        for go_id in pivot_goid_by_id.values()
+    }
 
     nonzero = sum(1 for v in ia.values() if v > 0)
     total = sum(ia.values())

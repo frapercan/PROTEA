@@ -83,6 +83,8 @@ test.describe("landing page", () => {
     await setShowcaseResponse({
       protein_stats: { total: 0, canonical: 0 },
       best: null,
+      primary_metric: "f_micro_w",
+      per_task: [],
       counts: {
         proteins: 0,
         sequences: 0,

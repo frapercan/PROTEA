@@ -22,3 +22,4 @@ fix sequence that an operator can execute without prior context.
    loki
    prometheus
    deployment-process-stack
+   lafa-native-parity

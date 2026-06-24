@@ -5,9 +5,18 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { BenchmarkHeatmap } from "@/components/BenchmarkHeatmap";
+import { EvalProvenanceBadges } from "@/components/EvalProvenanceBadges";
 import { Skeleton } from "@/components/Skeleton";
 import { Tooltip } from "@/components/Tooltip";
 import { useUrlNumber, useUrlParam } from "@/lib/useUrlParam";
+import {
+  bestPerCellFromRows,
+  curateBestCells,
+  curateRows,
+  evalSetIdsWithRows,
+  lafaCellKeys,
+  perTaskFromRows,
+} from "@/lib/benchmarkCuration";
 import {
   getBenchmarkEmbeddings,
   getBenchmarkMatrix,
@@ -17,6 +26,7 @@ import {
   type BenchmarkMatrixResponse,
   type BenchmarkRow,
   type BenchmarkStage,
+  type PerTaskAggregate,
 } from "../../../lib/api";
 
 /** Canonical category definitions. Anchored to the leakage-fixed champion
@@ -75,6 +85,14 @@ const LINEAGE_CHIPS: { key: LineageChipKey; label: string; cats: string[]; toolt
     tooltip: "Limited Knowledge in isolation — proteins annotated in other aspects but not the one under evaluation.",
   },
 ];
+
+/** IA-weighted headline metric definition (FIX-METRIC-IA). */
+const FMICRO_TOOLTIP =
+  "f_micro_w: the information-accretion-weighted micro-averaged F score. The LAFA / CAFA headline metric, comparable to the external leaderboards. Rare, specific GO terms count more than common ones.";
+
+/** Shown on cells still carrying the legacy unweighted Fmax (no real IA yet). */
+const NOT_IA_TOOLTIP =
+  "Not IA-weighted: this cell predates real information-accretion scoring and reports the unweighted Fmax, which is not directly comparable to the LAFA / CAFA leaderboards.";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -141,10 +159,6 @@ function stageLabel(stages: BenchmarkStage[], name: string): string {
   return stages.find((s) => s.name === name)?.label ?? name;
 }
 
-function evalSetLabel(evalSets: BenchmarkEvalSet[], id: string): string {
-  return evalSets.find((e) => e.id === id)?.label ?? `${id.slice(0, 8)}…`;
-}
-
 /** Pick the initial stage once the catalog is loaded. Backend already
  *  returns stages sorted by YAML preferred_default_stages, so the first
  *  entry IS the preferred one if it has data. */
@@ -167,11 +181,18 @@ function rowsToCsv(
     "stage",
     "category",
     "aspect",
+    "primary",
+    "primary_metric",
+    "f_micro_w",
     "fmax",
     "precision",
     "recall",
     "coverage",
     "n_proteins",
+    "frame",
+    "temporal_window",
+    "arms_enabled",
+    "leakage_role",
     "evaluation_set_id",
     "evaluation_result_id",
   ].join(",");
@@ -188,11 +209,23 @@ function rowsToCsv(
         r.stage,
         r.category,
         r.aspect,
+        r.primary,
+        r.primary_metric,
+        r.f_micro_w ?? "",
         r.fmax,
         r.precision ?? "",
         r.recall ?? "",
         r.coverage ?? "",
         r.n_proteins ?? "",
+        r.frame ?? "",
+        r.temporal_window ?? "",
+        r.arms_enabled
+          ? Object.entries(r.arms_enabled)
+              .filter(([, on]) => on)
+              .map(([k]) => k)
+              .join("+")
+          : "",
+        r.leakage_role ?? "",
         r.evaluation_set_id,
         r.evaluation_result_id,
       ]
@@ -242,6 +275,14 @@ export default function BenchmarkPage() {
   const [lineageRaw, setLineageRaw] = useUrlParam("lineage", null);
   const lineage = (lineageRaw ?? "all") as LineageChipKey;
   const setLineage = (v: LineageChipKey) => setLineageRaw(v === "all" ? null : v);
+  // Reversible curation (slice F-METHOD-EVAL-SURFACE). The default view hides
+  // diagnostic probe rows and legacy internal-frame rows superseded by a
+  // current LAFA-frame result; "Show all" reveals everything. Encoded as the
+  // missing param when off so a copied default URL stays clean. No data is
+  // dropped: this is a pure presentation filter on rows already in hand.
+  const [showAllRaw, setShowAllRaw] = useUrlParam("all", null);
+  const showAll = showAllRaw === "1";
+  const setShowAll = (v: boolean) => setShowAllRaw(v ? "1" : null);
   // Default view: heatmap small-multiples (#81). The full numeric matrix is
   // still one click away under the toggle for export workflows.
   const [viewMode, setViewMode] = useState<"heatmap" | "table">("heatmap");
@@ -343,28 +384,61 @@ export default function BenchmarkPage() {
       .catch((e) => setError(e.message));
   }, [stage, evalSetId, selectedK]);
 
-  const rowIndex = useMemo(
-    () => (matrix ? indexRows(matrix.rows) : new Map<string, BenchmarkRow>()),
-    [matrix],
+  // Reversible curation: drop probe + superseded-internal rows in the default
+  // view. Everything downstream (table, heatmap, leaderboards, headline) is
+  // recomputed from this curated set so the page can never point at a row it
+  // no longer shows. ``curation.rows`` === ``matrix.rows`` when showAll.
+  const curation = useMemo(
+    () => curateRows(matrix?.rows ?? [], showAll),
+    [matrix, showAll],
   );
+  const curatedRows = curation.rows;
 
+  // LAFA-frame cell keys come from the full row set so the superseded-internal
+  // test for the global leaderboard sees every frame, not just curated rows.
+  const lafaKeys = useMemo(() => lafaCellKeys(matrix?.rows ?? []), [matrix]);
+
+  const rowIndex = useMemo(() => indexRows(curatedRows), [curatedRows]);
+
+  // In-selection leaderboard recomputed from curated rows (mirrors the backend
+  // max-primary-per-cell), so a hidden probe row never wins a cell by default.
   const bestPerCell = useMemo(
-    () => (matrix ? indexBestPerCell(matrix.best_per_cell) : new Map<string, BenchmarkBestCell>()),
-    [matrix],
-  );
-
-  const bestPerCellGlobal = useMemo(
     () =>
       matrix
-        ? indexBestPerCell(matrix.best_per_cell_global ?? [])
+        ? indexBestPerCell(
+            bestPerCellFromRows(curatedRows, matrix.categories, matrix.aspects),
+          )
         : new Map<string, BenchmarkBestCell>(),
-    [matrix],
+    [matrix, curatedRows],
+  );
+
+  // Global champions ignore stage/K, so they cannot be recomputed from the
+  // (stage-filtered) row set; instead the probe / superseded entries are
+  // filtered out of the server list in the default view.
+  const bestPerCellGlobal = useMemo(
+    () =>
+      indexBestPerCell(
+        curateBestCells(matrix?.best_per_cell_global ?? [], showAll, lafaKeys),
+      ),
+    [matrix, showAll, lafaKeys],
   );
 
   const embeddingsWithData = useMemo(() => {
-    if (!embeddings || !matrix) return new Set<string>();
-    return new Set(matrix.embedding_config_ids);
-  }, [embeddings, matrix]);
+    if (!embeddings) return new Set<string>();
+    return new Set(curatedRows.map((r) => r.embedding_config_id));
+  }, [embeddings, curatedRows]);
+
+  // Honest headline: per-task mean ± 95% CI recomputed across the curated
+  // models in the current selection (FIX-METRIC-IA), keyed by (category|aspect)
+  // so probe / superseded rows never inflate the mean.
+  const perTaskIndex = useMemo(() => {
+    const out = new Map<string, PerTaskAggregate>();
+    if (!matrix) return out;
+    for (const t of perTaskFromRows(curatedRows, matrix.categories, matrix.aspects)) {
+      out.set(`${t.category}|${t.aspect}`, t);
+    }
+    return out;
+  }, [matrix, curatedRows]);
 
   if (error) {
     return (
@@ -446,9 +520,21 @@ export default function BenchmarkPage() {
     );
   }
 
-  const hasData = matrix.rows.length > 0;
+  const hasData = curatedRows.length > 0;
+  // True when curation hid every row but the raw matrix still has data — the
+  // empty state then nudges the user to the "Show all" escape hatch instead of
+  // implying the benchmark is empty.
+  const curatedToEmpty = !hasData && matrix.rows.length > 0;
   const stageList = catalog.stages.length > 0 ? catalog.stages : matrix.stages;
-  const evalSetList = catalog.evalSets.length > 0 ? catalog.evalSets : matrix.evaluation_sets;
+  const allEvalSetList = catalog.evalSets.length > 0 ? catalog.evalSets : matrix.evaluation_sets;
+  // Hide eval sets that have no curated rows (probe / test-only sets) from the
+  // selector in the default view; the currently selected set is always kept so
+  // the dropdown never loses its own value. Reversible via "Show all".
+  const curatedEsIds = evalSetIdsWithRows(curatedRows);
+  const evalSetList = showAll
+    ? allEvalSetList
+    : allEvalSetList.filter((es) => curatedEsIds.has(es.id) || es.id === evalSetId);
+  const hiddenEvalSetCount = allEvalSetList.length - evalSetList.length;
   const allCategories = catalog.categories.length > 0 ? catalog.categories : matrix.categories;
   const aspects = catalog.aspects.length > 0 ? catalog.aspects : matrix.aspects;
   const currentStageLabel = stageLabel(stageList, stage);
@@ -468,7 +554,7 @@ export default function BenchmarkPage() {
   // category was filtered out. Identical to chipCats on the happy path,
   // but defaults to "all known" when the fallback fires above.
   const effectiveCatSet = new Set(effectiveCategories);
-  const filteredRows = matrix.rows.filter((r) => effectiveCatSet.has(r.category));
+  const filteredRows = curatedRows.filter((r) => effectiveCatSet.has(r.category));
 
   // Active eval set banner: when "all" is selected and there's only one set,
   // show that one; when a specific one is selected, show its full metadata.
@@ -486,19 +572,43 @@ export default function BenchmarkPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Benchmark matrix</h1>
           <p className="text-sm text-slate-500 mt-1">
-            Per-embedding Fmax across categories and aspects for every evaluation
-            run in the database.{" "}
+            Per-embedding IA-weighted <span className="font-mono">f_micro_w</span> (LAFA / CAFA
+            comparable) across categories and aspects for every evaluation run in the
+            database.{" "}
             <Link href={`/${locale}/`} className="text-blue-600 hover:underline">
               {t("backToHome")}
             </Link>
           </p>
         </div>
         <div className="flex gap-2">
+          {/* Reversible curation toggle. Default view hides probe + legacy
+              superseded-internal rows; one click reveals everything. */}
+          <Tooltip
+            text={
+              showAll
+                ? "Showing every row, including diagnostic probes and legacy internal-frame results. Click to return to the curated default."
+                : "Curated default: diagnostic probe rows and legacy internal-frame results superseded by a current LAFA-frame number are hidden. Click to show all."
+            }
+          >
+            <button
+              type="button"
+              onClick={() => setShowAll(!showAll)}
+              aria-pressed={showAll}
+              data-testid="benchmark-show-all"
+              className={`rounded-md border px-3 py-1.5 text-sm transition-colors ${
+                showAll
+                  ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                  : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              {showAll ? "Showing all" : "Show all (incl. legacy / probes)"}
+            </button>
+          </Tooltip>
           <button
             disabled={!hasData}
             onClick={() =>
               downloadCsv(
-                `benchmark_${stage}${lineage !== "all" ? `_${lineage}` : ""}.csv`,
+                `benchmark_${stage}${lineage !== "all" ? `_${lineage}` : ""}${showAll ? "_all" : ""}.csv`,
                 rowsToCsv(embeddings, filteredRows, stage),
               )
             }
@@ -508,6 +618,67 @@ export default function BenchmarkPage() {
           </button>
         </div>
       </header>
+
+      {/* Curation banner: explains what the default view hides and offers the
+          reveal. Only shown when curation actually removed something so the
+          clean default stays uncluttered (and stays silent mid-recompute when
+          the provenance columns are still null). */}
+      {!showAll && (curation.hiddenTotal > 0 || hiddenEvalSetCount > 0) && (
+        <div
+          className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"
+          role="status"
+          data-testid="benchmark-curation-banner"
+        >
+          <span>
+            Curated view ·{" "}
+            {curation.hiddenProbe > 0 && (
+              <span>
+                <strong>{curation.hiddenProbe}</strong> probe
+                {curation.hiddenProbe === 1 ? "" : "s"}
+              </span>
+            )}
+            {curation.hiddenProbe > 0 && curation.hiddenLegacy > 0 && " · "}
+            {curation.hiddenLegacy > 0 && (
+              <span>
+                <strong>{curation.hiddenLegacy}</strong> legacy internal-frame
+              </span>
+            )}
+            {(curation.hiddenTotal > 0) && hiddenEvalSetCount > 0 && " · "}
+            {hiddenEvalSetCount > 0 && (
+              <span>
+                <strong>{hiddenEvalSetCount}</strong> eval set
+                {hiddenEvalSetCount === 1 ? "" : "s"}
+              </span>
+            )}{" "}
+            hidden. Nothing is deleted.
+          </span>
+          <button
+            type="button"
+            onClick={() => setShowAll(true)}
+            className="font-semibold text-blue-600 hover:text-blue-800 underline underline-offset-2"
+          >
+            Show all
+          </button>
+        </div>
+      )}
+      {showAll && (
+        <div
+          className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+          role="status"
+        >
+          <span>
+            Showing <strong>all</strong> rows, including diagnostic probes and
+            legacy internal-frame results that the curated default hides.
+          </span>
+          <button
+            type="button"
+            onClick={() => setShowAll(false)}
+            className="font-semibold text-amber-700 hover:text-amber-900 underline underline-offset-2"
+          >
+            Back to curated
+          </button>
+        </div>
+      )}
 
       {/* Eval set context banner */}
       {activeEvalSet && (
@@ -688,12 +859,14 @@ export default function BenchmarkPage() {
 
         <div className="text-xs text-slate-600 ml-auto self-end">
           {filteredRows.length} cells
-          {filteredRows.length !== matrix.rows.length && (
-            <span className="text-slate-400"> / {matrix.total}</span>
+          {filteredRows.length !== curatedRows.length && (
+            <span className="text-slate-400"> / {curatedRows.length}</span>
+          )}
+          {!showAll && curation.hiddenTotal > 0 && (
+            <span className="text-slate-400"> ({matrix.total} all)</span>
           )}{" "}
-          · {matrix.embedding_config_ids.length} embeddings ·{" "}
-          {matrix.evaluation_sets.length} eval set
-          {matrix.evaluation_sets.length === 1 ? "" : "s"}
+          · {embeddingsWithData.size} embeddings · {evalSetList.length} eval set
+          {evalSetList.length === 1 ? "" : "s"}
         </div>
       </div>
 
@@ -709,16 +882,106 @@ export default function BenchmarkPage() {
         </div>
       )}
 
-      {/* Global champions: best Fmax per (cat, asp) ignoring stage/K filters.
-          Stable across filter changes — anchors the absolute-best read. */}
-      {matrix.best_per_cell_global && matrix.best_per_cell_global.length > 0 && (
+      {/* Headline: honest per-task mean ± 95% CI across every model in the
+          current selection. This is the f_micro_w aggregate the page leads
+          with; the best-cell tables below report maxima, never the headline
+          (winner's-curse, FIX-METRIC-IA). */}
+      {perTaskIndex.size > 0 && (
+        <section className="rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50/60 via-white to-cyan-50/40 shadow-sm p-4 sm:p-5">
+          <div className="flex items-baseline justify-between mb-3 flex-wrap gap-2">
+            <h2 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+              <span aria-hidden className="text-base">📈</span>
+              Per-task headline
+              <Tooltip text={FMICRO_TOOLTIP}>
+                <span className="ml-1 font-mono text-[11px] font-normal text-slate-600 underline decoration-dotted decoration-slate-300 underline-offset-4 cursor-help">
+                  mean f_micro_w ± 95% CI
+                </span>
+              </Tooltip>
+              <span className="ml-1 text-[11px] font-normal text-slate-500">
+                across all models in the current selection
+              </span>
+            </h2>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr>
+                  <th scope="col" className="px-2 py-1 text-left font-medium text-slate-500"></th>
+                  {aspects.map((asp) => (
+                    <th
+                      key={asp}
+                      scope="col"
+                      className="px-2 py-1 text-center text-[10px] font-medium text-slate-500 uppercase tracking-wide"
+                    >
+                      {asp}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {effectiveCategories.map((cat) => (
+                  <tr key={cat} className="border-t border-slate-200/60">
+                    <th scope="row" className="px-2 py-2.5 font-semibold text-slate-700 text-left">
+                      {CATEGORY_TOOLTIPS[cat] ? (
+                        <Tooltip text={CATEGORY_TOOLTIPS[cat]}>
+                          <span className="underline decoration-dotted decoration-slate-300 underline-offset-4 cursor-help">
+                            {cat}
+                          </span>
+                        </Tooltip>
+                      ) : (
+                        cat
+                      )}
+                    </th>
+                    {aspects.map((asp) => {
+                      const agg = perTaskIndex.get(`${cat}|${asp}`);
+                      if (!agg) {
+                        return (
+                          <td key={asp} className="px-2 py-2.5 text-center text-slate-300 border-l border-slate-200/60">
+                            —
+                          </td>
+                        );
+                      }
+                      return (
+                        <td
+                          key={asp}
+                          className="px-2 py-2.5 text-center border-l border-slate-200/60"
+                          title={`mean ${agg.mean.toFixed(3)} ± ${agg.ci95.toFixed(3)} · best cell ${agg.max.toFixed(3)} · ${agg.n_models} models`}
+                        >
+                          <div className="font-bold text-lg text-slate-900 tabular-nums leading-none">
+                            {agg.mean.toFixed(3)}
+                          </div>
+                          <div className="text-[11px] text-slate-500 tabular-nums mt-1">
+                            ± {agg.ci95.toFixed(3)}
+                          </div>
+                          <div className="text-[9px] text-slate-400 tabular-nums mt-0.5">
+                            best {agg.max.toFixed(3)} · n={agg.n_models}
+                          </div>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 text-[11px] text-slate-500">
+            Headline = the calibrated mean across every model per task. The best-cell
+            tables below report the single top model per cell (a maximum), which runs
+            ~+0.02 to +0.03 above this mean and must not be read as the headline.
+          </p>
+        </section>
+      )}
+
+      {/* Global champions: best primary metric per (cat, asp) ignoring stage/K
+          filters. Stable across filter changes — anchors the best-cell read. */}
+      {bestPerCellGlobal.size > 0 && (
         <section className="rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50/60 via-white to-violet-50/40 shadow-sm p-4 sm:p-5">
           <div className="flex items-baseline justify-between mb-3 flex-wrap gap-2">
             <h2 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
               <span aria-hidden className="text-base">🏆</span>
-              Global champions per cell
+              Best cell per task
               <span className="ml-1 text-[11px] font-normal text-slate-500">
-                across every stage and K · current evaluation set
+                single top model per cell across every stage and K · best-cell maximum, not the headline
               </span>
             </h2>
           </div>
@@ -772,8 +1035,15 @@ export default function BenchmarkPage() {
                             href={`/${locale}/evaluation/${best.evaluation_set_id}?result=${best.evaluation_result_id}`}
                             className="block group rounded-md px-1 py-0.5 hover:bg-blue-50 focus:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 transition-colors"
                           >
-                            <div className="font-bold text-lg text-slate-900 group-hover:text-blue-700 tabular-nums leading-none">
-                              {best.fmax.toFixed(3)}
+                            <div className="font-bold text-lg text-slate-900 group-hover:text-blue-700 tabular-nums leading-none flex items-center justify-center gap-1">
+                              {best.primary.toFixed(3)}
+                              {best.primary_metric === "fmax" && (
+                                <Tooltip text={NOT_IA_TOOLTIP}>
+                                  <span className="text-[8px] font-bold uppercase text-rose-600 cursor-help">
+                                    fmax
+                                  </span>
+                                </Tooltip>
+                              )}
                             </div>
                             <div className="text-[11px] font-medium text-slate-700 truncate max-w-[140px] mx-auto mt-1">
                               {emb?.display_name ?? "—"}
@@ -784,6 +1054,15 @@ export default function BenchmarkPage() {
                               <span className="tabular-nums">K={best.k}</span>
                             </div>
                           </Link>
+                          {/* Method-surface provenance for the champion cell.
+                              hideWhenEmpty keeps the grid clean on legacy
+                              cells; the /evaluation page shows the explicit
+                              unknown state per result. */}
+                          <EvalProvenanceBadges
+                            provenance={best}
+                            hideWhenEmpty
+                            className="mt-1.5 justify-center"
+                          />
                         </td>
                       );
                     })}
@@ -795,14 +1074,14 @@ export default function BenchmarkPage() {
         </section>
       )}
 
-      {/* Leaderboard: best Fmax per (cat, asp) across every model & stage */}
-      {matrix.best_per_cell.length > 0 && (
+      {/* Leaderboard: best primary metric per (cat, asp) across every model & stage */}
+      {bestPerCell.size > 0 && (
         <section className="rounded-xl border bg-white shadow-sm p-4">
           <div className="flex items-baseline justify-between mb-3">
             <h2 className="text-sm font-semibold text-slate-800">
-              Best Fmax per cell
+              Best cell per task
               <span className="ml-2 text-xs font-normal text-slate-600">
-                in current selection
+                in current selection · best-cell maximum, not the headline
                 {stage ? ` · stage=${stageLabel(stageList, stage)}` : ""}
                 {selectedK ? ` · K=${selectedK}` : ""}
               </span>
@@ -861,8 +1140,15 @@ export default function BenchmarkPage() {
                             href={`/${locale}/evaluation/${best.evaluation_set_id}?result=${best.evaluation_result_id}`}
                             className="block group rounded-md px-1 py-0.5 hover:bg-blue-50 focus:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 transition-colors"
                           >
-                            <div className="font-semibold text-slate-900 group-hover:text-blue-700 tabular-nums">
-                              {best.fmax.toFixed(3)}
+                            <div className="font-semibold text-slate-900 group-hover:text-blue-700 tabular-nums flex items-center justify-center gap-1">
+                              {best.primary.toFixed(3)}
+                              {best.primary_metric === "fmax" && (
+                                <Tooltip text={NOT_IA_TOOLTIP}>
+                                  <span className="text-[8px] font-bold uppercase text-rose-600 cursor-help">
+                                    fmax
+                                  </span>
+                                </Tooltip>
+                              )}
                             </div>
                             <div className="text-[10px] text-slate-500 truncate max-w-[120px] mx-auto">
                               {emb?.display_name ?? "—"}
@@ -906,25 +1192,51 @@ export default function BenchmarkPage() {
               );
             })}
           </div>
-          <p className="text-xs text-slate-500">
-            {viewMode === "heatmap"
-              ? "Visual ranking per cell. Bars sorted by Fmax."
-              : "Full matrix with raw numbers. Useful for export."}
-          </p>
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <Tooltip text={FMICRO_TOOLTIP}>
+              <span className="inline-flex items-center rounded-md bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 ring-1 ring-inset ring-emerald-200 font-mono cursor-help">
+                f_micro_w · IA-weighted
+              </span>
+            </Tooltip>
+            <span>
+              {viewMode === "heatmap"
+                ? "Visual ranking per cell. Bars sorted by IA-weighted f_micro_w."
+                : "Full matrix with raw numbers. Useful for export."}
+            </span>
+          </div>
         </div>
       )}
 
       {/* Matrix view */}
       {!hasData ? (
         <section className="rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 p-12 text-center">
-          <p className="text-slate-500 text-sm">
-            No evaluation results for{" "}
-            <span className="font-semibold">{currentStageLabel}</span> yet.
-          </p>
-          <p className="text-slate-600 text-xs mt-2">
-            Run <code>run_cafa_evaluation</code> for an embedding to populate
-            this cell of the matrix.
-          </p>
+          {curatedToEmpty ? (
+            <>
+              <p className="text-slate-500 text-sm">
+                Every result for{" "}
+                <span className="font-semibold">{currentStageLabel}</span> is a
+                probe or a legacy internal-frame run, hidden by the curated view.
+              </p>
+              <button
+                type="button"
+                onClick={() => setShowAll(true)}
+                className="mt-3 inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100"
+              >
+                Show all (incl. legacy / probes)
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-slate-500 text-sm">
+                No evaluation results for{" "}
+                <span className="font-semibold">{currentStageLabel}</span> yet.
+              </p>
+              <p className="text-slate-600 text-xs mt-2">
+                Run <code>run_cafa_evaluation</code> for an embedding to populate
+                this cell of the matrix.
+              </p>
+            </>
+          )}
         </section>
       ) : viewMode === "heatmap" ? (
         <BenchmarkHeatmap
@@ -1030,8 +1342,16 @@ export default function BenchmarkPage() {
                                     isWinner ? "text-green-700" : "text-slate-900"
                                   }`}
                                 >
-                                  {row.fmax.toFixed(3)}
+                                  {row.primary.toFixed(3)}
                                 </span>
+                                {row.primary_metric === "fmax" && (
+                                  <span
+                                    className="text-[8px] font-bold uppercase text-rose-600"
+                                    title="Not IA-weighted (legacy Fmax)"
+                                  >
+                                    fmax
+                                  </span>
+                                )}
                                 {std && (
                                   <span className="text-[10px] font-normal text-slate-500 group-hover:text-blue-600 tabular-nums">
                                     {std}
@@ -1040,6 +1360,11 @@ export default function BenchmarkPage() {
                               </Link>
                             ) : (
                               <span className="text-slate-300">—</span>
+                            )}
+                            {row && hasCiBand(row) && (
+                              <span className="mt-0.5 block text-[9px] leading-none text-slate-400 tabular-nums">
+                                CI [{row.fmax_ci_low!.toFixed(3)}, {row.fmax_ci_high!.toFixed(3)}]
+                              </span>
                             )}
                           </td>
                         );

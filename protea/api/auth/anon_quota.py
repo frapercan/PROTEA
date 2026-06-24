@@ -70,12 +70,10 @@ def _is_authenticated(request: Request) -> bool:
     Checks for Bearer token, ApiKey header, or X-Api-Key header so that
     authenticated users bypass the anon quota gate regardless of role.
     """
-    auth = request.headers.get("authorization", "")
-    if auth.lower().startswith("bearer ") or auth.lower().startswith("apikey "):
+    auth = request.headers.get("authorization", "").lower()
+    if auth.startswith(("bearer ", "apikey ")):
         return True
-    if request.headers.get("x-api-key"):
-        return True
-    return False
+    return bool(request.headers.get("x-api-key"))
 
 
 def _quota_limit() -> int:

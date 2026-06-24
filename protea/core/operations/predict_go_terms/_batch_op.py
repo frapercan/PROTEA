@@ -124,7 +124,26 @@ class PredictGOTermsBatchOperation(
     def __init__(self, reranker_scorer: RerankerScorer | None = None) -> None:
         self._reranker_scorer = reranker_scorer or RerankerScorer(
             attach_aspect=self._attach_go_term_aspect,
+            attach_category=self._attach_query_category,
         )
+
+    def _attach_query_category(
+        self,
+        session: Session,
+        annotation_set_id: uuid.UUID,
+        prediction_dicts: list[dict[str, Any]],
+    ) -> dict[str, int]:
+        """Assign each candidate a CAFA category from the protein's t0 known terms.
+
+        Bound here (not on the scorer) so the category loader reuses this op's
+        ``_load_annotations_for`` chunked annotation reader, matching how
+        ``_attach_go_term_aspect`` is injected.
+        """
+        from protea.core.operations.predict_go_terms._category_dispatch import (
+            attach_query_category,
+        )
+
+        return attach_query_category(self, session, annotation_set_id, prediction_dicts)
 
     def summarize_payload(self, payload: dict[str, Any]) -> str:
         p = payload or {}
@@ -214,6 +233,15 @@ class PredictGOTermsBatchOperation(
                 "         >= COALESCE((meta->>'expected_batches')::int, 2147483647)"
                 "    THEN NOW()"
                 "    ELSE finished_at"
+                "  END,"
+                # FIX-UI-PROVENANCE: on the terminal SUCCEEDED transition snap
+                # progress_current up to progress_total so the UI shows 100%
+                # instead of a stale sub-total left by the last batch emit.
+                "  progress_current = CASE"
+                "    WHEN COALESCE((meta->>'batches_completed')::int, 0) + 1"
+                "         >= COALESCE((meta->>'expected_batches')::int, 2147483647)"
+                "    THEN COALESCE(progress_total, progress_current)"
+                "    ELSE progress_current"
                 "  END "
                 "WHERE id = :pid AND status = 'RUNNING'::job_status "
                 "RETURNING (status = 'SUCCEEDED'::job_status) AS finalized, "

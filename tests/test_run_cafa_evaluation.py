@@ -9,6 +9,7 @@ import gzip
 import os
 import tempfile
 import uuid
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -16,6 +17,7 @@ import pandas as pd
 import pytest
 from pydantic import ValidationError
 
+from protea.core.band_registry import BandMismatchError
 from protea.core.evaluation import EvaluationData
 from protea.core.operations._run_cafa_artifacts import WritePredictionsContext
 from protea.core.operations.run_cafa_evaluation import (
@@ -62,10 +64,11 @@ def _make_ann_old():
     return ann
 
 
-def _make_snapshot(obo_url="https://example.com/go.obo", ia_url=None):
+def _make_snapshot(obo_url="https://example.com/go.obo", ia_url=None, obo_version=None):
     snap = MagicMock()
     snap.obo_url = obo_url
     snap.ia_url = ia_url
+    snap.obo_version = obo_version
     return snap
 
 
@@ -77,13 +80,6 @@ def _make_eval_data(nk=None, lk=None, pk=None, known=None, pk_known=None):
         known=known or {},
         pk_known=pk_known or {},
     )
-
-
-def _make_scoring_config():
-    sc = MagicMock()
-    sc.formula = "linear"
-    sc.weights = {"embedding_similarity": 1.0}
-    return sc
 
 
 def _dfs_best_fixture(*, with_weighted: bool = False):
@@ -142,9 +138,27 @@ def _dfs_best_fixture(*, with_weighted: bool = False):
         )
         out["f_micro_w"] = pd.DataFrame(
             [
-                {"ns": "biological_process", "f_micro_w": 0.25},
-                {"ns": "molecular_function", "f_micro_w": 0.45},
-                {"ns": "cellular_component", "f_micro_w": 0.50},
+                {
+                    "ns": "biological_process",
+                    "f_micro_w": 0.25,
+                    "pr_micro_w": 0.33,
+                    "rc_micro_w": 0.20,
+                    "cov_max": 0.94,
+                },
+                {
+                    "ns": "molecular_function",
+                    "f_micro_w": 0.45,
+                    "pr_micro_w": 0.50,
+                    "rc_micro_w": 0.41,
+                    "cov_max": 0.87,
+                },
+                {
+                    "ns": "cellular_component",
+                    "f_micro_w": 0.50,
+                    "pr_micro_w": 0.55,
+                    "rc_micro_w": 0.46,
+                    "cov_max": 0.91,
+                },
             ]
         )
     return out
@@ -166,6 +180,35 @@ class TestRunCafaEvaluationPayload:
         assert p.max_distance is None
         assert p.scoring_config_id is None
         assert p.ia_file is None
+
+    def test_lafa_parity_defaults(self):
+        # The defaults must reproduce LAFA's cafaeval invocation exactly:
+        # th_step=0.01 (cafaeval default), no max_terms cap, snapshot TOI.
+        # See docs/EVAL_LAFA_PARITY.md. A finer th_step (e.g. 0.001) would
+        # inflate f_micro_w and break numeric parity with LAFA.
+        p = RunCafaEvaluationPayload(
+            evaluation_set_id=EVAL_SET_ID,
+            prediction_set_id=PRED_SET_ID,
+        )
+        assert p.th_step == 0.01
+        assert p.max_terms is None
+        assert p.toi_file is None
+
+    def test_th_step_out_of_range(self):
+        with pytest.raises(ValidationError):
+            RunCafaEvaluationPayload(
+                evaluation_set_id=EVAL_SET_ID,
+                prediction_set_id=PRED_SET_ID,
+                th_step=0.0,
+            )
+
+    def test_max_terms_must_be_positive(self):
+        with pytest.raises(ValidationError):
+            RunCafaEvaluationPayload(
+                evaluation_set_id=EVAL_SET_ID,
+                prediction_set_id=PRED_SET_ID,
+                max_terms=0,
+            )
 
     def test_valid_payload_all_fields(self):
         p = RunCafaEvaluationPayload(
@@ -231,6 +274,114 @@ class TestRunCafaEvaluationPayload:
         )
         with pytest.raises(ValidationError):
             p.evaluation_set_id = "new_value"
+
+    def test_provenance_fields_accepted(self):
+        p = RunCafaEvaluationPayload(
+            evaluation_set_id=EVAL_SET_ID,
+            prediction_set_id=PRED_SET_ID,
+            frame="internal",
+            temporal_window="SELECT_220_227",
+            leakage_role="select",
+            window_role="valid",
+            arms_enabled={"knn": True, "reranker": False},
+        )
+        assert p.frame == "internal"
+        assert p.temporal_window == "SELECT_220_227"
+        assert p.leakage_role == "select"
+        assert p.window_role == "valid"
+        assert p.arms_enabled == {"knn": True, "reranker": False}
+
+    def test_provenance_defaults_are_none(self):
+        p = RunCafaEvaluationPayload(
+            evaluation_set_id=EVAL_SET_ID,
+            prediction_set_id=PRED_SET_ID,
+        )
+        assert p.frame is None
+        assert p.temporal_window is None
+        assert p.leakage_role is None
+        assert p.window_role is None
+        assert p.arms_enabled is None
+
+    @pytest.mark.parametrize(
+        "field,value",
+        [
+            ("frame", "bogus"),
+            ("leakage_role", "bogus"),
+            ("window_role", "bogus"),
+            ("window_role", "probe"),  # valid leakage_role but not a window_role
+        ],
+    )
+    def test_provenance_vocab_enforced(self, field, value):
+        with pytest.raises(ValidationError):
+            RunCafaEvaluationPayload(
+                evaluation_set_id=EVAL_SET_ID,
+                prediction_set_id=PRED_SET_ID,
+                **{field: value},
+            )
+
+
+# ---------------------------------------------------------------------------
+# Provenance stamping helpers (FIX-UI-PROVENANCE)
+# ---------------------------------------------------------------------------
+
+
+class TestEvalProvenanceStamping:
+    def test_stamp_window_role_sets_when_blank(self):
+        es = _make_eval_set()
+        es.window_role = None
+        RunCafaEvaluationOperation._stamp_window_role(es, "valid", _make_emit())
+        assert es.window_role == "valid"
+
+    def test_stamp_window_role_never_overwrites(self):
+        es = _make_eval_set()
+        es.window_role = "test"
+        RunCafaEvaluationOperation._stamp_window_role(es, "valid", _make_emit())
+        assert es.window_role == "test"
+
+    def test_stamp_window_role_noop_when_payload_none(self):
+        es = _make_eval_set()
+        es.window_role = None
+        RunCafaEvaluationOperation._stamp_window_role(es, None, _make_emit())
+        assert es.window_role is None
+
+    def test_build_provenance_derives_leakage_from_window_role(self):
+        es = _make_eval_set()
+        es.window_role = "valid"
+        p = RunCafaEvaluationPayload(evaluation_set_id=EVAL_SET_ID, prediction_set_id=PRED_SET_ID)
+        frame, window, role, arms = RunCafaEvaluationOperation._build_eval_provenance(
+            p, es, has_rerankers=False
+        )
+        assert role == "select"
+        assert arms == {"knn": True, "reranker": False, "mlp_tower": False, "interpro": False}
+        assert frame is None and window is None
+
+    def test_build_provenance_explicit_wins(self):
+        es = _make_eval_set()
+        es.window_role = "valid"
+        p = RunCafaEvaluationPayload(
+            evaluation_set_id=EVAL_SET_ID,
+            prediction_set_id=PRED_SET_ID,
+            frame="internal",
+            temporal_window="SELECT_220_227",
+            leakage_role="probe",
+            arms_enabled={"knn": True, "reranker": True},
+        )
+        frame, window, role, arms = RunCafaEvaluationOperation._build_eval_provenance(
+            p, es, has_rerankers=False
+        )
+        assert (frame, window, role) == ("internal", "SELECT_220_227", "probe")
+        assert arms == {"knn": True, "reranker": True}
+
+    def test_build_provenance_reranker_arm_reflects_run(self):
+        es = _make_eval_set()
+        es.window_role = None
+        p = RunCafaEvaluationPayload(evaluation_set_id=EVAL_SET_ID, prediction_set_id=PRED_SET_ID)
+        _, _, role, arms = RunCafaEvaluationOperation._build_eval_provenance(
+            p, es, has_rerankers=True
+        )
+        # No window_role on the set and none in the payload -> leakage unknown.
+        assert role is None
+        assert arms["reranker"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -313,6 +464,8 @@ class TestParseResults:
         assert "fmax_w" not in bpo
         assert "f_micro" not in bpo
         assert "f_micro_w" not in bpo
+        assert "precision_w" not in bpo
+        assert "recall_w" not in bpo
 
     def test_parse_with_weighted_surfaces_extra_keys(self):
         dfs_best = _dfs_best_fixture(with_weighted=True)
@@ -325,6 +478,23 @@ class TestParseResults:
         cco = result["CCO"]
         assert cco["fmax_w"] == 0.62
         assert cco["f_micro_w"] == 0.50
+
+    def test_parse_with_weighted_surfaces_weighted_precision_recall(self):
+        # The IA-weighted micro precision / recall / coverage that go with
+        # f_micro_w must be persisted per aspect (FIX-METRIC-IA): these are
+        # the LAFA-comparable numbers, distinct from the unweighted pr/rc.
+        dfs_best = _dfs_best_fixture(with_weighted=True)
+        result = self.op._parse_results(dfs_best)
+        bpo = result["BPO"]
+        assert bpo["precision_w"] == 0.33
+        assert bpo["recall_w"] == 0.20
+        assert bpo["coverage_w"] == 0.94
+        # unweighted pr/rc are unchanged and kept alongside
+        assert bpo["precision"] == 0.51
+        assert bpo["recall"] == 0.40
+        mfo = result["MFO"]
+        assert mfo["precision_w"] == 0.50
+        assert mfo["recall_w"] == 0.41
 
     def test_parse_weighted_handles_missing_namespace_in_extra_frame(self):
         dfs_best = _dfs_best_fixture(with_weighted=True)
@@ -547,240 +717,566 @@ class TestDownloadTsv:
 # ---------------------------------------------------------------------------
 
 
+# Base-row column order matches ``_BASE_SCORE_COLS`` in the Core columnar fetch.
+_BASE_COLS_ORDER = (
+    "protein_accession",
+    "go_id",
+    "distance",
+    "identity_nw",
+    "identity_sw",
+    "evidence_code",
+    "taxonomic_distance",
+    "neighbor_vote_fraction",
+)
+
+
+def _base_row(
+    protein="P1",
+    go_id="GO:0000001",
+    distance=0.4,
+    identity_nw=None,
+    identity_sw=None,
+    evidence_code=None,
+    taxonomic_distance=None,
+    neighbor_vote_fraction=None,
+    *,
+    alignment_length_nw=None,
+    gaps_pct_nw=None,
+    alignment_length_sw=None,
+    gaps_pct_sw=None,
+    length_query=None,
+    ref_annotation_density=None,
+    anc2vec_neighbor_cos=None,
+    anc2vec_neighbor_maxcos=None,
+    go_term_frequency=None,
+):
+    """Build a single Core-row tuple in ``_BASE_SCORE_COLS`` order."""
+    return (
+        protein,
+        go_id,
+        distance,
+        identity_nw,
+        identity_sw,
+        evidence_code,
+        taxonomic_distance,
+        neighbor_vote_fraction,
+        alignment_length_nw,
+        gaps_pct_nw,
+        alignment_length_sw,
+        gaps_pct_sw,
+        length_query,
+        ref_annotation_density,
+        anc2vec_neighbor_cos,
+        anc2vec_neighbor_maxcos,
+        go_term_frequency,
+    )
+
+
+def _core_session(rows):
+    """Mock a Session whose ``execute(stmt).all()`` returns ``rows`` (base tuples)."""
+    session = MagicMock()
+    result = MagicMock()
+    result.all.return_value = list(rows)
+    session.execute.return_value = result
+    return session
+
+
+def _real_scoring_config(formula="linear", weights=None, evidence_weights=None):
+    from protea.infrastructure.orm.models.embedding.scoring_config import ScoringConfig
+
+    return ScoringConfig(
+        formula=formula,
+        weights=weights if weights is not None else {"embedding_similarity": 1.0},
+        evidence_weights=evidence_weights,
+    )
+
+
 class TestWritePredictions:
-    def setup_method(self):
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path, monkeypatch):
+        # Redirect the parquet base-fetch cache to an isolated temp dir so
+        # tests neither pollute the repo nor share state.
+        monkeypatch.setattr("protea.core.operations._pred_base_cache._PRED_CACHE_DIR", tmp_path)
         self.op = RunCafaEvaluationOperation()
 
-    def test_write_predictions_without_scoring_config(self):
-        pred_mock = MagicMock()
-        pred_mock.protein_accession = "P1"
-        pred_mock.distance = 0.4
-        pred_mock.identity_nw = None
-        pred_mock.identity_sw = None
-        pred_mock.evidence_code = None
-        pred_mock.taxonomic_distance = None
-
-        gt_mock = MagicMock()
-        gt_mock.go_id = "GO:0000001"
-
-        session = MagicMock()
-        query = MagicMock()
-        session.query.return_value = query
-        query.join.return_value = query
-        query.filter.return_value = query
-        query.order_by.return_value = query
-        query.yield_per.return_value = [(pred_mock, gt_mock)]
-
+    def _write(self, rows, *, scoring_config=None, max_distance=None):
+        session = _core_session(rows)
         with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
             path = f.name
+        self.op._write_predictions(
+            session,
+            WritePredictionsContext(
+                pred_set_id=uuid.uuid4(),
+                delta_proteins={"P1", "P2"},
+                max_distance=max_distance,
+                path=path,
+            ),
+            scoring_config=scoring_config,
+        )
         try:
-            self.op._write_predictions(
-                session,
-                WritePredictionsContext(
-                    pred_set_id=uuid.uuid4(),
-                    delta_proteins={"P1"},
-                    max_distance=None,
-                    path=path,
-                ),
-            )
             with open(path) as f:
-                line = f.read().strip()
-            # score = max(0, 1 - 0.4/2) = 0.8
-            assert line == "P1\tGO:0000001\t0.8000"
+                return f.read().strip()
         finally:
             os.unlink(path)
+
+    def test_write_predictions_without_scoring_config(self):
+        out = self._write([_base_row(distance=0.4)])
+        # score = max(0, 1 - 0.4/2) = 0.8
+        assert out == "P1\tGO:0000001\t0.8000"
 
     def test_write_predictions_deduplicates(self):
-        pred1 = MagicMock()
-        pred1.protein_accession = "P1"
-        pred1.distance = 0.2
+        rows = [
+            _base_row(distance=0.6),
+            _base_row(distance=0.2),
+        ]
+        out = self._write(rows)
+        # Only the closest (lowest-distance) row survives → 1 - 0.2/2 = 0.9
+        assert out == "P1\tGO:0000001\t0.9000"
 
-        pred2 = MagicMock()
-        pred2.protein_accession = "P1"
-        pred2.distance = 0.6
-
-        gt_mock = MagicMock()
-        gt_mock.go_id = "GO:0000001"
-
-        session = MagicMock()
-        query = MagicMock()
-        session.query.return_value = query
-        query.join.return_value = query
-        query.filter.return_value = query
-        query.order_by.return_value = query
-        query.yield_per.return_value = [(pred1, gt_mock), (pred2, gt_mock)]
-
-        with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
-            path = f.name
-        try:
-            self.op._write_predictions(
-                session,
-                WritePredictionsContext(
-                    pred_set_id=uuid.uuid4(),
-                    delta_proteins={"P1"},
-                    max_distance=None,
-                    path=path,
-                ),
-            )
-            with open(path) as f:
-                lines = f.read().strip().split("\n")
-            # Only the first (closest) prediction should be written
-            assert len(lines) == 1
-        finally:
-            os.unlink(path)
-
-    @patch("protea.core.operations._run_cafa_artifacts.compute_score")
-    def test_write_predictions_with_scoring_config(self, mock_compute_score):
-        mock_compute_score.return_value = 0.75
-
-        pred_mock = MagicMock()
-        pred_mock.protein_accession = "P1"
-        pred_mock.distance = 0.4
-        pred_mock.identity_nw = 0.8
-        pred_mock.identity_sw = 0.9
-        pred_mock.evidence_code = "IDA"
-        pred_mock.taxonomic_distance = 2.0
-
-        gt_mock = MagicMock()
-        gt_mock.go_id = "GO:0000001"
-
-        session = MagicMock()
-        query = MagicMock()
-        session.query.return_value = query
-        query.join.return_value = query
-        query.filter.return_value = query
-        query.order_by.return_value = query
-        query.yield_per.return_value = [(pred_mock, gt_mock)]
-
-        scoring_config = _make_scoring_config()
-
-        with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
-            path = f.name
-        try:
-            self.op._write_predictions(
-                session,
-                WritePredictionsContext(
-                    pred_set_id=uuid.uuid4(),
-                    delta_proteins={"P1"},
-                    max_distance=None,
-                    path=path,
-                ),
-                scoring_config=scoring_config,
-            )
-            with open(path) as f:
-                line = f.read().strip()
-            assert line == "P1\tGO:0000001\t0.7500"
-            mock_compute_score.assert_called_once()
-        finally:
-            os.unlink(path)
+    def test_write_predictions_with_scoring_config(self):
+        rows = [_base_row(distance=0.4)]
+        # embedding_similarity = 1 - 0.4/2 = 0.8, sole signal weight 1.0 → 0.8
+        out = self._write(rows, scoring_config=_real_scoring_config())
+        assert out == "P1\tGO:0000001\t0.8000"
 
     def test_write_predictions_zero_distance(self):
-        pred_mock = MagicMock()
-        pred_mock.protein_accession = "P1"
-        pred_mock.distance = 0.0
-
-        gt_mock = MagicMock()
-        gt_mock.go_id = "GO:0000001"
-
-        session = MagicMock()
-        query = MagicMock()
-        session.query.return_value = query
-        query.join.return_value = query
-        query.filter.return_value = query
-        query.order_by.return_value = query
-        query.yield_per.return_value = [(pred_mock, gt_mock)]
-
-        with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
-            path = f.name
-        try:
-            self.op._write_predictions(
-                session,
-                WritePredictionsContext(
-                    pred_set_id=uuid.uuid4(),
-                    delta_proteins={"P1"},
-                    max_distance=None,
-                    path=path,
-                ),
-            )
-            with open(path) as f:
-                line = f.read().strip()
-            # score = max(0, 1 - 0/2) = 1.0
-            assert line == "P1\tGO:0000001\t1.0000"
-        finally:
-            os.unlink(path)
+        out = self._write([_base_row(distance=0.0)])
+        assert out == "P1\tGO:0000001\t1.0000"
 
     def test_write_predictions_with_max_distance(self):
-        """When max_distance is provided, query should include the filter."""
-        pred_mock = MagicMock()
-        pred_mock.protein_accession = "P1"
-        pred_mock.distance = 0.3
-
-        gt_mock = MagicMock()
-        gt_mock.go_id = "GO:0000001"
-
-        session = MagicMock()
-        query = MagicMock()
-        session.query.return_value = query
-        query.join.return_value = query
-        query.filter.return_value = query
-        query.order_by.return_value = query
-        query.yield_per.return_value = [(pred_mock, gt_mock)]
-
-        with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
-            path = f.name
-        try:
-            self.op._write_predictions(
-                session,
-                WritePredictionsContext(
-                    pred_set_id=uuid.uuid4(),
-                    delta_proteins={"P1"},
-                    max_distance=0.5,
-                    path=path,
-                ),
-            )
-            with open(path) as f:
-                line = f.read().strip()
-            assert line == "P1\tGO:0000001\t0.8500"
-            # filter should have been called 3 times:
-            # pred_set_id, protein_accession IN, distance <=
-            assert query.filter.call_count == 3
-        finally:
-            os.unlink(path)
+        out = self._write([_base_row(distance=0.3)], max_distance=0.5)
+        assert out == "P1\tGO:0000001\t0.8500"
 
     def test_write_predictions_none_distance_fallback(self):
-        pred_mock = MagicMock()
-        pred_mock.protein_accession = "P1"
-        pred_mock.distance = None
+        out = self._write([_base_row(distance=None)])
+        # None distance → 0.0 → 1 - 0/2 = 1.0
+        assert out == "P1\tGO:0000001\t1.0000"
 
-        gt_mock = MagicMock()
-        gt_mock.go_id = "GO:0000001"
+    def test_write_predictions_empty_writes_empty_file(self):
+        out = self._write([])
+        assert out == ""
 
-        session = MagicMock()
-        query = MagicMock()
-        session.query.return_value = query
-        query.join.return_value = query
-        query.filter.return_value = query
-        query.order_by.return_value = query
-        query.yield_per.return_value = [(pred_mock, gt_mock)]
 
+class TestBaseSelectSql:
+    """The Core SELECT / COUNT must carry the max_distance filter when set."""
+
+    def _ctx(self, max_distance):
+        return WritePredictionsContext(
+            pred_set_id=uuid.uuid4(),
+            delta_proteins={"P1"},
+            max_distance=max_distance,
+            path="x.tsv",
+        )
+
+    def test_select_includes_distance_filter_when_set(self):
+        from protea.core.operations._run_cafa_artifacts import _base_select, _count_base_rows
+
+        assert "distance <=" in str(_base_select(self._ctx(0.5))).lower()
+        # _count_base_rows builds a COUNT(*) statement we can render via the op.
+        op = RunCafaEvaluationOperation()
+        session = _core_session([])
+        session.execute.return_value.scalar_one.return_value = 0
+        assert _count_base_rows(session, self._ctx(0.5)) == 0
+        assert op is not None
+
+    def test_select_omits_distance_filter_when_unset(self):
+        from protea.core.operations._run_cafa_artifacts import _base_select
+
+        assert "distance <=" not in str(_base_select(self._ctx(None))).lower()
+
+
+class TestVectorizedScoreEquivalence:
+    """The vectorised baseline scorer must be byte-for-byte equivalent to the
+    OLD per-row ``_score_unranked_pred`` / ``compute_score`` output (same rows,
+    same dedup winner, same 4dp TSV)."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("protea.core.operations._pred_base_cache._PRED_CACHE_DIR", tmp_path)
+        self.op = RunCafaEvaluationOperation()
+
+    # Raw rows include an intentional (P1, GO:0000001) duplicate to exercise
+    # dedup, plus None-valued signals and varied evidence codes.
+    _RAW_ROWS = [
+        _base_row("P1", "GO:0000001", 0.4, 0.8, 0.9, "IDA", 2, 0.5),
+        _base_row("P1", "GO:0000001", 0.6, 0.1, 0.2, "IEA", 5, 0.1),  # dropped (farther)
+        _base_row("P1", "GO:0000002", 0.2, None, 0.3, "IEA", None, 0.7),
+        _base_row("P2", "GO:0000003", 1.0, 0.5, None, None, 1, None),
+        _base_row("P2", "GO:0000001", 0.8, 0.2, 0.2, "ND", 0, 0.0),
+    ]
+
+    def _oracle(self, scoring_config):
+        """Replicate the OLD path: dedup (min distance), then _score_unranked_pred."""
+        from protea.core.operations._run_cafa_artifacts import _score_unranked_pred
+
+        winners: dict[tuple[str, str], tuple] = {}
+        for row in sorted(self._RAW_ROWS, key=lambda r: (r[0], r[1], r[2])):
+            winners.setdefault((row[0], row[1]), row)
+        lines = []
+        for (_p, _g), row in sorted(winners.items()):
+            pred = SimpleNamespace(
+                distance=row[2],
+                identity_nw=row[3],
+                identity_sw=row[4],
+                evidence_code=row[5],
+                taxonomic_distance=row[6],
+                neighbor_vote_fraction=row[7],
+                alignment_length_nw=row[8],
+                gaps_pct_nw=row[9],
+                alignment_length_sw=row[10],
+                gaps_pct_sw=row[11],
+                length_query=row[12],
+                ref_annotation_density=row[13],
+                anc2vec_neighbor_cos=row[14],
+                anc2vec_neighbor_maxcos=row[15],
+                go_term_frequency=row[16],
+            )
+            score = _score_unranked_pred(pred, scoring_config)
+            lines.append(f"{row[0]}\t{row[1]}\t{score:.4f}")
+        return sorted(lines)
+
+    def _new_path(self, scoring_config):
+        session = _core_session(self._RAW_ROWS)
+        with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
+            path = f.name
+        self.op._write_predictions(
+            session,
+            WritePredictionsContext(
+                pred_set_id=uuid.uuid4(),
+                delta_proteins={"P1", "P2"},
+                max_distance=None,
+                path=path,
+            ),
+            scoring_config=scoring_config,
+        )
+        try:
+            with open(path) as f:
+                return sorted(line for line in f.read().splitlines() if line)
+        finally:
+            os.unlink(path)
+
+    def test_equivalence_none_config_fallback(self):
+        assert self._new_path(None) == self._oracle(None)
+
+    def test_equivalence_linear_multi_signal(self):
+        cfg = _real_scoring_config(
+            formula="linear",
+            weights={
+                "embedding_similarity": 0.5,
+                "identity_nw": 0.3,
+                "identity_sw": 0.0,
+                "evidence_weight": 0.2,
+                "taxonomic_proximity": 0.1,
+                "neighbor_vote_fraction": 0.4,
+            },
+            evidence_weights={"IEA": 0.3},
+        )
+        assert self._new_path(cfg) == self._oracle(cfg)
+
+    def test_equivalence_evidence_weighted_formula(self):
+        cfg = _real_scoring_config(
+            formula="evidence_weighted",
+            weights={"embedding_similarity": 1.0, "evidence_weight": 0.0},
+            evidence_weights={"IEA": 0.5, "ND": 0.05},
+        )
+        assert self._new_path(cfg) == self._oracle(cfg)
+
+    # --- A-SCORE rich axes: vectorised path must still match the per-row scorer ---
+    _RICH_ROWS = [
+        _base_row(
+            "P1",
+            "GO:0000001",
+            0.4,
+            0.8,
+            0.9,
+            "IDA",
+            2,
+            0.5,
+            alignment_length_sw=120.0,
+            gaps_pct_sw=0.1,
+            length_query=200,
+            ref_annotation_density=7,
+            anc2vec_neighbor_cos=0.6,
+            anc2vec_neighbor_maxcos=0.8,
+            go_term_frequency=5000,
+        ),
+        _base_row(
+            "P2",
+            "GO:0000003",
+            0.2,
+            None,
+            0.3,
+            "IEA",
+            None,
+            0.7,
+            alignment_length_nw=180.0,
+            gaps_pct_nw=0.0,
+            length_query=200,
+            ref_annotation_density=0,
+            anc2vec_neighbor_cos=-0.4,
+            anc2vec_neighbor_maxcos=None,
+            go_term_frequency=10,
+        ),
+        _base_row(
+            "P2",
+            "GO:0000005",
+            0.8,
+            0.2,
+            0.2,
+            "ND",
+            1,
+            0.1,
+            alignment_length_sw=None,
+            length_query=None,
+            ref_annotation_density=None,
+            go_term_frequency=None,
+        ),
+    ]
+
+    def _oracle_rich(self, scoring_config):
+        from protea.core.operations._run_cafa_artifacts import _score_unranked_pred
+
+        winners: dict[tuple[str, str], tuple] = {}
+        for row in sorted(self._RICH_ROWS, key=lambda r: (r[0], r[1], r[2])):
+            winners.setdefault((row[0], row[1]), row)
+        lines = []
+        for (_p, _g), row in sorted(winners.items()):
+            pred = SimpleNamespace(
+                distance=row[2],
+                identity_nw=row[3],
+                identity_sw=row[4],
+                evidence_code=row[5],
+                taxonomic_distance=row[6],
+                neighbor_vote_fraction=row[7],
+                alignment_length_nw=row[8],
+                gaps_pct_nw=row[9],
+                alignment_length_sw=row[10],
+                gaps_pct_sw=row[11],
+                length_query=row[12],
+                ref_annotation_density=row[13],
+                anc2vec_neighbor_cos=row[14],
+                anc2vec_neighbor_maxcos=row[15],
+                go_term_frequency=row[16],
+            )
+            lines.append(f"{row[0]}\t{row[1]}\t{_score_unranked_pred(pred, scoring_config):.4f}")
+        return sorted(lines)
+
+    def _new_path_rich(self, scoring_config):
+        session = _core_session(self._RICH_ROWS)
+        with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
+            path = f.name
+        self.op._write_predictions(
+            session,
+            WritePredictionsContext(
+                pred_set_id=uuid.uuid4(),
+                delta_proteins={"P1", "P2"},
+                max_distance=None,
+                path=path,
+            ),
+            scoring_config=scoring_config,
+        )
+        try:
+            with open(path) as f:
+                return sorted(line for line in f.read().splitlines() if line)
+        finally:
+            os.unlink(path)
+
+    def test_equivalence_rich_signals(self):
+        cfg = _real_scoring_config(
+            formula="linear",
+            weights={
+                "embedding_similarity": 0.4,
+                "coverage": 0.3,
+                "ref_annotation_density": 0.1,
+                "anc2vec_neighbor_cos": 0.1,
+                "anc2vec_neighbor_maxcos": 0.1,
+            },
+        )
+        assert self._new_path_rich(cfg) == self._oracle_rich(cfg)
+
+    def test_equivalence_ia_prior_frequency(self):
+        cfg = _real_scoring_config(
+            formula="linear",
+            weights={"embedding_similarity": 1.0, "coverage": 0.5},
+        )
+        cfg.params = {"ia_prior": {"enabled": True, "gamma": 1.5, "source": "frequency"}}
+        assert self._new_path_rich(cfg) == self._oracle_rich(cfg)
+
+
+# ---------------------------------------------------------------------------
+# universal-booster routing in the eval-artifacts path (F-RERANK-UNIVERSAL)
+# ---------------------------------------------------------------------------
+
+
+def _make_reranked_pred_mock():
+    """A GOPrediction-shaped mock carrying every column ``_record_from_pred`` reads."""
+    pred = MagicMock()
+    pred.protein_accession = "P1"
+    pred.qualifier = "enables"
+    pred.evidence_code = "EXP"
+    pred.taxonomic_relation = "same"
+    pred.distance = 0.2
+    # _record_from_pred uses getattr(pred, col, None) for numeric cols; a
+    # MagicMock would auto-create truthy attrs, so force them to plain floats.
+    from protea.core.operations._run_cafa_helpers import _NUMERIC_ORM_COLS
+
+    for col in _NUMERIC_ORM_COLS:
+        setattr(pred, col, 1.0)
+    pred.distance = 0.2
+    return pred
+
+
+def _reranked_session(pred, go_id="GO:0000001", aspect="F"):
+    session = MagicMock()
+    query = MagicMock()
+    session.query.return_value = query
+    query.join.return_value = query
+    query.filter.return_value = query
+    query.yield_per.return_value = [(pred, go_id, aspect)]
+    return session
+
+
+class TestUniversalBoosterRoutingInEval:
+    """The eval-artifacts writers must route universal boosters through
+    ``score_universal`` (not the generic ``reranker_predict``) and leave the
+    per-cell path unchanged (F-RERANK-UNIVERSAL eval wiring)."""
+
+    _UNIVERSAL_CTX = {
+        "categorical_codes": {
+            "qualifier": ["", "enables"],
+            "evidence_code": ["EXP", "IEA"],
+            "taxonomic_relation": ["same", "distant"],
+            "plm_id": ["prot_t5"],
+        },
+        "plm_id": "prot_t5",
+        "k_context": 10.0,
+    }
+
+    def test_write_predictions_reranked_routes_universal(self):
+        import numpy as np
+
+        from protea.core.operations import _run_cafa_artifacts as _art
+
+        pred = _make_reranked_pred_mock()
+        session = _reranked_session(pred)
         with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
             path = f.name
         try:
-            self.op._write_predictions(
-                session,
-                WritePredictionsContext(
-                    pred_set_id=uuid.uuid4(),
-                    delta_proteins={"P1"},
-                    max_distance=None,
-                    path=path,
-                ),
-            )
-            with open(path) as f:
-                line = f.read().strip()
-            # score = max(0, 1 - 0/2) = 1.0 (None → 0.0)
-            assert line == "P1\tGO:0000001\t1.0000"
+            with (
+                patch("protea.core.reranker.model_from_string", return_value=MagicMock()),
+                patch(
+                    "protea.core._universal_reranker.score_universal",
+                    return_value=np.array([0.7]),
+                ) as mock_uni,
+                patch("protea.core.reranker.predict") as mock_generic,
+            ):
+                _art.write_predictions_reranked(
+                    session,
+                    WritePredictionsContext(
+                        pred_set_id=uuid.uuid4(),
+                        delta_proteins={"P1"},
+                        max_distance=None,
+                        path=path,
+                    ),
+                    reranker_bundle={
+                        "model": "ignored-by-mock",
+                        "cat_codes": None,
+                        "universal": self._UNIVERSAL_CTX,
+                    },
+                )
+            mock_uni.assert_called_once()
+            mock_generic.assert_not_called()
+            kwargs = mock_uni.call_args.kwargs
+            assert kwargs["plm_id"] == "prot_t5"
+            assert kwargs["k_context"] == 10.0
+            assert kwargs["categorical_codes"] == self._UNIVERSAL_CTX["categorical_codes"]
+            with open(path) as fh:
+                assert fh.read().strip() == "P1\tGO:0000001\t0.7000"
         finally:
             os.unlink(path)
+
+    def test_write_predictions_reranked_per_cell_unchanged(self):
+        import numpy as np
+
+        from protea.core.operations import _run_cafa_artifacts as _art
+
+        pred = _make_reranked_pred_mock()
+        session = _reranked_session(pred)
+        with tempfile.NamedTemporaryFile(suffix=".tsv", delete=False) as f:
+            path = f.name
+        try:
+            with (
+                patch("protea.core.reranker.model_from_string", return_value=MagicMock()),
+                patch(
+                    "protea.core.reranker.predict", return_value=np.array([0.42])
+                ) as mock_generic,
+                patch("protea.core._universal_reranker.score_universal") as mock_uni,
+            ):
+                _art.write_predictions_reranked(
+                    session,
+                    WritePredictionsContext(
+                        pred_set_id=uuid.uuid4(),
+                        delta_proteins={"P1"},
+                        max_distance=None,
+                        path=path,
+                    ),
+                    reranker_bundle={
+                        "model": "ignored-by-mock",
+                        "cat_codes": None,
+                        "universal": None,
+                    },
+                )
+            mock_generic.assert_called_once()
+            mock_uni.assert_not_called()
+            with open(path) as fh:
+                assert fh.read().strip() == "P1\tGO:0000001\t0.4200"
+        finally:
+            os.unlink(path)
+
+    def test_apply_per_aspect_scores_routes_universal(self):
+        import numpy as np
+
+        from protea.core.operations import _run_cafa_artifacts as _art
+
+        df = pd.DataFrame(
+            [
+                {
+                    "protein_accession": "P1",
+                    "go_id": "GO:1",
+                    "aspect": "F",
+                    "distance": 0.1,
+                    "qualifier": "enables",
+                    "evidence_code": "EXP",
+                    "taxonomic_relation": "same",
+                },
+                {
+                    "protein_accession": "P2",
+                    "go_id": "GO:2",
+                    "aspect": "P",
+                    "distance": 0.3,
+                    "qualifier": "enables",
+                    "evidence_code": "EXP",
+                    "taxonomic_relation": "same",
+                },
+            ]
+        )
+        aspect_models = {
+            "F": {"model": "m-uni", "cat_codes": None, "universal": self._UNIVERSAL_CTX},
+            "P": {"model": "m-cell", "cat_codes": None, "universal": None},
+        }
+        with (
+            patch("protea.core.reranker.model_from_string", return_value=MagicMock()),
+            patch(
+                "protea.core._universal_reranker.score_universal",
+                return_value=np.array([0.9]),
+            ) as mock_uni,
+            patch("protea.core.reranker.predict", return_value=np.array([0.1])) as mock_generic,
+        ):
+            _art._apply_per_aspect_scores(df, aspect_models)
+        mock_uni.assert_called_once()
+        mock_generic.assert_called_once()
+        assert df.loc[df["aspect"] == "F", "score"].iloc[0] == 0.9
+        assert df.loc[df["aspect"] == "P", "score"].iloc[0] == 0.1
 
 
 # ---------------------------------------------------------------------------
@@ -819,7 +1315,10 @@ class TestExecuteErrors:
 
     @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
     def test_no_delta_proteins(self, mock_compute):
-        mock_compute.return_value = (EvaluationData(nk={}, lk={}, pk={}, known={}, pk_known={}), uuid.uuid4())
+        mock_compute.return_value = (
+            EvaluationData(nk={}, lk={}, pk={}, known={}, pk_known={}),
+            uuid.uuid4(),
+        )
         session = MagicMock()
         eval_set = _make_eval_set()
         pred_set = _make_pred_set()
@@ -1122,6 +1621,93 @@ class TestExecuteHappyPath:
         assert "run_cafa_evaluation.ia_resolved" in emit_events
         assert "run_cafa_evaluation.downloading_ia" not in emit_events
 
+    def _run_with_band(self, mock_compute, *, snapshot, payload_extra):
+        """Drive ``execute`` with a banded payload; return the emit-event names.
+
+        Raises whatever the operation raises (the phantom-gap guard fires
+        before cafa_eval, so the mocked binary is never reached on rejection).
+        """
+        mock_compute.return_value = (_make_eval_data(), uuid.uuid4())
+        session = MagicMock()
+        session.get.side_effect = [_make_eval_set(), _make_pred_set(), snapshot]
+        query = MagicMock()
+        session.query.return_value = query
+        query.join.return_value = query
+        query.filter.return_value = query
+        query.order_by.return_value = query
+        query.yield_per.return_value = []
+        payload = {
+            "evaluation_set_id": EVAL_SET_ID,
+            "prediction_set_id": PRED_SET_ID,
+            **payload_extra,
+        }
+        with (
+            patch("protea.core.operations._run_cafa_artifacts.download_obo"),
+            patch("protea.core.operations._run_cafa_artifacts.download_tsv"),
+            patch(
+                "cafaeval.evaluation.cafa_eval",
+                return_value=(MagicMock(), _dfs_best_fixture()),
+            ),
+        ):
+            self.op.execute(session, payload, emit=self.emit)
+        return [c[0][0] for c in self.emit.call_args_list]
+
+    @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
+    def test_band_canonical_pair_verified(self, mock_compute):
+        """A v227-declared cell with the canonical snapshot + IA emits
+        band_verified and proceeds."""
+        snapshot = _make_snapshot(obo_version="releases/2025-07-22")
+        events = self._run_with_band(
+            mock_compute,
+            snapshot=snapshot,
+            payload_extra={"band": "v227", "ia_file": "/data/lafa_t0_Sep_2025/IA.tsv"},
+        )
+        assert "run_cafa_evaluation.band_verified" in events
+
+    @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
+    def test_band_rejects_cross_band_ia(self, mock_compute):
+        """A v227 cell that resolves the v226 IA is rejected at runtime."""
+        snapshot = _make_snapshot(obo_version="releases/2025-07-22")
+        with pytest.raises(BandMismatchError, match="IA artifact"):
+            self._run_with_band(
+                mock_compute,
+                snapshot=snapshot,
+                payload_extra={"band": "v227", "ia_file": "/data/IA_cafa6.tsv"},
+            )
+
+    @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
+    def test_band_rejects_cross_band_snapshot(self, mock_compute):
+        """A v227 cell whose pivot snapshot is the v226 ontology is rejected."""
+        snapshot = _make_snapshot(obo_version="releases/2025-03-16", ia_url=None)
+        with pytest.raises(BandMismatchError, match="obo_version"):
+            self._run_with_band(
+                mock_compute,
+                snapshot=snapshot,
+                payload_extra={"band": "v227", "ia_file": "/data/IA.tsv"},
+            )
+
+    @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
+    def test_band_rejects_ic1_fallback(self, mock_compute):
+        """A band-declared cell with no IA (would be IC=1) is rejected."""
+        snapshot = _make_snapshot(obo_version="releases/2025-03-16", ia_url=None)
+        with pytest.raises(BandMismatchError, match="IC=1"):
+            self._run_with_band(
+                mock_compute,
+                snapshot=snapshot,
+                payload_extra={"band": "v226"},
+            )
+
+    @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
+    def test_no_band_is_unguarded(self, mock_compute):
+        """Without a declared band the guard is a no-op (legacy/ad-hoc runs)."""
+        snapshot = _make_snapshot(obo_version="releases/2025-03-16", ia_url=None)
+        events = self._run_with_band(
+            mock_compute,
+            snapshot=snapshot,
+            payload_extra={},
+        )
+        assert "run_cafa_evaluation.band_verified" not in events
+
     @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
     def test_session_commit_before_cafa_eval(self, mock_compute):
         """Session should be committed before cafa_eval to release DB connection."""
@@ -1220,6 +1806,7 @@ class TestExecuteHappyPath:
         scoring_cfg = MagicMock()
         scoring_cfg.formula = "linear"
         scoring_cfg.weights = {"embedding_similarity": 1.0}
+        scoring_cfg.params = None
         session.get.side_effect = [eval_set, pred_set, snapshot, scoring_cfg]
 
         query = MagicMock()
@@ -1252,6 +1839,7 @@ class TestExecuteHappyPath:
         mock_sc_cls.assert_called_once_with(
             formula="linear",
             weights={"embedding_similarity": 1.0},
+            params=None,
         )
         assert "evaluation_result_id" in result.result
 
@@ -1304,3 +1892,94 @@ class TestSmellBudgetGuard:
             f"Methods exceed 60-LOC ceiling (T2B.5): {offenders}. "
             "Extract the body or apply the Method Object pattern."
         )
+
+
+# ---------------------------------------------------------------------------
+# LAFA parity: the cafaeval invocation must use LAFA-compatible flags
+# ---------------------------------------------------------------------------
+
+
+class TestCafaevalInvocationLafaParity:
+    """The signal-safe cafa_eval call must forward the parity knobs.
+
+    LAFA scores with cafaeval's default th_step (0.01) and no max_terms
+    cap. PROTEA must pass exactly the values carried on the run context
+    (defaulting to those), not hard-coded legacy values, otherwise the
+    same prediction scores differently on each side. See
+    docs/EVAL_LAFA_PARITY.md.
+    """
+
+    def _make_ctx(self, **overrides):
+        from protea.core.operations._run_cafa_eval_driver import CafaEvalRunContext
+
+        base = dict(
+            pred_set_id=uuid.uuid4(),
+            delta_proteins=set(),
+            max_distance=None,
+            artifacts_root=__import__("pathlib").Path("/tmp"),
+            has_rerankers=False,
+            reranker_models={},
+            scoring_config_snapshot=None,
+            data=EvaluationData(),
+            obo_path="/tmp/go.obo",
+            nk_path="/tmp/nk.tsv",
+            lk_path="/tmp/lk.tsv",
+            pk_path="/tmp/pk.tsv",
+            pk_known_path="/tmp/pk_known.tsv",
+            ia_path="/tmp/ia.tsv",
+            toi_path="/tmp/toi.txt",
+            shared_pred_dir="/tmp/preds",
+        )
+        base.update(overrides)
+        return CafaEvalRunContext(**base)
+
+    def test_context_defaults_are_lafa_compatible(self):
+        ctx = self._make_ctx()
+        assert ctx.th_step == 0.01
+        assert ctx.max_terms is None
+
+    def test_invoke_forwards_th_step_and_max_terms(self):
+        from protea.core.operations import _run_cafa_eval_driver as driver
+
+        ctx = self._make_ctx(th_step=0.01, max_terms=None)
+        captured: dict[str, Any] = {}
+
+        def fake_cafa_eval(*args, **kwargs):
+            captured.update(kwargs)
+            return ("df", "dfs_best")
+
+        with patch.dict(
+            "sys.modules",
+            {"cafaeval.evaluation": MagicMock(cafa_eval=fake_cafa_eval)},
+        ):
+            driver._invoke_cafaeval_signal_safe(
+                ctx=ctx, pred_dir="/tmp/preds", gt_file="/tmp/nk.tsv", known_file=None
+            )
+
+        assert captured["th_step"] == 0.01
+        assert captured["max_terms"] is None
+        assert captured["toi_file"] == "/tmp/toi.txt"
+        assert captured["prop"] == "fill"
+        assert captured["norm"] == "cafa"
+        assert captured["no_orphans"] is True
+
+    def test_invoke_uses_custom_knobs_when_overridden(self):
+        from protea.core.operations import _run_cafa_eval_driver as driver
+
+        ctx = self._make_ctx(th_step=0.001, max_terms=500)
+        captured: dict[str, Any] = {}
+
+        def fake_cafa_eval(*args, **kwargs):
+            captured.update(kwargs)
+            return ("df", "dfs_best")
+
+        with patch.dict(
+            "sys.modules",
+            {"cafaeval.evaluation": MagicMock(cafa_eval=fake_cafa_eval)},
+        ):
+            driver._invoke_cafaeval_signal_safe(
+                ctx=ctx, pred_dir="/tmp/preds", gt_file="/tmp/nk.tsv", known_file=None
+            )
+
+        assert captured["th_step"] == 0.001
+        assert captured["max_terms"] == 500

@@ -48,6 +48,7 @@ from sqlalchemy.orm import Session, aliased, sessionmaker
 
 from protea.api.cache import cached, invalidate
 from protea.api.deps import get_benchmark_config, get_session_factory
+from protea.api.metrics import PRIMARY_METRIC, per_task_aggregate, primary_cell_score
 from protea.api.stages import RERANKER_STAGE as _RERANKER_STAGE
 from protea.api.stages import StageKind  # noqa: F401  (re-exported for type hints)
 from protea.api.stages import stage_kind as _stage_kind
@@ -63,6 +64,12 @@ from protea.infrastructure.orm.models.embedding.scoring_config import ScoringCon
 from protea.infrastructure.session import session_scope
 
 router = APIRouter(prefix="/benchmark", tags=["benchmark"])
+
+# Primary ranking metric + legacy fallback live in ``protea.api.metrics`` so
+# the benchmark matrix and the home showcase agree on the IA-weighted headline
+# (FIX-METRIC-IA). ``_primary_score`` is kept as a thin local alias to limit
+# the diff against the rest of this module.
+_primary_score = primary_cell_score
 
 BENCHMARK_EMBEDDINGS_CACHE_KEY = "benchmark:embeddings"
 BENCHMARK_EMBEDDINGS_TTL_SECONDS = 300.0
@@ -127,22 +134,31 @@ def _make_leaderboard(
     categories: tuple[str, ...] | list[str],
     aspects: tuple[str, ...] | list[str],
 ) -> list[dict[str, Any]]:
-    """Cross-model leaderboard: best Fmax per ``(category, aspect)`` cell.
+    """Cross-model best-cell leaderboard per ``(category, aspect)`` cell.
 
     Iterates a flat list of row dicts (each containing at least ``category``,
-    ``aspect`` and ``fmax``) and returns one entry per cell with the winning
-    embedding / stage / K, in canonical (categories × aspects) order.
+    ``aspect`` and ``primary``) and returns one entry per cell with the
+    winning embedding / stage / K, in canonical (categories × aspects) order.
+    The winner is the cell with the highest IA-weighted ``primary`` metric
+    (``f_micro_w``, fmax fallback for legacy rows). This is the *best-cell*
+    maximum and must be labelled as such by the front-end, never as the
+    headline number (winner's-curse, FIX-METRIC-IA).
     """
     leaderboard: dict[tuple[str, str], dict[str, Any]] = {}
     for r in rows:
         lkey = (r["category"], r["aspect"])
         cur = leaderboard.get(lkey)
-        if cur is None or r["fmax"] > cur["fmax"]:
+        if cur is None or r["primary"] > cur["primary"]:
             leaderboard[lkey] = r
     return [
         {
             "category": cat,
             "aspect": asp,
+            "primary": entry["primary"],
+            "primary_metric": entry["primary_metric"],
+            "f_micro_w": entry.get("f_micro_w"),
+            "precision_w": entry.get("precision_w"),
+            "recall_w": entry.get("recall_w"),
             "fmax": entry["fmax"],
             "precision": entry["precision"],
             "recall": entry["recall"],
@@ -152,11 +168,56 @@ def _make_leaderboard(
             "stage": entry["stage"],
             "evaluation_result_id": entry["evaluation_result_id"],
             "evaluation_set_id": entry["evaluation_set_id"],
+            # F-METHOD-EVAL-SURFACE provenance for the winning cell.
+            "frame": entry.get("frame"),
+            "temporal_window": entry.get("temporal_window"),
+            "arms_enabled": entry.get("arms_enabled"),
+            "leakage_role": entry.get("leakage_role"),
         }
         for cat in categories
         for asp in aspects
         if (entry := leaderboard.get((cat, asp))) is not None
     ]
+
+
+def _per_task_aggregate(
+    rows: list[dict[str, Any]],
+    categories: tuple[str, ...] | list[str],
+    aspects: tuple[str, ...] | list[str],
+) -> list[dict[str, Any]]:
+    """Honest per-task summary: mean primary metric across models per cell.
+
+    The best-cell leaderboard reports the single highest model per
+    ``(category, aspect)``; on its own that is the winner's-curse headline
+    the dashboard must stop leading with (FIX-METRIC-IA). This aggregate
+    reports, per task, the mean of the primary metric across all models in
+    the current selection plus a normal-approximation 95% CI half-width
+    (``1.96 * sd / sqrt(n)``), so the front-end can headline a calibrated
+    central tendency and only label the maximum as best-cell.
+    """
+    grouped: dict[tuple[str, str], list[float]] = {}
+    for r in rows:
+        grouped.setdefault((r["category"], r["aspect"]), []).append(float(r["primary"]))
+    out: list[dict[str, Any]] = []
+    for cat in categories:
+        for asp in aspects:
+            vals = grouped.get((cat, asp))
+            agg = per_task_aggregate(vals or [])
+            if agg is None:
+                continue
+            out.append(
+                {
+                    "category": cat,
+                    "aspect": asp,
+                    "metric": PRIMARY_METRIC,
+                    "mean": agg["mean"],
+                    "ci95": agg["ci95"],
+                    "max": agg["max"],
+                    "min": agg["min"],
+                    "n_models": agg["n"],
+                }
+            )
+    return out
 
 
 def _eval_set_label(
@@ -347,15 +408,18 @@ def _build_matrix_response(
     best_per_cell_global = _make_leaderboard(
         list(agg.best_global.values()), cfg.categories, cfg.aspects
     )
+    per_task = _per_task_aggregate(rows, cfg.categories, cfg.aspects)
     return {
         "rows": rows,
         "total": len(rows),
+        "primary_metric": PRIMARY_METRIC,
         "evaluation_sets": eval_sets_payload,
         "embedding_config_ids": sorted(agg.embedding_ids),
         "stages": stages_payload,
         "categories": list(cfg.categories),
         "aspects": list(cfg.aspects),
         "ks": sorted(agg.ks_seen),
+        "per_task": per_task,
         "best_per_cell": best_per_cell,
         "best_per_cell_global": best_per_cell_global,
         "filters": {
@@ -460,9 +524,9 @@ def _fold_evaluation_cells(
             continue
         for asp in cfg.aspects:
             cell = cat_data.get(asp) or {}
-            fmax = cell.get("fmax")
-            if fmax is None:
+            if cell.get("fmax") is None:
                 continue
+            primary, primary_metric = _primary_score(cell)
             key: _BestKey = (row.eid, row.esid, row.st, row.row_k, cat, asp)
             payload = {
                 "embedding_config_id": row.eid,
@@ -471,19 +535,31 @@ def _fold_evaluation_cells(
                 "k": row.row_k,
                 "category": cat,
                 "aspect": asp,
-                "fmax": round(float(fmax), 4),
+                "primary": round(primary, 4),
+                "primary_metric": primary_metric,
+                "f_micro_w": _round(cell.get("f_micro_w")),
+                "precision_w": _round(cell.get("precision_w")),
+                "recall_w": _round(cell.get("recall_w")),
+                "fmax": round(float(cell["fmax"]), 4),
                 "precision": _round(cell.get("precision")),
                 "recall": _round(cell.get("recall")),
                 "coverage": _round(cell.get("coverage")),
                 "n_proteins": cell.get("n_proteins"),
                 "evaluation_result_id": str(er.id),
+                # F-METHOD-EVAL-SURFACE: per-result provenance, read through
+                # so the matrix can badge frame / window / arms / leakage
+                # without a second request. ``None`` on legacy rows.
+                "frame": er.frame,
+                "temporal_window": er.temporal_window,
+                "arms_enabled": er.arms_enabled,
+                "leakage_role": er.leakage_role,
             }
             cur_g = best_global.get(key)
-            if cur_g is None or payload["fmax"] > cur_g["fmax"]:
+            if cur_g is None or payload["primary"] > cur_g["primary"]:
                 best_global[key] = payload
             if passes_filter:
                 cur = best.get(key)
-                if cur is None or payload["fmax"] > cur["fmax"]:
+                if cur is None or payload["primary"] > cur["primary"]:
                     best[key] = payload
 
 

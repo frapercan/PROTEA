@@ -19,11 +19,26 @@ function formatDate(iso?: string | null) {
 }
 
 function InlineProgress({
-  current, total,
+  current, total, status,
 }: {
   current?: number | null;
   total?: number | null;
+  status?: string;
 }) {
+  // A SUCCEEDED job is 100% done by definition. Coordinators that finalize in
+  // deferred child batches can leave progress_current at a stale sub-total
+  // (e.g. 24/26), which used to render a misleading <100% bar on a job that
+  // actually finished. Always show a full bar for a terminal success.
+  if (String(status ?? "").toLowerCase() === "succeeded") {
+    return (
+      <div className="mt-1 flex items-center gap-2">
+        <div className="h-1.5 w-24 overflow-hidden rounded-full bg-emerald-100">
+          <div className="h-1.5 w-full rounded-full bg-emerald-500" />
+        </div>
+        <span className="text-xs text-slate-600">100%</span>
+      </div>
+    );
+  }
   if (!current && !total) return null;
   if (!total) {
     return (
@@ -368,7 +383,7 @@ export default function JobsPage() {
                   {j.operation_summary && (
                     <p className="mt-1 text-xs font-mono text-slate-700 break-words">{j.operation_summary}</p>
                   )}
-                  <InlineProgress current={j.progress_current} total={j.progress_total} />
+                  <InlineProgress current={j.progress_current} total={j.progress_total} status={j.status} />
                   <p className="mt-1 font-mono text-xs text-slate-600 truncate">{j.id}</p>
                   {(j.parent_job_id || j.queue_name === BATCH_QUEUE) && (
                     <div className="mt-1 flex flex-wrap gap-1">
@@ -440,7 +455,7 @@ export default function JobsPage() {
                   {j.operation_description && (
                     <span className="text-xs text-slate-500 leading-snug line-clamp-2 block">{j.operation_description}</span>
                   )}
-                  <InlineProgress current={j.progress_current} total={j.progress_total} />
+                  <InlineProgress current={j.progress_current} total={j.progress_total} status={j.status} />
                   {(j.parent_job_id || j.queue_name === BATCH_QUEUE) && (
                     <div className="mt-1 flex flex-wrap gap-1">
                       {j.parent_job_id && (

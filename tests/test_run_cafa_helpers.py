@@ -110,6 +110,114 @@ class TestRecordFromPred:
         for col in helpers._NUMERIC_ORM_COLS:
             assert rec[col] is None
 
+    def test_lafa_families_read_from_jsonb_blob(self) -> None:
+        # The LAFA families have no typed column; they are read back from
+        # ``pred.features`` (the JSONB blob the store wrote).
+        blob = {
+            "classifier_score": 0.73,
+            "classifier_present": 1.0,
+            "self_prior_score": 1.0,
+            "association_total": 0.4,
+            "association_cross": 0.1,
+            "association_present": 1.0,
+            "IA": 7.5,
+        }
+        pred = self._make_pred(features=blob)
+        rec = helpers._record_from_pred(pred, "GO:1")
+        for col in helpers._LAFA_JSONB_FEATURE_COLS:
+            assert rec[col] == blob[col], f"mismatch on {col}"
+
+    def test_lafa_families_default_to_none_without_blob(self) -> None:
+        # Legacy / default-run rows: no blob (or no LAFA keys) -> None,
+        # which LightGBM routes through its native missing branch.
+        pred = self._make_pred(features=None)
+        rec = helpers._record_from_pred(pred, "GO:1")
+        for col in helpers._LAFA_JSONB_FEATURE_COLS:
+            assert rec[col] is None
+
+    def test_lafa_families_partial_blob_fills_missing_with_none(self) -> None:
+        # A self_prior-only run: only that key is in the blob; the rest None.
+        pred = self._make_pred(features={"self_prior_score": 1.0})
+        rec = helpers._record_from_pred(pred, "GO:1")
+        assert rec["self_prior_score"] == 1.0
+        assert rec["classifier_score"] is None
+        assert rec["association_total"] is None
+
+
+class TestLafaPersistEvalRoundTrip:
+    """End-to-end (in-memory) parity: a prediction dict carrying the LAFA
+    families round-trips store -> ``GOPrediction.features`` -> the eval
+    reranker record, so the per-category booster sees the real values it
+    trained on (not zero / missing).
+    """
+
+    def test_lafa_values_survive_store_to_eval_record(self) -> None:
+        from protea.core.operations.predict_go_terms._common import (
+            _row_from_prediction,
+        )
+
+        pred_dict = {
+            "protein_accession": "P42",
+            "go_term_id": 99,
+            "ref_protein_accession": "Q7",
+            "distance": 0.12,
+            "qualifier": "enables",
+            "evidence_code": "IBA",
+            "classifier_score": 0.81,
+            "classifier_present": 1.0,
+            "self_prior_score": 1.0,
+            "association_total": 0.55,
+            "association_cross": 0.2,
+            "association_present": 1.0,
+            "IA": 9.0,
+        }
+        # Half 1: persist -> the JSONB blob the store column receives.
+        blob = _row_from_prediction(pred_dict, uuid.uuid4())["features"]
+
+        # Reconstruct the GOPrediction the eval reads, carrying that blob.
+        pred = cast(
+            GOPrediction,
+            SimpleNamespace(
+                protein_accession="P42",
+                qualifier="enables",
+                evidence_code="IBA",
+                taxonomic_relation="",
+                features=blob,
+            ),
+        )
+        # Half 2: read back -> the eval reranker record carries the families.
+        rec = helpers._record_from_pred(pred, "GO:99", aspect="F")
+        for col in helpers._LAFA_JSONB_FEATURE_COLS:
+            assert rec[col] == pred_dict[col], f"round-trip lost {col}"
+
+    def test_default_run_yields_missing_lafa_in_eval_record(self) -> None:
+        from protea.core.operations.predict_go_terms._common import (
+            _row_from_prediction,
+        )
+
+        pred_dict = {
+            "protein_accession": "P42",
+            "go_term_id": 99,
+            "ref_protein_accession": "Q7",
+            "distance": 0.12,
+        }
+        blob = _row_from_prediction(pred_dict, uuid.uuid4())["features"]
+        pred = cast(
+            GOPrediction,
+            SimpleNamespace(
+                protein_accession="P42",
+                qualifier="",
+                evidence_code="",
+                taxonomic_relation="",
+                features=blob,
+            ),
+        )
+        rec = helpers._record_from_pred(pred, "GO:99")
+        # No LAFA families were computed, so the eval record carries None
+        # (LightGBM missing branch) for each.
+        for col in helpers._LAFA_JSONB_FEATURE_COLS:
+            assert rec[col] is None
+
 
 def _patch_anc2vec(monkeypatch: pytest.MonkeyPatch, embeddings: dict[str, np.ndarray]) -> None:
     """Patch ``get_anc2vec_index`` to return a stub with a ``batch`` method."""

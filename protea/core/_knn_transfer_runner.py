@@ -16,15 +16,20 @@ from __future__ import annotations
 import gc
 import logging
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-import pyarrow as pa
 import pyarrow.parquet as pq
 from sqlalchemy.orm import Session
 
+from protea.core._export_schema import (
+    CANONICAL_EXPORT_SCHEMA,
+    export_table_from_records,
+)
+from protea.core._feature_enricher_helpers import compute_lineage_into
 from protea.core._pair_feature_compute import (
     build_pair_feature_dict,
     precompute_alignment_features,
@@ -34,6 +39,7 @@ from protea.core.knn_search import search_knn
 from protea.core.reranker import EMBEDDING_PCA_DIM
 
 if TYPE_CHECKING:
+    from protea.core.training_dump._export_features import ExportParityFlags
     from protea.core.training_dump_helpers import (
         KnnTransferContext,
         SequenceContext,
@@ -121,6 +127,154 @@ def run_knn_transfer_and_label(
     return runner.run()
 
 
+def _build_parity_flags(p: TrainRerankerAutoPayload) -> ExportParityFlags:
+    """Read the INT-6 ``compute_*`` flags off the dump payload (default off)."""
+    from protea.core.training_dump._export_features import ExportParityFlags
+
+    return ExportParityFlags(
+        self_prior=bool(getattr(p, "compute_self_prior", False)),
+        association=bool(getattr(p, "compute_association", False)),
+        classifier=bool(getattr(p, "compute_classifier", False)),
+    )
+
+
+def _apply_batch_parity_features(
+    runner: _KnnTransferRunner,
+    accessions: list[str],
+    records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """INT-6: fill real self_prior/association/classifier values in place.
+
+    Reuses the predict-path producers on a BATCH of queries' full candidate
+    sets at once. The producers key strictly by ``(protein_accession,
+    go_term_id)`` and never mix candidates across proteins, so feeding all
+    queries in the chunk through one call yields byte-identical values to the
+    historical per-query invocation while collapsing the per-protein SQL + GPU
+    storm into one batched pass. Leakage-clean (reads only the pre-cutoff
+    ``t0_annotation_set_id``). Records key by ``go_id``; the producers by int
+    ``go_term_id``, so the int id is stamped transiently then stripped (schema
+    unchanged). The classifier flag UNIONs full-vocabulary proposals into the
+    pool like the predict path. Returns the (possibly grown) list to rebind.
+    """
+    from functools import partial
+
+    from protea.core._leaf_record_builder import build_classifier_only_record
+    from protea.core.training_dump._export_features import (
+        ClassifierUnionSpec,
+        apply_export_parity_features,
+    )
+
+    assert runner.t0_annotation_set_id is not None  # guarded by ``_parity_on``
+    if not records or not accessions:
+        return records
+    _stamp_int_go_term_ids(runner, records)
+    t_clf0 = time.perf_counter()
+    spec = ClassifierUnionSpec(
+        ontology_snapshot_id=uuid.UUID(str(runner.p.ontology_snapshot_id)),
+        record_factory=partial(build_classifier_only_record, runner._builder),
+        aspect_by_term_id=runner.aspect_map,
+    )
+    records = apply_export_parity_features(
+        runner.session,
+        runner.t0_annotation_set_id,
+        accessions,
+        records,
+        runner._parity_flags,
+        spec,
+    )
+    _LOG.info(
+        "parity chunk done: queries=%d records=%d flags=%r elapsed=%.1fs",
+        len(accessions),
+        len(records),
+        runner._parity_flags,
+        time.perf_counter() - t_clf0,
+    )
+    for rec in records:
+        rec.pop("go_term_id", None)
+    return records
+
+
+def _stamp_int_go_term_ids(runner: _KnnTransferRunner, records: list[dict[str, Any]]) -> None:
+    """Transiently stamp int ``go_term_id`` from each rec's ``go_id`` string.
+
+    The producers key by int id; the runner strips it again before emit so the
+    parquet schema stays unchanged. The reverse map is built once and cached.
+    """
+    if runner._go_str_to_int is None:
+        runner._go_str_to_int = {gid: tid for tid, gid in runner.go_id_map.items()}
+    for rec in records:
+        tid = runner._go_str_to_int.get(rec.get("go_id", ""))
+        if tid is not None:
+            rec["go_term_id"] = tid
+
+
+def _run_build_records(
+    runner: _KnnTransferRunner,
+) -> list[dict[str, Any]] | dict[str, Any]:
+    """Drive the per-query record loop with chunked parity batching + emit."""
+    hb_t0 = time.perf_counter()
+    hb_last = hb_t0
+    chunk_accessions: list[str] = []
+    chunk_records: list[dict[str, Any]] = []
+    n_queries = len(runner.valid_queries)
+    for q_idx, q_acc in enumerate(runner.valid_queries):
+        query_records = runner._build_records_for_query(q_idx, q_acc)
+        if runner._parity_on:
+            chunk_accessions.append(q_acc)
+            chunk_records.extend(query_records)
+            if runner._parity_chunk_size and len(chunk_accessions) >= runner._parity_chunk_size:
+                _flush_parity_chunk(runner, chunk_accessions, chunk_records)
+                chunk_accessions, chunk_records = [], []
+        else:
+            for rec in query_records:
+                runner._emit(rec)
+        runner._cleanup_query_state(q_idx, q_acc)
+        hb_last = _build_records_heartbeat(runner, q_idx, n_queries, hb_t0, hb_last)
+    if runner._parity_on and chunk_accessions:
+        _flush_parity_chunk(runner, chunk_accessions, chunk_records)
+    if runner.streaming:
+        runner._flush()
+        if runner.writer is not None:
+            runner.writer.close()
+        return {"parquet_path": str(runner.output_parquet), "n_rows": runner.n_rows}
+    return runner.records
+
+
+def _flush_parity_chunk(
+    runner: _KnnTransferRunner,
+    chunk_accessions: list[str],
+    chunk_records: list[dict[str, Any]],
+) -> None:
+    """Run the batched parity pass over one chunk, then emit its records."""
+    chunk_records = _apply_batch_parity_features(runner, chunk_accessions, chunk_records)
+    for rec in chunk_records:
+        runner._emit(rec)
+
+
+def _build_records_heartbeat(
+    runner: _KnnTransferRunner, q_idx: int, n_queries: int, hb_t0: float, hb_last: float
+) -> float:
+    """Log query-loop progress every ~30s so the silent stage is visible.
+
+    ``emit`` is swallowed by ``_noop_emit`` in the export, so this uses
+    ``logging`` to surface progress in ``worker-training.log``. Returns the
+    (possibly updated) last-beat timestamp.
+    """
+    now = time.perf_counter()
+    if now - hb_last < 30.0:
+        return hb_last
+    done = q_idx + 1
+    _LOG.info(
+        "build_records heartbeat: queries=%d/%d records_emitted=%d elapsed=%.1fs rate=%.1f q/s",
+        done,
+        n_queries,
+        runner.n_rows + len(runner.buffer) + len(runner.records),
+        now - hb_t0,
+        done / max(1e-9, now - hb_t0),
+    )
+    return now
+
+
 class _KnnTransferRunner:
     """Method Object for ``_knn_transfer_and_label``.
 
@@ -167,6 +321,7 @@ class _KnnTransferRunner:
         self.pca_state = ctx.pca_state
         self.pivot_go_ids = ctx.pivot_go_ids
         self.embedding_pool = ctx.embedding_pool
+        self.t0_annotation_set_id = ctx.t0_annotation_set_id  # INT-6 parity t0 set
 
     def _unpack_sequence_context(self, sequence_context: SequenceContext | None) -> None:
         """Unpack the optional ``SequenceContext`` and resolve toggles."""
@@ -248,6 +403,20 @@ class _KnnTransferRunner:
             else {}
         )
         self._lineage_known: dict[str, set[str]] = self.query_known_gos or {}
+        # Runner-scoped lineage ancestor-closure memo: reused across every
+        # per-(query, aspect) call (the library rebuilds it per call). See
+        # :func:`protea.core._feature_enricher_helpers.compute_lineage_into`.
+        self._lineage_closure_cache: dict[str, frozenset[str]] = {}
+        # INT-6 parity flags. Only fire when a t0 set is bound (the predict-side
+        # single-version dump path has none). The go_id->int reverse map (export
+        # records key by ``go_id``; producers by int id) is built lazily.
+        self._parity_flags = _build_parity_flags(self.p)
+        self._parity_on = self.t0_annotation_set_id is not None and self._parity_flags.any
+        self._go_str_to_int: dict[str, int] | None = None
+        # Batch the parity producers over CHUNKS of queries, not one at a time
+        # (see :func:`_apply_batch_parity_features`); 0 => per-split.
+        raw_chunk = getattr(self.p, "parity_chunk_size", 512)
+        self._parity_chunk_size = int(raw_chunk) if raw_chunk else 0
 
     def run(self) -> list[dict[str, Any]] | dict[str, Any]:
         """Drive the full KNN-transfer-label pipeline."""
@@ -480,26 +649,23 @@ class _KnnTransferRunner:
     # ── phase 9: per-(q_acc, aspect) record builder + emit ────────────
 
     def _build_records(self) -> list[dict[str, Any]] | dict[str, Any]:
-        """Per-``(q_acc, aspect)`` record-building loop.
+        """Per-``(q_acc, aspect)`` record-building loop (delegates to module fn).
 
-        Iterating per group keeps ancestor expansion local and bounds
-        intermediate state to one group's worth of records. In list mode
-        (the legacy default) records accumulate in memory. In streaming
-        mode (``output_parquet`` given) each group flushes through a
-        pyarrow ParquetWriter in ``chunk_rows`` batches.
+        List mode accumulates in memory; streaming flushes via a ParquetWriter.
+        With INT-6 parity on, per-query candidate lists batch into a CHUNK
+        (``parity_chunk_size``; 0 => per-split) and the producers run ONCE over
+        the chunk (value-preserving; see :func:`_apply_batch_parity_features`).
         """
-        for q_idx, q_acc in enumerate(self.valid_queries):
-            self._build_records_for_query(q_idx, q_acc)
-            self._cleanup_query_state(q_idx, q_acc)
-        if self.streaming:
-            self._flush()
-            if self.writer is not None:
-                self.writer.close()
-            return {"parquet_path": str(self.output_parquet), "n_rows": self.n_rows}
-        return self.records
+        return _run_build_records(self)
 
-    def _build_records_for_query(self, q_idx: int, q_acc: str) -> None:
-        """Build leaves + ancestor expansion for one query, all aspects."""
+    def _build_records_for_query(self, q_idx: int, q_acc: str) -> list[dict[str, Any]]:
+        """Build leaves + ancestor expansion for one query, all aspects.
+
+        Records are collected across aspects before return so the INT-6 parity
+        producers (``apply_association`` is cross-aspect) see the query's full
+        candidate set. Returns the per-query record list; the caller emits it
+        directly (parity off) or accumulates it into a chunk (parity on).
+        """
         q_pca_row = (
             self.pca_query_proj[q_idx].tolist()
             if self.pca_query_proj is not None
@@ -508,6 +674,7 @@ class _KnnTransferRunner:
         q_known_cent, q_known_mat, q_known_n = self.query_known_info.get(q_acc, (None, None, 0))
         q_pairs_features = self.pair_features.get(q_acc, {})
         builder = self._builder
+        query_records: list[dict[str, Any]] = []
         for aspect in _ASPECTS:
             nbs = self.neighbors_by_aspect[aspect]
             if q_idx >= len(nbs):
@@ -524,20 +691,20 @@ class _KnnTransferRunner:
             )
             leaf_by_gid = builder.build_leaves_for_aspect(leaf_ctx)
             synth = builder.expand_ancestors(q_acc, leaf_by_gid)
-            # Lineage producer: mutate every record in place with the 4
-            # canonical ``lineage_*`` columns before emit. Covers both
-            # leaves and synthesised ancestor rows under the same known
-            # set; the parquet boundary invariant requires them present.
+            # S3b: union the protein's InterPro-only terms (absent from the
+            # KNN set) into leaf_by_gid, post ancestor expansion so KNN
+            # votes are untouched. Lineage / InterPro post-passes + emit
+            # then cover them with no further wiring.
+            builder.add_interpro_only(leaf_ctx, leaf_by_gid, synth)
             self._apply_lineage_features(q_acc, leaf_by_gid, synth)
-            for rec in leaf_by_gid.values():
-                self._emit(rec)
-            for rec in synth.values():
-                self._emit(rec)
+            self._apply_interpro_features(leaf_by_gid, synth)
+            query_records.extend((*leaf_by_gid.values(), *synth.values()))
             # Free per-(q, aspect) state. Keeps neighbor_info / nbs[q_idx]
             # bounded to "queries not yet processed".
             self.neighbor_info.pop((q_acc, aspect), None)
             if q_idx < len(nbs):
                 nbs[q_idx] = []
+        return query_records
 
     def _apply_lineage_features(
         self,
@@ -545,34 +712,54 @@ class _KnnTransferRunner:
         leaf_by_gid: dict[str, dict[str, Any]],
         synth: dict[str, dict[str, Any]],
     ) -> None:
-        """Invoke ``compute_lineage_features`` on this group's records.
+        """Compute the 4 ``lineage_*`` columns for this group's records.
 
-        Mutates each record in place with the 4 ``lineage_*`` columns.
-        Lazy import keeps the GO-DAG dependency out of the runner's
-        import graph for unrelated unit tests.
+        Delegates to :func:`compute_lineage_into` with the runner-scoped closure
+        cache so closures are reused across every (query, aspect) call (the
+        library rebuilds them per call). See that helper for the rationale.
         """
-        from protea_method.lineage import compute_lineage_features
-
-        combined: list[dict[str, Any]] = [
-            *leaf_by_gid.values(),
-            *synth.values(),
-        ]
+        combined: list[dict[str, Any]] = [*leaf_by_gid.values(), *synth.values()]
         if not combined:
             return
-        compute_lineage_features(
+        compute_lineage_into(
             combined,
             parents=self._lineage_parents,
-            known_by_protein={q_acc: self._lineage_known.get(q_acc, set())},
+            known=self._lineage_known.get(q_acc, set()),
+            cache=self._lineage_closure_cache,
         )
+
+    def _apply_interpro_features(
+        self,
+        leaf_by_gid: dict[str, dict[str, Any]],
+        synth: dict[str, dict[str, Any]],
+    ) -> None:
+        """Fill the 11 InterPro columns on this group's records.
+
+        Left-joins the env-configured InterPro GO-prediction table on
+        ``(protein, go_id)`` and overwrites the zero-fill defaults for
+        matched leaves, synthesised ancestors and the InterPro-only union
+        rows already merged into ``leaf_by_gid`` (S3b). When the table is
+        empty (env var unset) every record keeps the builder defaults, so
+        all 11 columns stay present unconditionally.
+        """
+        table = self._builder.get_interpro_table()
+        if not table:
+            return
+        from protea.core._interpro_features import apply_interpro_features
+
+        apply_interpro_features([*leaf_by_gid.values(), *synth.values()], table)
 
     # ── phase 10: streaming buffer + per-query state cleanup ──────────
 
     def _flush(self) -> None:
         if not self.buffer:
             return
-        table = pa.Table.from_pylist(self.buffer)
+        # Build every batch under the ONE explicit canonical schema (not
+        # pyarrow per-batch inference), ending the schema-drift write
+        # failure between all-KNN and classifier-only-NaN chunks.
+        table = export_table_from_records(self.buffer)
         if self.writer is None:
-            self.writer = pq.ParquetWriter(str(self.output_parquet), table.schema)
+            self.writer = pq.ParquetWriter(str(self.output_parquet), CANONICAL_EXPORT_SCHEMA)
         self.writer.write_table(table)
         self.n_rows += len(self.buffer)
         self.buffer.clear()

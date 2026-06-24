@@ -90,8 +90,13 @@ def test_entrypoint_parses_under_posix_sh() -> None:
 
 def test_entrypoint_pins_baseline_flags() -> None:
     text = _ENTRYPOINT.read_text()
-    for flag in ("--aspect_separated", "--no_v6", "--no_reranker"):
-        assert flag in text, f"baseline flag {flag} not pinned in entrypoint"
+    # Default path: aspect-separated KNN + universal reranker + self-prior.
+    for flag in ("--aspect_separated", "--universal_reranker", "--self_prior"):
+        assert flag in text, f"default flag {flag} not pinned in entrypoint"
+    # Legacy pure-KNN fallback (PROTEA_KNN_V1_NO_UNIVERSAL=1) is retained.
+    for flag in ("--no_v6", "--no_reranker"):
+        assert flag in text, f"fallback flag {flag} not retained in entrypoint"
+    assert "PROTEA_KNN_V1_NO_UNIVERSAL" in text
     # The entrypoint must call protea-predict (or its script form).
     assert "/app/protea_predict.py" in text
     # Caller-supplied args must be forwarded so K / metric overrides

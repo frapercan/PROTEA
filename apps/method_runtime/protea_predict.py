@@ -200,6 +200,44 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Skip the LightGBM reranker even if a booster ships in the bundle.",
     )
     parser.add_argument(
+        "--universal_reranker",
+        action="store_true",
+        help=(
+            "Score with the single universal (pooled, aspect-conditioned, "
+            "K-augmented) booster shipped at "
+            "``<bundle>/reranker/universal.txt`` plus its "
+            "``universal_run.json`` metadata. Runs KNN + v6 features with the "
+            "built-in reranker OFF, then post-hoc rescores every candidate "
+            "with the universal booster's own feature order + categorical "
+            "vocabulary + injected plm_id / k_context. Requires v6 features "
+            "(do not combine with --no_v6). Overrides --no_reranker."
+        ),
+    )
+    parser.add_argument(
+        "--self_prior",
+        action="store_true",
+        help=(
+            "Inject the GOA self-prior: each query target's OWN t0 "
+            "non-experimental annotation (from the frozen bundle), scored "
+            "confidently and max-combined with neighbour transfer. Default off."
+        ),
+    )
+    parser.add_argument(
+        "--self_prior_score",
+        type=float,
+        default=1.0,
+        help="Score for own-annotation self-prior candidates (default 1.0).",
+    )
+    parser.add_argument(
+        "--self_prior_neighbour_scale",
+        type=float,
+        default=0.95,
+        help=(
+            "Multiplier on neighbour-transfer scores before combining with the "
+            "self-prior (default 0.95) so the self-prior dominates the band."
+        ),
+    )
+    parser.add_argument(
         "--model_dir",
         default=os.environ.get("HF_CACHE"),
         help="HuggingFace cache dir for ProtT5 (default: $HF_CACHE).",
@@ -280,9 +318,46 @@ def main(argv: list[str] | None = None) -> None:
         if (bundle / "anc2vec.npz").exists() and not args.no_v6
         else None
     )
+    universal_booster = None
+    universal_meta: dict[str, Any] | None = None
+    if args.universal_reranker:
+        from universal_scorer import (
+            is_universal_booster,
+            load_universal_meta,
+        )
+
+        uni_path = bundle / "reranker" / "universal.txt"
+        if not uni_path.exists():
+            print(
+                "[protea-predict] --universal_reranker set but "
+                f"{uni_path} not found in bundle.",
+                file=sys.stderr,
+            )
+            sys.exit(4)
+        universal_booster = load_from_bytes(uni_path.read_bytes())
+        if not is_universal_booster(universal_booster):
+            print(
+                "[protea-predict] booster at "
+                f"{uni_path} is not a universal model "
+                "(missing plm_id / k_context features).",
+                file=sys.stderr,
+            )
+            sys.exit(5)
+        universal_meta = load_universal_meta(bundle)
+        if universal_meta is None:
+            print(
+                "[protea-predict] universal booster needs "
+                f"{bundle / 'reranker' / 'universal_run.json'} with "
+                "categorical_codes + multi_manifest_pool.",
+                file=sys.stderr,
+            )
+            sys.exit(6)
+
     boosters_by_aspect: dict[str, object] = {}
     booster = None
-    if not args.no_reranker:
+    # The universal booster is applied as a post-hoc rescore (below), not
+    # via the built-in reranker; keep the built-in path off in that mode.
+    if not args.no_reranker and not args.universal_reranker:
         per_aspect_bytes = _load_boosters_by_aspect(bundle)
         if per_aspect_bytes:
             boosters_by_aspect = {
@@ -303,6 +378,15 @@ def main(argv: list[str] | None = None) -> None:
         f"go_terms={len(go_id_map)} pca={pca_state is not None} "
         f"anc2vec={anc_idx is not None} reranker={rerank_summary}",
     )
+
+    if args.universal_reranker and (args.no_v6 or anc_idx is None):
+        print(
+            "[protea-predict] --universal_reranker requires v6 features "
+            "(anc2vec.npz in bundle and no --no_v6); the universal booster "
+            "was trained on the full feature layout.",
+            file=sys.stderr,
+        )
+        sys.exit(7)
 
     config = PredictConfig(
         k=args.k,
@@ -329,6 +413,45 @@ def main(argv: list[str] | None = None) -> None:
         anc_idx=anc_idx,
     )
     print(f"[protea-predict] {len(predictions)} prediction rows")
+
+    if args.universal_reranker and predictions and universal_meta is not None:
+        import pandas as pd
+        from universal_scorer import score_universal
+
+        df = pd.DataFrame(predictions)
+        scores = score_universal(
+            universal_booster,
+            df,
+            categorical_codes=universal_meta["categorical_codes"],
+            plm_id=universal_meta["plm_id"],
+            k_context=universal_meta["k_context"],
+        )
+        for pred, score in zip(predictions, scores.tolist(), strict=True):
+            pred["reranker_score"] = float(score)
+        print(
+            f"[protea-predict] universal reranker scored {len(predictions)} rows "
+            f"(plm={universal_meta['plm_id']} k={universal_meta['k_context']})",
+        )
+
+    if args.self_prior:
+        from self_prior import build_self_prior_rows, combine_with_self_prior
+
+        self_rows = build_self_prior_rows(
+            annotations, kept_q, self_score=args.self_prior_score,
+        )
+        n_targets = len({r["protein_accession"] for r in self_rows})
+        print(
+            f"[protea-predict] self-prior: {len(self_rows)} own-annotation "
+            f"candidates over {n_targets}/{len(kept_q)} query targets "
+            f"(neighbour_scale={args.self_prior_neighbour_scale})",
+        )
+        predictions = combine_with_self_prior(
+            predictions,
+            self_rows,
+            neighbour_scale=args.self_prior_neighbour_scale,
+            score_of=_score_for_output,
+        )
+        print(f"[protea-predict] {len(predictions)} rows after self-prior combine")
 
     n_rows = write_predictions_tsv(predictions, go_id_map, args.output)
     print(f"[protea-predict] wrote {n_rows} predictions to {args.output}")

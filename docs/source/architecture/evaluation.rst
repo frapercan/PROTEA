@@ -466,11 +466,151 @@ External tools can be evaluated against the same ground truth using
 
 Supported formats: ``emapper``, ``pannzer2``, ``interproscan``, ``blast``.
 
+.. _eval-band-registry:
+
+.. rubric:: Per-band canonical (ontology snapshot, IA) registry
+
+A *band* is a GOA evaluation window (for example ``v226`` or ``v227``). Each
+band binds two derived artefacts that are pinned rather than free-floated:
+
+1. An ``OntologySnapshot`` identified by its ``obo_version``. The snapshot
+   governs True-Path propagation, the term universe, and orphan handling.
+   Every cell in the band scores against the same snapshot.
+2. An Information Accretion (IA) artefact identified by a stable file token.
+   The IA weights each GO term by its information content on the t0 corpus of
+   that band.
+
+The registry is ``protea.core.band_registry.BANDS``. Authoritative pairs:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 10 28 28 20
+
+   * - Band
+     - GOA t0
+     - Canonical ``obo_version``
+     - Canonical IA token
+   * - v226
+     - goa 226 (2025-05-03)
+     - ``releases/2025-03-16``
+     - ``IA_cafa6.tsv``
+   * - v227
+     - goa 227 (2025-09-04)
+     - ``releases/2025-07-22``
+     - ``IA.tsv`` / ``IA-swissprot-exp-v227.txt``
+
+Adding a new band requires one new ``Band`` row in ``BANDS``. No
+``obo_version`` and no IA token may be shared by two bands; the CI guard
+(``scripts/check_band_registry.py``, wired into ``lint.yml``) enforces this.
+
+**Why a snapshot/IA mismatch inflates a phantom gap.** If a cell declared for
+one band is scored with the snapshot or IA of another band, the comparison
+measures artefact drift rather than prediction quality. A cross-band snapshot
+changes the propagation closure and the term universe; a cross-band IA
+reweights ``f_micro_w`` against a foreign corpus. The ``v226`` ``IA_cafa6.tsv``
+and the ``v227`` ``IA.tsv`` disagree by up to 14.6 on shared terms. The
+registry fix binds both artefacts to the band and rejects any mix.
+
+**Dispatching a banded evaluation.** Pass the band name in the
+``run_cafa_evaluation`` payload and supply the canonical IA for that band:
+
+.. code-block:: json
+
+   {
+     "evaluation_set_id": "<eval set>",
+     "prediction_set_id": "<pred set>",
+     "band": "v227",
+     "ia_file": "/path/to/lafa_t0_Sep_2025/IA.tsv"
+   }
+
+The operation resolves the pivot snapshot from the ``EvaluationSet``, verifies
+its ``obo_version`` is canonical for the declared band, verifies the IA token,
+emits ``run_cafa_evaluation.band_verified``, and only then calls ``cafaeval``.
+A cross-band cell raises ``BandMismatchError`` and the job fails immediately.
+
+.. _eval-lafa-parity:
+
+.. rubric:: LAFA evaluation parity
+
+PROTEA's ``run_cafa_evaluation`` operation uses the same ``cafaeval`` fork
+binary as LAFA (CAFA_forever). When the same prediction is scored on both
+sides, the headline metric must agree within LAFA's 3-decimal rounding
+(epsilon about 5e-4). This section documents the alignment.
+
+**Headline metric.** Both pipelines report ``f_micro_w``: the IA-weighted
+micro-averaged F-measure, taken per namespace (BPO / CCO / MFO) at the
+threshold that maximises it. LAFA reads it from column 31 of
+``evaluation_best_f_micro_w.tsv``; PROTEA reads it from
+``dfs_best["f_micro_w"]`` in ``parse_results``.
+
+**cafaeval flag alignment.** The table below lists every flag where LAFA and
+PROTEA were previously misaligned and the current state after the fix
+(PRs #599, #601):
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 15 20 30
+
+   * - Flag
+     - LAFA
+     - PROTEA (after fix)
+     - Impact
+   * - ``th_step``
+     - ``0.01`` (default)
+     - ``0.01`` (was ``0.001``)
+     - Dominant gap: finer grid inflated ``f_micro_w`` by up to +0.0144
+   * - ``max_terms``
+     - unlimited (default)
+     - ``None`` (was ``500``)
+     - Inert for KNN-style predictions; removed for mechanical identity
+   * - ``ia``
+     - t0 ``IA.tsv``
+     - payload ``ia_file``
+     - Must point at the same IA artefact as LAFA used for the band
+   * - ``toi``
+     - ``groundtruth_terms_of_interest.txt``
+     - payload ``toi_file``, else snapshot terms
+     - Residual up to 0.004 on MFO without the exact file; pass it for strict parity
+   * - ``prop``
+     - ``fill``
+     - ``fill``
+     - Already matched
+   * - ``norm``
+     - ``cafa``
+     - ``cafa``
+     - Already matched
+   * - ``no_orphans``
+     - on
+     - on
+     - Already matched
+
+**How to run a LAFA-comparable evaluation.** In the ``run_cafa_evaluation``
+payload, leave ``th_step`` and ``max_terms`` at their defaults (``0.01`` and
+``None``), pass ``ia_file`` pointing at the same IA artefact LAFA used for
+the band, and pass ``toi_file`` pointing at LAFA's release
+``groundtruth_terms_of_interest.txt`` for strict MFO parity.
+
+**Persisted metrics.** ``run_cafa_evaluation`` persists, per aspect, the
+IA-weighted ``f_micro_w`` (headline), ``fmax_w``, ``f_micro``, and the
+weighted micro ``precision_w`` / ``recall_w`` / ``coverage_w``. The ``_w``
+keys appear only when a real IA file was supplied; under the uniform IC=1
+fallback they are omitted. The ``/v1/benchmark/matrix`` endpoint ranks every
+cell by ``f_micro_w`` (falling back to ``fmax`` for legacy IC=1 rows, flagged
+via ``primary_metric``) and exposes a ``per_task`` mean and 95% CI.
+
+**Obsolete metrics.** Unweighted ``fmax`` / ``f_micro`` (equal weight on all
+GO terms) are superseded by IA-weighted ``f_micro_w``; they are kept for
+history but are not LAFA-comparable. Numbers from the v226 evaluation window
+are also kept for history but should not be compared head-to-head with LAFA
+v227 results (different band, different ground truth shape).
+
 Implementation reference
 -------------------------
 
 - Core logic: :mod:`protea.core.evaluation` (``EvaluationData``,
   ``compute_evaluation_data``)
+- Band registry: ``protea/core/band_registry.py`` (``BANDS``,
+  ``assert_band_consistency``); CI guard ``scripts/check_band_registry.py``
 - Operations: :mod:`protea.core.operations.generate_evaluation_set`,
   :mod:`protea.core.operations.run_cafa_evaluation`
 - API router: ``protea/api/routers/annotations.py`` (download endpoints,

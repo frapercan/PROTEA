@@ -25,7 +25,8 @@ const DEFAULT_SHOWCASE = {
     evaluation_result_id: "er-fixture-001",
     evaluation_set_id: "es-fixture-001",
     stage: "reranker",
-    avg_fmax: 0.612,
+    avg_primary: 0.612,
+    primary_metric: "f_micro_w",
     embedding: {
       id: "emb-esm2-fixture",
       model_name: "facebook/esm2_t33_650M_UR50D",
@@ -35,11 +36,17 @@ const DEFAULT_SHOWCASE = {
       param_count: 650_000_000,
     },
     per_cell: [
-      { category: "NK", aspect: "MFO", fmax: 0.71, precision: 0.7, recall: 0.72 },
-      { category: "NK", aspect: "BPO", fmax: 0.55, precision: 0.5, recall: 0.6 },
-      { category: "NK", aspect: "CCO", fmax: 0.60, precision: 0.58, recall: 0.62 },
+      { category: "NK", aspect: "MFO", primary: 0.71, primary_metric: "f_micro_w", f_micro_w: 0.71, fmax: 0.69, precision: 0.7, recall: 0.72 },
+      { category: "NK", aspect: "BPO", primary: 0.55, primary_metric: "f_micro_w", f_micro_w: 0.55, fmax: 0.53, precision: 0.5, recall: 0.6 },
+      { category: "NK", aspect: "CCO", primary: 0.60, primary_metric: "f_micro_w", f_micro_w: 0.60, fmax: 0.58, precision: 0.58, recall: 0.62 },
     ],
   },
+  primary_metric: "f_micro_w",
+  per_task: [
+    { category: "NK", aspect: "MFO", metric: "f_micro_w", mean: 0.612, ci95: 0.04, max: 0.71, min: 0.49, n_models: 8 },
+    { category: "NK", aspect: "BPO", metric: "f_micro_w", mean: 0.46, ci95: 0.05, max: 0.55, min: 0.38, n_models: 8 },
+    { category: "NK", aspect: "CCO", metric: "f_micro_w", mean: 0.51, ci95: 0.03, max: 0.60, min: 0.44, n_models: 8 },
+  ],
   counts: {
     proteins: 12345,
     sequences: 12000,

@@ -302,7 +302,7 @@ export function Sidebar({
       hint: t("resultsHint"),
       icon: BarChart3,
       items: [
-        { href: "/benchmark", label: t("benchmark"), hint: "Fmax matrix across embedding × stage × NK / LK / PK", icon: BarChart3 },
+        { href: "/benchmark", label: t("benchmark"), hint: "f_micro_w (IA-weighted, LAFA-comparable) matrix across embedding × stage × NK / LK / PK", icon: BarChart3 },
         { href: "/evaluation", label: t("evaluation"), hint: "CAFA-style delta evaluation (Fmax, Smin, coverage)", icon: Gauge },
       ],
     },

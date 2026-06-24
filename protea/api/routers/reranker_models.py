@@ -106,7 +106,13 @@ def _compute_feature_schema_sha(run: dict[str, Any]) -> str | None:
     Preference order:
       1. ``compute_feature_schema_sha(families, drop_features)``: the
          family-aware sha the lab writes into ``run.features``.
-      2. The dataset's ``schema_sha``: fallback for older runs that
+      2. The sha the lab already computed and recorded in
+         ``run.features.feature_schema_sha``: used when the lab contracts
+         helper is not importable in this image (so branch 1 is skipped)
+         but the run carries the precomputed value. This keeps the
+         universal-booster path from landing a NULL ``feature_schema_sha``
+         on the ``RerankerModel`` row.
+      3. The dataset's ``schema_sha``: fallback for older runs that
          didn't record ``families_enabled``.
     """
     features = run.get("features", {}) or {}
@@ -116,6 +122,9 @@ def _compute_feature_schema_sha(run: dict[str, Any]) -> str | None:
     drop_features: list[str] = features.get("drop_features") or []
     if families and compute_feature_schema_sha is not None:
         return compute_feature_schema_sha(families, drop_features or None)
+    recorded = features.get("feature_schema_sha")
+    if recorded:
+        return str(recorded)
     return run.get("dataset", {}).get("schema_sha")
 
 

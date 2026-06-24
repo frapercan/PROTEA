@@ -17,13 +17,9 @@ jobs:
         run: |
           set -euo pipefail
           git fetch --no-tags --depth=200 origin "${BASE_SHA}"
-          # also need origin/main AND origin/develop so the scan can exclude
-          # commits already on the protected trunks (main or develop). We never
-          # re-flag trunk history we cannot rewrite: a feature PR's new commits
-          # are not yet on either trunk so they stay fully scanned, but a
-          # develop->main release PR only introduces the clean merge/release
-          # commits (develop's own history was gated when it entered develop).
-          git fetch --no-tags origin main develop
+          # also need origin/main so the scan can exclude commits already on
+          # the mainline (we never re-flag released history we cannot rewrite)
+          git fetch --no-tags origin main
 
       - name: Scan commit messages for forbidden attribution
         env:
@@ -34,11 +30,9 @@ jobs:
           range="${BASE_SHA}..${HEAD_SHA}"
           echo "Scanning commit range: ${range}"
           tmp="$(mktemp)"
-          # exclude commits already reachable from a protected trunk (origin/main
-          # or origin/develop): only NEW commits introduced by this PR are subject
-          # to the guard. Feature PRs (base=develop) still get their head commits
-          # scanned because those are not yet on develop.
-          git log --format='commit %H%n%B%n---END---' "${range}" --not origin/main origin/develop > "${tmp}"
+          # exclude commits already reachable from origin/main: only NEW commits
+          # introduced by this PR are subject to the guard.
+          git log --format='commit %H%n%B%n---END---' "${range}" --not origin/main > "${tmp}"
           pattern='co-authored-by:[[:space:]]*.*(claude|anthropic|noreply@anthropic)|generated[[:space:]]+with[[:space:]]+\[?claude|generated[[:space:]]+by[[:space:]]+\[?anthropic'
           if grep -iEn "${pattern}" "${tmp}"; then
             echo "ERROR: commit message contains forbidden Claude/Anthropic attribution."

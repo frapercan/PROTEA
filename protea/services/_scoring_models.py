@@ -18,6 +18,8 @@ from protea.infrastructure.orm.models.embedding.scoring_config import (
     DEFAULT_EVIDENCE_WEIGHTS,
     DEFAULT_WEIGHTS,
     VALID_FORMULAS,
+    VALID_IA_PRIOR_SOURCES,
+    VALID_PARAM_KEYS,
     ScoringConfig,
 )
 
@@ -26,7 +28,9 @@ class RerankerResponse(BaseModel):
     """Serialised representation of a stored :class:`RerankerModel`."""
 
     id: uuid.UUID = Field(..., description="UUID primary key of the ``RerankerModel`` row.")
-    name: str = Field(..., description="Unique human-readable name (also used as artifact key suffix).")
+    name: str = Field(
+        ..., description="Unique human-readable name (also used as artifact key suffix)."
+    )
     prediction_set_id: uuid.UUID | None = Field(
         ...,
         description=(
@@ -37,8 +41,7 @@ class RerankerResponse(BaseModel):
     evaluation_set_id: uuid.UUID | None = Field(
         ...,
         description=(
-            "UUID of the ``EvaluationSet`` this booster was tuned "
-            "against; ``None`` when not bound."
+            "UUID of the ``EvaluationSet`` this booster was tuned against; ``None`` when not bound."
         ),
     )
     category: str = Field(
@@ -186,6 +189,17 @@ class ScoringConfigCreate(BaseModel):
             "NULL means use system defaults. Partial dicts are valid."
         ),
     )
+    params: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Optional advanced scoring knobs. ``None`` reproduces the "
+            "legacy behaviour exactly. Recognised blocks: ``ia_prior`` "
+            "(term-specificity prior, axis E: ``enabled``/``gamma``/"
+            "``source`` in {frequency, ia}), ``soft_vote`` (axis T "
+            "temperature; stored here but applied at predict time), and "
+            "``calibration`` (post-score hook; no-op stub)."
+        ),
+    )
     description: str | None = Field(
         default=None,
         description="Optional human-readable explanation shown in the scoring config picker.",
@@ -197,9 +211,7 @@ class ScoringConfigCreate(BaseModel):
     @classmethod
     def validate_formula(cls, v: str) -> str:
         if v not in VALID_FORMULAS:
-            raise ValueError(
-                f"Unknown formula {v!r}. Valid formulas: {sorted(VALID_FORMULAS)}"
-            )
+            raise ValueError(f"Unknown formula {v!r}. Valid formulas: {sorted(VALID_FORMULAS)}")
         return v
 
     @field_validator("weights")
@@ -230,6 +242,37 @@ class ScoringConfigCreate(BaseModel):
             raise ValueError(f"Evidence weights must be in [0, 1]. Out-of-range: {out_of_range}")
         return v
 
+    @field_validator("params")
+    @classmethod
+    def validate_params(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+        """Reject unknown top-level blocks and validate the IA-prior knob.
+
+        Kept deliberately light: each block is otherwise free-form so
+        A-SCORE.2 can grow it (e.g. calibration tables) without a schema
+        migration, but the ``ia_prior`` lever is checked because it changes
+        scores. ``None`` (legacy behaviour) is always valid.
+        """
+        if v is None:
+            return None
+        unknown = set(v.keys()) - set(VALID_PARAM_KEYS)
+        if unknown:
+            raise ValueError(
+                f"Unknown params blocks: {sorted(unknown)}. Valid: {sorted(VALID_PARAM_KEYS)}"
+            )
+        ia = v.get("ia_prior")
+        if ia is not None:
+            if not isinstance(ia, dict):
+                raise ValueError("params.ia_prior must be an object.")
+            gamma = ia.get("gamma", 1.0)
+            if not isinstance(gamma, (int, float)) or isinstance(gamma, bool) or gamma < 0:
+                raise ValueError("params.ia_prior.gamma must be a number >= 0.")
+            source = ia.get("source")
+            if source is not None and source not in VALID_IA_PRIOR_SOURCES:
+                raise ValueError(
+                    f"params.ia_prior.source must be one of {sorted(VALID_IA_PRIOR_SOURCES)}."
+                )
+        return v
+
 
 class ScoringConfigResponse(BaseModel):
     """Serialised representation of a stored :class:`ScoringConfig`."""
@@ -247,8 +290,14 @@ class ScoringConfigResponse(BaseModel):
     evidence_weights: dict[str, Any] | None = Field(
         ...,
         description=(
-            "Per-evidence-code quality overrides; ``None`` means the "
-            "row uses the system defaults."
+            "Per-evidence-code quality overrides; ``None`` means the row uses the system defaults."
+        ),
+    )
+    params: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Advanced scoring knobs (IA prior, soft-vote temperature, "
+            "calibration); ``None`` means none configured."
         ),
     )
     description: str | None = Field(
@@ -269,6 +318,7 @@ def to_response(c: ScoringConfig) -> ScoringConfigResponse:
         formula=c.formula,
         weights=c.weights,
         evidence_weights=c.evidence_weights,
+        params=c.params,
         description=c.description,
         created_at=c.created_at,
     )

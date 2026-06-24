@@ -59,6 +59,12 @@ jobs:
       - name: em-dash check (no em-dashes in publishable prose)
         run: python scripts/check_no_em_dashes.py
 
+      - name: band registry guard (F-BAND-REGISTRY phantom-gap)
+        run: poetry run python scripts/check_band_registry.py
+
+      - name: cutoff guard (F-EVAL-PROTOCOL no-future-data)
+        run: poetry run python scripts/check_cutoff_guard.py
+
       - name: doc ref drift gate (DS.2)
         run: poetry run python scripts/check_doc_refs.py
 

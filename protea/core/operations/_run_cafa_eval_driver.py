@@ -55,6 +55,9 @@ class CafaEvalRunContext:
     ia_path: str | None
     toi_path: str
     shared_pred_dir: str
+    th_step: float = 0.01
+    max_terms: int | None = None
+    softprop: bool = False
 
 
 def _write_setting_predictions(
@@ -90,8 +93,7 @@ def _write_setting_predictions(
             session,
             write_ctx,
             scoring_config=ctx.scoring_config_snapshot,
-            reranker_model_str=bundle["model"],
-            reranker_cat_codes=bundle.get("cat_codes"),
+            reranker_bundle=bundle,
             known_gos=setting_known,
         )
     else:
@@ -133,8 +135,8 @@ def _invoke_cafaeval_signal_safe(
             norm="cafa",
             no_orphans=True,
             toi_file=ctx.toi_path,
-            max_terms=500,
-            th_step=0.001,
+            max_terms=ctx.max_terms,
+            th_step=ctx.th_step,
             n_cpu=1,
         )
     finally:
@@ -220,8 +222,22 @@ def evaluate_all_settings(
                 setting=setting,
                 ctx=ctx,
             )
+            # Soft-prop only on the FRESH per-setting dir (idempotency: the shared
+            # dir is reused across settings, so transforming it in-loop would
+            # double-apply). softprop currently requires per-setting rerankers.
+            if ctx.softprop:
+                from protea.core.operations._run_cafa_softprop import apply_softprop
+
+                apply_softprop(pred_dir, ctx.obo_path, emit)
         else:
             pred_dir = ctx.shared_pred_dir
+            if ctx.softprop:
+                emit(
+                    "run_cafa_evaluation.softprop_skipped",
+                    None,
+                    {"reason": "softprop requires per-setting reranker predictions"},
+                    "warning",
+                )
         results[setting] = _run_cafaeval_for_setting(
             setting=setting,
             pred_dir=pred_dir,

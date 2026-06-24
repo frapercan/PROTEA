@@ -714,10 +714,32 @@ applied/skipped/mean_score/etc.) but is not persisted.
 Reference cache
 ~~~~~~~~~~~~~~~
 
-Reference embeddings are loaded once per (``embedding_config_id``,
-``annotation_set_id``) pair and stored as a process-level float16 numpy
-array (max 1 entry, LRU-evicted on config change). This avoids reloading
-hundreds of thousands of vectors for every batch.
+Reference embeddings are loaded once per
+``(embedding_config_id, annotation_set_id, aspect_separated_knn,
+need_cos, need_plain)`` tuple and stored as a process-level dict in
+``_REF_CACHE`` (max 1 entry, LRU-evicted on config change). This avoids
+reloading hundreds of thousands of vectors for every batch.
+
+The ``need_cos`` / ``need_plain`` flags control which float32 copies are
+materialised from the float16 base array:
+
+- ``need_cos`` (the L2-normalised ``embeddings_f32_cos`` view) is set
+  when ``metric == "cosine"``.
+- ``need_plain`` (the raw ``embeddings_f32`` view) is set when the metric
+  is not cosine, **or** when the embedding-PCA artefact for this config
+  is not yet cached on disk (the PCA fit needs the raw f32 pool; once the
+  artefact exists on disk it is loaded from there and the plain copy is
+  no longer needed).
+
+Unused copies are set to ``None``; downstream readers select by metric
+and the PCA pool builder guards with ``is not None``. The per-aspect
+float16 slice that was previously written alongside the unified pool has
+been removed; it was never read by any consumer.
+
+For high-dimensional PLMs (ESM2-3B at 2560 dims), each f32 copy of a
+500 K-vector pool is roughly 5 GB. Materialising only the copy the run
+actually reads reduces peak RAM from around 53 GB to around 21 GB for
+ESM2-3B (see ADR :doc:`/adr/D41-lean-f32-refpool-highdim-plm`).
 
 Batch and write workers
 ~~~~~~~~~~~~~~~~~~~~~~~

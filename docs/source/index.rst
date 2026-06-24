@@ -1,7 +1,7 @@
 PROTEA
 ======
 
-**PROtein funcTional Embedding-based Annotation**
+**PROtein functional Embedding-based Annotation**
 
 PROTEA is the target platform for the progressive consolidation of the
 `Protein Information System (PIS) <https://github.com/CBBIO/protein-information-system>`_

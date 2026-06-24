@@ -108,9 +108,16 @@ class TestShaConsistency:
         # too so PROTEA's CI fails before the booster cache invalidates.
         # T-RES.1b rolled this forward to v0.3.0 of protea-contracts,
         # which added the four ``lineage_*`` columns; prior golden
-        # ``"145592ed186c"`` is superseded.
+        # ``"145592ed186c"`` is superseded. S3 rolls it forward to
+        # contracts 0.4.0, which added the 11-column interpro feature
+        # family (67 columns total); prior golden ``"8d9a1668b1a2"``
+        # is superseded. lafa-integrate INT-2 rolls it forward to
+        # contracts 0.5.0, which added the six ``classifier_*`` /
+        # ``self_prior_score`` / ``association_*`` columns (73 columns
+        # total); prior golden ``"4390db315e76"`` is superseded. Mirrors
+        # the golden in protea-contracts ``tests/test_feature_schema.py``.
         sha = protea_contracts.compute_schema_sha(protea_contracts.ALL_FEATURES)
-        assert sha == "5dc696be2f18"
+        assert sha == "b2a5cd46ec6b"
 
 
 # ---------------------------------------------------------------------------

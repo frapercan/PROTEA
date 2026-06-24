@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
-import { getShowcase, type ShowcaseData } from "@/lib/api";
+import { getShowcase, type PerTaskAggregate, type ShowcaseData } from "@/lib/api";
 import { Tooltip } from "@/components/Tooltip";
 import { ShareBestLinkButton } from "./ShareBestLinkButton";
 import { stageBadgeClass, stageLabelKey } from "@/lib/stageBadge";
@@ -25,10 +25,13 @@ const ASPECT_LABELS: Record<string, string> = {
   CCO: "Cellular Component",
 };
 
+// Text shades bumped one step darker (700 -> 800) so the abbreviation
+// labels clear WCAG 2.2 AA (4.5:1) against their tinted backgrounds; the
+// emerald-700-on-emerald-50 pairing was the lowest at 3.55:1.
 const ASPECT_COLORS: Record<string, { bg: string; text: string; ring: string }> = {
-  MFO: { bg: "bg-blue-50", text: "text-blue-700", ring: "ring-blue-100" },
-  BPO: { bg: "bg-violet-50", text: "text-violet-700", ring: "ring-violet-100" },
-  CCO: { bg: "bg-emerald-50", text: "text-emerald-700", ring: "ring-emerald-100" },
+  MFO: { bg: "bg-blue-50", text: "text-blue-800", ring: "ring-blue-100" },
+  BPO: { bg: "bg-violet-50", text: "text-violet-800", ring: "ring-violet-100" },
+  CCO: { bg: "bg-emerald-50", text: "text-emerald-800", ring: "ring-emerald-100" },
 };
 
 // Tooltips for the GO aspects, written in plain English. Hover surfaces
@@ -50,10 +53,31 @@ const CATEGORY_TOOLTIPS: Record<string, string> = {
   PK: "Partial Knowledge: the protein is already annotated for the same aspect, so scoring only counts newly added terms.",
 };
 
-// Definition of the Fmax metric. Kept short so the dotted-underline
-// inline pattern stays readable.
-const FMAX_TOOLTIP =
-  "Fmax: the maximum F1 score across all decision thresholds. The standard CAFA metric for ranking GO-term predictions.";
+// Definition of the IA-weighted headline metric. f_micro_w is the
+// information-accretion-weighted micro-averaged F: the LAFA / CAFA headline
+// number, the only one comparable to the external leaderboards (FIX-METRIC-IA).
+const FMICRO_TOOLTIP =
+  "f_micro_w: the information-accretion-weighted micro-averaged F score. The LAFA / CAFA headline metric, comparable to the external leaderboards. Rare, specific GO terms count more than common ones.";
+
+// Shown when a cell still carries the legacy unweighted Fmax (no real IA
+// score yet). Surfaces the gap honestly rather than mixing it into the
+// IA-weighted headline.
+const NOT_IA_TOOLTIP =
+  "Not IA-weighted: this result predates real information-accretion scoring and reports the unweighted Fmax, which is not directly comparable to the LAFA / CAFA leaderboards.";
+
+/** Mean ± 95% CI half-width across all (category, aspect) tasks, pooling the
+ *  per-task means. This is the honest headline: the central tendency across
+ *  every benchmark task, NOT the single best cell (winner's-curse). The CI is
+ *  the mean of the per-task half-widths, a conservative readout of the typical
+ *  uncertainty band rather than a re-derived pooled interval. */
+function overallPerTask(
+  perTask: PerTaskAggregate[],
+): { mean: number; ci95: number; nTasks: number } | null {
+  if (perTask.length === 0) return null;
+  const mean = perTask.reduce((s, t) => s + t.mean, 0) / perTask.length;
+  const ci95 = perTask.reduce((s, t) => s + t.ci95, 0) / perTask.length;
+  return { mean, ci95, nTasks: perTask.length };
+}
 
 const STAGE_ICONS: Record<string, string> = {
   sequences: "Aa",
@@ -142,16 +166,29 @@ export async function HomeShowcase() {
   const best = data.best;
   const paramBadge = best ? formatParamCount(best.embedding.param_count) : "";
 
-  // Derive a per-aspect summary (mean over the 3 categories) from the
-  // flat per_cell list the backend returns.
+  // Honest headline: per-task mean ± 95% CI across every model (the
+  // f_micro_w aggregate the backend computes), NOT the best-cell maximum
+  // (winner's-curse, FIX-METRIC-IA). The single best embedding below is
+  // labelled "best cell", not as the headline number. `per_task` defaults
+  // to [] so a backend that predates the aggregate degrades to the
+  // best-cell-only view instead of crashing.
+  const perTask = data.per_task ?? [];
+  const headline = overallPerTask(perTask);
+
+  // Per-aspect mean of the IA-weighted per-task means (mean over the 3
+  // categories per aspect) for the mini tiles. Driven by the honest
+  // per_task aggregate, not the best-cell per_cell list.
   const perAspect: Record<string, { sum: number; count: number }> = {};
-  if (best) {
-    for (const cell of best.per_cell) {
-      if (!perAspect[cell.aspect]) perAspect[cell.aspect] = { sum: 0, count: 0 };
-      perAspect[cell.aspect].sum += cell.fmax;
-      perAspect[cell.aspect].count += 1;
-    }
+  for (const t of perTask) {
+    if (!perAspect[t.aspect]) perAspect[t.aspect] = { sum: 0, count: 0 };
+    perAspect[t.aspect].sum += t.mean;
+    perAspect[t.aspect].count += 1;
   }
+
+  // True when the spotlight result is still on the legacy unweighted Fmax
+  // (one or more cells predate real-IA scoring). Surfaced as a badge so the
+  // non-IA number never silently rides the f_micro_w framing.
+  const bestNotIaWeighted = best != null && best.primary_metric !== "f_micro_w";
 
   return (
     <>
@@ -165,16 +202,16 @@ export async function HomeShowcase() {
           <div className="flex items-end justify-between gap-3 mb-4">
             <div className="min-w-0">
               <h2 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-600">
-                {t("bestOverall")}
+                Benchmark headline
               </h2>
               <p className="text-sm text-slate-500 mt-1">
-                Top{" "}
-                <Tooltip text={FMAX_TOOLTIP}>
-                  <span className="underline decoration-dotted decoration-slate-400 underline-offset-4 cursor-help">
-                    Fmax
+                Per-task mean{" "}
+                <Tooltip text={FMICRO_TOOLTIP}>
+                  <span className="underline decoration-dotted decoration-slate-400 underline-offset-4 cursor-help font-mono">
+                    f_micro_w
                   </span>
                 </Tooltip>
-                {" "}across the{" "}
+                {" "}across all models, with a 95% CI, on the{" "}
                 <Tooltip text={CATEGORY_TOOLTIPS.NK}>
                   <span className="underline decoration-dotted decoration-slate-400 underline-offset-4 cursor-help">
                     NK
@@ -213,38 +250,81 @@ export async function HomeShowcase() {
               className="absolute right-0 top-0 h-40 w-40 rounded-full bg-gradient-to-br from-blue-100 to-violet-100 blur-3xl opacity-50 pointer-events-none"
             />
 
-            <div className="relative flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight truncate">
-                    {best.embedding.display_name}
-                  </span>
-                  {paramBadge && (
-                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 tabular-nums ring-1 ring-inset ring-slate-200">
-                      {paramBadge}
-                    </span>
-                  )}
-                  <span
-                    className={`rounded-full px-2.5 py-1 text-xs font-semibold ${stageBadgeClass(
-                      best.stage,
-                    )}`}
-                  >
-                    {stageLabelKey(best.stage)
-                      ? t(stageLabelKey(best.stage) as never)
-                      : best.stage}
-                  </span>
-                </div>
-                <div className="text-[12px] text-slate-600 mt-2 font-mono break-all">
-                  {best.embedding.model_name}
-                </div>
-              </div>
-
-              <div className="flex items-baseline gap-2 lg:flex-col lg:items-end lg:gap-1 lg:text-right shrink-0">
+            {/* Headline: honest per-task mean ± 95% CI across every model.
+                NOT the best-cell maximum (winner's-curse, FIX-METRIC-IA). */}
+            <div className="relative flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+              <div className="flex items-baseline gap-2">
                 <div className="text-5xl sm:text-6xl font-bold tabular-nums protea-gradient-text leading-none">
-                  {best.avg_fmax.toFixed(3)}
+                  {headline ? headline.mean.toFixed(3) : "—"}
                 </div>
-                <div className="text-[11px] uppercase tracking-[0.14em] text-slate-500 font-medium">
-                  {t("avgFmaxAcrossCells")}
+                {headline && (
+                  <div className="text-xl sm:text-2xl font-semibold tabular-nums text-slate-500 leading-none">
+                    ± {headline.ci95.toFixed(3)}
+                  </div>
+                )}
+              </div>
+              <div className="text-[11px] uppercase tracking-[0.14em] text-slate-500 font-medium">
+                mean{" "}
+                <Tooltip text={FMICRO_TOOLTIP}>
+                  <span className="underline decoration-dotted decoration-slate-400 underline-offset-4 cursor-help font-mono normal-case">
+                    f_micro_w
+                  </span>
+                </Tooltip>
+                {" "}± 95% CI · {headline ? headline.nTasks : 0} tasks
+              </div>
+            </div>
+
+            {/* Best-cell spotlight — the single top model on one cell. Clearly
+                labelled "best cell" so it is never read as the headline. */}
+            <div className="relative mt-6 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+              <div className="flex items-center gap-2 mb-2 flex-wrap">
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-800 ring-1 ring-inset ring-amber-200">
+                  Best cell
+                </span>
+                {bestNotIaWeighted && (
+                  <Tooltip text={NOT_IA_TOOLTIP}>
+                    <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-rose-800 ring-1 ring-inset ring-rose-200 cursor-help">
+                      Not IA-weighted
+                    </span>
+                  </Tooltip>
+                )}
+                <span className="text-[11px] text-slate-500">
+                  single top model on its best (split × aspect) cell · not the headline
+                </span>
+              </div>
+              <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight truncate">
+                      {best.embedding.display_name}
+                    </span>
+                    {paramBadge && (
+                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 tabular-nums ring-1 ring-inset ring-slate-200">
+                        {paramBadge}
+                      </span>
+                    )}
+                    <span
+                      className={`rounded-full px-2.5 py-1 text-xs font-semibold ${stageBadgeClass(
+                        best.stage,
+                      )}`}
+                    >
+                      {stageLabelKey(best.stage)
+                        ? t(stageLabelKey(best.stage) as never)
+                        : best.stage}
+                    </span>
+                  </div>
+                  <div className="text-[12px] text-slate-600 mt-2 font-mono break-all">
+                    {best.embedding.model_name}
+                  </div>
+                </div>
+                <div className="flex items-baseline gap-2 lg:flex-col lg:items-end lg:gap-1 lg:text-right shrink-0">
+                  <div className="text-3xl sm:text-4xl font-bold tabular-nums text-slate-800 leading-none">
+                    {typeof best.avg_primary === "number" ? best.avg_primary.toFixed(3) : "—"}
+                  </div>
+                  <div className="text-[10px] uppercase tracking-[0.14em] text-slate-500 font-medium">
+                    best-cell mean{" "}
+                    {bestNotIaWeighted ? "Fmax" : "f_micro_w"}
+                  </div>
                 </div>
               </div>
             </div>
@@ -270,7 +350,7 @@ export async function HomeShowcase() {
                         </span>
                       </Tooltip>
                     </div>
-                    <div className="text-xs text-slate-500 mt-0.5 truncate" title={ASPECT_LABELS[aspect]}>
+                    <div className="text-xs text-slate-600 mt-0.5 truncate" title={ASPECT_LABELS[aspect]}>
                       {ASPECT_LABELS[aspect]}
                     </div>
                   </div>
@@ -309,41 +389,49 @@ export async function HomeShowcase() {
           </p>
         </div>
 
+        {/* Mobile (< sm): flex-col vertical stack, each card full-width, arrows rotate to
+            point down. sm+: the inner row becomes a horizontal flex that may be wider
+            than the card. The outer wrapper is overflow-x-auto so the row scrolls
+            horizontally rather than overflowing the page. justify-center is intentionally
+            dropped from the scrollable row: centering an overflowing flex-row clips the
+            first card behind the left viewport edge with no way to scroll back to it. */}
         <div className="rounded-3xl border border-slate-200 bg-white p-5 sm:p-6 shadow-sm">
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-1 lg:gap-2">
-            {data.pipeline_stages.map((stage, i) => (
-              <div key={stage.name} className="flex flex-col sm:flex-row items-center">
-                {i > 0 && (
-                  <div className="text-slate-300 sm:mx-1 lg:mx-2 my-1 sm:my-0 select-none flex items-center justify-center">
-                    <svg className="rotate-90 sm:rotate-0 w-5 h-5" fill="none" viewBox="0 0 20 20" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M5 10h10M11 6l4 4-4 4" />
-                    </svg>
-                  </div>
-                )}
-                <Link
-                  href={withLocale(locale, stage.href)}
-                  aria-label={`${t(STAGE_I18N[stage.name] as never)} ${t(STAGE_DESC_I18N[stage.name] as never)}`}
-                  className="group relative flex flex-col items-center justify-center w-40 sm:w-44 min-h-[10rem] px-3 py-3 rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 hover:from-blue-50 hover:to-white hover:border-blue-300 hover:shadow-md transition-all cursor-pointer text-center"
-                >
-                  <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-500 text-sm font-bold group-hover:bg-blue-100 group-hover:text-blue-600 transition-colors">
-                    {STAGE_ICONS[stage.name] ?? stage.name.slice(0, 2).toUpperCase()}
-                  </span>
-                  <span className="text-[12px] font-semibold text-slate-700 mt-2 group-hover:text-slate-900">
-                    {t(STAGE_I18N[stage.name] as never)}
-                  </span>
-                  <span className="text-[11px] text-slate-600 tabular-nums mt-0.5 font-medium">
-                    {stage.count.toLocaleString()}
-                  </span>
-                  <span className="text-[10px] text-slate-500 leading-snug mt-1.5 line-clamp-2">
-                    {t(STAGE_DESC_I18N[stage.name] as never)}
-                  </span>
-                  <span className="text-[10px] font-medium text-blue-600 mt-1.5 inline-flex items-center gap-0.5 group-hover:text-blue-800 transition-colors">
-                    {t("stageView" as never)}
-                    <span aria-hidden>→</span>
-                  </span>
-                </Link>
-              </div>
-            ))}
+          <div className="sm:overflow-x-auto">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-1 lg:gap-2 sm:min-w-max">
+              {data.pipeline_stages.map((stage, i) => (
+                <div key={stage.name} className="flex flex-col sm:flex-row items-center">
+                  {i > 0 && (
+                    <div className="text-slate-300 sm:mx-1 lg:mx-2 my-1 sm:my-0 select-none flex items-center justify-center">
+                      <svg className="rotate-90 sm:rotate-0 w-5 h-5" fill="none" viewBox="0 0 20 20" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M5 10h10M11 6l4 4-4 4" />
+                      </svg>
+                    </div>
+                  )}
+                  <Link
+                    href={withLocale(locale, stage.href)}
+                    aria-label={`${t(STAGE_I18N[stage.name] as never)} ${t(STAGE_DESC_I18N[stage.name] as never)}`}
+                    className="group relative flex flex-col items-center justify-center w-full sm:w-40 lg:w-44 min-h-[7rem] sm:min-h-[10rem] px-3 py-3 rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 hover:from-blue-50 hover:to-white hover:border-blue-300 hover:shadow-md transition-all cursor-pointer text-center"
+                  >
+                    <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-500 text-sm font-bold group-hover:bg-blue-100 group-hover:text-blue-600 transition-colors">
+                      {STAGE_ICONS[stage.name] ?? stage.name.slice(0, 2).toUpperCase()}
+                    </span>
+                    <span className="text-[12px] font-semibold text-slate-700 mt-2 group-hover:text-slate-900">
+                      {t(STAGE_I18N[stage.name] as never)}
+                    </span>
+                    <span className="text-[11px] text-slate-600 tabular-nums mt-0.5 font-medium">
+                      {stage.count.toLocaleString()}
+                    </span>
+                    <span className="text-[10px] text-slate-500 leading-snug mt-1.5 line-clamp-2">
+                      {t(STAGE_DESC_I18N[stage.name] as never)}
+                    </span>
+                    <span className="text-[10px] font-medium text-blue-600 mt-1.5 inline-flex items-center gap-0.5 group-hover:text-blue-800 transition-colors">
+                      {t("stageView" as never)}
+                      <span aria-hidden>→</span>
+                    </span>
+                  </Link>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </section>

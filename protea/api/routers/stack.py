@@ -31,7 +31,6 @@ router = APIRouter(tags=["stack"])
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _STACK_YAML = _PROJECT_ROOT / "docs" / "source" / "_data" / "stack.yaml"
-_DOCS_BUILD_ROOT = _PROJECT_ROOT / "docs" / "build"
 _THESIS_PDF = _PROJECT_ROOT / "apps" / "web" / "public" / "thesis.pdf"
 _PULLS_TTL_SECONDS = 300
 _GITHUB_API = "https://api.github.com"
@@ -70,21 +69,21 @@ class RepoEntry(BaseModel):
         ),
     )
     summary: str = Field(..., description="One-line description shown on the stack landing page.")
+    summary_es: str | None = Field(
+        default=None,
+        description=(
+            "Spanish translation of ``summary`` shown on the ``/es`` "
+            "locale; ``None`` falls back to the English ``summary``."
+        ),
+    )
     github_url: str = Field(..., description="Canonical ``https://github.com/...`` URL.")
     docs_url: str | None = Field(
         default=None,
-        description="Sphinx docs URL when published; ``None`` for sibling repos without docs.",
+        description="Public ReadTheDocs URL for this repo; ``None`` if not yet published.",
     )
     package_url: str | None = Field(
         default=None,
         description="PyPI / package registry URL; ``None`` if not published.",
-    )
-    local_docs_path: str | None = Field(
-        default=None,
-        description=(
-            "Path under the local docs portal where this repo's "
-            "Sphinx build is served (when present in the worktree)."
-        ),
     )
 
 
@@ -189,15 +188,6 @@ def _build_github_client() -> httpx.Client:
     return httpx.Client(timeout=10.0, headers=headers)
 
 
-def _local_docs_path(slug: str) -> str | None:
-    """Return ``/docs/<slug>/`` when a built HTML tree exists for the
-    given slug, otherwise ``None`` so the UI falls back to ``docs_url``.
-    """
-    if (_DOCS_BUILD_ROOT / slug / "html" / "index.html").exists():
-        return f"/docs/{slug}/"
-    return None
-
-
 def _thesis_pdf_url() -> str | None:
     # The PDF lives in apps/web/public/, which Next serves at / under the
     # frontend host. No FastAPI proxy hop, no /static mount dependency.
@@ -210,7 +200,7 @@ def _load_repos() -> list[RepoEntry]:
     data = yaml.safe_load(_STACK_YAML.read_text(encoding="utf-8"))
     repos: list[RepoEntry] = []
     for r in data["repos"]:
-        repos.append(RepoEntry(local_docs_path=_local_docs_path(r["slug"]), **r))
+        repos.append(RepoEntry(**r))
     return repos
 
 
@@ -235,11 +225,11 @@ def get_stack() -> StackResponse:
     repo. Edit that file (and run ``scripts/sync_stack.py``) to refresh
     the README block and the Sphinx page in the same commit.
 
-    Per-repo ``local_docs_path`` and the top-level ``thesis_pdf_url``
-    are computed from the filesystem at request time: the field is
-    populated whenever the corresponding artefact has been built into
-    ``docs/build/<slug>/html/`` or ``apps/web/public/thesis.pdf``
-    respectively, and is ``None`` otherwise.
+    Each repo's ``docs_url`` resolves to its public ReadTheDocs site
+    (``https://<project>.readthedocs.io/``). The top-level
+    ``thesis_pdf_url`` is computed from the filesystem at request time:
+    it is populated whenever ``apps/web/public/thesis.pdf`` exists and is
+    ``None`` otherwise.
     """
     return StackResponse(repos=_load_repos(), thesis_pdf_url=_thesis_pdf_url())
 

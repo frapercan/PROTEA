@@ -48,18 +48,25 @@ class _ReferenceMixin:
     the feature + reranker mixins.
     """
 
-    def _ensure_reference_cache(
-        self, session: Session, ctx: Any, emit: EmitFn
-    ) -> Any:
+    def _ensure_reference_cache(self, session: Session, ctx: Any, emit: EmitFn) -> Any:
         """Load (or reuse) the per-process reference embedding cache for this
         ``(embedding_config, annotation_set, aspect_separated_knn)`` triple.
 
         The cache key includes ``aspect_separated_knn`` so switching modes on
-        the same worker does not serve stale data from a previous run. When
-        the cache is full, the oldest entry is evicted to free numpy memory.
+        the same worker does not serve stale data from a previous run. It also
+        includes ``need_cos`` / ``need_plain`` so a cosine run and a non-cosine
+        run never share a pool that materialised only one metric's f32 copy.
+        When the cache is full, the oldest entry is evicted to free numpy memory.
         """
         p = ctx.p
-        cache_key = (p.embedding_config_id, p.annotation_set_id, p.aspect_separated_knn)
+        need_cos, need_plain = self._reference_dtype_needs(p)
+        cache_key = (
+            p.embedding_config_id,
+            p.annotation_set_id,
+            p.aspect_separated_knn,
+            need_cos,
+            need_plain,
+        )
         if cache_key not in _REF_CACHE:
             from protea.config.tuning import get_tuning
 
@@ -79,13 +86,42 @@ class _ReferenceMixin:
             )
             if p.aspect_separated_knn:
                 _REF_CACHE[cache_key] = self._load_reference_data_per_aspect(
-                    session, ctx.embedding_config_id, ctx.annotation_set_id, emit
+                    session,
+                    ctx.embedding_config_id,
+                    ctx.annotation_set_id,
+                    emit,
+                    need_cos=need_cos,
+                    need_plain=need_plain,
                 )
             else:
                 _REF_CACHE[cache_key] = self._load_reference_data(
-                    session, ctx.embedding_config_id, ctx.annotation_set_id, emit
+                    session,
+                    ctx.embedding_config_id,
+                    ctx.annotation_set_id,
+                    emit,
+                    need_cos=need_cos,
+                    need_plain=need_plain,
                 )
         return _REF_CACHE[cache_key]
+
+    @staticmethod
+    def _reference_dtype_needs(p: Any) -> tuple[bool, bool]:
+        """Decide which f32 reference copies this run actually reads.
+
+        ``need_cos`` (the L2-normalised copy) is read by the KNN search when
+        the metric is cosine; ``need_plain`` (the raw f32 copy) is read by the
+        KNN search otherwise, and is also the pool the embedding-PCA fit
+        consumes. The PCA state is cached on disk per embedding config and the
+        fit ignores the pool once cached, so the raw copy is only needed when
+        the PCA artefact is still missing. Skipping the unread copy keeps
+        high-dim PLMs (ESM2-3B, 2560 dims) inside RAM.
+        """
+        from protea.core.pca_cache import _pca_state_path
+
+        need_cos = getattr(p, "metric", "cosine") == "cosine"
+        pca_cached = _pca_state_path(p.embedding_config_id).exists()
+        need_plain = (not need_cos) or (not pca_cached)
+        return need_cos, need_plain
 
     def _load_reference_data(
         self,
@@ -93,6 +129,9 @@ class _ReferenceMixin:
         embedding_config_id: uuid.UUID,
         annotation_set_id: uuid.UUID,
         emit: EmitFn,
+        *,
+        need_cos: bool = True,
+        need_plain: bool = True,
     ) -> dict[str, Any]:
         """Load reference accessions and embeddings (float16) into the process cache.
 
@@ -100,6 +139,7 @@ class _ReferenceMixin:
         load on miss / count-mismatch. When the disk cache files are fresh (mtime
         within ``ref_cache_freshness_seconds``), the expensive COUNT(*)-over-JOIN
         is skipped entirely. GO annotations are loaded lazily per batch elsewhere.
+        ``need_cos`` / ``need_plain`` control which f32 copies are materialised.
         """
         emit("predict_go_terms_batch.load_references_start", None, {}, "info")
         accessions, embeddings, source = self._load_ref_pool(
@@ -115,7 +155,9 @@ class _ReferenceMixin:
             },
             "info",
         )
-        return _derive_reference_views(accessions, embeddings)
+        return _derive_reference_views(
+            accessions, embeddings, need_cos=need_cos, need_plain=need_plain
+        )
 
     def _load_ref_pool(
         self,
@@ -211,13 +253,18 @@ class _ReferenceMixin:
         embedding_config_id: uuid.UUID,
         annotation_set_id: uuid.UUID,
         emit: EmitFn,
+        *,
+        need_cos: bool = True,
+        need_plain: bool = True,
     ) -> dict[str, dict[str, Any]]:
         """Build per-aspect reference views as numpy slices over a single unified cache.
 
         One ~1 GB float16 embedding array + three int32 index arrays (~2 MB each)
         live on disk. Every per-aspect view is a fancy-index slice into the unified
         array, no embedding duplication. See :meth:`_query_and_persist_aspect_caches`
-        for the on-disk layout and the (one-shot) DB scan path.
+        for the on-disk layout and the (one-shot) DB scan path. ``need_cos`` /
+        ``need_plain`` propagate to each per-aspect slice so only the f32 copies
+        this run reads get materialised.
         """
         emit(
             "predict_go_terms_batch.load_references_per_aspect_start",
@@ -229,7 +276,14 @@ class _ReferenceMixin:
             "info",
         )
 
-        unified = self._load_reference_data(session, embedding_config_id, annotation_set_id, emit)
+        unified = self._load_reference_data(
+            session,
+            embedding_config_id,
+            annotation_set_id,
+            emit,
+            need_cos=need_cos,
+            need_plain=need_plain,
+        )
         if not unified["accessions"]:
             empty = {
                 asp: _derive_reference_views([], np.empty((0,), dtype=np.float16))
@@ -251,7 +305,13 @@ class _ReferenceMixin:
             )
 
         result, total_refs = self._assemble_all_aspect_views(
-            unified, missing_aspects, embedding_config_id, annotation_set_id, emit
+            unified,
+            missing_aspects,
+            embedding_config_id,
+            annotation_set_id,
+            emit,
+            need_cos=need_cos,
+            need_plain=need_plain,
         )
         result[_UNIFIED_REF_KEY] = unified  # F2C.5b: pipeline.predict() needs unified pool
         emit(
@@ -269,6 +329,9 @@ class _ReferenceMixin:
         embedding_config_id: uuid.UUID,
         annotation_set_id: uuid.UUID,
         emit: EmitFn,
+        *,
+        need_cos: bool = True,
+        need_plain: bool = True,
     ) -> tuple[dict[str, dict[str, Any]], int]:
         """Slice the unified cache into per-aspect views, emit one ``done`` event
         per aspect, and return ``(views, total_refs)``."""
@@ -276,7 +339,12 @@ class _ReferenceMixin:
         total_refs = 0
         for aspect in _ASPECTS:
             view, n_refs = self._assemble_aspect_view(
-                aspect, unified, embedding_config_id, annotation_set_id
+                aspect,
+                unified,
+                embedding_config_id,
+                annotation_set_id,
+                need_cos=need_cos,
+                need_plain=need_plain,
             )
             result[aspect] = view
             total_refs += n_refs
@@ -402,17 +470,32 @@ class _ReferenceMixin:
         unified: dict[str, Any],
         embedding_config_id: uuid.UUID,
         annotation_set_id: uuid.UUID,
+        *,
+        need_cos: bool = True,
+        need_plain: bool = True,
     ) -> tuple[dict[str, Any], int]:
         """Slice the unified embeddings by the aspect's on-disk index array and
-        attach the CSR annotation cache. Returns ``(view, n_refs)``."""
+        attach the CSR annotation cache. Returns ``(view, n_refs)``.
+
+        Each fancy-index slice is a full copy, so for high-dim PLMs a per-aspect
+        f32 view is tens of GB. Only the copies this run reads are materialised
+        (``need_cos`` → the cosine view, ``need_plain`` → the raw view); the f16
+        slice is never read downstream and is left as an empty placeholder.
+        """
         idx_path = _aspect_index_path(embedding_config_id, annotation_set_id, aspect)
         indices = np.load(idx_path)
         aspect_accessions = [unified["accessions"][i] for i in indices]
+        unified_f32 = unified.get("embeddings_f32")
+        unified_cos = unified.get("embeddings_f32_cos")
         view: dict[str, Any] = {
             "accessions": aspect_accessions,
-            "embeddings": unified["embeddings"][indices],
-            "embeddings_f32": unified["embeddings_f32"][indices],
-            "embeddings_f32_cos": unified["embeddings_f32_cos"][indices],
+            "embeddings": np.empty((0,), dtype=np.float16),
+            "embeddings_f32": (
+                unified_f32[indices] if need_plain and unified_f32 is not None else None
+            ),
+            "embeddings_f32_cos": (
+                unified_cos[indices] if need_cos and unified_cos is not None else None
+            ),
         }
         anno_csr = _load_anno_csr_from_disk(embedding_config_id, annotation_set_id, aspect)
         if anno_csr is not None:

@@ -334,9 +334,9 @@ export default function DatasetsPage() {
                 const href = `/${locale}/datasets/${encodeURIComponent(d.id)}`;
                 return (
                   <tr key={d.id} className="border-t hover:bg-blue-50/60 transition-colors">
-                    <td className="px-3 py-2.5">
-                      <Link href={href} className="font-medium text-slate-900 hover:text-blue-800">
-                        <span className="font-mono text-[13px]">{d.name}</span>
+                    <td className="px-3 py-2.5 max-w-[280px]">
+                      <Link href={href} className="font-medium text-slate-900 hover:text-blue-800" title={d.name}>
+                        <span className="block font-mono text-[13px] truncate">{d.name}</span>
                       </Link>
                       {emb && (
                         <div className="text-[11px] text-slate-500 mt-0.5 font-mono truncate max-w-[280px]">

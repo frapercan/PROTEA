@@ -53,6 +53,16 @@ class TestStackEndpoint:
             assert required <= set(repo.keys())
             assert repo["github_url"].startswith("https://github.com/")
 
+    def test_each_repo_carries_spanish_summary(self, client: TestClient) -> None:
+        # summary_es backs the /es locale; the frontend falls back to the
+        # English summary when it is missing, but the registry ships one
+        # per repo so the Spanish chrome and the table stay consistent.
+        body = client.get("/stack").json()
+        for repo in body["repos"]:
+            assert "summary_es" in repo
+            assert repo["summary_es"]
+            assert repo["summary_es"] != repo["summary"]
+
 
 def _make_fake_client_builder(
     fake_get: Any, captured_headers: dict[str, str] | None = None
@@ -172,24 +182,25 @@ class TestStackYamlFile:
         assert len(repos) >= 1
 
 
-class TestLocalArtefacts:
-    def test_local_docs_path_is_set_when_index_exists(
-        self, client: TestClient, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        slug = "protea-contracts"
-        html_dir = tmp_path / "docs" / "build" / slug / "html"
-        html_dir.mkdir(parents=True)
-        (html_dir / "index.html").write_text("<html></html>", encoding="utf-8")
-
-        monkeypatch.setattr(stack_router, "_DOCS_BUILD_ROOT", tmp_path / "docs" / "build")
-
+class TestDocsUrls:
+    def test_docs_url_points_at_public_readthedocs(self, client: TestClient) -> None:
         body = client.get("/stack").json()
-        target = next(r for r in body["repos"] if r["slug"] == slug)
-        assert target["local_docs_path"] == f"/docs/{slug}/"
+        for repo in body["repos"]:
+            assert repo["docs_url"] is not None
+            assert repo["docs_url"].startswith("https://")
+            assert ".readthedocs.io/" in repo["docs_url"]
 
-        other = next(r for r in body["repos"] if r["slug"] != slug)
-        assert other["local_docs_path"] is None
+    def test_protea_core_docs_url(self, client: TestClient) -> None:
+        body = client.get("/stack").json()
+        protea = next(r for r in body["repos"] if r["slug"] == "protea-core")
+        assert protea["docs_url"] == "https://protea.readthedocs.io/"
 
+    def test_local_docs_path_field_removed(self, client: TestClient) -> None:
+        body = client.get("/stack").json()
+        assert all("local_docs_path" not in r for r in body["repos"])
+
+
+class TestLocalArtefacts:
     def test_thesis_pdf_url_reflects_filesystem(
         self, client: TestClient, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
