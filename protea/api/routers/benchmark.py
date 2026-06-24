@@ -553,6 +553,10 @@ def _fold_evaluation_cells(
                 "temporal_window": er.temporal_window,
                 "arms_enabled": er.arms_enabled,
                 "leakage_role": er.leakage_role,
+                # R0.1 reproducible-frame provenance: the Job that produced
+                # this result. ``None`` flags an orphan artifact (the
+                # job_id=None archaeology trap) vs a job-backed, traceable run.
+                "job_id": str(er.job_id) if er.job_id else None,
             }
             cur_g = best_global.get(key)
             if cur_g is None or payload["primary"] > cur_g["primary"]:

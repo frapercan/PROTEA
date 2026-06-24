@@ -253,6 +253,67 @@ class TestGenerateEvaluationSetExecute:
         assert result.result["lk_proteins"] == 1
         assert self.emit.call_count >= 3  # start, computing, done
 
+    def test_job_id_threaded_onto_eval_set(self):
+        """R0.1: the worker-injected ``_job_id`` is stamped onto the new set.
+
+        Without this the EvaluationSet is an orphan artifact (job_id=None),
+        the exact provenance gap the reproducible-frame slice closes.
+        """
+        session = MagicMock()
+        snap_id = uuid.uuid4()
+        old_set = _make_annotation_set(snap_id)
+        new_set = _make_annotation_set(snap_id)
+        session.get.side_effect = [old_set, new_set]
+        session.query.return_value.filter_by.return_value.one_or_none.return_value = None
+
+        created: list = []
+
+        def add_side(obj):
+            obj.id = uuid.uuid4()
+            created.append(obj)
+
+        session.add.side_effect = add_side
+        session.flush = MagicMock()
+
+        job_id = uuid.uuid4()
+        payload = self._payload()
+        payload["_job_id"] = str(job_id)
+
+        with patch(
+            "protea.core.operations.generate_evaluation_set.compute_evaluation_data",
+            return_value=_make_eval_data(),
+        ):
+            self.op.execute(session, payload, emit=self.emit)
+
+        assert created, "no EvaluationSet was added"
+        assert created[0].job_id == job_id
+
+    def test_job_id_none_when_payload_omits_it(self):
+        """A direct (non-job-backed) dispatch leaves job_id None, not a crash."""
+        session = MagicMock()
+        snap_id = uuid.uuid4()
+        old_set = _make_annotation_set(snap_id)
+        new_set = _make_annotation_set(snap_id)
+        session.get.side_effect = [old_set, new_set]
+        session.query.return_value.filter_by.return_value.one_or_none.return_value = None
+
+        created: list = []
+
+        def add_side(obj):
+            obj.id = uuid.uuid4()
+            created.append(obj)
+
+        session.add.side_effect = add_side
+        session.flush = MagicMock()
+
+        with patch(
+            "protea.core.operations.generate_evaluation_set.compute_evaluation_data",
+            return_value=_make_eval_data(),
+        ):
+            self.op.execute(session, self._payload(), emit=self.emit)
+
+        assert created and created[0].job_id is None
+
     def test_emits_start_event(self):
         session = MagicMock()
         snap_id = uuid.uuid4()

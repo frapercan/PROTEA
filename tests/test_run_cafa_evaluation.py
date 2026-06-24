@@ -1427,6 +1427,52 @@ class TestExecuteHappyPath:
         session.flush.assert_called_once()
 
     @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
+    def test_job_id_threaded_onto_eval_result(self, mock_compute):
+        """R0.1: the worker-injected ``_job_id`` is stamped onto the result.
+
+        A result born without its Job id is an orphan artifact (the
+        job_id=None archaeology trap the reproducible frame eliminates).
+        """
+        mock_compute.return_value = (_make_eval_data(), uuid.uuid4())
+
+        session = MagicMock()
+        eval_set = _make_eval_set()
+        pred_set = _make_pred_set()
+        snapshot = _make_snapshot()
+        session.get.side_effect = [eval_set, pred_set, snapshot]
+
+        query = MagicMock()
+        session.query.return_value = query
+        query.join.return_value = query
+        query.filter.return_value = query
+        query.order_by.return_value = query
+        query.yield_per.return_value = []
+
+        added: list = []
+        session.add.side_effect = added.append
+
+        dfs_best = _dfs_best_fixture()
+        job_id = uuid.uuid4()
+
+        with patch("protea.core.operations._run_cafa_artifacts.download_obo"):
+            with patch(
+                "cafaeval.evaluation.cafa_eval",
+                return_value=(MagicMock(), dfs_best),
+            ):
+                self.op.execute(
+                    session,
+                    {
+                        "evaluation_set_id": EVAL_SET_ID,
+                        "prediction_set_id": PRED_SET_ID,
+                        "_job_id": str(job_id),
+                    },
+                    emit=self.emit,
+                )
+
+        assert added, "no EvaluationResult was added"
+        assert added[0].job_id == job_id
+
+    @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
     def test_emit_events(self, mock_compute):
         mock_compute.return_value = (_make_eval_data(), uuid.uuid4())
 

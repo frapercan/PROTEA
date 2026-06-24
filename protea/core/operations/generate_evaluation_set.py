@@ -15,6 +15,7 @@ from protea.core.evaluation import (
     groundtruth_key_for,
     serialize_evaluation_data_to_parquet,
 )
+from protea.core.utils import job_id_from_payload
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
@@ -156,6 +157,7 @@ class GenerateEvaluationSetOperation:
             new_annotation_set_id=new_set_id,
             stats=stats,
             window_role=p.window_role,
+            job_id=job_id_from_payload(payload),
         )
         session.add(eval_set)
         session.flush()

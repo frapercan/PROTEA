@@ -44,6 +44,7 @@ from protea.core.operations._run_cafa_setup import (  # noqa: F401
     _load_terms_of_interest,
     _PipelineCtx,
 )
+from protea.core.utils import job_id_from_payload
 from protea.infrastructure.orm.models.annotation.evaluation_result import EvaluationResult
 from protea.infrastructure.orm.models.annotation.evaluation_set import EvaluationSet
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
@@ -301,6 +302,7 @@ class RunCafaEvaluationOperation:
             temporal_window=temporal_window,
             leakage_role=leakage_role,
             arms_enabled=arms_enabled,
+            job_id=job_id_from_payload(payload),
         )
         session.add(eval_result)
         session.flush()
