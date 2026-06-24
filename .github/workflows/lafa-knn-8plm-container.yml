@@ -1,11 +1,6 @@
 name: LAFA knn-8plm Container
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'apps/lafa_knn_8plm/**'
-      - '.github/workflows/lafa-knn-8plm-container.yml'
   release:
     types: [published]
   workflow_dispatch:

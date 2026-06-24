@@ -192,7 +192,7 @@ def test_workflow_yaml_valid() -> None:
     # accepted here so the test is resilient to a future migration.
     triggers = spec.get("on") or spec.get(True)
     assert triggers is not None, "workflow missing 'on:' triggers"
-    assert "push" in triggers
+    assert "push" not in triggers  # release-gated: container builds on release only
     assert "release" in triggers
     assert "workflow_dispatch" in triggers
 

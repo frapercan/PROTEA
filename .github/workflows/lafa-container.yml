@@ -1,11 +1,6 @@
 name: LAFA Container
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'apps/lafa_container/**'
-      - '.github/workflows/lafa-container.yml'
   release:
     types: [published]
   workflow_dispatch:

@@ -1,11 +1,6 @@
 name: LAFA knn-v1 Container
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'apps/lafa_knn_v1/**'
-      - '.github/workflows/lafa-knn-v1-container.yml'
   release:
     types: [published]
   workflow_dispatch:
