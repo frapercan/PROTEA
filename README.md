@@ -14,7 +14,7 @@ It is built as a **contracts-first plugin platform**: this repository holds the 
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
 [![License: Unlicense](https://img.shields.io/badge/license-Unlicense-blue.svg)](https://unlicense.org/)
 
-**Status:** v0.8.0, production. The platform is actively deployed and drives live CAFA 6 evaluation and research dataset exports. The public REST API is not yet stable across minor releases.
+**Status:** v0.10.0, production. The platform is actively deployed and drives live CAFA 6 evaluation and research dataset exports. The public REST API is not yet stable across minor releases.
 
 ---
 
@@ -35,6 +35,30 @@ PROTEA is the successor to [PIS](https://github.com/CBBIO/protein-information-sy
 3. **Honest, date-windowed evaluation**: PROTEA evaluates the way LAFA does, on real temporal holdouts between two dated GOA releases rather than random splits. The model sees only the annotations known at the earlier date and is scored against those that appeared by the later one, with the official `cafaeval` library and information-accretion weighting. The platform automates the windowing, so the benchmark is leakage-free by construction and re-runs itself as each new GOA release lands.
 
 PROTEA is the post-CAFA productisation of a protein-function-prediction method that reached #19 in CAFA 6, turning it into a maintainable, deployable, continuously-evaluable system.
+
+---
+
+## The temporal split
+
+Evaluation is keyed to dated GOA releases, so a prediction is always scored against the future relative to what the model could know:
+
+| Role | GOA release | Date | Meaning |
+|---|---|---|---|
+| Training / reference history | 160 ... 220 | 2016-11-01 ... 2024-04-16 | KNN reference pool and reranker training pairs |
+| `t0` (inputs) | 227 | 2025-09-04 | the model sees only annotations known at this date |
+| `t1` (ground truth) | 230 | 2026-03-04 | predictions are scored against annotations that appeared by this date |
+
+The `227 -> 230` window is the live **LAFA Sep-2025 -> Mar-2026** evaluation window, so the same artifact that scores on this benchmark is the one submitted to LAFA. Each (protein, namespace) pair is classed into the CAFA **NK / LK / PK** tiers by what was already known at `t0`. Earlier windows (for example `220 -> 229`) are used as validated checkpoints; the split points and their dates come from the live GOA release timeline on `/evaluation`.
+
+---
+
+## Methods and levers
+
+The score is built from a stack of levers explored across the project:
+
+- **In the pipeline today**: KNN annotation transfer over PLM embeddings (eight PLM backends); learned LightGBM re-ranking of KNN candidates (LambdaRank, IA weighting, per-tier NK/LK/PK); a self-prior that injects each target's own `t0` non-experimental annotations; leakage-free, date-windowed evaluation with information-accretion weighting.
+- **Validated offline, integration in progress**: a learned k-WTA hard-negative retrieval encoder that projects a PLM embedding into a GO-aligned sparse code and beats dense KNN by a wide margin in reranked tests.
+- **On the roadmap** (levers from the strongest CAFA solutions, being adopted): conditional-probability hierarchical modulation, meta-stacking over evidence arms, soft two-way (Pmin/Pmax) ontology propagation, and literature TF-IDF plus PPI-graph features.
 
 ---
 
