@@ -42,12 +42,32 @@ def test_load_encoder_apply_produces_topk_real_code(tmp_path):
 
     apply, meta = _load_encoder(str(art))
     assert meta["dict_dim"] == dict_dim
+    # apply takes a list of per-sequence chunk-vector matrices; single-chunk groups here
     X = np.random.RandomState(0).randn(4, in_dim).astype(np.float32)
-    codes = apply(X)
+    groups = [X[i : i + 1] for i in range(4)]
+    codes = apply(groups)
     assert codes.shape == (4, dict_dim)
     # each row keeps exactly top_k non-zero entries (top-k real)
     for row in codes:
         assert int((row != 0).sum()) == top_k
+
+
+def test_load_encoder_mean_pools_multi_chunk_groups(tmp_path):
+    import torch
+    import torch.nn as nn
+
+    in_dim, dict_dim, top_k = 6, 20, 4
+    enc = nn.Linear(in_dim, dict_dim)
+    art = tmp_path / "enc.pt"
+    torch.save({"state_dict": enc.state_dict(),
+                "meta": {"in_dim": in_dim, "dict_dim": dict_dim, "top_k": top_k}}, art)
+    apply, _ = _load_encoder(str(art))
+    rng = np.random.RandomState(1)
+    multi = rng.randn(3, in_dim).astype(np.float32)
+    # a 3-chunk group must equal the single-chunk group of its mean
+    a = apply([multi])
+    b = apply([multi.mean(axis=0, keepdims=True)])
+    assert np.allclose(a, b, atol=1e-5)
 
 
 def test_load_encoder_zero_row_is_safe(tmp_path):
@@ -59,5 +79,46 @@ def test_load_encoder_zero_row_is_safe(tmp_path):
     torch.save({"state_dict": enc.state_dict(),
                 "meta": {"in_dim": 4, "dict_dim": 16, "top_k": 3, "objective": "cosine-lin"}}, art)
     apply, _ = _load_encoder(str(art))
-    codes = apply(np.zeros((1, 4), dtype=np.float32))  # zero embedding must not div-by-zero
+    codes = apply([np.zeros((1, 4), dtype=np.float32)])  # zero embedding must not div-by-zero
     assert codes.shape == (1, 16) and np.isfinite(codes).all()
+
+
+def _save_attn_artifact(path, in_dim, dict_dim, att_dim, heads, top_k, cap_chunks):
+    import torch
+
+    sd = {
+        "W.weight": torch.randn(att_dim, in_dim),
+        "W.bias": torch.randn(att_dim),
+        "v.weight": torch.randn(heads, att_dim),
+        "lin.weight": torch.randn(dict_dim, in_dim * heads),
+        "lin.bias": torch.randn(dict_dim),
+    }
+    torch.save({"state_dict": sd,
+                "meta": {"in_dim": in_dim, "dict_dim": dict_dim, "top_k": top_k,
+                         "att_dim": att_dim, "heads": heads, "cap_chunks": cap_chunks,
+                         "pooling": "attention", "objective": "hard-neg"}}, path)
+
+
+def test_attention_apply_produces_topk_real_code(tmp_path):
+    in_dim, dict_dim, att_dim, heads, top_k, cap = 6, 24, 8, 1, 5, 4
+    art = tmp_path / "attn.pt"
+    _save_attn_artifact(art, in_dim, dict_dim, att_dim, heads, top_k, cap)
+    apply, meta = _load_encoder(str(art))
+    assert meta["pooling"] == "attention"
+    rng = np.random.RandomState(0)
+    groups = [rng.randn(n, in_dim).astype(np.float32) for n in (1, 3, 2)]
+    codes = apply(groups)
+    assert codes.shape == (3, dict_dim)
+    for row in codes:
+        assert int((row != 0).sum()) == top_k
+
+
+def test_attention_apply_truncates_to_cap(tmp_path):
+    in_dim, dict_dim, att_dim, heads, top_k, cap = 5, 16, 8, 2, 4, 3
+    art = tmp_path / "attn.pt"
+    _save_attn_artifact(art, in_dim, dict_dim, att_dim, heads, top_k, cap)
+    apply, _ = _load_encoder(str(art))
+    rng = np.random.RandomState(2)
+    long_group = rng.randn(10, in_dim).astype(np.float32)  # > cap chunks
+    codes = apply([long_group])
+    assert codes.shape == (1, dict_dim) and np.isfinite(codes).all()
