@@ -675,7 +675,7 @@ test = ["pytest (>=7)"]
 type = "git"
 url = "https://github.com/frapercan/cafaeval-protea.git"
 reference = "main"
-resolved_reference = "52acad754ed5b7ee08c0e038e8a0575103d7c044"
+resolved_reference = "80d705aaa2f931f9bc0c1fb89e10782132c19707"
 
 [[package]]
 name = "certifi"
