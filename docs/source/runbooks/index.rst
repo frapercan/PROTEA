@@ -25,3 +25,4 @@ fix sequence that an operator can execute without prior context.
    lafa-native-parity
    reproducible-eval-frame
    release-process
+   export-resume-and-minijobs
