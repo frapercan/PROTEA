@@ -50,6 +50,8 @@ from torch import nn
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+    from protea.core.two_tower_classifier import TwoTowerSparseClassifier
+
 _LOG = logging.getLogger(__name__)
 
 # Canonical 6-PLM concat order (ADR D35 config ids). The order is
@@ -86,6 +88,15 @@ _ANC2VEC_ENV = "PROTEA_CLASSIFIER_ANC2VEC_PATH"
 #    directory env when both are set.
 _SEED_DIR_ENV = "PROTEA_CLASSIFIER_SEED_DIR"
 _SEED_PATHS_ENV = "PROTEA_CLASSIFIER_SEED_PATHS"
+
+# Classifier implementation selector (iteration ``sparse-classifier``). The
+# default (unset / ``m2``) keeps the production M2 ``hybrid_anc2vec`` head; set
+# ``PROTEA_CLASSIFIER_IMPL=two_tower_sparse`` to serve / export the opt-in
+# two-tower sparse functional candidate generator instead. Both share this
+# module's ``get_classifier`` entry point and the ``ClassifierPrediction``
+# contract, so ``apply_classifier`` and the export union path are unchanged.
+_IMPL_ENV = "PROTEA_CLASSIFIER_IMPL"
+_TWO_TOWER_IMPL = "two_tower_sparse"
 
 
 @dataclass(frozen=True)
@@ -295,6 +306,31 @@ class SeedAveragedClassifier:
         return rows
 
 
+def classifier_impl() -> str:
+    """Selected classifier implementation (``m2`` default, env-overridable)."""
+    return (os.environ.get(_IMPL_ENV) or "m2").strip().lower()
+
+
+def load_classifier_features(
+    session: object, accessions: list[str]
+) -> tuple[np.ndarray, list[str]]:
+    """Load the feature matrix for the SELECTED classifier implementation.
+
+    M2 consumes the 8320-d 6-PLM concat (:func:`load_concat_features`); the
+    two-tower sparse head consumes the 2048-d learned-champion codes
+    (``load_two_tower_features``). Both return ``(features, valid_accessions)``
+    aligned row-for-row, so the predict / export callers stay implementation
+    agnostic.
+    """
+    if classifier_impl() == _TWO_TOWER_IMPL:
+        from protea.core.two_tower_classifier import (  # noqa: PLC0415
+            load_two_tower_features,
+        )
+
+        return load_two_tower_features(session, accessions)
+    return load_concat_features(session, accessions)
+
+
 # Process-level cache: load the (large) model once per batch worker.
 _CLASSIFIER_CACHE: dict[tuple[str, str], FullVocabClassifier] = {}
 _SEED_CLASSIFIER_CACHE: dict[tuple[tuple[str, ...], str], SeedAveragedClassifier] = {}
@@ -302,7 +338,7 @@ _SEED_CLASSIFIER_CACHE: dict[tuple[tuple[str, ...], str], SeedAveragedClassifier
 
 def get_classifier(
     model_path: str | None = None, anc2vec_path: str | None = None
-) -> FullVocabClassifier | SeedAveragedClassifier:
+) -> FullVocabClassifier | SeedAveragedClassifier | TwoTowerSparseClassifier:
     """Return a cached classifier, seed-averaged when a seed env is configured.
 
     When ``PROTEA_CLASSIFIER_SEED_DIR`` / ``PROTEA_CLASSIFIER_SEED_PATHS``
@@ -311,7 +347,17 @@ def get_classifier(
     behaviour is byte-identical to the historical single-checkpoint
     :class:`FullVocabClassifier`. An explicit ``model_path`` argument always
     forces the single-checkpoint path (it is how unit tests pin one file).
+
+    When ``PROTEA_CLASSIFIER_IMPL=two_tower_sparse`` is set (and no explicit
+    ``model_path`` pins the M2 single-checkpoint path), the opt-in two-tower
+    sparse functional candidate generator is returned instead.
     """
+    if model_path is None and classifier_impl() == _TWO_TOWER_IMPL:
+        from protea.core.two_tower_classifier import (  # noqa: PLC0415
+            get_two_tower_classifier,
+        )
+
+        return get_two_tower_classifier()
     anc = anc2vec_path or os.environ.get(_ANC2VEC_ENV, _DEFAULT_ANC2VEC_PATH)
     seed_paths = [] if model_path else resolve_seed_paths()
     if seed_paths:
@@ -571,7 +617,9 @@ def reset_classifier_output_cache() -> None:
 def predict_proteins_cached(
     session: object,
     accessions: list[str],
-    classifier: FullVocabClassifier | SeedAveragedClassifier | None = None,
+    classifier: (
+        FullVocabClassifier | SeedAveragedClassifier | TwoTowerSparseClassifier | None
+    ) = None,
 ) -> list[ClassifierPrediction]:
     """Classifier top-100 per protein, memoised across snapshot pairs (P2).
 
@@ -594,7 +642,23 @@ def predict_proteins_cached(
     # De-dup while preserving order so a protein appearing twice is scored once.
     wanted = [a for a in dict.fromkeys(accessions) if a]
     key_by_acc = {a: _clf_cache_key(a, checkpoint_sha) for a in wanted}
+    cached = _resolve_classifier_cache(session, clf, wanted, key_by_acc)
 
+    out: list[ClassifierPrediction] = []
+    for acc in wanted:
+        for go_id, score in cached.get(acc, []):
+            out.append(ClassifierPrediction(acc, go_id, score))
+    return out
+
+
+def _resolve_classifier_cache(
+    session: object,
+    clf: FullVocabClassifier | SeedAveragedClassifier | TwoTowerSparseClassifier,
+    wanted: list[str],
+    key_by_acc: dict[str, str],
+) -> dict[str, list[tuple[str, float]]]:
+    """Return ``{acc: [(go_id, score)]}`` from the memo+disk cache, computing
+    any misses through the classifier (and storing them back into both tiers)."""
     cached: dict[str, list[tuple[str, float]]] = {}
     misses: list[str] = []
     for acc in wanted:
@@ -622,12 +686,7 @@ def predict_proteins_cached(
     finally:
         if disk is not None:
             disk.close()
-
-    out: list[ClassifierPrediction] = []
-    for acc in wanted:
-        for go_id, score in cached.get(acc, []):
-            out.append(ClassifierPrediction(acc, go_id, score))
-    return out
+    return cached
 
 
 def _open_disk_cache() -> _ClassifierOutputDiskCache | None:
@@ -644,7 +703,7 @@ def _open_disk_cache() -> _ClassifierOutputDiskCache | None:
 
 def _compute_and_store_misses(
     session: object,
-    clf: FullVocabClassifier | SeedAveragedClassifier,
+    clf: FullVocabClassifier | SeedAveragedClassifier | TwoTowerSparseClassifier,
     misses: list[str],
     key_by_acc: dict[str, str],
     cached: dict[str, list[tuple[str, float]]],
@@ -656,7 +715,7 @@ def _compute_and_store_misses(
     protein dropped by :func:`load_concat_features` (missing a PLM) is cached as
     an EMPTY output so repeated pairs do not re-attempt the (failing) load.
     """
-    features, valid = load_concat_features(session, misses)
+    features, valid = load_classifier_features(session, misses)
     by_acc: dict[str, list[tuple[str, float]]] = {a: [] for a in misses}
     if valid:
         for pr in clf.predict(features, valid):
