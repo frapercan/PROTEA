@@ -675,12 +675,12 @@ def apply_classifier(
     """
     from protea.core.classifier_producer import (
         get_classifier,
-        load_concat_features,
+        load_classifier_features,
         resolve_go_term_ids,
     )
 
     accessions = [acc for acc in valid_accessions if acc]
-    features, valid = load_concat_features(session, accessions)
+    features, valid = load_classifier_features(session, accessions)
     if not valid:
         _emit_classifier_done(emit, 0, 0)
         return prediction_dicts
