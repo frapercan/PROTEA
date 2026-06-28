@@ -642,7 +642,23 @@ def predict_proteins_cached(
     # De-dup while preserving order so a protein appearing twice is scored once.
     wanted = [a for a in dict.fromkeys(accessions) if a]
     key_by_acc = {a: _clf_cache_key(a, checkpoint_sha) for a in wanted}
+    cached = _resolve_classifier_cache(session, clf, wanted, key_by_acc)
 
+    out: list[ClassifierPrediction] = []
+    for acc in wanted:
+        for go_id, score in cached.get(acc, []):
+            out.append(ClassifierPrediction(acc, go_id, score))
+    return out
+
+
+def _resolve_classifier_cache(
+    session: object,
+    clf: FullVocabClassifier | SeedAveragedClassifier | TwoTowerSparseClassifier,
+    wanted: list[str],
+    key_by_acc: dict[str, str],
+) -> dict[str, list[tuple[str, float]]]:
+    """Return ``{acc: [(go_id, score)]}`` from the memo+disk cache, computing
+    any misses through the classifier (and storing them back into both tiers)."""
     cached: dict[str, list[tuple[str, float]]] = {}
     misses: list[str] = []
     for acc in wanted:
@@ -670,12 +686,7 @@ def predict_proteins_cached(
     finally:
         if disk is not None:
             disk.close()
-
-    out: list[ClassifierPrediction] = []
-    for acc in wanted:
-        for go_id, score in cached.get(acc, []):
-            out.append(ClassifierPrediction(acc, go_id, score))
-    return out
+    return cached
 
 
 def _open_disk_cache() -> _ClassifierOutputDiskCache | None:
