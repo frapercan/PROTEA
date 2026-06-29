@@ -173,6 +173,9 @@ def _apply_batch_parity_features(
         ontology_snapshot_id=uuid.UUID(str(runner.p.ontology_snapshot_id)),
         record_factory=partial(build_classifier_only_record, runner._builder),
         aspect_by_term_id=runner.aspect_map,
+        # This cut's t0: lets the two-tower resolve per-cut GO co-annotation
+        # codes (mirrors the per-cut ``association`` feature). No-op for M2.
+        t0_annotation_set_id=runner.t0_annotation_set_id,
     )
     records = apply_export_parity_features(
         runner.session,

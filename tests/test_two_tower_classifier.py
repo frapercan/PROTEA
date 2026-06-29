@@ -191,3 +191,82 @@ def test_two_tower_config_id_env_override(monkeypatch) -> None:
     assert tt.two_tower_config_id() == tt.TWO_TOWER_INPUT_CONFIG_ID
     monkeypatch.setenv(tt._CONFIG_ID_ENV, "other-config")
     assert tt.two_tower_config_id() == "other-config"
+
+
+# --------------------------------------------------------------------------- #
+# per-cut GO codes resolver (export only; mirrors the association feature)
+# --------------------------------------------------------------------------- #
+class _FakeResult:
+    def __init__(self, row: object) -> None:
+        self._row = row
+
+    def first(self) -> object:
+        return self._row
+
+
+class _FakeVersionSession:
+    """Returns one ``AnnotationSet.source_version`` row per ``execute``."""
+
+    def __init__(self, source_version: str | None) -> None:
+        self._version = source_version
+
+    def execute(self, *_a: object, **_k: object) -> _FakeResult:
+        return _FakeResult((self._version,) if self._version is not None else None)
+
+
+def _write_codes_npz(path: Path) -> None:
+    np.savez(
+        path, go_ids=np.array(["GO:0000001"], dtype=object), codes=np.zeros((1, _DOUT), np.float32)
+    )
+
+
+def test_resolver_returns_per_cut_path(tmp_path: Path, monkeypatch) -> None:
+    codes_dir = tmp_path / "per_cut"
+    codes_dir.mkdir()
+    _write_codes_npz(codes_dir / "go_sparse_codes_v227.npz")
+    monkeypatch.setenv(tt._GO_CODES_DIR_ENV, str(codes_dir))
+    out = tt.resolve_per_cut_go_codes_path(_FakeVersionSession("227"), "set-id")
+    assert out == str(codes_dir / "go_sparse_codes_v227.npz")
+
+
+def test_resolver_none_when_dir_unset(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv(tt._GO_CODES_DIR_ENV, raising=False)
+    assert tt.resolve_per_cut_go_codes_path(_FakeVersionSession("227"), "set-id") is None
+
+
+def test_resolver_none_when_file_absent(tmp_path: Path, monkeypatch) -> None:
+    codes_dir = tmp_path / "per_cut"
+    codes_dir.mkdir()
+    # v999 file is not written -> fall back to the single artifact.
+    monkeypatch.setenv(tt._GO_CODES_DIR_ENV, str(codes_dir))
+    assert tt.resolve_per_cut_go_codes_path(_FakeVersionSession("999"), "set-id") is None
+
+
+def test_resolver_none_when_no_source_version(tmp_path: Path, monkeypatch) -> None:
+    codes_dir = tmp_path / "per_cut"
+    codes_dir.mkdir()
+    _write_codes_npz(codes_dir / "go_sparse_codes_v227.npz")
+    monkeypatch.setenv(tt._GO_CODES_DIR_ENV, str(codes_dir))
+    assert tt.resolve_per_cut_go_codes_path(_FakeVersionSession(None), "set-id") is None
+
+
+def test_get_two_tower_caches_by_go_codes_path(tmp_path: Path, monkeypatch) -> None:
+    """A per-cut go_codes_path keys a distinct cached two-tower instance."""
+    reset_two_tower_cache()
+    seed_dir, go_codes_path, vocab_path = _write_artifacts(tmp_path)
+    # A second codes file with the SAME full vocab so the head bias still aligns.
+    alt_codes = tmp_path / "go_sparse_codes_v230.npz"
+    full = np.load(go_codes_path, allow_pickle=True)
+    np.savez(alt_codes, go_ids=full["go_ids"], codes=full["codes"])
+    monkeypatch.setenv(tt._SEED_DIR_ENV, seed_dir)
+    monkeypatch.setenv(tt._GO_CODES_ENV, go_codes_path)
+    monkeypatch.setenv(tt._VOCAB_ENV, vocab_path)
+
+    a = tt.get_two_tower_classifier(go_codes_path=go_codes_path)
+    a_again = tt.get_two_tower_classifier(go_codes_path=go_codes_path)
+    b = tt.get_two_tower_classifier(go_codes_path=str(alt_codes))
+    assert a is a_again  # same per-cut path -> cached instance
+    assert a is not b  # different per-cut path -> distinct instance
+    assert go_codes_path in a.checkpoint_paths
+    assert str(alt_codes) in b.checkpoint_paths
+    reset_two_tower_cache()

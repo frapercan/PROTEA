@@ -109,11 +109,18 @@ class ClassifierUnionSpec:
     ``record_factory`` ``None`` keeps the legacy STAMP-ONLY behaviour (no new
     rows appended), so the isolated unit-tests and any caller that cannot
     materialise a full canonical row stay safe.
+
+    ``t0_annotation_set_id`` is this cut's t0 annotation set. When set AND the
+    two-tower impl is selected with ``PROTEA_TWO_TOWER_GO_CODES_DIR`` configured,
+    the classifier scores against the GO co-annotation codes built at THIS cut's
+    t0 (per-cut), mirroring the ``association`` feature. ``None`` (the default,
+    and the isolated unit-tests) keeps the single fixed-artifact behaviour.
     """
 
     ontology_snapshot_id: uuid.UUID
     record_factory: ClassifierRecordFactory | None = None
     aspect_by_term_id: dict[int, str] | None = None
+    t0_annotation_set_id: uuid.UUID | None = None
 
 
 def apply_export_parity_features(
@@ -169,27 +176,44 @@ def _union_classifier_candidates(
 ) -> list[dict[str, Any]]:
     """Stamp existing candidates and APPEND classifier-only proposals.
 
-    Reuses the predict-path classifier producer's loaders verbatim, then mirrors
-    ``_post_knn_pipeline._merge_classifier_preds``: a proposal matching an
-    existing ``(protein, go_term_id)`` candidate stamps it; a proposal with no
-    match becomes a new full-canonical row built by ``spec.record_factory``.
-    With no factory only the stamping runs (the export keeps its prior KNN-only
-    pool), so an isolated caller stays safe. Returns the (possibly grown) list.
+    Reuses the predict-path classifier producer's loaders verbatim. The protein
+    tower + learned head are t0-independent, so the per-protein output is
+    memoised and reused across the 13 train snapshot pairs (+ the test pair). The
+    one t0-dependent part is the two-tower's frozen GO co-annotation codes:
+    :func:`_resolve_per_cut_go_codes` picks THIS cut's t0 codes (mirroring the
+    ``association`` feature) so an earlier pair never sees a later cut's
+    co-annotation. ``None`` (no per-cut dir, or M2) keeps the single fixed
+    artifact; the cache key carries the codes identity so cuts do not collide.
     """
     from protea.core.classifier_producer import (
+        classifier_impl,
         predict_proteins_cached,
-        resolve_go_term_ids,
     )
 
     accessions = [acc for acc in valid_accessions if acc]
-    # P2: the classifier output is t0-independent, so memoise it per protein and
-    # reuse it across the 13 train snapshot pairs (and the test pair) instead of
-    # recomputing it from scratch each pair. Cache hits skip both the embedding
-    # load and the GPU forward pass; the rows are identical to the fresh
-    # ``get_classifier().predict(load_concat_features(...))`` output.
-    preds = predict_proteins_cached(session, accessions)
+    go_codes_path = _resolve_per_cut_go_codes(session, spec, classifier_impl())
+    preds = predict_proteins_cached(session, accessions, go_codes_path=go_codes_path)
     if not preds:
         return records
+    return _merge_classifier_proposals(session, preds, records, spec)
+
+
+def _merge_classifier_proposals(
+    session: Session,
+    preds: list[Any],
+    records: list[dict[str, Any]],
+    spec: ClassifierUnionSpec,
+) -> list[dict[str, Any]]:
+    """Mirror ``_post_knn_pipeline._merge_classifier_preds`` on export records.
+
+    A proposal matching an existing ``(protein, go_term_id)`` candidate stamps it
+    (``classifier_score`` / ``classifier_present``); a proposal with no match
+    becomes a new full-canonical row built by ``spec.record_factory``. With no
+    factory only the stamping runs (the export keeps its prior KNN-only pool), so
+    an isolated caller stays safe. Returns the (possibly grown) list.
+    """
+    from protea.core.classifier_producer import resolve_go_term_ids
+
     go_ids = {pr.go_id for pr in preds}
     gid_by_go = resolve_go_term_ids(session, go_ids, spec.ontology_snapshot_id)
     by_key: dict[tuple[str, int], dict[str, Any]] = {}
@@ -217,6 +241,22 @@ def _union_classifier_candidates(
         by_key[(pr.accession, gtid)] = rec
         records.append(rec)
     return records
+
+
+def _resolve_per_cut_go_codes(session: Session, spec: ClassifierUnionSpec, impl: str) -> str | None:
+    """Per-cut two-tower GO codes path for this cut's t0, or ``None``.
+
+    Only the two-tower impl varies its GO codes per cut; the M2 head is fully
+    t0-independent (no-op). Returns ``None`` when no t0 is set, the impl is not
+    two-tower, or no per-cut artifact is configured/found, so the caller falls
+    back to the single fixed artifact (today's behaviour).
+    """
+    from protea.core.classifier_producer import _TWO_TOWER_IMPL
+    from protea.core.two_tower_classifier import resolve_per_cut_go_codes_path
+
+    if spec.t0_annotation_set_id is None or impl != _TWO_TOWER_IMPL:
+        return None
+    return resolve_per_cut_go_codes_path(session, spec.t0_annotation_set_id)
 
 
 __all__ = (
