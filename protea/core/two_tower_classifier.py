@@ -17,7 +17,12 @@ head:
 * GO tower (frozen): the sparse functional GO codes (1024-d) shipped in
   ``go_sparse_codes.npz`` (whitened-BioBERT text k-WTA + t0 co-annotation
   PPMI/SVD k-WTA). A vocabulary file pins the trained term ORDER so the head's
-  per-term bias aligns.
+  per-term bias aligns. The co-annotation block is the only t0-dependent part:
+  for the EXPORT path it can be resolved PER training snapshot pair from
+  ``PROTEA_TWO_TOWER_GO_CODES_DIR`` (see :func:`resolve_per_cut_go_codes_path`),
+  mirroring the per-cut ``association`` feature so an earlier pair never sees a
+  later cut's co-annotation. The protein tower and the learned head stay frozen
+  and t0-independent; only this GO co-annotation matrix varies.
 * learned head (``ProjHead``): projects the 2048-d protein code into the 1024-d
   GO-code space, scores it against every GO code, adds a per-term bias and a
   temperature.
@@ -54,6 +59,7 @@ conductor), never from the lab tree.
 from __future__ import annotations
 
 import glob
+import logging
 import os
 from typing import TYPE_CHECKING
 
@@ -65,6 +71,8 @@ from protea.core.classifier_producer import ClassifierPrediction
 
 if TYPE_CHECKING:
     pass
+
+_LOG = logging.getLogger(__name__)
 
 # The protein tower input: the learned-champion encoder embedding config. The
 # 2048-d k-WTA codes are already stored as a ``SequenceEmbedding`` for this
@@ -80,6 +88,17 @@ _SEED_DIR_ENV = "PROTEA_TWO_TOWER_SEED_DIR"  # dir of head_seed*.pt (7 ckpts)
 _GO_CODES_ENV = "PROTEA_TWO_TOWER_GO_CODES"  # go_sparse_codes.npz (go_ids + codes)
 _VOCAB_ENV = "PROTEA_TWO_TOWER_VOCAB"  # vocab_go.npy/.json/.npz: trained term ORDER
 _CONFIG_ID_ENV = "PROTEA_TWO_TOWER_CONFIG_ID"  # protein-tower embedding config id
+# EXPORT-ONLY per-cut GO co-annotation codes. A directory of artifacts named
+# ``go_sparse_codes_v{source_version}.npz``, one per t0 ``AnnotationSet``
+# ``source_version``. When set, the export resolves each training snapshot pair's
+# GO codes from THAT pair's own t0 (mirroring the per-cut ``association``
+# feature), instead of reusing the single ``_GO_CODES_ENV`` artifact for every
+# cut (which would leak the latest co-annotation into earlier pairs). Unset (or a
+# missing per-cut file) falls back to ``_GO_CODES_ENV`` (today's behaviour). The
+# LIVE predict path never reads this: it always serves the single latest codes.
+_GO_CODES_DIR_ENV = "PROTEA_TWO_TOWER_GO_CODES_DIR"
+# Per-cut codes filename convention: ``go_sparse_codes_v{source_version}.npz``.
+_GO_CODES_FILENAME = "go_sparse_codes_v{source_version}.npz"
 
 
 class ProjHead(nn.Module):
@@ -266,18 +285,68 @@ class TwoTowerSparseClassifier:
 _TWO_TOWER_CACHE: dict[tuple[str, str, str], TwoTowerSparseClassifier] = {}
 
 
-def get_two_tower_classifier() -> TwoTowerSparseClassifier:
-    """Return the cached env-configured two-tower classifier (one per worker)."""
+def get_two_tower_classifier(go_codes_path: str | None = None) -> TwoTowerSparseClassifier:
+    """Return the cached env-configured two-tower classifier (one per worker).
+
+    ``go_codes_path`` overrides the single ``_GO_CODES_ENV`` GO codes artifact
+    with a per-cut one (resolved by :func:`resolve_per_cut_go_codes_path` on the
+    EXPORT path); the cache key includes it so distinct cuts get distinct frozen
+    GO matrices and never collide. ``None`` (the default, and every LIVE predict
+    call) keeps today's single-artifact behaviour.
+    """
     key = (
         os.environ.get(_SEED_DIR_ENV, ""),
-        os.environ.get(_GO_CODES_ENV, ""),
+        go_codes_path or os.environ.get(_GO_CODES_ENV, ""),
         os.environ.get(_VOCAB_ENV, ""),
     )
     cached = _TWO_TOWER_CACHE.get(key)
     if cached is None:
-        cached = TwoTowerSparseClassifier()
+        cached = TwoTowerSparseClassifier(go_codes_path=go_codes_path)
         _TWO_TOWER_CACHE[key] = cached
     return cached
+
+
+def resolve_per_cut_go_codes_path(session: object, t0_annotation_set_id: object) -> str | None:
+    """Per-cut GO co-annotation codes npz for a training pair's t0, or ``None``.
+
+    EXPORT-ONLY. Resolves the ``source_version`` of ``t0_annotation_set_id`` and
+    returns ``{PROTEA_TWO_TOWER_GO_CODES_DIR}/go_sparse_codes_v{source_version}.npz``
+    when that dir env is set and the file exists; otherwise ``None`` so the
+    caller falls back to the single ``PROTEA_TWO_TOWER_GO_CODES`` artifact
+    (today's behaviour). Mirrors the per-cut ``association`` feature: each cut
+    reads the co-annotation built at its own t0, never a later cut's.
+    """
+    codes_dir = os.environ.get(_GO_CODES_DIR_ENV)
+    if not codes_dir:
+        return None
+    source_version = _resolve_source_version(session, t0_annotation_set_id)
+    if not source_version:
+        _LOG.debug(
+            "no source_version for t0=%s; using single %s", t0_annotation_set_id, _GO_CODES_ENV
+        )
+        return None
+    path = os.path.join(codes_dir, _GO_CODES_FILENAME.format(source_version=source_version))
+    if not os.path.exists(path):
+        _LOG.info("per-cut go codes %s absent; falling back to single %s", path, _GO_CODES_ENV)
+        return None
+    _LOG.debug("per-cut go codes for t0=%s (v%s) -> %s", t0_annotation_set_id, source_version, path)
+    return path
+
+
+def _resolve_source_version(session: object, annotation_set_id: object) -> str | None:
+    """``AnnotationSet.source_version`` for an id (string), or ``None`` if absent."""
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from protea.infrastructure.orm.models.annotation.annotation_set import (  # noqa: PLC0415
+        AnnotationSet,
+    )
+
+    row = session.execute(  # type: ignore[attr-defined]
+        select(AnnotationSet.source_version).where(AnnotationSet.id == annotation_set_id)
+    ).first()
+    if row is None or row[0] is None:
+        return None
+    return str(row[0])
 
 
 def two_tower_config_id() -> str:
@@ -323,5 +392,6 @@ __all__ = (
     "get_two_tower_classifier",
     "load_two_tower_features",
     "reset_two_tower_cache",
+    "resolve_per_cut_go_codes_path",
     "two_tower_config_id",
 )

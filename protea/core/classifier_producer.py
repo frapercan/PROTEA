@@ -497,16 +497,25 @@ def resolve_go_term_ids(
 # ---------------------------------------------------------------------------
 # Export classifier-output cache (P2).
 #
-# The classifier output for a protein is t0-INDEPENDENT: it depends ONLY on the
-# protein's frozen 6-PLM concat (the same :data:`PLM_CONCAT_ORDER` embeddings)
-# and the classifier checkpoint, NEVER on the annotation set / snapshot pair.
+# The classifier output for a protein depends on the protein's frozen 6-PLM
+# concat (the same :data:`PLM_CONCAT_ORDER` embeddings) and the classifier
+# checkpoint. The protein tower and the learned head are t0-INDEPENDENT; the one
+# t0-dependent part is the two-tower's frozen GO CO-ANNOTATION codes, which the
+# EXPORT path may resolve PER training snapshot pair from its own t0 (see
+# ``two_tower_classifier.resolve_per_cut_go_codes_path``), mirroring the per-cut
+# ``association`` feature so an earlier pair never sees a later cut's
+# co-annotation. The M2 head and the single-artifact two-tower (no per-cut dir
+# configured) remain fully t0-independent.
+#
 # The export iterates the 13 train snapshot pairs (+ the test pair) and the same
 # proteins recur heavily across consecutive pairs, so recomputing the classifier
-# per pair wastes ~12/13 of the classifier GPU compute. This cache memoises the
+# per pair wastes most of the classifier GPU compute. This cache memoises the
 # classifier's top-100 output per protein, keyed by ``(accession,
-# plm_concat_signature, classifier_checkpoint_sha)`` so it is correctly
-# invalidated when the embedding configs or the checkpoint change. Subsequent
-# pairs (and subsequent queries within a pair) hit the cache.
+# plm_concat_signature, classifier_checkpoint_sha, go_codes_sha)`` so it is
+# correctly invalidated when the embedding configs, the checkpoint, OR the
+# per-cut GO codes change. ``go_codes_sha`` is empty (and the key is byte-for-
+# byte today's) for the M2 head and for a two-tower without a per-cut dir.
+# Subsequent pairs (and subsequent queries within a pair) hit the cache.
 #
 # This is an EXPORT-RUN-scoped optimisation. The live predict path
 # (``apply_classifier``) stays per-request and does NOT use this cache.
@@ -553,9 +562,15 @@ def _checkpoint_sha(paths: Iterable[str]) -> str:
     return hashlib.sha256("\x00".join(parts).encode()).hexdigest()[:16]
 
 
-def _clf_cache_key(accession: str, checkpoint_sha: str) -> str:
-    """Cache key for one protein's classifier output."""
-    return f"{accession}\x1f{_PLM_CONCAT_SIGNATURE}\x1f{checkpoint_sha}"
+def _clf_cache_key(accession: str, checkpoint_sha: str, go_codes_sha: str = "") -> str:
+    """Cache key for one protein's classifier output.
+
+    ``go_codes_sha`` identifies the per-cut two-tower GO co-annotation codes used
+    for this cut so distinct cuts do not collide. It is empty for the M2 head and
+    for a single-artifact two-tower, keeping those keys byte-identical to before.
+    """
+    suffix = f"\x1f{go_codes_sha}" if go_codes_sha else ""
+    return f"{accession}\x1f{_PLM_CONCAT_SIGNATURE}\x1f{checkpoint_sha}{suffix}"
 
 
 def _resolve_clf_cache_dir() -> Path | None:
@@ -620,28 +635,46 @@ def predict_proteins_cached(
     classifier: (
         FullVocabClassifier | SeedAveragedClassifier | TwoTowerSparseClassifier | None
     ) = None,
+    go_codes_path: str | None = None,
 ) -> list[ClassifierPrediction]:
     """Classifier top-100 per protein, memoised across snapshot pairs (P2).
 
     Returns the SAME rows ``get_classifier().predict(load_concat_features(...))``
     would (same ``(accession, go_id, score)`` per protein), but the per-protein
     classifier compute runs at most once per export run: the output is cached by
-    ``(accession, plm_concat_signature, classifier_checkpoint_sha)`` so later
-    snapshot pairs reuse it. Only the proteins missing from the cache go through
-    ``load_concat_features`` + ``predict``; cache hits skip both the embedding
-    load and the GPU forward pass.
+    ``(accession, plm_concat_signature, classifier_checkpoint_sha, go_codes_sha)``
+    so later snapshot pairs reuse it. Only the proteins missing from the cache go
+    through ``load_concat_features`` + ``predict``; cache hits skip both the
+    embedding load and the GPU forward pass.
 
     ``classifier`` defaults to the env-selected :func:`get_classifier` (the
     seed-averaged champion when configured), matching the export's inline
-    applier. An on-disk sqlite tier is engaged when
+    applier. ``go_codes_path`` (EXPORT path only) pins this cut's per-cut
+    two-tower GO co-annotation codes: when given AND the two-tower impl is
+    selected, the classifier is built from that artifact and the codes identity
+    enters the cache key so distinct cuts do not collide. ``None`` keeps today's
+    single-artifact behaviour, and the codes identity stays empty for the M2
+    head, so its keys are unchanged. An on-disk sqlite tier is engaged when
     ``PROTEA_CLASSIFIER_CACHE_DIR`` is set (mirrors the alignment cache), so the
     output survives across export runs / processes.
     """
-    clf = classifier if classifier is not None else get_classifier()
+    use_per_cut = (
+        classifier is None and go_codes_path is not None and classifier_impl() == _TWO_TOWER_IMPL
+    )
+    go_codes_sha = ""
+    if classifier is not None:
+        clf: FullVocabClassifier | SeedAveragedClassifier | TwoTowerSparseClassifier = classifier
+    elif use_per_cut and go_codes_path is not None:
+        from protea.core.two_tower_classifier import get_two_tower_classifier  # noqa: PLC0415
+
+        clf = get_two_tower_classifier(go_codes_path=go_codes_path)
+        go_codes_sha = _checkpoint_sha([go_codes_path])
+    else:
+        clf = get_classifier()
     checkpoint_sha = _checkpoint_sha(clf.checkpoint_paths)
     # De-dup while preserving order so a protein appearing twice is scored once.
     wanted = [a for a in dict.fromkeys(accessions) if a]
-    key_by_acc = {a: _clf_cache_key(a, checkpoint_sha) for a in wanted}
+    key_by_acc = {a: _clf_cache_key(a, checkpoint_sha, go_codes_sha) for a in wanted}
     cached = _resolve_classifier_cache(session, clf, wanted, key_by_acc)
 
     out: list[ClassifierPrediction] = []
