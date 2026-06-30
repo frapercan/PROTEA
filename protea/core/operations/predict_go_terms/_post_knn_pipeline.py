@@ -27,6 +27,7 @@ from protea.core.operations.predict_go_terms._common import (
     PredictGOTermsBatchPayload,
 )
 from protea.core.operations.predict_go_terms._ia_feature import apply_ia
+from protea.core.operations.predict_go_terms._lineage_feature import apply_lineage
 from protea.core.reranker import EMBEDDING_PCA_DIM
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 
@@ -107,6 +108,15 @@ def _apply_lafa_score_features(
             emit,
             ia_file=getattr(p, "ia_file", None),
         )
+    if getattr(p, "compute_lineage_features", False):
+        apply_lineage(
+            op,
+            session,
+            uuid.UUID(p.ontology_snapshot_id),
+            ctx.annotation_set_id,
+            prediction_dicts,
+            emit,
+        )
 
 
 def _reranker_requested(p: PredictGOTermsBatchPayload) -> bool:
@@ -154,9 +164,7 @@ def apply_self_prior(
     # Snapshot-invariant matching (mirrors ``apply_association``): resolve the own
     # non-exp ids and the candidate ids to the shared go_id string namespace so the
     # match survives the multi-snapshot export (see ``_resolve_self_prior_go_ids``).
-    own_nonexp_go, go_id_by_int = _resolve_self_prior_go_ids(
-        session, own_nonexp, prediction_dicts
-    )
+    own_nonexp_go, go_id_by_int = _resolve_self_prior_go_ids(session, own_nonexp, prediction_dicts)
 
     hits = 0
     for rec in prediction_dicts:
@@ -754,6 +762,7 @@ def _emit_classifier_done(emit: EmitFn, queries: int, candidates_added: int) -> 
 __all__ = (
     "apply_association",
     "apply_classifier",
+    "apply_lineage",
     "apply_self_prior",
     "apply_v6_features",
     "expand_to_ancestors",
