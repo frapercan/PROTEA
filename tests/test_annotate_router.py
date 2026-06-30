@@ -252,6 +252,9 @@ class TestAnnotateSuccess:
             q.order_by.return_value.all.return_value = [config]
             q.scalar.return_value = True
             q.order_by.return_value.first.side_effect = lambda: next(first_results)
+            # active_or_latest_reranker probes the is_active path first; with no
+            # active row it returns None and falls back to order_by().first().
+            q.filter.return_value.order_by.return_value.first.return_value = None
             return q
 
         session.query.side_effect = query_side_effect
@@ -294,6 +297,9 @@ class TestAnnotateSuccess:
             q.order_by.return_value.all.return_value = [config]
             q.scalar.return_value = True
             q.order_by.return_value.first.side_effect = lambda: next(first_results)
+            # active_or_latest_reranker probes the is_active path first; with no
+            # active row it returns None and falls back to order_by().first().
+            q.filter.return_value.order_by.return_value.first.return_value = None
             return q
 
         session.query.side_effect = query_side_effect
@@ -332,6 +338,9 @@ class TestAnnotateSuccess:
             q.order_by.return_value.all.return_value = [config]
             q.scalar.return_value = True
             q.order_by.return_value.first.side_effect = lambda: next(first_results)
+            # active_or_latest_reranker probes the is_active path first; with no
+            # active row it returns None and falls back to order_by().first().
+            q.filter.return_value.order_by.return_value.first.return_value = None
             return q
 
         session.query.side_effect = query_side_effect
