@@ -24,7 +24,9 @@ from protea.api.routers.query_sets import _parse_fasta, _upsert_sequences
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.annotation.ontology_snapshot import OntologySnapshot
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
-from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
+from protea.infrastructure.orm.models.embedding.reranker_model import (
+    active_or_latest_reranker,
+)
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 from protea.infrastructure.orm.models.job import Job, JobEvent
 from protea.infrastructure.orm.models.query.query_set import QuerySet, QuerySetEntry
@@ -56,14 +58,55 @@ _DEFAULT_CONFIG = {
 }
 
 
+def _config_has_embeddings(session: Session, config_id: uuid.UUID) -> bool:
+    """True when ``sequence_embedding`` carries at least one row for the config."""
+    return bool(
+        session.query(
+            exists().where(SequenceEmbedding.embedding_config_id == config_id)
+        ).scalar()
+    )
+
+
+def _pinned_embedding_config(session: Session) -> EmbeddingConfig | None:
+    """Return the operator-pinned retrieval config, or ``None`` to auto-pick.
+
+    Reads ``serve.default_embedding_config_id`` (env
+    ``PROTEA_DEFAULT_EMBEDDING_CONFIG_ID``). This lets a deploy pin the
+    validated learned k-WTA retrieval config without hardcoding its id in
+    code. The pin is honoured ONLY when the id parses as a UUID, the config
+    exists, AND it already has embeddings; any of those failing falls back to
+    the smallest-param auto-pick so a stale/typo'd pin can never break serve.
+    Unset (the default) keeps the legacy behaviour exactly."""
+    from protea.config.tuning import get_tuning
+
+    pinned = get_tuning().serve.default_embedding_config_id
+    if not pinned:
+        return None
+    try:
+        config_id = uuid.UUID(str(pinned))
+    except ValueError:
+        return None
+    config = session.get(EmbeddingConfig, config_id)
+    if config is None:
+        return None
+    return config if _config_has_embeddings(session, config.id) else None
+
+
 def _best_embedding_config(session: Session) -> EmbeddingConfig | None:
-    """Pick the smallest model that already has embeddings; the quick-annotation
-    path is latency-sensitive, so a 300M PLM beats a 3B one for the default.
+    """Pick the retrieval config for the quick-annotation path.
+
+    Prefers the operator-pinned config (``_pinned_embedding_config``) when set
+    and usable; otherwise falls back to the smallest model that already has
+    embeddings (the quick-annotation path is latency-sensitive, so a 300M PLM
+    beats a 3B one for the default).
 
     Walks configs smallest-first and EXISTS-probes ``sequence_embedding``
     (indexed on ``embedding_config_id``) one config at a time, stopping at the
     first that has any embedding. This is O(configs) cheap index lookups
     instead of a GROUP BY count over all 5.8M embedding rows."""
+    pinned = _pinned_embedding_config(session)
+    if pinned is not None:
+        return pinned
     configs = (
         session.query(EmbeddingConfig)
         .order_by(EmbeddingConfig.param_count.asc().nulls_last())
@@ -72,10 +115,7 @@ def _best_embedding_config(session: Session) -> EmbeddingConfig | None:
     if not configs:
         return None
     for config in configs:
-        has_embeddings = session.query(
-            exists().where(SequenceEmbedding.embedding_config_id == config.id)
-        ).scalar()
-        if has_embeddings:
+        if _config_has_embeddings(session, config.id):
             return config
     return configs[0]
 
@@ -273,7 +313,20 @@ def _predict_payload(
     query_set_id: uuid.UUID,
     options: AnnotateFormOptions,
 ) -> dict[str, Any]:
-    """Build the predict_go_terms chaining payload returned by /annotate."""
+    """Build the predict_go_terms chaining payload returned by /annotate.
+
+    The four ``compute_*`` schema flags (``compute_alignments``,
+    ``compute_taxonomy``, ``compute_v6_features``, ``compute_lineage_features``)
+    are config-driven via ``serve.*`` tuning so the payload can be aligned to
+    whatever reranker is active. Defaults reproduce the previous serve
+    behaviour (alignments + taxonomy True, v6 + lineage absent/False). To serve
+    the validated 851849df reranker, set ``compute_v6_features`` and
+    ``compute_lineage_features`` True (env
+    ``PROTEA_TUNING__serve__compute_v6_features=true`` /
+    ``PROTEA_TUNING__serve__compute_lineage_features=true``)."""
+    from protea.config.tuning import get_tuning
+
+    serve = get_tuning().serve
     return {
         "embedding_config_id": str(config_id),
         "annotation_set_id": str(annotation_set_id),
@@ -281,8 +334,10 @@ def _predict_payload(
         "query_set_id": str(query_set_id),
         "search_backend": "numpy",
         "aspect_separated_knn": True,
-        "compute_alignments": True,
-        "compute_taxonomy": True,
+        "compute_alignments": serve.compute_alignments,
+        "compute_taxonomy": serve.compute_taxonomy,
+        "compute_v6_features": serve.compute_v6_features,
+        "compute_lineage_features": serve.compute_lineage_features,
         "compute_reranker_features": options.compute_reranker_features,
         "compute_classifier": options.compute_classifier,
         "compute_self_prior": options.compute_self_prior,
@@ -360,7 +415,8 @@ def _resolve_dispatch_resources(
     session: Session, cached_config_id: uuid.UUID | None = None
 ) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID | None]:
     """Pick the best embedding config (creating the default ESM-2 if none exists),
-    the newest AnnotationSet + OntologySnapshot, and the latest RerankerModel.
+    the newest AnnotationSet + OntologySnapshot, and the serve RerankerModel
+    (active-first, then latest-by-created_at; see ``active_or_latest_reranker``).
 
     ``cached_config_id`` is the TTL-cached id of the smallest config that has
     embeddings; when supplied (and still present), it skips the per-request
@@ -394,7 +450,7 @@ def _resolve_dispatch_resources(
             status_code=409,
             detail="No ontology snapshots available. Load a GO ontology first.",
         )
-    best_reranker = session.query(RerankerModel).order_by(RerankerModel.created_at.desc()).first()
+    best_reranker = active_or_latest_reranker(session)
     reranker_id = best_reranker.id if best_reranker else None
     return config.id, ann.id, snap.id, reranker_id
 

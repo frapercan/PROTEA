@@ -321,6 +321,77 @@ class APILimits(BaseModel):
     )
 
 
+class ServeTuning(BaseModel):
+    """Live serving-path knobs for the one-click ``/annotate`` endpoint.
+
+    These pin the validated offline pipeline onto the serving path without
+    hardcoding ids or flipping behaviour. Every default reproduces the
+    pre-existing serve behaviour exactly, so a deployment that sets none of
+    these env vars serves identically to before. To activate the validated
+    pipeline at deploy time, set:
+
+    * ``default_embedding_config_id`` to the learned k-WTA retrieval config,
+    * ``compute_v6_features`` and ``compute_lineage_features`` to ``True`` so
+      the predict payload matches the validated reranker feature schema,
+    * ``interpro_bp_graft`` to ``True`` for the InterPro2GO BP enrichment.
+
+    Sources: ``api/routers/annotate.py`` and the predict post-KNN pipeline.
+    """
+
+    default_embedding_config_id: str | None = Field(
+        default=None,
+        description=(
+            "Pinned EmbeddingConfig UUID used for retrieval by /annotate. When "
+            "set AND the config already has embeddings, it overrides the "
+            "smallest-param auto-pick. Empty/None (default) keeps the legacy "
+            "smallest-param logic. Override: PROTEA_DEFAULT_EMBEDDING_CONFIG_ID "
+            "o PROTEA_TUNING__serve__default_embedding_config_id."
+        ),
+    )
+    compute_alignments: bool = Field(
+        default=True,
+        description=(
+            "Serve-time compute_alignments flag in the predict payload. Default "
+            "True preserves current behaviour. Override: "
+            "PROTEA_TUNING__serve__compute_alignments."
+        ),
+    )
+    compute_taxonomy: bool = Field(
+        default=True,
+        description=(
+            "Serve-time compute_taxonomy flag in the predict payload. Default "
+            "True preserves current behaviour. Override: "
+            "PROTEA_TUNING__serve__compute_taxonomy."
+        ),
+    )
+    compute_v6_features: bool = Field(
+        default=False,
+        description=(
+            "Serve-time compute_v6_features flag. Default False preserves "
+            "current behaviour. Set True to match the validated reranker "
+            "feature schema (851849df). Override: "
+            "PROTEA_TUNING__serve__compute_v6_features."
+        ),
+    )
+    compute_lineage_features: bool = Field(
+        default=False,
+        description=(
+            "Serve-time compute_lineage_features flag. Default False preserves "
+            "current behaviour. Set True together with compute_v6_features to "
+            "match the validated reranker feature schema (851849df). Override: "
+            "PROTEA_TUNING__serve__compute_lineage_features."
+        ),
+    )
+    interpro_bp_graft: bool = Field(
+        default=False,
+        description=(
+            "Gate the optional InterPro2GO BP noisy-OR graft post-step in the "
+            "predict pipeline. Default False = no graft (behaviour unchanged). "
+            "Override: PROTEA_TUNING__serve__interpro_bp_graft."
+        ),
+    )
+
+
 class TuningSettings(BaseModel):
     """Root tuning model that composes per-category sub-models."""
 
@@ -328,6 +399,7 @@ class TuningSettings(BaseModel):
     worker: WorkerTuning = Field(default_factory=WorkerTuning)
     operation: OperationTuning = Field(default_factory=OperationTuning)
     api: APILimits = Field(default_factory=APILimits)
+    serve: ServeTuning = Field(default_factory=ServeTuning)
 
 
 def _load_yaml_tuning(project_root: Path) -> dict[str, Any]:
@@ -346,6 +418,7 @@ _SHORT_ALIASES: dict[str, tuple[str, str]] = {
     # PROTEA_TUNING__group__field path.
     "PROTEA_AMQP_HEARTBEAT": ("queue", "amqp_heartbeat"),
     "PROTEA_REAPER_EVENT_GRACE_SECONDS": ("worker", "reaper_event_grace_seconds"),
+    "PROTEA_DEFAULT_EMBEDDING_CONFIG_ID": ("serve", "default_embedding_config_id"),
 }
 
 

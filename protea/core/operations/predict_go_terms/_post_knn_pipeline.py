@@ -75,7 +75,31 @@ def run_post_knn_pipeline(
     if _reranker_requested(p) and prediction_dicts:
         scorer = op._reranker_scorer
         reranker_stats = scorer.apply(session, prediction_dicts, p, emit)
+    if _interpro_bp_graft_enabled() and prediction_dicts:
+        from protea.core.operations.predict_go_terms._interpro_graft import (
+            apply_interpro_bp_graft,
+        )
+
+        prediction_dicts = apply_interpro_bp_graft(
+            session,
+            uuid.UUID(p.ontology_snapshot_id),
+            knn_result.query_batch.valid_accessions,
+            prediction_dicts,
+            emit,
+        )
     return prediction_dicts, reranker_stats
+
+
+def _interpro_bp_graft_enabled() -> bool:
+    """True when the optional InterPro2GO BP noisy-OR graft is configured on.
+
+    Reads ``serve.interpro_bp_graft`` (default False), so the graft post-step
+    is skipped entirely unless a deploy opts in. Kept as a tiny helper so the
+    gate is trivially unit-testable without standing up the whole pipeline.
+    """
+    from protea.config.tuning import get_tuning
+
+    return get_tuning().serve.interpro_bp_graft
 
 
 def _apply_lafa_score_features(
