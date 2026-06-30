@@ -390,6 +390,28 @@ class ServeTuning(BaseModel):
             "Override: PROTEA_TUNING__serve__interpro_bp_graft."
         ),
     )
+    interpro_bp_graft_weight: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Noisy-OR weight w in 1-(1-base)(1-w*interpro) for the InterPro2GO "
+            "BP graft. Only consulted when interpro_bp_graft is True. Offline "
+            "tuned per-category BP weights (NK 0.05 / LK 0.4 / PK 0.5); serve "
+            "uses one weight because /annotate does not pre-categorise a query, "
+            "defaulting to the LK/PK BP band where the lift concentrates. "
+            "Override: PROTEA_TUNING__serve__interpro_bp_graft_weight."
+        ),
+    )
+    interpro_bp_graft_source_version: str | None = Field(
+        default=None,
+        description=(
+            "Pinned InterPro2GO mapping source_version for the BP graft. None "
+            "(default) auto-picks the most recently loaded InterProGoMapping "
+            "release. Only consulted when interpro_bp_graft is True. Override: "
+            "PROTEA_TUNING__serve__interpro_bp_graft_source_version."
+        ),
+    )
 
 
 class TuningSettings(BaseModel):

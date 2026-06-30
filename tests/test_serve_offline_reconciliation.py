@@ -188,9 +188,7 @@ def test_best_config_falls_back_to_smallest_when_unpinned(
 def _build_payload():
     from protea.api.routers.annotate import AnnotateFormOptions, _predict_payload
 
-    return _predict_payload(
-        uuid4(), uuid4(), uuid4(), uuid4(), AnnotateFormOptions()
-    )
+    return _predict_payload(uuid4(), uuid4(), uuid4(), uuid4(), AnnotateFormOptions())
 
 
 def test_predict_payload_defaults_preserve_behaviour(
@@ -282,21 +280,138 @@ def test_noisy_or_skips_entries_without_go_or_prob() -> None:
     assert stats == {"updated": 0, "added": 0}
 
 
-def test_apply_graft_is_noop_with_stub_loader() -> None:
-    """With the loader's current no-op, the post-step must not mutate preds."""
-    from protea.core.operations.predict_go_terms._interpro_graft import apply_interpro_bp_graft
+def test_noisy_or_applies_weight() -> None:
+    """``weight`` scales the InterPro contribution: 1-(1-base)(1-w*prob)."""
+    from protea.core.operations.predict_go_terms._interpro_graft import noisy_or_graft_bp
 
+    preds = [{"protein_accession": "P1", "go_id": "GO:1", "reranker_score": 0.5}]
+    interpro = [{"protein_accession": "P1", "go_id": "GO:1", "go_term_id": 9, "prob": 0.5}]
+    out, stats = noisy_or_graft_bp(preds, interpro, weight=0.4)
+    # 1 - (1 - 0.5)(1 - 0.4 * 0.5) = 1 - 0.5 * 0.8 = 0.6
+    assert out[0]["reranker_score"] == pytest.approx(0.6)
+    assert stats == {"updated": 1, "added": 0}
+
+
+def test_noisy_or_skips_zero_weighted_contribution() -> None:
+    """``weight * prob <= 0`` contributes nothing (no update, no new row)."""
+    from protea.core.operations.predict_go_terms._interpro_graft import noisy_or_graft_bp
+
+    preds = [{"protein_accession": "P1", "go_id": "GO:1", "reranker_score": 0.5}]
+    interpro = [
+        {"protein_accession": "P1", "go_id": "GO:1", "go_term_id": 9, "prob": 0.8},
+        {"protein_accession": "P1", "go_id": "GO:2", "go_term_id": 7, "prob": 0.9},
+    ]
+    out, stats = noisy_or_graft_bp(preds, interpro, weight=0.0)
+    assert out == preds
+    assert out[0]["reranker_score"] == 0.5
+    assert stats == {"updated": 0, "added": 0}
+
+
+def test_compute_interpro_bp_preds_graded_bp_only() -> None:
+    """Graded score support/n, BP-only, with the denominator counting all
+    GO-mapped InterPro entries (MF entries inflate n but are not emitted)."""
+    from protea.core.operations.predict_go_terms._interpro_graft import (
+        compute_interpro_bp_preds,
+    )
+
+    prot2iprs = {"P1": {"IPR1", "IPR2", "IPR3"}}
+    ipr2go_direct = {"IPR1": {"GO:bp"}, "IPR2": {"GO:bp"}, "IPR3": {"GO:mf"}}
+    go_meta = {"GO:bp": (1, "P"), "GO:mf": (2, "F")}
+
+    def ancestors(_g: str) -> frozenset[str]:
+        return frozenset()
+
+    out = compute_interpro_bp_preds(prot2iprs, ipr2go_direct, ancestors, go_meta)
+    # n = 3 (all three IPRs carry a GO mapping); support[GO:bp] = 2 -> 2/3.
+    # GO:mf is dropped (BP-only) but still counted in n.
+    assert out == [{"protein_accession": "P1", "go_id": "GO:bp", "go_term_id": 1, "prob": 2 / 3}]
+
+
+def test_compute_interpro_bp_preds_propagates_ancestors() -> None:
+    """Each InterPro entry's GO set is propagated up the DAG before scoring."""
+    from protea.core.operations.predict_go_terms._interpro_graft import (
+        compute_interpro_bp_preds,
+    )
+
+    prot2iprs = {"P1": {"IPR1", "IPR2"}}
+    ipr2go_direct = {"IPR1": {"GO:leaf"}, "IPR2": {"GO:leaf"}}
+    go_meta = {"GO:leaf": (10, "P"), "GO:root": (11, "P")}
+
+    def ancestors(go_id: str) -> frozenset[str]:
+        return frozenset({"GO:root"}) if go_id == "GO:leaf" else frozenset()
+
+    out = compute_interpro_bp_preds(prot2iprs, ipr2go_direct, ancestors, go_meta)
+    by_go = {r["go_id"]: r["prob"] for r in out}
+    # Both IPRs imply leaf -> root, so support = 2, n = 2 -> prob 1.0 each.
+    assert by_go == {"GO:leaf": pytest.approx(1.0), "GO:root": pytest.approx(1.0)}
+
+
+def test_compute_interpro_bp_preds_unmapped_ipr_counts_in_denominator() -> None:
+    """An InterPro entry whose terms fall outside the snapshot still counts in n."""
+    from protea.core.operations.predict_go_terms._interpro_graft import (
+        compute_interpro_bp_preds,
+    )
+
+    prot2iprs = {"P1": {"IPR1", "IPRX"}}
+    ipr2go_direct = {"IPR1": {"GO:bp"}, "IPRX": {"GO:obsolete"}}
+    go_meta = {"GO:bp": (1, "P")}  # GO:obsolete absent from snapshot
+
+    def ancestors(_g: str) -> frozenset[str]:
+        return frozenset()
+
+    out = compute_interpro_bp_preds(prot2iprs, ipr2go_direct, ancestors, go_meta)
+    # IPRX still counts toward n (n = 2) even though its term is dropped.
+    assert out == [{"protein_accession": "P1", "go_id": "GO:bp", "go_term_id": 1, "prob": 0.5}]
+
+
+class _EmptyResult:
+    """Tail of a fake ``session.execute(...)`` that yields nothing."""
+
+    def all(self) -> list:
+        return []
+
+    def scalar(self) -> None:
+        return None
+
+
+class _EmptySession:
+    """Fake session whose every query returns an empty result set."""
+
+    def execute(self, *_a: object, **_k: object) -> _EmptyResult:
+        return _EmptyResult()
+
+
+def test_load_interpro_bp_predictions_noop_without_cached_signatures() -> None:
+    """No cached InterPro signature for any query -> graceful empty source."""
+    from protea.core.operations.predict_go_terms._interpro_graft import (
+        load_interpro_bp_predictions,
+    )
+
+    out = load_interpro_bp_predictions(_EmptySession(), uuid4(), ["P1", "P2"])
+    assert out == []
+
+
+def test_apply_graft_is_noop_when_signatures_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With no cached signatures the post-step must not mutate preds."""
+    from protea.core.operations.predict_go_terms._interpro_graft import (
+        apply_interpro_bp_graft,
+    )
+
+    _patch_serve(monkeypatch, interpro_bp_graft=True)
     preds = [{"protein_accession": "P1", "go_id": "GO:1", "reranker_score": 0.5}]
     events: list[tuple] = []
 
     def emit(name, pct, fields, level):  # noqa: ANN001
         events.append((name, fields))
 
-    out = apply_interpro_bp_graft(MagicMock(), uuid4(), ["P1"], preds, emit)
+    out = apply_interpro_bp_graft(_EmptySession(), uuid4(), ["P1"], preds, emit)
     assert out == preds
     assert out[0]["reranker_score"] == 0.5
     assert events and events[0][0] == "predict_go_terms_batch.interpro_bp_graft_done"
     assert events[0][1]["candidates_updated"] == 0
+    assert events[0][1]["interpro_bp_predictions"] == 0
 
 
 def test_graft_gate_default_off(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -330,6 +445,8 @@ def test_serve_tuning_defaults_are_behaviour_preserving() -> None:
     assert s.compute_v6_features is False
     assert s.compute_lineage_features is False
     assert s.interpro_bp_graft is False
+    assert s.interpro_bp_graft_weight == 0.5
+    assert s.interpro_bp_graft_source_version is None
 
 
 def test_default_embedding_config_id_short_alias(
