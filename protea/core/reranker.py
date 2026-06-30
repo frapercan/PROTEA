@@ -32,11 +32,13 @@ from protea_method.reranker import (
     NUMERIC_FEATURES,
     apply_reranker,
     fit_embedding_pca,
-    infer_active_feature_families,
     load_from_bytes,
     model_from_string,
     predict,
     prepare_dataset,
+)
+from protea_method.reranker import (
+    infer_active_feature_families as _lib_infer_active_feature_families,
 )
 
 from protea.infrastructure.storage import ArtifactStore, LocalFsArtifactStore
@@ -71,11 +73,11 @@ def _uri_to_key(artifact_uri: str, store: ArtifactStore) -> str:
     key from either form without depending on the concrete class.
     """
     if artifact_uri.startswith("s3://"):
-        rest = artifact_uri[len("s3://"):]
+        rest = artifact_uri[len("s3://") :]
         _, _, key = rest.partition("/")
         return key
     if artifact_uri.startswith("file://") and isinstance(store, LocalFsArtifactStore):
-        local_path = Path(artifact_uri[len("file://"):])
+        local_path = Path(artifact_uri[len("file://") :])
         root = Path(store.root).resolve()
         try:
             return str(local_path.resolve().relative_to(root))
@@ -134,6 +136,46 @@ def load_reranker(
     with _CACHE_LOCK:
         _BOOSTER_CACHE[artifact_uri] = booster
     return booster
+
+
+def infer_active_feature_families(
+    *,
+    compute_alignments: bool,
+    compute_taxonomy: bool,
+    compute_v6_features: bool,
+    compute_lineage_features: bool = False,
+) -> list[str]:
+    """Map predict-time feature flags onto lab feature families.
+
+    Thin PROTEA-side extension of
+    :func:`protea_method.reranker.infer_active_feature_families`: it
+    delegates to the library helper for the base families
+    (``knn`` / ``annotation_meta`` / ``alignment_nw`` / ``length`` /
+    ``taxonomy_pair`` / the v6 bundle) and layers the GO-DAG ``lineage``
+    family on top when ``compute_lineage_features`` is set.
+
+    The lineage family is governed here (not in the library) because it
+    is opt-in at serve time via the ``compute_lineage_features`` payload
+    flag and must round-trip through
+    :func:`protea_contracts.compute_feature_schema_sha` so a booster
+    trained with lineage gets a matching live schema sha.
+
+    Invariant (load-bearing for the FARM-EXP.5 schema-sha guard): with
+    ``compute_lineage_features=False`` (the default) the returned family
+    list is byte-identical to the library output for every
+    align/tax/v6 combination, so the eight existing schema shas
+    (registered trio ``7fcecf26aa0a`` etc.) are unchanged. Setting the
+    flag appends exactly the ``lineage`` family, yielding a new sha
+    (e.g. align+tax+no-v6+lineage -> ``0810bef8fd4d``).
+    """
+    families = _lib_infer_active_feature_families(
+        compute_alignments=compute_alignments,
+        compute_taxonomy=compute_taxonomy,
+        compute_v6_features=compute_v6_features,
+    )
+    if compute_lineage_features:
+        families = sorted({*families, "lineage"})
+    return families
 
 
 __all__ = [

@@ -155,6 +155,7 @@ class RerankerScorer:
             compute_alignments=p.compute_alignments,
             compute_taxonomy=p.compute_taxonomy,
             compute_v6_features=p.compute_v6_features,
+            compute_lineage_features=getattr(p, "compute_lineage_features", False),
         )
         return compute_feature_schema_sha(live_families)
 
