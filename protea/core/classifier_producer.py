@@ -312,7 +312,7 @@ def classifier_impl() -> str:
 
 
 def load_classifier_features(
-    session: object, accessions: list[str]
+    session: object, accessions: list[str], impl: str | None = None
 ) -> tuple[np.ndarray, list[str]]:
     """Load the feature matrix for the SELECTED classifier implementation.
 
@@ -321,8 +321,13 @@ def load_classifier_features(
     (``load_two_tower_features``). Both return ``(features, valid_accessions)``
     aligned row-for-row, so the predict / export callers stay implementation
     agnostic.
+
+    ``impl`` pins the implementation explicitly (``m2`` or ``two_tower_sparse``);
+    ``None`` (the default) keeps the global :func:`classifier_impl` selection so
+    every existing caller is byte-identical. The explicit form backs the
+    per-category composite routing, which needs BOTH heads within one call.
     """
-    if classifier_impl() == _TWO_TOWER_IMPL:
+    if (impl or classifier_impl()) == _TWO_TOWER_IMPL:
         from protea.core.two_tower_classifier import (  # noqa: PLC0415
             load_two_tower_features,
         )
@@ -337,7 +342,7 @@ _SEED_CLASSIFIER_CACHE: dict[tuple[tuple[str, ...], str], SeedAveragedClassifier
 
 
 def get_classifier(
-    model_path: str | None = None, anc2vec_path: str | None = None
+    model_path: str | None = None, anc2vec_path: str | None = None, impl: str | None = None
 ) -> FullVocabClassifier | SeedAveragedClassifier | TwoTowerSparseClassifier:
     """Return a cached classifier, seed-averaged when a seed env is configured.
 
@@ -350,9 +355,13 @@ def get_classifier(
 
     When ``PROTEA_CLASSIFIER_IMPL=two_tower_sparse`` is set (and no explicit
     ``model_path`` pins the M2 single-checkpoint path), the opt-in two-tower
-    sparse functional candidate generator is returned instead.
+    sparse functional candidate generator is returned instead. ``impl`` pins
+    that selection explicitly (``m2`` or ``two_tower_sparse``); ``None`` (the
+    default) keeps the global :func:`classifier_impl` env selection so every
+    existing caller is byte-identical. The explicit form backs the per-category
+    composite routing, which needs BOTH heads within one call.
     """
-    if model_path is None and classifier_impl() == _TWO_TOWER_IMPL:
+    if model_path is None and (impl or classifier_impl()) == _TWO_TOWER_IMPL:
         from protea.core.two_tower_classifier import (  # noqa: PLC0415
             get_two_tower_classifier,
         )

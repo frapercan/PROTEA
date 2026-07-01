@@ -348,7 +348,9 @@ def test_classifier_adapter_matches_producer() -> None:
             return_value={"GO:0000011": 11},
         ),
     ):
-        out_dicts = pkp.apply_classifier(MagicMock(), MagicMock(), ["Q1"], [knn_rec], _emit)
+        from protea.core.operations.predict_go_terms._classifier import apply_classifier
+
+        out_dicts = apply_classifier(MagicMock(), MagicMock(), ["Q1"], [knn_rec], _emit)
 
     out = ClassifierScorer().score(_ctx(out_dicts), out_dicts)
     assert out == {"GO:0000011": pytest.approx(0.9)}
