@@ -384,7 +384,12 @@ class ComputeEmbeddingsBatchOperation:
             "info",
         )
 
-        write_sequences = self._infer_all(config, sequences, p, emit)
+        from protea.core.operations._learned_code_embed import is_learned_code_config
+
+        if is_learned_code_config(config):
+            write_sequences = self._infer_all_learned_code(session, config, sequences, p, emit)
+        else:
+            write_sequences = self._infer_all(config, sequences, p, emit)
 
         emit(
             "compute_embeddings_batch.done",
@@ -416,6 +421,41 @@ class ComputeEmbeddingsBatchOperation:
             batch_chunks = self._embed_batch(model, tokenizer, seq_strs, config, p.device)
             write_sequences.extend(serialize_inferred_chunks(batch, batch_chunks))
         return write_sequences
+
+    def _infer_all_learned_code(
+        self,
+        session: Session,
+        config: EmbeddingConfig,
+        sequences: list[Sequence],
+        p: ComputeEmbeddingsBatchPayload,
+        emit: EmitFn,
+    ) -> list[dict]:
+        """Learned-code path: base-embed each query on the fly, then apply the head.
+
+        A learned-code config (e.g. the pinned ``d8979601`` k-WTA retrieval
+        encoder) has no HuggingFace model to load; its codes are produced from a
+        BASE PLM config's embeddings. ``embed_learned_code`` resolves the base
+        config + head artifact and returns the 2048-d codes as one ChunkEmbedding
+        per sequence, which serialise + persist under the learned config exactly
+        like any other embedding (KNN then reuses them; computed once per query).
+        """
+        from protea.core.operations._learned_code_embed import embed_learned_code
+
+        def embed_base(
+            base_config: EmbeddingConfig, seq_batch: list[str]
+        ) -> list[list[ChunkEmbedding]]:
+            model, tokenizer = _get_or_load_model(base_config, p.device, emit)
+            return _dispatch_embed(model, tokenizer, seq_batch, base_config, p.device)
+
+        batch_chunks = embed_learned_code(
+            session,
+            config,
+            [s.sequence for s in sequences],
+            emit,
+            embed_base=embed_base,
+            batch_size=p.batch_size,
+        )
+        return serialize_inferred_chunks(sequences, batch_chunks)
 
     def _load_model(self, config: EmbeddingConfig, device: str, emit: EmitFn) -> tuple[Any, Any]:
         return _get_or_load_model(config, device, emit)
