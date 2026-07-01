@@ -412,6 +412,23 @@ class ServeTuning(BaseModel):
             "PROTEA_TUNING__serve__interpro_bp_graft_source_version."
         ),
     )
+    classifier_impl_by_category: bool = Field(
+        default=False,
+        description=(
+            "Route the classifier candidate generator per CAFA category on the "
+            "predict path so serve reproduces the composite champion pool: NK "
+            "and LK cells use the M2 anc2vec head, PK cells use the two-tower "
+            "sparse head (d8979601). Default False keeps the single global "
+            "PROTEA_CLASSIFIER_IMPL selection so behaviour is unchanged. The "
+            "category is derived per (protein, candidate aspect) from the same "
+            "leakage-clean pre-cutoff experimental annotations the reranker "
+            "uses, so a K protein takes its known-aspect candidates from the "
+            "two-tower head and its other-aspect candidates from M2. Enabling "
+            "this requires BOTH heads configured (the M2 checkpoint and the "
+            "two-tower PROTEA_TWO_TOWER_* artifacts). Override: "
+            "PROTEA_TUNING__serve__classifier_impl_by_category."
+        ),
+    )
 
 
 class TuningSettings(BaseModel):
