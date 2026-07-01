@@ -172,7 +172,7 @@ def _score_bundle_df(df: Any, bundle: dict[str, Any]) -> Any:
     ``reranker_predict`` cannot encode. Per-cell bundles keep the generic
     ``reranker_predict`` path unchanged (F-RERANK-UNIVERSAL eval wiring).
     """
-    from protea.core.reranker import model_from_string
+    from protea.core.reranker import model_from_string, prepare_reranker_frame
     from protea.core.reranker import predict as reranker_predict
 
     model = model_from_string(bundle["model"])
@@ -187,6 +187,11 @@ def _score_bundle_df(df: Any, bundle: dict[str, Any]) -> Any:
             plm_id=universal["plm_id"],
             k_context=universal["k_context"],
         )
+    # Derive ad-hoc reranker features (aspect_code -> INT) and guard any
+    # ungoverned object column so a per-category booster that splits on
+    # aspect_code scores cleanly instead of tripping LightGBM's opaque
+    # "pandas dtypes must be int, float or bool" error in run_cafa_evaluation.
+    df = prepare_reranker_frame(model, df)
     return reranker_predict(model, df, categorical_codes=bundle.get("cat_codes"))
 
 

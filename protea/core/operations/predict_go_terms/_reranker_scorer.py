@@ -263,6 +263,14 @@ class RerankerScorer:
                 plm_id=ctx["plm_id"],
                 k_context=ctx["k_context"],
             )
+        # Derive ad-hoc reranker features (e.g. aspect_code, an INT the
+        # offline lab bakes but which is not in the governed feature schema)
+        # and guard any ungoverned object column before predict; without this
+        # a booster expecting aspect_code fails with the opaque LightGBM
+        # "pandas dtypes must be int, float or bool" error.
+        from protea.core.reranker import prepare_reranker_frame
+
+        df = prepare_reranker_frame(booster, df)
         cat_codes = load_per_category_categorical_codes(artifact_uri, store)
         if cat_codes:
             return _shim.predict(booster, df, categorical_codes=cat_codes)
