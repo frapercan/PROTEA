@@ -352,7 +352,13 @@ class TestEvalProvenanceStamping:
             p, es, has_rerankers=False
         )
         assert role == "select"
-        assert arms == {"knn": True, "reranker": False, "mlp_tower": False, "interpro": False}
+        assert arms == {
+            "knn": True,
+            "reranker": False,
+            "mlp_tower": False,
+            "interpro": False,
+            "interpro_graft": False,
+        }
         assert frame is None and window is None
 
     def test_build_provenance_explicit_wins(self):
@@ -382,6 +388,35 @@ class TestEvalProvenanceStamping:
         # No window_role on the set and none in the payload -> leakage unknown.
         assert role is None
         assert arms["reranker"] is True
+
+    def test_build_provenance_interpro_graft_off_by_default(self):
+        es = _make_eval_set()
+        es.window_role = None
+        p = RunCafaEvaluationPayload(evaluation_set_id=EVAL_SET_ID, prediction_set_id=PRED_SET_ID)
+        _, _, _, arms = RunCafaEvaluationOperation._build_eval_provenance(
+            p, es, has_rerankers=True
+        )
+        # Payload did not opt into the graft -> arm off even with rerankers.
+        assert arms["interpro_graft"] is False
+
+    def test_build_provenance_interpro_graft_needs_rerankers(self):
+        es = _make_eval_set()
+        es.window_role = None
+        p = RunCafaEvaluationPayload(
+            evaluation_set_id=EVAL_SET_ID,
+            prediction_set_id=PRED_SET_ID,
+            interpro_graft=True,
+        )
+        # Opted in but no rerankers -> the graft is skipped, so it must stay off.
+        _, _, _, arms_no_rr = RunCafaEvaluationOperation._build_eval_provenance(
+            p, es, has_rerankers=False
+        )
+        assert arms_no_rr["interpro_graft"] is False
+        # Opted in with rerankers -> the graft applies, so it is recorded on.
+        _, _, _, arms_rr = RunCafaEvaluationOperation._build_eval_provenance(
+            p, es, has_rerankers=True
+        )
+        assert arms_rr["interpro_graft"] is True
 
 
 # ---------------------------------------------------------------------------

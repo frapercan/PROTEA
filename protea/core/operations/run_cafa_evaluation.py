@@ -222,8 +222,10 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
         description=(
             "Method-arm composition flag dict stamped onto the EvaluationResult, "
             "e.g. {'knn': true, 'reranker': true, 'mlp_tower': false, "
-            "'interpro': false}. When None it is derived from the run (knn always "
-            "on; reranker on when a reranker model is supplied)."
+            "'interpro': false, 'interpro_graft': false}. When None it is derived "
+            "from the run (knn always on; reranker on when a reranker model is "
+            "supplied; interpro_graft on when the payload opts into the InterPro "
+            "BP graft and the run has rerankers)."
         ),
     )
     window_role: str | None = Field(
@@ -422,7 +424,9 @@ class RunCafaEvaluationOperation:
           stamped) EvaluationSet ``window_role`` ('valid'->'select',
           'test'->'test').
         - ``arms_enabled``: explicit, else derived from the run (KNN always on;
-          reranker on when a reranker model was supplied).
+          reranker on when a reranker model was supplied; ``interpro_graft`` on
+          when the payload opted into the InterPro BP graft and the run had
+          rerankers, the only path where the graft actually applies).
         """
         leakage_role = p.leakage_role
         if leakage_role is None:
@@ -435,6 +439,12 @@ class RunCafaEvaluationOperation:
                 "reranker": has_rerankers,
                 "mlp_tower": False,
                 "interpro": False,
+                # The InterPro BP graft (PR #700) only runs in the per-setting
+                # reranker path; without rerankers the arm is skipped with a
+                # warning. Record it as on only when the payload opted in AND the
+                # run had rerankers, so a grafted number is not mislabelled as
+                # interpro_graft:false.
+                "interpro_graft": bool(p.interpro_graft and has_rerankers),
             }
         return p.frame, p.temporal_window, leakage_role, arms_enabled
 
