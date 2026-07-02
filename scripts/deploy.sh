@@ -142,8 +142,18 @@ if [[ "$DO_DEPS" == "1" ]]; then
   # scripts/worker.py` only gets `scripts/` on sys.path[0] and every worker
   # crashes with ModuleNotFoundError. The API survives because uvicorn does
   # its own sys.path setup before the factory import.
+  # Footgun guard: this deps install and the torch flip below both hit the
+  # network (PyPI, download.pytorch.org). The live stack was already stopped
+  # above; under `set -e` a transient network failure here would abort BEFORE
+  # the restart and leave the stack DOWN. Tolerate a network failure on these
+  # steps only: warn and fall through to the restart on the existing .venv,
+  # which already carries a working torch + deps from the prior deploy. When
+  # the network is available these run exactly as before. Unrelated errors are
+  # NOT swallowed: the guard is scoped to just the install / flip commands.
   echo "${C_BOLD}poetry install...${C_RESET}"
-  poetry install --quiet --with docs || poetry install --with docs
+  if ! { poetry install --quiet --with docs || poetry install --with docs; }; then
+    echo "${C_YELLOW}poetry install failed (network?); continuing on existing .venv${C_RESET}" >&2
+  fi
 
   # pyproject pins torch to the pytorch-cpu source so CI runners and the
   # slim Docker image do not pull the ~6 GB NVIDIA / triton stack. Hosts
@@ -158,8 +168,13 @@ if [[ "$DO_DEPS" == "1" ]]; then
     fi
   fi
   if [[ "$want_gpu" == "1" ]]; then
+    # Same footgun as above: the flip downloads the cu128 wheel. A network
+    # failure here must not brick the already-stopped stack, so keep the
+    # existing .venv torch and continue to the restart.
     echo "${C_BOLD}flipping torch to CUDA wheel${C_RESET}"
-    bash scripts/install_gpu_torch.sh
+    if ! bash scripts/install_gpu_torch.sh; then
+      echo "${C_YELLOW}torch CUDA flip failed (network?); keeping existing .venv torch${C_RESET}" >&2
+    fi
   fi
 fi
 
