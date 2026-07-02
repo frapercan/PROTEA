@@ -130,10 +130,40 @@ Consequences
 
 Resolution
 ~~~~~~~~~~
-Open. This ADR records the boundary and proposes the provenance marker plus
-the serve-time check. The governed surface (``feature_schema_sha`` in
-``feature_schema.py`` and ``_reranker_scorer.py``) and the ungoverned blob
-producers (``_post_knn_pipeline.py``) both exist today; D45 names the seam
-between them and the incident that proves it is load-bearing. Implementation
-of the marker and the check is deferred to a follow-up slice and is gated
-on the beat-lafa-1 booster-registration flow that would carry the field.
+Open (partially implemented). This ADR records the boundary and proposes the
+provenance marker plus the serve-time check. The governed surface
+(``feature_schema_sha`` in ``feature_schema.py`` and ``_reranker_scorer.py``)
+and the ungoverned blob producers (``_post_knn_pipeline.py``) both exist
+today; D45 names the seam between them and the incident that proves it is
+load-bearing.
+
+A conservative, warn-only increment of the mechanism is now in place:
+
+- ``protea.core.operations.predict_go_terms._blob_provenance`` computes a
+  stable value-provenance descriptor and a 12-hex digest over the four blob
+  families from the live predict payload (which producers are active plus
+  their reachable config markers, e.g. ``ia_file``, and a per-family
+  ``BLOB_PRODUCER_VERSIONS`` constant). It is the value-provenance
+  counterpart to ``feature_schema_sha``.
+- ``RerankerScorer.record_blob_provenance`` (in ``_reranker_scorer.py``) runs
+  after the schema-sha guard on both the single and per-category scoring
+  paths. It always emits a ``reranker.blob_provenance`` event recording the
+  live digest and descriptor (the seam is now observable in the Job event
+  log), and, when the payload carries an expected provenance that disagrees
+  with the live one, emits a LOUD ``reranker.blob_provenance_mismatch``
+  warning (structured event + stdlib log, ``reason=blob_provenance_mismatch``)
+  and PROCEEDS. It never raises: unlike the schema-sha guard the expected
+  marker is nullable, so a hard refuse would take serving down. Warn-only
+  matches the null-marker decision above. Scoring numbers are byte-identical
+  when provenance matches or is absent (the guard only adds observability).
+
+Deferred to the D45 follow-up (the part that closes the loop automatically):
+record ``blob_feature_provenance`` on the training artifact
+(``Dataset`` / ``RerankerModel``) at registration with a content marker for
+each producer's inputs (the ``association`` cooccurrence build keyed to the
+training t0 sets, the IA file identity, producer revisions), and carry it to
+the batch payload (``reranker_blob_feature_provenance``) so the comparison
+above lights up against a real recorded value rather than a null. That step
+touches ``protea-contracts`` (the payload field) and the booster-registration
+flow, so it is scoped separately; the descriptor, the recording, and the
+tested warn-on-mismatch seam it plugs into land here.

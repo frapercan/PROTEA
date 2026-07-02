@@ -46,6 +46,13 @@ from protea.core.operations.predict_go_terms._common import (
 
 logger = logging.getLogger(__name__)
 
+# ADR D45 blob-feature VALUE provenance guard lives in a sibling module; the
+# reason literal is re-exported here so consumers/tests that reach for it
+# through the scorer surface keep a stable import path.
+from protea.core.operations.predict_go_terms._blob_provenance import (  # noqa: E402
+    BLOB_PROVENANCE_MISMATCH_REASON,
+)
+
 AttachAspectFn = Callable[[Session, list[dict[str, Any]]], None]
 #: Loader for the per-(protein, aspect) CAFA category, injected so unit
 #: tests can stub the DB-bound annotation lookup. Signature mirrors
@@ -158,6 +165,27 @@ class RerankerScorer:
             compute_lineage_features=getattr(p, "compute_lineage_features", False),
         )
         return compute_feature_schema_sha(live_families)
+
+    def record_blob_provenance(
+        self,
+        p: PredictGOTermsBatchPayload,
+        emit: EmitFn,
+    ) -> str:
+        """ADR D45 value-skew guard: record blob provenance, warn on mismatch.
+
+        Thin delegate to
+        :func:`._blob_provenance.record_blob_provenance`. The four JSONB-blob
+        families (classifier, self_prior, association, IA) ride outside
+        ``feature_schema_sha``, so a train/serve VALUE skew in them (the
+        "0.3462 incident") passes the schema guard silently. This records the
+        live provenance and, on a mismatch against the payload's recorded
+        expected provenance, warns loudly and PROCEEDS (never raises).
+        """
+        from protea.core.operations.predict_go_terms._blob_provenance import (
+            record_blob_provenance,
+        )
+
+        return record_blob_provenance(p, emit)
 
     def score(
         self,
@@ -377,6 +405,9 @@ class RerankerScorer:
             return None
         if live_sha != p.reranker_feature_schema_sha:
             self._raise_schema_sha_mismatch(p, live_sha, emit)
+        # ADR D45: record blob-feature VALUE provenance (warn-only on skew)
+        # after the schema-identity guard passes and before scoring.
+        self.record_blob_provenance(p, emit)
         scores = self.score(session, prediction_dicts, p)
         if scores.size == 0:
             return {"applied": True, "rows": 0}
@@ -443,6 +474,11 @@ class RerankerScorer:
         if live_sha is None:
             return None
         self._guard_category_shas(p, bindings, live_sha, emit)
+        # ADR D45: record blob-feature VALUE provenance (warn-only on skew).
+        # The blob families are gated by the same payload compute_* flags
+        # regardless of single vs per-category dispatch, so the provenance is
+        # recorded once here too.
+        self.record_blob_provenance(p, emit)
         self._attach_aspect(session, prediction_dicts)
         hist = self._attach_categories(session, p, prediction_dicts)
         scored = 0
@@ -552,4 +588,10 @@ def _default_attach_category(
     return attach_query_category(op, session, annotation_set_id, prediction_dicts)
 
 
-__all__ = ["AttachAspectFn", "AttachCategoryFn", "RerankerScorer", "SchemaShaMismatchError"]
+__all__ = [
+    "BLOB_PROVENANCE_MISMATCH_REASON",
+    "AttachAspectFn",
+    "AttachCategoryFn",
+    "RerankerScorer",
+    "SchemaShaMismatchError",
+]
