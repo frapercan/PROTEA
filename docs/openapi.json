@@ -5,9 +5,11 @@
         "description": "Result of activating a booster for its serve slot.\n\n``activated`` is the row now marked active; ``deactivated`` lists\nthe ids of the sibling rows in the same ``(category, aspect)`` slot\nthat were flipped inactive to keep the selection unambiguous.",
         "properties": {
           "activated": {
-            "$ref": "#/components/schemas/RerankerModelSummary"
+            "$ref": "#/components/schemas/RerankerModelSummary",
+            "description": "The row now marked active for its (category, aspect) slot."
           },
           "deactivated": {
+            "description": "Ids of same-slot sibling rows flipped inactive to keep selection unambiguous.",
             "items": {
               "type": "string"
             },
@@ -1409,21 +1411,26 @@
                 "type": "null"
               }
             ],
+            "description": "GO aspect (mfo / bpo / cco) or null if aspect-agnostic.",
             "title": "Aspect"
           },
           "category": {
+            "description": "Serve category (nk / lk / pk).",
             "title": "Category",
             "type": "string"
           },
           "id": {
+            "description": "RerankerModel UUID.",
             "title": "Id",
             "type": "string"
           },
           "is_active": {
+            "description": "Whether the selector currently prefers this row for its slot.",
             "title": "Is Active",
             "type": "boolean"
           },
           "name": {
+            "description": "Human-readable model name.",
             "title": "Name",
             "type": "string"
           }
@@ -1432,7 +1439,6 @@
           "id",
           "name",
           "category",
-          "aspect",
           "is_active"
         ],
         "title": "RerankerModelSummary",

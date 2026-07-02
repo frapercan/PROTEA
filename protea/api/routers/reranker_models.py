@@ -501,11 +501,15 @@ class RerankerModelSummary(BaseModel):
     touched and whether the row is the one the selector now picks.
     """
 
-    id: str
-    name: str
-    category: str
-    aspect: str | None
-    is_active: bool
+    id: str = Field(..., description="RerankerModel UUID.")
+    name: str = Field(..., description="Human-readable model name.")
+    category: str = Field(..., description="Serve category (nk / lk / pk).")
+    aspect: str | None = Field(
+        None, description="GO aspect (mfo / bpo / cco) or null if aspect-agnostic."
+    )
+    is_active: bool = Field(
+        ..., description="Whether the selector currently prefers this row for its slot."
+    )
 
 
 class ActivateRerankerResponse(BaseModel):
@@ -516,8 +520,13 @@ class ActivateRerankerResponse(BaseModel):
     that were flipped inactive to keep the selection unambiguous.
     """
 
-    activated: RerankerModelSummary
-    deactivated: list[str]
+    activated: RerankerModelSummary = Field(
+        ..., description="The row now marked active for its (category, aspect) slot."
+    )
+    deactivated: list[str] = Field(
+        ...,
+        description="Ids of same-slot sibling rows flipped inactive to keep selection unambiguous.",
+    )
 
 
 def _summarise(model: RerankerModel) -> RerankerModelSummary:
