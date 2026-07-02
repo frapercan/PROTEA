@@ -1,6 +1,27 @@
 {
   "components": {
     "schemas": {
+      "ActivateRerankerResponse": {
+        "description": "Result of activating a booster for its serve slot.\n\n``activated`` is the row now marked active; ``deactivated`` lists\nthe ids of the sibling rows in the same ``(category, aspect)`` slot\nthat were flipped inactive to keep the selection unambiguous.",
+        "properties": {
+          "activated": {
+            "$ref": "#/components/schemas/RerankerModelSummary"
+          },
+          "deactivated": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Deactivated",
+            "type": "array"
+          }
+        },
+        "required": [
+          "activated",
+          "deactivated"
+        ],
+        "title": "ActivateRerankerResponse",
+        "type": "object"
+      },
       "Body_create_query_set_v1_query_sets_post": {
         "properties": {
           "description": {
@@ -1374,6 +1395,47 @@
           "github_url"
         ],
         "title": "RepoEntry",
+        "type": "object"
+      },
+      "RerankerModelSummary": {
+        "description": "Compact view of a ``RerankerModel`` row for management responses.\n\nReturned by the activate / deactivate / delete endpoints so an\noperator can confirm which serve slot ``(category, aspect)`` was\ntouched and whether the row is the one the selector now picks.",
+        "properties": {
+          "aspect": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aspect"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "category",
+          "aspect",
+          "is_active"
+        ],
+        "title": "RerankerModelSummary",
         "type": "object"
       },
       "RerankerResponse": {
@@ -8571,6 +8633,261 @@
           }
         },
         "summary": "Register a booster already in the artifact store",
+        "tags": [
+          "reranker-models"
+        ]
+      }
+    },
+    "/v1/reranker-models/{model_id}": {
+      "delete": {
+        "description": "Remove a ``RerankerModel`` row from the registry.\n\nRefuses with 409 when the row is currently active: deleting the\nlive serve pick out from under the selector is the unsafe path, so\nthe operator must ``POST /{id}/deactivate`` first (an explicit,\nauditable step) before the row can be removed. The response echoes\nthe deleted row's summary.",
+        "operationId": "delete_reranker_model_v1_reranker_models__model_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Model Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RerankerModelSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete a registered booster",
+        "tags": [
+          "reranker-models"
+        ]
+      }
+    },
+    "/v1/reranker-models/{model_id}/activate": {
+      "post": {
+        "description": "Pin ``model_id`` as the active booster the serve path selects.\n\nActivation is EXCLUSIVE per ``(category, aspect)`` slot: any other\nrow already active in the same slot is flipped inactive first. This\nmatches ``active_or_latest_reranker``, which filters by category and\naspect before preferring the active row, and the\n``uq_reranker_model_active_slot`` partial unique index (which permits\nat most one active row per ``(category, COALESCE(aspect, ''))``).\nActivating a full trio therefore stays well-defined: each of nk / lk\n/ pk (or per-aspect) rows owns a distinct slot and coexists active.",
+        "operationId": "activate_reranker_model_v1_reranker_models__model_id__activate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Model Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivateRerankerResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mark a booster active for its (category, aspect) serve slot",
+        "tags": [
+          "reranker-models"
+        ]
+      }
+    },
+    "/v1/reranker-models/{model_id}/deactivate": {
+      "post": {
+        "description": "Unpin ``model_id`` so its slot falls back to latest-by-created_at.\n\nIdempotent: clearing an already-inactive row is a no-op that returns\nthe current summary. This is the safe precondition for deleting a\nrow that is currently serving (see ``DELETE`` below).",
+        "operationId": "deactivate_reranker_model_v1_reranker_models__model_id__deactivate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Model Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RerankerModelSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clear a booster's active flag",
         "tags": [
           "reranker-models"
         ]
