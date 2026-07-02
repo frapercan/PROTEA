@@ -58,6 +58,10 @@ class CafaEvalRunContext:
     th_step: float = 0.01
     max_terms: int | None = None
     softprop: bool = False
+    interpro_graft: bool = False
+    interpro_protein2ipr_file: str | None = None
+    interpro_ipr2go_file: str | None = None
+    interpro_graft_weight: float | None = None
 
 
 def _write_setting_predictions(
@@ -197,6 +201,49 @@ def _run_cafaeval_for_setting(
         return {}
 
 
+def _resolve_setting_pred_dir(
+    session: Session,
+    *,
+    setting: str,
+    ctx: CafaEvalRunContext,
+    emit: EmitFn,
+) -> str:
+    """Return the prediction dir for one setting, applying the scoring arms.
+
+    With per-setting rerankers, writes a FRESH per-setting dir and applies the
+    softprop / InterPro-graft arms in place (idempotency: the shared dir is
+    reused across settings, so a noisy-OR arm would double-apply there). Without
+    rerankers, reuses ``ctx.shared_pred_dir`` and emits a skip per requested arm.
+    """
+    if not ctx.has_rerankers:
+        for enabled, arm in ((ctx.softprop, "softprop"), (ctx.interpro_graft, "interpro_graft")):
+            if enabled:
+                emit(
+                    f"run_cafa_evaluation.{arm}_skipped",
+                    None,
+                    {"reason": f"{arm} requires per-setting reranker predictions"},
+                    "warning",
+                )
+        return ctx.shared_pred_dir
+    pred_dir = _write_setting_predictions(session, setting=setting, ctx=ctx)
+    if ctx.softprop:
+        from protea.core.operations._run_cafa_softprop import apply_softprop
+
+        apply_softprop(pred_dir, ctx.obo_path, emit)
+    if ctx.interpro_graft:
+        from protea.core.operations._run_cafa_interpro_graft import apply_interpro_graft
+
+        apply_interpro_graft(
+            pred_dir,
+            ctx.obo_path,
+            ctx.interpro_protein2ipr_file,
+            ctx.interpro_ipr2go_file,
+            ctx.interpro_graft_weight,
+            emit,
+        )
+    return pred_dir
+
+
 def evaluate_all_settings(
     session: Session,
     *,
@@ -216,28 +263,7 @@ def evaluate_all_settings(
         ("LK", ctx.lk_path, None),
         ("PK", ctx.pk_path, ctx.pk_known_path),
     ]:
-        if ctx.has_rerankers:
-            pred_dir = _write_setting_predictions(
-                session,
-                setting=setting,
-                ctx=ctx,
-            )
-            # Soft-prop only on the FRESH per-setting dir (idempotency: the shared
-            # dir is reused across settings, so transforming it in-loop would
-            # double-apply). softprop currently requires per-setting rerankers.
-            if ctx.softprop:
-                from protea.core.operations._run_cafa_softprop import apply_softprop
-
-                apply_softprop(pred_dir, ctx.obo_path, emit)
-        else:
-            pred_dir = ctx.shared_pred_dir
-            if ctx.softprop:
-                emit(
-                    "run_cafa_evaluation.softprop_skipped",
-                    None,
-                    {"reason": "softprop requires per-setting reranker predictions"},
-                    "warning",
-                )
+        pred_dir = _resolve_setting_pred_dir(session, setting=setting, ctx=ctx, emit=emit)
         results[setting] = _run_cafaeval_for_setting(
             setting=setting,
             pred_dir=pred_dir,

@@ -99,6 +99,45 @@ class RunCafaEvaluationPayload(ProteaPayload, frozen=True):
             "post-processing step. Off by default so existing evals are bit-identical."
         ),
     )
+    interpro_graft: bool = Field(
+        default=False,
+        description=(
+            "Apply the InterPro2GO BP-only graft to the prediction frame per protein "
+            "right before cafaeval, as a scorer-agnostic post-reranker arm. For BP terms "
+            "the score becomes max(base, interpro_graded) (naive max) or a noisy-OR blend "
+            "when interpro_graft_weight is set; BP terms InterPro adds are grafted as new "
+            "candidates, while MF/CC terms stay untouched. Reproduces the offline "
+            "naivemax_bponly champion (board-faithful 9-cell mean f_micro_w 0.3884 -> 0.4063). "
+            "Off by default so existing evals are bit-identical. Requires per-setting "
+            "reranker predictions (same seam as softprop)."
+        ),
+    )
+    interpro_protein2ipr_file: str | None = Field(
+        default=None,
+        description=(
+            "Path to a JSON map of accession -> list of InterPro (IPR) accessions for the "
+            "evaluation proteins. Required when interpro_graft is on; the arm is skipped "
+            "with a warning (never crashes) when missing."
+        ),
+    )
+    interpro_ipr2go_file: str | None = Field(
+        default=None,
+        description=(
+            "Path to a JSON map of InterPro (IPR) accession -> list of propagated, "
+            "namespaced GO ids (the offline ipr2go_prop.json). Required when "
+            "interpro_graft is on; the arm is skipped with a warning when missing."
+        ),
+    )
+    interpro_graft_weight: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Optional per-aspect weight for the InterPro BP graft. None (default) uses "
+            "the parameter-free naive max max(base, graded); a value w uses the noisy-OR "
+            "blend 1 - (1 - base)(1 - w*graded) on BP terms."
+        ),
+    )
     th_step: float = Field(
         default=0.01,
         gt=0.0,
@@ -460,7 +499,6 @@ class RunCafaEvaluationOperation:
         _artifacts.download_obo(inputs.snapshot.obo_url, obo_path)
         ia_path = self._resolve_ia_file(tmpdir, inputs.snapshot, p.ia_file, emit)
         self._enforce_band(p.band, inputs.snapshot, p.ia_file, emit)
-
         data = inputs.data
         if p.restrict_gt_to_predicted:
             data = _data.restrict_data_to_predicted(
@@ -499,6 +537,10 @@ class RunCafaEvaluationOperation:
             th_step=p.th_step,
             max_terms=p.max_terms,
             softprop=p.softprop,
+            interpro_graft=p.interpro_graft,
+            interpro_protein2ipr_file=p.interpro_protein2ipr_file,
+            interpro_ipr2go_file=p.interpro_ipr2go_file,
+            interpro_graft_weight=p.interpro_graft_weight,
         )
 
     @staticmethod
