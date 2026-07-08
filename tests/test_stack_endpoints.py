@@ -205,7 +205,9 @@ class TestLocalArtefacts:
         self, client: TestClient, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         pdf = tmp_path / "thesis.pdf"
-        monkeypatch.setattr(stack_router, "_THESIS_PDF", pdf)
+        # Serve-mount: the PDF is resolved from PROTEA_THESIS_PDF_PATH at
+        # request time (no baked file, no rebuild).
+        monkeypatch.setenv("PROTEA_THESIS_PDF_PATH", str(pdf))
 
         body = client.get("/stack").json()
         assert body["thesis_pdf_url"] is None
@@ -213,3 +215,25 @@ class TestLocalArtefacts:
         pdf.write_bytes(b"%PDF-1.7 fake")
         body = client.get("/stack").json()
         assert body["thesis_pdf_url"] == "/thesis.pdf"
+
+    def test_thesis_pdf_route_serves_mounted_file(
+        self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The route lives at app level (root /thesis.pdf), so wire it onto a
+        # minimal app via the registrar (no DB / create_app needed).
+        from fastapi import FastAPI
+
+        from protea.api.app import _register_thesis_pdf
+
+        pdf = tmp_path / "thesis.pdf"
+        monkeypatch.setenv("PROTEA_THESIS_PDF_PATH", str(pdf))
+        app = FastAPI()
+        _register_thesis_pdf(app, tmp_path)
+        c = TestClient(app)
+        assert c.get("/thesis.pdf").status_code == 404
+
+        pdf.write_bytes(b"%PDF-1.7 fake")
+        resp = c.get("/thesis.pdf")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "application/pdf"
+        assert resp.content == b"%PDF-1.7 fake"
