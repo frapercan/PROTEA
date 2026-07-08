@@ -14,6 +14,9 @@ const nextConfig: NextConfig = {
   },
   async rewrites() {
     return [
+      // Thesis PDF is served by the API from a stable mounted path (serve-mount),
+      // so it refreshes on a file overwrite with no frontend rebuild.
+      { source: "/thesis.pdf", destination: `${apiUrl}/thesis.pdf` },
       { source: "/sphinx/", destination: `${apiUrl}/sphinx/` },
       { source: "/sphinx/:path*", destination: `${apiUrl}/sphinx/:path*` },
       { source: "/docs/:slug/", destination: `${apiUrl}/docs/:slug/` },

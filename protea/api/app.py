@@ -9,8 +9,10 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from protea.api._thesis_pdf import thesis_pdf_path
 from protea.api.bearer import assert_bearer_config
 from protea.api.middleware import HttpMetricsMiddleware, VisitorCounterMiddleware
 from protea.api.problem_details import (
@@ -324,6 +326,23 @@ def _mount_sibling_docs(app: FastAPI, docs_build_root: Path) -> None:
             )
 
 
+def _register_thesis_pdf(app: FastAPI, project_root: Path) -> None:
+    """Serve the thesis PDF from a stable, env-overridable path.
+
+    Decouples the PDF from the frontend build: the file is read at request
+    time from :func:`thesis_pdf_path`, so overwriting it at the mounted path
+    (``PROTEA_THESIS_PDF_PATH``) updates what the app distributes with no
+    rebuild and no restart. The frontend proxies ``/thesis.pdf`` here.
+    """
+
+    @app.get("/thesis.pdf", include_in_schema=False)
+    def _thesis_pdf() -> FileResponse:
+        path = thesis_pdf_path(project_root)
+        if path is None:
+            raise HTTPException(status_code=404, detail="thesis PDF not available")
+        return FileResponse(path, media_type="application/pdf", filename="thesis.pdf")
+
+
 def _mount_static_assets(app: FastAPI, project_root: Path) -> None:
     # Canonical Sphinx output is `docs/build/html/` (produced by
     # `make html` / `sphinx-build -M html`). Fall back to
@@ -480,6 +499,7 @@ def create_app(project_root: Path | None = None) -> FastAPI:
     install_problem_openapi_schema(app)
     _register_health_endpoints(app, factory, settings)
     _register_routers(app)
+    _register_thesis_pdf(app, project_root)
     _mount_static_assets(app, project_root)
 
     return app

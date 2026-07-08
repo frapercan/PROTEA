@@ -27,11 +27,12 @@ import yaml
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from protea.api._thesis_pdf import thesis_pdf_path
+
 router = APIRouter(tags=["stack"])
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _STACK_YAML = _PROJECT_ROOT / "docs" / "source" / "_data" / "stack.yaml"
-_THESIS_PDF = _PROJECT_ROOT / "apps" / "web" / "public" / "thesis.pdf"
 _PULLS_TTL_SECONDS = 300
 _GITHUB_API = "https://api.github.com"
 
@@ -189,9 +190,10 @@ def _build_github_client() -> httpx.Client:
 
 
 def _thesis_pdf_url() -> str | None:
-    # The PDF lives in apps/web/public/, which Next serves at / under the
-    # frontend host. No FastAPI proxy hop, no /static mount dependency.
-    return "/thesis.pdf" if _THESIS_PDF.exists() else None
+    # The PDF is served by the API at /thesis.pdf from a stable, env-overridable
+    # path (serve-mount), and the frontend rewrites /thesis.pdf to the API. The
+    # URL is populated whenever that path resolves to an existing file.
+    return "/thesis.pdf" if thesis_pdf_path() is not None else None
 
 
 def _load_repos() -> list[RepoEntry]:
