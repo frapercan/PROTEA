@@ -139,6 +139,53 @@ truth.
    artefact so a consumer can see not only that a column is present but who
    produced it and under what inputs.
 
+Evidence that the seam fired
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+This is not a hypothetical. Two datasets in the reranker lab carry the **same**
+``feature_schema_sha``, ``775611822dd9``, and differ in exactly these families.
+``results/clean_227230/comparison.json`` records the sealed run at that
+fingerprint with ``feature_exclusions: association_* and classifier_*
+(zero-filled in export)``. ``results/clean_227230/clfassoc/SUMMARY.md`` records a
+second arm at the same fingerprint, run with ``compute_classifier`` and
+``compute_association`` switched **on**, where the five previously zero-filled
+features carry real values. One fingerprint, two semantically different
+datasets. That is precisely the confusion the fingerprint exists to prevent, and
+it had been recorded in the project's own results directory for months.
+
+Implementation status
+~~~~~~~~~~~~~~~~~~~~~
+All three consequences above are implemented as of PR #710.
+
+1. **No silent default.** ``_LeafRecordBuilder._lafa_default_fields()`` returns
+   ``float("nan")`` for all six columns. LightGBM already reads NaN as missing,
+   so a family with no producer is missing rather than zero. When a producer
+   **is** wired, ``apply_export_parity_features`` first resets that family to a
+   true-zero baseline, because the producers only overwrite the candidates they
+   hit: a non-hit of a produced family is a genuine ``0``, while a non-hit of an
+   absent family stays ``NaN``.
+
+2. **The degeneracy check.** ``parquet_export._assert_no_degenerate_families()``
+   raises when a family recorded as produced is constant across a split. It is
+   evaluated at the consolidated split level rather than per per-category shard,
+   because a per-shard check would false-fire: no-knowledge proteins carry no
+   experimental known terms, so ``association_*`` is a legitimate all-zero on
+   the NK shard. Only families recorded as produced are checked, so a
+   declared-absent family never fails an export.
+
+3. **Provenance per family.** The dump manifest now carries a
+   ``feature_family_provenance`` key, written by
+   ``_training_dump_loaders._dump_family_provenance``: one
+   ``{family, state, producer}`` record per family, where ``state`` is
+   ``produced`` or ``declared_absent``. A reader learns a family's status from
+   metadata instead of inferring it from a column of zeros. ``SignalConfig``
+   remains the destination for the fuller provenance (producer version, input
+   snapshot) once the signal store lands; the manifest key is its first surface.
+
+The same three states are mirrored, for human readers, in the
+``protea_contracts.feature_docs`` registry (``FeatureStatus.PRODUCED`` /
+``DECLARED_ABSENT``), which is the single source the Sphinx feature reference
+renders from.
+
 What D45 is NOT
 ~~~~~~~~~~~~~~~
 Promoting the six columns from the JSONB blob to typed columns is a separate,
