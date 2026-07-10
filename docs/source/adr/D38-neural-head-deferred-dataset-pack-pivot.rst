@@ -1,10 +1,26 @@
 ADR-D38: Defer neural-head champion; pivot to curated dataset packaging
 =======================================================================
 
-:Status: Accepted
+:Status: Superseded
 :Date: 2026-05-25
 :Author: Francisco Miguel Pérez Canales
 :Phase: F-DATA-PACK
+:Superseded-by: the sealed board (:doc:`/results`), champion ``d8979601``
+   at ``f_micro_w`` 0.4063 on the leakage-free v227 to v230 frame (ADR-D40),
+   scored through the stacked meta-reranker (ADR-D43)
+
+.. note::
+
+   Superseded on the champion designation. Decision point 2 below named the
+   binary-label LightGBM booster (``prostt5``, k=5, NK+LK Fmax 0.7291 on the
+   v226 frame) as the methodological champion reported in the thesis. That
+   designation is retired: the sealed champion is the learned k-WTA retrieval
+   encoder ``d8979601`` at ``f_micro_w`` 0.4063 on the leakage-free v227 to
+   v230 frame (ADR-D40), followed by the stacked per-category re-ranker
+   (ADR-D43). See :doc:`/results`. The neural-head DEFERRAL recorded here
+   (decision point 1) was also overtaken: the learned-encoder direction was
+   resumed and became that champion. The F-DATA-PACK deliverable (decision
+   point 3) shipped and stands. The record is retained for history.
 
 Context
 ~~~~~~~
