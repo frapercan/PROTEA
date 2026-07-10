@@ -120,7 +120,9 @@ const tToast = useTranslations("toasts");
       ]);
       setConfigs(cfgs);
       setQuerySets(qsets);
-      getProteinStats().then((s) => setProteinCount(s.total ?? 0)).catch(() => {});
+      getProteinStats()
+        .then((s) => setProteinCount(s.total ?? 0))
+        .catch((err) => console.error("feature: protein-count stat failed", err));
       if (cfgs.length > 0 && !cmpConfigId) setCmpConfigId(cfgs[0].id);
     } catch (e: any) {
       setError(String(e));
