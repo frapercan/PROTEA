@@ -133,13 +133,21 @@ def test_classifier_only_record_is_full_canonical_row() -> None:
     the row is unioned into the export training pool (native 0.391 parity).
     """
     from protea.core._leaf_record_builder import build_classifier_only_record
+    from protea.core.features._bindings import _POOL_INJECTED_FEATURES
     from protea.core.reranker import ALL_FEATURES
 
     builder = _fake_builder(gt_pairs={("Q1", "GO:0000099")})
     rec = build_classifier_only_record(builder, "Q1", "GO:0000099", "P", 0.9)
 
-    # Every canonical feature column is present (T1.8 boundary).
+    # Every canonical feature column is present (T1.8 boundary), except the
+    # pool-injected ones. ``plm_id`` and ``k_context`` say which PLM and which
+    # K a row came from; they are meaningless for a single manifest and the
+    # lab stamps them only when pooling several. A raw record must not carry
+    # them, and asserting that it does would force a fabricated value.
     for col in ALL_FEATURES:
+        if col in _POOL_INJECTED_FEATURES:
+            assert col not in rec, f"{col} must not be stamped by PROTEA"
+            continue
         assert col in rec, col
 
     # Classifier-only markers.

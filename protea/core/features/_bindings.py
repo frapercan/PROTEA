@@ -191,6 +191,27 @@ def _association_producer() -> Callable[..., Any]:
     return apply_association
 
 
+#: Declared by the contracts, stamped by the lab when pooling manifests.
+#: PROTEA emits neither, so they get an explicit not-produced-here marker.
+_POOL_INJECTED_FEATURES: tuple[str, ...] = ("plm_id", "k_context")
+
+
+def _pool_injected_producer() -> Callable[..., Any]:
+    """Reference for columns PROTEA declares but does not produce.
+
+    ``plm_id`` and ``k_context`` identify which PLM and which K a row came
+    from. They are meaningless for a single manifest and are stamped by the
+    lab's pooled multi-manifest loader when several sources are combined to
+    train a universal booster. PROTEA never writes them: they are absent from
+    every raw parquet dump this platform emits.
+
+    The marker records that absence explicitly rather than binding a fake
+    producer, which is the mistake ADR-D45 exists to prevent. A declared
+    column with no producer must say so, not quietly resolve to something.
+    """
+    return _pool_injected_producer
+
+
 def _annotation_metadata_producer() -> Callable[..., Any]:
     """Reference for categorical metadata columns sourced from annotation rows.
 
@@ -319,6 +340,8 @@ def _build_feature_to_producer() -> dict[str, tuple[Callable[..., Any], str]]:
         mapping[name] = (_association_producer, "lafa_association")
     for name in _ANNOTATION_METADATA_FEATURES:
         mapping[name] = (_annotation_metadata_producer, "annotation_metadata")
+    for name in _POOL_INJECTED_FEATURES:
+        mapping[name] = (_pool_injected_producer, "pool_injected")
     missing = [name for name in ALL_FEATURES if name not in mapping]
     if missing:
         raise KeyError(

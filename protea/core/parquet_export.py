@@ -32,6 +32,7 @@ import pyarrow.parquet as pq
 from protea_contracts import compute_schema_sha as _canonical_schema_sha
 
 from protea.core.features import REGISTRY as _FEATURE_REGISTRY
+from protea.core.features._bindings import _POOL_INJECTED_FEATURES
 from protea.core.reranker import LABEL_COLUMN
 from protea.infrastructure.storage import ArtifactStore
 
@@ -50,13 +51,23 @@ logger = logging.getLogger(__name__)
 
 
 def _registry_feature_names() -> list[str]:
-    """Return the canonical feature names in registration order.
+    """Return the canonical feature names this exporter is responsible for.
 
     Wraps :meth:`FeatureRegistry.names` so the exporter has a single
     seam to swap if T2B.3 makes the registry context-aware (per
     active families).
+
+    Pool-injected columns are excluded. ``plm_id`` and ``k_context`` record
+    which PLM and which K a row came from; they are meaningless for a single
+    manifest and the lab stamps them only when pooling several sources to
+    train a universal booster. PROTEA never writes them, so demanding them at
+    the T1.8 boundary would fail every dump this platform produces.
+
+    The exclusion is a statement about who produces a column, not a way to
+    make the check pass. Compare ADR-D45: a column with no producer must be
+    accounted for explicitly, never filled with a plausible value.
     """
-    return _FEATURE_REGISTRY.names()
+    return [n for n in _FEATURE_REGISTRY.names() if n not in _POOL_INJECTED_FEATURES]
 
 
 def _produced_family_columns(
