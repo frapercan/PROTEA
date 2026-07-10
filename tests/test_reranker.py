@@ -62,6 +62,12 @@ def _make_training_df(n: int = 200, positive_rate: float = 0.3, seed: int = 42) 
     data["qualifier"] = rng.choice(["enables", "involved_in", "located_in", ""], n).tolist()
     data["evidence_code"] = rng.choice(["IDA", "IEA", "ISS", "EXP", ""], n).tolist()
     data["taxonomic_relation"] = rng.choice(["self", "sibling", "ancestor", ""], n).tolist()
+    # plm_id is the pool-injected categorical the lab stamps when it pools
+    # several manifests to train a universal booster (contracts v1.4.0). These
+    # tests exercise the training path, which sees pooled frames, so the
+    # fixture generates it; k_context (its numeric sibling) comes from the
+    # NUMERIC_FEATURES loop above.
+    data["plm_id"] = rng.choice(["esm2_650m", "ankh_base", "prott5", ""], n).tolist()
 
     return pd.DataFrame(data)
 

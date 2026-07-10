@@ -412,11 +412,18 @@ def test_streaming_shard_schema_contains_full_canonical_feature_set(tmp_path):
     """
     from protea_contracts import ALL_FEATURES
 
+    from protea.core.features._bindings import _POOL_INJECTED_FEATURES
+
     info = _run("stream", tmp_path=tmp_path, expand=False)
     assert info["n_rows"] > 0
     table = pq.read_table(str(tmp_path / "out.parquet"))
     shard_cols = set(table.column_names)
-    missing = [c for c in ALL_FEATURES if c not in shard_cols]
+    # Pool-injected columns (``plm_id`` / ``k_context``) are declared by the
+    # contracts but stamped only by the lab's pooled multi-manifest loader; a
+    # shard PROTEA produces from a single manifest never carries them, and the
+    # export boundary does not require them (ADR-D45).
+    required = [c for c in ALL_FEATURES if c not in _POOL_INJECTED_FEATURES]
+    missing = [c for c in required if c not in shard_cols]
     assert missing == [], (
         f"streamed shard missing canonical feature columns: {missing!r}"
     )
