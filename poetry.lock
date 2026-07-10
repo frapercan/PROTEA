@@ -4020,7 +4020,7 @@ t5 = ["protea-backends @ git+https://github.com/frapercan/protea-backends.git@ma
 type = "git"
 url = "https://github.com/frapercan/protea-method.git"
 reference = "main"
-resolved_reference = "db03c5fd343897d71c9802b06bb6f83be9d952de"
+resolved_reference = "a0d68e9c5749cae5d52df1242750b1f725256fc1"
 
 [[package]]
 name = "protea-reranker-lab"
