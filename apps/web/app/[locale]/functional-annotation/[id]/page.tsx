@@ -2,6 +2,7 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useToast } from "@/components/Toast";
 import { SkeletonTableRow } from "@/components/Skeleton";
@@ -16,6 +17,7 @@ import {
   listScoringConfigs,
   getScoredTsvUrl,
   createScoringConfig,
+  ApiError,
   Prediction,
   ProteinAnnotation,
   GoSubgraph,
@@ -799,6 +801,15 @@ const tToast = useTranslations("toasts");
   const [annotationSetId, setAnnotationSetId] = useState<string | null>(null);
   const [ontologySnapshotId, setOntologySnapshotId] = useState<string | null>(null);
   const [limitPerEntry, setLimitPerEntry] = useState<number | null>(null);
+  // A failure loading the prediction set means this whole page has no
+  // subject to render. A missing id resolves to the not-found boundary;
+  // any other failure is re-thrown to the route error boundary. Both
+  // signals are raised during render (not from the async callback) so
+  // React actually routes them to a boundary.
+  const [notFoundFlag, setNotFoundFlag] = useState(false);
+  const [fatalError, setFatalError] = useState<Error | null>(null);
+  if (notFoundFlag) notFound();
+  if (fatalError) throw fatalError;
 
   // Scoring
   const [scoringConfigs, setScoringConfigs] = useState<ScoringConfig[]>([]);
@@ -837,10 +848,26 @@ const tToast = useTranslations("toasts");
         setOntologySnapshotId(ps.ontology_snapshot_id);
         setLimitPerEntry(ps.limit_per_entry);
       })
-      .catch(() => {});
+      .catch((e: unknown) => {
+        // A missing id is a 404: hand it to not-found, not the generic
+        // error screen. Everything else (auth, network, 500) is fatal
+        // for this page and belongs on the error boundary.
+        if (e instanceof ApiError && e.status === 404) {
+          setNotFoundFlag(true);
+          return;
+        }
+        setFatalError(e instanceof Error ? e : new Error(String(e)));
+      });
+    // Scoring presets are an optional side panel: a failure here must not
+    // sink the page, but it must not vanish either. Surface it as a toast.
     listScoringConfigs()
       .then(setScoringConfigs)
-      .catch(() => {});
+      .catch((e: unknown) => {
+        toast(
+          (e instanceof Error && e.message) || tToast("loadScoringConfigsFailed"),
+          "error",
+        );
+      });
   }, [setId]);
 
   const selectedConfig: ScoringConfig | undefined =

@@ -1795,5 +1795,32 @@
       "backHome": "Back home",
       "goSignIn": "Go to sign in"
     }
+  },
+  "errors": {
+    "title": "This view could not be loaded",
+    "body": "The interface hit an error while building this page. What the app reported is shown below.",
+    "unauthorizedTitle": "You are not signed in",
+    "unauthorizedBody": "The server withheld this data because the request carried no valid session. Sign in, then retry.",
+    "forbiddenTitle": "You are not permitted to view this",
+    "forbiddenBody": "Your account is missing the role this page requires. Ask an administrator to grant it, then retry.",
+    "networkTitle": "The server could not be reached",
+    "networkBody": "The request never completed. Check that the backend is running and reachable, then retry.",
+    "endpointLabel": "Endpoint",
+    "statusLabel": "Status",
+    "messageLabel": "Detail",
+    "referenceLabel": "Reference",
+    "retry": "Retry",
+    "signIn": "Go to sign in",
+    "home": "Back to the start page",
+    "notFound": {
+      "title": "This page does not exist",
+      "body": "The address matched no route. Check the link, or return to the start page.",
+      "home": "Back to the start page"
+    },
+    "predictionSetNotFound": {
+      "title": "This prediction set does not exist",
+      "body": "No prediction set matches this id. It may have been deleted, or the id is wrong.",
+      "back": "Back to prediction sets"
+    }
   }
 }

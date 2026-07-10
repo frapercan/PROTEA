@@ -1796,5 +1796,32 @@
       "backHome": "Voltar ao início",
       "goSignIn": "Ir para iniciar sessão"
     }
+  },
+  "errors": {
+    "title": "Não foi possível carregar esta vista",
+    "body": "A interface encontrou um erro ao construir esta página. O que a aplicação reportou está abaixo.",
+    "unauthorizedTitle": "A sessão não está iniciada",
+    "unauthorizedBody": "O servidor reteve estes dados porque o pedido não tinha uma sessão válida. Inicie sessão e tente de novo.",
+    "forbiddenTitle": "Não tem permissão para ver isto",
+    "forbiddenBody": "À sua conta falta o papel que esta página exige. Peça a um administrador para o conceder e tente de novo.",
+    "networkTitle": "Não foi possível contactar o servidor",
+    "networkBody": "O pedido nunca chegou a concluir. Verifique se o backend está a correr e acessível, e tente de novo.",
+    "endpointLabel": "Endpoint",
+    "statusLabel": "Estado",
+    "messageLabel": "Detalhe",
+    "referenceLabel": "Referência",
+    "retry": "Tentar de novo",
+    "signIn": "Ir para iniciar sessão",
+    "home": "Voltar à página inicial",
+    "notFound": {
+      "title": "Esta página não existe",
+      "body": "O endereço não corresponde a nenhuma rota. Verifique a ligação ou volte à página inicial.",
+      "home": "Voltar à página inicial"
+    },
+    "predictionSetNotFound": {
+      "title": "Este conjunto de predições não existe",
+      "body": "Nenhum conjunto de predições corresponde a este id. Pode ter sido eliminado, ou o id está errado.",
+      "back": "Voltar aos conjuntos de predições"
+    }
   }
 }

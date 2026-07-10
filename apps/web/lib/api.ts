@@ -26,6 +26,40 @@ export type JobEvent = {
 
 import { authHeaders } from "@/lib/auth";
 
+// Discriminated failure kinds so callers and error boundaries can tell a
+// real "no data" from "you are not signed in" or "you are not allowed".
+export type ApiErrorKind = "unauthorized" | "forbidden" | "http" | "network";
+
+/**
+ * Typed transport error thrown by :func:`http` for every non-ok response
+ * and every network failure. Carries the status, the request path, and a
+ * coarse ``kind`` so an error boundary can render the right guidance
+ * (sign in, ask for a role, retry) instead of a bare stack trace.
+ *
+ * A 401 or 403 on a read used to resolve to an empty array. That was a
+ * lie: it reported "the server has no data" when the truth was "you are
+ * not authenticated" or "you are not permitted". Callers could not tell
+ * those apart. They now receive this error and can act on it.
+ */
+export class ApiError extends Error {
+  readonly kind: ApiErrorKind;
+  readonly status: number;
+  readonly path: string;
+
+  constructor(kind: ApiErrorKind, status: number, path: string, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.kind = kind;
+    this.status = status;
+    this.path = path;
+  }
+}
+
+/** True when a caught value is an auth failure (401 or 403). */
+export function isAuthError(e: unknown): e is ApiError {
+  return e instanceof ApiError && (e.kind === "unauthorized" || e.kind === "forbidden");
+}
+
 export function baseUrl(): string {
   const u = process.env.NEXT_PUBLIC_API_URL;
   if (!u) throw new Error("NEXT_PUBLIC_API_URL is not set");
@@ -72,9 +106,9 @@ const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 // role-gated GET endpoints (``GET /v1/admin/dlq/summary``,
 // ``GET /v1/admin/users``, the bootstrap-admin sweep PR #569 surface)
 // for logged-in users: the backend ``require_role`` gate sees no
-// principal, returns 401, and the 401 catcher below silently swallows
-// the failure into an empty list, leaving the user staring at an
-// "empty admin page" that they perceive as "my login isn't persisting".
+// principal and returns 401. (That 401 now throws a typed ApiError from
+// ``http`` below; it no longer resolves to an empty list. Sending the
+// header is what keeps the logged-in user off that error path.)
 //
 // Sending the Bearer header whenever the cookie is present is safe:
 // public endpoints ignore unknown principals, role-gated endpoints
@@ -104,32 +138,39 @@ async function http<T>(path: string, init?: RequestInit & { cacheable?: boolean 
   try {
     res = await fetch(`${baseUrl()}${path}`, withAuth(fetchInit));
   } catch (e: any) {
-    throw new Error(e?.message ?? "Network error");
+    throw new ApiError("network", 0, path, e?.message ?? "Network error");
   }
   if (!res.ok) {
-    // AUTH-PUBLIC-VIEWER (2026-05-26): a 401/403 on a GET means a
-    // backend mis-gate (every viewer surface should be public). Do
-    // NOT bubble the JSON error envelope into the UI; log it and
-    // resolve the promise with an empty list so the page can still
-    // render its anonymous baseline. Writes keep their loud throw so
-    // the caller's catch block surfaces the sign-in CTA.
-    if (!MUTATING_METHODS.has(method) && (res.status === 401 || res.status === 403)) {
-      if (typeof console !== "undefined") {
-        console.warn(
-          `[api] anonymous GET ${path} returned ${res.status}; ` +
-            "returning empty (public-viewer policy expects no auth gate)",
-        );
-      }
-      // Most viewer endpoints return list payloads; empty array is the
-      // sensible default. Detail handlers ought to handle null/empty
-      // sentinel themselves via their own optional chaining.
-      return [] as unknown as T;
+    // A 401 or 403 on a read is not an empty result. Earlier revisions
+    // resolved these to `[]` so an anonymous dashboard kept rendering,
+    // but that hid the machinery: the operator saw an empty table and
+    // could not tell "no data" from "not signed in" or "not permitted".
+    // Surface a typed error the boundary can explain and act on. Reads
+    // and writes both throw; the message is written for the technician.
+    const isRead = !MUTATING_METHODS.has(method);
+    if (isRead && res.status === 401) {
+      throw new ApiError(
+        "unauthorized",
+        401,
+        path,
+        "You are not signed in, so the server withheld this data. Sign in and retry.",
+      );
+    }
+    if (isRead && res.status === 403) {
+      throw new ApiError(
+        "forbidden",
+        403,
+        path,
+        "Your account is not permitted to read this. An administrator has to grant the required role.",
+      );
     }
     const body = await res.text();
     const msg = body.trimStart().startsWith("<")
       ? `HTTP ${res.status} ${res.statusText}`
       : body;
-    throw new Error(msg);
+    const kind: ApiErrorKind =
+      res.status === 401 ? "unauthorized" : res.status === 403 ? "forbidden" : "http";
+    throw new ApiError(kind, res.status, path, msg || `HTTP ${res.status} ${res.statusText}`);
   }
   return await res.json();
 }
