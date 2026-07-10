@@ -1795,5 +1795,32 @@
       "backHome": "返回首页",
       "goSignIn": "前往登录"
     }
+  },
+  "errors": {
+    "title": "无法加载此视图",
+    "body": "界面在构建此页面时遇到错误。应用报告的信息如下。",
+    "unauthorizedTitle": "您尚未登录",
+    "unauthorizedBody": "由于请求没有有效会话，服务器拒绝返回这些数据。请登录后重试。",
+    "forbiddenTitle": "您没有查看此内容的权限",
+    "forbiddenBody": "您的账户缺少此页面所需的角色。请让管理员授予该角色后重试。",
+    "networkTitle": "无法连接服务器",
+    "networkBody": "请求未能完成。请确认后端正在运行且可访问，然后重试。",
+    "endpointLabel": "接口",
+    "statusLabel": "状态",
+    "messageLabel": "详情",
+    "referenceLabel": "参考编号",
+    "retry": "重试",
+    "signIn": "前往登录",
+    "home": "返回首页",
+    "notFound": {
+      "title": "该页面不存在",
+      "body": "该地址未匹配任何路由。请检查链接，或返回首页。",
+      "home": "返回首页"
+    },
+    "predictionSetNotFound": {
+      "title": "该预测集不存在",
+      "body": "没有与此 id 匹配的预测集。它可能已被删除，或 id 有误。",
+      "back": "返回预测集列表"
+    }
   }
 }

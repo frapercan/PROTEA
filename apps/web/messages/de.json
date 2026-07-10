@@ -1796,5 +1796,32 @@
       "backHome": "Zurück zur Startseite",
       "goSignIn": "Zur Anmeldung"
     }
+  },
+  "errors": {
+    "title": "Diese Ansicht konnte nicht geladen werden",
+    "body": "Die Oberfläche stieß beim Aufbau dieser Seite auf einen Fehler. Was die Anwendung gemeldet hat, steht unten.",
+    "unauthorizedTitle": "Sie sind nicht angemeldet",
+    "unauthorizedBody": "Der Server hat diese Daten zurückgehalten, weil die Anfrage keine gültige Sitzung hatte. Melden Sie sich an und versuchen Sie es erneut.",
+    "forbiddenTitle": "Sie dürfen dies nicht ansehen",
+    "forbiddenBody": "Ihrem Konto fehlt die Rolle, die diese Seite verlangt. Bitten Sie eine Administratorin oder einen Administrator, sie zu vergeben, und versuchen Sie es erneut.",
+    "networkTitle": "Der Server war nicht erreichbar",
+    "networkBody": "Die Anfrage wurde nie abgeschlossen. Prüfen Sie, ob das Backend läuft und erreichbar ist, und versuchen Sie es erneut.",
+    "endpointLabel": "Endpunkt",
+    "statusLabel": "Status",
+    "messageLabel": "Detail",
+    "referenceLabel": "Referenz",
+    "retry": "Erneut versuchen",
+    "signIn": "Zur Anmeldung",
+    "home": "Zurück zur Startseite",
+    "notFound": {
+      "title": "Diese Seite existiert nicht",
+      "body": "Die Adresse passte zu keiner Route. Prüfen Sie den Link oder kehren Sie zur Startseite zurück.",
+      "home": "Zurück zur Startseite"
+    },
+    "predictionSetNotFound": {
+      "title": "Dieses Vorhersageset existiert nicht",
+      "body": "Kein Vorhersageset passt zu dieser id. Es wurde möglicherweise gelöscht, oder die id ist falsch.",
+      "back": "Zurück zu den Vorhersagesets"
+    }
   }
 }
