@@ -24,7 +24,7 @@ export function SupportButton() {
     fetch(`${baseUrl()}/support`, { cache: "no-store" })
       .then((r) => r.json())
       .then(setData)
-      .catch(() => {});
+      .catch((err) => console.error("support: fetch /support failed", err));
   }, []);
 
   // Close on outside click
