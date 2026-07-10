@@ -25,7 +25,7 @@ test.beforeEach(async ({ context }) => {
 });
 
 test("pipeline section has no horizontal page overflow at 390px", async ({ page }) => {
-  await page.goto("/en/");
+  await page.goto("/en/annotate");
   await page.waitForLoadState("networkidle");
 
   const bodyScrollWidth = await page.evaluate(() => document.body.scrollWidth);
@@ -37,7 +37,7 @@ test("pipeline section has no horizontal page overflow at 390px", async ({ page 
 });
 
 test("all 5 pipeline stage cards are reachable at 390px", async ({ page }) => {
-  await page.goto("/en/");
+  await page.goto("/en/annotate");
   await page.waitForLoadState("networkidle");
 
   // Locate by the stage anchor labels present in the mock payload.
@@ -72,7 +72,7 @@ test("all 5 pipeline stage cards are reachable at 390px", async ({ page }) => {
 test("desktop pipeline (1280px) is unchanged: horizontal row visible", async ({ page }) => {
   // Switch to desktop viewport within the test to verify desktop layout.
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto("/en/");
+  await page.goto("/en/annotate");
   await page.waitForLoadState("networkidle");
 
   // On desktop the pipeline cards should still be in a row. We verify
@@ -105,7 +105,7 @@ test("desktop pipeline (1280px) is unchanged: horizontal row visible", async ({ 
 });
 
 test("screenshot — mobile landing pipeline", async ({ page }) => {
-  await page.goto("/en/");
+  await page.goto("/en/annotate");
   await page.waitForLoadState("networkidle");
   await page.screenshot({
     path: "e2e/screenshots/mobile-landing-pipeline.png",
