@@ -25,51 +25,74 @@ The ``export_research_dataset`` operation emits events with the
 ``export_research_dataset.alignment_done``) so each sub-step can be
 timed from the event log alone.
 
-.. rubric:: scalene (line-level CPU + GPU + memory)
+.. rubric:: Profiling a single job run
 
-scalene is the recommended profiler for PROTEA workers. It samples both
-CPU and GPU time per line without requiring code changes.
+PROTEA has no single-job CLI runner. Jobs are dispatched to a queue and a
+worker consumes them, so to profile one operation end-to-end you enqueue
+exactly one job and run the worker for its queue under a profiler.
 
-To profile the export operation module, run scalene with the
-`--cpu`, `--gpu`, and `--memory` flags pointing at the operation module:
+**1. Dispatch one job.** ``POST /jobs`` with the operation name, its queue,
+and the operation-specific payload. This is the only supported dispatch path;
+do not poke other endpoints by hand. For example, to profile an
+``export_research_dataset`` run:
+
+.. code-block:: json
+
+   {
+     "operation": "export_research_dataset",
+     "queue_name": "protea.training",
+     "payload": {"...": "operation-specific; see architecture/operations"}
+   }
+
+The response is ``{"id": "<job-uuid>", "status": "queued"}``.
+
+**2. Profile the worker that consumes it.** ``scalene`` is the bundled
+profiler (line-level CPU + GPU + memory). Point it at ``scripts/worker.py``
+on the same queue; the worker claims the one queued job, runs it, then idles:
 
 .. parsed-literal::
 
    poetry run scalene `--cpu` `--gpu` `--memory` \\
-       protea/core/operations/export_research_dataset.py
+       scripts/worker.py `--queue` protea.training
 
-Or to profile a specific worker invocation using the `--cpu` and `--memory`
-flags:
+Once the job reaches ``SUCCEEDED`` (poll ``GET /jobs/<job-uuid>`` or read the
+JobEvent log above), stop the worker with ``Ctrl+C``. It logs
+``Worker stopped.`` and exits cleanly, so scalene writes its HTML report to
+the current directory. Because the worker is a continuous consumer, the
+profile also captures the idle wait on the AMQP socket between messages; that
+time sits inside the consumer's blocking read and is easy to discount.
 
-.. parsed-literal::
+The PERF.1 slice will publish pre-computed flamegraphs from the FARM-EXP.13
+run under ``docs/perf/`` once that slice lands.
 
-   poetry run scalene `--cpu` `--memory` \\
-       scripts/run_one_job.py <job_uuid>
+.. rubric:: cProfile + pstats (function-level, standard library)
 
-Output is an HTML report in the current directory. The PERF.1 slice will
-publish pre-computed flamegraphs from the FARM-EXP.13 run under
-``docs/perf/`` once that slice lands.
-
-.. rubric:: pyinstrument (call-stack sampling)
-
-pyinstrument is faster to set up for a quick call-stack snapshot:
-
-.. parsed-literal::
-
-   poetry run pyinstrument scripts/run_one_job.py <job_uuid>
-
-It groups time by call stack rather than by line, which makes it easier
-to identify which function family (alignment vs KNN vs DB IO) dominates.
-
-.. rubric:: cProfile + snakeviz (function-level)
-
-For function-level profiling without installing extra tools:
+For a function-level view without any extra dependency, wrap the same worker
+with the standard-library ``cProfile`` and inspect the dump with ``pstats``:
 
 .. parsed-literal::
 
    poetry run python -m cProfile -o /tmp/protea.prof \\
-       scripts/run_one_job.py <job_uuid>
-   snakeviz /tmp/protea.prof
+       scripts/worker.py `--queue` protea.training
+   poetry run python -m pstats /tmp/protea.prof
+
+The ``cProfile`` output file is written when the interpreter exits, which the
+clean ``Ctrl+C`` shutdown above triggers.
+
+.. rubric:: Known gap: no single-job CLI
+
+The queue-plus-worker recipe profiles the whole worker process, not one job
+in isolation, so it also samples the consumer's idle wait. A thin CLI that
+runs a single job by id and exits would be cleaner, especially for
+call-stack profilers that report only on process exit. PROTEA once shipped
+``scripts/run_one_job.py`` for exactly this, but it was removed (commit
+``80ed10e``) once it drifted out of step with the queue-driven worker. The
+internal entry point still exists as ``BaseWorker.handle_job(job_id)`` in
+``protea/workers/base_worker.py`` (it claims a QUEUED job, runs its operation,
+and records the terminal transition), but nothing exposes it on the command
+line today. Until a supported wrapper lands, profile the continuous worker as
+above, or read per-step timings straight from the JobEvent log at the top of
+this page, which needs no profiler at all.
 
 .. rubric:: Interpreting hot paths
 
