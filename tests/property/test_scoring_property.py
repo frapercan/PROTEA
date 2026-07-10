@@ -60,11 +60,20 @@ SIGNAL_KEYS = (
     "neighbor_vote_fraction",
 )
 
-weight_value = st.floats(
-    min_value=0.0,
-    max_value=10.0,
-    allow_nan=False,
-    allow_infinity=False,
+# A weight is either switched off (exactly 0.0) or a magnitude the system can
+# actually express. Nothing in between: drawing arbitrarily small positives lets
+# Hypothesis reach the subnormal range, where `weight * signal` and `weight *
+# scale` underflow to zero. Scale invariance is a property of exact arithmetic,
+# not of IEEE 754, so such draws falsify a formula that is in fact correct.
+weight_value = st.one_of(
+    st.just(0.0),
+    st.floats(
+        min_value=1e-6,
+        max_value=10.0,
+        allow_nan=False,
+        allow_infinity=False,
+        allow_subnormal=False,
+    ),
 )
 
 signal_weights = st.fixed_dictionaries({k: weight_value for k in SIGNAL_KEYS})
@@ -197,15 +206,12 @@ def test_compute_score_invariant_to_uniform_weight_scaling(
     short-circuits to 0.0 regardless. ``assume`` discards those draws so we
     only exercise the actual invariant.
 
-    The floor on the largest weight is load-bearing. A weighted average is
-    scale-invariant in exact arithmetic, not in floating point: with every
-    weight near the smallest subnormal (5e-324), a product ``w * signal``
-    underflows to zero while the same product under a scale of 2.0 does not,
-    so the numerator moves and the denominator does not. That is a property of
-    IEEE 754, not of ``compute_score``, and weights that small are outside any
-    configuration the system can express.
+    Subnormal weights are excluded by ``weight_value`` itself, not here: a
+    floor on the largest weight would not be enough, because the weight that
+    underflows need not be the largest one. It only has to be the only weight
+    whose signal is present in ``pred``.
     """
-    assume(max(weights.values()) > 1e-9)
+    assume(any(w > 0.0 for w in weights.values()))
     cfg_a = _config(weights, formula=FORMULA_LINEAR)
     scaled = {k: v * scale for k, v in weights.items()}
     cfg_b = _config(scaled, formula=FORMULA_LINEAR)
