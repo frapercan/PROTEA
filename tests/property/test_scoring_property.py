@@ -60,11 +60,20 @@ SIGNAL_KEYS = (
     "neighbor_vote_fraction",
 )
 
-weight_value = st.floats(
-    min_value=0.0,
-    max_value=10.0,
-    allow_nan=False,
-    allow_infinity=False,
+# A weight is either switched off (exactly 0.0) or a magnitude the system can
+# actually express. Nothing in between: drawing arbitrarily small positives lets
+# Hypothesis reach the subnormal range, where `weight * signal` and `weight *
+# scale` underflow to zero. Scale invariance is a property of exact arithmetic,
+# not of IEEE 754, so such draws falsify a formula that is in fact correct.
+weight_value = st.one_of(
+    st.just(0.0),
+    st.floats(
+        min_value=1e-6,
+        max_value=10.0,
+        allow_nan=False,
+        allow_infinity=False,
+        allow_subnormal=False,
+    ),
 )
 
 signal_weights = st.fixed_dictionaries({k: weight_value for k in SIGNAL_KEYS})
@@ -196,6 +205,11 @@ def test_compute_score_invariant_to_uniform_weight_scaling(
     Edge case: when every weight is 0, scaling is also 0 and the function
     short-circuits to 0.0 regardless. ``assume`` discards those draws so we
     only exercise the actual invariant.
+
+    Subnormal weights are excluded by ``weight_value`` itself, not here: a
+    floor on the largest weight would not be enough, because the weight that
+    underflows need not be the largest one. It only has to be the only weight
+    whose signal is present in ``pred``.
     """
     assume(any(w > 0.0 for w in weights.values()))
     cfg_a = _config(weights, formula=FORMULA_LINEAR)
