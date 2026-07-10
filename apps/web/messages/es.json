@@ -4,6 +4,7 @@
     "description": "Plataforma de datos proteicos — cola de trabajos y gestión de pipelines"
   },
   "nav": {
+    "featureRegistry": "Registro de features",
     "proteins": "Proteínas",
     "annotations": "Anotaciones GO",
     "querySets": "Conjuntos de consulta",
@@ -1821,6 +1822,36 @@
       "title": "Este conjunto de predicciones no existe",
       "body": "Ningún conjunto de predicciones coincide con este id. Puede haberse eliminado o el id es incorrecto.",
       "back": "Volver a los conjuntos de predicciones"
+    }
+  },
+  "featureRegistry": {
+    "title": "Registro de features",
+    "subtitle": "Cada feature del reranker tiene una única descripción canónica, compartida por la documentación, la tesis y esta página. Aquí puedes leer qué significa cada feature, quién la produce y si lleva un valor real en la exportación por defecto.",
+    "provenance": "Obtenido de protea-contracts {version}. {total} features en {families} familias.",
+    "legendHeading": "Qué significan las etiquetas de estado",
+    "countSuffix": "{count} en este estado",
+    "familyCount": "{count} features",
+    "producerLabel": "Productor",
+    "rangeLabel": "Rango",
+    "notApplicable": "n/d",
+    "caveatLabel": "Advertencia",
+    "status": {
+      "PRODUCED": {
+        "label": "producida",
+        "help": "Rellenada con un valor real en la exportación por defecto."
+      },
+      "DECLARED_ABSENT": {
+        "label": "declarada ausente",
+        "help": "La exportación por defecto la deja sin rellenar porque su productor no está conectado a la ruta de exportación (ADR-D45). El valor que ves en un volcado en crudo no es la señal del modelo."
+      },
+      "POOL_INJECTED": {
+        "label": "inyectada en el pool",
+        "help": "La estampa el cargador multimanifiesto del laboratorio en la fase de pool. No aparece en un volcado parquet en crudo."
+      },
+      "BROKEN": {
+        "label": "rota",
+        "help": "El productor está conectado pero su fuente de datos está vacía o defectuosa, por lo que la columna no lleva señal."
+      }
     }
   }
 }

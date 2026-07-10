@@ -576,6 +576,135 @@
         "title": "ExperimentRunStatus",
         "type": "string"
       },
+      "FeatureDocInfo": {
+        "description": "One feature's canonical documentation, mirroring\n:class:`protea_contracts.feature_docs.FeatureDoc`.\n\nEvery field is copied verbatim from the contract; ``status`` is\nlowered to its string value so the frontend can key a badge off it\nwithout importing the Python enum.",
+        "properties": {
+          "definition": {
+            "description": "Precise definition of what the number means and how it is computed.",
+            "title": "Definition",
+            "type": "string"
+          },
+          "family": {
+            "description": "Feature family the column belongs to (e.g. ``knn``, ``interpro``, ``classifier``).",
+            "title": "Family",
+            "type": "string"
+          },
+          "name": {
+            "description": "Canonical feature/column name (e.g. ``distance``, ``interpro_hit``).",
+            "title": "Name",
+            "type": "string"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Caveats the operator must know in situ (e.g. why ``interpro_*`` carries no signal when its table is unpopulated, or the ADR-D45 producer seam).",
+            "title": "Notes"
+          },
+          "producer": {
+            "description": "Who fills the column (the module, operation, or loader stage).",
+            "title": "Producer",
+            "type": "string"
+          },
+          "status": {
+            "description": "Production status: ``PRODUCED`` (real values in the default export), ``DECLARED_ABSENT`` (a producer seam leaves it unfilled, see ADR-D45), ``POOL_INJECTED`` (stamped by the lab's pooled loader, not the parquet dump), or ``BROKEN``.",
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "description": "One-line plain-language summary for the technician.",
+            "title": "Summary",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Physical/logical unit, or null when dimensionless.",
+            "title": "Unit"
+          },
+          "value_range": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Expected value range (e.g. ``[0, 1]``), or null.",
+            "title": "Value Range"
+          }
+        },
+        "required": [
+          "name",
+          "family",
+          "status",
+          "summary",
+          "definition",
+          "producer"
+        ],
+        "title": "FeatureDocInfo",
+        "type": "object"
+      },
+      "FeatureRegistryResponse": {
+        "description": "The whole feature registry, grouped-friendly for the UI.",
+        "properties": {
+          "families": {
+            "description": "Distinct family names, in first-seen order.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Families",
+            "type": "array"
+          },
+          "features": {
+            "description": "Every documented feature, in canonical declaration order.",
+            "items": {
+              "$ref": "#/components/schemas/FeatureDocInfo"
+            },
+            "title": "Features",
+            "type": "array"
+          },
+          "schema_version": {
+            "description": "``protea-contracts`` version the registry was sourced from.",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "status_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Count of features per status value.",
+            "title": "Status Counts",
+            "type": "object"
+          },
+          "total": {
+            "description": "Number of documented features.",
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "total",
+          "families",
+          "status_counts",
+          "features"
+        ],
+        "title": "FeatureRegistryResponse",
+        "type": "object"
+      },
       "GpuAvailability": {
         "description": "Truthful busy/free signal for the shared GPU pipeline.\n\n``busy`` is true only when there is a freshly-leased RUNNING\ncoordinator (``leased_until`` in the future) or genuinely QUEUED work\nfor a GPU operation. Stale RUNNING rows are reported in\n``running_stale`` for observability but never set ``busy``.",
         "properties": {
@@ -6818,6 +6947,28 @@
         "summary": "Update an experiment run",
         "tags": [
           "experiment-runs"
+        ]
+      }
+    },
+    "/v1/features/registry": {
+      "get": {
+        "description": "Serve the canonical reranker feature registry as JSON.\n\nThis is the third renderer of the explainability registry (docs via\nSphinx, thesis via citation, this endpoint for the UI). It reads the\nsame ``FEATURE_DOCS`` contract the other two do, so what the operator\nsees in the browser is byte-for-byte the documented truth, including\nwhich features are ``DECLARED_ABSENT`` (ADR-D45 producer seam) and\nwhich are ``POOL_INJECTED`` by the lab's pooled loader.",
+        "operationId": "get_feature_registry_v1_features_registry_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureRegistryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Feature Registry",
+        "tags": [
+          "features"
         ]
       }
     },

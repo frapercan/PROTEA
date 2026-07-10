@@ -4,6 +4,7 @@
     "description": "Protein data platform — job queue and pipeline management"
   },
   "nav": {
+    "featureRegistry": "Feature registry",
     "proteins": "Proteins",
     "annotations": "GO Annotations",
     "querySets": "Query Sets",
@@ -1821,6 +1822,36 @@
       "title": "This prediction set does not exist",
       "body": "No prediction set matches this id. It may have been deleted, or the id is wrong.",
       "back": "Back to prediction sets"
+    }
+  },
+  "featureRegistry": {
+    "title": "Feature registry",
+    "subtitle": "Every reranker feature has one canonical description, shared by the documentation, the thesis, and this page. Here you can read what each feature means, who produces it, and whether it carries a real value in the default export.",
+    "provenance": "Sourced from protea-contracts {version}. {total} features across {families} families.",
+    "legendHeading": "What the status badges mean",
+    "countSuffix": "{count} in this state",
+    "familyCount": "{count} features",
+    "producerLabel": "Producer",
+    "rangeLabel": "Range",
+    "notApplicable": "n/a",
+    "caveatLabel": "Caveat",
+    "status": {
+      "PRODUCED": {
+        "label": "produced",
+        "help": "Filled with a real value in the default export."
+      },
+      "DECLARED_ABSENT": {
+        "label": "declared absent",
+        "help": "Left unfilled by the default export because its producer is not wired into the export path (ADR-D45). The value you see in a raw dump is not the model's signal."
+      },
+      "POOL_INJECTED": {
+        "label": "pool injected",
+        "help": "Stamped by the lab's pooled multi-manifest loader at pool stage. It does not appear in a raw parquet dump."
+      },
+      "BROKEN": {
+        "label": "broken",
+        "help": "The producer is wired but its data source is empty or faulty, so the column carries no signal."
+      }
     }
   }
 }

@@ -1730,3 +1730,48 @@ export function purgeDlq(body: DlqPurgeRequest) {
     body: JSON.stringify(body),
   });
 }
+
+// ---------------------------------------------------------------------------
+// Feature registry (explainability, third renderer)
+// ---------------------------------------------------------------------------
+//
+// Mirrors ``protea/api/routers/features.py`` (GET /features/registry). The
+// endpoint serializes ``protea_contracts.feature_docs.FEATURE_DOCS`` verbatim,
+// so this is the SAME source the Sphinx docs render and the thesis cites: the
+// UI does not keep its own copy of the feature schema. ``status`` is the
+// contract enum's string value; the page keys a badge off it.
+
+export type FeatureStatus =
+  | "PRODUCED"
+  | "DECLARED_ABSENT"
+  | "POOL_INJECTED"
+  | "BROKEN";
+
+export type FeatureDocInfo = {
+  name: string;
+  family: string;
+  status: FeatureStatus;
+  summary: string;
+  definition: string;
+  producer: string;
+  unit: string | null;
+  value_range: string | null;
+  notes: string | null;
+};
+
+export type FeatureRegistry = {
+  schema_version: string;
+  total: number;
+  families: string[];
+  status_counts: Record<string, number>;
+  features: FeatureDocInfo[];
+};
+
+export function getFeatureRegistry() {
+  // Live (no-store) on purpose. This is a small, static payload, so the
+  // cache buys little; the point is that a failed fetch must SURFACE through
+  // the route error boundary (the page teaches the operator what broke),
+  // never be masked by a stale-if-error copy that hides that the backend is
+  // down. The throwing `http` helper does the rest.
+  return http<FeatureRegistry>(`/features/registry`);
+}
