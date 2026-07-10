@@ -21,9 +21,8 @@ from __future__ import annotations
 from collections import Counter
 
 from fastapi import APIRouter
-from pydantic import BaseModel, Field
-
 from protea_contracts.feature_docs import FEATURE_DOCS
+from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/features", tags=["features"])
 
