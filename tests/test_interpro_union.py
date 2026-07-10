@@ -158,11 +158,13 @@ def test_classifier_only_record_is_full_canonical_row() -> None:
     assert math.isnan(rec["emb_pca_query_0"])
     assert math.isnan(rec["anc2vec_query_known_cos"])
 
-    # The self_prior / association columns stay at the zero-fill default until
-    # the per-query parity producers run over the unioned record.
-    assert rec["self_prior_score"] == 0.0
-    assert rec["association_total"] == 0.0
-    assert rec["association_present"] == 0.0
+    # The self_prior / association families have no producer wired on a bare
+    # classifier-only row, so they are declared absent -> NaN (ADR-D45), not a
+    # true zero. When the export enables a producer the applier resets the
+    # family to its true-zero baseline before marking hits.
+    assert math.isnan(rec["self_prior_score"])
+    assert math.isnan(rec["association_total"])
+    assert math.isnan(rec["association_present"])
 
 
 def _knn_capable_builder(gt_pairs: set[tuple[str, str]]) -> _LeafRecordBuilder:
