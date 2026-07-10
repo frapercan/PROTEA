@@ -173,14 +173,12 @@ export const PILLARS: Pillar[] = [
     title: "The calibrated fusion",
     teaser: "Two learning layers and a signal store. The lever is calibration, not depth.",
     claim:
-      "Two learning layers, with a signal store between them. A learned k-WTA retrieval encoder proposes candidates; calibrated evidence scorers put every signal on one scale; a shallow per-category combiner fuses them into a probability. The lever is calibration, not depth: standardising a fixed representation moves the number more than changing the layer it is read from. Run end to end, the native pipeline reproduces the sealed board to within 0.007.",
+      "Two learning layers, with a signal store between them. A learned k-WTA retrieval encoder proposes candidates; calibrated evidence scorers put every signal on one scale; a shallow per-category combiner fuses them into a probability. The lever is calibration, not depth: standardising a fixed representation moves the number more than changing the layer it is read from. Run end to end, the native pipeline reproduces the sealed board closely; the exact gap waits on the reproducibility receipt named below.",
     evidence: {
-      caption: `Sealed headline and reproducibility (${METRIC}, ${FRAME})`,
+      caption: `Sealed headline (${METRIC}, ${FRAME})`,
       valueHeader: "Value",
       rows: [
         { label: "Sealed board", value: "0.4063", note: "first in 7 of 9 cells" },
-        { label: "Native pipeline vs board", value: "< 0.007", note: "reproduction gap" },
-        { label: "Universal vs per-category reranker", value: "0.387 / 0.388", note: "the split buys little" },
       ],
     },
     receipt: {
@@ -199,8 +197,8 @@ export const PILLARS: Pillar[] = [
     },
     caveats: [
       "The largest single lever is standardisation, a normalisation effect, not a deeper model. We name it so no one reads depth into the result.",
-      "A single universal reranker reaches essentially the same number as the per-category combiner (0.387 against 0.388), so the per-category split earns little and we say so.",
-      "The reproducibility receipt named by the plan, comparison.json, was not present in the storage snapshot this page was built from. The 0.007 gap therefore rests on the sealed board and the layer-ablation receipt until that file is re-materialised.",
+      "A single universal reranker reaches essentially the same number as the per-category combiner, so the per-category split earns little and we say so. The exact figures wait on the receipt below.",
+      "The reproducibility receipt named by the plan, comparison.json, was not present in the storage snapshot this page was built from, and the values it would carry are not restated here. Until that file is re-materialised, this pillar rests only on the sealed board and the layer-ablation receipt.",
     ],
   },
   {
