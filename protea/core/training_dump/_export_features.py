@@ -45,6 +45,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
+from protea_contracts import FEATURE_FAMILIES
+
 from protea.core.operations.predict_go_terms._batch_op_feature import _FeatureLoadingMixin
 from protea.core.operations.predict_go_terms._post_knn_pipeline import (
     apply_association,
@@ -57,6 +59,16 @@ if TYPE_CHECKING:
     from protea.core.operations.predict_go_terms._batch_op import (
         PredictGOTermsBatchOperation,
     )
+    from protea.core.parquet_export import FamilyProvenance
+
+# Fully-qualified identity of the producer wired for each LAFA family; recorded
+# in the dataset manifest provenance so a reader can trace a produced family's
+# values back to the exact compute (ADR-D45).
+_SELF_PRIOR_PRODUCER = "protea.core.operations.predict_go_terms._post_knn_pipeline.apply_self_prior"
+_ASSOCIATION_PRODUCER = (
+    "protea.core.operations.predict_go_terms._post_knn_pipeline.apply_association"
+)
+_CLASSIFIER_PRODUCER = "protea.core.training_dump._export_features._union_classifier_candidates"
 
 
 @dataclass(frozen=True)
@@ -64,8 +76,9 @@ class ExportParityFlags:
     """Which INT-6 parity feature families the export should compute.
 
     Each flag independently enables one predict-path producer. All False (the
-    default) makes :func:`apply_export_parity_features` a no-op, so the default
-    export keeps the leaf builder's zero-fill defaults (bit-identical).
+    default) makes :func:`apply_export_parity_features` a no-op, so each family
+    stays at the leaf builder's declared-absent default (``NaN``, ADR-D45) and
+    is recorded as declared-absent in the dataset manifest.
     """
 
     self_prior: bool = False
@@ -136,9 +149,13 @@ def apply_export_parity_features(
     Mutates ``records`` (the export's per-query candidate dicts) so the six
     LAFA columns carry the SAME values the predict path serves, matching what a
     lab booster sees at inference time. Each flag is independent; when all are
-    off this is a no-op and the records keep their zero-fill defaults (default
-    export stays bit-identical). ``records`` must already carry the six
-    zero-filled columns (the leaf builder guarantees this).
+    off this is a no-op and every family stays at the leaf builder's
+    declared-absent default (``NaN``, ADR-D45), so the default export keeps the
+    families declared absent. For a family whose flag IS on, its columns are
+    first reset to the true-zero baseline across every record (a producer ran,
+    so a non-hit candidate is a genuine ``0``, not a missing measurement) and
+    then the producer overwrites its hits. ``records`` must already carry the
+    six LAFA columns (the leaf builder guarantees this).
 
     The classifier step UNIONs the classifier's full-vocabulary proposals into
     the candidate pool exactly like the predict path: existing candidates are
@@ -160,12 +177,63 @@ def apply_export_parity_features(
     # Union the classifier proposals FIRST so the prior producers below see the
     # appended rows (a query's known terms can prime the appended candidate).
     if flags.classifier and classifier_union is not None:
+        # ADR-D45: the leaf builder now emits NaN (declared-absent) for the
+        # classifier family. Reset it to the true-zero baseline BEFORE the union
+        # so an existing candidate the classifier did not propose is a genuine
+        # zero (the producer ran and did not vote it), not a missing value; the
+        # union then stamps the proposals and appends classifier-only rows.
+        _zero_baseline_family(records, FEATURE_FAMILIES["classifier"])
         records = _union_classifier_candidates(session, valid_accessions, records, classifier_union)
     if flags.self_prior:
+        _zero_baseline_family(records, FEATURE_FAMILIES["self_prior"])
         apply_self_prior(op, session, t0_annotation_set_id, valid_accessions, records, _noop_emit)
     if flags.association:
+        _zero_baseline_family(records, FEATURE_FAMILIES["association"])
         apply_association(op, session, t0_annotation_set_id, valid_accessions, records, _noop_emit)
     return records
+
+
+def _zero_baseline_family(records: list[dict[str, Any]], columns: list[str]) -> None:
+    """Reset one PRODUCED family's columns to the true-zero baseline in place.
+
+    The predict-path producers (``apply_self_prior`` / ``apply_association`` and
+    the classifier stamping) only overwrite the candidates they hit and rely on
+    the non-hit candidates carrying a well-defined ``0`` (a producer ran and did
+    not fire on this candidate). The leaf builder's default is now ``NaN``
+    (declared-absent, ADR-D45), so when the export wires a producer for a family
+    we first stamp that family's true-zero baseline across every record; the
+    producer then overwrites its hits. A DECLARED-ABSENT family is never passed
+    here, so its columns stay ``NaN``.
+    """
+    for rec in records:
+        for col in columns:
+            rec[col] = 0.0
+
+
+def build_lafa_family_provenance(flags: ExportParityFlags) -> tuple[FamilyProvenance, ...]:
+    """Provenance rows for the three LAFA families given the export flags.
+
+    Each family is ``produced`` (a producer is wired for this export) or
+    ``declared_absent`` (no producer; the six columns ship as ``NaN``). The
+    export writes these rows into the dataset manifest so a reader learns a
+    family's absence from metadata instead of by noticing a column of zeros
+    (ADR-D45). ``producer`` names the wired producer when one exists.
+    """
+    from protea.core.parquet_export import DECLARED_ABSENT, PRODUCED, FamilyProvenance
+
+    wiring = (
+        ("classifier", flags.classifier, _CLASSIFIER_PRODUCER),
+        ("self_prior", flags.self_prior, _SELF_PRIOR_PRODUCER),
+        ("association", flags.association, _ASSOCIATION_PRODUCER),
+    )
+    return tuple(
+        FamilyProvenance(
+            family=family,
+            state=PRODUCED if on else DECLARED_ABSENT,
+            producer=producer if on else None,
+        )
+        for family, on, producer in wiring
+    )
 
 
 def _union_classifier_candidates(
@@ -264,4 +332,5 @@ __all__ = (
     "ClassifierUnionSpec",
     "ExportParityFlags",
     "apply_export_parity_features",
+    "build_lafa_family_provenance",
 )

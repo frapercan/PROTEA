@@ -37,9 +37,7 @@ from protea.core.contracts.operation import EmitFn, OperationResult
 from protea.core.domain.aspect import ASPECT_CODES as _ASPECTS
 
 
-def _count_embeddings_with_dim(
-    conn: Connection, emb_config_id: uuid.UUID
-) -> tuple[int, int]:
+def _count_embeddings_with_dim(conn: Connection, emb_config_id: uuid.UUID) -> tuple[int, int]:
     """Return ``(total_rows, embedding_dim)`` for a config.
 
     ``embedding_dim`` falls back to 960 when the lookup probe finds no
@@ -185,8 +183,7 @@ def _resolve_annotation_set_ids(
         )
         if aset is None:
             raise ValueError(
-                f"AnnotationSet not found for source={source!r}, "
-                f"source_version={str(v)!r}"
+                f"AnnotationSet not found for source={source!r}, source_version={str(v)!r}"
             )
         version_to_set[v] = aset.id
         version_to_native[v] = aset.ontology_snapshot_id
@@ -206,11 +203,7 @@ def _check_reranker_name_collisions(session: Session, names: Iterable[str]) -> N
     )
 
     for model_name in names:
-        existing = (
-            session.query(RerankerModel)
-            .filter(RerankerModel.name == model_name)
-            .first()
-        )
+        existing = session.query(RerankerModel).filter(RerankerModel.name == model_name).first()
         if existing is not None:
             raise ValueError(f"RerankerModel {model_name!r} already exists")
 
@@ -253,19 +246,14 @@ def _load_go_maps(
     """
     map_snapshots = {ontology_snapshot_id} | set(native_snapshots)
     union_rows = session.execute(
-        text(
-            "SELECT id, go_id, aspect FROM go_term WHERE ontology_snapshot_id = ANY(:snap_ids)"
-        ),
+        text("SELECT id, go_id, aspect FROM go_term WHERE ontology_snapshot_id = ANY(:snap_ids)"),
         {"snap_ids": [str(s) for s in map_snapshots]},
     ).fetchall()
     go_id_map: dict[Any, str] = {row_id: go_id for row_id, go_id, _ in union_rows}
-    aspect_map: dict[Any, str] = {
-        row_id: aspect for row_id, _, aspect in union_rows if aspect
-    }
+    aspect_map: dict[Any, str] = {row_id: aspect for row_id, _, aspect in union_rows if aspect}
     pivot_rows = session.execute(
         text(
-            "SELECT go_id FROM go_term "
-            "WHERE ontology_snapshot_id = :snap_id AND aspect IS NOT NULL"
+            "SELECT go_id FROM go_term WHERE ontology_snapshot_id = :snap_id AND aspect IS NOT NULL"
         ),
         {"snap_id": ontology_snapshot_id},
     ).fetchall()
@@ -359,9 +347,7 @@ class _TrainSplitOutcome(NamedTuple):
     skipped: bool
 
 
-def _build_skipped_outcome(
-    v_old: int, v_new: int, reason: str
-) -> _TrainSplitOutcome:
+def _build_skipped_outcome(v_old: int, v_new: int, reason: str) -> _TrainSplitOutcome:
     """Build the outcome shape for a skipped training-split iteration."""
     return _TrainSplitOutcome(
         split_files={},
@@ -394,6 +380,27 @@ class _DumpRequest(NamedTuple):
     ontology_snapshot_id: uuid.UUID
 
 
+def _dump_family_provenance(p: Any) -> tuple[Any, ...]:
+    """Per-family production status for this dump (ADR-D45).
+
+    The three LAFA families are produced only when the matching ``compute_*``
+    export flag wired their producer; otherwise they ship ``NaN`` (declared
+    absent). Recording which is which keeps the manifest honest and tells the
+    shard-write degeneracy check which families to enforce.
+    """
+    from protea.core.training_dump._export_features import (
+        ExportParityFlags,
+        build_lafa_family_provenance,
+    )
+
+    flags = ExportParityFlags(
+        self_prior=bool(getattr(p, "compute_self_prior", False)),
+        association=bool(getattr(p, "compute_association", False)),
+        classifier=bool(getattr(p, "compute_classifier", False)),
+    )
+    return build_lafa_family_provenance(flags)
+
+
 def _perform_dataset_dump(
     request: _DumpRequest,
     dump_fn: Callable[[Any], dict[str, Any]],
@@ -402,16 +409,12 @@ def _perform_dataset_dump(
 ) -> OperationResult:
     """Run the frozen-parquet dump and shape the success ``OperationResult``.
 
-    Raises ``ValueError`` when ``payload.dump_to`` is unset because the
-    legacy in-process LightGBM training path was moved to
-    ``protea-reranker-lab``; every caller must now target a dump path
-    (``ExportResearchDatasetOperation`` always does).
-
-    ``dump_fn`` is the (caller-owned) shim around
-    ``export_reranker_parquets`` -- typically
-    ``TrainRerankerAutoOperation._dump_frozen_dataset``. Passing it in
-    lets the helper stay free of the ``ParquetExportContext`` import
-    at module-load time.
+    Raises ``ValueError`` when ``payload.dump_to`` is unset because the legacy
+    in-process LightGBM training path moved to ``protea-reranker-lab``; every
+    caller must now target a dump path. ``dump_fn`` is the caller-owned shim
+    around ``export_reranker_parquets`` (typically
+    ``TrainRerankerAutoOperation._dump_frozen_dataset``), passed in so this
+    helper stays free of the ``ParquetExportContext`` import at module load.
     """
     p = request.payload
     if not p.dump_to:
@@ -442,6 +445,7 @@ def _perform_dataset_dump(
             store=None,
             producer_version=_protea_version,
             producer_git_sha=resolve_protea_git_sha(),
+            feature_family_provenance=_dump_family_provenance(p),
         )
     )
     emit("dump_helper.dump_done", None, dump_stats, "info")

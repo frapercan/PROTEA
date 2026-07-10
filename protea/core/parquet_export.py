@@ -59,6 +59,30 @@ def _registry_feature_names() -> list[str]:
     return _FEATURE_REGISTRY.names()
 
 
+def _produced_family_columns(
+    provenance: tuple[FamilyProvenance, ...],
+) -> dict[str, list[str]]:
+    """Map each ``produced`` family to its registered feature columns (ADR-D45).
+
+    Only families the export recorded as ``produced`` are returned; the
+    shard-write degeneracy check iterates this map so a ``declared_absent``
+    family (legitimately constant NaN) is never checked. Columns are filtered to
+    the canonical registry so a family whose columns are not in this dump's
+    schema contributes nothing.
+    """
+    from protea_contracts import FEATURE_FAMILIES
+
+    names = set(_registry_feature_names())
+    out: dict[str, list[str]] = {}
+    for fp in provenance:
+        if fp.state != PRODUCED:
+            continue
+        cols = [c for c in FEATURE_FAMILIES.get(fp.family, ()) if c in names]
+        if cols:
+            out[fp.family] = cols
+    return out
+
+
 _ASPECT_NAMES = {"P": "bpo", "F": "mfo", "C": "cco"}
 _CATEGORIES = ("nk", "lk", "pk")
 
@@ -77,6 +101,32 @@ _RESERVED_COLUMNS = [
     "category",
     "snapshot_pair",
 ]
+
+#: Feature-family provenance states (ADR-D45).
+PRODUCED = "produced"
+DECLARED_ABSENT = "declared_absent"
+
+
+class FamilyProvenance(NamedTuple):
+    """Per-family production status recorded in the dataset manifest (ADR-D45).
+
+    A feature family is in exactly one of two recorded states for a given
+    export:
+
+    * ``produced``: a producer ran and wrote real values; ``producer`` names it.
+    * ``declared_absent``: no producer is wired, so the family's columns ship as
+      ``NaN`` (a missing measurement). ``producer`` is ``None``.
+
+    Recording the absence here lets a reader learn it from metadata instead of
+    inferring it from a column of zeros, and lets the shard-write degeneracy
+    check (:func:`_assert_no_degenerate_families`) skip the declared-absent
+    families while still failing loudly on a family that CLAIMS production yet
+    ships a constant column.
+    """
+
+    family: str
+    state: str
+    producer: str | None
 
 
 @dataclass(frozen=True)
@@ -110,6 +160,13 @@ class ParquetExportContext:
     producer_version: str | None = None
     producer_git_sha: str | None = None
     validate_with_contracts: bool = True
+
+    # ADR-D45: per-family production status. Families marked ``produced`` are
+    # subject to the shard-write degeneracy check; families marked
+    # ``declared_absent`` are exempt (their columns are legitimately constant
+    # NaN). Both are recorded in the manifest. Empty () keeps the legacy
+    # behaviour: no family is degeneracy-checked and no provenance is written.
+    feature_family_provenance: tuple[FamilyProvenance, ...] = ()
 
 
 def resolve_protea_git_sha() -> str | None:
@@ -185,8 +242,13 @@ def export_reranker_parquets(ctx: ParquetExportContext) -> dict[str, Any]:
     eval_path = ctx.stage_dir / "eval.parquet"
     manifest_path = ctx.stage_dir / "manifest.json"
 
-    n_train_rows, train_snapshot_pairs = _stream_train_shards(ctx, aspect_norm, train_path)
-    n_eval_rows = _stream_eval_shards(ctx, eval_pair, aspect_norm, eval_path)
+    produced_family_columns = _produced_family_columns(ctx.feature_family_provenance)
+    n_train_rows, train_snapshot_pairs = _stream_train_shards(
+        ctx, aspect_norm, train_path, produced_family_columns
+    )
+    n_eval_rows = _stream_eval_shards(
+        ctx, eval_pair, aspect_norm, eval_path, produced_family_columns
+    )
 
     metrics = _ExportMetrics(
         n_train_rows=n_train_rows,
@@ -232,6 +294,14 @@ def _build_and_write_manifest(
         "producer_version": ctx.producer_version,
         "producer_git_sha": ctx.producer_git_sha,
     }
+    if ctx.feature_family_provenance:
+        # ADR-D45: record which feature families a producer wrote and which are
+        # declared absent (columns ship NaN). ManifestV1 ignores extra keys, so
+        # this rides the existing manifest without a lab-contract bump.
+        manifest["feature_family_provenance"] = [
+            {"family": fp.family, "state": fp.state, "producer": fp.producer}
+            for fp in ctx.feature_family_provenance
+        ]
     if ctx.validate_with_contracts:
         _validate_manifest_with_contracts(manifest)
     manifest_path.write_text(json.dumps(manifest, indent=2))
@@ -282,12 +352,27 @@ class _SplitWriter:
     resident, replacing the ``pd.concat`` of the whole split.
     """
 
-    def __init__(self, out_path: Path, split_name: str, aspect_norm: dict[str, str]) -> None:
+    def __init__(
+        self,
+        out_path: Path,
+        split_name: str,
+        aspect_norm: dict[str, str],
+        produced_family_columns: dict[str, list[str]] | None = None,
+    ) -> None:
         self._out_path = out_path
         self._split_name = split_name
         self._aspect_norm = aspect_norm
         self._writer: pq.ParquetWriter | None = None
         self.n_rows = 0
+        # ADR-D45 degeneracy tracking: per produced-family column, up to two
+        # distinct values seen across all batches (capped, so memory is O(1)).
+        # A produced family whose every column ends with <= 1 distinct value is
+        # constant across the whole split, which means its producer did not run.
+        self._produced_family_columns = produced_family_columns or {}
+        self._checked_columns: list[str] = sorted(
+            {c for cols in self._produced_family_columns.values() for c in cols}
+        )
+        self._distinct: dict[str, set[Any]] = {c: set() for c in self._checked_columns}
 
     def write_shard(self, shard_path: Path, cat: str, snap_pair: str) -> None:
         """Stream one shard into the split, batch by batch."""
@@ -297,6 +382,7 @@ class _SplitWriter:
             if pdf.empty:
                 continue
             _assert_canonical_columns(self._split_name, pdf, _RESERVED_COLUMNS)
+            self._track_produced_family_values(pdf)
             table = pa.Table.from_pandas(pdf, preserve_index=False)
             if self._writer is None:
                 self._writer = pq.ParquetWriter(
@@ -305,13 +391,37 @@ class _SplitWriter:
             self._writer.write_table(table)
             self.n_rows += len(pdf)
 
+    def _track_produced_family_values(self, pdf: pd.DataFrame) -> None:
+        """Accumulate up to two distinct values per checked column for the batch."""
+        for col in self._checked_columns:
+            seen = self._distinct[col]
+            if len(seen) > 1 or col not in pdf.columns:
+                continue
+            for val in pdf[col].unique():
+                # Collapse every NaN to one sentinel so an all-missing column
+                # reads as a single distinct value (constant), not many.
+                seen.add(_DEGENERATE_NAN if pd.isna(val) else val)
+                if len(seen) > 1:
+                    break
+
     def close(self) -> None:
         if self._writer is not None:
             self._writer.close()
 
+    def assert_no_degenerate_families(self) -> None:
+        """Fail if any produced family stayed constant across the whole split."""
+        if self.n_rows == 0:
+            return
+        _assert_no_degenerate_families(
+            self._split_name, self._distinct, self._produced_family_columns
+        )
+
 
 def _stream_train_shards(
-    ctx: ParquetExportContext, aspect_norm: dict[str, str], out_path: Path
+    ctx: ParquetExportContext,
+    aspect_norm: dict[str, str],
+    out_path: Path,
+    produced_family_columns: dict[str, list[str]],
 ) -> tuple[int, list[str]]:
     """Stream every per-cat training shard into ``out_path``.
 
@@ -322,7 +432,7 @@ def _stream_train_shards(
     insertion order. No file is written when no shard yields a row,
     preserving the legacy empty-split behaviour.
     """
-    writer = _SplitWriter(out_path, "train", aspect_norm)
+    writer = _SplitWriter(out_path, "train", aspect_norm, produced_family_columns)
     snapshot_pairs: list[str] = []
     try:
         for cat in _CATEGORIES:
@@ -335,6 +445,9 @@ def _stream_train_shards(
                 writer.write_shard(shard_path, cat, snap_pair)
     finally:
         writer.close()
+    # ADR-D45: only on the success path, after a clean close, so a genuine
+    # write error is never masked by the degeneracy assertion.
+    writer.assert_no_degenerate_families()
     return writer.n_rows, snapshot_pairs
 
 
@@ -343,13 +456,14 @@ def _stream_eval_shards(
     eval_pair: str,
     aspect_norm: dict[str, str],
     out_path: Path,
+    produced_family_columns: dict[str, list[str]],
 ) -> int:
     """Stream every per-cat test shard into ``out_path``. Returns row count.
 
     Streaming twin of the legacy ``_load_eval_shards`` concat path; one
     batch resident at a time, no file written when there are no rows.
     """
-    writer = _SplitWriter(out_path, "eval", aspect_norm)
+    writer = _SplitWriter(out_path, "eval", aspect_norm, produced_family_columns)
     try:
         for cat in _CATEGORIES:
             path = ctx.test_files.get(cat)
@@ -358,7 +472,47 @@ def _stream_eval_shards(
             writer.write_shard(path, cat, eval_pair)
     finally:
         writer.close()
+    writer.assert_no_degenerate_families()
     return writer.n_rows
+
+
+#: Sentinel every NaN collapses to while tracking distinct values, so an
+#: all-missing column reads as one distinct value (constant), not many.
+_DEGENERATE_NAN = "__nan__"
+
+
+def _assert_no_degenerate_families(
+    split_name: str,
+    distinct: dict[str, set[Any]],
+    produced_family_columns: dict[str, list[str]],
+) -> None:
+    """ADR-D45 boundary check: a family recorded as ``produced`` must vary.
+
+    For every family the export declared PRODUCED, if every one of its columns
+    is constant across the whole split (a single distinct value, including the
+    all-NaN case), raise: a claimed producer that ships a constant column did
+    not actually run. Families recorded ``declared_absent`` are not in
+    ``produced_family_columns`` so their legitimately-constant NaN columns are
+    never flagged. The error names the family, the constant value per column,
+    and the split.
+    """
+    for family, cols in produced_family_columns.items():
+        present = [c for c in cols if c in distinct]
+        if not present or any(len(distinct[c]) > 1 for c in present):
+            continue
+        constant_values = {
+            c: (None if _DEGENERATE_NAN in distinct[c] else next(iter(distinct[c]), None))
+            for c in present
+        }
+        raise ValueError(
+            f"{split_name!r} split: feature family {family!r} is recorded as "
+            f"produced but every column is constant across the shard "
+            f"(constant_values={constant_values!r}). A produced family must vary "
+            "across the dataset; an all-constant family means its producer did "
+            "not run over these records. If the producer is intentionally "
+            "unwired, record the family as declared-absent in the export "
+            "provenance instead of shipping a constant column (ADR-D45)."
+        )
 
 
 def _assert_canonical_columns(split_name: str, shard: pd.DataFrame, reserved: list[str]) -> None:
