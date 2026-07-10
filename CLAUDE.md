@@ -53,8 +53,9 @@ bash scripts/expose.sh
 # Initialize the database schema (first time or after DB reset)
 poetry run python scripts/init_db.py
 
-# Execute a queued job manually by UUID
-poetry run python scripts/run_one_job.py <job_id_uuid>
+# Dispatch a job (POST /jobs with {operation, payload}) and run a worker to
+# consume it from its queue
+poetry run python scripts/worker.py --queue protea.jobs
 
 # Apply Alembic migrations
 alembic upgrade head

@@ -620,8 +620,8 @@ Implementation reference
 
    - :doc:`/results`: the actual numbers obtained on the GOA 220 → 229
      temporal holdout following this protocol.
-   - :doc:`/appendix/reproduction_guide`: the full ordered command sequence
-     to regenerate every figure end-to-end.
+   - :doc:`/operate/reproduce-0.4063`: the ordered path that reproduces the
+     sealed board.
    - :doc:`operations`: the ``generate_evaluation_set`` and
      ``run_cafa_evaluation`` operations that implement the protocol live.
      Booster training has moved out-of-tree to ``protea-reranker-lab``

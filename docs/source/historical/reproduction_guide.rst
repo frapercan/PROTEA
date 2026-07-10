@@ -1,5 +1,19 @@
-Reproduction guide
-==================
+Reproduction guide (superseded, retained for provenance)
+========================================================
+
+.. admonition:: Superseded frame and dead endpoint, retained for provenance only (dated 2026-07-10)
+   :class: danger
+
+   This guide reproduces the abandoned pre-v227 Fmax board (GOA 220 to 229,
+   ESM-C 300M, the lgbm_v1/v2/v3 progression), not the sealed result. It also
+   drives ``POST /scoring/rerankers/train``, an endpoint that no longer
+   exists: re-ranker training moved to the ``protea-reranker-lab`` sibling
+   repository, and boosters are registered through
+   ``POST /reranker-models/import``. The page is kept only so the older
+   procedure remains traceable. For the current path see
+   :doc:`/operate/reproduce-0.4063`; for the sealed board see :doc:`/results`;
+   for the protocol see :doc:`/architecture/evaluation`.
+
 
 .. admonition:: Audience and scope
    :class: tip
@@ -7,7 +21,7 @@ Reproduction guide
    **Read this if:** you want to reproduce the full thesis evaluation
    end-to-end against the GOA 220 → 229 temporal holdout.
 
-   **Read** :doc:`howto_guides` **instead if:** you have one specific task to
+   **Read** :doc:`/appendix/howto_guides` **instead if:** you have one specific task to
    accomplish (load an ontology, upload a FASTA, predict GO terms for your
    own proteins, scale a worker). The how-to is recipe-style and stops at the
    step you need; this guide is a single ordered procedure that runs every
@@ -87,7 +101,7 @@ Reproduction guide
    doc-writer roadmap.
 
 This appendix documents the exact sequence of steps required to reproduce the
-experimental results reported in :doc:`../results`. The target is a fresh
+experimental results reported in :doc:`/results`. The target is a fresh
 PROTEA installation against the GOA 220 → 229 temporal holdout, covering all
 nine experiments: the ``k`` sweep, the aspect-separated KNN ablation, the five
 heuristic scoring configurations, the three re-ranker iterations
@@ -201,7 +215,7 @@ Step 1.3: Generate the NK/LK/PK evaluation set
      | jq -r '.[0].id')
 
 The operation implements the CAFA5 protocol described in
-:doc:`../architecture/evaluation`: NOT-propagation through the GO DAG,
+:doc:`/architecture/evaluation`: NOT-propagation through the GO DAG,
 experimental evidence filtering, and per-namespace classification. The
 summary counts stored on the ``EvaluationSet`` row should match the numbers
 reported in Infrastructure above.
@@ -347,7 +361,7 @@ includes alignment and taxonomy features. Generate it once:
      | jq -r '.[0].id')
 
 The resulting prediction set populates the 20 numeric and 3 categorical
-feature columns documented in :doc:`../reference/core` and is reused by
+feature columns documented in :doc:`/reference/core` and is reused by
 Stage 3, Stage 4, and Stage 5.
 
 Seed the scoring configuration presets and evaluate each one:
@@ -504,7 +518,7 @@ Score and evaluate the enriched prediction set with each ``lgbm_v3`` model:
 
 Expected result: ``lgbm_v3`` outperforms the ``alignment_weighted``
 heuristic in 7 of the 9 evaluation cells and is the best global
-configuration reported in :doc:`../results`.
+configuration reported in :doc:`/results`.
 
 Stage 5: External tool benchmarks
 ----------------------------------
@@ -579,7 +593,7 @@ Checklist
 ---------
 
 The nine experiments above fully reproduce the figures and tables in
-:doc:`../results`:
+:doc:`/results`:
 
 1. Experiment 1: ``k`` sweep (``k ∈ {5, 10, 20, 50}``)
 2. Experiment 2: ``aspect_separated_knn`` ablation

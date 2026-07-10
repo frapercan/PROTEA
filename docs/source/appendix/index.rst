@@ -3,7 +3,8 @@ Appendix
 
 Operational material that complements the architecture and reference
 sections: how to install PROTEA, how to configure it, recipes for common
-tasks, the script to reproduce the thesis results, and the on-call runbook.
+tasks, and the on-call runbook. For reproducing the sealed board see
+:doc:`/operate/reproduce-0.4063`.
 
 :doc:`stack`
    The eight repositories that make up the PROTEA stack: the platform,
@@ -24,11 +25,6 @@ tasks, the script to reproduce the thesis results, and the on-call runbook.
    set, compute embeddings, predict GO terms, scale workers) with the exact
    ``curl`` and ``manage.sh`` commands. Read this when you have one specific
    thing to accomplish.
-
-:doc:`reproduction_guide`
-   The full, ordered procedure that regenerates every figure and table in the
-   :doc:`/results` chapter from a clean database. Read this when you want to
-   reproduce the thesis evaluation end-to-end.
 
 :doc:`runbook`
    On-call procedures: diagnosing stuck jobs, draining queues, recovering
@@ -52,7 +48,6 @@ tasks, the script to reproduce the thesis results, and the on-call runbook.
    installation_and_quickstart
    configuration
    howto_guides
-   reproduction_guide
    runbook
    monitoring
    secrets

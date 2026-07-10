@@ -12,8 +12,8 @@ How-to Guides
    ontology, upload a FASTA, train a re-ranker, scale a worker) and you
    want the shortest path from a clean stack to a finished job.
 
-   **Read** :doc:`reproduction_guide` **instead if:** you want to regenerate
-   every figure and table in :doc:`/results` end-to-end.
+   **Read** :doc:`/operate/reproduce-0.4063` **instead if:** you want the
+   ordered path that reproduces the sealed board in :doc:`/results`.
 
 Submit a job via the API
 ------------------------
