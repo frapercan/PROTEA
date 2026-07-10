@@ -55,7 +55,7 @@ on the same queue; the worker claims the one queued job, runs it, then idles:
    poetry run scalene `--cpu` `--gpu` `--memory` \\
        scripts/worker.py `--queue` protea.training
 
-Once the job reaches ``SUCCEEDED`` (poll ``GET /jobs/<job-uuid>`` or read the
+Once the job reaches ``SUCCEEDED`` (poll ``GET /jobs/{job_id}`` or read the
 JobEvent log above), stop the worker with ``Ctrl+C``. It logs
 ``Worker stopped.`` and exits cleanly, so scalene writes its HTML report to
 the current directory. Because the worker is a continuous consumer, the
