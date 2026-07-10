@@ -60,8 +60,9 @@ metadata enrichment, and job orchestration.
       :shadow: md
       :text-align: left
 
-      :bdg-danger:`Evaluation` Benchmark numbers, ablation studies, the
-      re-ranker training pipeline, and the figures that back the thesis.
+      :bdg-danger:`Evidence` The sealed board on the leakage-free temporal
+      frame, with the metric definition, scoring recipe, and reproduction
+      path cross-referenced from one home.
 
 .. raw:: html
 
@@ -71,9 +72,13 @@ metadata enrichment, and job orchestration.
    :class: tip
 
    A platform for protein functional annotation: from sequence ingestion through
-   GPU embedding computation (ESM-2, ESM-C, T5/ProstT5, Ankh) and KNN-based GO
-   term prediction to CAFA evaluation and LightGBM re-ranking, with clean
-   separation of infrastructure, execution flow, and domain logic.
+   GPU embedding computation (ESM-2, ESM-C, T5/ProstT5, Ankh), a learned k-WTA
+   retrieval encoder, KNN candidate generation, and a stacked per-category
+   re-ranker, to board-faithful CAFA evaluation, with clean separation of
+   infrastructure, execution flow, and domain logic.
+
+   New here? Start with the :doc:`quickstart <appendix/installation_and_quickstart>`,
+   then read the sealed board and its evidence in :doc:`results`.
 
 .. toctree::
    :caption: Documentation
@@ -86,6 +91,7 @@ metadata enrichment, and job orchestration.
    complexity/index
    guides/plugin-authoring/index
    results
+   operate/reproduce-0.4063
    appendix/index
    runbooks/index
    quality/index
@@ -99,3 +105,10 @@ metadata enrichment, and job orchestration.
    :hidden:
 
    reference/index
+
+.. toctree::
+   :caption: Historical (superseded)
+   :maxdepth: 1
+   :hidden:
+
+   historical/index

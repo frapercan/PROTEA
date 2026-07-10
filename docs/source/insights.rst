@@ -19,8 +19,8 @@ that closed each issue.
 
 .. seealso::
 
-   - :doc:`/appendix/reproduction_guide` for the ordered procedure that
-     regenerates every figure from a clean database.
+   - :doc:`/operate/reproduce-0.4063` for the ordered path that reproduces
+     the sealed board.
    - :doc:`/adr/index` for the full decision log.
    - :doc:`/runbooks/index` for on-call operational procedures.
 
@@ -439,5 +439,5 @@ aggregate across multiple snapshot pairs). The ``EvaluationSet`` row in PROTEA
 captures (1), (2), (3), and (4). The training dataset manifest captures the
 snapshot pair list. Cross-checking that the eval snapshot pair does not
 overlap with any training pair is enforced by the ``export_research_dataset``
-payload validator. See :doc:`/appendix/reproduction_guide` for the full
-ordered procedure.
+payload validator. See :doc:`/operate/reproduce-0.4063` for the ordered
+reproduction path.
