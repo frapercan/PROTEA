@@ -4,6 +4,7 @@
     "description": "蛋白质数据平台 — 任务队列与流水线管理"
   },
   "nav": {
+    "featureRegistry": "特征登记表",
     "proteins": "蛋白质",
     "annotations": "GO 注释",
     "querySets": "查询集",
@@ -1821,6 +1822,36 @@
       "title": "该预测集不存在",
       "body": "没有与此 id 匹配的预测集。它可能已被删除，或 id 有误。",
       "back": "返回预测集列表"
+    }
+  },
+  "featureRegistry": {
+    "title": "特征登记表",
+    "subtitle": "每个重排器特征都只有一份规范说明，文档、论文和本页面共用同一来源。你可以在此了解每个特征的含义、由谁产生，以及在默认导出中是否带有真实值。",
+    "provenance": "来源于 protea-contracts {version}。共 {total} 个特征，分属 {families} 个族。",
+    "legendHeading": "状态标记的含义",
+    "countSuffix": "{count} 个处于此状态",
+    "familyCount": "{count} 个特征",
+    "producerLabel": "产生者",
+    "rangeLabel": "取值范围",
+    "notApplicable": "不适用",
+    "caveatLabel": "注意",
+    "status": {
+      "PRODUCED": {
+        "label": "已产生",
+        "help": "在默认导出中填入了真实值。"
+      },
+      "DECLARED_ABSENT": {
+        "label": "声明缺失",
+        "help": "默认导出未填充该列，因为其产生者未接入导出路径（ADR-D45）。你在原始导出中看到的值并不是模型的信号。"
+      },
+      "POOL_INJECTED": {
+        "label": "池阶段注入",
+        "help": "由实验室的多清单池化加载器在池化阶段写入。它不会出现在原始 parquet 导出中。"
+      },
+      "BROKEN": {
+        "label": "损坏",
+        "help": "产生者已接入，但其数据源为空或有误，因此该列不携带信号。"
+      }
     }
   }
 }

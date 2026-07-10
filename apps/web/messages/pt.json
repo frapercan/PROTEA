@@ -4,6 +4,7 @@
     "description": "Plataforma de dados proteicos — fila de jobs e gestão de pipelines"
   },
   "nav": {
+    "featureRegistry": "Registro de features",
     "proteins": "Proteínas",
     "annotations": "Anotações GO",
     "querySets": "Query Sets",
@@ -1822,6 +1823,36 @@
       "title": "Este conjunto de predições não existe",
       "body": "Nenhum conjunto de predições corresponde a este id. Pode ter sido eliminado, ou o id está errado.",
       "back": "Voltar aos conjuntos de predições"
+    }
+  },
+  "featureRegistry": {
+    "title": "Registro de features",
+    "subtitle": "Cada feature do reranker tem uma única descrição canônica, partilhada pela documentação, pela tese e por esta página. Aqui podes ler o que cada feature significa, quem a produz e se carrega um valor real na exportação padrão.",
+    "provenance": "Obtido de protea-contracts {version}. {total} features em {families} famílias.",
+    "legendHeading": "O que significam os selos de estado",
+    "countSuffix": "{count} neste estado",
+    "familyCount": "{count} features",
+    "producerLabel": "Produtor",
+    "rangeLabel": "Intervalo",
+    "notApplicable": "n/d",
+    "caveatLabel": "Ressalva",
+    "status": {
+      "PRODUCED": {
+        "label": "produzida",
+        "help": "Preenchida com um valor real na exportação padrão."
+      },
+      "DECLARED_ABSENT": {
+        "label": "declarada ausente",
+        "help": "A exportação padrão deixa-a por preencher porque o seu produtor não está ligado ao caminho de exportação (ADR-D45). O valor que vês num despejo em bruto não é o sinal do modelo."
+      },
+      "POOL_INJECTED": {
+        "label": "injetada no pool",
+        "help": "Carimbada pelo carregador multimanifesto do laboratório na fase de pool. Não aparece num despejo parquet em bruto."
+      },
+      "BROKEN": {
+        "label": "quebrada",
+        "help": "O produtor está ligado mas a sua fonte de dados está vazia ou defeituosa, por isso a coluna não carrega sinal."
+      }
     }
   }
 }

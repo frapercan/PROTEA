@@ -4,6 +4,7 @@
     "description": "Proteindatenplattform — Job-Warteschlange und Pipeline-Verwaltung"
   },
   "nav": {
+    "featureRegistry": "Feature-Register",
     "proteins": "Proteine",
     "annotations": "GO-Annotationen",
     "querySets": "Query-Sets",
@@ -1822,6 +1823,36 @@
       "title": "Dieses Vorhersageset existiert nicht",
       "body": "Kein Vorhersageset passt zu dieser id. Es wurde möglicherweise gelöscht, oder die id ist falsch.",
       "back": "Zurück zu den Vorhersagesets"
+    }
+  },
+  "featureRegistry": {
+    "title": "Feature-Register",
+    "subtitle": "Jedes Reranker-Feature hat eine einzige kanonische Beschreibung, die von der Dokumentation, der Dissertation und dieser Seite gemeinsam genutzt wird. Hier steht, was jedes Feature bedeutet, wer es erzeugt und ob es im Standard-Export einen echten Wert trägt.",
+    "provenance": "Bezogen aus protea-contracts {version}. {total} Features in {families} Familien.",
+    "legendHeading": "Was die Status-Kennzeichen bedeuten",
+    "countSuffix": "{count} in diesem Zustand",
+    "familyCount": "{count} Features",
+    "producerLabel": "Erzeuger",
+    "rangeLabel": "Bereich",
+    "notApplicable": "k. A.",
+    "caveatLabel": "Hinweis",
+    "status": {
+      "PRODUCED": {
+        "label": "erzeugt",
+        "help": "Im Standard-Export mit einem echten Wert gefüllt."
+      },
+      "DECLARED_ABSENT": {
+        "label": "als fehlend deklariert",
+        "help": "Vom Standard-Export nicht gefüllt, weil sein Erzeuger nicht in den Export-Pfad eingebunden ist (ADR-D45). Der Wert in einem Rohdaten-Dump ist nicht das Signal des Modells."
+      },
+      "POOL_INJECTED": {
+        "label": "im Pool eingefügt",
+        "help": "Vom gepoolten Multi-Manifest-Loader des Labors in der Pool-Phase gesetzt. Er erscheint nicht in einem rohen Parquet-Dump."
+      },
+      "BROKEN": {
+        "label": "defekt",
+        "help": "Der Erzeuger ist eingebunden, aber seine Datenquelle ist leer oder fehlerhaft, sodass die Spalte kein Signal trägt."
+      }
     }
   }
 }

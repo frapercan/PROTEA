@@ -16,6 +16,7 @@ import {
   Tags,
   Sliders,
   ArrowUpDown,
+  ListTree,
   Dna,
   Tag,
   FolderOpen,
@@ -283,6 +284,7 @@ export function Sidebar({
         { href: "/scoring", label: t("scoring"), hint: "Combine distance, alignment, taxonomy, evidence", badge: "LAB", icon: Sliders },
         { href: "/reranker", label: t("reranker"), hint: "LightGBM reranker over scored predictions", badge: "LAB", icon: ArrowUpDown },
         { href: "/datasets", label: t("datasets"), hint: "Frozen reranker dumps and export dispatcher", icon: Archive },
+        { href: "/feature-registry", label: t("featureRegistry"), hint: "What every reranker feature means, who produces it, and whether it is live", icon: ListTree },
       ],
     },
     {
