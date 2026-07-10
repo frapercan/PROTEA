@@ -2,6 +2,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.abspath('../..'))
+sys.path.insert(0, os.path.abspath('_ext'))
 
 project = 'PROTEA'
 copyright = '2025, frapercan'
@@ -14,6 +15,7 @@ extensions = [
     'sphinx_copybutton',
     'sphinx_design',
     'sphinxcontrib.bibtex',
+    'feature_docs_table',
 ]
 
 # sphinxcontrib-bibtex configuration
