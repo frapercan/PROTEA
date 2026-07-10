@@ -196,8 +196,16 @@ def test_compute_score_invariant_to_uniform_weight_scaling(
     Edge case: when every weight is 0, scaling is also 0 and the function
     short-circuits to 0.0 regardless. ``assume`` discards those draws so we
     only exercise the actual invariant.
+
+    The floor on the largest weight is load-bearing. A weighted average is
+    scale-invariant in exact arithmetic, not in floating point: with every
+    weight near the smallest subnormal (5e-324), a product ``w * signal``
+    underflows to zero while the same product under a scale of 2.0 does not,
+    so the numerator moves and the denominator does not. That is a property of
+    IEEE 754, not of ``compute_score``, and weights that small are outside any
+    configuration the system can express.
     """
-    assume(any(w > 0.0 for w in weights.values()))
+    assume(max(weights.values()) > 1e-9)
     cfg_a = _config(weights, formula=FORMULA_LINEAR)
     scaled = {k: v * scale for k, v in weights.items()}
     cfg_b = _config(scaled, formula=FORMULA_LINEAR)
