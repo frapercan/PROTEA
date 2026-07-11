@@ -84,6 +84,7 @@ metadata enrichment, and job orchestration.
    :caption: Documentation
    :maxdepth: 2
 
+   overview
    abstract
    introduction
    related_work
