@@ -441,3 +441,51 @@ snapshot pair list. Cross-checking that the eval snapshot pair does not
 overlap with any training pair is enforced by the ``export_research_dataset``
 payload validator. See :doc:`/operate/reproduce-0.4063` for the ordered
 reproduction path.
+
+The served last layer is a weak retrieval base, and standardisation is the lever
+--------------------------------------------------------------------------------
+
+PROTEA's retrieval encoder stores learned, GO-aligned codes rather than a raw
+protein-language-model vector. A controlled ablation on the ankh-base substrate
+motivates that choice, and its lesson is not the one a reader expects.
+
+**The finding.**
+Scored board-faithfully (cosine top-30 KNN GO transfer into the 15,000-protein
+reference, ``f_micro_w`` over the nine cells), the learned k-WTA encoder
+``d8979601`` reaches mean 0.21500, versus 0.14597 for the best fixed
+representation (a standardised mid layer, L10, k-WTA) and 0.13356 for the served
+last-layer dense baseline. That is plus 47.3 percent over the best fixed choice
+and plus 61.0 percent over the served baseline, winning all nine cells, with the
+largest gains on molecular function.
+
+**Why the last layer is a poor base.**
+Mean-pooled activations of ankh-base's final layer are compressed to a peak
+absolute value near 0.6 by the model's closing LayerNorm, while the mid layers
+reach magnitudes above 400,000. The final layer's flattened geometry is a weak
+substrate for cosine retrieval, which is one reason the served last layer sat at
+the bottom of the ranking.
+
+**The lever is standardisation, not depth.**
+Among fixed representations the dominant lever is per-dimension standardisation
+(z-score, statistics fit on the reference pool only, non-transductive), not the
+index of the layer. Choosing a different raw layer does not beat the served base;
+standardising a mid layer does. A rerun at the champion's declared 100,000
+protein pool confirms this at scale with high significance: a standardised L10
+beats both the raw L10 and the served last layer, while the raw layer choice is
+statistically null. The same rerun shows that training-pool size, the
+hard-negative objective, and a learned multi-layer mixture are all null in this
+harness, so standardisation is the single lever the fixed-representation family
+exposes.
+
+**The honest caveat.**
+A controlled re-training of the encoder inside the offline lab harness reaches
+only the fixed-representation band (about 0.14 to 0.16) and does not reproduce
+the served encoder's 0.215 on the same reference. The served encoder's advantage
+therefore reflects its full production training procedure, which the lab harness
+does not yet replicate. That is an open question, not a settled attribution to
+the base or the objective. These are all KNN-only retrieval numbers and are
+distinct from the sealed 0.4063 reranked board in :doc:`results`; they explain
+why the champion stores learned GO-aligned codes. See
+:doc:`/adr/D35-canonical-8plm-embedding-configs` for the embedding config
+registry and :doc:`/adr/D38-neural-head-deferred-dataset-pack-pivot` for the
+neural-head decision this evidence informs.
