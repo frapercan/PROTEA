@@ -43,6 +43,7 @@ from protea.infrastructure.session import session_scope
 from protea.services.scoring_service import (
     BoosterUnavailableError,
     EntityNotFoundError,
+    RerankedPairResponse,
     RerankerResponse,
     ScoringConfigCreate,
     ScoringConfigResponse,
@@ -59,6 +60,7 @@ from protea.services.scoring_service import (
     list_scoring_configs_data,
     prepare_training_data_request,
     score_predictions_with_reranker,
+    score_single_pair_with_reranker,
     to_reranker_response,
     validate_scoring_request,
 )
@@ -408,6 +410,44 @@ def download_reranked_predictions(
         media_type="text/tab-separated-values",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get(
+    "/prediction-sets/{set_id}/score",
+    response_model=RerankedPairResponse,
+    summary="Reranked score for a single (accession, GO term) pair",
+)
+def get_reranked_pair_score(
+    set_id: uuid.UUID,
+    reranker_id: uuid.UUID = Query(..., description="UUID of the trained RerankerModel to apply"),
+    accession: str = Query(..., description="Query protein accession to look up"),
+    go_term: str = Query(..., description="GO term ID (e.g. ``GO:0003674``) to look up"),
+    factory=Depends(get_session_factory),
+) -> RerankedPairResponse:
+    """Return the fused/reranked probability for one prediction pair.
+
+    Backs the ``/score/:accession/:go`` UI page with the same number the
+    bulk ``rerank.tsv`` stream emits for the matching row. Internally
+    reuses :func:`score_predictions_with_reranker` (the exact function
+    behind ``rerank.tsv``) and selects the single row for this pair, so
+    the value is byte-for-byte identical to the bulk output. Returns 404
+    when the set, reranker, or the specific pair does not exist.
+    """
+    try:
+        with session_scope(factory) as session:
+            row = score_single_pair_with_reranker(
+                session,
+                prediction_set_id=set_id,
+                reranker_id=reranker_id,
+                accession=accession,
+                go_term=go_term,
+            )
+    except EntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except BoosterUnavailableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return RerankedPairResponse(**row)
 
 
 @router.get("/prediction-sets/{set_id}/reranker-metrics")

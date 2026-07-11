@@ -1528,6 +1528,93 @@
         "title": "RepoEntry",
         "type": "object"
       },
+      "RerankedPairResponse": {
+        "description": "Single ``(accession, go_term)`` reranked-score lookup result.\n\nField names and semantics mirror the ``rerank.tsv`` columns exactly\nso the value returned here is the same number the bulk stream emits\nfor the corresponding row. Produced by\n:func:`score_single_pair_with_reranker`, which reuses the identical\n:func:`score_predictions_with_reranker` scoring pass the bulk TSV\nuses and selects the one matching row.",
+        "properties": {
+          "aspect": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "GO aspect (``F`` / ``P`` / ``C``) of the term; empty when unknown.",
+            "title": "Aspect"
+          },
+          "distance": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "KNN embedding distance of the backing neighbour.",
+            "title": "Distance"
+          },
+          "evidence_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "GO evidence code of the transferred annotation.",
+            "title": "Evidence Code"
+          },
+          "go_id": {
+            "description": "GO term the score was computed for.",
+            "title": "Go Id",
+            "type": "string"
+          },
+          "protein_accession": {
+            "description": "Query protein accession the score belongs to.",
+            "title": "Protein Accession",
+            "type": "string"
+          },
+          "qualifier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "GO qualifier of the transferred annotation.",
+            "title": "Qualifier"
+          },
+          "ref_protein_accession": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Reference (neighbour) protein the annotation was transferred from.",
+            "title": "Ref Protein Accession"
+          },
+          "reranker_score": {
+            "description": "Fused/reranked probability in [0, 1] for this pair. Byte-for-byte the same value the bulk ``rerank.tsv`` produces for this row (same booster pass over the full prediction set).",
+            "title": "Reranker Score",
+            "type": "number"
+          }
+        },
+        "required": [
+          "protein_accession",
+          "go_id",
+          "reranker_score"
+        ],
+        "title": "RerankedPairResponse",
+        "type": "object"
+      },
       "RerankerModelSummary": {
         "description": "Compact view of a ``RerankerModel`` row for management responses.\n\nReturned by the activate / deactivate / delete endpoints so an\noperator can confirm which serve slot ``(category, aspect)`` was\ntouched and whether the row is the one the selector now picks.",
         "properties": {
@@ -9640,6 +9727,89 @@
           }
         },
         "summary": "Compute Reranker Metrics",
+        "tags": [
+          "scoring"
+        ]
+      }
+    },
+    "/v1/scoring/prediction-sets/{set_id}/score": {
+      "get": {
+        "description": "Return the fused/reranked probability for one prediction pair.\n\nBacks the ``/score/:accession/:go`` UI page with the same number the\nbulk ``rerank.tsv`` stream emits for the matching row. Internally\nreuses :func:`score_predictions_with_reranker` (the exact function\nbehind ``rerank.tsv``) and selects the single row for this pair, so\nthe value is byte-for-byte identical to the bulk output. Returns 404\nwhen the set, reranker, or the specific pair does not exist.",
+        "operationId": "get_reranked_pair_score_v1_scoring_prediction_sets__set_id__score_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "set_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Set Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID of the trained RerankerModel to apply",
+            "in": "query",
+            "name": "reranker_id",
+            "required": true,
+            "schema": {
+              "description": "UUID of the trained RerankerModel to apply",
+              "format": "uuid",
+              "title": "Reranker Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Query protein accession to look up",
+            "in": "query",
+            "name": "accession",
+            "required": true,
+            "schema": {
+              "description": "Query protein accession to look up",
+              "title": "Accession",
+              "type": "string"
+            }
+          },
+          {
+            "description": "GO term ID (e.g. ``GO:0003674``) to look up",
+            "in": "query",
+            "name": "go_term",
+            "required": true,
+            "schema": {
+              "description": "GO term ID (e.g. ``GO:0003674``) to look up",
+              "title": "Go Term",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RerankedPairResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reranked score for a single (accession, GO term) pair",
         "tags": [
           "scoring"
         ]

@@ -140,3 +140,62 @@ def score_predictions_with_reranker(
         ["protein_accession", "reranker_score"],
         ascending=[True, False],
     )
+
+
+def score_single_pair_with_reranker(
+    session: Session,
+    *,
+    prediction_set_id: uuid.UUID,
+    reranker_id: uuid.UUID,
+    accession: str,
+    go_term: str,
+) -> dict[str, Any]:
+    """Return the reranked score for one ``(accession, go_term)`` pair.
+
+    Reuses the exact bulk scoring pass (:func:`score_predictions_with_reranker`)
+    and selects the single matching row, guaranteeing the value is
+    byte-for-byte identical to the ``rerank.tsv`` cell for that row.
+    The booster is deliberately scored over the whole prediction set,
+    not a one-row batch, because ``predict`` applies batch-level
+    calibration (sigmoid gate keyed on the batch min/max) and
+    categorical factorisation over the inference batch; scoring a
+    single row in isolation could therefore diverge from the bulk value.
+
+    The ``(prediction_set_id, protein_accession, go_term_id)`` uniqueness
+    constraint on ``GOPrediction`` means at most one row matches.
+
+    Raises
+    ------
+    EntityNotFoundError
+        ``PredictionSet`` / ``RerankerModel`` is missing, the set has no
+        predictions, or no prediction exists for the pair.
+    BoosterUnavailableError
+        The RerankerModel row exists but no booster bytes are reachable.
+    """
+    import pandas as pd
+
+    from protea.services.scoring_service import EntityNotFoundError
+
+    df = score_predictions_with_reranker(
+        session,
+        prediction_set_id=prediction_set_id,
+        reranker_id=reranker_id,
+    )
+    if df is None or df.empty:
+        raise EntityNotFoundError("GOPrediction pair", prediction_set_id)
+
+    match = df[(df["protein_accession"] == accession) & (df["go_id"] == go_term)]
+    if match.empty:
+        raise EntityNotFoundError("GOPrediction pair", prediction_set_id)
+
+    row = match.iloc[0]
+    return {
+        "protein_accession": str(row["protein_accession"]),
+        "go_id": str(row["go_id"]),
+        "aspect": (str(row["aspect"]) or None) if row["aspect"] is not None else None,
+        "reranker_score": float(row["reranker_score"]),
+        "distance": float(row["distance"]) if pd.notna(row["distance"]) else None,
+        "ref_protein_accession": (str(row["ref_protein_accession"]) or None),
+        "evidence_code": (str(row["evidence_code"]) or None),
+        "qualifier": (str(row["qualifier"]) or None),
+    }
