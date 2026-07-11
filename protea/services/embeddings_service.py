@@ -145,6 +145,7 @@ def config_to_dict(c: EmbeddingConfig, embedding_count: int | None = None) -> di
         "pooling": c.pooling,
         "normalize_residues": c.normalize_residues,
         "normalize": c.normalize,
+        "embedding_scale": c.embedding_scale,
         "max_length": c.max_length,
         "use_chunking": c.use_chunking,
         "chunk_size": c.chunk_size,

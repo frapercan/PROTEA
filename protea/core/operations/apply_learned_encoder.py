@@ -30,6 +30,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from protea.core.contracts.operation import EmitFn, OperationResult, ProteaPayload
+from protea.core.operations._compute_embeddings_helpers import (
+    fetch_embedding_scale,
+    scale_and_clip_embedding,
+)
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 
@@ -245,6 +249,46 @@ def _ensure_target_config(session: Session, p: ApplyLearnedEncoderPayload, meta:
     return cfg.id
 
 
+def _encode_and_store_batch(
+    session: Session, apply: Any, batch: list[int],
+    src_id: uuid.UUID, target_id: uuid.UUID, target_scale: float,
+) -> tuple[int, int]:
+    """Encode one batch of source sequences to codes and bulk-insert the rows.
+
+    Groups each sequence's per-chunk source vectors, applies the learned encoder,
+    then divides each code by the target config's uniform ``embedding_scale`` and
+    clips to the fp16 halfvec range before insert. Returns
+    ``(sequences_stored, components_clipped)``.
+    """
+    import numpy as np
+
+    rows = session.execute(
+        select(SequenceEmbedding.sequence_id, SequenceEmbedding.embedding,
+               SequenceEmbedding.chunk_index_s)
+        .where(SequenceEmbedding.embedding_config_id == src_id,
+               SequenceEmbedding.sequence_id.in_(batch))
+        .order_by(SequenceEmbedding.sequence_id, SequenceEmbedding.chunk_index_s)).all()
+    by_seq: dict[int, list] = {}
+    for sid, emb, _cs in rows:
+        by_seq.setdefault(sid, []).append(np.asarray(emb.to_list(), dtype=np.float32))
+    order = [s for s in batch if s in by_seq]
+    # per-sequence chunk-vector matrices in chunk_index_s order (apply pools internally)
+    chunk_groups = [np.vstack(by_seq[s]).astype(np.float32) for s in order]
+    codes = apply(chunk_groups)
+    clipped = 0
+    code_rows = []
+    for i, s in enumerate(order):
+        scaled_vector, n_clipped = scale_and_clip_embedding(codes[i].tolist(), target_scale)
+        clipped += n_clipped
+        code_rows.append(
+            {"sequence_id": s, "embedding_config_id": target_id, "chunk_index_s": 0,
+             "chunk_index_e": None, "embedding": scaled_vector,
+             "embedding_dim": int(codes.shape[1])})
+    session.bulk_insert_mappings(SequenceEmbedding, code_rows)
+    session.commit()
+    return len(order), clipped
+
+
 class ApplyLearnedEncoderOperation:
     """Apply a trained learned encoder to every source embedding, storing codes under a new config."""
 
@@ -270,14 +314,16 @@ class ApplyLearnedEncoderOperation:
         return " ".join(bits)
 
     def execute(self, session: Session, payload: dict[str, Any], *, emit: EmitFn) -> OperationResult:
-        import numpy as np
-
         p = ApplyLearnedEncoderPayload.model_validate(payload)
         src_id = uuid.UUID(p.source_embedding_config_id)
         apply, meta = _load_encoder(p.encoder_artifact_path)
         if int(meta["in_dim"]) <= 0:
             raise ValueError("encoder meta missing in_dim")
         target_id = _ensure_target_config(session, p, meta)
+        # Uniform per-config divisor + fp16 clip so a high-magnitude learned code
+        # cannot overflow the halfvec column; default scale 1.0 => no-op.
+        target_scale = fetch_embedding_scale(session, target_id)
+        clipped_total = 0
         emit("apply_learned_encoder.start", None,
              {"source": str(src_id), "target": str(target_id), "meta": meta}, "info")
 
@@ -301,29 +347,18 @@ class ApplyLearnedEncoderOperation:
                 skipped += len(done)
             if not batch:
                 continue
-            rows = session.execute(
-                select(SequenceEmbedding.sequence_id, SequenceEmbedding.embedding,
-                       SequenceEmbedding.chunk_index_s)
-                .where(SequenceEmbedding.embedding_config_id == src_id,
-                       SequenceEmbedding.sequence_id.in_(batch))
-                .order_by(SequenceEmbedding.sequence_id, SequenceEmbedding.chunk_index_s)).all()
-            by_seq: dict[int, list] = {}
-            for sid, emb, _cs in rows:
-                by_seq.setdefault(sid, []).append(np.asarray(emb.to_list(), dtype=np.float32))
-            order = [s for s in batch if s in by_seq]
-            # per-sequence chunk-vector matrices in chunk_index_s order (apply pools internally)
-            chunk_groups = [np.vstack(by_seq[s]).astype(np.float32) for s in order]
-            codes = apply(chunk_groups)
-            session.bulk_insert_mappings(SequenceEmbedding, [
-                {"sequence_id": s, "embedding_config_id": target_id, "chunk_index_s": 0,
-                 "chunk_index_e": None, "embedding": codes[i].tolist(),
-                 "embedding_dim": int(codes.shape[1])}
-                for i, s in enumerate(order)])
-            session.commit()
-            stored += len(order)
+            n_stored, n_clipped = _encode_and_store_batch(
+                session, apply, batch, src_id, target_id, target_scale)
+            stored += n_stored
+            clipped_total += n_clipped
             emit("apply_learned_encoder.progress", None,
                  {"stored": stored, "skipped": skipped, "total": len(seq_ids)}, "info")
 
+        if clipped_total:
+            emit("apply_learned_encoder.halfvec_clipped", None,
+                 {"components_clipped": clipped_total,
+                  "reason": "embedding_scale too small; values exceeded fp16 range "
+                            "and were clipped to [-65504, 65504]"}, "warning")
         result = {"target_embedding_config_id": str(target_id), "stored": stored,
                   "skipped": skipped, "source_sequences": len(seq_ids)}
         emit("apply_learned_encoder.done", None, result, "info")
