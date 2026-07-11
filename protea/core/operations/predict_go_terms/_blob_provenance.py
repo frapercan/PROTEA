@@ -3,40 +3,47 @@
 The reranker's ``feature_schema_sha`` fingerprints only the *contract*
 feature families (knn, alignment, taxonomy, anc2vec, emb_pca, go_context,
 annotation_meta, lineage): it guards the column NAMES the lab parquet
-carries. Four other families ride the ``GOPrediction.features`` JSONB blob
-and are produced post-KNN behind their own ``compute_*`` payload flags in
-``_post_knn_pipeline.py``:
+carries. Four other families are produced post-KNN behind their own
+``compute_*`` payload flags in ``_post_knn_pipeline.py``:
 
 - ``classifier``   (``compute_classifier``),
 - ``self_prior``   (``compute_self_prior``),
 - ``association``  (``compute_association``),
 - ``IA``           (``compute_ia`` + ``ia_file``).
 
-Those families are never named in ``feature_schema.py``, so they do not
-enter ``compute_feature_schema_sha`` and the schema guard is structurally
-blind to them. A change in their VALUES (a producer that was a no-op at
-train time becoming populated at serve time, a config change, a different
-IA file) does not move any sha and trips no check. That is the exact
-train/serve VALUE skew that collapsed reranked ``f_micro_w`` from 0.3745 to
-0.3462 (the "0.3462 incident"): the column NAME was unchanged so
-``feature_schema_sha`` matched and the guard passed silently.
+History: these families used to live only in the ``GOPrediction.features``
+JSONB blob. The signal-store code-switch moved their VALUES to typed columns
+(``classifier_*`` / ``self_prior_score`` / ``association_*`` / ``ia``); the
+"blob" name is retained here for continuity because this guard never read the
+stored values at all, only the predict-time payload that produced them, so the
+switch does not change what it fingerprints. ``classifier`` /
+``self_prior`` / ``association`` ARE named in ``feature_schema.py`` (they enter
+``compute_feature_schema_sha`` by name); the IA family is not. Either way the
+schema-sha guard is structurally blind to their VALUES. A change in those
+values (a producer that was a no-op at train time becoming populated at serve
+time, a config change, a different IA file) does not move any sha and trips no
+check. That is the exact train/serve VALUE skew that collapsed reranked
+``f_micro_w`` from 0.3745 to 0.3462 (the "0.3462 incident"): the column NAME
+was unchanged so ``feature_schema_sha`` matched and the guard passed silently.
 
-This module computes a stable *value provenance* descriptor over those blob
-families from the live predict payload, plus a short digest, so the seam is
-observable and a train/serve mismatch can be surfaced (warn-only) rather
-than passing silently. It is the value-provenance counterpart to
-``feature_schema_sha``: schema identity is governed there, blob value
-provenance is described here.
+This module computes a stable *value provenance* descriptor over those
+families from the live predict PAYLOAD (which producers are active and their
+reachable config markers, e.g. ``ia_file``, plus a producer-version constant
+per family), plus a short digest, so the seam is observable and a train/serve
+mismatch can be surfaced (warn-only) rather than passing silently. It is the
+value-provenance counterpart to ``feature_schema_sha``: schema identity is
+governed there, producer value provenance is described here. It reads the
+payload, never the stored blob or typed column, so it is unaffected by where
+the values are persisted.
 
 Scope note (conservative, per ADR D45): the descriptor captures what the
-live pipeline can see from the payload (which blob producers are active and
-their reachable config markers, e.g. ``ia_file``) together with a producer
-version constant per family. The full content marker for a producer's
-inputs (the ``association`` cooccurrence build keyed to the training t0
-sets, the IA file content, producer revisions) is recorded on the TRAINING
-artifact in the D45 follow-up; bump the matching entry in
-``BLOB_PRODUCER_VERSIONS`` when a producer's value semantics change so the
-digest moves with it.
+live pipeline can see from the payload (which producers are active and their
+reachable config markers, e.g. ``ia_file``) together with a producer version
+constant per family. The full content marker for a producer's inputs (the
+``association`` cooccurrence build keyed to the training t0 sets, the IA file
+content, producer revisions) is recorded on the TRAINING artifact in the D45
+follow-up; bump the matching entry in ``BLOB_PRODUCER_VERSIONS`` when a
+producer's value semantics change so the digest moves with it.
 """
 
 from __future__ import annotations

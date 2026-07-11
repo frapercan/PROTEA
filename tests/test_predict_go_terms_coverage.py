@@ -36,7 +36,6 @@ from protea.core.operations.predict_go_terms import (
 )
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
-from protea.infrastructure.orm.models.embedding.go_prediction_features import build_feature_jsonb
 from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
 from protea.infrastructure.orm.models.query.query_set import QuerySet
 
@@ -110,7 +109,7 @@ class TestCleanFloat:
 
 
 class TestRowFromPrediction:
-    def test_minimal_row_carries_jsonb(self) -> None:
+    def test_minimal_row_typed_columns_no_blob(self) -> None:
         pred = {
             "protein_accession": "Q1",
             "go_term_id": 42,
@@ -122,7 +121,8 @@ class TestRowFromPrediction:
         assert row["prediction_set_id"] == pred_set_id
         assert row["protein_accession"] == "Q1"
         assert row["distance"] == 0.25
-        assert row["features"] == build_feature_jsonb(row)
+        # Signal-store code-switch: the redundant JSONB blob is not written.
+        assert "features" not in row
 
     def test_nan_features_become_none(self) -> None:
         pred = {

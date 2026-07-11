@@ -14,9 +14,6 @@ import numpy as np
 
 from protea.core.feature_enricher import NEW_V6_FEATURE_KEYS as _NEW_V6_FEATURE_KEYS
 from protea.core.jsonb_dual_write import maybe_jsonb
-from protea.infrastructure.orm.models.embedding.go_prediction_features import (
-    build_feature_jsonb,
-)
 
 # Annotation and stream chunk sizes are configured via OperationTuning
 # (annotation_chunk_size, stream_chunk_size) and resolved at call time
@@ -109,23 +106,33 @@ _STORE_FLOAT_KEYS: tuple[str, ...] = (
 )
 
 
-#: LAFA per-category booster features (INT-2/3/4). They have NO typed
-#: ``GOPrediction`` column (no migration by design), so they ride the
-#: ``features`` JSONB blob. They are written ONLY when the prediction dict
-#: carries them, i.e. when the matching compute flag was on at predict time;
-#: a default run never sets them, so its persisted blob is byte-identical to
-#: before. The eval reads them back from JSONB in
+#: LAFA per-category booster scalars (INT-2/3/4). As of the signal-store
+#: code-switch these six have typed ``GOPrediction`` columns (migration
+#: f9b2c1a4d7e0), so they are written to those typed columns, not the redundant
+#: ``features`` JSONB blob. Their names match the column names exactly. A key is
+#: written ONLY when the prediction dict carries it (the matching ``compute_*``
+#: flag was on at predict time); otherwise ``_clean_float(pred.get(key))``
+#: leaves the column NULL, which LightGBM routes through its native missing
+#: branch. The eval reads them back from the typed columns in
 #: ``protea.core.operations._run_cafa_helpers._record_from_pred`` so the
-#: per-category boosters see the same 3 families they trained on.
-_LAFA_JSONB_FEATURE_KEYS: tuple[str, ...] = (
+#: per-category boosters see the same families they trained on.
+_LAFA_TYPED_FEATURE_KEYS: tuple[str, ...] = (
     "classifier_score",
     "classifier_present",
     "self_prior_score",
     "association_total",
     "association_cross",
     "association_present",
-    "IA",
 )
+
+#: Information-accretion scalar. ``apply_ia`` stamps it on the predict dict
+#: under the upper-case ``"IA"`` key; it is persisted to the lower-case typed
+#: ``ia`` column added by the signal-store migration. It is an eval-side
+#: weighting value (cafaeval ``f_micro_w``), NOT a reranker feature (absent from
+#: ``protea_contracts.feature_schema.NUMERIC_FEATURES``), so it does not enter
+#: ``feature_schema_sha``.
+_IA_PRED_KEY = "IA"
+_IA_COLUMN = "ia"
 
 
 _PAIR_FEATURE_KEYS: tuple[str, ...] = (
@@ -234,12 +241,13 @@ def _row_from_prediction(
     }
     for key in _STORE_FLOAT_KEYS:
         row[key] = _clean_float(pred.get(key))
-    # T3.1a dual-write: mirror every feature value into the JSONB blob.
-    # Old typed columns stay authoritative for readers; T3.1b will cut
-    # the reader paths over.
-    features = build_feature_jsonb(row)
-    _attach_lafa_features(features, pred)
-    row["features"] = features
+    # Signal-store code-switch: the six LAFA scalars + IA now write to their
+    # own typed columns (values already on ``pred``; NULL when the producer did
+    # not run). The eval reads them straight off those columns, so the redundant
+    # ``features`` JSONB mirror is no longer written and new rows leave it NULL.
+    for key in _LAFA_TYPED_FEATURE_KEYS:
+        row[key] = _clean_float(pred.get(key))
+    row[_IA_COLUMN] = _clean_float(pred.get(_IA_PRED_KEY))
     # T3.1 dual-write: mirror the prediction tuple (go_term_id, score,
     # evidence) into the ``predictions_jsonb`` blob. Gated by
     # ``PROTEA_GO_PREDICTION_JSONB_WRITE_ENABLED``; when the flag is
@@ -249,22 +257,3 @@ def _row_from_prediction(
         [(row["go_term_id"], row["distance"], row.get("evidence_code"))]
     )
     return row
-
-
-def _attach_lafa_features(features: dict[str, Any], pred: dict[str, Any]) -> None:
-    """Mirror the LAFA per-category families into ``features`` when present.
-
-    The classifier / self_prior / association families (INT-2/3/4) have no
-    typed ``GOPrediction`` column, so ``build_feature_jsonb`` does not emit
-    them. The per-category boosters DID train on them, so the eval path must
-    be able to read them back from JSONB. A key is written ONLY when the
-    prediction dict carries it (set by ``apply_classifier`` /
-    ``apply_self_prior`` / ``apply_association``, which run behind the
-    ``compute_classifier`` / ``compute_self_prior`` / ``compute_association``
-    flags). A default run sets none of them, so the blob is byte-identical to
-    the pre-INT shape and the golden / parity tests stay green. Non-finite
-    floats are scrubbed to ``None`` to match the typed-column dual-write.
-    """
-    for key in _LAFA_JSONB_FEATURE_KEYS:
-        if key in pred:
-            features[key] = _clean_float(pred[key])
