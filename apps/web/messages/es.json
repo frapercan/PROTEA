@@ -168,6 +168,73 @@
     "receiptPending": "Comprobante pendiente: no se encontró en la instantánea actual de almacenamiento. La afirmación se apoya en el tablero sellado hasta que se regenere.",
     "pullReceipt": "Mostrar el comprobante"
   },
+  "score": {
+    "eyebrow": "Chapter zero",
+    "title": "How a score is made",
+    "back": "Back to the argument",
+    "proteinLabel": "Protein",
+    "goLabel": "GO term",
+    "setLabel": "Prediction set",
+    "setResolvedFromLatest": "Resolved to the most recent prediction run. Pass ?set=<id> to pin a specific run.",
+    "setPinned": "Pinned by the ?set query parameter.",
+    "grounding": "The steps below are a real pipeline order: retrieval, candidate, evidence, fusion, probability. They are grounded in a measured fact from chapter one: sixteen of the sixty-four features carry ninety-five percent of the gain, and the single largest driver is a base-rate prior, which we discuss rather than hide.",
+    "groundingLink": "Read chapter one",
+    "noSet": {
+      "heading": "No prediction run is available",
+      "body": "This page reads a real prediction run from GET /embeddings/prediction-sets. None was returned, so there is no retrieval to walk for this pair. Run a prediction from the instrument, then reopen this page. Nothing on this page is fabricated to fill the gap."
+    },
+    "retrieval": {
+      "heading": "1. The retrieval",
+      "lede": "A k-nearest-neighbour search over protein-language-model embeddings finds the reference proteins closest to the query, and each neighbour that already carries this GO term casts a vote. These are the neighbours that voted for {go} on {accession}, nearest first.",
+      "caption": "kNN neighbours voting for this GO term (prediction set {set})",
+      "thNeighbour": "Neighbour",
+      "thDistance": "Distance",
+      "thIdentity": "Identity (NW)",
+      "thKPosition": "k position",
+      "thVoteCount": "Vote count",
+      "empty": {
+        "heading": "No neighbour voted for this pair",
+        "body": "This prediction run has no candidate row for {accession} carrying {go}. Either the protein is not in this run, or no retrieved neighbour carried this term. This empty state is the honest answer, not a zero."
+      }
+    },
+    "evidence": {
+      "heading": "2. The evidence",
+      "lede": "Each candidate carries a row of typed feature columns, the same columns the reranker consumes. Their meaning is pulled from the explainability registry (GET /features/registry), the one source the thesis and the Sphinx docs also cite. The columns shown are those stored on the prediction row; the export-time families (anc2vec, lineage, InterPro, embedding PCA) are computed downstream and are not on this endpoint.",
+      "caption": "Per-candidate features on the nearest voting neighbour, {neighbour}",
+      "thFeature": "Feature",
+      "thValue": "Value",
+      "thMeaning": "Meaning",
+      "meaningPending": "Meaning not found in the feature registry.",
+      "registryPending": "The feature registry (GET /features/registry) did not return, so the columns below are shown without their registry meaning. The values themselves are the real feature columns on the prediction row.",
+      "baseRateNote": "The base-rate prior. This is the single largest driver of the sealed booster's gain, about twenty-five percent. We surface it rather than hide it.",
+      "registryLink": "See the full feature registry",
+      "noCandidate": "No candidate row for this pair, so there are no feature columns to show."
+    },
+    "fusion": {
+      "heading": "3. The fusion and the score",
+      "lede": "Calibrated evidence scorers put every signal on one scale, and a shallow per-category combiner (a LightGBM booster) fuses them into one probability. That final probability is the score.",
+      "gap": {
+        "heading": "The single-pair probability is not exposed by a JSON endpoint",
+        "body": "PROTEA computes the fused probability, but serves it only in bulk, as a TSV stream, not as a per-(accession, GO) JSON field. Rather than invent a number, this page names the contract and stops. Closing this gap needs a small backend endpoint that returns the fused score for one pair."
+      },
+      "rerankersHeading": "Rerankers registered for inference",
+      "rerankersEmpty": "No reranker model is registered (GET /scoring/rerankers returned none). Until a booster is imported, the fusion step falls back to the scoring-config weighted average.",
+      "thReranker": "Model",
+      "thCategory": "Category",
+      "thAspect": "Aspect",
+      "openInstrument": "Open the scoring instrument"
+    },
+    "caveats": {
+      "heading": "Our caveats",
+      "intro": "We state these before anyone states them for us.",
+      "items": [
+        "The single largest driver of the score is go_term_frequency, a base-rate prior. A frequent GO term scores partly because it is frequent, not only because the evidence is strong.",
+        "Retrieval proposes candidates; it does not discriminate between them. A near neighbour is a hypothesis, not a conclusion, and homology alone does not settle the term.",
+        "The final probability depends on which reranker and scoring config are selected in the instrument. There is no single canonical number for a pair outside a named run.",
+        "A pair with no voting neighbour has no score. The empty states on this page are the honest answer, never a fabricated value."
+      ]
+    }
+  },
   "benchmark": {
     "loadingTitle": "Cargando benchmark…",
     "loadingHint": "Resolviendo embeddings y matriz.",
