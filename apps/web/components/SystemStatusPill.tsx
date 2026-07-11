@@ -105,7 +105,7 @@ export function SystemStatusPill() {
 
   return (
     <Link
-      href={`/${locale}/jobs`}
+      href={`/${locale}/instrument/jobs`}
       title={sha ? `${label} · build ${sha}` : label}
       className="group hidden md:inline-flex items-center gap-2 h-9 rounded-full bg-slate-50/80 hover:bg-slate-100 ring-1 ring-inset ring-slate-200 px-2.5 text-[12px] font-medium text-slate-700 transition-colors"
       aria-label={label}

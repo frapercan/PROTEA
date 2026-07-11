@@ -112,7 +112,7 @@ test.describe("FARM-UI.5 mobile cost page", () => {
     await bypassUsagePolicy(page);
     await mockFarmApi(page, counters);
 
-    await page.goto("/en/farm/cost");
+    await page.goto("/en/instrument/farm/cost");
 
     // Summary cards appear before the chart so the operator gets a
     // window-total at a glance regardless of which view is active.
@@ -148,7 +148,7 @@ test.describe("FARM-UI.5 mobile cost page", () => {
     await bypassUsagePolicy(page);
     await mockFarmApi(page, counters);
 
-    await page.goto("/en/farm/cost");
+    await page.goto("/en/instrument/farm/cost");
     await expect(page.getByTestId("cost-chart-agent")).toBeVisible();
 
     await page.getByTestId("cost-view-model").click();
@@ -172,7 +172,7 @@ test.describe("FARM-UI.5 mobile cost page", () => {
     await bypassUsagePolicy(page);
     await mockFarmApi(page, counters);
 
-    await page.goto("/en/farm/cost");
+    await page.goto("/en/instrument/farm/cost");
     await expect(page.getByTestId("cost-view-agent")).toHaveAttribute("aria-pressed", "true");
 
     await page.getByTestId("cost-window-30").click();

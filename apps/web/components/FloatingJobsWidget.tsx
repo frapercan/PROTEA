@@ -73,7 +73,7 @@ export function FloatingJobsWidget() {
               return (
                 <Link
                   key={job.id}
-                  href={`/${locale}/jobs/${job.id}`}
+                  href={`/${locale}/instrument/jobs/${job.id}`}
                   className="block px-4 py-3 hover:bg-slate-50 transition-colors"
                 >
                   <div className="flex items-center justify-between gap-2">

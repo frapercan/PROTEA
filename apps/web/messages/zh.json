@@ -20,6 +20,7 @@
     "experimentRuns": "实验运行",
     "maintenance": "维护",
     "home": "首页",
+    "instrument": "仪表台",
     "data": "参考数据",
     "pipelineGroup": "流水线",
     "results": "结果",
@@ -1943,5 +1944,10 @@
         "help": "产生者已接入，但其数据源为空或有误，因此该列不携带信号。"
       }
     }
+  },
+  "instrument": {
+    "eyebrow": "运维面板",
+    "title": "仪表台",
+    "subtitle": "论证背后的全部数据、流水线、结果与运维界面，按流水线运行顺序分组。书保留在顶层；这是你打开以进行操作的标签页。"
   }
 }

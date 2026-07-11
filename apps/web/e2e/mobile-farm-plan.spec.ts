@@ -91,7 +91,7 @@ test.beforeEach(async ({ context }) => {
 
 test("plan page renders the slice DAG canvas at 390x844", async ({ page }) => {
   await mockPlan(page);
-  await page.goto("/en/farm/plan");
+  await page.goto("/en/instrument/farm/plan");
 
   await expect(
     page.getByRole("heading", { name: "Slice DAG" }),
@@ -107,7 +107,7 @@ test("plan page renders the slice DAG canvas at 390x844", async ({ page }) => {
 
 test("loop filter chip narrows the slice count", async ({ page }) => {
   await mockPlan(page);
-  await page.goto("/en/farm/plan");
+  await page.goto("/en/instrument/farm/plan");
 
   await expect(page.getByText("4 slices shown")).toBeVisible();
 
@@ -121,7 +121,7 @@ test("loop filter chip narrows the slice count", async ({ page }) => {
 
 test("critical-path toggle adds the summary line", async ({ page }) => {
   await mockPlan(page);
-  await page.goto("/en/farm/plan");
+  await page.goto("/en/instrument/farm/plan");
 
   const toggle = page.getByTestId("critical-toggle");
   await expect(toggle).toHaveAttribute("aria-pressed", "false");

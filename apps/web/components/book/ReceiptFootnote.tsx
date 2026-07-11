@@ -89,7 +89,7 @@ export function ReceiptFootnote({
                     <span className="mt-1 block text-[12px] text-[var(--muted)]">{operation.note}</span>
                   )}
                   <Link
-                    href={`/${locale}/jobs`}
+                    href={`/${locale}/instrument/jobs`}
                     className="mt-2 inline-block font-medium text-[var(--primary)] underline decoration-[var(--border-strong)] decoration-1 underline-offset-2 hover:decoration-[var(--primary)]"
                   >
                     {t("regenerate")}

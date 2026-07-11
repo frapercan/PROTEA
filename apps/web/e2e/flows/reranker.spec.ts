@@ -90,7 +90,7 @@ test.describe("reranker flow", () => {
     mockApi.override("/annotations/evaluation-sets", EVALUATION_SETS);
     mockApi.override("/annotations/sets/", ANNOTATION_SETS);
 
-    await page.goto("/en/reranker/");
+    await page.goto("/en/instrument/reranker/");
 
     await expect(
       page.getByRole("heading", { name: "Re-ranker Models", level: 1 }),
@@ -120,7 +120,7 @@ test.describe("reranker flow", () => {
     mockApi.override("/annotations/evaluation-sets", EVALUATION_SETS);
     mockApi.override("/annotations/sets/", ANNOTATION_SETS);
 
-    await page.goto("/en/reranker/");
+    await page.goto("/en/instrument/reranker/");
 
     await expect(page.getByText("reranker-nk-bpo-v1")).toBeVisible();
     // Category + aspect badges render uppercased.
@@ -139,7 +139,7 @@ test.describe("reranker flow", () => {
     mockApi.override("/annotations/evaluation-sets", EVALUATION_SETS);
     mockApi.override("/annotations/sets/", ANNOTATION_SETS);
 
-    await page.goto("/en/reranker/");
+    await page.goto("/en/instrument/reranker/");
 
     // Click the card header to expand. The header contains the model
     // name; using its parent wrapper would be brittle, so we click the
@@ -162,7 +162,7 @@ test.describe("reranker flow", () => {
     mockApi.override("/annotations/evaluation-sets", EVALUATION_SETS);
     mockApi.override("/annotations/sets/", ANNOTATION_SETS);
 
-    await page.goto("/en/reranker/");
+    await page.goto("/en/instrument/reranker/");
 
     // The strip lives on the collapsed card header and never requires
     // expanding the card. Its testid lets us scope the four pills

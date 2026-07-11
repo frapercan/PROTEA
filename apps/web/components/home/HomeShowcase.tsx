@@ -118,11 +118,30 @@ function formatParamCount(n: number | null): string {
   return `${n}`;
 }
 
+// Operational routes now live under the /instrument/* prefix (the "book"
+// keeps the top level). Backend stage hrefs are still root-relative
+// ("/proteins", "/benchmark", ...), so map the moved ones onto their
+// instrument path before the locale is applied.
+const INSTRUMENT_ROUTES = new Set([
+  "benchmark", "datasets", "embeddings", "evaluation", "functional-annotation",
+  "jobs", "proteins", "query-sets", "reranker", "scoring", "annotations",
+  "stack", "farm",
+]);
+function toInstrument(href: string): string {
+  if (!href.startsWith("/")) return href;
+  const seg = href.split("/")[1] ?? "";
+  if (INSTRUMENT_ROUTES.has(seg) && !href.startsWith("/instrument/")) {
+    return `/instrument${href}`;
+  }
+  return href;
+}
+
 // Stage hrefs from the backend are root-relative ("/proteins",
 // "/benchmark", ...). The active locale must be prepended or
 // next-intl middleware silently redirects to the default locale
 // (see fix(locale)/#530 / P0-C).
 function withLocale(locale: string, href: string): string {
+  href = toInstrument(href);
   if (!href.startsWith("/")) return href;
   if (href.startsWith(`/${locale}/`) || href === `/${locale}`) return href;
   return `/${locale}${href}`;
@@ -235,7 +254,7 @@ export async function HomeShowcase() {
             <div className="flex items-center gap-3 shrink-0">
               <ShareBestLinkButton evaluationResultId={best.evaluation_result_id} />
               <Link
-                href={`/${locale}/benchmark`}
+                href={`/${locale}/instrument/benchmark`}
                 className="text-[13px] font-medium text-blue-600 hover:text-blue-800 transition-colors inline-flex items-center gap-1"
               >
                 {t("viewBenchmark")}
@@ -366,7 +385,7 @@ export async function HomeShowcase() {
         >
           <p className="text-slate-500 text-base">{t("noDataYet")}</p>
           <Link
-            href={`/${locale}/proteins`}
+            href={`/${locale}/instrument/proteins`}
             className="mt-5 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 transition-colors"
           >
             {t("getStarted")}

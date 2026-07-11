@@ -7,6 +7,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import {
   Sparkles,
+  LayoutGrid,
   Workflow,
   Database,
   BarChart3,
@@ -133,6 +134,28 @@ function RailContent({
         >
           <Sparkles className="h-4 w-4 shrink-0" aria-hidden />
           <span>{t("annotate")}</span>
+        </Link>
+      </div>
+
+      {/* Instrument hub link: the labeled entrance to the operational
+          dashboard. The book (home + pillars) stays the top-level entrance,
+          reached from the brand mark; this rail is the instrument's tab, and
+          this link is its overview / hub. */}
+      <div className="px-3 pt-2">
+        <Link
+          href={`/${locale}/instrument`}
+          onClick={onNavigate}
+          aria-current={
+            stripped === "/instrument" ? "page" : undefined
+          }
+          className={`flex items-center gap-2.5 rounded-lg px-3.5 py-2 text-[0.9rem] font-medium tracking-[-0.005em] transition-colors ${
+            stripped === "/instrument"
+              ? "bg-stone-100 text-blue-900"
+              : "text-stone-700 hover:bg-stone-100/70 hover:text-stone-950"
+          }`}
+        >
+          <LayoutGrid className="h-[18px] w-[18px] shrink-0 text-stone-500" aria-hidden strokeWidth={1.85} />
+          <span>{t("instrument")}</span>
         </Link>
       </div>
 
@@ -265,7 +288,7 @@ export function Sidebar({
   const onHome = stripLocale(pathname) === "/";
   const annotateHref = onHome
     ? `/${locale}#annotate-form`
-    : `/${locale}/functional-annotation`;
+    : `/${locale}/instrument/functional-annotation`;
   // AUTH-PUBLIC-VIEWER: the Swagger href is rendered into HTML and
   // clicked by the user, so it must use the public ingress (e.g.
   // ``/api-proxy``) rather than the SSR-only ``127.0.0.1`` fallback
@@ -279,11 +302,11 @@ export function Sidebar({
       hint: t("pipelineHint"),
       icon: Workflow,
       items: [
-        { href: "/embeddings", label: t("embeddings"), hint: "PLM embedding configs · ESM-2 · ESM3c · ProstT5 · Ankh", icon: Atom },
-        { href: "/functional-annotation", label: t("functionalAnnotation"), hint: "Embedding-similarity GO annotation, BPO / MFO / CCO", icon: Tags },
-        { href: "/scoring", label: t("scoring"), hint: "Combine distance, alignment, taxonomy, evidence", badge: "LAB", icon: Sliders },
-        { href: "/reranker", label: t("reranker"), hint: "LightGBM reranker over scored predictions", badge: "LAB", icon: ArrowUpDown },
-        { href: "/datasets", label: t("datasets"), hint: "Frozen reranker dumps and export dispatcher", icon: Archive },
+        { href: "/instrument/embeddings", label: t("embeddings"), hint: "PLM embedding configs · ESM-2 · ESM3c · ProstT5 · Ankh", icon: Atom },
+        { href: "/instrument/functional-annotation", label: t("functionalAnnotation"), hint: "Embedding-similarity GO annotation, BPO / MFO / CCO", icon: Tags },
+        { href: "/instrument/scoring", label: t("scoring"), hint: "Combine distance, alignment, taxonomy, evidence", badge: "LAB", icon: Sliders },
+        { href: "/instrument/reranker", label: t("reranker"), hint: "LightGBM reranker over scored predictions", badge: "LAB", icon: ArrowUpDown },
+        { href: "/instrument/datasets", label: t("datasets"), hint: "Frozen reranker dumps and export dispatcher", icon: Archive },
         { href: "/feature-registry", label: t("featureRegistry"), hint: "What every reranker feature means, who produces it, and whether it is live", icon: ListTree },
       ],
     },
@@ -293,9 +316,9 @@ export function Sidebar({
       hint: t("dataHint"),
       icon: Database,
       items: [
-        { href: "/proteins", label: t("proteins"), hint: "UniProt entries · Swiss-Prot + TrEMBL, isoforms", icon: Dna },
-        { href: "/annotations", label: t("annotations"), hint: "GO ontology snapshots and ground-truth GAF / QuickGO sets", icon: Tag },
-        { href: "/query-sets", label: t("querySets"), hint: "FASTA uploads grouped for batch runs", icon: FolderOpen },
+        { href: "/instrument/proteins", label: t("proteins"), hint: "UniProt entries · Swiss-Prot + TrEMBL, isoforms", icon: Dna },
+        { href: "/instrument/annotations", label: t("annotations"), hint: "GO ontology snapshots and ground-truth GAF / QuickGO sets", icon: Tag },
+        { href: "/instrument/query-sets", label: t("querySets"), hint: "FASTA uploads grouped for batch runs", icon: FolderOpen },
       ],
     },
     {
@@ -304,8 +327,8 @@ export function Sidebar({
       hint: t("resultsHint"),
       icon: BarChart3,
       items: [
-        { href: "/benchmark", label: t("benchmark"), hint: "f_micro_w (IA-weighted, LAFA-comparable) matrix across embedding × stage × NK / LK / PK", icon: BarChart3 },
-        { href: "/evaluation", label: t("evaluation"), hint: "CAFA-style delta evaluation (Fmax, Smin, coverage)", icon: Gauge },
+        { href: "/instrument/benchmark", label: t("benchmark"), hint: "f_micro_w (IA-weighted, LAFA-comparable) matrix across embedding × stage × NK / LK / PK", icon: BarChart3 },
+        { href: "/instrument/evaluation", label: t("evaluation"), hint: "CAFA-style delta evaluation (Fmax, Smin, coverage)", icon: Gauge },
       ],
     },
     {
@@ -314,9 +337,9 @@ export function Sidebar({
       hint: t("operationsHint"),
       icon: Server,
       items: [
-        { href: "/jobs", label: t("jobs"), hint: "Live job queue and event audit trail", icon: Inbox },
+        { href: "/instrument/jobs", label: t("jobs"), hint: "Live job queue and event audit trail", icon: Inbox },
         { href: "/maintenance", label: t("maintenance"), hint: "Vacuum orphan sequences and unindexed embeddings", icon: Wrench },
-        { href: "/stack", label: t("stack"), hint: "Eight repositories, open PRs, deploy targets", icon: Boxes },
+        { href: "/instrument/stack", label: t("stack"), hint: "Eight repositories, open PRs, deploy targets", icon: Boxes },
       ],
     },
     {
@@ -371,7 +394,7 @@ export function Sidebar({
   }
 
   const stripped = stripLocale(pathname);
-  const annotateActive = stripped.startsWith("/functional-annotation");
+  const annotateActive = stripped.startsWith("/instrument/functional-annotation");
   const closeDrawer = useCallback(() => setOpen(false), []);
 
   // Close the mobile drawer on browser back/forward navigation. In-app link

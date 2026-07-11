@@ -6,6 +6,7 @@ import { useLocale, useTranslations } from "next-intl";
 
 type NavKey =
   | "home"
+  | "instrument"
   | "functionalAnnotation"
   | "proteins"
   | "jobs"
@@ -32,6 +33,7 @@ type NavKey =
 // FARM-UI.9 P1.2 added farm/plan/cost so the agent-farm section displays
 // translated breadcrumb labels instead of the raw URL segment.
 const SEGMENT_TO_NAV_KEY: Record<string, NavKey> = {
+  instrument: "instrument",
   "functional-annotation": "functionalAnnotation",
   proteins: "proteins",
   jobs: "jobs",
