@@ -62,8 +62,58 @@ def _topk_real(z, top_k: int):
     return out
 
 
-def _build_mean_apply(blob: dict, meta: dict, dev: str):
-    """Mean-pool family: Linear(d -> dict) over the per-sequence mean of chunk vectors."""
+def _sibling_scaler_path(artifact_path: str) -> str:
+    """Default sibling z-score scaler path for a head artifact (``<stem>.scaler.npz``).
+
+    A head stored at ``.../<id>.pt`` looks for ``.../<id>.scaler.npz`` alongside it,
+    so the scaler travels with the head with no separate configuration.
+    """
+    base = artifact_path[:-3] if artifact_path.endswith(".pt") else artifact_path
+    return f"{base}.scaler.npz"
+
+
+def _load_scaler(scaler_path: str | None, in_dim: int):
+    """Load an optional per-dim z-score scaler ``(mu, sigma)`` for the base embedding.
+
+    A learned head may ship a sibling ``.scaler.npz`` (keys ``mu`` and ``sigma``,
+    each ``(in_dim,)``, fit on the reference pool the head trained over). When present
+    the base embedding is standardised ``(x - mu) / sigma`` BEFORE the in-head L2 +
+    Linear, reproducing the offline z-score recipe. When ABSENT this returns ``None``
+    and the apply math is byte-for-byte the legacy behaviour (existing heads untouched).
+
+    A present-but-malformed scaler (wrong keys, wrong shape, non-positive sigma) raises
+    a clear ``ValueError`` rather than silently corrupting the code.
+    """
+    import os  # noqa: PLC0415
+
+    import numpy as np  # noqa: PLC0415
+
+    if not scaler_path or not os.path.exists(scaler_path):
+        return None
+    data = np.load(scaler_path)
+    if "mu" not in data or "sigma" not in data:
+        raise ValueError(
+            f"scaler {scaler_path!r} must contain arrays 'mu' and 'sigma'; got {list(data.keys())}"
+        )
+    mu = np.asarray(data["mu"], dtype=np.float32).reshape(-1)
+    sigma = np.asarray(data["sigma"], dtype=np.float32).reshape(-1)
+    if mu.shape != (in_dim,) or sigma.shape != (in_dim,):
+        raise ValueError(
+            f"scaler {scaler_path!r} shape mismatch: mu{mu.shape} sigma{sigma.shape} "
+            f"!= expected ({in_dim},) from head meta in_dim"
+        )
+    if not bool(np.all(np.isfinite(sigma))) or not bool(np.all(sigma > 0)):
+        raise ValueError(f"scaler {scaler_path!r} has non-finite or non-positive sigma entries")
+    return mu, sigma
+
+
+def _build_mean_apply(blob: dict, meta: dict, dev: str, scaler=None):
+    """Mean-pool family: Linear(d -> dict) over the per-sequence mean of chunk vectors.
+
+    When ``scaler`` is ``(mu, sigma)`` the mean-pooled base is z-scored
+    ``(x - mu) / sigma`` before the in-head L2 + Linear (the offline recipe order:
+    z-score -> L2 -> Linear -> top-k). ``scaler=None`` is the unchanged legacy path.
+    """
     import numpy as np
     import torch
     import torch.nn as nn
@@ -76,6 +126,9 @@ def _build_mean_apply(blob: dict, meta: dict, dev: str):
     def apply(chunk_groups: list) -> np.ndarray:
         """chunk_groups: list of (n_chunks_i, in_dim) arrays -> (n, dict_dim) top-k real codes."""
         mat = np.vstack([np.mean(g, axis=0) for g in chunk_groups]).astype(np.float32)
+        if scaler is not None:
+            mu, sigma = scaler
+            mat = ((mat - mu) / sigma).astype(np.float32)
         nrm = np.linalg.norm(mat, axis=1, keepdims=True)
         nrm[nrm == 0] = 1.0
         xn = (mat / nrm).astype(np.float32)
@@ -86,7 +139,7 @@ def _build_mean_apply(blob: dict, meta: dict, dev: str):
     return apply
 
 
-def _build_attention_apply(blob: dict, meta: dict, dev: str):
+def _build_attention_apply(blob: dict, meta: dict, dev: str, scaler=None):
     """Attention family: additive multi-head pool over per-chunk vectors, then Linear(d*h -> dict)."""
     import numpy as np
     import torch
@@ -129,6 +182,9 @@ def _build_attention_apply(blob: dict, meta: dict, dev: str):
         mask = np.zeros((n, cap), bool)
         for i, g in enumerate(chunk_groups):
             m = np.asarray(g, dtype=np.float32)[:cap]
+            if scaler is not None:
+                mu, sigma = scaler
+                m = ((m - mu) / sigma).astype(np.float32)
             Xpad[i, : m.shape[0]] = m
             mask[i, : m.shape[0]] = True
         with torch.no_grad():
@@ -140,22 +196,28 @@ def _build_attention_apply(blob: dict, meta: dict, dev: str):
     return apply
 
 
-def _load_encoder(artifact_path: str):
+def _load_encoder(artifact_path: str, scaler_path: str | None = None):
     """Load the torch artifact -> (apply_fn, meta). Lazy-imports torch/numpy.
 
     ``apply_fn`` takes a list of per-sequence chunk-vector matrices (each ``(n_chunks, in_dim)``) and
     returns ``(n, dict_dim)`` top-k real codes, so the caller groups source chunks identically for
     both pooling families. ``meta["pooling"]`` selects mean-pool (default) vs attention-pool.
+
+    An optional per-dim z-score scaler travels with the head: ``scaler_path`` (explicit) or, when
+    unset, the ``<stem>.scaler.npz`` sibling of ``artifact_path``. When a scaler is found the base
+    embedding is standardised before the in-head L2 + Linear (offline recipe); when none is found the
+    apply math is the unchanged legacy behaviour, so existing heads are byte-for-byte untouched.
     """
     import torch
 
     blob = torch.load(artifact_path, map_location="cpu", weights_only=False)
     meta = blob["meta"]
     dev = "cuda" if torch.cuda.is_available() else "cpu"
+    scaler = _load_scaler(scaler_path or _sibling_scaler_path(artifact_path), int(meta["in_dim"]))
     pooling = str(meta.get("pooling", "mean")).lower()
     if pooling == "attention":
-        return _build_attention_apply(blob, meta, dev), meta
-    return _build_mean_apply(blob, meta, dev), meta
+        return _build_attention_apply(blob, meta, dev, scaler), meta
+    return _build_mean_apply(blob, meta, dev, scaler), meta
 
 
 def _ensure_target_config(session: Session, p: ApplyLearnedEncoderPayload, meta: dict) -> uuid.UUID:

@@ -64,6 +64,7 @@ if TYPE_CHECKING:
 # Head-artifact env vars (mirrors the PROTEA_TWO_TOWER_* artifact convention).
 _ARTIFACT_ENV = "PROTEA_LEARNED_ENCODER_ARTIFACT"  # explicit head .pt path
 _DIR_ENV = "PROTEA_LEARNED_ENCODER_DIR"  # dir of <config_id>.pt head blobs
+_SCALER_ENV = "PROTEA_LEARNED_ENCODER_SCALER"  # explicit per-dim z-score .scaler.npz path
 
 # Callable a caller injects to embed a batch with a STANDARD base config:
 # (base_config, sequences) -> per-sequence per-chunk ChunkEmbedding lists. The
@@ -155,6 +156,36 @@ def resolve_encoder_artifact(config: EmbeddingConfig) -> str:
     )
 
 
+def resolve_scaler_artifact(config: EmbeddingConfig, artifact_path: str) -> str | None:
+    """Resolve an OPTIONAL per-dim z-score scaler ``.scaler.npz`` for a learned head.
+
+    Unlike the head artifact, the scaler is optional: a head that ships no scaler keeps
+    the legacy (no-standardisation) behaviour, so pinning the existing champion is
+    untouched. Resolution order (first hit wins):
+
+    1. ``PROTEA_LEARNED_ENCODER_SCALER`` (explicit path; raises if set but absent),
+    2. ``PROTEA_LEARNED_ENCODER_DIR``/<config_id>.scaler.npz or /<config_id[:8]>.scaler.npz,
+    3. the ``<stem>.scaler.npz`` sibling of the resolved head ``artifact_path``.
+
+    Returns the scaler path, or ``None`` when no scaler is configured or found.
+    """
+    explicit = os.environ.get(_SCALER_ENV)
+    if explicit:
+        if not os.path.exists(explicit):
+            raise ValueError(f"{_SCALER_ENV}={explicit!r} does not exist")
+        return explicit
+    enc_dir = os.environ.get(_DIR_ENV)
+    if enc_dir:
+        for cand in (f"{config.id}.scaler.npz", f"{str(config.id)[:8]}.scaler.npz"):
+            path = os.path.join(enc_dir, cand)
+            if os.path.exists(path):
+                return path
+    sibling = f"{artifact_path[:-3]}.scaler.npz" if artifact_path.endswith(".pt") else None
+    if sibling and os.path.exists(sibling):
+        return sibling
+    return None
+
+
 def _group_chunk_vectors(base_chunks: list[list[ChunkEmbedding]]) -> list[np.ndarray]:
     """Stack each sequence's per-chunk vectors into a ``(n_chunks, in_dim)`` array."""
     import numpy as np  # noqa: PLC0415
@@ -185,7 +216,8 @@ def embed_learned_code(
 
     base_config = resolve_base_config(session, config)
     artifact = resolve_encoder_artifact(config)
-    apply, meta = _load_encoder(artifact)
+    scaler_path = resolve_scaler_artifact(config, artifact)
+    apply, meta = _load_encoder(artifact, scaler_path=scaler_path)
     if int(meta.get("in_dim", 0)) <= 0:
         raise ValueError(f"learned head {artifact!r} meta missing a positive in_dim")
     emit(
@@ -195,6 +227,7 @@ def embed_learned_code(
             "learned_config": str(config.id),
             "base_config": str(base_config.id),
             "artifact": os.path.basename(artifact),
+            "scaler": os.path.basename(scaler_path) if scaler_path else None,
             "dict_dim": int(meta.get("dict_dim", 0)),
         },
         "info",
