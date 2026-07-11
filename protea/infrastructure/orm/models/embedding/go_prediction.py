@@ -108,6 +108,20 @@ class GOPrediction(Base):
     tax_voters_close_frac: Mapped[float | None] = mapped_column(Float, nullable=True)
     tax_voters_mean_common_ancestors: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    # --- LAFA-system scalars (classifier / self-prior / association).
+    # These six were the last feature families living only in the
+    # ``features`` JSONB blob, outside the typed-column space. Promoting
+    # them here makes the blob fully redundant so it can be dropped in a
+    # separate reviewed step (ADR-D45). Nullable because legacy rows and
+    # exports where the producer did not run carry a missing value, not a
+    # zero; the export path emits NaN, never a well-defined 0.0.
+    classifier_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    classifier_present: Mapped[float | None] = mapped_column(Float, nullable=True)
+    self_prior_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    association_total: Mapped[float | None] = mapped_column(Float, nullable=True)
+    association_cross: Mapped[float | None] = mapped_column(Float, nullable=True)
+    association_present: Mapped[float | None] = mapped_column(Float, nullable=True)
+
     # --- T3.1a dual-write target: every feature column above is also
     # mirrored into this JSONB blob (see ``build_feature_jsonb``).
     # Readers stay on the typed columns until T3.1b cuts them over;
