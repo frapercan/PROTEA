@@ -477,13 +477,15 @@ hard-negative objective, and a learned multi-layer mixture are all null in this
 harness, so standardisation is the single lever the fixed-representation family
 exposes.
 
-**The honest caveat.**
-A controlled re-training of the encoder inside the offline lab harness reaches
-only the fixed-representation band (about 0.14 to 0.16) and does not reproduce
-the served encoder's 0.215 on the same reference. The served encoder's advantage
-therefore reflects its full production training procedure, which the lab harness
-does not yet replicate. That is an open question, not a settled attribution to
-the base or the objective. These are all KNN-only retrieval numbers and are
+**The caveat, and what resolved it.**
+A controlled re-training of the encoder inside the offline lab harness, on a
+local mean-pool of the ankh-base last layer, reaches only the fixed-representation
+band (about 0.14 to 0.16). The resolution is the base embedding, not the training
+procedure: the identical head recipe, trained on the production-stored embedding
+for this backbone, reproduces the served encoder (mean 0.220 against 0.215). The
+lab arms fell short only because their local extraction is a weaker base than the
+production one. The precise extraction difference (pooling, normalisation, or which
+tensor is read as the last layer) is the one detail still to pin down. These are all KNN-only retrieval numbers and are
 distinct from the sealed 0.4063 reranked board in :doc:`results`; they explain
 why the champion stores learned GO-aligned codes. See
 :doc:`/adr/D35-canonical-8plm-embedding-configs` for the embedding config
