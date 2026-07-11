@@ -2,7 +2,7 @@ import Link from "next/link";
 import { getLocale, getTranslations } from "next-intl/server";
 import { NineCellGrid } from "@/components/book/NineCellGrid";
 import { ReceiptFootnote } from "@/components/book/ReceiptFootnote";
-import { HEADLINE, PILLARS, THESIS_SENTENCE } from "@/lib/book";
+import { CHAPTER_ZERO, HEADLINE, PILLARS, THESIS_SENTENCE } from "@/lib/book";
 
 /**
  * The front door is the argument, not a dashboard.
@@ -32,6 +32,33 @@ export default async function ArgumentPage() {
           {THESIS_SENTENCE}
         </h1>
       </header>
+
+      {/* Chapter zero: the whole argument, end to end, for a reader barely initiated. */}
+      <section aria-labelledby="ch0-heading" className="mt-12 border-t border-[var(--border)] pt-10">
+        <h2 id="ch0-heading" className="sr-only">
+          The argument, end to end
+        </h2>
+        <div className="space-y-7">
+          {CHAPTER_ZERO.map((m, i) => (
+            <div key={i}>
+              <p className="font-serif text-[17px] leading-relaxed text-[var(--foreground)]">
+                <span className="font-semibold">{m.lead}</span> {m.body}
+              </p>
+              {m.link ? (
+                <Link
+                  href={`/${locale}/${m.link.to}`}
+                  className="group mt-2 inline-flex items-baseline gap-1.5 text-[14px] text-[var(--primary)] underline decoration-[var(--border-strong)] decoration-1 underline-offset-2 hover:decoration-[var(--primary)]"
+                >
+                  {m.link.label}
+                  <span aria-hidden className="transition-transform group-hover:translate-x-0.5">
+                    →
+                  </span>
+                </Link>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      </section>
 
       {/* The hero: the sealed board, typeset as a table. */}
       <section aria-labelledby="board-heading" className="mt-14 border-t border-[var(--border)] pt-10">
