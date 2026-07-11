@@ -122,10 +122,25 @@ class GOPrediction(Base):
     association_cross: Mapped[float | None] = mapped_column(Float, nullable=True)
     association_present: Mapped[float | None] = mapped_column(Float, nullable=True)
 
-    # --- T3.1a dual-write target: every feature column above is also
-    # mirrored into this JSONB blob (see ``build_feature_jsonb``).
-    # Readers stay on the typed columns until T3.1b cuts them over;
-    # the column is nullable because legacy rows predate the dual-write.
+    # --- Information-accretion weighting scalar (signal-store code-switch).
+    # IA(t) is the snapshot-invariant information content the cafaeval
+    # ``f_micro_w`` objective weights with; ``apply_ia`` stamps it on each
+    # candidate under the upper-case ``IA`` key and it is persisted here as the
+    # lower-case ``ia`` column. It was the seventh (and last) scalar living
+    # only in the ``features`` JSONB blob; promoting it here lets the blob be
+    # dropped in a separate reviewed step. Nullable: NULL means the IA producer
+    # did not run for that row. It is an eval-side weight, NOT a reranker
+    # feature (absent from ``feature_schema.NUMERIC_FEATURES``), so it does not
+    # enter ``feature_schema_sha``.
+    ia: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # --- Legacy JSONB feature mirror (pre signal-store code-switch).
+    # This blob used to mirror every typed feature column plus the LAFA/IA
+    # scalars that lacked a typed column. As of the signal-store code-switch
+    # every feature signal has a typed column, nothing reads this blob, and the
+    # writer no longer populates it, so new rows carry NULL here. The column is
+    # retained (not dropped) so old prediction sets keep their history; a
+    # separate reviewed migration drops it and reclaims the space.
     features: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     # --- T3.1 dual-write target: the prediction tuple itself

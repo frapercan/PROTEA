@@ -174,12 +174,15 @@ class RerankerScorer:
         """ADR D45 value-skew guard: record blob provenance, warn on mismatch.
 
         Thin delegate to
-        :func:`._blob_provenance.record_blob_provenance`. The four JSONB-blob
-        families (classifier, self_prior, association, IA) ride outside
-        ``feature_schema_sha``, so a train/serve VALUE skew in them (the
-        "0.3462 incident") passes the schema guard silently. This records the
-        live provenance and, on a mismatch against the payload's recorded
-        expected provenance, warns loudly and PROCEEDS (never raises).
+        :func:`._blob_provenance.record_blob_provenance`. The four LAFA/IA
+        producer families (classifier, self_prior, association, IA) carry a
+        train/serve VALUE skew risk that ``feature_schema_sha`` cannot see (the
+        "0.3462 incident"), so it passes the schema guard silently. The guard
+        derives provenance from the predict-time payload, so the signal-store
+        code-switch (values now in typed columns, not the JSONB blob) does not
+        change it. This records the live provenance and, on a mismatch against
+        the payload's recorded expected provenance, warns loudly and PROCEEDS
+        (never raises).
         """
         from protea.core.operations.predict_go_terms._blob_provenance import (
             record_blob_provenance,

@@ -21,11 +21,13 @@ The original four MR-1 producer signals:
 * self_prior           <- ``self_prior_score`` (``apply_self_prior``)
 * association          <- ``association_total`` (``apply_association``, snapshot-agnostic per #644)
 
-Because those keys are also persisted on ``GOPrediction.features`` (#643), an
-adapter reads identically whether the candidate dict came straight off the live
-predict path or was rehydrated from the JSONB blob for the eval / combiner path
-(MR-2). The adapters are thin by design: the producer owns the computation, the
-adapter owns only the port contract (``name``, ``applies_to``, ``score``).
+Because those keys are persisted on the typed ``GOPrediction`` columns (the
+signal-store code-switch moved the LAFA scalars off the ``features`` JSONB
+blob), an adapter reads identically whether the candidate dict came straight
+off the live predict path or was rehydrated from the typed columns for the
+eval / combiner path (MR-2). The adapters are thin by design: the producer owns
+the computation, the adapter owns only the port contract (``name``,
+``applies_to``, ``score``).
 
 ``applies_to`` follows the CAFA evidence model: the base-evidence scorers
 (alignment, taxonomy, label_embedding, interpro, term_frequency), KNN, and the
