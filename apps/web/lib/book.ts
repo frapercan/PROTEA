@@ -40,6 +40,52 @@ export const HEADLINE = {
 export const THESIS_SENTENCE =
   "Protein function is predictable from a taxonomy of orthogonal evidence, combined by a calibrated fusion, measured on a leakage-free temporal frame. The nine-cell benchmark is not nine numbers, it is a map of which evidence wins in which regime, and it has an honest, evidence-bound frontier that this work characterises rather than hides.";
 
+/**
+ * Chapter zero: the whole argument, end to end, for a reader who is barely
+ * initiated. Every term new to a beginner (GO, kNN, reranker, temporal holdout)
+ * is explained in place, the real sealed numbers are cited, and each movement
+ * links on to the chapter that develops it. The test for every line: could
+ * someone who just started understand it?
+ */
+export interface ChapterZeroMovement {
+  lead: string;
+  body: string;
+  /** A path relative to the locale root, e.g. "pillar/1". */
+  link?: { to: string; label: string };
+}
+
+export const CHAPTER_ZERO: ChapterZeroMovement[] = [
+  {
+    lead: "What this is.",
+    body:
+      "A protein is a chain of amino acids that does a job in the cell. Its function is that job, written in a shared vocabulary called the Gene Ontology, or GO: terms like binds DNA or located in the mitochondrion. Most proteins ever sequenced carry no such labels. PROTEA reads a protein's sequence and proposes its GO terms, with the evidence for each one in plain view.",
+    link: { to: "pillar/1", label: "The kinds of evidence it reads" },
+  },
+  {
+    lead: "How it works, in one breath.",
+    body:
+      "PROTEA does not guess a function from the sequence directly. It retrieves. It turns each protein into a compact code, finds the most similar proteins that are already labelled, and lets those neighbours vote for GO terms; this is k-nearest-neighbours, kNN. A second stage, a reranker, weighs that vote against other clues, how strong each match is and how a candidate term relates to what we already know, and calibrates a final score.",
+    link: { to: "pillar/2", label: "The two learning layers, and why calibration is the lever" },
+  },
+  {
+    lead: "What it achieves.",
+    body:
+      "On a fair test, PROTEA reaches " + HEADLINE.value + " on the field's headline score (a weighted, information-aware measure called " + METRIC + ") and ranks first in seven of the nine evaluation cells. The nine cells are three knowledge regimes, from proteins we know nothing about to proteins we already know something about, crossed with the three branches of GO.",
+    link: { to: "pillar/3", label: "The nine-cell board, read as a map" },
+  },
+  {
+    lead: "Why the test is fair.",
+    body:
+      "The hard part of this field is not the model, it is not cheating. PROTEA is scored on a temporal holdout: we freeze what was known on one date and ask only about function that was discovered afterwards, so the answer cannot leak into the question. Every number here is reproducible from that frozen frame, and the sealed board never moves; regenerated numbers are candidates until reviewed against it.",
+  },
+  {
+    lead: "Where it stops, honestly.",
+    body:
+      "Two of the nine cells are not won: predicting the Biological Process branch for the least-studied proteins. The evidence available does not reach there yet. We name it the biological-process wall and we show it, rather than hide it, and we point to the first crack in it.",
+    link: { to: "pillar/4", label: "The frontier, and the first crack in the wall" },
+  },
+];
+
 export type Aspect = "MF" | "BP" | "CC";
 export type Knowledge = "NK" | "LK" | "PK";
 
