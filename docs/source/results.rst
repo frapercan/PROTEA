@@ -17,7 +17,8 @@ nine evaluation cells (NK/LK/PK by BPO/MFO/CCO).
   the ground truth is the delta gained by t1, so the score is free of the
   data leakage that inflates tools scored against a current database.
 - **Champion.** The learned k-WTA retrieval encoder (config ``d8979601``,
-  which stores GO-aligned codes rather than a raw PLM vector) for candidate
+  which stores GO-aligned codes rather than a raw PLM vector, a choice the
+  representation ablation in :doc:`insights` motivates) for candidate
   generation, followed by a stacked per-category re-ranker (see
   :doc:`/adr/D43-stacked-meta-reranker`).
 - **Metric and scoring.** ``f_micro_w`` is the headline metric, scored
