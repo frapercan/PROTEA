@@ -42,6 +42,7 @@ def _make_config(config_id=None):
     c.pooling = "mean"
     c.normalize_residues = False
     c.normalize = True
+    c.embedding_scale = 1.0
     c.max_length = 1022
     c.use_chunking = False
     c.chunk_size = 512
@@ -528,6 +529,37 @@ class TestValidationEdgeCases:
         resp = client.post("/embeddings/configs", json=body)
         assert resp.status_code == 422
         assert any("chunk_overlap" in str(e) for e in resp.json()["detail"])
+
+    def test_embedding_scale_accepted(self, client, session):
+        """A positive embedding_scale is accepted and stored on the config."""
+        added: list = []
+        session.add.side_effect = lambda obj: (
+            added.append(obj)
+            or setattr(obj, "id", uuid4())
+            or setattr(obj, "created_at", datetime(2024, 1, 1, tzinfo=UTC))
+        )
+        body = {**_VALID_CONFIG_BODY, "embedding_scale": 32}
+        resp = client.post("/embeddings/configs", json=body)
+        assert resp.status_code == 200
+        assert added[0].embedding_scale == 32.0
+
+    def test_embedding_scale_non_positive_returns_422(self, client, session):
+        body = {**_VALID_CONFIG_BODY, "embedding_scale": 0}
+        resp = client.post("/embeddings/configs", json=body)
+        assert resp.status_code == 422
+        assert any("embedding_scale" in str(e) for e in resp.json()["detail"])
+
+    def test_embedding_scale_defaults_to_one(self, client, session):
+        """Omitting embedding_scale defaults it to 1.0 (existing configs unchanged)."""
+        added: list = []
+        session.add.side_effect = lambda obj: (
+            added.append(obj)
+            or setattr(obj, "id", uuid4())
+            or setattr(obj, "created_at", datetime(2024, 1, 1, tzinfo=UTC))
+        )
+        resp = client.post("/embeddings/configs", json={**_VALID_CONFIG_BODY})
+        assert resp.status_code == 200
+        assert added[0].embedding_scale == 1.0
 
     def test_description_non_string_returns_422(self, client, session):
         body = {**_VALID_CONFIG_BODY, "description": 42}

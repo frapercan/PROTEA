@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy.orm import Session
 
+from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.sequence_embedding import SequenceEmbedding
 
 if TYPE_CHECKING:
@@ -25,6 +26,54 @@ if TYPE_CHECKING:
 
 _BATCH_QUEUE = "protea.embeddings.batch"
 _WRITE_QUEUE = "protea.embeddings.write"
+
+# pgvector HALFVEC is fp16; the largest finite fp16 magnitude is 65504. Anything
+# beyond this becomes +/-inf, which Postgres rejects
+# (``psycopg.errors.DataException: infinite value not allowed in halfvec``).
+HALFVEC_FP16_MAX = 65504.0
+
+
+def fetch_embedding_scale(session: Session, config_id: uuid.UUID) -> float:
+    """Return the owning config's uniform ``embedding_scale`` (constant per config).
+
+    Defaults to ``1.0`` (no-op) for a missing config or a missing/zero value,
+    so every existing config keeps its byte-for-byte store behaviour.
+    """
+    config = session.get(EmbeddingConfig, config_id)
+    if config is None:
+        return 1.0
+    scale = float(getattr(config, "embedding_scale", 1.0) or 1.0)
+    return scale if scale > 0.0 else 1.0
+
+
+def scale_and_clip_embedding(
+    vector: list[float], scale: float
+) -> tuple[list[float], int]:
+    """Divide a per-sequence embedding by ``scale`` and clip it to the fp16 range.
+
+    Returns ``(scaled_vector, n_clipped)``. ``scale == 1.0`` (the default for
+    every existing config, including the champion) is a pure passthrough: the
+    exact input list object is returned unchanged, so no numpy round-trip and no
+    clip can perturb those values. For any non-default scale the vector is
+    divided uniformly, then clipped to ``[-65504, 65504]`` as a safety net so an
+    over-small configured scale can never let an inf reach the halfvec column;
+    ``n_clipped`` counts how many components were clipped (a WARN signal that the
+    scale was too small).
+
+    A uniform per-config divisor is safe for every downstream consumer:
+    cosine-KNN is scale-invariant and the per-dim z-score standardisation
+    absorbs a uniform scale, so ``embedding / scale`` is equivalent to the raw
+    embedding.
+    """
+    if scale == 1.0:
+        return vector, 0
+    import numpy as np
+
+    arr = np.asarray(vector, dtype=np.float64) / scale
+    n_clipped = int(np.count_nonzero(np.abs(arr) > HALFVEC_FP16_MAX))
+    if n_clipped:
+        np.clip(arr, -HALFVEC_FP16_MAX, HALFVEC_FP16_MAX, out=arr)
+    return arr.tolist(), n_clipped
 
 
 def build_batch_dispatch_messages(
@@ -119,18 +168,24 @@ def build_embedding_rows(
     session: Session,
     p: StoreEmbeddingsPayload,
     config_id: uuid.UUID,
-) -> tuple[list[dict], int, int]:
+) -> tuple[list[dict], int, int, int]:
     """Materialise SequenceEmbedding insert rows for a store-embeddings batch.
 
     Iterates ``p.sequences`` and skips entries whose ``(sequence_id,
     config_id)`` pair already exists when ``p.skip_existing`` is true;
     otherwise deletes the existing rows so the bulk insert can replace
-    them. Returns ``(rows, embeddings_stored, sequences_skipped)``;
-    callers run the bulk insert + per-job-progress update.
+    them. Each stored vector is divided by the owning config's uniform
+    ``embedding_scale`` and clipped to the fp16 halfvec range (see
+    :func:`scale_and_clip_embedding`); ``scale == 1.0`` (the default) is a
+    no-op. Returns ``(rows, embeddings_stored, sequences_skipped,
+    components_clipped)``; callers run the bulk insert, emit a WARN when
+    ``components_clipped`` is non-zero, and update per-job progress.
     """
+    scale = fetch_embedding_scale(session, config_id)
     rows: list[dict] = []
     embeddings_stored = 0
     sequences_skipped = 0
+    components_clipped = 0
     for seq_data in p.sequences:
         sequence_id = seq_data["sequence_id"]
         chunks = seq_data["chunks"]
@@ -148,18 +203,20 @@ def build_embedding_rows(
                 sequence_id=sequence_id, embedding_config_id=config_id
             ).delete()
         for chunk in chunks:
+            scaled_vector, n_clipped = scale_and_clip_embedding(chunk["vector"], scale)
+            components_clipped += n_clipped
             rows.append(
                 {
                     "sequence_id": sequence_id,
                     "embedding_config_id": config_id,
                     "chunk_index_s": chunk["chunk_index_s"],
                     "chunk_index_e": chunk.get("chunk_index_e"),
-                    "embedding": chunk["vector"],
+                    "embedding": scaled_vector,
                     "embedding_dim": chunk["embedding_dim"],
                 }
             )
             embeddings_stored += 1
-    return rows, embeddings_stored, sequences_skipped
+    return rows, embeddings_stored, sequences_skipped, components_clipped
 
 
 def t5_forward_pass(model: Any, input_ids: Any, attention_mask: Any) -> Any:

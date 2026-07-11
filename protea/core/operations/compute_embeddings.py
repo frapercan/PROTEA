@@ -521,9 +521,20 @@ class StoreEmbeddingsOperation:
             )
             return OperationResult(result={"skipped": True})
 
-        rows_to_insert, embeddings_stored, sequences_skipped = build_embedding_rows(
-            session, p, config_id
+        rows_to_insert, embeddings_stored, sequences_skipped, components_clipped = (
+            build_embedding_rows(session, p, config_id)
         )
+        if components_clipped:
+            emit(
+                "store_embeddings.halfvec_clipped",
+                None,
+                {
+                    "components_clipped": components_clipped,
+                    "reason": "embedding_scale too small; values exceeded fp16 range "
+                    "and were clipped to [-65504, 65504]",
+                },
+                "warning",
+            )
         if rows_to_insert:
             session.execute(
                 pg_insert(SequenceEmbedding).on_conflict_do_nothing(),
