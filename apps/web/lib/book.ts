@@ -183,7 +183,7 @@ export const PILLARS: Pillar[] = [
     title: "The taxonomy of evidence",
     teaser: "Orthogonal evidence classes, not one model. Sixteen of sixty-four features carry ninety-five percent of the gain.",
     claim:
-      "PROTEA does not predict function with one model. It assembles a taxonomy of orthogonal evidence. Embeddings are representations, keyed by protein language model. Per-candidate scalars are the features the reranker consumes. And some evidence enters as neither, but as a graft: the InterPro2GO mapping, worth +0.0179 on the sealed metric, is what secures first place in seven of nine cells. The evidence is plural because no single class covers every regime, and the reranker leans on very few of the columns it is given: sixteen of the sixty-four features carry ninety-five percent of the gain, and twenty-eight carry exactly none.",
+      "PROTEA does not use one model to predict function. It gathers several independent kinds of evidence and lets a final judge weigh them. One kind is a compact numerical fingerprint of the protein, learned by a protein language model (a neural network trained on millions of sequences). Another is a set of per-candidate clues the judge reads directly: how similar a match is, how common a term is, how a candidate term relates to what we already know. A third is grafted in from an outside catalogue, the InterPro2GO mapping, which links known protein domains to functions; it adds 0.0179 to the sealed score and is what tips seven of the nine cells into first place. Why so many kinds? Because none of them wins everywhere. And the judge is frugal: of the sixty-four clues it is offered, sixteen carry ninety-five percent of the weight and twenty-eight carry none at all.",
     evidence: {
       caption: `LightGBM gain share, sealed booster (${METRIC}, ${FRAME})`,
       valueHeader: "Gain share",
@@ -219,7 +219,7 @@ export const PILLARS: Pillar[] = [
     title: "The calibrated fusion",
     teaser: "Two learning layers and a signal store. The lever is calibration, not depth.",
     claim:
-      "Two learning layers, with a signal store between them. A learned k-WTA retrieval encoder proposes candidates; calibrated evidence scorers put every signal on one scale; a shallow per-category combiner fuses them into a probability. The lever is calibration, not depth: standardising a fixed representation moves the number more than changing the layer it is read from. Run end to end, the native pipeline reproduces the sealed board closely; the exact gap waits on the reproducibility receipt named below.",
+      "The pipeline learns in two places, with a shared signal store between them. First, a learned encoder turns each protein into a sparse code and uses it to retrieve similar, already-labelled proteins: the candidates. Then a set of scorers put every clue onto one common scale, and a small model, trained separately for each branch of the ontology, fuses them into a single probability. The surprising lesson is that the biggest lever is not a deeper or fancier model, it is calibration: simply standardising a representation (rescaling each of its dimensions to a common range) moves the score more than changing which internal layer of the language model you read it from. Run from end to end, this pipeline reproduces the sealed 0.4063; the exact remaining gap waits on the reproducibility receipt named below.",
     evidence: {
       caption: `Sealed headline (${METRIC}, ${FRAME})`,
       valueHeader: "Value",
@@ -253,7 +253,7 @@ export const PILLARS: Pillar[] = [
     title: "The map of regimes",
     teaser: "The nine cells read as a map of which evidence wins where, not as nine scores.",
     claim:
-      "The nine-cell benchmark is not nine numbers, it is a map of which evidence wins in which regime. Read across knowledge and aspect: the learned classifier carries the novel proteins in the no-knowledge and limited-knowledge rows; prior knowledge, association and anc2vec-query, carries the partly-known; and homology proposes candidates but does not discriminate between them. First in seven of nine cells is the shape of that map, not a single score, and the two cells it does not hold are the two the map predicts are hardest.",
+      "The nine cells are not nine separate scores, they are a map of which evidence wins where. The rows are how much we already know about a protein (nothing, a little, or a fair amount); the columns are the three branches of the Gene Ontology (molecular function, biological process, cellular component). Read across the map and a pattern appears: a learned classifier carries the proteins we know nothing about; what we already know about a protein, its associations and its lineage in the ontology, carries the partly-known ones; and plain sequence similarity proposes candidates but cannot tell the good from the bad on its own. First in seven of the nine cells is the shape of that map, not one number, and the two cells we do not hold are exactly the two the map predicts are hardest.",
     evidence: {
       caption: `Nine-cell board, first in 7 of 9 (${METRIC}, ${FRAME})`,
       valueHeader: METRIC,
@@ -290,7 +290,7 @@ export const PILLARS: Pillar[] = [
     title: "The frontier",
     teaser: "The biological-process wall is bounded by evidence, and a text-aligned representation is the first crack.",
     claim:
-      "The two cells we do not win are LK biological process and PK biological process: the biological-process wall. It is bounded by evidence, not by architecture. Structure conserves molecular function, not biological process, so a structural gate recovers molecular-function cells and leaves the process cells where they were. The first crack is a representation supervised on descriptions of function: a text-aligned protein language model lifts novel-protein biological process by about +0.062, leakage-free, over the same base with no text. We state the wall before we state the crack.",
+      "The two cells we do not win are Biological Process for the proteins we know little or nothing about: the biological-process wall. It is bounded by the evidence available, not by the design of the method. A protein's 3D structure, for example, is conserved for molecular function but not for biological process, so adding a structural check recovers the molecular-function cells and leaves the process cells exactly where they were. The first genuine crack in the wall comes from a different kind of representation, one trained on written descriptions of function: a text-aligned protein language model lifts biological process for novel proteins by about 0.062, with no data leakage, over the same setup without text. We state the wall before we state the crack.",
     evidence: {
       caption: "Novel-protein BP, text-aligned vs base representation (aspect-aware lab eval)",
       valueHeader: "nk-BP",
