@@ -89,7 +89,7 @@ export function FarmJobsWidget() {
             {tasks.map((task) => (
               <Link
                 key={task.id}
-                href={`/${locale}/farm/${task.id}`}
+                href={`/${locale}/instrument/farm/${task.id}`}
                 className="block px-4 py-3 hover:bg-slate-50 transition-colors"
                 data-testid="farm-jobs-widget-row"
               >

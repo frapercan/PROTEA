@@ -61,7 +61,7 @@ export default async function AnnotatePage() {
       {/* CTAs. */}
       <section className="mx-auto flex max-w-3xl flex-col sm:flex-row items-center justify-center gap-3 pt-2">
         <Link
-          href={`/${locale}/benchmark`}
+          href={`/${locale}/instrument/benchmark`}
           className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-7 py-3 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 transition-colors"
         >
           {t("exploreResults")}

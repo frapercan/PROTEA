@@ -110,7 +110,7 @@ export default async function ArgumentPage() {
       <footer className="mt-14 border-t border-[var(--border)] pt-6">
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[14px]">
           <Link
-            href={`/${locale}/benchmark`}
+            href={`/${locale}/instrument/benchmark`}
             className="text-[var(--primary)] underline decoration-[var(--border-strong)] decoration-1 underline-offset-2 hover:decoration-[var(--primary)]"
           >
             {t("openInstrument")}

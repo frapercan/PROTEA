@@ -45,7 +45,7 @@ test.describe("scoring flow", () => {
   }) => {
     mockApi.override("/scoring/configs/", [CONFIG_LINEAR, CONFIG_EVIDENCE_WEIGHTED]);
 
-    await page.goto("/en/scoring/");
+    await page.goto("/en/instrument/scoring/");
 
     await expect(
       page.getByRole("heading", { name: "Scoring Configs", level: 1 }),
@@ -67,7 +67,7 @@ test.describe("scoring flow", () => {
   }) => {
     mockApi.override("/scoring/configs/", []);
 
-    await page.goto("/en/scoring/");
+    await page.goto("/en/instrument/scoring/");
 
     await expect(
       page.getByText(/No configs yet\. Load the presets or create one above\./),
@@ -91,7 +91,7 @@ test.describe("scoring flow", () => {
       name: "new_cfg",
     });
 
-    await page.goto("/en/scoring/");
+    await page.goto("/en/instrument/scoring/");
 
     await page.getByRole("button", { name: /\+ New scoring config/ }).click();
     // The form input has placeholder "my_config" (newConfigForm.namePlaceholder)
@@ -120,7 +120,7 @@ test.describe("scoring flow", () => {
       call === 1 ? [] : [CONFIG_LINEAR, CONFIG_EVIDENCE_WEIGHTED],
     );
 
-    await page.goto("/en/scoring/");
+    await page.goto("/en/instrument/scoring/");
     await page.getByRole("button", { name: "Load presets" }).click();
 
     // The two presets surface in the list after the re-fetch. Scope to

@@ -20,6 +20,7 @@
     "experimentRuns": "Experiment-Runs",
     "maintenance": "Wartung",
     "home": "Startseite",
+    "instrument": "Instrument",
     "data": "Referenzdaten",
     "pipelineGroup": "Pipeline",
     "results": "Ergebnisse",
@@ -1944,5 +1945,10 @@
         "help": "Der Erzeuger ist eingebunden, aber seine Datenquelle ist leer oder fehlerhaft, sodass die Spalte kein Signal trägt."
       }
     }
+  },
+  "instrument": {
+    "eyebrow": "Betriebs-Dashboard",
+    "title": "Das Instrument",
+    "subtitle": "Alle Daten-, Pipeline-, Ergebnis- und Betriebsflächen hinter dem Argument, gruppiert nach dem Ablauf der Pipeline. Das Buch bleibt auf der obersten Ebene; dies ist der Tab, den du zum Betrieb öffnest."
   }
 }

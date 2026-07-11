@@ -157,7 +157,7 @@ export default async function ScorePage({
           <dt className="protea-eyebrow text-[11px] uppercase text-[var(--muted)]">{t("proteinLabel")}</dt>
           <dd className="min-w-0">
             <Link
-              href={`/${locale}/proteins/${encodeURIComponent(accession)}`}
+              href={`/${locale}/instrument/proteins/${encodeURIComponent(accession)}`}
               className="font-mono text-[var(--primary)] underline decoration-[var(--border-strong)] decoration-1 underline-offset-2 hover:decoration-[var(--primary)]"
             >
               {accession}
@@ -240,7 +240,7 @@ export default async function ScorePage({
                     <tr key={`${p.ref_protein_accession}-${i}`} className="border-b border-[var(--border)]">
                       <th scope="row" className="py-2.5 pr-4 text-left font-mono text-[14px] font-normal">
                         <Link
-                          href={`/${locale}/proteins/${encodeURIComponent(p.ref_protein_accession)}`}
+                          href={`/${locale}/instrument/proteins/${encodeURIComponent(p.ref_protein_accession)}`}
                           className="text-[var(--primary)] underline decoration-[var(--border)] decoration-1 underline-offset-2 hover:decoration-[var(--primary)]"
                         >
                           {p.ref_protein_accession}
@@ -424,7 +424,7 @@ export default async function ScorePage({
         )}
 
         <Link
-          href={`/${locale}/scoring`}
+          href={`/${locale}/instrument/scoring`}
           className="mt-6 inline-block text-[14px] text-[var(--primary)] underline decoration-[var(--border-strong)] decoration-1 underline-offset-2 hover:decoration-[var(--primary)]"
         >
           {t("fusion.openInstrument")}

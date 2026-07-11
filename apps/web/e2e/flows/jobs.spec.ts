@@ -10,7 +10,7 @@ import { test, expect } from "./fixtures/mock-api";
 
 test.describe("jobs flow", () => {
   test("list page renders the four mocked jobs", async ({ page }) => {
-    await page.goto("/en/jobs/");
+    await page.goto("/en/instrument/jobs/");
     // Jobs render both mobile (lg:hidden) and desktop (hidden lg:block)
     // markup; on a 1280x800 viewport only the desktop variant is
     // visible. Match each operation by the visible row link and scope
@@ -22,7 +22,7 @@ test.describe("jobs flow", () => {
   });
 
   test("active-jobs pill counts running + queued mock jobs", async ({ page }) => {
-    await page.goto("/en/jobs/");
+    await page.goto("/en/instrument/jobs/");
     // Mock has 1 running + 1 queued, so the pill should show count=2.
     await expect(page.getByText(/2/).first()).toBeVisible();
   });
@@ -30,7 +30,7 @@ test.describe("jobs flow", () => {
   test("status filter narrows the list and updates the URL param", async ({
     page,
   }) => {
-    await page.goto("/en/jobs/");
+    await page.goto("/en/instrument/jobs/");
     const main = page.getByRole("main");
     // Wait for initial list to populate before changing filter.
     await expect(main.getByRole("link", { name: /compute_embeddings/ }).first()).toBeVisible();
@@ -49,7 +49,7 @@ test.describe("jobs flow", () => {
   });
 
   test("clicking a job row navigates to its detail route", async ({ page }) => {
-    await page.goto("/en/jobs/");
+    await page.goto("/en/instrument/jobs/");
     const main = page.getByRole("main");
     await main
       .getByRole("link", { name: /compute_embeddings/ })
@@ -60,7 +60,7 @@ test.describe("jobs flow", () => {
   });
 
   test("detail page shows progress, payload, and events", async ({ page }) => {
-    await page.goto("/en/jobs/job-aaa-001/");
+    await page.goto("/en/instrument/jobs/job-aaa-001/");
     // Progress reads 4500 / 9000 (50%).
     await expect(page.getByText(/50%/).first()).toBeVisible();
     // Events timeline includes the mocked entry.
@@ -76,7 +76,7 @@ test.describe("jobs flow", () => {
     mockApi,
   }) => {
     // Running job: cancel enabled, delete disabled (isLive).
-    await page.goto("/en/jobs/job-aaa-001/");
+    await page.goto("/en/instrument/jobs/job-aaa-001/");
     await expect(page.getByRole("button", { name: /cancel/i })).toBeEnabled();
     await expect(page.getByRole("button", { name: /delete/i })).toBeDisabled();
 
@@ -96,7 +96,7 @@ test.describe("jobs flow", () => {
       progress_total: 1000,
       payload: {},
     });
-    await page.goto("/en/jobs/job-ccc-003/");
+    await page.goto("/en/instrument/jobs/job-ccc-003/");
     await expect(page.getByRole("button", { name: /cancel/i })).toBeDisabled();
     await expect(page.getByRole("button", { name: /delete/i })).toBeEnabled();
   });

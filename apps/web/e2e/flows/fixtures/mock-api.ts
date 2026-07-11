@@ -30,7 +30,7 @@ export type OverrideBody = Json | ((ctx: OverrideContext) => Json | { body: Json
 // The web app reads NEXT_PUBLIC_API_URL at page-load time and issues
 // raw fetch() calls to that origin (see lib/api.ts). Route matchers
 // must be origin-scoped so they do not accidentally intercept the
-// Next.js page routes (/en/jobs/, /en/jobs/[id]/) which share suffix
+// Next.js page routes (/en/instrument/jobs/, /en/instrument/jobs/[id]/) which share suffix
 // shapes with API paths.
 //
 // We accept both the dev origin (localhost:8000) and the prod-style
@@ -332,7 +332,7 @@ export const test = base.extend<{ mockApi: MockApi }>({
 
     // Scope route mocks to the API origin (or the /api-proxy rewrite)
     // so they do not intercept Next.js page routes that share suffix
-    // shapes with API endpoints (e.g. /en/jobs/ vs /jobs).
+    // shapes with API endpoints (e.g. /en/instrument/jobs/ vs /jobs).
     await page.route(`${API_ORIGIN}/**`, handle);
     await page.route("**/api-proxy/**", handle);
 

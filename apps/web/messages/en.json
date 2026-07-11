@@ -20,6 +20,7 @@
     "experimentRuns": "Experiment runs",
     "maintenance": "Maintenance",
     "home": "Home",
+    "instrument": "Instrument",
     "data": "Reference Data",
     "pipelineGroup": "Pipeline",
     "results": "Results",
@@ -1943,5 +1944,10 @@
         "help": "The producer is wired but its data source is empty or faulty, so the column carries no signal."
       }
     }
+  },
+  "instrument": {
+    "eyebrow": "Operational dashboard",
+    "title": "The instrument",
+    "subtitle": "Every data, pipeline, results and operations surface behind the argument, grouped the way the pipeline runs. The book stays at the top level; this is the tab you open to operate it."
   }
 }

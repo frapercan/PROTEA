@@ -27,13 +27,13 @@ const TABS: { key: TabKey; segment: string | null }[] = [
 
 function deriveActive(pathname: string | null): TabKey {
   if (!pathname) return "tasks";
-  // Pathname looks like /<locale>/farm[/<segment>...]. Strip the locale
-  // and the literal "farm" segment to find the section subpath.
+  // Pathname looks like /<locale>/instrument/farm[/<segment>...]. Strip the
+  // locale and the "instrument" + "farm" segments to find the section subpath.
   const stripped = pathname.replace(/^\/[a-z]{2}(?=\/|$)/, "");
   const parts = stripped.split("/").filter(Boolean);
-  if (parts.length < 2 || parts[0] !== "farm") return "tasks";
-  if (parts[1] === "plan") return "plan";
-  if (parts[1] === "cost") return "cost";
+  if (parts.length < 3 || parts[0] !== "instrument" || parts[1] !== "farm") return "tasks";
+  if (parts[2] === "plan") return "plan";
+  if (parts[2] === "cost") return "cost";
   // Anything else (task id, future sub-routes) belongs to the tasks tab.
   return "tasks";
 }
@@ -52,8 +52,8 @@ export function FarmSubnav() {
     >
       {TABS.map(({ key, segment }) => {
         const href = segment
-          ? `/${locale}/farm/${segment}`
-          : `/${locale}/farm`;
+          ? `/${locale}/instrument/farm/${segment}`
+          : `/${locale}/instrument/farm`;
         const isActive = active === key;
         return (
           <Link

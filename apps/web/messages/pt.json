@@ -20,6 +20,7 @@
     "experimentRuns": "Execuções de experiência",
     "maintenance": "Manutenção",
     "home": "Início",
+    "instrument": "Instrumento",
     "data": "Dados de referência",
     "pipelineGroup": "Pipeline",
     "results": "Resultados",
@@ -1944,5 +1945,10 @@
         "help": "O produtor está ligado mas a sua fonte de dados está vazia ou defeituosa, por isso a coluna não carrega sinal."
       }
     }
+  },
+  "instrument": {
+    "eyebrow": "Painel operacional",
+    "title": "O instrumento",
+    "subtitle": "Todas as superfícies de dados, pipeline, resultados e operações por trás do argumento, agrupadas como o pipeline é executado. O livro permanece no nível superior; esta é a aba que você abre para operá-lo."
   }
 }

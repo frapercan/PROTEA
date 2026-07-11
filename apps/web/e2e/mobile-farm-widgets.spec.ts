@@ -2,7 +2,7 @@
 //
 // Both components are mounted in the global LocaleLayout but gated to
 // /[locale]/farm/* routes by <FarmChrome>. The spec asserts:
-//   - both render on /en/farm
+//   - both render on /en/instrument/farm
 //   - the status pill resolves to a health dot (data-testid + data-health)
 //   - the floating widget appears when at least one running task is
 //     returned by the sidecar mock, and disappears when the queue is
@@ -105,7 +105,7 @@ test.describe("FARM-UI.3 widgets at 390x844", () => {
       { running: [RUNNING_TASK], recent: [RUNNING_TASK] },
       hitCounter,
     );
-    await page.goto("/en/farm");
+    await page.goto("/en/instrument/farm");
 
     // Status pill is visible and reports healthy.
     const pill = page.getByTestId("farm-status-pill");
@@ -137,7 +137,7 @@ test.describe("FARM-UI.3 widgets at 390x844", () => {
       { running: [], recent: [FAILED_TASK] },
       hitCounter,
     );
-    await page.goto("/en/farm");
+    await page.goto("/en/instrument/farm");
 
     const dot = page.getByTestId("farm-status-dot");
     await expect(dot).toHaveAttribute("data-health", "error");
@@ -154,14 +154,14 @@ test.describe("FARM-UI.3 widgets at 390x844", () => {
       { running: [RUNNING_TASK], recent: [RUNNING_TASK] },
       hitCounter,
     );
-    // Visit /en/jobs first; the farm chrome must NOT mount here even
+    // Visit /en/instrument/jobs first; the farm chrome must NOT mount here even
     // though the locale layout is shared.
-    await page.goto("/en/jobs");
+    await page.goto("/en/instrument/jobs");
     await expect(page.getByTestId("farm-status-pill")).toHaveCount(0);
     await expect(page.getByTestId("farm-jobs-widget-toggle")).toHaveCount(0);
 
     // Move to /en/farm; the chrome should mount.
-    await page.goto("/en/farm");
+    await page.goto("/en/instrument/farm");
     await expect(page.getByTestId("farm-status-pill")).toBeVisible();
   });
 });
