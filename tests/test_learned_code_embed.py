@@ -18,12 +18,15 @@ from protea_backends._chunk_helpers import ChunkEmbedding
 from protea.core.operations._learned_code_embed import (
     _ARTIFACT_ENV,
     _DIR_ENV,
+    _SCALER_ENV,
     _base_config_prefix,
     embed_learned_code,
     is_learned_code_config,
     resolve_base_config,
     resolve_encoder_artifact,
+    resolve_scaler_artifact,
 )
+from protea.core.operations.apply_learned_encoder import _load_encoder, _load_scaler
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 
 
@@ -61,6 +64,10 @@ def _save_linear_head(path, in_dim: int, dict_dim: int, top_k: int) -> None:
          "meta": {"in_dim": in_dim, "dict_dim": dict_dim, "top_k": top_k, "objective": "hard-neg"}},
         path,
     )
+
+
+def _save_scaler(path, mu, sigma) -> None:
+    np.savez(path, mu=np.asarray(mu, np.float32), sigma=np.asarray(sigma, np.float32))
 
 
 class TestDetection:
@@ -256,3 +263,172 @@ class TestBatchOperationRouting:
         assert captured["sequences"] == ["MKT", "ACDEF"]
         assert [r["sequence_id"] for r in rows] == [1, 2]
         assert rows[0]["chunks"][0]["embedding_dim"] == 2048
+
+
+class TestScalerLoad:
+    """``_load_scaler`` reads the optional per-dim z-score sidecar or returns None."""
+
+    def test_absent_scaler_is_none(self, tmp_path) -> None:
+        assert _load_scaler(None, 8) is None
+        assert _load_scaler(str(tmp_path / "missing.scaler.npz"), 8) is None
+
+    def test_loads_mu_sigma(self, tmp_path) -> None:
+        p = tmp_path / "h.scaler.npz"
+        _save_scaler(p, np.arange(8), np.arange(1, 9))
+        mu, sigma = _load_scaler(str(p), 8)
+        assert mu.shape == (8,) and sigma.shape == (8,)
+        assert np.allclose(mu, np.arange(8))
+        assert np.allclose(sigma, np.arange(1, 9))
+
+    def test_shape_mismatch_raises(self, tmp_path) -> None:
+        p = tmp_path / "h.scaler.npz"
+        _save_scaler(p, np.zeros(4), np.ones(4))
+        with pytest.raises(ValueError, match="shape mismatch"):
+            _load_scaler(str(p), 8)
+
+    def test_non_positive_sigma_raises(self, tmp_path) -> None:
+        p = tmp_path / "h.scaler.npz"
+        _save_scaler(p, np.zeros(8), np.array([1, 1, 0, 1, 1, 1, 1, 1]))
+        with pytest.raises(ValueError, match="non-positive sigma"):
+            _load_scaler(str(p), 8)
+
+    def test_missing_keys_raises(self, tmp_path) -> None:
+        p = tmp_path / "h.scaler.npz"
+        np.savez(p, mean=np.zeros(8))  # wrong key names
+        with pytest.raises(ValueError, match="must contain arrays"):
+            _load_scaler(str(p), 8)
+
+
+def _reference_code(vec, weight, bias, top_k, mu=None, sigma=None):
+    """Numpy re-implementation of the apply math (z-score -> L2 -> Linear -> top-k)."""
+    x = vec.astype(np.float64)
+    if mu is not None:
+        x = (x - mu) / sigma
+    n = np.linalg.norm(x)
+    xn = x / (n if n else 1.0)
+    z = weight.astype(np.float64) @ xn + bias.astype(np.float64)
+    out = np.zeros_like(z)
+    idx = np.argsort(-np.abs(z))[:top_k]
+    out[idx] = z[idx]
+    return out
+
+
+class TestScalerApply:
+    """A sibling scaler standardises the base before the in-head L2 + Linear; its
+    absence leaves the legacy math byte-for-byte unchanged."""
+
+    def test_sibling_scaler_applied_matches_reference(self, tmp_path) -> None:
+        in_dim, dict_dim, top_k = 6, 20, 5
+        art = tmp_path / "head.pt"
+        _save_linear_head(art, in_dim, dict_dim, top_k)
+        rng = np.random.RandomState(3)
+        mu = rng.randn(in_dim).astype(np.float32)
+        sigma = (np.abs(rng.randn(in_dim)) + 0.5).astype(np.float32)
+        _save_scaler(tmp_path / "head.scaler.npz", mu, sigma)
+
+        apply, meta = _load_encoder(str(art))  # sibling auto-discovered
+        blob = torch.load(str(art), map_location="cpu", weights_only=False)
+        w = blob["state_dict"]["weight"].numpy()
+        b = blob["state_dict"]["bias"].numpy()
+        vec = rng.randn(in_dim).astype(np.float32)
+
+        got = apply([vec[None, :]])[0]
+        exp = _reference_code(vec, w, b, top_k, mu, sigma)
+        assert np.allclose(got, exp, atol=1e-4)
+        assert int((got != 0).sum()) == top_k
+
+    def test_no_scaler_matches_legacy_reference(self, tmp_path) -> None:
+        in_dim, dict_dim, top_k = 6, 20, 5
+        art = tmp_path / "head.pt"
+        _save_linear_head(art, in_dim, dict_dim, top_k)
+        apply, _ = _load_encoder(str(art))  # no sibling scaler present
+        blob = torch.load(str(art), map_location="cpu", weights_only=False)
+        w = blob["state_dict"]["weight"].numpy()
+        b = blob["state_dict"]["bias"].numpy()
+        rng = np.random.RandomState(4)
+        vec = rng.randn(in_dim).astype(np.float32)
+        got = apply([vec[None, :]])[0]
+        exp = _reference_code(vec, w, b, top_k)  # no mu/sigma
+        assert np.allclose(got, exp, atol=1e-4)
+
+    def test_scaler_changes_the_code(self, tmp_path) -> None:
+        in_dim, dict_dim, top_k = 6, 20, 5
+        art = tmp_path / "head.pt"
+        _save_linear_head(art, in_dim, dict_dim, top_k)
+        rng = np.random.RandomState(5)
+        vec = rng.randn(in_dim).astype(np.float32)
+        legacy, _ = _load_encoder(str(art))
+        code_legacy = legacy([vec[None, :]])[0]
+        _save_scaler(tmp_path / "head.scaler.npz",
+                     rng.randn(in_dim).astype(np.float32),
+                     (np.abs(rng.randn(in_dim)) + 0.5).astype(np.float32))
+        scaled, _ = _load_encoder(str(art))
+        code_scaled = scaled([vec[None, :]])[0]
+        assert not np.allclose(code_legacy, code_scaled)
+
+
+class TestScalerResolution:
+    def _cfg(self, cfg_id=None):
+        return _config("learned-code:hard-neg:08234f06", "learned-code", cfg_id)
+
+    def test_none_when_no_scaler(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.delenv(_SCALER_ENV, raising=False)
+        monkeypatch.delenv(_DIR_ENV, raising=False)
+        art = tmp_path / "head.pt"
+        art.write_bytes(b"x")
+        assert resolve_scaler_artifact(self._cfg(), str(art)) is None
+
+    def test_explicit_env(self, tmp_path, monkeypatch) -> None:
+        s = tmp_path / "explicit.scaler.npz"
+        s.write_bytes(b"x")
+        monkeypatch.setenv(_SCALER_ENV, str(s))
+        assert resolve_scaler_artifact(self._cfg(), str(tmp_path / "head.pt")) == str(s)
+
+    def test_explicit_env_missing_raises(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.setenv(_SCALER_ENV, str(tmp_path / "nope.scaler.npz"))
+        with pytest.raises(ValueError, match="does not exist"):
+            resolve_scaler_artifact(self._cfg(), str(tmp_path / "head.pt"))
+
+    def test_dir_by_config_id(self, tmp_path, monkeypatch) -> None:
+        cfg_id = uuid.uuid4()
+        cfg = self._cfg(cfg_id)
+        s = tmp_path / f"{cfg_id}.scaler.npz"
+        s.write_bytes(b"x")
+        monkeypatch.delenv(_SCALER_ENV, raising=False)
+        monkeypatch.setenv(_DIR_ENV, str(tmp_path))
+        assert resolve_scaler_artifact(cfg, str(tmp_path / f"{cfg_id}.pt")) == str(s)
+
+    def test_sibling_fallback(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.delenv(_SCALER_ENV, raising=False)
+        monkeypatch.delenv(_DIR_ENV, raising=False)
+        art = tmp_path / "head.pt"
+        art.write_bytes(b"x")
+        s = tmp_path / "head.scaler.npz"
+        s.write_bytes(b"x")
+        assert resolve_scaler_artifact(self._cfg(), str(art)) == str(s)
+
+
+class TestEmbedLearnedCodeWithScaler:
+    def test_scaler_changes_end_to_end_codes(self, tmp_path, monkeypatch) -> None:
+        in_dim, dict_dim, top_k = 6, 20, 4
+        base = _config("ElnaggarLab/ankh-base", "ankh")
+        learned = _config("learned-code:hard-neg:08234f06", "learned-code")
+        art = tmp_path / "head.pt"
+        _save_linear_head(art, in_dim, dict_dim, top_k)
+        monkeypatch.setenv(_ARTIFACT_ENV, str(art))
+        monkeypatch.delenv(_SCALER_ENV, raising=False)
+        monkeypatch.delenv(_DIR_ENV, raising=False)
+        rng = np.random.RandomState(6)
+        vecs = rng.randn(in_dim).astype(np.float32)
+
+        def embed_base(base_config, seq_batch):
+            return [[ChunkEmbedding(0, None, vecs)] for _ in seq_batch]
+
+        before = embed_learned_code(_FakeSession([base]), learned, ["X"], lambda *a, **k: None,
+                                    embed_base=embed_base)
+        _save_scaler(tmp_path / "head.scaler.npz",
+                     rng.randn(in_dim).astype(np.float32),
+                     (np.abs(rng.randn(in_dim)) + 0.5).astype(np.float32))
+        after = embed_learned_code(_FakeSession([base]), learned, ["X"], lambda *a, **k: None,
+                                   embed_base=embed_base)
+        assert not np.allclose(before[0][0].vector, after[0][0].vector)
