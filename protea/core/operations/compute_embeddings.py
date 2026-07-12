@@ -150,6 +150,12 @@ class ComputeEmbeddingsOperation:
       prefix.  Ambiguous residues (``U``, ``Z``, ``O``, ``B``) are replaced
       with ``X`` before tokenisation.
 
+    - **protst** : text-aligned ProtST-ESM1b (``mila-intel/ProtST-esm1b``).
+      Returns the whole-protein ``protein_feature`` projection (512-d,
+      orthogonal text-aligned signal); one full-sequence chunk per
+      sequence, honouring only ``normalize`` (residue-level knobs do not
+      apply).  Served entirely by the ``protst`` protea-backends plugin.
+
     Layer indexing (reverse convention, matches PIS)
     ------------------------------------------------
     ``layer_indices = [0]`` → last (most semantic) layer.

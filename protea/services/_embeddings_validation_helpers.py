@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
-VALID_BACKENDS: frozenset[str] = frozenset({"esm", "esm3c", "t5", "ankh", "auto"})
+VALID_BACKENDS: frozenset[str] = frozenset({"esm", "esm3c", "t5", "ankh", "protst", "auto"})
 VALID_LAYER_AGG: frozenset[str] = frozenset({"mean", "last", "concat"})
 VALID_POOLING: frozenset[str] = frozenset({"mean", "max", "cls", "mean_max"})
 

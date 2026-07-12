@@ -12,7 +12,7 @@ from protea.infrastructure.orm.base import Base
 
 _VALID_LAYER_AGG = {"mean", "last", "concat"}
 _VALID_POOLING = {"mean", "max", "cls", "mean_max"}
-_VALID_BACKENDS = {"esm", "esm3c", "t5", "ankh", "auto"}
+_VALID_BACKENDS = {"esm", "esm3c", "t5", "ankh", "protst", "auto"}
 
 
 class EmbeddingConfig(Base):
@@ -51,6 +51,10 @@ class EmbeddingConfig(Base):
     - ``ankh``  : HuggingFace ``T5EncoderModel`` loaded via ``AutoTokenizer``
                   (Ankh base/large).  No ``<AA2fold>`` prefix; ambiguous
                   residues are substituted with ``X`` like the other T5 path.
+    - ``protst``: text-aligned ProtST-ESM1b (``mila-intel/ProtST-esm1b``).
+                  Whole-protein ``protein_feature`` projection (512-d,
+                  orthogonal text-aligned signal); one vector per sequence,
+                  honours only ``normalize``.
     - ``auto``  : falls back to ``esm``.
 
     Normalisation
