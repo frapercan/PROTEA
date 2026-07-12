@@ -130,11 +130,11 @@ def run_knn_transfer_and_label(
 def _build_parity_flags(p: TrainRerankerAutoPayload) -> ExportParityFlags:
     """Read the INT-6 ``compute_*`` flags off the dump payload (default off)."""
     from protea.core.training_dump._export_features import ExportParityFlags
-
     return ExportParityFlags(
         self_prior=bool(getattr(p, "compute_self_prior", False)),
         association=bool(getattr(p, "compute_association", False)),
         classifier=bool(getattr(p, "compute_classifier", False)),
+        protst_text=bool(getattr(p, "compute_protst", False)),
     )
 
 

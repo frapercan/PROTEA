@@ -180,7 +180,7 @@ class TestProvenanceBuilder:
         )
 
         prov = {p.family: p for p in build_lafa_family_provenance(ExportParityFlags())}
-        assert set(prov) == {"classifier", "self_prior", "association"}
+        assert set(prov) == {"classifier", "self_prior", "association", "protst_text"}
         for entry in prov.values():
             assert entry.state == DECLARED_ABSENT
             assert entry.producer is None
@@ -194,7 +194,9 @@ class TestProvenanceBuilder:
         prov = {
             p.family: p
             for p in build_lafa_family_provenance(
-                ExportParityFlags(self_prior=True, association=True, classifier=True)
+                ExportParityFlags(
+                    self_prior=True, association=True, classifier=True, protst_text=True
+                )
             )
         }
         for entry in prov.values():
@@ -202,3 +204,4 @@ class TestProvenanceBuilder:
             assert entry.producer  # a non-empty producer identity
         assert "apply_self_prior" in prov["self_prior"].producer
         assert "apply_association" in prov["association"].producer
+        assert "apply_protst_text" in prov["protst_text"].producer

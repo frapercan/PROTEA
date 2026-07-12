@@ -383,10 +383,10 @@ class _DumpRequest(NamedTuple):
 def _dump_family_provenance(p: Any) -> tuple[Any, ...]:
     """Per-family production status for this dump (ADR-D45).
 
-    The three LAFA families are produced only when the matching ``compute_*``
-    export flag wired their producer; otherwise they ship ``NaN`` (declared
-    absent). Recording which is which keeps the manifest honest and tells the
-    shard-write degeneracy check which families to enforce.
+    The LAFA + protst_text families are produced only when the matching
+    ``compute_*`` export flag wired their producer; otherwise they ship ``NaN``
+    (declared absent). Recording which is which keeps the manifest honest and
+    tells the shard-write degeneracy check which families to enforce.
     """
     from protea.core.training_dump._export_features import (
         ExportParityFlags,
@@ -397,6 +397,7 @@ def _dump_family_provenance(p: Any) -> tuple[Any, ...]:
         self_prior=bool(getattr(p, "compute_self_prior", False)),
         association=bool(getattr(p, "compute_association", False)),
         classifier=bool(getattr(p, "compute_classifier", False)),
+        protst_text=bool(getattr(p, "compute_protst", False)),
     )
     return build_lafa_family_provenance(flags)
 

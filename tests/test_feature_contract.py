@@ -118,10 +118,12 @@ class TestShaConsistency:
         # v1.4.0 reconciliation of the forked main/develop schemas rolls
         # it forward to 75 columns (adding the four ``lineage_*`` and the
         # two pool-injected ``plm_id`` / ``k_context``); prior golden
-        # ``"b2a5cd46ec6b"`` is superseded. Mirrors the golden in
+        # ``"b2a5cd46ec6b"`` is superseded. contracts v1.5.0 adds the
+        # three ``protst_text`` columns (78 columns total); prior golden
+        # ``"4e2c515273d3"`` is superseded. Mirrors the golden in
         # protea-contracts ``tests/test_feature_schema.py``.
         sha = protea_contracts.compute_schema_sha(protea_contracts.ALL_FEATURES)
-        assert sha == "4e2c515273d3"
+        assert sha == "bcb5453c5a0e"
 
 
 # ---------------------------------------------------------------------------
