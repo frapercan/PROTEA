@@ -69,6 +69,7 @@ _ASSOCIATION_PRODUCER = (
     "protea.core.operations.predict_go_terms._post_knn_pipeline.apply_association"
 )
 _CLASSIFIER_PRODUCER = "protea.core.training_dump._export_features._union_classifier_candidates"
+_PROTST_PRODUCER = "protea.core.operations.predict_go_terms._protst_text.apply_protst_text"
 
 
 @dataclass(frozen=True)
@@ -84,10 +85,11 @@ class ExportParityFlags:
     self_prior: bool = False
     association: bool = False
     classifier: bool = False
+    protst_text: bool = False
 
     @property
     def any(self) -> bool:
-        return self.self_prior or self.association or self.classifier
+        return self.self_prior or self.association or self.classifier or self.protst_text
 
 
 class _ExportFeatureOp(_FeatureLoadingMixin):
@@ -190,7 +192,26 @@ def apply_export_parity_features(
     if flags.association:
         _zero_baseline_family(records, FEATURE_FAMILIES["association"])
         apply_association(op, session, t0_annotation_set_id, valid_accessions, records, _noop_emit)
+    if flags.protst_text:
+        _stamp_protst_text(session, t0_annotation_set_id, records)
     return records
+
+
+def _stamp_protst_text(
+    session: Session, t0_annotation_set_id: uuid.UUID, records: list[dict[str, Any]]
+) -> None:
+    """Stamp the protst_text family on the export records (predict producer, verbatim).
+
+    Unlike the LAFA families, NO :func:`_zero_baseline_family` runs first: the
+    protst producer owns its own per-candidate baseline. A COVERED query gets a
+    measured ``0.0`` on ``protst_vote_fraction`` / ``protst_present`` and keeps
+    ``NaN`` on ``protst_text_score`` for an unvoted term; an UNCOVERED query keeps
+    all three ``NaN``. Zero-filling the family here would overwrite that
+    declared-absent score with a fake measured zero (ADR-D45).
+    """
+    from protea.core.operations.predict_go_terms._protst_text import apply_protst_text
+
+    apply_protst_text(session, records, t0_annotation_set_id, emit=_noop_emit)
 
 
 def _zero_baseline_family(records: list[dict[str, Any]], columns: list[str]) -> None:
@@ -211,7 +232,7 @@ def _zero_baseline_family(records: list[dict[str, Any]], columns: list[str]) -> 
 
 
 def build_lafa_family_provenance(flags: ExportParityFlags) -> tuple[FamilyProvenance, ...]:
-    """Provenance rows for the three LAFA families given the export flags.
+    """Provenance rows for the LAFA + protst_text families given the export flags.
 
     Each family is ``produced`` (a producer is wired for this export) or
     ``declared_absent`` (no producer; the six columns ship as ``NaN``). The
@@ -225,6 +246,7 @@ def build_lafa_family_provenance(flags: ExportParityFlags) -> tuple[FamilyProven
         ("classifier", flags.classifier, _CLASSIFIER_PRODUCER),
         ("self_prior", flags.self_prior, _SELF_PRIOR_PRODUCER),
         ("association", flags.association, _ASSOCIATION_PRODUCER),
+        ("protst_text", flags.protst_text, _PROTST_PRODUCER),
     )
     return tuple(
         FamilyProvenance(

@@ -3976,7 +3976,7 @@ resolved_reference = "9fad1955719d00936b44d62b053541a34d7e82a9"
 
 [[package]]
 name = "protea-contracts"
-version = "1.4.0"
+version = "1.5.0"
 description = "Shared ABCs, payload schemas, feature registry contract and compute_schema_sha helper for the PROTEA stack."
 optional = false
 python-versions = ">=3.12,<4.0"
@@ -3993,7 +3993,7 @@ pydantic = ">=2.5"
 type = "git"
 url = "https://github.com/frapercan/protea-contracts.git"
 reference = "main"
-resolved_reference = "126bfb41071f8fd4ec814321184274e496c04123"
+resolved_reference = "21f300f4a4779f349df6bba3e53e9a814140d25b"
 
 [[package]]
 name = "protea-method"

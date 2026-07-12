@@ -130,6 +130,10 @@ def _apply_lafa_score_features(
         apply_self_prior(op, session, ctx.annotation_set_id, accessions, prediction_dicts, emit)
     if getattr(p, "compute_association", False):
         apply_association(op, session, ctx.annotation_set_id, accessions, prediction_dicts, emit)
+    if getattr(p, "compute_protst", False):
+        from protea.core.operations.predict_go_terms._protst_text import apply_protst_text
+
+        apply_protst_text(session, prediction_dicts, ctx.annotation_set_id, emit=emit)
     if getattr(p, "compute_ia", False):
         apply_ia(
             session,

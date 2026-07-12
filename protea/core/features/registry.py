@@ -83,6 +83,7 @@ _PRIMARY_FAMILY_ORDER: tuple[str, ...] = (
     "classifier",
     "self_prior",
     "association",
+    "protst_text",
     "annotation_meta",
     # Pool-stage-injected context. Absent from raw parquet dumps: the lab's
     # multi-manifest loader adds them when several sources are pooled.

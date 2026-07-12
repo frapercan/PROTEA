@@ -70,6 +70,31 @@ def _tax_consensus_default_fields() -> dict[str, Any]:
     }
 
 
+def _protst_default_fields() -> dict[str, Any]:
+    """Declared-absent defaults for the 3 protst_text columns (ADR-D45).
+
+    The ProtST text-to-GO producer (``apply_protst_text``) is opt-in behind the
+    ``compute_protst`` flag and is NOT wired into the export by default, so every
+    record carries all three columns unconditionally (the canonical-column
+    boundary holds) at ``NaN`` (missing measurement), never ``0.0``. A separate
+    sibling of :meth:`_LeafRecordBuilder._lafa_default_fields` because the
+    protst_text family's produced-but-no-evidence default differs from the LAFA
+    families: the producer, when it runs on a COVERED query, stamps a measured
+    ``0.0`` on ``protst_vote_fraction`` / ``protst_present`` and leaves
+    ``protst_text_score`` at this ``NaN`` for a term that drew no vote, so a
+    covered-but-unvoted candidate stays a missing score, not a measured zero. An
+    uncovered query keeps all three at ``NaN``. LightGBM reads ``NaN`` as
+    missing; the export degeneracy check (#710/#720) then treats an all-null
+    protst family as declared absent, not a bug.
+    """
+    nan = float("nan")
+    return {
+        "protst_text_score": nan,
+        "protst_vote_fraction": nan,
+        "protst_present": nan,
+    }
+
+
 class _LeafRecordBuilder:
     """Builds the per-(query, candidate-GO) record dicts + ancestor expansion.
 
@@ -170,7 +195,7 @@ class _LeafRecordBuilder:
         rec.update({f"emb_pca_query_{i}": inputs.q_pca_row[i] for i in range(EMBEDDING_PCA_DIM)})
         rec.update(self._lineage_default_fields())
         rec.update(self._interpro_default_fields())
-        rec.update(self._lafa_default_fields())
+        rec.update({**self._lafa_default_fields(), **_protst_default_fields()})
         return rec
 
     # ── InterPro-only candidate materialisation (S3b union) ───────────
@@ -250,7 +275,7 @@ class _LeafRecordBuilder:
         """
         rec.update(self._lineage_default_fields())
         rec.update(self._interpro_default_fields())
-        rec.update(self._lafa_default_fields())
+        rec.update({**self._lafa_default_fields(), **_protst_default_fields()})
         rec["knn_present"] = False
 
     def get_interpro_table(self) -> dict[tuple[str, str], Any]:

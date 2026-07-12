@@ -76,6 +76,13 @@ class TrainRerankerAutoPayload(ProteaPayload, frozen=True):  # type: ignore[misc
     compute_self_prior: bool = False
     compute_association: bool = False
     compute_classifier: bool = False
+    # ProtST text-to-GO transfer (protst_text lever). When set, the export stamps
+    # the precomputed cosine-kNN ProtST vote onto each candidate via
+    # ``predict_go_terms._protst_text.apply_protst_text`` (the SAME producer the
+    # predict path uses behind ``compute_protst``), so the training and eval
+    # pools carry matched values. Default False: exports stay bit-identical and
+    # the family ships NaN (declared absent, ADR-D45).
+    compute_protst: bool = False
 
     # Parity-producer batching: the self_prior / association / classifier
     # producers run ONCE per chunk of this many query proteins rather than once
