@@ -80,6 +80,8 @@ class ExportResearchDatasetPayload(ProteaPayload, frozen=True):
     compute_self_prior: bool = False
     compute_association: bool = False
     compute_classifier: bool = False
+    # ProtST text-to-GO family, gated like the other compute_* flags.
+    compute_protst: bool = False
 
     # NFR-ARCH "export decouple". When True, the STABLE per-candidate feature
     # table (every column except the classifier columns) is content-addressed
@@ -351,6 +353,7 @@ class ExportResearchDatasetOperation:
             "compute_self_prior": p.compute_self_prior,
             "compute_association": p.compute_association,
             "compute_classifier": compute_classifier,
+            "compute_protst": p.compute_protst,
             "training_scope": "per_cell",
             "dump_to": str(stage_dir),
             "dump_only": True,
