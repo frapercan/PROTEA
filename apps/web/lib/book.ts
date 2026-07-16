@@ -38,7 +38,7 @@ export const HEADLINE = {
 
 // The one sentence the whole product is an argument for.
 export const THESIS_SENTENCE =
-  "Protein function is predictable from a taxonomy of orthogonal evidence, combined by a calibrated fusion, measured on a leakage-free temporal frame. The nine-cell benchmark is not nine numbers, it is a map of which evidence wins in which regime, and it has an honest, evidence-bound frontier that this work characterises rather than hides.";
+  "Protein function is predictable from a taxonomy of orthogonal evidence, combined by a calibrated fusion, measured on a leakage-free temporal frame. The nine-cell benchmark is not nine numbers, it is a map of which evidence wins in which regime, and its frontier is a measured limit of ranking rather than of evidence, which this work characterises rather than hides.";
 
 /**
  * Chapter zero: the whole argument, end to end, for a reader who is barely
@@ -81,8 +81,8 @@ export const CHAPTER_ZERO: ChapterZeroMovement[] = [
   {
     lead: "Where it stops, honestly.",
     body:
-      "Two of the nine cells are not won: predicting the Biological Process branch for the least-studied proteins. The evidence available does not reach there yet. We name it the biological-process wall and we show it, rather than hide it, and we point to the first crack in it.",
-    link: { to: "pillar/4", label: "The frontier, and the first crack in the wall" },
+      "Two of the nine cells are not won: predicting the Biological Process branch for the least-studied proteins. We call it the biological-process wall, we show it rather than hide it, and we measured where it lives. It is not that the evidence is missing: almost all of those terms are already visible to the method. It is that we cannot order the shortlist we build. A perfect ranking of the very candidates we already retrieve would score nearly five times what we deliver.",
+    link: { to: "pillar/4", label: "The frontier, and where the wall actually lives" },
   },
 ];
 
@@ -219,7 +219,7 @@ export const PILLARS: Pillar[] = [
     title: "The calibrated fusion",
     teaser: "Two learning layers and a signal store. The lever is calibration, not depth.",
     claim:
-      "The pipeline learns in two places, with a shared signal store between them. First, a learned encoder turns each protein into a sparse code and uses it to retrieve similar, already-labelled proteins: the candidates. Then a set of scorers put every clue onto one common scale, and a small model, trained separately for each branch of the ontology, fuses them into a single probability. The surprising lesson is that the biggest lever is not a deeper or fancier model, it is calibration: simply standardising a representation (rescaling each of its dimensions to a common range) moves the score more than changing which internal layer of the language model you read it from. Run from end to end, this pipeline reproduces the sealed 0.4063; the exact remaining gap waits on the reproducibility receipt named below.",
+      "The pipeline learns in two places, with a shared signal store between them. First, a learned encoder turns each protein into a sparse code and uses it to retrieve similar, already-labelled proteins: the candidates. Then a set of scorers put every clue onto one common scale, and a small model, trained separately for each branch of the ontology, fuses them into a single probability. The surprising lesson is that the biggest lever is not a deeper or fancier model, it is calibration: simply standardising a representation (rescaling each of its dimensions to a common range) moves the score more than changing which internal layer of the language model you read it from. Re-running the pipeline end to end does not land back on the sealed 0.4063, and the reason is now measured rather than pending: turning the candidate classifier on widens the pool from 62 to 114 candidates per query, which dilutes the score. The sealed number and a regenerated one are answers to different questions, and this page keeps the sealed one.",
     evidence: {
       caption: `Sealed headline (${METRIC}, ${FRAME})`,
       valueHeader: "Value",
@@ -288,35 +288,38 @@ export const PILLARS: Pillar[] = [
     n: 4,
     eyebrow: "Chapter four",
     title: "The frontier",
-    teaser: "The biological-process wall is bounded by evidence, and a text-aligned representation is the first crack.",
+    teaser: "The biological-process wall is a ranking limit, not an evidence ceiling. We measured where it lives, and it is inside our own method.",
     claim:
-      "The two cells we do not win are Biological Process for the proteins we know little or nothing about: the biological-process wall. It is bounded by the evidence available, not by the design of the method. A protein's 3D structure, for example, is conserved for molecular function but not for biological process, so adding a structural check recovers the molecular-function cells and leaves the process cells exactly where they were. The first genuine crack in the wall comes from a different kind of representation, one trained on written descriptions of function: a text-aligned protein language model lifts biological process for novel proteins by about 0.062, with no data leakage, over the same setup without text. We state the wall before we state the crack.",
+      "The two cells we do not win are Biological Process for the proteins we know little or nothing about: the biological-process wall. We used to describe it as a limit of the evidence available. That description is wrong, and the measurement that corrects it is the centre of this chapter. For the least-studied proteins, 97 percent of the process terms we fail to predict already exist in the vocabulary the method can see before the evaluation window opens, so the information is not missing. We then scored our own candidate list with the true answer, to ask what a perfect ranking of the very same candidates would be worth: 0.608, against the 0.126 we actually deliver. We capture a fifth of what the shortlist we already build allows. The wall is therefore not what we retrieve, it is how we order it, and that is a fact about our design rather than about biology. It explains why every lever that adds more candidates has been inert: a co-occurrence expansion that lifts recall by half converts to plus 0.002, because more candidates do not help a ranker that cannot order the ones it holds. The gap to the leading method on these two cells is about 0.075, and the ranking headroom above us is several times that. The honest closing statement is that we know where the loss is, and we have not yet identified the signal that recovers it: the two structural candidates we could test, term co-occurrence and ontology proximity, are both ruled out by measurement.",
     evidence: {
-      caption: "Novel-protein BP, text-aligned vs base representation (aspect-aware lab eval)",
-      valueHeader: "nk-BP",
+      caption: "Least-studied proteins, BP: what binds (same pool, same harness)",
+      valueHeader: "f_micro_w",
       rows: [
-        { label: "ESM-1b, no text (base)", value: "0.145" },
-        { label: "ProtST, text-aligned", value: "0.206", note: "+0.062 over base" },
-        { label: "Structural gate, BP", value: "no lift", frontier: true, note: "structure conserves MF, not BP" },
+        { label: "What we deliver today", value: "0.126", note: "reranker over the pool" },
+        { label: "Perfect ranking of the SAME pool", value: "0.608", frontier: true, note: "we capture 20.7%: the loss is ranking" },
+        { label: "Adding candidates (co-occurrence)", value: "+0.002", note: "recall +50% relative, buys nothing" },
+        { label: "Matching the metric (binary objective)", value: "+0.026", note: "real, free, and not enough alone" },
       ],
     },
-    evidenceLabel: `These are aspect-aware lab evaluations on the text-scorer substrate, not the sealed ${METRIC} board. The lift is a direction, not a new headline.`,
+    evidenceLabel: `These are lab evaluations on a freshly retrained booster, not the sealed ${METRIC} board, so the absolute values are not comparable to it. Every row is measured against the same ground truth and the same harness, which is what makes the comparison between the rows the result.`,
     receipt: {
-      artifact: "storage/text_scorer/knn_confirm_text_result.json",
-      script: "storage/text_scorer/stratify_identity_result.json",
+      artifact: "storage/regen_headline/BP_WALL_CHARACTERIZATION.md",
+      script: "storage/cooc_experiment/oracle_ceiling.py",
     },
     receiptSecondary: {
-      artifact: "storage/struct_gate/m2ab/eval_9cell.json",
-      script: "storage/struct_gate/carriers.json",
+      artifact: "storage/regen_headline/BP_TECHNIQUE_LEVERS.md",
+      script: "storage/cooc_experiment/fuse_and_score.py",
     },
     operation: {
       kind: "script",
-      script: "storage/text_scorer/knn_confirm_text.py",
-      note: "The frontier probes run offline (text_scorer and struct_gate). They are not yet a dispatchable operation, so this claim lives at the edge of the argument until one exists.",
+      script: "storage/cooc_experiment/oracle_ceiling.py",
+      note: "The frontier probes run offline over an exported dataset. They are not yet dispatchable operations, so this claim lives at the edge of the argument until one exists.",
     },
     caveats: [
-      "These frontier numbers are lab evaluations on a text-scorer substrate, not the sealed metric. Read them as a direction, not a headline.",
-      "The biological-process lift is specific to ProtST. A second text model, ProTrek, did not reproduce it, so the claim is function-description-aligned representation, not text models in general.",
+      "The oracle ceiling is what a perfect ranking of our current shortlist would score. It is a bound on this pool, not a score any method could reach, and two thirds of the true process terms are still outside the pool.",
+      "This chapter reverses an earlier reading of our own. We first read the low recall of the shortlist as the wall, and said so. Scoring the same pool with the true answer disproved it: a recall number alone does not tell you what binds, the ceiling of the pool does.",
+      "A text-aligned representation (ProtST) lifts process for novel proteins by about 0.062 in an aspect-aware lab evaluation, and remains the most promising outside signal. It is reported here as a direction, not a headline, and the lift is specific to ProtST: a second text model, ProTrek, did not reproduce it.",
+      "Structure recovers the molecular-function cells and leaves the process cells where they were, which is consistent with structure being conserved for function and not for process.",
     ],
   },
 ];

@@ -31,9 +31,15 @@ nine evaluation cells (NK/LK/PK by BPO/MFO/CCO).
   home of the metric definition and the scoring recipe.
 
 The two cells not won are LK-BPO and PK-BPO: the Biological Process wall.
-The evidence available on this frame does not lift those cells, so the wall
-is evidence-bound rather than architecture-bound. First in seven of nine is
-therefore the honest ceiling on this frame, not a partial run.
+Earlier versions of this chapter called that wall evidence-bound rather than
+architecture-bound. **That framing was wrong and is retracted.** Scoring our own
+candidate pool with the true label shows the evidence is present and the loss is
+in ranking: the pool we already retrieve is worth ``f_micro_w`` 0.6077 to a
+perfect ranker while the re-ranker delivers 0.1255. First in seven of nine is the
+honest standing on this frame, and the wall is a characterised limit of our
+ranking stage rather than a ceiling of the available evidence. The measurement,
+its method, and the levers it rules out are in
+:ref:`insight-bp-wall-is-a-ranking-limit`.
 
 .. admonition:: One number, one home
    :class: note
