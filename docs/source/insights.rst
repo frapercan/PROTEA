@@ -491,3 +491,70 @@ why the champion stores learned GO-aligned codes. See
 :doc:`/adr/D35-canonical-8plm-embedding-configs` for the embedding config
 registry and :doc:`/adr/D38-neural-head-deferred-dataset-pack-pivot` for the
 neural-head decision this evidence informs.
+
+.. _insight-bp-wall-is-a-ranking-limit:
+
+The BP wall is a ranking limit, not an evidence ceiling
+-------------------------------------------------------
+
+The sealed board (:doc:`results`) is first in seven of nine cells. The two it does
+not win are LK-BPO and PK-BPO, the Biological Process branch for the proteins with
+limited or no prior knowledge. This book called that wall **evidence-bound** and
+said the available evidence simply does not reach those cells. Measurement does not
+support that claim, and this section retracts it.
+
+**The finding.**
+Three measurements on PK-BPO locate the loss, each on the same harness and the same
+ground truth. First, the evidence is present: 97 percent of the true protein to
+Biological Process term pairs the pipeline misses use a term that already exists in
+the vocabulary visible before the target window opens, so only 3 percent are
+genuinely novel. Second, retrieval is not what binds. Candidate recall is only
+0.322, which invites a recall-limited reading, but scoring that same pool with the
+true label (asking what a perfect ordering of the candidates already retrieved
+would be worth) yields ``f_micro_w`` 0.6077 where the re-ranker delivers 0.1255.
+The pipeline captures a fifth of what its own shortlist allows. Third, and as a
+consequence, every candidate-side lever is inert: a co-occurrence expansion that
+lifts recall from 0.322 to 0.480 converts to plus 0.0021, because more candidates
+do not help a ranker that cannot order the ones it holds.
+
+**Why the ranker cannot order them.**
+On PK-BPO no feature the pipeline carries exceeds AUC 0.68 (``classifier_present``;
+then ``protst_text`` at 0.64 on 41 percent coverage, ``classifier_score`` 0.63,
+alignment near 0.60) against a 2.47 percent positive rate.
+
+**Part of the limit is self-inflicted.**
+The re-ranker trains with ``lambdarank``, which optimises the order of candidates
+*within* one protein, while ``f_micro_w`` sweeps *one global threshold across every
+protein*. LambdaMART is invariant to any per-group monotone rescaling, so it can
+order each protein well and still leave scores mutually incomparable across
+proteins. That is exactly the observed symptom: a global AUC of 0.79 converting to
+``f_micro_w`` 0.126. Retraining the identical rows and features with a ``binary``
+objective, a globally calibrated scorer, lifts AUC to 0.8227 and ``f_micro_w`` to
+0.1518, a gain of plus 0.0263 with no new feature.
+
+**Ruled out by measurement.**
+Term co-occurrence as a candidate generator (plus 0.0021); GO-DAG hierarchical
+proximity as a feature (AUC 0.5501, decorrelated from the re-ranker yet adding plus
+0.0002 when blended); a text-aligned scorer as a re-ranker feature (plus 0.0016); an
+InterPro graft (negative on BP); and a larger base representation, which reorders
+the same candidates and so cannot help where recall is not the constraint.
+
+**The honest state.**
+The gap to the leading external method is plus 0.072 (LK-BPO) and plus 0.076
+(PK-BPO). The ranking headroom inside the existing pool is several times that, so
+the work is a ranker and not a retriever. The objective correction above is real but
+does not on its own close the gap, and the signal that would has **not** been
+identified: the two structural hypotheses testable with the resources at hand are
+both dead. "Improve the ranker" is a direction, not yet a plan.
+
+**Method lesson.**
+The first reading of the 0.322 recall was that the pipeline was recall-limited, and
+that reading was written down before the oracle test was run. A recall number alone
+does not identify what binds a pipeline; the ceiling of the pool does, and obtaining
+it costs one evaluation with the labels used as the score.
+
+.. note::
+   These absolutes come from a retrained booster on an exported dataset and are not
+   comparable to the board's 0.2181 for PK-BPO (different harness, leaf-term ground
+   truth). Every figure shares one ground truth and one harness, so the deltas and
+   the oracle ratio are the result, not the absolutes.

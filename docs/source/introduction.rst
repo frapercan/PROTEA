@@ -111,8 +111,11 @@ Fmax advantage over strictly temporal methods.
 **H3.** A learned k-WTA retrieval encoder for candidate generation, followed
 by a stacked per-category re-ranker, can outperform the baseline embedding
 similarity score of a raw-vector KNN pipeline across the NK/LK/PK ×
-BPO/MFO/CCO grid, save for the Biological Process cells where the limit is
-evidence-bound rather than architectural.
+BPO/MFO/CCO grid, save for the Biological Process cells of the harder
+proteins. This hypothesis originally attributed those two cells to an
+evidence-bound limit. Measurement did not support that attribution and it is
+retracted: the limit is in the ranking stage, and therefore architectural.
+See :ref:`insight-bp-wall-is-a-ranking-limit`.
 
 Contributions
 -------------
@@ -155,9 +158,10 @@ retrieval encoder (which stores GO-aligned codes rather than a raw PLM vector)
 for candidate generation, followed by a stacked per-category re-ranker
 (:doc:`/adr/D43-stacked-meta-reranker`). On the leakage-free temporal frame it
 is first in seven of the nine NK/LK/PK × BPO/MFO/CCO cells; the two Biological
-Process cells not won mark an evidence-bound wall rather than an architectural
-limit. The sealed board and its scoring recipe are reported in :doc:`results`
-and :doc:`architecture/evaluation`.
+Process cells not won mark a wall that measurement places in the ranking stage,
+not in the evidence available (:ref:`insight-bp-wall-is-a-ranking-limit`). The
+sealed board and its scoring recipe are reported in :doc:`results` and
+:doc:`architecture/evaluation`.
 
 The PROTEA approach
 -------------------
