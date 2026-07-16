@@ -203,6 +203,20 @@ cmd_start() {
     # local hacking where HMR is actually useful.
     local FRONTEND_MODE="${FRONTEND_MODE:-prod}"
     printf "\n${BOLD}[9] Frontend (%s)${RESET}\n" "$FRONTEND_MODE"
+    # Next.js 16 needs Node >=20.9. The watchdog cron's PATH may only carry the
+    # system Node 18 (nvm is not sourced), which fails BOTH `npm run build` and
+    # `node server.js`. Prefer the newest nvm-installed Node 20+ toolchain so a
+    # frontend (re)start after a reboot does not silently 502 the public tunnel.
+    if ! { command -v node >/dev/null 2>&1 \
+           && [[ "$(node -e 'process.stdout.write(process.versions.node.split(".")[0])' 2>/dev/null)" -ge 20 ]]; }; then
+        _nvm_node=$(ls -d "$HOME"/.nvm/versions/node/v2[0-9]* 2>/dev/null | sort -Vr | head -1)
+        if [[ -n "$_nvm_node" && -x "$_nvm_node/bin/node" ]]; then
+            export PATH="$_nvm_node/bin:$PATH"
+            printf "  ${GREEN}✓${RESET} using Node %s from nvm (%s)\n" "$("$_nvm_node/bin/node" --version)" "$_nvm_node/bin"
+        else
+            printf "  ${YELLOW}WARNING: no Node >=20 found via nvm; frontend may fail on $(node --version 2>/dev/null)${RESET}\n"
+        fi
+    fi
     cd "$ROOT/apps/web"
     if [[ "$FRONTEND_MODE" == "prod" ]]; then
         printf "  Building production bundle (this may take ~30-60s)...\n"
