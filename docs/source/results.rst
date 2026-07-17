@@ -31,10 +31,12 @@ nine evaluation cells (NK/LK/PK by BPO/MFO/CCO).
   home of the metric definition and the scoring recipe.
 
 The two cells not won are LK-BPO and PK-BPO: the Biological Process wall. It is a
-limit of the ranking stage, not of the available evidence. 97 percent of the true
-terms missed on those cells already exist in the pre-window vocabulary, and the
-candidate pool the pipeline already retrieves is worth ``f_micro_w`` 0.6077 to a
-perfect ranker while the re-ranker delivers 0.2131 of it. First in seven of nine is
+limit of the ranking stage, not of the available evidence. 97.0 percent of the true
+terms missed on those cells already exist in the pre-window vocabulary, 95.2 percent
+by the information accretion the metric weights by, and the candidate pool the
+pipeline already retrieves is worth ``f_micro_w`` 0.7519 at precision 1.000 to a
+perfect ranker, and up to 0.7764 to the best ordering of it, while the re-ranker
+delivers 0.2131 of that. First in seven of nine is
 the honest standing on this frame, and the wall is a characterised limit that the
 measurement, its method, and the levers it rules out set out in
 :ref:`insight-bp-wall-is-a-ranking-limit`.

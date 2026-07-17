@@ -503,15 +503,21 @@ limited or no prior knowledge. This section locates that limit. Every figure bel
 measured on one harness, against the full ground truth, on the PK-BPO cell.
 
 **The evidence is present.**
-97 percent of the true protein to Biological Process term pairs the pipeline misses
-use a term that already exists in the vocabulary visible before the target window
-opens. Only 3 percent are genuinely novel. Nothing is missing from the vocabulary.
+97.0 percent of the true protein to Biological Process term pairs the pipeline misses
+use a term that some protein in the same cohort already carried before the target
+window opened. Weighted by information accretion, which is what the metric scores,
+the figure is 95.2 percent. Only 3 percent of the pairs, and 4.8 percent of the
+weight, are genuinely novel. Nothing is missing from the vocabulary.
 
 **Retrieval is not the binding constraint.**
-Candidate recall is 0.322. Scoring that same pool by the true label, which is what a
-perfect ordering of the candidates already retrieved would be worth, yields
-``f_micro_w`` **0.6077**. The deployed re-ranker delivers **0.2131** on that pool. The
-pipeline extracts about a third of what its own shortlist allows.
+Candidate recall is 0.322. Submitting every pool cell that belongs to the propagated
+ground truth, which is what a perfect ordering of the candidates already retrieved
+would be worth, yields ``f_micro_w`` **0.7519** at precision 1.000, verified through
+the evaluator itself. Allowing that ordering to also keep the pool cells whose own
+ancestors are true, which a real ranker may do and an oracle has no reason to refuse,
+reaches **0.7764**, and the ceiling of the pool lies in [0.7764, 0.8326]. The deployed
+re-ranker delivers **0.2131** on that same pool: **27.4 percent** of what its own
+shortlist allows.
 
 **So adding candidates does not pay.**
 A co-occurrence expansion lifting recall from 0.322 to 0.480 moves the score by a
