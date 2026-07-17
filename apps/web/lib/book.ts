@@ -81,7 +81,7 @@ export const CHAPTER_ZERO: ChapterZeroMovement[] = [
   {
     lead: "Where it stops, honestly.",
     body:
-      "Two of the nine cells are not won: predicting the Biological Process branch for the least-studied proteins. We call it the biological-process wall, we show it rather than hide it, and we measured where it lives. It is not that the evidence is missing: almost all of those terms are already visible to the method. It is that we cannot order the shortlist we build. A perfect ranking of the very candidates we already retrieve would score nearly five times what we deliver.",
+      "Two of the nine cells are not won: predicting the Biological Process branch for the least-studied proteins. We call it the biological-process wall, we show it rather than hide it, and we measured where it lives. It is not that the evidence is missing: almost all of those terms are already visible to the method. It is that we cannot order the shortlist we build. A perfect ranking of the very candidates we already retrieve would score close to three times what we deliver.",
     link: { to: "pillar/4", label: "The frontier, and where the wall actually lives" },
   },
 ];
@@ -290,25 +290,25 @@ export const PILLARS: Pillar[] = [
     title: "The frontier",
     teaser: "The biological-process wall is a ranking limit, not an evidence ceiling. We measured where it lives, and it is inside our own method.",
     claim:
-      "The two cells we do not win are Biological Process for the proteins we know little or nothing about: the biological-process wall. We used to describe it as a limit of the evidence available. That description is wrong, and the measurement that corrects it is the centre of this chapter. For the least-studied proteins, 97 percent of the process terms we fail to predict already exist in the vocabulary the method can see before the evaluation window opens, so the information is not missing. We then scored our own candidate list with the true answer, to ask what a perfect ranking of the very same candidates would be worth: 0.608, against the 0.126 we actually deliver. We capture a fifth of what the shortlist we already build allows. The wall is therefore not what we retrieve, it is how we order it, and that is a fact about our design rather than about biology. It explains why every lever that adds more candidates has been inert: a co-occurrence expansion that lifts recall by half converts to plus 0.002, because more candidates do not help a ranker that cannot order the ones it holds. The gap to the leading method on these two cells is about 0.075, and the ranking headroom above us is several times that. The honest closing statement is that we know where the loss is, and we have not yet identified the signal that recovers it: the two structural candidates we could test, term co-occurrence and ontology proximity, are both ruled out by measurement.",
+      "The two cells we do not win are Biological Process for the proteins we know little or nothing about: the biological-process wall. This chapter says exactly where it is, and each step is one measurement. The information is not missing: 97 percent of the process terms we fail to predict already exist in the vocabulary the method can see before the evaluation window opens. What we retrieve is not the limit either: scoring our own candidate list with the true answer, which is what a perfect ranking of those same candidates would be worth, gives 0.608 against the 0.213 we deliver, so we extract about a third of what our own shortlist allows. That is why adding candidates does not pay, and a co-occurrence expansion that lifts recall by half moves almost nothing. It is not where we cut the list: handing each protein its true number of terms, an oracle no method could have, recovers about a tenth of the gap. The other nine tenths is ordering, and no clue we carry separates the right candidates from the rest. Nor is it for want of turning the knobs: a different training objective, one model per cell, rank features, class weights, a pruned pool, every variation scores below the recipe we already run. The wall is a fact about our ranking, not about biology, and the signal that would cross it is one we have not found.",
     evidence: {
       caption: "Least-studied proteins, BP: what binds (same pool, same harness)",
       valueHeader: "f_micro_w",
       rows: [
-        { label: "What we deliver today", value: "0.126", note: "reranker over the pool" },
-        { label: "Perfect ranking of the SAME pool", value: "0.608", frontier: true, note: "we capture 20.7%: the loss is ranking" },
-        { label: "Adding candidates (co-occurrence)", value: "+0.002", note: "recall +50% relative, buys nothing" },
-        { label: "Matching the metric (binary objective)", value: "+0.026", note: "real, free, and not enough alone" },
+        { label: "What we deliver today", value: "0.213", note: "the deployed recipe over the pool" },
+        { label: "Perfect ranking of the SAME pool", value: "0.608", frontier: true, note: "we capture about a third: the loss is ranking" },
+        { label: "Perfect per-protein term count", value: "+0.036", note: "an oracle cut buys a tenth of the gap" },
+        { label: "Best technique variation we found", value: "none", note: "every knob we turned made it worse" },
       ],
     },
-    evidenceLabel: `These are lab evaluations on a freshly retrained booster, not the sealed ${METRIC} board, so the absolute values are not comparable to it. Every row is measured against the same ground truth and the same harness, which is what makes the comparison between the rows the result.`,
+    evidenceLabel: `These are lab evaluations on a freshly retrained booster rather than the sealed ${METRIC} board, and they track it closely: the deployed recipe measures 0.213 here against the board's 0.218 on this cell. Every row shares one ground truth and one harness, which is what makes the comparison between the rows the result.`,
     receipt: {
       artifact: "storage/regen_headline/BP_WALL_CHARACTERIZATION.md",
       script: "storage/cooc_experiment/oracle_ceiling.py",
     },
     receiptSecondary: {
-      artifact: "storage/regen_headline/BP_TECHNIQUE_LEVERS.md",
-      script: "storage/cooc_experiment/fuse_and_score.py",
+      artifact: "storage/cooc_experiment/isolate_percell_split.json",
+      script: "storage/cooc_experiment/decompose_order_vs_count.py",
     },
     operation: {
       kind: "script",
@@ -317,7 +317,8 @@ export const PILLARS: Pillar[] = [
     },
     caveats: [
       "The oracle ceiling is what a perfect ranking of our current shortlist would score. It is a bound on this pool, not a score any method could reach, and two thirds of the true process terms are still outside the pool.",
-      "This chapter reverses an earlier reading of our own. We first read the low recall of the shortlist as the wall, and said so. Scoring the same pool with the true answer disproved it: a recall number alone does not tell you what binds, the ceiling of the pool does.",
+      "A recall number does not tell you what binds a pipeline; the ceiling of the pool does, and it costs one evaluation with the labels used as the score. That is how the low recall of our shortlist was shown not to be the wall.",
+      "One variation deserves its own line: the binary objective carries a better AUC than the recipe we run (0.823 against 0.790) and a worse score on the metric that decides. AUC ranks these recipes in the opposite order to the benchmark. We do not triage ranking levers by AUC.",
       "A text-aligned representation (ProtST) lifts process for novel proteins by about 0.062 in an aspect-aware lab evaluation, and remains the most promising outside signal. It is reported here as a direction, not a headline, and the lift is specific to ProtST: a second text model, ProTrek, did not reproduce it.",
       "Structure recovers the molecular-function cells and leaves the process cells where they were, which is consistent with structure being conserved for function and not for process.",
     ],

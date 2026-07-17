@@ -112,10 +112,8 @@ Fmax advantage over strictly temporal methods.
 by a stacked per-category re-ranker, can outperform the baseline embedding
 similarity score of a raw-vector KNN pipeline across the NK/LK/PK ×
 BPO/MFO/CCO grid, save for the Biological Process cells of the harder
-proteins. This hypothesis originally attributed those two cells to an
-evidence-bound limit. Measurement did not support that attribution and it is
-retracted: the limit is in the ranking stage, and therefore architectural.
-See :ref:`insight-bp-wall-is-a-ranking-limit`.
+proteins, where the limit is in the ranking stage and therefore architectural
+(:ref:`insight-bp-wall-is-a-ranking-limit`).
 
 Contributions
 -------------
