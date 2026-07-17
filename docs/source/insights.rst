@@ -499,62 +499,99 @@ The BP wall is a ranking limit, not an evidence ceiling
 
 The sealed board (:doc:`results`) is first in seven of nine cells. The two it does
 not win are LK-BPO and PK-BPO, the Biological Process branch for the proteins with
-limited or no prior knowledge. This book called that wall **evidence-bound** and
-said the available evidence simply does not reach those cells. Measurement does not
-support that claim, and this section retracts it.
+limited or no prior knowledge. This section locates that limit. Every figure below is
+measured on one harness, against the full ground truth, on the PK-BPO cell.
 
-**The finding.**
-Three measurements on PK-BPO locate the loss, each on the same harness and the same
-ground truth. First, the evidence is present: 97 percent of the true protein to
-Biological Process term pairs the pipeline misses use a term that already exists in
-the vocabulary visible before the target window opens, so only 3 percent are
-genuinely novel. Second, retrieval is not what binds. Candidate recall is only
-0.322, which invites a recall-limited reading, but scoring that same pool with the
-true label (asking what a perfect ordering of the candidates already retrieved
-would be worth) yields ``f_micro_w`` 0.6077 where the re-ranker delivers 0.1255.
-The pipeline captures a fifth of what its own shortlist allows. Third, and as a
-consequence, every candidate-side lever is inert: a co-occurrence expansion that
-lifts recall from 0.322 to 0.480 converts to plus 0.0021, because more candidates
-do not help a ranker that cannot order the ones it holds.
+**The evidence is present.**
+97 percent of the true protein to Biological Process term pairs the pipeline misses
+use a term that already exists in the vocabulary visible before the target window
+opens. Only 3 percent are genuinely novel. Nothing is missing from the vocabulary.
 
-**Why the ranker cannot order them.**
+**Retrieval is not the binding constraint.**
+Candidate recall is 0.322. Scoring that same pool by the true label, which is what a
+perfect ordering of the candidates already retrieved would be worth, yields
+``f_micro_w`` **0.6077**. The deployed re-ranker delivers **0.2131** on that pool. The
+pipeline extracts about a third of what its own shortlist allows.
+
+**So adding candidates does not pay.**
+A co-occurrence expansion lifting recall from 0.322 to 0.480 moves the score by a
+small fraction of the gap. More candidates do not help a ranker that cannot order the
+ones it already holds.
+
+**Nor is it where the list is cut.**
+A global threshold cannot express a per-protein term count: every protein is cut at
+the same ``tau`` whether it deserves three terms or thirty. Freezing the pipeline's
+own ordering and granting each protein its true count, an oracle no method could
+have, moves ``f_micro_w`` from 0.2017 to 0.2379. That is plus 0.036 of a 0.406 gap,
+**about a tenth**. The other nine tenths is ordering.
+
+**It is ordering, and no feature carries it.**
 On PK-BPO no feature the pipeline carries exceeds AUC 0.68 (``classifier_present``;
 then ``protst_text`` at 0.64 on 41 percent coverage, ``classifier_score`` 0.63,
 alignment near 0.60) against a 2.47 percent positive rate.
 
-**Part of the limit is self-inflicted.**
-The re-ranker trains with ``lambdarank``, which optimises the order of candidates
-*within* one protein, while ``f_micro_w`` sweeps *one global threshold across every
-protein*. LambdaMART is invariant to any per-group monotone rescaling, so it can
-order each protein well and still leave scores mutually incomparable across
-proteins. That is exactly the observed symptom: a global AUC of 0.79 converting to
-``f_micro_w`` 0.126. Retraining the identical rows and features with a ``binary``
-objective, a globally calibrated scorer, lifts AUC to 0.8227 and ``f_micro_w`` to
-0.1518, a gain of plus 0.0263 with no new feature.
+**The deployed recipe is the best technique we have.**
+Every variation tested scores below it:
+
+.. list-table:: PK-BPO, one harness, full ground truth
+   :header-rows: 1
+   :widths: 60 20 20
+
+   * - Recipe
+     - ``f_micro_w``
+     - vs deployed
+   * - **deployed: per-category ``lambdarank``, aspects pooled**
+     - **0.2131**
+     - reference
+   * - trained per cell instead of pooling aspects
+     - 0.2017
+     - minus 0.011
+   * - ``binary`` objective instead of ``lambdarank``
+     - 0.1518
+     - minus 0.061
+   * - plus within-protein rank and z-score features
+     - 0.1465
+     - minus 0.067
+   * - plus class weighting
+     - 0.1441
+     - minus 0.069
+   * - classifier-proposed candidates dropped from the pool
+     - flat
+     - coverage 0.978 to 0.846
+
+The ``binary`` result is worth stating twice, because it is counterintuitive: it
+carries a **better** AUC than the deployed recipe (0.8227 against 0.7903) and a
+**worse** ``f_micro_w``. AUC ranks these recipes in the opposite order to the metric
+that decides. Do not triage ranking levers by AUC.
 
 **Ruled out by measurement.**
-Term co-occurrence as a candidate generator (plus 0.0021); GO-DAG hierarchical
-proximity as a feature (AUC 0.5501, decorrelated from the re-ranker yet adding plus
-0.0002 when blended); a text-aligned scorer as a re-ranker feature (plus 0.0016); an
-InterPro graft (negative on BP); and a larger base representation, which reorders
-the same candidates and so cannot help where recall is not the constraint.
+GO-DAG hierarchical proximity as a feature (AUC 0.5501, decorrelated from the
+re-ranker yet adding plus 0.0002 when blended); a text-aligned scorer as a re-ranker
+feature (plus 0.0016); an InterPro graft (negative on BP); and a larger base
+representation, which reorders the same candidates and so cannot help where recall is
+not the constraint.
 
-**The honest state.**
+**Where that leaves the two cells.**
 The gap to the leading external method is plus 0.072 (LK-BPO) and plus 0.076
-(PK-BPO). The ranking headroom inside the existing pool is several times that, so
-the work is a ranker and not a retriever. The objective correction above is real but
-does not on its own close the gap, and the signal that would has **not** been
-identified: the two structural hypotheses testable with the resources at hand are
-both dead. "Improve the ranker" is a direction, not yet a plan.
+(PK-BPO). The ranking headroom inside the pool already retrieved is several times
+that, so the work is a ranker and not a retriever. The technique levers available are
+exhausted: the deployed recipe sits at their optimum. The signal that would close the
+gap is not identified, and the two structural candidates testable with these
+resources, term co-occurrence and ontology proximity, are both dead. "Improve the
+ranker" is a direction, not yet a plan.
 
-**Method lesson.**
-The first reading of the 0.322 recall was that the pipeline was recall-limited, and
-that reading was written down before the oracle test was run. A recall number alone
-does not identify what binds a pipeline; the ceiling of the pool does, and obtaining
-it costs one evaluation with the labels used as the score.
+**Method note.**
+Two rules this cell earned, both cheap to apply and both load-bearing here. A recall
+number does not identify what binds a pipeline; the ceiling of the pool does, and
+obtaining it costs one evaluation with the labels used as the score. And a monotone
+rescaling of a score is **not** free under a threshold-swept metric: ``f_micro_w``
+sweeps ``tau`` on a fixed grid, so remapping the score distribution changes which
+cuts the sweep can reach. Scoring one booster with its raw output and with a global
+rank-percentile of that output differs by 0.088 on this cell. Any transform applied
+before evaluation is part of the measurement.
 
 .. note::
-   These absolutes come from a retrained booster on an exported dataset and are not
-   comparable to the board's 0.2181 for PK-BPO (different harness, leaf-term ground
-   truth). Every figure shares one ground truth and one harness, so the deltas and
-   the oracle ratio are the result, not the absolutes.
+   These figures come from a retrained booster on an exported dataset rather than the
+   sealed board, and they track it closely: the deployed recipe measures 0.2131 here
+   against the board's 0.2181 for PK-BPO. Every figure shares one ground truth and one
+   harness.
