@@ -4,7 +4,7 @@ Appendix
 Operational material that complements the architecture and reference
 sections: how to install PROTEA, how to configure it, recipes for common
 tasks, and the on-call runbook. For reproducing the sealed board see
-:doc:`/operate/reproduce-0.4063`.
+:doc:`/operate/reproduce-the-sealed-board`.
 
 :doc:`stack`
    The eight repositories that make up the PROTEA stack: the platform,

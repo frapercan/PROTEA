@@ -101,7 +101,7 @@ row holds a real value. The fingerprint matched throughout, so nothing failed.
 
 Honest scope: the sealed number is intact
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-The sealed champion (``f_micro_w`` 0.4063, frame v227 to v230,
+The sealed champion (``f_micro_w`` 0.40765, frame v227 to v230,
 config ``d8979601``) was trained WITHOUT the ``classifier`` and
 ``association`` families, exactly because they were zero-filled and excluded.
 The seam therefore did not corrupt the sealed number. What it did is quieter
@@ -239,7 +239,7 @@ Consequences
   (decision 3): the dataset records who produced each family and under what
   inputs, so a stranger auditing the frozen dataset can tell a measured zero
   from an unwired producer.
-- The sealed 0.4063 champion is unaffected: it was trained without the two
+- The sealed 0.40765 champion is unaffected: it was trained without the two
   zero-filled families, so re-homing them behind real producers is an additive
   expansion of the feature space, not a correction to the sealed number.
 - The storage question (typed columns, dropping the ~75 GB duplicated blob) is

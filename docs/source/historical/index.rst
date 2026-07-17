@@ -9,7 +9,7 @@ Historical (superseded, retained for provenance)
    it is the sealed result. It is retained only so the older figures and the
    older procedure remain traceable. For the current result see
    :doc:`/results`; for the protocol see :doc:`/architecture/evaluation`; for
-   the reproduction path see :doc:`/operate/reproduce-0.4063`.
+   the reproduction path see :doc:`/operate/reproduce-the-sealed-board`.
 
 .. toctree::
    :maxdepth: 1

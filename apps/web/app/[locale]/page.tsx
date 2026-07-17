@@ -86,7 +86,7 @@ export default async function ArgumentPage() {
                     kind: "job",
                     operation: "run_cafa_evaluation",
                     payload: { prediction_set_id: "<sealed>", metric: "f_micro_w", frame: "v227-v230" },
-                    note: "The sealed value 0.4063 is fixed. Dispatching this operation regenerates a candidate to compare against it.",
+                    note: "The sealed value 0.40765 is fixed. Dispatching this operation regenerates a candidate to compare against it.",
                   }}
                 />
               </>

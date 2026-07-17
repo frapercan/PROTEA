@@ -19,7 +19,7 @@ that closed each issue.
 
 .. seealso::
 
-   - :doc:`/operate/reproduce-0.4063` for the ordered path that reproduces
+   - :doc:`/operate/reproduce-0.40765` for the ordered path that reproduces
      the sealed board.
    - :doc:`/adr/index` for the full decision log.
    - :doc:`/runbooks/index` for on-call operational procedures.
@@ -439,7 +439,7 @@ aggregate across multiple snapshot pairs). The ``EvaluationSet`` row in PROTEA
 captures (1), (2), (3), and (4). The training dataset manifest captures the
 snapshot pair list. Cross-checking that the eval snapshot pair does not
 overlap with any training pair is enforced by the ``export_research_dataset``
-payload validator. See :doc:`/operate/reproduce-0.4063` for the ordered
+payload validator. See :doc:`/operate/reproduce-0.40765` for the ordered
 reproduction path.
 
 The served last layer is a weak retrieval base, and standardisation is the lever
@@ -486,7 +486,7 @@ for this backbone, reproduces the served encoder (mean 0.220 against 0.215). The
 lab arms fell short only because their local extraction is a weaker base than the
 production one. The precise extraction difference (pooling, normalisation, or which
 tensor is read as the last layer) is the one detail still to pin down. These are all KNN-only retrieval numbers and are
-distinct from the sealed 0.4063 reranked board in :doc:`results`; they explain
+distinct from the sealed 0.40765 reranked board in :doc:`results`; they explain
 why the champion stores learned GO-aligned codes. See
 :doc:`/adr/D35-canonical-8plm-embedding-configs` for the embedding config
 registry and :doc:`/adr/D38-neural-head-deferred-dataset-pack-pivot` for the

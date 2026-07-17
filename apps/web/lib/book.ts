@@ -28,7 +28,7 @@ export const VALIDATION_FRAME = "v225 to v227";
 
 // The sealed headline. Immutable.
 export const HEADLINE = {
-  value: "0.4063",
+  value: "0.40765",
   metric: METRIC,
   frame: FRAME,
   validation: VALIDATION_FRAME,
@@ -219,12 +219,12 @@ export const PILLARS: Pillar[] = [
     title: "The calibrated fusion",
     teaser: "Two learning layers and a signal store. The lever is calibration, not depth.",
     claim:
-      "The pipeline learns in two places, with a shared signal store between them. First, a learned encoder turns each protein into a sparse code and uses it to retrieve similar, already-labelled proteins: the candidates. Then a set of scorers put every clue onto one common scale, and a small model, trained separately for each branch of the ontology, fuses them into a single probability. The surprising lesson is that the biggest lever is not a deeper or fancier model, it is calibration: simply standardising a representation (rescaling each of its dimensions to a common range) moves the score more than changing which internal layer of the language model you read it from. Re-running the pipeline end to end does not land back on the sealed 0.4063, and the reason is now measured rather than pending: turning the candidate classifier on widens the pool from 62 to 114 candidates per query, which dilutes the score. The sealed number and a regenerated one are answers to different questions, and this page keeps the sealed one.",
+      "The pipeline learns in two places, with a shared signal store between them. First, a learned encoder turns each protein into a sparse code and uses it to retrieve similar, already-labelled proteins: the candidates. Then a set of scorers put every clue onto one common scale, and a small model, trained separately for each branch of the ontology, fuses them into a single probability. The surprising lesson is that the biggest lever is not a deeper or fancier model, it is calibration: simply standardising a representation (rescaling each of its dimensions to a common range) moves the score more than changing which internal layer of the language model you read it from. Re-running the pipeline end to end does not land back on the sealed 0.40765, and the reason is now measured rather than pending: turning the candidate classifier on widens the pool from 62 to 114 candidates per query, which dilutes the score. The sealed number and a regenerated one are answers to different questions, and this page keeps the sealed one.",
     evidence: {
       caption: `Sealed headline (${METRIC}, ${FRAME})`,
       valueHeader: "Value",
       rows: [
-        { label: "Sealed board", value: "0.4063", note: "first in 7 of 9 cells" },
+        { label: "Sealed board", value: "0.40765", note: "first in 7 of 9 cells" },
       ],
     },
     receipt: {

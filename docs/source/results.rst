@@ -9,7 +9,7 @@ The sealed board
 ----------------
 
 PROTEA's headline result on the leakage-free temporal frame is a weighted,
-IA-aware micro F-measure (``f_micro_w``) of **0.4063**, first in seven of the
+IA-aware micro F-measure (``f_micro_w``) of **0.40765**, first in seven of the
 nine evaluation cells (NK/LK/PK by BPO/MFO/CCO).
 
 - **Frame.** Test window v227 to v230; validation window v225 to v227. The
@@ -48,7 +48,7 @@ measurement, its method, and the levers it rules out set out in
    ``cafaeval`` recipe live in :doc:`/architecture/evaluation`; the
    re-ranker design lives in :doc:`/adr/D43-stacked-meta-reranker`; the
    step-by-step reproduction path lives in
-   :doc:`/operate/reproduce-0.4063`. Numbers are not restated elsewhere in
+   :doc:`/operate/reproduce-the-sealed-board`. Numbers are not restated elsewhere in
    the book; the other chapters cross-reference this board.
 
 Reproducing the board
@@ -59,7 +59,7 @@ produced it, on a frame that reproduces bit-identically across two
 independent runs. The ordered path (stand up the stack, load the v227
 snapshot, compute the learned-encoder codes, retrieve, re-rank, and score
 with ``cafaeval`` on the sealed settings) is documented in
-:doc:`/operate/reproduce-0.4063`, which is explicit about which stages are
+:doc:`/operate/reproduce-the-sealed-board`, which is explicit about which stages are
 job-backed today and which are not yet automated.
 
 Provenance of the earlier figures
@@ -79,6 +79,6 @@ quoted as a current result.
      scoring parity mapping.
    - :doc:`/adr/D43-stacked-meta-reranker`: the stacked per-category
      re-ranker design.
-   - :doc:`/operate/reproduce-0.4063`: the ordered reproduction path.
+   - :doc:`/operate/reproduce-the-sealed-board`: the ordered reproduction path.
    - :doc:`/historical/pre-v227`: the superseded pre-v227 figures, retained
      for provenance.

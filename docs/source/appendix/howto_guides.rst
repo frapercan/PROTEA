@@ -12,7 +12,7 @@ How-to Guides
    ontology, upload a FASTA, train a re-ranker, scale a worker) and you
    want the shortest path from a clean stack to a finished job.
 
-   **Read** :doc:`/operate/reproduce-0.4063` **instead if:** you want the
+   **Read** :doc:`/operate/reproduce-the-sealed-board` **instead if:** you want the
    ordered path that reproduces the sealed board in :doc:`/results`.
 
 Submit a job via the API
