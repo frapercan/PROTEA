@@ -31,12 +31,12 @@ sequence to a scored prediction, is in :doc:`architecture/index`.
 What it achieves
 ----------------
 
-On a fair test, PROTEA reaches ``f_micro_w`` 0.4063 (a weighted,
+On a fair test, PROTEA reaches ``f_micro_w`` 0.40765 (a weighted,
 information-aware F-measure) and ranks first in seven of the nine evaluation
 cells. The nine cells are three knowledge regimes, from proteins we know nothing
 about to proteins we already know something about, crossed with the three
 branches of GO. The board and its reproduction path are in :doc:`results` and
-:doc:`operate/reproduce-0.4063`.
+:doc:`operate/reproduce-the-sealed-board`.
 
 Why the test is fair
 --------------------
@@ -63,7 +63,7 @@ Where to go next
 ----------------
 
 - New here and want to run something? The quickstart gets you from a clone to a
-  first job in about ten minutes: :doc:`operate/reproduce-0.4063`.
+  first job in about ten minutes: :doc:`operate/reproduce-the-sealed-board`.
 - Want the architecture, the queues, and the operation catalogue?
   :doc:`architecture/index`.
 - Want the design decisions and their trade-offs? The ADRs in

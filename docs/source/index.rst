@@ -92,7 +92,7 @@ metadata enrichment, and job orchestration.
    complexity/index
    guides/plugin-authoring/index
    results
-   operate/reproduce-0.4063
+   operate/reproduce-the-sealed-board
    appendix/index
    runbooks/index
    quality/index

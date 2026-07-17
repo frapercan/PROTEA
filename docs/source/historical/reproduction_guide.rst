@@ -11,7 +11,7 @@ Reproduction guide (superseded, retained for provenance)
    repository, and boosters are registered through
    ``POST /reranker-models/import``. The page is kept only so the older
    procedure remains traceable. For the current path see
-   :doc:`/operate/reproduce-0.4063`; for the sealed board see :doc:`/results`;
+   :doc:`/operate/reproduce-the-sealed-board`; for the sealed board see :doc:`/results`;
    for the protocol see :doc:`/architecture/evaluation`.
 
 

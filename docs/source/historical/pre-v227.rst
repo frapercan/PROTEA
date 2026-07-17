@@ -7,7 +7,7 @@ Pre-v227 results (superseded, retained for provenance)
    This chapter belongs to an abandoned evaluation frame. It reports an
    Fmax board on the GOA 220 to 229 window, computed with ESM-C 300M
    embeddings and a three-generation LightGBM progression. None of that is
-   the sealed result. The sealed board (``f_micro_w`` = 0.4063, first in
+   the sealed result. The sealed board (``f_micro_w`` = 0.40765, first in
    seven of nine cells, frame v227 to v230, learned k-WTA retrieval encoder
    ``d8979601`` plus a stacked per-category re-ranker) is in :doc:`/results`,
    and the protocol home is :doc:`/architecture/evaluation`. Nothing on this

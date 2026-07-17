@@ -323,7 +323,7 @@ Benchmark: PROTEA vs external tools
 -------------------------------------
 
 PROTEA's headline result lives in one place. The sealed board (``f_micro_w``
-= 0.4063 on the leakage-free v227 to v230 frame, first in seven of the nine
+= 0.40765 on the leakage-free v227 to v230 frame, first in seven of the nine
 NK/LK/PK by BPO/MFO/CCO cells) is stated once in :doc:`/results`. This page is
 the home of the *protocol* that produces the board, not of the numbers
 themselves.
@@ -520,11 +520,11 @@ Implementation reference
 
 .. seealso::
 
-   - :doc:`/results`: the sealed board (``f_micro_w`` = 0.4063 on the
+   - :doc:`/results`: the sealed board (``f_micro_w`` = 0.40765 on the
      v227 to v230 frame) produced by following this protocol.
    - :doc:`/historical/pre-v227`: the superseded GOA 220 to 229 Fmax figures,
      retained for provenance only.
-   - :doc:`/operate/reproduce-0.4063`: the ordered path that reproduces the
+   - :doc:`/operate/reproduce-0.40765`: the ordered path that reproduces the
      sealed board.
    - :doc:`operations`: the ``generate_evaluation_set`` and
      ``run_cafa_evaluation`` operations that implement the protocol live.
