@@ -147,6 +147,32 @@ def enrich_v6_features(
     )
 
 
+def _closest_leaf_per_term(recs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Index one group's leaf records by term, keeping the closest per term.
+
+    Written out rather than spelled ``{r["go_id"]: r for r in recs}`` because
+    that comprehension keeps whichever record happens to come LAST in the list
+    when a term repeats within a group. Which record survives then depends on
+    the order the predictions arrived in, so the same inputs can produce
+    different features under a different batch size or worker count, and the
+    surviving row is chosen arbitrarily rather than on merit.
+
+    Keeping the closest is both deterministic and what the surrounding
+    expansion already assumes: it merges ancestors by bumping vote and taking
+    the minimum distance. When terms are unique within a group, which is the
+    ordinary case, this returns exactly what the comprehension returned.
+    """
+    best: dict[str, dict[str, Any]] = {}
+    for rec in recs:
+        gid = rec["go_id"]
+        incumbent = best.get(gid)
+        if incumbent is None or float(rec.get("distance", 1.0)) < float(
+            incumbent.get("distance", 1.0)
+        ):
+            best[gid] = rec
+    return best
+
+
 def expand_predictions_to_ancestors(
     predictions: list[dict[str, Any]],
     *,
@@ -187,7 +213,7 @@ def expand_predictions_to_ancestors(
             column=labels.column,
             present=labels.present,
         )
-        leaf_by_gid: dict[str, dict[str, Any]] = {r["go_id"]: r for r in recs}
+        leaf_by_gid: dict[str, dict[str, Any]] = _closest_leaf_per_term(recs)
         synth: dict[str, dict[str, Any]] = {}
         for leaf_gid, leaf_rec in list(leaf_by_gid.items()):
             leaf_d = float(leaf_rec.get("distance", 1.0))
