@@ -1,6 +1,6 @@
 [project]
 name = "protea"
-version = "0.10.0"
+version = "0.11.0"
 description = "PROtein funcTional Embedding-based Annotation: distributed platform for GO term prediction via PLM embeddings, KNN transfer, and learned re-ranking."
 authors = [
     {name = "Francisco Miguel Pérez Canales",email = "frapercan1@alum.us.es"}
