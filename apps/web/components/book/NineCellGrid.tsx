@@ -59,16 +59,25 @@ export function NineCellGrid({ frameCaption, italicLine }: { frameCaption: strin
                   const cell = NINE_CELL[k][a];
                   return (
                     <td key={a} className="py-4 pl-6 align-baseline">
+                      {/*
+                        The value is withdrawn while the campaign recomputes, so each
+                        cell shows the finding that survives it: whether this regime is
+                        one the method carries, or the frontier where it does not. A
+                        word is used rather than a blank, because a blank reads as
+                        missing data and this is a deliberate absence.
+                      */}
                       {cell.won ? (
                         <span className="text-[1.6rem] leading-none text-[var(--foreground)]">
-                          {cell.value.toFixed(3)}
+                          {cell.value === null ? "carried" : cell.value.toFixed(3)}
                         </span>
                       ) : (
                         <span className="inline-flex items-baseline gap-1 text-[var(--danger)]">
                           <span aria-hidden className="text-lg opacity-60">
                             [
                           </span>
-                          <span className="text-[1.6rem] leading-none">{cell.value.toFixed(3)}</span>
+                          <span className="text-[1.6rem] leading-none">
+                            {cell.value === null ? "frontier" : cell.value.toFixed(3)}
+                          </span>
                           <span aria-hidden className="text-lg opacity-60">
                             ]
                           </span>

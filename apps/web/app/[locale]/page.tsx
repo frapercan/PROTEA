@@ -70,8 +70,14 @@ export default async function ArgumentPage() {
         <p className="mt-8 font-serif text-[17px] leading-relaxed text-[var(--foreground)]">
           {t.rich("headlineSentence", {
             metric: () => <span className="font-mono text-[15px] text-[var(--foreground)]">{HEADLINE.metric}</span>,
+            // Withdrawn while the campaign recomputes: the sentence keeps its
+            // shape and names the figure as absent, so a reader is told the
+            // state of the work rather than shown a number this repository has
+            // retracted.
             value: () => (
-              <span className="font-mono font-semibold text-[var(--foreground)]">{HEADLINE.value}</span>
+              <span className="font-semibold italic text-[var(--muted)]">
+                {HEADLINE.value ?? "being recomputed"}
+              </span>
             ),
             note: (chunks) => (
               <>
@@ -86,7 +92,7 @@ export default async function ArgumentPage() {
                     kind: "job",
                     operation: "run_cafa_evaluation",
                     payload: { prediction_set_id: "<sealed>", metric: "f_micro_w", frame: "v227-v230" },
-                    note: "The sealed value 0.40765 is fixed. Dispatching this operation regenerates a candidate to compare against it.",
+                    note: "The published figure is withdrawn while the campaign recomputes. Dispatching this operation is how a new one is produced, which is the point: a claim you cannot regenerate is not a claim.",
                   }}
                 />
               </>

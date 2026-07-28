@@ -18,13 +18,14 @@ test.describe("argument front door", () => {
     ).toBeVisible();
   });
 
-  test("the sealed board leads with the two cells it does not win", async ({ page }) => {
+  test("the board leads with the two cells it does not win", async ({ page }) => {
     await page.goto("/en/");
-    // A won cell renders in ink; the two BP cells render in frontier rose,
-    // inside a hairline bracket. Assert both a won value and the two losses.
-    await expect(page.getByText("0.648").first()).toBeVisible();
-    await expect(page.getByText("0.354").first()).toBeVisible();
-    await expect(page.getByText("0.141").first()).toBeVisible();
+    // The values are withdrawn while the campaign recomputes, so the test
+    // asserts the finding that survives rather than the numbers that do not:
+    // seven regimes the method carries and two it does not, the latter in
+    // frontier rose inside a hairline bracket.
+    await expect(page.getByText("carried").first()).toBeVisible();
+    await expect(page.getByText("frontier").first()).toBeVisible();
     // The honest frame line is present.
     await expect(page.getByText(/the two we are not, we explain/i)).toBeVisible();
   });

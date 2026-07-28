@@ -23,17 +23,29 @@
 
 // The one metric, the one frame. Stamped on every evidence table.
 export const METRIC = "f_micro_w";
-export const FRAME = "v227 to v230";
-export const VALIDATION_FRAME = "v225 to v227";
+export const FRAME = "Sep 2025 to Mar 2026";
+export const VALIDATION_FRAME = "the cut before the board's mark";
 
-// The sealed headline. Immutable.
+/**
+ * The headline, withdrawn rather than superseded.
+ *
+ * The figure that stood here was measured against a baseline that a
+ * normalisation applied to the scores turned out to have manufactured, and a
+ * lookup built on a key that was not unique rewrote a share of the rows that
+ * fed it. Neither defect shows up in an output that keeps its expected shape;
+ * both were found by counting rather than by reading.
+ *
+ * So no number is published here while the campaign recomputes. A front door
+ * that shows a figure its own repository has retracted is worse than one that
+ * says plainly what state the work is in.
+ */
 export const HEADLINE = {
-  value: "0.40765",
+  value: null,
   metric: METRIC,
   frame: FRAME,
   validation: VALIDATION_FRAME,
-  wonCells: 7,
   totalCells: 9,
+  withdrawn: true,
 } as const;
 
 // The one sentence the whole product is an argument for.
@@ -90,21 +102,43 @@ export type Aspect = "MF" | "BP" | "CC";
 export type Knowledge = "NK" | "LK" | "PK";
 
 export interface GridCell {
-  value: number;
+  /** null while the campaign recomputes. See HEADLINE for why. */
+  value: number | null;
   /** false only for the two cells the method does not win: LK-BP and PK-BP. */
   won: boolean;
 }
 
 /**
- * The nine-cell board, `f_micro_w`, sealed champion, frame v227 to v230.
- * Rows are knowledge regimes (No / Limited / Prior knowledge), columns are GO
- * aspects. The two BP cells the method does not win are the biological-process
- * wall, and they are the honest centre of the whole argument.
+ * The nine-cell board. Rows are knowledge regimes (No / Limited / Prior
+ * knowledge), columns are GO aspects.
+ *
+ * When the values return, they come from the benchmark's own frozen result
+ * mirror rather than from anything computed here, and regenerate in one
+ * command. A claim that cannot be regenerated is not a claim, and the previous
+ * receipt on this table named a leave-one-family-out ablation, which is a
+ * different experiment from the board it captioned.
+ *
+ * `won` compares against the EXTERNAL field only, and that is not pedantry.
+ * Three rows on the public board are our own variants, and on several cells one
+ * of them edges the submission by less than a thousandth. Counting them as
+ * rivals reports two cells carried instead of seven. The exclusion is read from
+ * the release's own list of method names, never from a filename guess, because
+ * one of our variants carries no recognisable substring and a guess silently
+ * promotes it to a competitor.
+ *
+ * The numbers are withdrawn and the shape is not, which is the whole point of
+ * this table. As the thesis sentence says, the benchmark is not nine numbers,
+ * it is a map of which evidence wins in which regime. That map survives the
+ * retraction: the two biological-process cells are where the method does not
+ * win, and an independent characterisation found them to be a separability and
+ * calibration frontier rather than a gap in the evidence. Which cells are hard
+ * is a finding; how hard, in this metric, is a measurement, and the
+ * measurement is being redone.
  */
 export const NINE_CELL: Record<Knowledge, Record<Aspect, GridCell>> = {
-  NK: { MF: { value: 0.648, won: true }, BP: { value: 0.331, won: true }, CC: { value: 0.481, won: true } },
-  LK: { MF: { value: 0.559, won: true }, BP: { value: 0.354, won: false }, CC: { value: 0.467, won: true } },
-  PK: { MF: { value: 0.230, won: true }, BP: { value: 0.141, won: false }, CC: { value: 0.273, won: true } },
+  NK: { MF: { value: null, won: true }, BP: { value: null, won: true }, CC: { value: null, won: true } },
+  LK: { MF: { value: null, won: true }, BP: { value: null, won: false }, CC: { value: null, won: true } },
+  PK: { MF: { value: null, won: true }, BP: { value: null, won: false }, CC: { value: null, won: true } },
 };
 
 export const KNOWLEDGE_ROWS: Knowledge[] = ["NK", "LK", "PK"];
@@ -219,12 +253,16 @@ export const PILLARS: Pillar[] = [
     title: "The calibrated fusion",
     teaser: "Two learning layers and a signal store. The lever is calibration, not depth.",
     claim:
-      "The pipeline learns in two places, with a shared signal store between them. First, a learned encoder turns each protein into a sparse code and uses it to retrieve similar, already-labelled proteins: the candidates. Then a set of scorers put every clue onto one common scale, and a small model, trained separately for each branch of the ontology, fuses them into a single probability. The surprising lesson is that the biggest lever is not a deeper or fancier model, it is calibration: simply standardising a representation (rescaling each of its dimensions to a common range) moves the score more than changing which internal layer of the language model you read it from. Re-running the pipeline end to end does not land back on the sealed 0.40765, and the reason is now measured rather than pending: turning the candidate classifier on widens the pool from 62 to 114 candidates per query, which dilutes the score. The sealed number and a regenerated one are answers to different questions, and this page keeps the sealed one.",
+      "The pipeline learns in two places, with a shared signal store between them. First, a learned encoder turns each protein into a sparse code and uses it to retrieve similar, already-labelled proteins: the candidates. Then a set of scorers put every clue onto one common scale, and a small model, trained separately for each branch of the ontology, fuses them into a single probability. The surprising lesson is that the biggest lever is not a deeper or fancier model, it is calibration: simply standardising a representation (rescaling each of its dimensions to a common range) moves the score more than changing which internal layer of the language model you read it from. Re-running the pipeline end to end did not land back on the figure this page used to publish, and the reason was measured: turning the candidate classifier on widens the pool per query, which dilutes the score. That figure is now withdrawn for a separate reason, and the campaign recomputes rather than reconciling the two.",
     evidence: {
-      caption: `Sealed headline (${METRIC}, ${FRAME})`,
+      caption: `Headline (${METRIC}, ${FRAME})`,
       valueHeader: "Value",
       rows: [
-        { label: "Sealed board", value: "0.40765", note: "first in 7 of 9 cells" },
+        {
+          label: "Board headline",
+          value: "withdrawn",
+          note: "measured against a baseline a later defect showed to be manufactured",
+        },
       ],
     },
     receipt: {
@@ -255,22 +293,23 @@ export const PILLARS: Pillar[] = [
     claim:
       "The nine cells are not nine separate scores, they are a map of which evidence wins where. The rows are how much we already know about a protein (nothing, a little, or a fair amount); the columns are the three branches of the Gene Ontology (molecular function, biological process, cellular component). Read across the map and a pattern appears: a learned classifier carries the proteins we know nothing about; what we already know about a protein, its associations and its lineage in the ontology, carries the partly-known ones; and plain sequence similarity proposes candidates but cannot tell the good from the bad on its own. First in seven of the nine cells is the shape of that map, not one number, and the two cells we do not hold are exactly the two the map predicts are hardest.",
     evidence: {
-      caption: `Nine-cell board, first in 7 of 9 (${METRIC}, ${FRAME})`,
-      valueHeader: METRIC,
+      caption: `Nine-cell board, values withdrawn (${METRIC}, ${FRAME})`,
+      valueHeader: "Regime",
       rows: [
-        { label: "NK molecular function", value: "0.648" },
-        { label: "NK biological process", value: "0.331" },
-        { label: "NK cellular component", value: "0.481" },
-        { label: "LK molecular function", value: "0.559" },
-        { label: "LK biological process", value: "0.354", frontier: true, note: "not won" },
-        { label: "LK cellular component", value: "0.467" },
-        { label: "PK molecular function", value: "0.230" },
-        { label: "PK biological process", value: "0.141", frontier: true, note: "not won" },
-        { label: "PK cellular component", value: "0.273" },
+        { label: "NK molecular function", value: "carried" },
+        { label: "NK biological process", value: "carried" },
+        { label: "NK cellular component", value: "carried" },
+        { label: "LK molecular function", value: "carried" },
+        { label: "LK biological process", value: "frontier", frontier: true, note: "not won" },
+        { label: "LK cellular component", value: "carried" },
+        { label: "PK molecular function", value: "carried" },
+        { label: "PK biological process", value: "frontier", frontier: true, note: "not won" },
+        { label: "PK cellular component", value: "carried" },
       ],
     },
     receipt: {
-      artifact: "storage/lofo_9cell/result.json",
+      artifact: "storage/regen_headline/board_nine_cell.json",
+      script: "storage/regen_headline/board_nine_cell.py",
       pending: true,
     },
     operation: {
@@ -280,7 +319,7 @@ export const PILLARS: Pillar[] = [
       note: "Each cell is regenerated by scoring the sealed predictions with the knowledge x aspect stratification. Dispatch from the instrument.",
     },
     caveats: [
-      "The leave-one-family-out ablation that reads the map, lofo_9cell/result.json, was not present in the storage snapshot this page was built from. The regime reading rests on the sealed board until that receipt is re-materialised.",
+      "The regime reading, which evidence carries which cell, comes from a leave-one-family-out ablation whose receipt lives in the lab repository rather than in this page storage snapshot. The values themselves are withdrawn while the campaign recomputes, so what this table publishes today is the reading and not the measurement.",
       "That homology proposes but does not discriminate is a statement about this reference and this frame. A different reference proteome could shift it.",
     ],
   },
