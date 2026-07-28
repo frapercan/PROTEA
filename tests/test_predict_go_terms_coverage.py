@@ -34,6 +34,7 @@ from protea.core.operations.predict_go_terms import (
     _clean_float,
     _row_from_prediction,
 )
+from protea.core.operations.predict_go_terms._batch_op_reference import _PoolRequest
 from protea.infrastructure.orm.models.annotation.annotation_set import AnnotationSet
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
 from protea.infrastructure.orm.models.embedding.reranker_model import RerankerModel
@@ -617,7 +618,7 @@ class TestLoadReferenceData:
             ),
         ):
             emit, events = _emit_capture()
-            ref = op._load_reference_data(session, uuid.uuid4(), uuid.uuid4(), emit)
+            ref = op._load_reference_data(session, _PoolRequest(uuid.uuid4(), uuid.uuid4()), emit)
         assert ref["accessions"] == []
         assert ref["embeddings"].size == 0
         names = [n for n, _ in events]
@@ -648,8 +649,8 @@ class TestLoadReferenceData:
             ),
             patch.object(op, "_stream_reference_pool", side_effect=_stream),
         ):
-            ref1 = op._load_reference_data(session, ec_id, as_id, _noop_emit)
-            ref2 = op._load_reference_data(session, ec_id, as_id, _noop_emit)
+            ref1 = op._load_reference_data(session, _PoolRequest(ec_id, as_id), _noop_emit)
+            ref2 = op._load_reference_data(session, _PoolRequest(ec_id, as_id), _noop_emit)
         assert ref1["accessions"] == accs
         assert ref2["accessions"] == accs
         assert stream_calls["n"] == 1  # 2nd call hit disk cache
@@ -700,7 +701,7 @@ class TestLoadReferenceDataPerAspect:
         }
         with patch.object(op, "_load_reference_data", return_value=empty_unified):
             result = op._load_reference_data_per_aspect(
-                MagicMock(), uuid.uuid4(), uuid.uuid4(), _noop_emit
+                MagicMock(), _PoolRequest(uuid.uuid4(), uuid.uuid4()), _noop_emit
             )
         assert _UNIFIED_REF_KEY in result
         for asp in ASPECT_CODES:
@@ -752,7 +753,7 @@ class TestLoadReferenceDataPerAspect:
             ),
         ):
             emit, events = _emit_capture()
-            result = op._load_reference_data_per_aspect(MagicMock(), ec_id, as_id, emit)
+            result = op._load_reference_data_per_aspect(MagicMock(), _PoolRequest(ec_id, as_id), emit)
         for asp in ASPECT_CODES:
             view = result[asp]
             assert isinstance(view["embeddings_f32"], np.ndarray)
@@ -1444,12 +1445,14 @@ class TestEnsureReferenceCacheMode:
         )
         sentinel = {"cached": True}
         need_cos, need_plain = op._reference_dtype_needs(ctx.p)
-        key = (
-            ctx.p.embedding_config_id,
-            ctx.p.annotation_set_id,
-            ctx.p.aspect_separated_knn,
-            need_cos,
-            need_plain,
+        # Derived, not restated. A key spelled twice is a key that can
+        # disagree with itself, and this test existed to catch a cache hit,
+        # not to re-implement how the cache is addressed.
+        key = op._process_cache_key(
+            ctx.p,
+            _PoolRequest(ctx.embedding_config_id, ctx.annotation_set_id, ctx.p.donor_policy),
+            need_cos=need_cos,
+            need_plain=need_plain,
         )
         monkeypatch.setattr(_batch_op_reference, "_REF_CACHE", {key: sentinel})
         with (
@@ -1841,7 +1844,7 @@ class TestReferencePoolQuery:
         provided session.query without raising."""
         op = PredictGOTermsBatchOperation()
         session = MagicMock()
-        out = op._reference_pool_query(session, uuid.uuid4(), uuid.uuid4())
+        out = op._reference_pool_query(session, _PoolRequest(uuid.uuid4(), uuid.uuid4()))
         assert out is session.query.return_value.join.return_value.join.return_value
 
 
