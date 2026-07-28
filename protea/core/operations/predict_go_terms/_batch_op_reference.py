@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from protea.core.annotation_intern import intern_string
 from protea.core.contracts.operation import EmitFn
 from protea.core.disk_cache import (
+    RefPoolKey,
     _aspect_index_path,
     _build_anno_csr,
     _derive_reference_views,
@@ -193,8 +194,7 @@ class _ReferenceMixin:
             expected = accession_q.count()
 
         accessions, embeddings = _load_reference_pool_cached(
-            embedding_config_id,
-            annotation_set_id,
+            RefPoolKey(embedding_config_id, annotation_set_id),
             _db_loader,
             expected_count=expected,
             emit=lambda ev, fields: emit(f"predict_go_terms_batch.{ev}", None, fields, "info"),
