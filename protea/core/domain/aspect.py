@@ -88,6 +88,40 @@ _CODE_TO_ASPECT: dict[str, Aspect] = {a.code: a for a in Aspect}
 _CAFA_TO_ASPECT: dict[str, Aspect] = {a.cafa: a for a in Aspect}
 
 
+#: Integer encoding of the aspect used as an ad-hoc reranker feature
+#: (``aspect_code``). This is NOT the enum iteration order (which is
+#: ``P -> F -> C``): it reproduces bit-for-bit the mapping the offline
+#: ``protea-reranker-lab`` trainer bakes into every per-category booster
+#: (``train_serve_reranker.py``:
+#: ``df["aspect_code"] = df["aspect"].map({"mfo": 0, "bpo": 1, "cco": 2})``).
+#: The lab keys on the lowercase CAFA code; PROTEA prediction rows carry the
+#: single-char wire code (``P`` / ``F`` / ``C``), so serve/eval must translate
+#: through the enum to land on the SAME integer the booster split on.
+_CAFA_TO_RERANKER_CODE: dict[str, int] = {"MFO": 0, "BPO": 1, "CCO": 2}
+
+
+def reranker_aspect_code(aspect: str | None) -> int | None:
+    """Map any aspect encoding to the offline lab's ``aspect_code`` integer.
+
+    Accepts the single-char wire code (``P`` / ``F`` / ``C``, as carried on
+    PROTEA prediction rows) or the three-char CAFA code in any case
+    (``MFO`` / ``mfo`` / ...). Returns the lab's integer encoding
+    (``mfo -> 0``, ``bpo -> 1``, ``cco -> 2``). Empty or unrecognised input
+    returns ``None`` so a downstream numeric column routes it through
+    LightGBM's native missing-value branch rather than crashing.
+    """
+    if not aspect:
+        return None
+    token = aspect.strip().upper()
+    if len(token) == 1:
+        asp = _CODE_TO_ASPECT.get(token)
+    else:
+        asp = _CAFA_TO_ASPECT.get(token)
+    if asp is None:
+        return None
+    return _CAFA_TO_RERANKER_CODE[asp.cafa]
+
+
 # Canonical iteration tuples — kept as module-level constants so existing
 # callers that destructure into ``for code in ASPECT_CODES`` keep working
 # without importing the enum directly.
@@ -99,4 +133,5 @@ __all__ = [
     "ASPECT_CAFA_CODES",
     "ASPECT_CODES",
     "Aspect",
+    "reranker_aspect_code",
 ]

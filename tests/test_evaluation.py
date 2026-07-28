@@ -99,6 +99,8 @@ class TestEvaluationDataProperties:
             "lk_annotations",
             "pk_annotations",
             "known_terms_count",
+            "removed_proteins",
+            "removed_annotations",
         }
         assert set(s.keys()) == expected
 
@@ -747,3 +749,75 @@ class TestComputeEvaluationDataReconciled:
         assert result.lk == {"P1": {"GO:0002"}}
         assert result.nk == {}
         assert result.pk == {}
+
+
+class TestRemovedBucket:
+    """The window is decomposed into what arrived and what left.
+
+    A window described only by its additions cannot say whether a drop came
+    from the method or from the corpus, and the corpus contracts as well as
+    grows.
+    """
+
+    @staticmethod
+    def _classify(old, new):
+        from protea.core.evaluation import _classify_protein_deltas
+
+        return _classify_protein_deltas(old, new)
+
+    def test_terms_dropped_in_a_namespace_are_reported(self):
+        old = {"P1": {"F": {"GO:0001", "GO:0002"}}}
+        new = {"P1": {"F": {"GO:0002", "GO:0003"}}}
+        _, _, _, _, removed = self._classify(old, new)
+        assert removed == {"P1": {"GO:0001"}}
+
+    def test_a_protein_that_loses_everything_is_still_counted(self):
+        """The case the additions logic cannot see.
+
+        A protein with nothing left at the end of the window exits the
+        additions branch early, so computing removals after that exit would
+        make the largest losses the only invisible ones.
+        """
+        old = {"P1": {"F": {"GO:0001"}, "P": {"GO:0002"}}}
+        new: dict = {}
+        _, _, _, _, removed = self._classify(old, new)
+        assert removed == {"P1": {"GO:0001", "GO:0002"}}
+
+    def test_pure_additions_produce_no_removals(self):
+        old = {"P1": {"F": {"GO:0001"}}}
+        new = {"P1": {"F": {"GO:0001", "GO:0002"}}}
+        _, _, _, _, removed = self._classify(old, new)
+        assert removed == {}
+
+    def test_a_new_protein_produces_no_removals(self):
+        old: dict = {}
+        new = {"P1": {"F": {"GO:0001"}}}
+        nk, _, _, _, removed = self._classify(old, new)
+        assert removed == {}
+        assert nk == {"P1": {"GO:0001"}}
+
+    def test_removals_do_not_leak_into_the_scored_buckets(self):
+        """Removed terms are reported, never scored."""
+        old = {"P1": {"F": {"GO:0001", "GO:0002"}}}
+        new = {"P1": {"F": {"GO:0003"}}}
+        nk, lk, pk, pk_known, removed = self._classify(old, new)
+        assert removed == {"P1": {"GO:0001", "GO:0002"}}
+        assert pk == {"P1": {"GO:0003"}}
+        for bucket in (nk, lk):
+            assert "GO:0001" not in {go for terms in bucket.values() for go in terms}
+
+    def test_removals_are_counted_per_namespace_not_globally(self):
+        """A term that moves namespace is a removal in one and an addition in
+        the other, which is what the per-namespace protocol already implies."""
+        old = {"P1": {"F": {"GO:0001"}, "P": set()}}
+        new = {"P1": {"F": set(), "P": {"GO:0001"}}}
+        _, _, _, _, removed = self._classify(old, new)
+        assert removed == {"P1": {"GO:0001"}}
+
+    def test_stats_report_removals(self):
+        from protea.core.evaluation import EvaluationData
+
+        ed = EvaluationData(removed={"P1": {"GO:0001", "GO:0002"}, "P2": {"GO:0003"}})
+        s = ed.stats()
+        assert s["removed_proteins"] == 2
+        assert s["removed_annotations"] == 3

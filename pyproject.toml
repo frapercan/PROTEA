@@ -29,7 +29,7 @@ dependencies = [
     "faiss-cpu (>=1.7.0)",
     "parasail (>=1.3.4)",
     "ete3 (>=3.1.3)",
-    "cafaeval-protea @ git+https://github.com/frapercan/cafaeval-protea.git@main",
+    "cafaeval-protea @ git+https://github.com/frapercan/cafaeval-protea.git@80d705aaa2f931f9bc0c1fb89e10782132c19707",
     "lightgbm (>=4.6.0,<5.0.0)",
     "pyarrow (>=23.0.1,<24.0.0)",
     "httpx (>=0.28.1,<0.29.0)",
@@ -38,7 +38,7 @@ dependencies = [
     "uvicorn (>=0.41.0,<0.42.0)",
     "pydantic-settings (>=2.0,<3.0)",
     "prometheus-client (>=0.20.0,<1.0.0)",
-    "protea-contracts @ git+https://github.com/frapercan/protea-contracts.git@main",
+    "protea-contracts @ git+https://github.com/frapercan/protea-contracts.git@7500dc2313ed2df9c53821f2a10588c1ee7abe81",
     "argon2-cffi (>=23.1.0,<26.0.0)",
     "minio (>=7.2,<8.0)",
     "scipy (>=1.11.0,<2.0.0)",
@@ -74,10 +74,10 @@ priority = "explicit"
 # NOTE: protea-contracts is a MAIN dependency (imported at runtime by
 # protea.core.contracts.operation); the remaining four are optional
 # plugin extras installed via --with plugins.
-protea-method = { git = "https://github.com/frapercan/protea-method.git", branch = "main" }
-protea-sources = { git = "https://github.com/frapercan/protea-sources.git", branch = "main" }
-protea-runners = { git = "https://github.com/frapercan/protea-runners.git", branch = "main" }
-protea-backends = { git = "https://github.com/frapercan/protea-backends.git", branch = "main" }
+protea-method = { git = "https://github.com/frapercan/protea-method.git", rev = "44ed948b8618529c210217a10114cddca1376f13" }
+protea-sources = { git = "https://github.com/frapercan/protea-sources.git", rev = "0b637193475712872875597eba89f722291dff78" }
+protea-runners = { git = "https://github.com/frapercan/protea-runners.git", rev = "f9b1e646ee86af8ecc9b694f611d9e8dbb8e55e2" }
+protea-backends = { git = "https://github.com/frapercan/protea-backends.git", rev = "47f023551a274880b941a1e712e705e74ffd0871" }
 
 
 [build-system]
@@ -136,7 +136,7 @@ hypothesis = ">=6.100,<7"
 # on ``--timeout=<seconds>`` to cap runaway mutants.
 cosmic-ray = ">=8.4.6,<9.0.0"
 pytest-timeout = ">=2.3,<3"
-protea-reranker-lab = {git = "https://github.com/frapercan/protea-reranker-lab.git", branch = "main"}
+protea-reranker-lab = {git = "https://github.com/frapercan/protea-reranker-lab.git", rev = "2311c67edf6c6da045dffc9cf1a40dce9b0af1e3"}
 
 
 [tool.poetry.group.profiling]

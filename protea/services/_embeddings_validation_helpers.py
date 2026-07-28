@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
-VALID_BACKENDS: frozenset[str] = frozenset({"esm", "esm3c", "t5", "ankh", "auto"})
+VALID_BACKENDS: frozenset[str] = frozenset({"esm", "esm3c", "t5", "ankh", "protst", "auto"})
 VALID_LAYER_AGG: frozenset[str] = frozenset({"mean", "last", "concat"})
 VALID_POOLING: frozenset[str] = frozenset({"mean", "max", "cls", "mean_max"})
 
@@ -85,6 +85,18 @@ def _validate_chunking_sizes(body: dict[str, Any], errors: list[str]) -> None:
         )
 
 
+def _validate_embedding_scale(body: dict[str, Any], errors: list[str]) -> None:
+    """Validate the optional ``embedding_scale`` divisor (default 1.0).
+
+    A uniform per-config divisor lets high-magnitude PLM layers fit the fp16
+    halfvec store; it must be a strictly positive number. ``bool`` is rejected
+    explicitly because ``isinstance(True, int)`` is true in Python.
+    """
+    scale = body.get("embedding_scale", 1.0)
+    if isinstance(scale, bool) or not isinstance(scale, (int, float)) or scale <= 0:
+        errors.append("embedding_scale must be a positive number")
+
+
 def _validate_description(body: dict[str, Any], errors: list[str]) -> None:
     description = body.get("description", None)
     if description is not None and not isinstance(description, str):
@@ -106,6 +118,7 @@ def _canonicalise_config(body: dict[str, Any]) -> dict[str, Any]:
         "pooling": body.get("pooling"),
         "normalize_residues": body.get("normalize_residues", False),
         "normalize": body.get("normalize", True),
+        "embedding_scale": float(body.get("embedding_scale", 1.0)),
         "max_length": body.get("max_length", 1022),
         "use_chunking": body.get("use_chunking", False),
         "chunk_size": body.get("chunk_size", 512),
@@ -132,6 +145,7 @@ def validate_embedding_config_body(body: dict[str, Any]) -> dict[str, Any]:
     _validate_model_fields(body, errors)
     _validate_boolean_flags(body, errors)
     _validate_chunking_sizes(body, errors)
+    _validate_embedding_scale(body, errors)
     _validate_description(body, errors)
 
     if errors:

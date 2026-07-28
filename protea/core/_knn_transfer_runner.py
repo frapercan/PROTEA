@@ -130,11 +130,11 @@ def run_knn_transfer_and_label(
 def _build_parity_flags(p: TrainRerankerAutoPayload) -> ExportParityFlags:
     """Read the INT-6 ``compute_*`` flags off the dump payload (default off)."""
     from protea.core.training_dump._export_features import ExportParityFlags
-
     return ExportParityFlags(
         self_prior=bool(getattr(p, "compute_self_prior", False)),
         association=bool(getattr(p, "compute_association", False)),
         classifier=bool(getattr(p, "compute_classifier", False)),
+        protst_text=bool(getattr(p, "compute_protst", False)),
     )
 
 
@@ -173,6 +173,9 @@ def _apply_batch_parity_features(
         ontology_snapshot_id=uuid.UUID(str(runner.p.ontology_snapshot_id)),
         record_factory=partial(build_classifier_only_record, runner._builder),
         aspect_by_term_id=runner.aspect_map,
+        # This cut's t0: lets the two-tower resolve per-cut GO co-annotation
+        # codes (mirrors the per-cut ``association`` feature). No-op for M2.
+        t0_annotation_set_id=runner.t0_annotation_set_id,
     )
     records = apply_export_parity_features(
         runner.session,

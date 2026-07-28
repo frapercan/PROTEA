@@ -23,6 +23,7 @@ manually to force a reload after a model change.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import time
 import uuid
@@ -54,12 +55,65 @@ class AnnoCsr(NamedTuple):
     offsets: np.ndarray
 
 
+class RefPoolKey(NamedTuple):
+    """The triple that identifies one cached reference pool.
+
+    The two IDs say which embeddings and which annotations the pool was built
+    from; the discriminator says under which donor policy it was built. All
+    three change what the pool CONTAINS, so all three belong to its identity
+    and none of them may travel without the others.
+
+    Bundling them is what keeps that true. While they were three loose
+    arguments it was possible, and it happened, to thread the policy through
+    the read path and forget the write path, which stores a filtered pool
+    under the unfiltered name. It also keeps the loader under the master-plan
+    section 3 six-parameter ceiling.
+
+    The discriminator defaults to the permissive policy's empty string, so
+    call sites that predate policies keep their historical key.
+    """
+
+    embedding_config_id: uuid.UUID
+    annotation_set_id: uuid.UUID
+    donor_discriminator: str = ""
+
+
+def _cache_key(
+    embedding_config_id: uuid.UUID,
+    annotation_set_id: uuid.UUID,
+    donor_discriminator: str = "",
+) -> str:
+    """Return the shared prefix every reference-cache file is named from.
+
+    This exists as one function because the key used to be spelled out
+    separately in each path builder. Anything that changes what a cached pool
+    CONTAINS has to change its key, and with the spelling repeated in three
+    places, adding such a thing and updating only two of them would serve one
+    pool under another's name with nothing to notice. That failure mode has
+    already been measured on this cache once.
+
+    ``donor_discriminator`` identifies the donor policy the pool was built
+    under. The permissive policy discriminates to the empty string, so keys
+    for pools built before policies existed are unchanged and their cache
+    entries stay valid.
+    """
+    key = f"{embedding_config_id}__{annotation_set_id}"
+    if donor_discriminator:
+        # Hashed rather than interpolated: the discriminator carries
+        # separators that are not safe in a filename, and hashing keeps the
+        # name bounded however many fields a policy grows.
+        digest = hashlib.sha256(donor_discriminator.encode("utf-8")).hexdigest()[:12]
+        key = f"{key}__donor-{digest}"
+    return key
+
+
 def _disk_cache_paths(
     embedding_config_id: uuid.UUID,
     annotation_set_id: uuid.UUID,
+    donor_discriminator: str = "",
 ) -> tuple[Path, Path]:
     """Return (embeddings_path, accessions_path) for the unified reference cache."""
-    key = f"{embedding_config_id}__{annotation_set_id}"
+    key = _cache_key(embedding_config_id, annotation_set_id, donor_discriminator)
     return (
         _DISK_CACHE_DIR / f"{key}_embeddings.npy",
         _DISK_CACHE_DIR / f"{key}_accessions.npy",
@@ -70,9 +124,10 @@ def _aspect_index_path(
     embedding_config_id: uuid.UUID,
     annotation_set_id: uuid.UUID,
     aspect: str,
+    donor_discriminator: str = "",
 ) -> Path:
     """Return the path for the per-aspect index array (int32 indices into the unified cache)."""
-    key = f"{embedding_config_id}__{annotation_set_id}"
+    key = _cache_key(embedding_config_id, annotation_set_id, donor_discriminator)
     return _DISK_CACHE_DIR / f"{key}__{aspect}_indices.npy"
 
 
@@ -80,9 +135,13 @@ def _anno_disk_cache_paths(
     embedding_config_id: uuid.UUID,
     annotation_set_id: uuid.UUID,
     aspect: str,
+    donor_discriminator: str = "",
 ) -> tuple[Path, Path, Path, Path]:
     """Return (gtids, quals, ecodes, offsets) paths for the annotation CSR cache."""
-    key = f"{embedding_config_id}__{annotation_set_id}__{aspect}"
+    key = (
+        _cache_key(embedding_config_id, annotation_set_id, donor_discriminator)
+        + f"__{aspect}"
+    )
     base = _DISK_CACHE_DIR
     return (
         base / f"{key}_anno_gtids.npy",
@@ -232,6 +291,7 @@ def _is_cache_fresh(
     embedding_config_id: uuid.UUID,
     annotation_set_id: uuid.UUID,
     freshness_seconds: int,
+    donor_discriminator: str = "",
 ) -> bool:
     """Return True when both cache files exist and their oldest mtime is within
     ``freshness_seconds`` of wall-clock now.
@@ -243,7 +303,9 @@ def _is_cache_fresh(
     """
     if freshness_seconds <= 0:
         return False
-    emb_path, acc_path = _disk_cache_paths(embedding_config_id, annotation_set_id)
+    emb_path, acc_path = _disk_cache_paths(
+        embedding_config_id, annotation_set_id, donor_discriminator
+    )
     if not emb_path.exists() or not acc_path.exists():
         return False
     oldest_mtime = min(emb_path.stat().st_mtime, acc_path.stat().st_mtime)
@@ -254,6 +316,7 @@ def _load_from_disk_cache(
     embedding_config_id: uuid.UUID,
     annotation_set_id: uuid.UUID,
     expected_count: int | None = None,
+    donor_discriminator: str = "",
 ) -> dict[str, Any] | None:
     """Load the cached reference pool, optionally validating its row count.
 
@@ -263,7 +326,9 @@ def _load_from_disk_cache(
     drift after a reference re-ingest without needing to delete the
     cache files by hand.
     """
-    emb_path, acc_path = _disk_cache_paths(embedding_config_id, annotation_set_id)
+    emb_path, acc_path = _disk_cache_paths(
+        embedding_config_id, annotation_set_id, donor_discriminator
+    )
     if not emb_path.exists() or not acc_path.exists():
         return None
     try:
@@ -281,8 +346,18 @@ def _save_to_disk_cache(
     annotation_set_id: uuid.UUID,
     accessions: list[str],
     embeddings: np.ndarray,
+    donor_discriminator: str = "",
 ) -> None:
-    emb_path, acc_path = _disk_cache_paths(embedding_config_id, annotation_set_id)
+    """Persist the pool under the key the reader will look for.
+
+    The discriminator is not optional in practice: writing without it would
+    store a filtered pool under the unfiltered name, so every later read of
+    the unfiltered pool would silently get someone else's filtered one. Read
+    and write must agree on the key or the cache is worse than absent.
+    """
+    emb_path, acc_path = _disk_cache_paths(
+        embedding_config_id, annotation_set_id, donor_discriminator
+    )
     emb_path.parent.mkdir(parents=True, exist_ok=True)
     np.save(emb_path, embeddings)
     np.save(acc_path, np.array(accessions))
@@ -321,17 +396,27 @@ def _emit_cache_hit(
 
 
 def _load_and_write_cache(
-    embedding_config_id: uuid.UUID,
-    annotation_set_id: uuid.UUID,
+    key: RefPoolKey,
     db_loader: Callable[[], tuple[list[str], np.ndarray]],
     emit: Callable[[str, dict[str, Any]], None] | None,
     emb_path: Path,
 ) -> tuple[list[str], np.ndarray]:
-    """Invoke ``db_loader``, persist to disk, emit ``cache_write`` audit event."""
+    """Invoke ``db_loader``, persist to disk, emit ``cache_write`` audit event.
+
+    The pool is written under the same ``key`` it would be read from, so a
+    pool restricted by a donor policy can never be stored under the name of
+    an unrestricted one.
+    """
     if emit is not None and emb_path.exists():
         emit("refpool.cache_stale", {"path": str(emb_path)})
     accessions, embeddings = db_loader()
-    _save_to_disk_cache(embedding_config_id, annotation_set_id, accessions, embeddings)
+    _save_to_disk_cache(
+        key.embedding_config_id,
+        key.annotation_set_id,
+        accessions,
+        embeddings,
+        key.donor_discriminator,
+    )
     if emit is not None:
         size_bytes = emb_path.stat().st_size if emb_path.exists() else int(embeddings.nbytes)
         emit(
@@ -342,8 +427,7 @@ def _load_and_write_cache(
 
 
 def _load_reference_pool_cached(
-    embedding_config_id: uuid.UUID,
-    annotation_set_id: uuid.UUID,
+    key: RefPoolKey,
     db_loader: Callable[[], tuple[list[str], np.ndarray]],
     *,
     expected_count: int | None = None,
@@ -351,6 +435,11 @@ def _load_reference_pool_cached(
     freshness_seconds: int = 0,
 ) -> tuple[list[str], np.ndarray]:
     """Return ``(accessions, embeddings)`` for the reference pool with disk-cache.
+
+    ``key`` identifies the pool: which embeddings, which annotations, and
+    under which donor policy it was built. Every path this function takes,
+    the freshness probe, both reads and the write, is derived from that one
+    key, so they cannot disagree about which pool is in play.
 
     ``db_loader`` is invoked only on miss or when the cached row count diverges
     from ``expected_count``.  When ``freshness_seconds > 0`` and the cache
@@ -360,24 +449,35 @@ def _load_reference_pool_cached(
     ``refpool.cache_hit_fresh`` / ``refpool.cache_stale`` /
     ``refpool.cache_write`` events; pass ``None`` to stay quiet.
     """
-    emb_path, _ = _disk_cache_paths(embedding_config_id, annotation_set_id)
+    emb_path, _ = _disk_cache_paths(*key)
     if freshness_seconds > 0 and _is_cache_fresh(
-        embedding_config_id, annotation_set_id, freshness_seconds
+        key.embedding_config_id,
+        key.annotation_set_id,
+        freshness_seconds,
+        key.donor_discriminator,
     ):
-        cached = _load_from_disk_cache(embedding_config_id, annotation_set_id)
+        cached = _load_from_disk_cache(
+            key.embedding_config_id,
+            key.annotation_set_id,
+            donor_discriminator=key.donor_discriminator,
+        )
         if cached is not None:
             _emit_cache_hit(emit, emb_path, cached, fresh=True, freshness_seconds=freshness_seconds)
             return cached["accessions"], cached["embeddings"]
     cached = _load_from_disk_cache(
-        embedding_config_id, annotation_set_id, expected_count=expected_count
+        key.embedding_config_id,
+        key.annotation_set_id,
+        expected_count=expected_count,
+        donor_discriminator=key.donor_discriminator,
     )
     if cached is not None:
         _emit_cache_hit(emit, emb_path, cached)
         return cached["accessions"], cached["embeddings"]
-    return _load_and_write_cache(embedding_config_id, annotation_set_id, db_loader, emit, emb_path)
+    return _load_and_write_cache(key, db_loader, emit, emb_path)
 
 
 __all__ = [
+    "RefPoolKey",
     "_DISK_CACHE_DIR",
     "_anno_disk_cache_paths",
     "_aspect_index_path",

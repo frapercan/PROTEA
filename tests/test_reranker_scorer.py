@@ -189,6 +189,42 @@ class TestApplyIfAlignedBranches:
         assert any(name == "reranker.skipped" for name, _ in events)
 
 
+class TestResolveLiveSchemaShaLineage:
+    """``resolve_live_schema_sha`` threads the lineage payload flag.
+
+    The lineage family is opt-in via ``compute_lineage_features`` on the
+    payload; the live sha the FARM-EXP.5 guard compares against MUST
+    include lineage exactly when that flag is set, otherwise a booster
+    trained with the GO-DAG lineage family can never be served through
+    the guard.
+    """
+
+    def test_flag_off_resolves_registered_trio_sha(self) -> None:
+        """Flag off (default) => the unchanged align+tax trio sha."""
+        scorer = RerankerScorer(attach_aspect=_noop_attach_aspect)
+        p = _payload(
+            compute_alignments=True,
+            compute_taxonomy=True,
+            compute_v6_features=False,
+        )
+        emit, _events = _emit_capture()
+        assert scorer.resolve_live_schema_sha(p, emit) == "7fcecf26aa0a"
+
+    def test_flag_on_resolves_lineage_inclusive_sha(self) -> None:
+        """Flag on => the lineage-inclusive sha (new, distinct value)."""
+        scorer = RerankerScorer(attach_aspect=_noop_attach_aspect)
+        p = _payload(
+            compute_alignments=True,
+            compute_taxonomy=True,
+            compute_v6_features=False,
+            compute_lineage_features=True,
+        )
+        emit, _events = _emit_capture()
+        live = scorer.resolve_live_schema_sha(p, emit)
+        assert live == "0810bef8fd4d"
+        assert live != "7fcecf26aa0a"
+
+
 class TestSchemaShaMismatchError:
     """Pin the public contract of the FARM-EXP.5 guard exception.
 

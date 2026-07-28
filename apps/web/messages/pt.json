@@ -4,6 +4,7 @@
     "description": "Plataforma de dados proteicos — fila de jobs e gestão de pipelines"
   },
   "nav": {
+    "featureRegistry": "Registro de features",
     "proteins": "Proteínas",
     "annotations": "Anotações GO",
     "querySets": "Query Sets",
@@ -19,6 +20,7 @@
     "experimentRuns": "Execuções de experiência",
     "maintenance": "Manutenção",
     "home": "Início",
+    "instrument": "Instrumento",
     "data": "Dados de referência",
     "pipelineGroup": "Pipeline",
     "results": "Resultados",
@@ -144,6 +146,96 @@
     "annotateQueueWaitingLabel": "Trabalhos aguardando",
     "shareCopy": "Compartilhar",
     "shareCopied": "Link copiado"
+  },
+  "book": {
+    "eyebrow": "PROTEA · Anotação funcional de proteínas baseada em embeddings",
+    "boardHeading": "O quadro selado de nove células",
+    "nineCellItalic": "Primeiros em sete de nove; as duas que não, nós explicamos.",
+    "headlineSentence": "Com o seu enquadramento, o resultado selado é <value></value> em <metric></metric>, primeiro em sete de nove células<note>.</note>",
+    "chaptersHeading": "Os quatro pilares, como capítulos",
+    "openInstrument": "Abrir o instrumento",
+    "annotate": "Anotar uma sequência",
+    "thesisPdf": "Ler a tese",
+    "claim": "A afirmação",
+    "pullHint": "Abra o marcador para ver o comprovativo e a operação que regenera o número.",
+    "evidence": "A evidência",
+    "caveats": "As nossas ressalvas",
+    "caveatsIntro": "Declaramo-las antes que alguém as declare por nós.",
+    "chapterNav": "Navegação de capítulos",
+    "backToArgument": "Voltar ao argumento",
+    "receipt": "Comprovativo",
+    "receiptAlso": "Também",
+    "reproduce": "Reproduzir",
+    "regenerate": "Regenerar este número",
+    "receiptPending": "Comprovativo pendente: não encontrado no instantâneo atual de armazenamento. A afirmação apoia-se no quadro selado até ser regenerada.",
+    "pullReceipt": "Mostrar o comprovativo"
+  },
+  "score": {
+    "eyebrow": "Chapter zero",
+    "title": "How a score is made",
+    "back": "Back to the argument",
+    "proteinLabel": "Protein",
+    "goLabel": "GO term",
+    "setLabel": "Prediction set",
+    "setResolvedFromLatest": "Resolved to the most recent prediction run. Pass ?set=<id> to pin a specific run.",
+    "setPinned": "Pinned by the ?set query parameter.",
+    "grounding": "The steps below are a real pipeline order: retrieval, candidate, evidence, fusion, probability. They are grounded in a measured fact from chapter one: sixteen of the sixty-four features carry ninety-five percent of the gain, and the single largest driver is a base-rate prior, which we discuss rather than hide.",
+    "groundingLink": "Read chapter one",
+    "noSet": {
+      "heading": "No prediction run is available",
+      "body": "This page reads a real prediction run from GET /embeddings/prediction-sets. None was returned, so there is no retrieval to walk for this pair. Run a prediction from the instrument, then reopen this page. Nothing on this page is fabricated to fill the gap."
+    },
+    "retrieval": {
+      "heading": "1. The retrieval",
+      "lede": "A k-nearest-neighbour search over protein-language-model embeddings finds the reference proteins closest to the query, and each neighbour that already carries this GO term casts a vote. These are the neighbours that voted for {go} on {accession}, nearest first.",
+      "caption": "kNN neighbours voting for this GO term (prediction set {set})",
+      "thNeighbour": "Neighbour",
+      "thDistance": "Distance",
+      "thIdentity": "Identity (NW)",
+      "thKPosition": "k position",
+      "thVoteCount": "Vote count",
+      "empty": {
+        "heading": "No neighbour voted for this pair",
+        "body": "This prediction run has no candidate row for {accession} carrying {go}. Either the protein is not in this run, or no retrieved neighbour carried this term. This empty state is the honest answer, not a zero."
+      }
+    },
+    "evidence": {
+      "heading": "2. The evidence",
+      "lede": "Each candidate carries a row of typed feature columns, the same columns the reranker consumes. Their meaning is pulled from the explainability registry (GET /features/registry), the one source the thesis and the Sphinx docs also cite. The columns shown are those stored on the prediction row; the export-time families (anc2vec, lineage, InterPro, embedding PCA) are computed downstream and are not on this endpoint.",
+      "caption": "Per-candidate features on the nearest voting neighbour, {neighbour}",
+      "thFeature": "Feature",
+      "thValue": "Value",
+      "thMeaning": "Meaning",
+      "meaningPending": "Meaning not found in the feature registry.",
+      "registryPending": "The feature registry (GET /features/registry) did not return, so the columns below are shown without their registry meaning. The values themselves are the real feature columns on the prediction row.",
+      "baseRateNote": "The base-rate prior. This is the single largest driver of the sealed booster's gain, about twenty-five percent. We surface it rather than hide it.",
+      "registryLink": "See the full feature registry",
+      "noCandidate": "No candidate row for this pair, so there are no feature columns to show."
+    },
+    "fusion": {
+      "heading": "3. The fusion and the score",
+      "lede": "Calibrated evidence scorers put every signal on one scale, and a shallow per-category combiner (a LightGBM booster) fuses them into one probability. That final probability is the score.",
+      "gap": {
+        "heading": "The single-pair probability is not exposed by a JSON endpoint",
+        "body": "PROTEA computes the fused probability, but serves it only in bulk, as a TSV stream, not as a per-(accession, GO) JSON field. Rather than invent a number, this page names the contract and stops. Closing this gap needs a small backend endpoint that returns the fused score for one pair."
+      },
+      "rerankersHeading": "Rerankers registered for inference",
+      "rerankersEmpty": "No reranker model is registered (GET /scoring/rerankers returned none). Until a booster is imported, the fusion step falls back to the scoring-config weighted average.",
+      "thReranker": "Model",
+      "thCategory": "Category",
+      "thAspect": "Aspect",
+      "openInstrument": "Open the scoring instrument"
+    },
+    "caveats": {
+      "heading": "Our caveats",
+      "intro": "We state these before anyone states them for us.",
+      "items": [
+        "The single largest driver of the score is go_term_frequency, a base-rate prior. A frequent GO term scores partly because it is frequent, not only because the evidence is strong.",
+        "Retrieval proposes candidates; it does not discriminate between them. A near neighbour is a hypothesis, not a conclusion, and homology alone does not settle the term.",
+        "The final probability depends on which reranker and scoring config are selected in the instrument. There is no single canonical number for a pair outside a named run.",
+        "A pair with no voting neighbour has no score. The empty states on this page are the honest answer, never a fabricated value."
+      ]
+    }
   },
   "benchmark": {
     "loadingTitle": "Carregando benchmark…",
@@ -1796,5 +1888,67 @@
       "backHome": "Voltar ao início",
       "goSignIn": "Ir para iniciar sessão"
     }
+  },
+  "errors": {
+    "title": "Não foi possível carregar esta vista",
+    "body": "A interface encontrou um erro ao construir esta página. O que a aplicação reportou está abaixo.",
+    "unauthorizedTitle": "A sessão não está iniciada",
+    "unauthorizedBody": "O servidor reteve estes dados porque o pedido não tinha uma sessão válida. Inicie sessão e tente de novo.",
+    "forbiddenTitle": "Não tem permissão para ver isto",
+    "forbiddenBody": "À sua conta falta o papel que esta página exige. Peça a um administrador para o conceder e tente de novo.",
+    "networkTitle": "Não foi possível contactar o servidor",
+    "networkBody": "O pedido nunca chegou a concluir. Verifique se o backend está a correr e acessível, e tente de novo.",
+    "endpointLabel": "Endpoint",
+    "statusLabel": "Estado",
+    "messageLabel": "Detalhe",
+    "referenceLabel": "Referência",
+    "retry": "Tentar de novo",
+    "signIn": "Ir para iniciar sessão",
+    "home": "Voltar à página inicial",
+    "notFound": {
+      "title": "Esta página não existe",
+      "body": "O endereço não corresponde a nenhuma rota. Verifique a ligação ou volte à página inicial.",
+      "home": "Voltar à página inicial"
+    },
+    "predictionSetNotFound": {
+      "title": "Este conjunto de predições não existe",
+      "body": "Nenhum conjunto de predições corresponde a este id. Pode ter sido eliminado, ou o id está errado.",
+      "back": "Voltar aos conjuntos de predições"
+    }
+  },
+  "featureRegistry": {
+    "title": "Registro de features",
+    "subtitle": "Cada feature do reranker tem uma única descrição canônica, partilhada pela documentação, pela tese e por esta página. Aqui podes ler o que cada feature significa, quem a produz e se carrega um valor real na exportação padrão.",
+    "provenance": "Obtido de protea-contracts {version}. {total} features em {families} famílias.",
+    "legendHeading": "O que significam os selos de estado",
+    "countSuffix": "{count} neste estado",
+    "familyCount": "{count} features",
+    "producerLabel": "Produtor",
+    "rangeLabel": "Intervalo",
+    "notApplicable": "n/d",
+    "caveatLabel": "Ressalva",
+    "status": {
+      "PRODUCED": {
+        "label": "produzida",
+        "help": "Preenchida com um valor real na exportação padrão."
+      },
+      "DECLARED_ABSENT": {
+        "label": "declarada ausente",
+        "help": "A exportação padrão deixa-a por preencher porque o seu produtor não está ligado ao caminho de exportação (ADR-D45). O valor que vês num despejo em bruto não é o sinal do modelo."
+      },
+      "POOL_INJECTED": {
+        "label": "injetada no pool",
+        "help": "Carimbada pelo carregador multimanifesto do laboratório na fase de pool. Não aparece num despejo parquet em bruto."
+      },
+      "BROKEN": {
+        "label": "quebrada",
+        "help": "O produtor está ligado mas a sua fonte de dados está vazia ou defeituosa, por isso a coluna não carrega sinal."
+      }
+    }
+  },
+  "instrument": {
+    "eyebrow": "Painel operacional",
+    "title": "O instrumento",
+    "subtitle": "Todas as superfícies de dados, pipeline, resultados e operações por trás do argumento, agrupadas como o pipeline é executado. O livro permanece no nível superior; esta é a aba que você abre para operá-lo."
   }
 }

@@ -467,6 +467,91 @@ class TestPredictGOTermsCoordinatorDispatch:
         assert msg["payload"]["compute_self_prior"] is False
         assert msg["payload"]["compute_association"] is False
 
+    def test_lineage_flag_propagates_to_batch_payload(self) -> None:
+        """compute_lineage_features flows coordinator -> batch payload.
+
+        Regression guard for the serve-time SchemaShaMismatchError: PR #693
+        added ``compute_lineage_features`` to the payload contracts and to
+        ``infer_active_feature_families`` but missed wiring it through the
+        coordinator fan-out. The coordinator dropped the flag, so a job
+        dispatched with ``compute_lineage_features=True`` had it silently
+        reset to the contract default (False) at the batch level. The batch
+        worker then computed the live ``feature_schema_sha`` WITHOUT the
+        lineage family, tripping the sha-mismatch guard against any reranker
+        trained with lineage features.
+        """
+        from protea.core.reranker import infer_active_feature_families
+
+        try:
+            from protea_contracts import compute_feature_schema_sha
+        except ImportError:  # pragma: no cover - contracts always present in CI
+            pytest.skip("protea_contracts unavailable")
+
+        op = self._op()
+        session = MagicMock()
+        session.get.side_effect = make_session_get()
+
+        def add_side_effect(obj):
+            if not hasattr(obj, "id") or obj.id is None:
+                obj.id = uuid.uuid4()
+
+        session.add.side_effect = add_side_effect
+
+        payload = self._base_payload()
+        payload["compute_lineage_features"] = True
+
+        with patch.object(op, "_load_query_accessions", return_value=["P1"]):
+            result = op.execute(session, payload, emit=_noop_emit)
+
+        _, msg = result.publish_operations[0]
+        assert msg["payload"]["compute_lineage_features"] is True
+
+        # The batch payload round-trips through the contract and the live
+        # schema sha it drives now carries the lineage family, so it matches
+        # a lineage-trained reranker instead of tripping the mismatch guard.
+        batch_p = PredictGOTermsBatchPayload.model_validate(msg["payload"])
+        assert batch_p.compute_lineage_features is True
+
+        families = infer_active_feature_families(
+            compute_alignments=batch_p.compute_alignments,
+            compute_taxonomy=batch_p.compute_taxonomy,
+            compute_v6_features=batch_p.compute_v6_features,
+            compute_lineage_features=batch_p.compute_lineage_features,
+        )
+        assert "lineage" in families
+        families_without = infer_active_feature_families(
+            compute_alignments=batch_p.compute_alignments,
+            compute_taxonomy=batch_p.compute_taxonomy,
+            compute_v6_features=batch_p.compute_v6_features,
+            compute_lineage_features=False,
+        )
+        assert "lineage" not in families_without
+        assert compute_feature_schema_sha(families) != compute_feature_schema_sha(families_without)
+
+    def test_lineage_flag_defaults_false_in_batch_payload(self) -> None:
+        """compute_lineage_features defaults to False when the caller omits it.
+
+        Sibling flags (compute_v6_features and the LAFA producers) are
+        unaffected by the lineage fan-out fix.
+        """
+        op = self._op()
+        session = MagicMock()
+        session.get.side_effect = make_session_get()
+
+        def add_side_effect(obj):
+            if not hasattr(obj, "id") or obj.id is None:
+                obj.id = uuid.uuid4()
+
+        session.add.side_effect = add_side_effect
+
+        with patch.object(op, "_load_query_accessions", return_value=["P1"]):
+            result = op.execute(session, self._base_payload(), emit=_noop_emit)
+
+        _, msg = result.publish_operations[0]
+        assert msg["payload"]["compute_lineage_features"] is False
+        # Sibling propagated flag is unaffected by the lineage wiring.
+        assert msg["payload"]["compute_v6_features"] is False
+
 
 # ---------------------------------------------------------------------------
 # StorePredictionsOperation

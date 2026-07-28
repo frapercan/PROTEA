@@ -14,7 +14,11 @@ It is built as a **contracts-first plugin platform**: this repository holds the 
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
 [![License: Unlicense](https://img.shields.io/badge/license-Unlicense-blue.svg)](https://unlicense.org/)
 
-**Status:** v0.10.0, production. The platform is actively deployed and drives live CAFA 6 evaluation and research dataset exports. The public REST API is not yet stable across minor releases.
+**Status:** deployed and in use. The platform drives the evaluation and the research dataset exports for an ongoing doctoral campaign. The public REST API is not yet stable across releases.
+
+The stack was consolidated recently. The shared contract package has a single branch again, reached by a real merge rather than a snapshot, and every internal dependency across the eight repositories now names a commit instead of a branch, enforced by a check on each pull request. That mattered more than it sounds: while a consumer names a branch, that branch becomes a delivery channel, so urgent work lands on it directly and bypasses the gates on the trunk.
+
+A definitive campaign run is being prepared. **Earlier experimental results are being recomputed rather than carried forward**, so no headline number is quoted here as current.
 
 ---
 
@@ -48,7 +52,7 @@ Evaluation is keyed to dated GOA releases, so a prediction is always scored agai
 | `t0` (inputs) | 227 | 2025-09-04 | the model sees only annotations known at this date |
 | `t1` (ground truth) | 230 | 2026-03-04 | predictions are scored against annotations that appeared by this date |
 
-The `227 -> 230` window is the live **LAFA Sep-2025 -> Mar-2026** evaluation window, so the same artifact that scores on this benchmark is the one submitted to LAFA. Each (protein, namespace) pair is classed into the CAFA **NK / LK / PK** tiers by what was already known at `t0`. Earlier windows (for example `220 -> 229`) are used as validated checkpoints; the split points and their dates come from the live GOA release timeline on `/evaluation`.
+The live evaluation window is the one the community board scores, so the same artifact that scores on this benchmark is the one submitted to it. Window boundaries are given as dates rather than release numbers, because the contribution is the productised environment and not a particular numbering of the source. Each (protein, namespace) pair is classed into the CAFA **NK / LK / PK** tiers by what was already known at `t0`. Earlier windows are used as validated checkpoints; the split points and their dates come from the live annotation release timeline on `/evaluation`.
 
 ---
 

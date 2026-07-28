@@ -70,6 +70,31 @@ def _tax_consensus_default_fields() -> dict[str, Any]:
     }
 
 
+def _protst_default_fields() -> dict[str, Any]:
+    """Declared-absent defaults for the 3 protst_text columns (ADR-D45).
+
+    The ProtST text-to-GO producer (``apply_protst_text``) is opt-in behind the
+    ``compute_protst`` flag and is NOT wired into the export by default, so every
+    record carries all three columns unconditionally (the canonical-column
+    boundary holds) at ``NaN`` (missing measurement), never ``0.0``. A separate
+    sibling of :meth:`_LeafRecordBuilder._lafa_default_fields` because the
+    protst_text family's produced-but-no-evidence default differs from the LAFA
+    families: the producer, when it runs on a COVERED query, stamps a measured
+    ``0.0`` on ``protst_vote_fraction`` / ``protst_present`` and leaves
+    ``protst_text_score`` at this ``NaN`` for a term that drew no vote, so a
+    covered-but-unvoted candidate stays a missing score, not a measured zero. An
+    uncovered query keeps all three at ``NaN``. LightGBM reads ``NaN`` as
+    missing; the export degeneracy check (#710/#720) then treats an all-null
+    protst family as declared absent, not a bug.
+    """
+    nan = float("nan")
+    return {
+        "protst_text_score": nan,
+        "protst_vote_fraction": nan,
+        "protst_present": nan,
+    }
+
+
 class _LeafRecordBuilder:
     """Builds the per-(query, candidate-GO) record dicts + ancestor expansion.
 
@@ -170,7 +195,7 @@ class _LeafRecordBuilder:
         rec.update({f"emb_pca_query_{i}": inputs.q_pca_row[i] for i in range(EMBEDDING_PCA_DIM)})
         rec.update(self._lineage_default_fields())
         rec.update(self._interpro_default_fields())
-        rec.update(self._lafa_default_fields())
+        rec.update({**self._lafa_default_fields(), **_protst_default_fields()})
         return rec
 
     # ── InterPro-only candidate materialisation (S3b union) ───────────
@@ -250,7 +275,7 @@ class _LeafRecordBuilder:
         """
         rec.update(self._lineage_default_fields())
         rec.update(self._interpro_default_fields())
-        rec.update(self._lafa_default_fields())
+        rec.update({**self._lafa_default_fields(), **_protst_default_fields()})
         rec["knn_present"] = False
 
     def get_interpro_table(self) -> dict[tuple[str, str], Any]:
@@ -340,29 +365,30 @@ class _LeafRecordBuilder:
 
     @staticmethod
     def _lafa_default_fields() -> dict[str, Any]:
-        """Zero-filled defaults for the 6 LAFA columns (contracts 0.5.0).
+        """Declared-absent defaults for the 6 LAFA columns (ADR-D45).
 
-        The ``classifier``, ``self_prior`` and ``association`` families
-        added in lafa-integrate INT-2 are JSONB-blob features: no
-        GOPrediction column migration. Every KNN leaf (and InterPro-only)
-        record carries all six columns unconditionally so the T1.8
-        canonical-column boundary
-        (:func:`protea.core.parquet_export._assert_canonical_columns`)
-        and the contracts producer-coverage guard never fail the dump.
-        ``self_prior_score`` is overwritten by the native compute when
-        the ``compute_self_prior`` payload flag is set (see
-        :func:`protea.core.operations.predict_go_terms._post_knn_pipeline.apply_self_prior`);
-        the ``classifier_*`` and ``association_*`` columns stay zero
-        until later lafa-integrate slices wire their producers. A
-        well-defined zero, not NaN, matching the lineage convention.
+        The ``classifier`` / ``self_prior`` / ``association`` producers are NOT
+        wired into the export by default; every record still carries all six
+        columns so the canonical-column boundary holds. The value is ``NaN``
+        (missing measurement), not ``0.0``, following the
+        :func:`_reranker_default_fields` yardstick: NaN means "no producer ran";
+        a true ``0`` means "a producer ran and counted zero". The old ``0.0``
+        made these declared-absent families indistinguishable from a genuine
+        zero and let them ship semantically null under an unchanged
+        ``feature_schema_sha``. LightGBM reads NaN as missing. When the export
+        wires a producer (the ``compute_*`` flags),
+        ``_export_features.apply_export_parity_features`` resets the family to
+        its true-zero baseline before marking hits, so a non-hit of a produced
+        family is ``0`` while a declared-absent family stays ``NaN``.
         """
+        nan = float("nan")
         return {
-            "classifier_score": 0.0,
-            "classifier_present": 0.0,
-            "self_prior_score": 0.0,
-            "association_total": 0.0,
-            "association_cross": 0.0,
-            "association_present": 0.0,
+            "classifier_score": nan,
+            "classifier_present": nan,
+            "self_prior_score": nan,
+            "association_total": nan,
+            "association_cross": nan,
+            "association_present": nan,
         }
 
     @staticmethod

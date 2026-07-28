@@ -23,4 +23,7 @@ fix sequence that an operator can execute without prior context.
    prometheus
    deployment-process-stack
    lafa-native-parity
+   serve-learned-code-retrieval
+   reproducible-eval-frame
    release-process
+   export-resume-and-minijobs

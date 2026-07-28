@@ -21,11 +21,13 @@ The original four MR-1 producer signals:
 * self_prior           <- ``self_prior_score`` (``apply_self_prior``)
 * association          <- ``association_total`` (``apply_association``, snapshot-agnostic per #644)
 
-Because those keys are also persisted on ``GOPrediction.features`` (#643), an
-adapter reads identically whether the candidate dict came straight off the live
-predict path or was rehydrated from the JSONB blob for the eval / combiner path
-(MR-2). The adapters are thin by design: the producer owns the computation, the
-adapter owns only the port contract (``name``, ``applies_to``, ``score``).
+Because those keys are persisted on the typed ``GOPrediction`` columns (the
+signal-store code-switch moved the LAFA scalars off the ``features`` JSONB
+blob), an adapter reads identically whether the candidate dict came straight
+off the live predict path or was rehydrated from the typed columns for the
+eval / combiner path (MR-2). The adapters are thin by design: the producer owns
+the computation, the adapter owns only the port contract (``name``,
+``applies_to``, ``score``).
 
 ``applies_to`` follows the CAFA evidence model: the base-evidence scorers
 (alignment, taxonomy, label_embedding, interpro, term_frequency), KNN, and the
@@ -245,13 +247,33 @@ class AssociationScorer(_KeyedScorer):
         return _as_float(candidate.get("association_total"))
 
 
+class ProtstTextScorer(_KeyedScorer):
+    """ProtST text-to-GO transfer evidence (``apply_protst_text``, protst_text family).
+
+    Reads the per-candidate ``protst_text_score`` the ProtST producer stamps (the
+    per-query-max-normalised cosine-weighted kNN vote of the query's ProtST
+    protein embedding over the reference bank's pre-cutoff t0 GO terms). It is a
+    thin read, NOT a recompute: the producer owns the kNN. Applies to every
+    category (ProtST proposes from sequence-aligned text embeddings alone, no
+    known terms needed); text evidence exists for NK too, and NK is the
+    leakage-free BP anchor where the signal is validated.
+    """
+
+    name = "protst_text"
+    applies_to = _ALL_CATEGORIES
+
+    def _value(self, candidate: Candidate) -> float | None:
+        return _as_float(candidate.get("protst_text_score"))
+
+
 def default_scorer_registry() -> ScorerRegistry:
     """A :class:`ScorerRegistry` pre-loaded with the MR-1 adapters.
 
     Registration order is the canonical score-vector order the MR-2 combiner
-    will consume (base evidence first, then the original four producer signals):
-    alignment, taxonomy, label_embedding, interpro, term_frequency,
-    knn_similarity, classifier, self_prior, association.
+    will consume (base evidence first, then the original four producer signals,
+    then the ProtST text lever): alignment, taxonomy, label_embedding, interpro,
+    term_frequency, knn_similarity, classifier, self_prior, association,
+    protst_text.
     """
     registry = ScorerRegistry()
     registry.register(AlignmentScorer())
@@ -263,6 +285,7 @@ def default_scorer_registry() -> ScorerRegistry:
     registry.register(ClassifierScorer())
     registry.register(SelfPriorScorer())
     registry.register(AssociationScorer())
+    registry.register(ProtstTextScorer())
     return registry
 
 
@@ -273,6 +296,7 @@ __all__ = [
     "InterproScorer",
     "KnnSimilarityScorer",
     "LabelEmbeddingScorer",
+    "ProtstTextScorer",
     "SelfPriorScorer",
     "TaxonomyScorer",
     "TermFrequencyScorer",

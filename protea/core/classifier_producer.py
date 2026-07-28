@@ -50,6 +50,8 @@ from torch import nn
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+    from protea.core.two_tower_classifier import TwoTowerSparseClassifier
+
 _LOG = logging.getLogger(__name__)
 
 # Canonical 6-PLM concat order (ADR D35 config ids). The order is
@@ -86,6 +88,15 @@ _ANC2VEC_ENV = "PROTEA_CLASSIFIER_ANC2VEC_PATH"
 #    directory env when both are set.
 _SEED_DIR_ENV = "PROTEA_CLASSIFIER_SEED_DIR"
 _SEED_PATHS_ENV = "PROTEA_CLASSIFIER_SEED_PATHS"
+
+# Classifier implementation selector (iteration ``sparse-classifier``). The
+# default (unset / ``m2``) keeps the production M2 ``hybrid_anc2vec`` head; set
+# ``PROTEA_CLASSIFIER_IMPL=two_tower_sparse`` to serve / export the opt-in
+# two-tower sparse functional candidate generator instead. Both share this
+# module's ``get_classifier`` entry point and the ``ClassifierPrediction``
+# contract, so ``apply_classifier`` and the export union path are unchanged.
+_IMPL_ENV = "PROTEA_CLASSIFIER_IMPL"
+_TWO_TOWER_IMPL = "two_tower_sparse"
 
 
 @dataclass(frozen=True)
@@ -295,14 +306,44 @@ class SeedAveragedClassifier:
         return rows
 
 
+def classifier_impl() -> str:
+    """Selected classifier implementation (``m2`` default, env-overridable)."""
+    return (os.environ.get(_IMPL_ENV) or "m2").strip().lower()
+
+
+def load_classifier_features(
+    session: object, accessions: list[str], impl: str | None = None
+) -> tuple[np.ndarray, list[str]]:
+    """Load the feature matrix for the SELECTED classifier implementation.
+
+    M2 consumes the 8320-d 6-PLM concat (:func:`load_concat_features`); the
+    two-tower sparse head consumes the 2048-d learned-champion codes
+    (``load_two_tower_features``). Both return ``(features, valid_accessions)``
+    aligned row-for-row, so the predict / export callers stay implementation
+    agnostic.
+
+    ``impl`` pins the implementation explicitly (``m2`` or ``two_tower_sparse``);
+    ``None`` (the default) keeps the global :func:`classifier_impl` selection so
+    every existing caller is byte-identical. The explicit form backs the
+    per-category composite routing, which needs BOTH heads within one call.
+    """
+    if (impl or classifier_impl()) == _TWO_TOWER_IMPL:
+        from protea.core.two_tower_classifier import (  # noqa: PLC0415
+            load_two_tower_features,
+        )
+
+        return load_two_tower_features(session, accessions)
+    return load_concat_features(session, accessions)
+
+
 # Process-level cache: load the (large) model once per batch worker.
 _CLASSIFIER_CACHE: dict[tuple[str, str], FullVocabClassifier] = {}
 _SEED_CLASSIFIER_CACHE: dict[tuple[tuple[str, ...], str], SeedAveragedClassifier] = {}
 
 
 def get_classifier(
-    model_path: str | None = None, anc2vec_path: str | None = None
-) -> FullVocabClassifier | SeedAveragedClassifier:
+    model_path: str | None = None, anc2vec_path: str | None = None, impl: str | None = None
+) -> FullVocabClassifier | SeedAveragedClassifier | TwoTowerSparseClassifier:
     """Return a cached classifier, seed-averaged when a seed env is configured.
 
     When ``PROTEA_CLASSIFIER_SEED_DIR`` / ``PROTEA_CLASSIFIER_SEED_PATHS``
@@ -311,7 +352,21 @@ def get_classifier(
     behaviour is byte-identical to the historical single-checkpoint
     :class:`FullVocabClassifier`. An explicit ``model_path`` argument always
     forces the single-checkpoint path (it is how unit tests pin one file).
+
+    When ``PROTEA_CLASSIFIER_IMPL=two_tower_sparse`` is set (and no explicit
+    ``model_path`` pins the M2 single-checkpoint path), the opt-in two-tower
+    sparse functional candidate generator is returned instead. ``impl`` pins
+    that selection explicitly (``m2`` or ``two_tower_sparse``); ``None`` (the
+    default) keeps the global :func:`classifier_impl` env selection so every
+    existing caller is byte-identical. The explicit form backs the per-category
+    composite routing, which needs BOTH heads within one call.
     """
+    if model_path is None and (impl or classifier_impl()) == _TWO_TOWER_IMPL:
+        from protea.core.two_tower_classifier import (  # noqa: PLC0415
+            get_two_tower_classifier,
+        )
+
+        return get_two_tower_classifier()
     anc = anc2vec_path or os.environ.get(_ANC2VEC_ENV, _DEFAULT_ANC2VEC_PATH)
     seed_paths = [] if model_path else resolve_seed_paths()
     if seed_paths:
@@ -451,16 +506,25 @@ def resolve_go_term_ids(
 # ---------------------------------------------------------------------------
 # Export classifier-output cache (P2).
 #
-# The classifier output for a protein is t0-INDEPENDENT: it depends ONLY on the
-# protein's frozen 6-PLM concat (the same :data:`PLM_CONCAT_ORDER` embeddings)
-# and the classifier checkpoint, NEVER on the annotation set / snapshot pair.
+# The classifier output for a protein depends on the protein's frozen 6-PLM
+# concat (the same :data:`PLM_CONCAT_ORDER` embeddings) and the classifier
+# checkpoint. The protein tower and the learned head are t0-INDEPENDENT; the one
+# t0-dependent part is the two-tower's frozen GO CO-ANNOTATION codes, which the
+# EXPORT path may resolve PER training snapshot pair from its own t0 (see
+# ``two_tower_classifier.resolve_per_cut_go_codes_path``), mirroring the per-cut
+# ``association`` feature so an earlier pair never sees a later cut's
+# co-annotation. The M2 head and the single-artifact two-tower (no per-cut dir
+# configured) remain fully t0-independent.
+#
 # The export iterates the 13 train snapshot pairs (+ the test pair) and the same
 # proteins recur heavily across consecutive pairs, so recomputing the classifier
-# per pair wastes ~12/13 of the classifier GPU compute. This cache memoises the
+# per pair wastes most of the classifier GPU compute. This cache memoises the
 # classifier's top-100 output per protein, keyed by ``(accession,
-# plm_concat_signature, classifier_checkpoint_sha)`` so it is correctly
-# invalidated when the embedding configs or the checkpoint change. Subsequent
-# pairs (and subsequent queries within a pair) hit the cache.
+# plm_concat_signature, classifier_checkpoint_sha, go_codes_sha)`` so it is
+# correctly invalidated when the embedding configs, the checkpoint, OR the
+# per-cut GO codes change. ``go_codes_sha`` is empty (and the key is byte-for-
+# byte today's) for the M2 head and for a two-tower without a per-cut dir.
+# Subsequent pairs (and subsequent queries within a pair) hit the cache.
 #
 # This is an EXPORT-RUN-scoped optimisation. The live predict path
 # (``apply_classifier``) stays per-request and does NOT use this cache.
@@ -507,9 +571,15 @@ def _checkpoint_sha(paths: Iterable[str]) -> str:
     return hashlib.sha256("\x00".join(parts).encode()).hexdigest()[:16]
 
 
-def _clf_cache_key(accession: str, checkpoint_sha: str) -> str:
-    """Cache key for one protein's classifier output."""
-    return f"{accession}\x1f{_PLM_CONCAT_SIGNATURE}\x1f{checkpoint_sha}"
+def _clf_cache_key(accession: str, checkpoint_sha: str, go_codes_sha: str = "") -> str:
+    """Cache key for one protein's classifier output.
+
+    ``go_codes_sha`` identifies the per-cut two-tower GO co-annotation codes used
+    for this cut so distinct cuts do not collide. It is empty for the M2 head and
+    for a single-artifact two-tower, keeping those keys byte-identical to before.
+    """
+    suffix = f"\x1f{go_codes_sha}" if go_codes_sha else ""
+    return f"{accession}\x1f{_PLM_CONCAT_SIGNATURE}\x1f{checkpoint_sha}{suffix}"
 
 
 def _resolve_clf_cache_dir() -> Path | None:
@@ -571,30 +641,66 @@ def reset_classifier_output_cache() -> None:
 def predict_proteins_cached(
     session: object,
     accessions: list[str],
-    classifier: FullVocabClassifier | SeedAveragedClassifier | None = None,
+    classifier: (
+        FullVocabClassifier | SeedAveragedClassifier | TwoTowerSparseClassifier | None
+    ) = None,
+    go_codes_path: str | None = None,
 ) -> list[ClassifierPrediction]:
     """Classifier top-100 per protein, memoised across snapshot pairs (P2).
 
     Returns the SAME rows ``get_classifier().predict(load_concat_features(...))``
     would (same ``(accession, go_id, score)`` per protein), but the per-protein
     classifier compute runs at most once per export run: the output is cached by
-    ``(accession, plm_concat_signature, classifier_checkpoint_sha)`` so later
-    snapshot pairs reuse it. Only the proteins missing from the cache go through
-    ``load_concat_features`` + ``predict``; cache hits skip both the embedding
-    load and the GPU forward pass.
+    ``(accession, plm_concat_signature, classifier_checkpoint_sha, go_codes_sha)``
+    so later snapshot pairs reuse it. Only the proteins missing from the cache go
+    through ``load_concat_features`` + ``predict``; cache hits skip both the
+    embedding load and the GPU forward pass.
 
     ``classifier`` defaults to the env-selected :func:`get_classifier` (the
     seed-averaged champion when configured), matching the export's inline
-    applier. An on-disk sqlite tier is engaged when
+    applier. ``go_codes_path`` (EXPORT path only) pins this cut's per-cut
+    two-tower GO co-annotation codes: when given AND the two-tower impl is
+    selected, the classifier is built from that artifact and the codes identity
+    enters the cache key so distinct cuts do not collide. ``None`` keeps today's
+    single-artifact behaviour, and the codes identity stays empty for the M2
+    head, so its keys are unchanged. An on-disk sqlite tier is engaged when
     ``PROTEA_CLASSIFIER_CACHE_DIR`` is set (mirrors the alignment cache), so the
     output survives across export runs / processes.
     """
-    clf = classifier if classifier is not None else get_classifier()
+    use_per_cut = (
+        classifier is None and go_codes_path is not None and classifier_impl() == _TWO_TOWER_IMPL
+    )
+    go_codes_sha = ""
+    if classifier is not None:
+        clf: FullVocabClassifier | SeedAveragedClassifier | TwoTowerSparseClassifier = classifier
+    elif use_per_cut and go_codes_path is not None:
+        from protea.core.two_tower_classifier import get_two_tower_classifier  # noqa: PLC0415
+
+        clf = get_two_tower_classifier(go_codes_path=go_codes_path)
+        go_codes_sha = _checkpoint_sha([go_codes_path])
+    else:
+        clf = get_classifier()
     checkpoint_sha = _checkpoint_sha(clf.checkpoint_paths)
     # De-dup while preserving order so a protein appearing twice is scored once.
     wanted = [a for a in dict.fromkeys(accessions) if a]
-    key_by_acc = {a: _clf_cache_key(a, checkpoint_sha) for a in wanted}
+    key_by_acc = {a: _clf_cache_key(a, checkpoint_sha, go_codes_sha) for a in wanted}
+    cached = _resolve_classifier_cache(session, clf, wanted, key_by_acc)
 
+    out: list[ClassifierPrediction] = []
+    for acc in wanted:
+        for go_id, score in cached.get(acc, []):
+            out.append(ClassifierPrediction(acc, go_id, score))
+    return out
+
+
+def _resolve_classifier_cache(
+    session: object,
+    clf: FullVocabClassifier | SeedAveragedClassifier | TwoTowerSparseClassifier,
+    wanted: list[str],
+    key_by_acc: dict[str, str],
+) -> dict[str, list[tuple[str, float]]]:
+    """Return ``{acc: [(go_id, score)]}`` from the memo+disk cache, computing
+    any misses through the classifier (and storing them back into both tiers)."""
     cached: dict[str, list[tuple[str, float]]] = {}
     misses: list[str] = []
     for acc in wanted:
@@ -622,12 +728,7 @@ def predict_proteins_cached(
     finally:
         if disk is not None:
             disk.close()
-
-    out: list[ClassifierPrediction] = []
-    for acc in wanted:
-        for go_id, score in cached.get(acc, []):
-            out.append(ClassifierPrediction(acc, go_id, score))
-    return out
+    return cached
 
 
 def _open_disk_cache() -> _ClassifierOutputDiskCache | None:
@@ -644,7 +745,7 @@ def _open_disk_cache() -> _ClassifierOutputDiskCache | None:
 
 def _compute_and_store_misses(
     session: object,
-    clf: FullVocabClassifier | SeedAveragedClassifier,
+    clf: FullVocabClassifier | SeedAveragedClassifier | TwoTowerSparseClassifier,
     misses: list[str],
     key_by_acc: dict[str, str],
     cached: dict[str, list[tuple[str, float]]],
@@ -656,7 +757,7 @@ def _compute_and_store_misses(
     protein dropped by :func:`load_concat_features` (missing a PLM) is cached as
     an EMPTY output so repeated pairs do not re-attempt the (failing) load.
     """
-    features, valid = load_concat_features(session, misses)
+    features, valid = load_classifier_features(session, misses)
     by_acc: dict[str, list[tuple[str, float]]] = {a: [] for a in misses}
     if valid:
         for pr in clf.predict(features, valid):

@@ -126,17 +126,20 @@ class TestCategoricalEncodingRoundTrip:
                 "label": [1, 0, 1, 0],
             }
         )
-        x_train, _ = prepare_dataset(
-            train.assign(
-                **{
-                    col: 0.0
-                    for col in __import__(
-                        "protea_method.reranker", fromlist=["NUMERIC_FEATURES"]
-                    ).NUMERIC_FEATURES
-                    if col not in train.columns
-                }
-            )
+        # Fill in every declared feature the fixture does not name, both
+        # numeric and categorical, reading the lists from the contract rather
+        # than repeating them here. A hardcoded list silently rots the first
+        # time the contract gains a column, which is exactly what happened
+        # when the categorical set grew and this fixture kept naming four.
+        from protea_method.reranker import CATEGORICAL_FEATURES, NUMERIC_FEATURES
+
+        filler: dict[str, object] = {
+            col: 0.0 for col in NUMERIC_FEATURES if col not in train.columns
+        }
+        filler.update(
+            {col: "" for col in CATEGORICAL_FEATURES if col not in train.columns}
         )
+        x_train, _ = prepare_dataset(train.assign(**filler))
         # Recover the per-column training vocabulary the way the lab records it:
         # the ordered-unique of the non-empty values (factorize order).
         vocab: dict[str, list[str]] = {}

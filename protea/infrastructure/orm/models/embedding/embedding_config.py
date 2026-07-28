@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Index, Integer, String, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, Index, Integer, String, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -12,7 +12,7 @@ from protea.infrastructure.orm.base import Base
 
 _VALID_LAYER_AGG = {"mean", "last", "concat"}
 _VALID_POOLING = {"mean", "max", "cls", "mean_max"}
-_VALID_BACKENDS = {"esm", "esm3c", "t5", "ankh", "auto"}
+_VALID_BACKENDS = {"esm", "esm3c", "t5", "ankh", "protst", "auto"}
 
 
 class EmbeddingConfig(Base):
@@ -51,6 +51,10 @@ class EmbeddingConfig(Base):
     - ``ankh``  : HuggingFace ``T5EncoderModel`` loaded via ``AutoTokenizer``
                   (Ankh base/large).  No ``<AA2fold>`` prefix; ambiguous
                   residues are substituted with ``X`` like the other T5 path.
+    - ``protst``: text-aligned ProtST-ESM1b (``mila-intel/ProtST-esm1b``).
+                  Whole-protein ``protein_feature`` projection (512-d,
+                  orthogonal text-aligned signal); one vector per sequence,
+                  honours only ``normalize``.
     - ``auto``  : falls back to ``esm``.
 
     Normalisation
@@ -80,6 +84,15 @@ class EmbeddingConfig(Base):
     pooling: Mapped[str] = mapped_column(String, nullable=False, default="mean")
     normalize_residues: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     normalize: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Uniform per-config divisor applied before the halfvec (fp16) store so
+    # high-magnitude PLM layers (e.g. Ankh-base layer 10, |max| ~4.9e5) fit the
+    # fp16 range without overflow. Default 1.0 => no-op: every existing config
+    # (incl. the byte-for-byte champion) stores its raw embedding unchanged.
+    # Safe for all consumers: cosine-KNN is scale-invariant and the downstream
+    # per-dim z-score absorbs a uniform scale, so embedding/scale == embedding.
+    embedding_scale: Mapped[float] = mapped_column(
+        Float, nullable=False, default=1.0, server_default="1.0"
+    )
     max_length: Mapped[int] = mapped_column(Integer, nullable=False, default=1022)
     use_chunking: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     chunk_size: Mapped[int] = mapped_column(Integer, nullable=False, default=512)

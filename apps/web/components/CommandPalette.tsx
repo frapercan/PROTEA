@@ -138,20 +138,20 @@ export function CommandPalette() {
     ): NavItem => ({ kind: "nav", id, label, href, group });
     return [
       k("home",        tk("home", "Home"),                                   "/",                       "Navigate"),
-      k("benchmark",   tk("benchmark", "Benchmark"),                         "/benchmark",              "Navigate"),
-      k("proteins",    tk("proteins", "Proteins"),                           "/proteins",               "Data"),
-      k("annotations", tk("annotations", "Annotations"),                     "/annotations",            "Data"),
-      k("querySets",   tk("querySets", "Query Sets"),                        "/query-sets",             "Data"),
-      k("embeddings",  tk("embeddings", "Embeddings"),                       "/embeddings",             "Pipeline"),
-      k("fa",          tk("functionalAnnotation", "Functional Annotation"),  "/functional-annotation",  "Pipeline"),
-      k("reranker",    tk("reranker", "Re-ranker"),                          "/reranker",               "Pipeline"),
-      k("scoring",     tk("scoring", "Scoring"),                             "/scoring",                "Results"),
-      k("evaluation",  tk("evaluation", "Evaluation"),                       "/evaluation",             "Results"),
-      k("jobs",        tk("jobs", "Jobs"),                                   "/jobs",                   "System"),
+      k("benchmark",   tk("benchmark", "Benchmark"),                         "/instrument/benchmark",              "Navigate"),
+      k("proteins",    tk("proteins", "Proteins"),                           "/instrument/proteins",               "Data"),
+      k("annotations", tk("annotations", "Annotations"),                     "/instrument/annotations",            "Data"),
+      k("querySets",   tk("querySets", "Query Sets"),                        "/instrument/query-sets",             "Data"),
+      k("embeddings",  tk("embeddings", "Embeddings"),                       "/instrument/embeddings",             "Pipeline"),
+      k("fa",          tk("functionalAnnotation", "Functional Annotation"),  "/instrument/functional-annotation",  "Pipeline"),
+      k("reranker",    tk("reranker", "Re-ranker"),                          "/instrument/reranker",               "Pipeline"),
+      k("scoring",     tk("scoring", "Scoring"),                             "/instrument/scoring",                "Results"),
+      k("evaluation",  tk("evaluation", "Evaluation"),                       "/instrument/evaluation",             "Results"),
+      k("jobs",        tk("jobs", "Jobs"),                                   "/instrument/jobs",                   "System"),
       k("maintenance", tk("maintenance", "Maintenance"),                     "/maintenance",            "System"),
-      k("stack",       "Stack",                                              "/stack",                  "System"),
+      k("stack",       "Stack",                                              "/instrument/stack",                  "System"),
       k("support",     "Support",                                            "/support",                "System"),
-      k("farm",        "Agent farm",                                         "/farm",                   "System"),
+      k("farm",        "Agent farm",                                         "/instrument/farm",                   "System"),
     ];
   }, [t]);
 
@@ -204,7 +204,7 @@ export function CommandPalette() {
             : `spawned ${res.task_id}`,
           "success",
         );
-        navigate(`/farm/${res.task_id}`);
+        navigate(`/instrument/farm/${res.task_id}`);
       },
     };
 
@@ -260,7 +260,7 @@ export function CommandPalette() {
         // Pure navigation; never gated.
         requiresAuth: false,
         action: () => {
-          navigate(`/farm/${taskId}`);
+          navigate(`/instrument/farm/${taskId}`);
         },
       });
     }
@@ -282,7 +282,7 @@ export function CommandPalette() {
         kind: "nav",
         id: "open-job",
         label: `Open job ${q.slice(0, 8)}…`,
-        href: `/jobs/${q}`,
+        href: `/instrument/jobs/${q}`,
         group: "Jump",
         hint: q,
       });
@@ -292,7 +292,7 @@ export function CommandPalette() {
         kind: "nav",
         id: "open-protein",
         label: `Open protein ${q.toUpperCase()}`,
-        href: `/proteins/${q.toUpperCase()}`,
+        href: `/instrument/proteins/${q.toUpperCase()}`,
         group: "Jump",
         hint: "UniProt accession",
       });

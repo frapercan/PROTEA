@@ -224,7 +224,7 @@ test.describe("farm palette (authed user)", () => {
   }) => {
     await mockFarmApi(page);
 
-    await page.goto("/en/farm");
+    await page.goto("/en/instrument/farm");
     // Baseline: the desktop list table shows the EXISTING_TASKS row(s)
     // but not the about-to-spawn task id. We scope to the desktop
     // container because the farm project runs at 1280x800 where the
@@ -243,10 +243,10 @@ test.describe("farm palette (authed user)", () => {
 
     // The palette navigates to the detail page; the heading uses the
     // task id which is what we just minted.
-    await expect(page).toHaveURL(new RegExp(`/en/farm/${SPAWNED_TASK.id}/?$`));
+    await expect(page).toHaveURL(new RegExp(`/en/instrument/farm/${SPAWNED_TASK.id}/?$`));
 
     // Bounce back to the list and assert the spawned task is visible.
-    await page.goto("/en/farm");
+    await page.goto("/en/instrument/farm");
     await expect(
       page.getByTestId("farm-list-desktop").getByText(SPAWNED_TASK.id),
     ).toBeVisible();
@@ -261,7 +261,7 @@ test.describe("farm palette (authed user)", () => {
       },
     });
 
-    await page.goto("/en/farm");
+    await page.goto("/en/instrument/farm");
     await openPaletteAndType(page, `farm: kill ${EXISTING_TASKS[0].id}`);
     const kill = page.getByTestId("cmdk-farm-kill");
     await expect(kill).toBeVisible();
@@ -278,7 +278,7 @@ test.describe("farm palette (authed user)", () => {
       },
     });
 
-    await page.goto("/en/farm");
+    await page.goto("/en/instrument/farm");
     await openPaletteAndType(page, "farm: cleanup");
     const cleanup = page.getByTestId("cmdk-farm-cleanup");
     await expect(cleanup).toBeVisible();
@@ -297,13 +297,13 @@ test.describe("farm palette (authed user)", () => {
       },
     });
 
-    await page.goto("/en/farm");
+    await page.goto("/en/instrument/farm");
     await openPaletteAndType(page, `farm: view ${EXISTING_TASKS[0].id}`);
     const view = page.getByTestId("cmdk-farm-view");
     await expect(view).toBeVisible();
     await view.click();
     await expect(page).toHaveURL(
-      new RegExp(`/en/farm/${EXISTING_TASKS[0].id}/?$`),
+      new RegExp(`/en/instrument/farm/${EXISTING_TASKS[0].id}/?$`),
     );
     expect(spawnHits).toBe(0);
   });
@@ -323,7 +323,7 @@ test.describe("farm palette (anonymous user)", () => {
       },
     });
 
-    await page.goto("/en/farm");
+    await page.goto("/en/instrument/farm");
     await openPaletteAndType(page, "farm: spawn");
     const spawn = page.getByTestId("cmdk-farm-spawn-next");
     await expect(spawn).toBeVisible();

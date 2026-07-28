@@ -182,9 +182,9 @@ export function AnnotateForm() {
     const timer = setTimeout(() => {
       if (predictionSetId) {
         const qs = rerankerId ? `?reranker_id=${rerankerId}` : "";
-        router.push(`/${locale}/functional-annotation/${predictionSetId}${qs}`);
+        router.push(`/${locale}/instrument/functional-annotation/${predictionSetId}${qs}`);
       } else {
-        router.push(`/${locale}/functional-annotation`);
+        router.push(`/${locale}/instrument/functional-annotation`);
       }
     }, 1500);
     return () => clearTimeout(timer);
@@ -270,7 +270,7 @@ export function AnnotateForm() {
               </p>
               <div className="mt-3 flex flex-wrap items-center gap-3">
                 <Link
-                  href={`/${locale}/benchmark`}
+                  href={`/${locale}/instrument/benchmark`}
                   className="inline-flex min-h-[40px] items-center gap-1 rounded-md bg-white px-3 py-2 text-xs font-semibold text-amber-900 ring-1 ring-inset ring-amber-200 hover:bg-amber-100 transition-colors"
                 >
                   {t("annotateQueueViewResults" as any)}

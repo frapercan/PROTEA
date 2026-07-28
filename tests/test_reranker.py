@@ -62,6 +62,12 @@ def _make_training_df(n: int = 200, positive_rate: float = 0.3, seed: int = 42) 
     data["qualifier"] = rng.choice(["enables", "involved_in", "located_in", ""], n).tolist()
     data["evidence_code"] = rng.choice(["IDA", "IEA", "ISS", "EXP", ""], n).tolist()
     data["taxonomic_relation"] = rng.choice(["self", "sibling", "ancestor", ""], n).tolist()
+    # plm_id is the pool-injected categorical the lab stamps when it pools
+    # several manifests to train a universal booster (contracts v1.4.0). These
+    # tests exercise the training path, which sees pooled frames, so the
+    # fixture generates it; k_context (its numeric sibling) comes from the
+    # NUMERIC_FEATURES loop above.
+    data["plm_id"] = rng.choice(["esm2_650m", "ankh_base", "prott5", ""], n).tolist()
 
     return pd.DataFrame(data)
 
@@ -189,3 +195,108 @@ class TestFeatureConstants:
 
     def test_numeric_and_categorical_disjoint(self):
         assert set(NUMERIC_FEATURES) & set(CATEGORICAL_FEATURES) == set()
+
+
+class TestInferActiveFeatureFamiliesLineage:
+    """Lineage governance for the PROTEA-side ``infer_active_feature_families``.
+
+    The serve path threads ``compute_lineage_features`` from the payload
+    through this helper into ``compute_feature_schema_sha`` so a booster
+    trained with the GO-DAG lineage family gets a matching live sha.
+
+    The load-bearing invariant (FARM-EXP.5 schema-sha guard): with the
+    flag off (the default) the family list and resulting schema sha are
+    byte-identical to today for every align/tax/v6 combination.
+    """
+
+    #: The eight align/tax/v6 schema shas that MUST NOT move when the
+    #: lineage flag is off. Anchored against contracts' family-aware
+    #: ``compute_feature_schema_sha`` (see the registered trio
+    #: ``7fcecf26aa0a`` = align+tax, no v6).
+    _EXPECTED_OFF_SHAS = {
+        (False, False, False): "9ef6a6609424",
+        (False, False, True): "2f14dea205b5",
+        (False, True, False): "a49027735c06",
+        (False, True, True): "ec3df5057de0",
+        (True, False, False): "178eb1cfeb36",
+        (True, False, True): "dca060fd7996",
+        (True, True, False): "7fcecf26aa0a",
+        (True, True, True): "94e87ae6f4ed",
+    }
+
+    def test_flag_off_is_byte_identical_to_library(self) -> None:
+        """Flag off => same families the protea-method library returns."""
+        import itertools
+
+        from protea_method.reranker import (
+            infer_active_feature_families as lib_infer,
+        )
+
+        from protea.core.reranker import infer_active_feature_families
+
+        for ca, ct, v6 in itertools.product([False, True], repeat=3):
+            wrapped = infer_active_feature_families(
+                compute_alignments=ca,
+                compute_taxonomy=ct,
+                compute_v6_features=v6,
+            )
+            lib = lib_infer(
+                compute_alignments=ca,
+                compute_taxonomy=ct,
+                compute_v6_features=v6,
+            )
+            assert wrapped == lib
+            assert "lineage" not in wrapped
+
+    def test_flag_off_schema_shas_unchanged(self) -> None:
+        """Flag off => the eight existing schema shas are unchanged."""
+        import itertools
+
+        from protea_contracts import compute_feature_schema_sha
+
+        from protea.core.reranker import infer_active_feature_families
+
+        for ca, ct, v6 in itertools.product([False, True], repeat=3):
+            families = infer_active_feature_families(
+                compute_alignments=ca,
+                compute_taxonomy=ct,
+                compute_v6_features=v6,
+            )
+            assert compute_feature_schema_sha(families) == self._EXPECTED_OFF_SHAS[(ca, ct, v6)]
+
+    def test_flag_on_appends_lineage_family(self) -> None:
+        """Flag on => exactly the ``lineage`` family is added, nothing else."""
+        import itertools
+
+        from protea.core.reranker import infer_active_feature_families
+
+        for ca, ct, v6 in itertools.product([False, True], repeat=3):
+            off = infer_active_feature_families(
+                compute_alignments=ca,
+                compute_taxonomy=ct,
+                compute_v6_features=v6,
+            )
+            on = infer_active_feature_families(
+                compute_alignments=ca,
+                compute_taxonomy=ct,
+                compute_v6_features=v6,
+                compute_lineage_features=True,
+            )
+            assert on == sorted({*off, "lineage"})
+            assert on == sorted(on)  # contract: returns a sorted list
+
+    def test_flag_on_yields_new_lineage_inclusive_sha(self) -> None:
+        """Flag on for the registered trio => the lineage-inclusive sha."""
+        from protea_contracts import compute_feature_schema_sha
+
+        from protea.core.reranker import infer_active_feature_families
+
+        on = infer_active_feature_families(
+            compute_alignments=True,
+            compute_taxonomy=True,
+            compute_v6_features=False,
+            compute_lineage_features=True,
+        )
+        assert compute_feature_schema_sha(on) == "0810bef8fd4d"
+        # And it differs from the flag-off trio sha (no silent collision).
+        assert "0810bef8fd4d" != self._EXPECTED_OFF_SHAS[(True, True, False)]

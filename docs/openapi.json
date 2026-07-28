@@ -1,6 +1,29 @@
 {
   "components": {
     "schemas": {
+      "ActivateRerankerResponse": {
+        "description": "Result of activating a booster for its serve slot.\n\n``activated`` is the row now marked active; ``deactivated`` lists\nthe ids of the sibling rows in the same ``(category, aspect)`` slot\nthat were flipped inactive to keep the selection unambiguous.",
+        "properties": {
+          "activated": {
+            "$ref": "#/components/schemas/RerankerModelSummary",
+            "description": "The row now marked active for its (category, aspect) slot."
+          },
+          "deactivated": {
+            "description": "Ids of same-slot sibling rows flipped inactive to keep selection unambiguous.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Deactivated",
+            "type": "array"
+          }
+        },
+        "required": [
+          "activated",
+          "deactivated"
+        ],
+        "title": "ActivateRerankerResponse",
+        "type": "object"
+      },
       "Body_create_query_set_v1_query_sets_post": {
         "properties": {
           "description": {
@@ -552,6 +575,135 @@
         ],
         "title": "ExperimentRunStatus",
         "type": "string"
+      },
+      "FeatureDocInfo": {
+        "description": "One feature's canonical documentation, mirroring\n:class:`protea_contracts.feature_docs.FeatureDoc`.\n\nEvery field is copied verbatim from the contract; ``status`` is\nlowered to its string value so the frontend can key a badge off it\nwithout importing the Python enum.",
+        "properties": {
+          "definition": {
+            "description": "Precise definition of what the number means and how it is computed.",
+            "title": "Definition",
+            "type": "string"
+          },
+          "family": {
+            "description": "Feature family the column belongs to (e.g. ``knn``, ``interpro``, ``classifier``).",
+            "title": "Family",
+            "type": "string"
+          },
+          "name": {
+            "description": "Canonical feature/column name (e.g. ``distance``, ``interpro_hit``).",
+            "title": "Name",
+            "type": "string"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Caveats the operator must know in situ (e.g. why ``interpro_*`` carries no signal when its table is unpopulated, or the ADR-D45 producer seam).",
+            "title": "Notes"
+          },
+          "producer": {
+            "description": "Who fills the column (the module, operation, or loader stage).",
+            "title": "Producer",
+            "type": "string"
+          },
+          "status": {
+            "description": "Production status: ``PRODUCED`` (real values in the default export), ``DECLARED_ABSENT`` (a producer seam leaves it unfilled, see ADR-D45), ``POOL_INJECTED`` (stamped by the lab's pooled loader, not the parquet dump), or ``BROKEN``.",
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "description": "One-line plain-language summary for the technician.",
+            "title": "Summary",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Physical/logical unit, or null when dimensionless.",
+            "title": "Unit"
+          },
+          "value_range": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Expected value range (e.g. ``[0, 1]``), or null.",
+            "title": "Value Range"
+          }
+        },
+        "required": [
+          "name",
+          "family",
+          "status",
+          "summary",
+          "definition",
+          "producer"
+        ],
+        "title": "FeatureDocInfo",
+        "type": "object"
+      },
+      "FeatureRegistryResponse": {
+        "description": "The whole feature registry, grouped-friendly for the UI.",
+        "properties": {
+          "families": {
+            "description": "Distinct family names, in first-seen order.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Families",
+            "type": "array"
+          },
+          "features": {
+            "description": "Every documented feature, in canonical declaration order.",
+            "items": {
+              "$ref": "#/components/schemas/FeatureDocInfo"
+            },
+            "title": "Features",
+            "type": "array"
+          },
+          "schema_version": {
+            "description": "``protea-contracts`` version the registry was sourced from.",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "status_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Count of features per status value.",
+            "title": "Status Counts",
+            "type": "object"
+          },
+          "total": {
+            "description": "Number of documented features.",
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "total",
+          "families",
+          "status_counts",
+          "features"
+        ],
+        "title": "FeatureRegistryResponse",
+        "type": "object"
       },
       "GpuAvailability": {
         "description": "Truthful busy/free signal for the shared GPU pipeline.\n\n``busy`` is true only when there is a freshly-leased RUNNING\ncoordinator (``leased_until`` in the future) or genuinely QUEUED work\nfor a GPU operation. Stale RUNNING rows are reported in\n``running_stale`` for observability but never set ``busy``.",
@@ -1374,6 +1526,138 @@
           "github_url"
         ],
         "title": "RepoEntry",
+        "type": "object"
+      },
+      "RerankedPairResponse": {
+        "description": "Single ``(accession, go_term)`` reranked-score lookup result.\n\nField names and semantics mirror the ``rerank.tsv`` columns exactly\nso the value returned here is the same number the bulk stream emits\nfor the corresponding row. Produced by\n:func:`score_single_pair_with_reranker`, which reuses the identical\n:func:`score_predictions_with_reranker` scoring pass the bulk TSV\nuses and selects the one matching row.",
+        "properties": {
+          "aspect": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "GO aspect (``F`` / ``P`` / ``C``) of the term; empty when unknown.",
+            "title": "Aspect"
+          },
+          "distance": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "KNN embedding distance of the backing neighbour.",
+            "title": "Distance"
+          },
+          "evidence_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "GO evidence code of the transferred annotation.",
+            "title": "Evidence Code"
+          },
+          "go_id": {
+            "description": "GO term the score was computed for.",
+            "title": "Go Id",
+            "type": "string"
+          },
+          "protein_accession": {
+            "description": "Query protein accession the score belongs to.",
+            "title": "Protein Accession",
+            "type": "string"
+          },
+          "qualifier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "GO qualifier of the transferred annotation.",
+            "title": "Qualifier"
+          },
+          "ref_protein_accession": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Reference (neighbour) protein the annotation was transferred from.",
+            "title": "Ref Protein Accession"
+          },
+          "reranker_score": {
+            "description": "Fused/reranked probability in [0, 1] for this pair. Byte-for-byte the same value the bulk ``rerank.tsv`` produces for this row (same booster pass over the full prediction set).",
+            "title": "Reranker Score",
+            "type": "number"
+          }
+        },
+        "required": [
+          "protein_accession",
+          "go_id",
+          "reranker_score"
+        ],
+        "title": "RerankedPairResponse",
+        "type": "object"
+      },
+      "RerankerModelSummary": {
+        "description": "Compact view of a ``RerankerModel`` row for management responses.\n\nReturned by the activate / deactivate / delete endpoints so an\noperator can confirm which serve slot ``(category, aspect)`` was\ntouched and whether the row is the one the selector now picks.",
+        "properties": {
+          "aspect": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "GO aspect (mfo / bpo / cco) or null if aspect-agnostic.",
+            "title": "Aspect"
+          },
+          "category": {
+            "description": "Serve category (nk / lk / pk).",
+            "title": "Category",
+            "type": "string"
+          },
+          "id": {
+            "description": "RerankerModel UUID.",
+            "title": "Id",
+            "type": "string"
+          },
+          "is_active": {
+            "description": "Whether the selector currently prefers this row for its slot.",
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "Human-readable model name.",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "category",
+          "is_active"
+        ],
+        "title": "RerankerModelSummary",
         "type": "object"
       },
       "RerankerResponse": {
@@ -6753,6 +7037,28 @@
         ]
       }
     },
+    "/v1/features/registry": {
+      "get": {
+        "description": "Serve the canonical reranker feature registry as JSON.\n\nThis is the third renderer of the explainability registry (docs via\nSphinx, thesis via citation, this endpoint for the UI). It reads the\nsame ``FEATURE_DOCS`` contract the other two do, so what the operator\nsees in the browser is byte-for-byte the documented truth, including\nwhich features are ``DECLARED_ABSENT`` (ADR-D45 producer seam) and\nwhich are ``POOL_INJECTED`` by the lab's pooled loader.",
+        "operationId": "get_feature_registry_v1_features_registry_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureRegistryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Feature Registry",
+        "tags": [
+          "features"
+        ]
+      }
+    },
     "/v1/jobs": {
       "get": {
         "description": "List jobs with optional filtering.\n\nBy default only top-level jobs (no parent) are returned. Set\n``include_children=true`` or filter by ``parent_job_id`` to see batch\nsub-jobs from distributed pipelines. Filters travel as discrete query\nparameters on the wire; the dependency bundles them into\n:class:`JobListFilters` for the handler.",
@@ -8576,6 +8882,261 @@
         ]
       }
     },
+    "/v1/reranker-models/{model_id}": {
+      "delete": {
+        "description": "Remove a ``RerankerModel`` row from the registry.\n\nRefuses with 409 when the row is currently active: deleting the\nlive serve pick out from under the selector is the unsafe path, so\nthe operator must ``POST /{id}/deactivate`` first (an explicit,\nauditable step) before the row can be removed. The response echoes\nthe deleted row's summary.",
+        "operationId": "delete_reranker_model_v1_reranker_models__model_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Model Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RerankerModelSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete a registered booster",
+        "tags": [
+          "reranker-models"
+        ]
+      }
+    },
+    "/v1/reranker-models/{model_id}/activate": {
+      "post": {
+        "description": "Pin ``model_id`` as the active booster the serve path selects.\n\nActivation is EXCLUSIVE per ``(category, aspect)`` slot: any other\nrow already active in the same slot is flipped inactive first. This\nmatches ``active_or_latest_reranker``, which filters by category and\naspect before preferring the active row, and the\n``uq_reranker_model_active_slot`` partial unique index (which permits\nat most one active row per ``(category, COALESCE(aspect, ''))``).\nActivating a full trio therefore stays well-defined: each of nk / lk\n/ pk (or per-aspect) rows owns a distinct slot and coexists active.",
+        "operationId": "activate_reranker_model_v1_reranker_models__model_id__activate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Model Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivateRerankerResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mark a booster active for its (category, aspect) serve slot",
+        "tags": [
+          "reranker-models"
+        ]
+      }
+    },
+    "/v1/reranker-models/{model_id}/deactivate": {
+      "post": {
+        "description": "Unpin ``model_id`` so its slot falls back to latest-by-created_at.\n\nIdempotent: clearing an already-inactive row is a no-op that returns\nthe current summary. This is the safe precondition for deleting a\nrow that is currently serving (see ``DELETE`` below).",
+        "operationId": "deactivate_reranker_model_v1_reranker_models__model_id__deactivate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Model Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Combined challenge: ``Authorization: ApiKey <key>`` (T5.6a) or ``Authorization: Bearer <jwt>`` (T5.6b). ``X-Api-Key`` is also honoured for ApiKey clients.",
+              "title": "Authorization"
+            }
+          },
+          {
+            "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+            "in": "header",
+            "name": "X-Api-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Alternative API-key carrier (``X-Api-Key: <key>``). Equivalent to the ``Authorization: ApiKey`` header form.",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RerankerModelSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clear a booster's active flag",
+        "tags": [
+          "reranker-models"
+        ]
+      }
+    },
     "/v1/runners": {
       "get": {
         "description": "List all installed experiment runner plugins.\n\nToday: ``baseline``, ``knn``, ``lightgbm``. The latter two are\ncontract-surface stubs until F2A.7 (lab \u2192 ``protea-runners\n.lightgbm`` migration) and F2C.1 (``protea-method`` extraction)\nmove the real implementations here.",
@@ -9166,6 +9727,89 @@
           }
         },
         "summary": "Compute Reranker Metrics",
+        "tags": [
+          "scoring"
+        ]
+      }
+    },
+    "/v1/scoring/prediction-sets/{set_id}/score": {
+      "get": {
+        "description": "Return the fused/reranked probability for one prediction pair.\n\nBacks the ``/score/:accession/:go`` UI page with the same number the\nbulk ``rerank.tsv`` stream emits for the matching row. Internally\nreuses :func:`score_predictions_with_reranker` (the exact function\nbehind ``rerank.tsv``) and selects the single row for this pair, so\nthe value is byte-for-byte identical to the bulk output. Returns 404\nwhen the set, reranker, or the specific pair does not exist.",
+        "operationId": "get_reranked_pair_score_v1_scoring_prediction_sets__set_id__score_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "set_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Set Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID of the trained RerankerModel to apply",
+            "in": "query",
+            "name": "reranker_id",
+            "required": true,
+            "schema": {
+              "description": "UUID of the trained RerankerModel to apply",
+              "format": "uuid",
+              "title": "Reranker Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Query protein accession to look up",
+            "in": "query",
+            "name": "accession",
+            "required": true,
+            "schema": {
+              "description": "Query protein accession to look up",
+              "title": "Accession",
+              "type": "string"
+            }
+          },
+          {
+            "description": "GO term ID (e.g. ``GO:0003674``) to look up",
+            "in": "query",
+            "name": "go_term",
+            "required": true,
+            "schema": {
+              "description": "GO term ID (e.g. ``GO:0003674``) to look up",
+              "title": "Go Term",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RerankedPairResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reranked score for a single (accession, GO term) pair",
         "tags": [
           "scoring"
         ]

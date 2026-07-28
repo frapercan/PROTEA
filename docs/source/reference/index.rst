@@ -5,7 +5,7 @@ This section documents every public module in PROTEA at the symbol level.
 It is generated from source docstrings via Sphinx autodoc and is always
 in sync with the installed codebase.
 
-The reference is organised into six pages:
+The reference is organised into seven pages:
 
 :doc:`core`
    The domain layer: the ``Operation`` protocol and ``OperationRegistry``,
@@ -34,6 +34,11 @@ The reference is organised into six pages:
    The configuration subpackage: tuning parameters and benchmark YAML
    loader.
 
+:doc:`feature_reference`
+   The re-ranker feature columns: what each measures, who produces it, and
+   whether that producer runs in the default export. Generated at build time
+   from the shared ``protea-contracts`` feature registry.
+
 .. toctree::
    :maxdepth: 2
    :hidden:
@@ -44,3 +49,4 @@ The reference is organised into six pages:
    workers
    services
    config
+   feature_reference

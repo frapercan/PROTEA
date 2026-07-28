@@ -10,6 +10,7 @@ from protea.config.tuning import (
     APILimits,
     OperationTuning,
     QueueTuning,
+    ServeTuning,
     TuningSettings,
     WorkerTuning,
     _apply_env_overrides,
@@ -95,9 +96,7 @@ class TestApplyEnvOverrides:
         assert out["queue"]["publisher_max_attempts"] == 30
         assert out["queue"]["oom_max_retries"] == 8
 
-    def test_short_alias_amqp_heartbeat(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_short_alias_amqp_heartbeat(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """PROTEA_AMQP_HEARTBEAT is a short alias for the canonical
         PROTEA_TUNING__queue__amqp_heartbeat path. Operators tuning
         a single broker knob shouldn't have to type the full path."""
@@ -108,9 +107,7 @@ class TestApplyEnvOverrides:
         out = _apply_env_overrides({})
         assert out["queue"]["amqp_heartbeat"] == 900
 
-    def test_canonical_path_wins_over_short_alias(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_canonical_path_wins_over_short_alias(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When both forms are set, the canonical nested path wins so
         a forgotten alias in a shell rc file can't override an explicit
         deploy-time tuning."""
@@ -138,26 +135,20 @@ class TestGetTuning:
             if key.startswith("PROTEA_TUNING__"):
                 monkeypatch.delenv(key, raising=False)
         # Pretend the project root has no system.yaml.
-        monkeypatch.setattr(
-            "protea.config.tuning._resolve_project_root", lambda: tmp_path
-        )
+        monkeypatch.setattr("protea.config.tuning._resolve_project_root", lambda: tmp_path)
         get_tuning.cache_clear()
         s = get_tuning()
         assert s.queue.publisher_max_attempts == 12
         assert s.queue.oom_max_retries == 5
 
     def test_env_override_applies(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        monkeypatch.setattr(
-            "protea.config.tuning._resolve_project_root", lambda: tmp_path
-        )
+        monkeypatch.setattr("protea.config.tuning._resolve_project_root", lambda: tmp_path)
         monkeypatch.setenv("PROTEA_TUNING__QUEUE__PUBLISHER_MAX_ATTEMPTS", "25")
         get_tuning.cache_clear()
         s = get_tuning()
         assert s.queue.publisher_max_attempts == 25
 
-    def test_yaml_override_applies(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_yaml_override_applies(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         cfg_dir = tmp_path / "protea" / "config"
         cfg_dir.mkdir(parents=True)
         (cfg_dir / "system.yaml").write_text(
@@ -167,9 +158,7 @@ class TestGetTuning:
         for key in list(__import__("os").environ):
             if key.startswith("PROTEA_TUNING__"):
                 monkeypatch.delenv(key, raising=False)
-        monkeypatch.setattr(
-            "protea.config.tuning._resolve_project_root", lambda: tmp_path
-        )
+        monkeypatch.setattr("protea.config.tuning._resolve_project_root", lambda: tmp_path)
         get_tuning.cache_clear()
         s = get_tuning()
         assert s.queue.oom_max_retries == 9
@@ -183,9 +172,7 @@ class TestGetTuning:
             "tuning:\n  queue:\n    publisher_max_attempts: 7\n",
             encoding="utf-8",
         )
-        monkeypatch.setattr(
-            "protea.config.tuning._resolve_project_root", lambda: tmp_path
-        )
+        monkeypatch.setattr("protea.config.tuning._resolve_project_root", lambda: tmp_path)
         monkeypatch.setenv("PROTEA_TUNING__QUEUE__PUBLISHER_MAX_ATTEMPTS", "33")
         get_tuning.cache_clear()
         s = get_tuning()
@@ -257,12 +244,8 @@ class TestWorkerEnvOverrides:
     def teardown_method(self) -> None:
         get_tuning.cache_clear()
 
-    def test_env_override_pool_size(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        monkeypatch.setattr(
-            "protea.config.tuning._resolve_project_root", lambda: tmp_path
-        )
+    def test_env_override_pool_size(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        monkeypatch.setattr("protea.config.tuning._resolve_project_root", lambda: tmp_path)
         monkeypatch.setenv("PROTEA_TUNING__WORKER__DB_POOL_SIZE", "50")
         get_tuning.cache_clear()
         s = get_tuning()
@@ -295,12 +278,8 @@ class TestOperationEnvOverrides:
     def teardown_method(self) -> None:
         get_tuning.cache_clear()
 
-    def test_env_override_chunk_size(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        monkeypatch.setattr(
-            "protea.config.tuning._resolve_project_root", lambda: tmp_path
-        )
+    def test_env_override_chunk_size(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        monkeypatch.setattr("protea.config.tuning._resolve_project_root", lambda: tmp_path)
         monkeypatch.setenv("PROTEA_TUNING__OPERATION__ANNOTATION_CHUNK_SIZE", "50000")
         get_tuning.cache_clear()
         s = get_tuning()
@@ -336,10 +315,27 @@ class TestAPILimitsEnvOverrides:
     def test_env_override_fasta_bytes(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        monkeypatch.setattr(
-            "protea.config.tuning._resolve_project_root", lambda: tmp_path
-        )
+        monkeypatch.setattr("protea.config.tuning._resolve_project_root", lambda: tmp_path)
         monkeypatch.setenv("PROTEA_TUNING__API__MAX_FASTA_BYTES", "104857600")  # 100 MB
         get_tuning.cache_clear()
         s = get_tuning()
         assert s.api.max_fasta_bytes == 104_857_600
+
+
+class TestServeTuning:
+    def setup_method(self) -> None:
+        get_tuning.cache_clear()
+
+    def teardown_method(self) -> None:
+        get_tuning.cache_clear()
+
+    def test_classifier_impl_by_category_defaults_off(self) -> None:
+        assert ServeTuning().classifier_impl_by_category is False
+
+    def test_env_override_classifier_impl_by_category(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setattr("protea.config.tuning._resolve_project_root", lambda: tmp_path)
+        monkeypatch.setenv("PROTEA_TUNING__SERVE__CLASSIFIER_IMPL_BY_CATEGORY", "true")
+        get_tuning.cache_clear()
+        assert get_tuning().serve.classifier_impl_by_category is True

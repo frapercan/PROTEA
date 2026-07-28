@@ -162,6 +162,10 @@ CANONICAL_COLUMN_ORDER: tuple[str, ...] = (
     "association_total",
     "association_cross",
     "association_present",
+    # protst text-to-GO transfer (all float64: NaN declared-absent per ADR-D45)
+    "protst_text_score",
+    "protst_vote_fraction",
+    "protst_present",
 )
 
 

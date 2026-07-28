@@ -17,10 +17,12 @@ into job progress through structured event logs.
 
 The platform implements the full protein functional annotation pipeline: UniProt sequence
 ingestion, GO ontology and annotation loading, GPU-accelerated embedding computation
-(ESM-2, ESM-C, T5/ProstT5, Ankh), KNN-based GO term prediction with optional pairwise
-alignment and taxonomic features, CAFA-style temporal holdout evaluation (NK/LK/PK), and
-LightGBM re-ranking. A scoring engine and one-click annotation endpoint make the system
-accessible to researchers without machine-learning infrastructure expertise.
+(ESM-2, ESM-C, T5/ProstT5, Ankh), a learned k-WTA retrieval encoder that generates
+candidate GO terms, a stacked per-category re-ranker, and CAFA-style temporal holdout
+evaluation (NK/LK/PK) scored board-faithfully on a leakage-free frame. A scoring engine
+and one-click annotation endpoint make the system accessible to researchers without
+machine-learning infrastructure expertise. The sealed result and its evaluation protocol
+are reported in the results chapter and the evaluation protocol chapter.
 
 The platform is designed to accommodate continuous extension (new operations, new data
 sources, new models) without architectural regression. Computational efficiency is preserved

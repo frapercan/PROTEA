@@ -101,7 +101,7 @@ test.describe("annotate flow", () => {
     // trigger the queue-busy banner. Override to a free signal so we
     // assert the empty-input gating cleanly.
     mockApi.override("/jobs/gpu-availability", GPU_FREE);
-    await page.goto("/en/");
+    await page.goto("/en/annotate");
     const submit = page.getByRole("button", { name: /^Annotate$/ });
     await expect(submit).toBeDisabled();
   });
@@ -112,7 +112,7 @@ test.describe("annotate flow", () => {
     // Default mock reports the GPU pipeline as busy (a fresh-leased
     // compute_embeddings run), so the banner should render and the
     // textarea should be disabled even with content.
-    await page.goto("/en/");
+    await page.goto("/en/annotate");
     await expect(page.getByText("Annotation temporarily unavailable")).toBeVisible();
     const textarea = page.getByLabel("Sequence input in FASTA format");
     await expect(textarea).toBeDisabled();
@@ -134,7 +134,7 @@ test.describe("annotate flow", () => {
       PREDICTION_SET_RESOLVE_OK,
     );
 
-    await page.goto("/en/");
+    await page.goto("/en/annotate");
     const textarea = page.getByLabel("Sequence input in FASTA format");
     await expect(textarea).toBeEnabled();
     await textarea.fill(FASTA_SAMPLE);
@@ -172,7 +172,7 @@ test.describe("annotate flow", () => {
     mockApi.override("/jobs/gpu-availability", GPU_FREE);
     mockApi.override("/annotate", { detail: "fasta parse failed" }, 422);
 
-    await page.goto("/en/");
+    await page.goto("/en/annotate");
     const textarea = page.getByLabel("Sequence input in FASTA format");
     await textarea.fill(FASTA_SAMPLE);
     await page.getByRole("button", { name: /^Annotate$/ }).click();

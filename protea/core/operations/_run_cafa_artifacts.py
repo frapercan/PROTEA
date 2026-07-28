@@ -26,6 +26,7 @@ from protea.core.operations._run_cafa_helpers import (
     _patch_query_known_features,
     _record_from_pred,
 )
+from protea.core.row_alignment import assert_unique_key
 from protea.core.scoring import compute_score, evidence_weight
 from protea.infrastructure.orm.models.annotation.go_term import GOTerm
 from protea.infrastructure.orm.models.embedding.go_prediction import GOPrediction
@@ -172,7 +173,7 @@ def _score_bundle_df(df: Any, bundle: dict[str, Any]) -> Any:
     ``reranker_predict`` cannot encode. Per-cell bundles keep the generic
     ``reranker_predict`` path unchanged (F-RERANK-UNIVERSAL eval wiring).
     """
-    from protea.core.reranker import model_from_string
+    from protea.core.reranker import model_from_string, prepare_reranker_frame
     from protea.core.reranker import predict as reranker_predict
 
     model = model_from_string(bundle["model"])
@@ -187,6 +188,11 @@ def _score_bundle_df(df: Any, bundle: dict[str, Any]) -> Any:
             plm_id=universal["plm_id"],
             k_context=universal["k_context"],
         )
+    # Derive ad-hoc reranker features (aspect_code -> INT) and guard any
+    # ungoverned object column so a per-category booster that splits on
+    # aspect_code scores cleanly instead of tripping LightGBM's opaque
+    # "pandas dtypes must be int, float or bool" error in run_cafa_evaluation.
+    df = prepare_reranker_frame(model, df)
     return reranker_predict(model, df, categorical_codes=bundle.get("cat_codes"))
 
 
@@ -669,12 +675,23 @@ def _merge_weighted_metrics(dfs_best: dict, ns_results: dict[str, Any]) -> None:
     Each frame is keyed by namespace; only namespaces already present from the
     unweighted ``f`` frame are touched. Missing frames (uniform IC=1 fallback)
     are skipped, leaving the unweighted keys alone.
+
+    The namespace key must be unique per frame. If it were not, the last row
+    for a namespace would overwrite the earlier ones and the published metric
+    would silently belong to a different row than the one it is attributed to,
+    with the result keeping its expected shape throughout. That is checked
+    rather than assumed, because it is the failure mode that produces no error.
     """
     for key, col_to_field in _EXTRA_METRIC_SPECS:
         df_extra = dfs_best.get(key)
         if df_extra is None or df_extra.empty:
             continue
         df_extra = df_extra.reset_index()
+        assert_unique_key(
+            (str(r.get("ns", "")) for _, r in df_extra.iterrows()),
+            lambda ns: ns,
+            context=f"folding the {key!r} best-frame into the per-namespace results",
+        )
         for _, row in df_extra.iterrows():
             ns = _NS_LABELS.get(str(row.get("ns", "")))
             if ns is None or ns not in ns_results:

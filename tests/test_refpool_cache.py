@@ -22,6 +22,7 @@ import pytest
 
 from protea.core import disk_cache
 from protea.core.disk_cache import (
+    RefPoolKey,
     _disk_cache_paths,
     _load_from_disk_cache,
     _load_reference_pool_cached,
@@ -87,8 +88,7 @@ class TestLoadReferencePoolCached:
         events: list[tuple[str, dict]] = []
 
         out_acc, out_emb = _load_reference_pool_cached(
-            cfg_id,
-            ann_id,
+            RefPoolKey(cfg_id, ann_id),
             db_loader,
             expected_count=len(accessions),
             emit=lambda ev, fields: events.append((ev, fields)),
@@ -121,8 +121,7 @@ class TestLoadReferencePoolCached:
         events: list[tuple[str, dict]] = []
 
         out_acc, out_emb = _load_reference_pool_cached(
-            cfg_id,
-            ann_id,
+            RefPoolKey(cfg_id, ann_id),
             db_loader,
             expected_count=len(accessions),
             emit=lambda ev, fields: events.append((ev, fields)),
@@ -149,8 +148,7 @@ class TestLoadReferencePoolCached:
         events: list[tuple[str, dict]] = []
 
         out_acc, out_emb = _load_reference_pool_cached(
-            cfg_id,
-            ann_id,
+            RefPoolKey(cfg_id, ann_id),
             db_loader,
             expected_count=len(new_accs),
             emit=lambda ev, fields: events.append((ev, fields)),
@@ -166,8 +164,7 @@ class TestLoadReferencePoolCached:
 
         # Reload after the rebuild: same key, same fresh count -> hit.
         out2_acc, out2_emb = _load_reference_pool_cached(
-            cfg_id,
-            ann_id,
+            RefPoolKey(cfg_id, ann_id),
             db_loader,
             expected_count=len(new_accs),
             emit=None,
@@ -182,8 +179,7 @@ class TestLoadReferencePoolCached:
         accessions, embeddings = _sample_pool()
 
         out_acc, out_emb = _load_reference_pool_cached(
-            cfg_id,
-            ann_id,
+            RefPoolKey(cfg_id, ann_id),
             lambda: (accessions, embeddings),
             expected_count=len(accessions),
         )

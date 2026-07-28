@@ -7,20 +7,23 @@ shows the what.
 
 ADRs come in two layers:
 
-- **Implementation decisions** (numbered ``001``-``008``): runtime,
+- **Implementation decisions** (numbered ``001``-``009``): runtime,
   data model and operational choices discovered while building
   PROTEA. They explain trade-offs of concrete code paths (KNN
   algorithm choice, queue topology, deduplication strategy, retries,
   etc.).
-- **Strategic decisions** (``D1``-``D31``): plan-level decisions
-  taken in the master plan revision 3 (2026-05-05). They drive the structure
-  of the project, the deployment story, and the thesis writing
-  cadence.
+- **Strategic decisions** (``D1``-``D45``): plan-level decisions. The
+  ``D1``-``D31`` block was taken in the master plan revision 3 (2026-05-05)
+  and drives the structure of the project, the deployment story, and the
+  thesis writing cadence. Later records (``D34`` onward) were added as the
+  work progressed and carry their own dates and phases in the table below.
+  This ``D``-series is a PROTEA-local ledger (see the cross-repo note under
+  Strategic decisions).
 
 Implementation decisions
 ------------------------
 
-All implementation ADRs (001-008) follow the MADR template (Status / Context /
+All implementation ADRs (001-009) follow the MADR template (Status / Context /
 Decision / Consequences sections). They are numbered in discovery order, not
 superseded by the D-series, and remain the authoritative record for the
 runtime, data model, and operational choices described.
@@ -73,10 +76,28 @@ runtime, data model, and operational choices described.
 Strategic decisions
 -------------------
 
-Decisions taken in the master plan revision 3 (2026-05-05). Statuses:
+Decisions taken in the master plan revision 3 (2026-05-05), plus later
+records added as the work progressed. Statuses:
 *Accepted*, *Pending* (gate opens at the indicated phase), *Deferred*
-(scheduled later in the timeline) or *Obsolete* (superseded by a
-later revision).
+(scheduled later in the timeline), *Obsolete* (superseded by a
+later revision) or *Superseded* (a named later decision replaces it).
+
+.. admonition:: Cross-repo D-number scope (disambiguation)
+   :class: important
+
+   This ``D``-series is the PROTEA-local ledger. ``protea-reranker-lab``
+   keeps its own independent ``D``-series, and the numbers are NOT a shared
+   namespace. ``D34`` (selective rerank resurrection) is deliberately the
+   same decision in both repositories, cross-referenced. But ``D39``,
+   ``D40`` and ``D41`` collide: in this ledger they are destructive-op
+   guards, the leakage-free temporal evaluation protocol, and the lean f32
+   reference pool; in ``protea-reranker-lab`` the same three numbers denote
+   FAIR dataset packaging, IA-aligned training, and the universal booster
+   pipeline. These are not renumbered here because PROTEA ``D39``/``D40``/
+   ``D41`` are already cited across the docs, memory, and thesis; a rename
+   would break those citations for no gain. Read a bare ``D39``/``D40``/
+   ``D41`` as the PROTEA decision; qualify it as ``lab-D39`` and so on when
+   the intended record lives in ``protea-reranker-lab``.
 
 .. list-table::
    :header-rows: 1
@@ -228,8 +249,8 @@ later revision).
      - F-AUTH (complete, FARM-AUTH.1-11)
    * - D38
      - :doc:`Defer neural-head champion; pivot to curated dataset packaging (F-DATA-PACK) <D38-neural-head-deferred-dataset-pack-pivot>`
-     - Accepted
-     - F-DATA-PACK
+     - Superseded
+     - F-DATA-PACK (champion designation superseded; see :doc:`/results`)
    * - D39
      - :doc:`Defense-in-depth guards on destructive database operations <D39-destructive-op-guards>`
      - Accepted
@@ -255,8 +276,8 @@ later revision).
      - Proposed
      - T-PRODUCTO
    * - D45
-     - :doc:`Governing the JSONB-blob feature seam <D45-jsonb-blob-feature-governance>`
-     - Proposed
+     - :doc:`The producer seam in the reranker feature export <D45-jsonb-blob-feature-governance>`
+     - Accepted
      - T-GOBERNANZA
 
 .. toctree::

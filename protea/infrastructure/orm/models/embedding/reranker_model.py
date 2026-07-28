@@ -4,9 +4,9 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, false, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from protea.infrastructure.orm.base import Base
 
@@ -36,6 +36,19 @@ class RerankerModel(Base):
         # SHA against this column when present; legacy rows fall back
         # to ``feature_schema_sha``.
         Index("ix_reranker_model_schema_sha_v2", "schema_sha_v2"),
+        # Serve selection: at most one ACTIVE booster per (category, aspect)
+        # slot. Partial unique index over the active rows only so the table
+        # can hold any number of inactive history rows. NULL aspect is
+        # coalesced to '' so a single (category, NULL-aspect) active row is
+        # also enforced (Postgres treats NULLs as distinct in plain unique
+        # indexes; the COALESCE closes that gap).
+        Index(
+            "uq_reranker_model_active_slot",
+            "category",
+            text("COALESCE(aspect, '')"),
+            unique=True,
+            postgresql_where=text("is_active"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -111,3 +124,48 @@ class RerankerModel(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+    # Operator-controlled serve selection flag. When True this booster is the
+    # one the live serving path picks for its (category, aspect) slot. Default
+    # False: until an operator marks a row active, serve selection falls back
+    # to the legacy latest-by-created_at pick, so the column is behaviour-
+    # preserving on a fresh migration (every existing row is inactive).
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=false(), default=False
+    )
+
+
+def active_or_latest_reranker(
+    session: Session,
+    *,
+    category: str | None = None,
+    aspect: str | None = None,
+) -> RerankerModel | None:
+    """Select the serve booster: the ACTIVE one first, else the latest.
+
+    The serving path used to pick the single latest-by-``created_at`` booster,
+    which silently drifts whenever any new model is registered. This helper
+    makes the choice explicit and operator-controlled:
+
+    * If a row matching the optional ``category`` / ``aspect`` filter has
+      ``is_active=True``, return it (the most recent active one if, against the
+      partial unique index, more than one ever co-exist).
+    * Otherwise FALL BACK to the latest-by-``created_at`` row in the same slot.
+
+    The fallback is what makes this drop-in safe: until an operator marks a
+    model active, behaviour is identical to the previous latest-only pick.
+    Returns ``None`` when no matching ``RerankerModel`` rows exist.
+    """
+    base = session.query(RerankerModel)
+    if category is not None:
+        base = base.filter(RerankerModel.category == category)
+    if aspect is not None:
+        base = base.filter(RerankerModel.aspect == aspect)
+    active = (
+        base.filter(RerankerModel.is_active.is_(True))
+        .order_by(RerankerModel.created_at.desc())
+        .first()
+    )
+    if active is not None:
+        return active
+    return base.order_by(RerankerModel.created_at.desc()).first()

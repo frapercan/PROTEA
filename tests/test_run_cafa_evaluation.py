@@ -352,7 +352,13 @@ class TestEvalProvenanceStamping:
             p, es, has_rerankers=False
         )
         assert role == "select"
-        assert arms == {"knn": True, "reranker": False, "mlp_tower": False, "interpro": False}
+        assert arms == {
+            "knn": True,
+            "reranker": False,
+            "mlp_tower": False,
+            "interpro": False,
+            "interpro_graft": False,
+        }
         assert frame is None and window is None
 
     def test_build_provenance_explicit_wins(self):
@@ -382,6 +388,35 @@ class TestEvalProvenanceStamping:
         # No window_role on the set and none in the payload -> leakage unknown.
         assert role is None
         assert arms["reranker"] is True
+
+    def test_build_provenance_interpro_graft_off_by_default(self):
+        es = _make_eval_set()
+        es.window_role = None
+        p = RunCafaEvaluationPayload(evaluation_set_id=EVAL_SET_ID, prediction_set_id=PRED_SET_ID)
+        _, _, _, arms = RunCafaEvaluationOperation._build_eval_provenance(
+            p, es, has_rerankers=True
+        )
+        # Payload did not opt into the graft -> arm off even with rerankers.
+        assert arms["interpro_graft"] is False
+
+    def test_build_provenance_interpro_graft_needs_rerankers(self):
+        es = _make_eval_set()
+        es.window_role = None
+        p = RunCafaEvaluationPayload(
+            evaluation_set_id=EVAL_SET_ID,
+            prediction_set_id=PRED_SET_ID,
+            interpro_graft=True,
+        )
+        # Opted in but no rerankers -> the graft is skipped, so it must stay off.
+        _, _, _, arms_no_rr = RunCafaEvaluationOperation._build_eval_provenance(
+            p, es, has_rerankers=False
+        )
+        assert arms_no_rr["interpro_graft"] is False
+        # Opted in with rerankers -> the graft applies, so it is recorded on.
+        _, _, _, arms_rr = RunCafaEvaluationOperation._build_eval_provenance(
+            p, es, has_rerankers=True
+        )
+        assert arms_rr["interpro_graft"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -1425,6 +1460,52 @@ class TestExecuteHappyPath:
         # session.add called for EvaluationResult
         session.add.assert_called_once()
         session.flush.assert_called_once()
+
+    @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
+    def test_job_id_threaded_onto_eval_result(self, mock_compute):
+        """R0.1: the worker-injected ``_job_id`` is stamped onto the result.
+
+        A result born without its Job id is an orphan artifact (the
+        job_id=None archaeology trap the reproducible frame eliminates).
+        """
+        mock_compute.return_value = (_make_eval_data(), uuid.uuid4())
+
+        session = MagicMock()
+        eval_set = _make_eval_set()
+        pred_set = _make_pred_set()
+        snapshot = _make_snapshot()
+        session.get.side_effect = [eval_set, pred_set, snapshot]
+
+        query = MagicMock()
+        session.query.return_value = query
+        query.join.return_value = query
+        query.filter.return_value = query
+        query.order_by.return_value = query
+        query.yield_per.return_value = []
+
+        added: list = []
+        session.add.side_effect = added.append
+
+        dfs_best = _dfs_best_fixture()
+        job_id = uuid.uuid4()
+
+        with patch("protea.core.operations._run_cafa_artifacts.download_obo"):
+            with patch(
+                "cafaeval.evaluation.cafa_eval",
+                return_value=(MagicMock(), dfs_best),
+            ):
+                self.op.execute(
+                    session,
+                    {
+                        "evaluation_set_id": EVAL_SET_ID,
+                        "prediction_set_id": PRED_SET_ID,
+                        "_job_id": str(job_id),
+                    },
+                    emit=self.emit,
+                )
+
+        assert added, "no EvaluationResult was added"
+        assert added[0].job_id == job_id
 
     @patch("protea.core.operations.run_cafa_evaluation.load_evaluation_data_for_set")
     def test_emit_events(self, mock_compute):

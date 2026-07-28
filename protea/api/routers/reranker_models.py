@@ -27,6 +27,7 @@ from typing import Any, NamedTuple
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
+from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
 
 from protea.api.deps import get_session_factory
@@ -490,6 +491,175 @@ def import_reranker_model_by_reference(
         )
 
     return {"id": str(model_id), "name": resolved_name, "artifact_uri": body.artifact_uri}
+
+
+class RerankerModelSummary(BaseModel):
+    """Compact view of a ``RerankerModel`` row for management responses.
+
+    Returned by the activate / deactivate / delete endpoints so an
+    operator can confirm which serve slot ``(category, aspect)`` was
+    touched and whether the row is the one the selector now picks.
+    """
+
+    id: str = Field(..., description="RerankerModel UUID.")
+    name: str = Field(..., description="Human-readable model name.")
+    category: str = Field(..., description="Serve category (nk / lk / pk).")
+    aspect: str | None = Field(
+        None, description="GO aspect (mfo / bpo / cco) or null if aspect-agnostic."
+    )
+    is_active: bool = Field(
+        ..., description="Whether the selector currently prefers this row for its slot."
+    )
+
+
+class ActivateRerankerResponse(BaseModel):
+    """Result of activating a booster for its serve slot.
+
+    ``activated`` is the row now marked active; ``deactivated`` lists
+    the ids of the sibling rows in the same ``(category, aspect)`` slot
+    that were flipped inactive to keep the selection unambiguous.
+    """
+
+    activated: RerankerModelSummary = Field(
+        ..., description="The row now marked active for its (category, aspect) slot."
+    )
+    deactivated: list[str] = Field(
+        ...,
+        description="Ids of same-slot sibling rows flipped inactive to keep selection unambiguous.",
+    )
+
+
+def _summarise(model: RerankerModel) -> RerankerModelSummary:
+    return RerankerModelSummary(
+        id=str(model.id),
+        name=model.name,
+        category=model.category,
+        aspect=model.aspect,
+        is_active=model.is_active,
+    )
+
+
+def _same_slot_active_siblings(session: Session, model: RerankerModel) -> list[RerankerModel]:
+    """Active rows sharing ``model``'s ``(category, aspect)`` serve slot.
+
+    Mirrors the ``uq_reranker_model_active_slot`` partial unique index
+    and the ``active_or_latest_reranker`` selector, both of which key on
+    ``(category, COALESCE(aspect, ''))``. Excludes ``model`` itself.
+    """
+    return (
+        session.query(RerankerModel)
+        .filter(
+            RerankerModel.id != model.id,
+            RerankerModel.category == model.category,
+            func.coalesce(RerankerModel.aspect, "") == (model.aspect or ""),
+            RerankerModel.is_active.is_(True),
+        )
+        .all()
+    )
+
+
+@router.post(
+    "/{model_id}/activate",
+    summary="Mark a booster active for its (category, aspect) serve slot",
+    response_model=ActivateRerankerResponse,
+    dependencies=[Depends(require_role(ROLE_OPERATOR))],
+)
+def activate_reranker_model(
+    model_id: uuid.UUID,
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+) -> ActivateRerankerResponse:
+    """Pin ``model_id`` as the active booster the serve path selects.
+
+    Activation is EXCLUSIVE per ``(category, aspect)`` slot: any other
+    row already active in the same slot is flipped inactive first. This
+    matches ``active_or_latest_reranker``, which filters by category and
+    aspect before preferring the active row, and the
+    ``uq_reranker_model_active_slot`` partial unique index (which permits
+    at most one active row per ``(category, COALESCE(aspect, ''))``).
+    Activating a full trio therefore stays well-defined: each of nk / lk
+    / pk (or per-aspect) rows owns a distinct slot and coexists active.
+    """
+    with session_scope(factory) as session:
+        model = session.get(RerankerModel, model_id)
+        if model is None:
+            raise HTTPException(status_code=404, detail="RerankerModel not found")
+
+        deactivated: list[str] = []
+        for sibling in _same_slot_active_siblings(session, model):
+            sibling.is_active = False
+            deactivated.append(str(sibling.id))
+        # Flush the deactivations before activating so the partial unique
+        # index never sees two active rows in the same slot mid-transaction.
+        session.flush()
+
+        model.is_active = True
+        session.flush()
+        return ActivateRerankerResponse(
+            activated=_summarise(model),
+            deactivated=deactivated,
+        )
+
+
+@router.post(
+    "/{model_id}/deactivate",
+    summary="Clear a booster's active flag",
+    response_model=RerankerModelSummary,
+    dependencies=[Depends(require_role(ROLE_OPERATOR))],
+)
+def deactivate_reranker_model(
+    model_id: uuid.UUID,
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+) -> RerankerModelSummary:
+    """Unpin ``model_id`` so its slot falls back to latest-by-created_at.
+
+    Idempotent: clearing an already-inactive row is a no-op that returns
+    the current summary. This is the safe precondition for deleting a
+    row that is currently serving (see ``DELETE`` below).
+    """
+    with session_scope(factory) as session:
+        model = session.get(RerankerModel, model_id)
+        if model is None:
+            raise HTTPException(status_code=404, detail="RerankerModel not found")
+        model.is_active = False
+        session.flush()
+        return _summarise(model)
+
+
+@router.delete(
+    "/{model_id}",
+    summary="Delete a registered booster",
+    response_model=RerankerModelSummary,
+    dependencies=[Depends(require_role(ROLE_OPERATOR))],
+)
+def delete_reranker_model(
+    model_id: uuid.UUID,
+    factory: sessionmaker[Session] = Depends(get_session_factory),
+) -> RerankerModelSummary:
+    """Remove a ``RerankerModel`` row from the registry.
+
+    Refuses with 409 when the row is currently active: deleting the
+    live serve pick out from under the selector is the unsafe path, so
+    the operator must ``POST /{id}/deactivate`` first (an explicit,
+    auditable step) before the row can be removed. The response echoes
+    the deleted row's summary.
+    """
+    with session_scope(factory) as session:
+        model = session.get(RerankerModel, model_id)
+        if model is None:
+            raise HTTPException(status_code=404, detail="RerankerModel not found")
+        if model.is_active:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"RerankerModel id={model_id} is active for slot "
+                    f"({model.category}, {model.aspect}); deactivate it "
+                    "before deleting."
+                ),
+            )
+        summary = _summarise(model)
+        session.delete(model)
+        session.flush()
+        return summary
 
 
 def _resolve_project_root():

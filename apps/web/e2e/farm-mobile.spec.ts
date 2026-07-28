@@ -1,10 +1,10 @@
-// FARM-UI.8 — mobile (390x844) smoke for the /en/farm/ surface area.
+// FARM-UI.8 — mobile (390x844) smoke for the /en/instrument/farm/ surface area.
 //
 // Covers the four farm routes shipped by FARM-UI.2..5:
-//   - /en/farm/               list page (farm-list)
-//   - /en/farm/<id>/          task detail
-//   - /en/farm/plan/          slice DAG
-//   - /en/farm/cost/          cost rollup
+//   - /en/instrument/farm/               list page (farm-list)
+//   - /en/instrument/farm/<id>/          task detail
+//   - /en/instrument/farm/plan/          slice DAG
+//   - /en/instrument/farm/cost/          cost rollup
 //
 // Runs under the existing "mobile" Playwright project (viewport 390x844,
 // see playwright.config.ts). The farm-api sidecar is mocked through
@@ -229,10 +229,10 @@ test.beforeEach(async ({ context }) => {
   });
 });
 
-test.describe("FARM-UI.8 mobile (390x844) — /en/farm/ surfaces", () => {
+test.describe("FARM-UI.8 mobile (390x844) — /en/instrument/farm/ surfaces", () => {
   test("list page renders and screenshots", async ({ page }) => {
     await mockFarmApi(page);
-    await page.goto("/en/farm");
+    await page.goto("/en/instrument/farm");
 
     await expect(
       page.getByRole("heading", { name: "Agent farm" }),
@@ -279,7 +279,7 @@ test.describe("FARM-UI.8 mobile (390x844) — /en/farm/ surfaces", () => {
 
   test("task detail renders and screenshots", async ({ page }) => {
     await mockFarmApi(page);
-    await page.goto(`/en/farm/${SAMPLE_TASKS[0].id}`);
+    await page.goto(`/en/instrument/farm/${SAMPLE_TASKS[0].id}`);
 
     await expect(page.getByTestId("farm-task-card")).toBeVisible();
     await expect(page.getByTestId("farm-summary")).toBeVisible();
@@ -309,7 +309,7 @@ test.describe("FARM-UI.8 mobile (390x844) — /en/farm/ surfaces", () => {
 
   test("plan page renders and screenshots", async ({ page }) => {
     await mockFarmApi(page);
-    await page.goto("/en/farm/plan");
+    await page.goto("/en/instrument/farm/plan");
 
     await expect(page.getByRole("heading", { name: "Slice DAG" })).toBeVisible();
     await expect(page.getByTestId("slice-dag-canvas")).toBeVisible();
@@ -341,7 +341,7 @@ test.describe("FARM-UI.8 mobile (390x844) — /en/farm/ surfaces", () => {
 
   test("cost page renders and screenshots", async ({ page }) => {
     await mockFarmApi(page);
-    await page.goto("/en/farm/cost");
+    await page.goto("/en/instrument/farm/cost");
 
     await expect(page.getByTestId("cost-summary-total")).toBeVisible();
     await expect(page.getByTestId("cost-chart-agent")).toBeVisible();
@@ -386,7 +386,7 @@ test.describe("FARM-UI.8 mobile (390x844) — /en/farm/ surfaces", () => {
   // via the nav namespace instead of rendering the raw URL segment.
   test("breadcrumbs translate farm/plan/cost segments", async ({ page }) => {
     await mockFarmApi(page);
-    await page.goto("/en/farm/plan");
+    await page.goto("/en/instrument/farm/plan");
     const crumbs = page.getByRole("navigation", { name: "Breadcrumb" });
     await expect(crumbs).toBeVisible();
     // "Agent farm" comes from nav.farmSection, "Plan" from nav.farmPlan.
@@ -418,7 +418,7 @@ test.describe("FARM-UI.8 mobile (390x844) — /en/farm/ surfaces", () => {
   // device.
   test("plan DAG tooltip surfaces on tap", async ({ page }) => {
     await mockFarmApi(page);
-    await page.goto("/en/farm/plan");
+    await page.goto("/en/instrument/farm/plan");
     await expect(page.getByTestId("slice-dag-canvas")).toBeVisible();
     await expect(
       page.getByTestId("slice-dag-canvas").locator("canvas").first(),
@@ -463,10 +463,10 @@ test.describe("FARM-UI.8 mobile (390x844) — /en/farm/ surfaces", () => {
   // tolerance for sub-pixel rounding inside chrome.
 
   const ROUTES: { path: string; name: string }[] = [
-    { path: "/en/farm", name: "list" },
-    { path: `/en/farm/${SAMPLE_TASKS[0].id}`, name: "detail" },
-    { path: "/en/farm/plan", name: "plan" },
-    { path: "/en/farm/cost", name: "cost" },
+    { path: "/en/instrument/farm", name: "list" },
+    { path: `/en/instrument/farm/${SAMPLE_TASKS[0].id}`, name: "detail" },
+    { path: "/en/instrument/farm/plan", name: "plan" },
+    { path: "/en/instrument/farm/cost", name: "cost" },
   ];
 
   for (const { path, name } of ROUTES) {
