@@ -21,7 +21,7 @@ from protea.core._training_dump_loaders import (
     _stream_embeddings,
 )
 from protea.core.contracts.operation import EmitFn
-from protea.core.disk_cache import _load_reference_pool_cached
+from protea.core.disk_cache import RefPoolKey, _load_reference_pool_cached
 from protea.core.domain.aspect import ASPECT_CODES as _ASPECTS
 from protea.infrastructure.orm.models.protein.protein import Protein
 from protea.infrastructure.orm.models.sequence.sequence import Sequence
@@ -75,8 +75,7 @@ def _preload_all_embeddings(
         return accs, embs
 
     accessions, embeddings = _load_reference_pool_cached(
-        emb_config_id,
-        _DUMP_ANN_SET_SENTINEL,
+        RefPoolKey(emb_config_id, _DUMP_ANN_SET_SENTINEL),
         _db_loader,
         expected_count=total,
         emit=lambda ev, fields: emit(f"dump_helper.{ev}", None, fields, "info"),
