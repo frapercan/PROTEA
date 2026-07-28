@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.11.0](https://github.com/frapercan/PROTEA/compare/v0.10.0...v0.11.0) (2026-07-28)
+
+
+### Features
+
+* promote develop to main for release ([#685](https://github.com/frapercan/PROTEA/issues/685)) ([ef9b939](https://github.com/frapercan/PROTEA/commit/ef9b9393d5995b91945ff572facf527745713219))
+* promote develop to main for release ([#753](https://github.com/frapercan/PROTEA/issues/753)) ([7d5c488](https://github.com/frapercan/PROTEA/commit/7d5c488c2d84784144f9888360b7cf32e0bad9a5))
+
+
+### Documentation
+
+* **readme:** dated temporal split (160/220/227/230) + named levers + framing ([#680](https://github.com/frapercan/PROTEA/issues/680)) ([306ffa1](https://github.com/frapercan/PROTEA/commit/306ffa1de14b2af49795c637e88269a3570d181e))
+
 ## [0.10.0](https://github.com/frapercan/PROTEA/compare/v0.9.1...v0.10.0) (2026-06-24)
 
 
