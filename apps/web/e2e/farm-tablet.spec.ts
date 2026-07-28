@@ -1,8 +1,8 @@
-// FARM-UI.8 — tablet (768x1024) smoke for the /en/farm/ surface area.
+// FARM-UI.8 — tablet (768x1024) smoke for the /en/instrument/farm/ surface area.
 //
 // Mirrors farm-mobile.spec.ts at the existing tablet viewport. Same
-// four routes (/en/farm/, /en/farm/<id>/, /en/farm/plan/,
-// /en/farm/cost/), same hermetic page.route() mocks for the farm-api
+// four routes (/en/instrument/farm/, /en/instrument/farm/<id>/, /en/instrument/farm/plan/,
+// /en/instrument/farm/cost/), same hermetic page.route() mocks for the farm-api
 // sidecar, same screenshots — but at 768x1024 and without the iPhone
 // userAgent so the tests exercise the lg-breakpoint-1 layout (768px is
 // still below the lg=1024 breakpoint, so the farm-list page should
@@ -216,10 +216,10 @@ test.beforeEach(async ({ context }) => {
   });
 });
 
-test.describe("FARM-UI.8 tablet (768x1024) — /en/farm/ surfaces", () => {
+test.describe("FARM-UI.8 tablet (768x1024) — /en/instrument/farm/ surfaces", () => {
   test("list page renders and screenshots", async ({ page }) => {
     await mockFarmApi(page);
-    await page.goto("/en/farm");
+    await page.goto("/en/instrument/farm");
 
     await expect(
       page.getByRole("heading", { name: "Agent farm" }),
@@ -246,7 +246,7 @@ test.describe("FARM-UI.8 tablet (768x1024) — /en/farm/ surfaces", () => {
 
   test("task detail renders and screenshots", async ({ page }) => {
     await mockFarmApi(page);
-    await page.goto(`/en/farm/${SAMPLE_TASKS[0].id}`);
+    await page.goto(`/en/instrument/farm/${SAMPLE_TASKS[0].id}`);
 
     await expect(page.getByTestId("farm-task-card")).toBeVisible();
     await expect(page.getByTestId("farm-summary")).toBeVisible();
@@ -261,7 +261,7 @@ test.describe("FARM-UI.8 tablet (768x1024) — /en/farm/ surfaces", () => {
 
   test("plan page renders and screenshots", async ({ page }) => {
     await mockFarmApi(page);
-    await page.goto("/en/farm/plan");
+    await page.goto("/en/instrument/farm/plan");
 
     await expect(page.getByRole("heading", { name: "Slice DAG" })).toBeVisible();
     await expect(page.getByTestId("slice-dag-canvas")).toBeVisible();
@@ -275,7 +275,7 @@ test.describe("FARM-UI.8 tablet (768x1024) — /en/farm/ surfaces", () => {
 
   test("cost page renders and screenshots", async ({ page }) => {
     await mockFarmApi(page);
-    await page.goto("/en/farm/cost");
+    await page.goto("/en/instrument/farm/cost");
 
     await expect(page.getByTestId("cost-summary-total")).toBeVisible();
     await expect(page.getByTestId("cost-chart-agent")).toBeVisible();

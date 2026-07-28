@@ -961,6 +961,7 @@ class TestStoreEmbeddingsOperation:
         session = MagicMock()
         parent = MagicMock()
         parent.status = JobStatus.RUNNING
+        parent.embedding_scale = 1.0  # session.get also serves the config scale lookup
         session.get.return_value = parent
         # No existing embeddings
         session.query.return_value.filter_by.return_value.first.return_value = None
@@ -979,6 +980,7 @@ class TestStoreEmbeddingsOperation:
         session = MagicMock()
         parent = MagicMock()
         parent.status = JobStatus.RUNNING
+        parent.embedding_scale = 1.0  # session.get also serves the config scale lookup
         session.get.return_value = parent
         # All existing
         session.query.return_value.filter_by.return_value.first.return_value = MagicMock()
@@ -996,6 +998,7 @@ class TestStoreEmbeddingsOperation:
         session = MagicMock()
         parent = MagicMock()
         parent.status = JobStatus.RUNNING
+        parent.embedding_scale = 1.0  # session.get also serves the config scale lookup
         session.get.return_value = parent
         row = MagicMock()
         row.progress_current = 1
@@ -1032,6 +1035,7 @@ class TestStoreEmbeddingsOperation:
         session = MagicMock()
         parent = MagicMock()
         parent.status = JobStatus.RUNNING
+        parent.embedding_scale = 1.0  # session.get also serves the config scale lookup
         session.get.return_value = parent
         session.query.return_value.filter_by.return_value.first.return_value = None
 
@@ -1055,6 +1059,7 @@ class TestStoreEmbeddingsOperation:
         session = MagicMock()
         parent = MagicMock()
         parent.status = JobStatus.RUNNING
+        parent.embedding_scale = 1.0  # session.get also serves the config scale lookup
         session.get.return_value = parent
         session.query.return_value.filter_by.return_value.first.return_value = None
         row = MagicMock()
@@ -1110,3 +1115,142 @@ class TestComputeEmbeddingsRetryLogic:
         with patch.object(op, "_load_sequence_ids", return_value=[1, 2, 3]):
             with pytest.raises(RetryLaterError):
                 op.execute(session, payload, emit=_noop_emit)
+
+
+# ---------------------------------------------------------------------------
+# Per-config embedding_scale (halfvec fp16 overflow fix)
+# ---------------------------------------------------------------------------
+
+
+class TestEmbeddingScale:
+    """Uniform per-config scale so high-magnitude layers fit the fp16 halfvec."""
+
+    def test_scale_one_is_passthrough_same_object(self) -> None:
+        """scale=1.0 (default, champion path) returns the exact input unchanged."""
+        from protea.core.operations._compute_embeddings_helpers import (
+            scale_and_clip_embedding,
+        )
+
+        vec = [4.9e5, -3.2e4, 0.0, 1.5]
+        out, clipped = scale_and_clip_embedding(vec, 1.0)
+        assert out is vec  # byte-for-byte: no numpy round-trip, no clip
+        assert clipped == 0
+
+    def test_scale_divides_uniformly(self) -> None:
+        from protea.core.operations._compute_embeddings_helpers import (
+            scale_and_clip_embedding,
+        )
+
+        vec = [32.0, 64.0, -96.0]
+        out, clipped = scale_and_clip_embedding(vec, 32.0)
+        assert clipped == 0
+        assert out == pytest.approx([1.0, 2.0, -3.0])
+
+    def test_scale_brings_overflow_into_fp16_range(self) -> None:
+        """Ankh-base L10-style |max| ~4.9e5 with scale=32 fits fp16 without clip."""
+        from protea.core.operations._compute_embeddings_helpers import (
+            HALFVEC_FP16_MAX,
+            scale_and_clip_embedding,
+        )
+
+        vec = [4.9e5, -4.9e5, 1.0e4]
+        out, clipped = scale_and_clip_embedding(vec, 32.0)
+        assert clipped == 0
+        assert max(abs(v) for v in out) <= HALFVEC_FP16_MAX
+
+    def test_too_small_scale_clips_and_counts(self) -> None:
+        """An over-small scale can never let an inf reach the DB: it clips + reports."""
+        from protea.core.operations._compute_embeddings_helpers import (
+            HALFVEC_FP16_MAX,
+            scale_and_clip_embedding,
+        )
+
+        vec = [4.9e5, -4.9e5, 1.0]  # /2 still ~2.45e5 > fp16 max for the first two
+        out, clipped = scale_and_clip_embedding(vec, 2.0)
+        assert clipped == 2
+        assert out[0] == pytest.approx(HALFVEC_FP16_MAX)
+        assert out[1] == pytest.approx(-HALFVEC_FP16_MAX)
+        assert max(abs(v) for v in out) <= HALFVEC_FP16_MAX
+
+    def test_fetch_scale_missing_config_defaults_one(self) -> None:
+        from protea.core.operations._compute_embeddings_helpers import (
+            fetch_embedding_scale,
+        )
+
+        session = MagicMock()
+        session.get.return_value = None
+        assert fetch_embedding_scale(session, uuid.uuid4()) == 1.0
+
+    def test_fetch_scale_reads_config_value(self) -> None:
+        from protea.core.operations._compute_embeddings_helpers import (
+            fetch_embedding_scale,
+        )
+
+        session = MagicMock()
+        cfg = MagicMock()
+        cfg.embedding_scale = 32.0
+        session.get.return_value = cfg
+        assert fetch_embedding_scale(session, uuid.uuid4()) == 32.0
+
+    def test_store_path_divides_by_config_scale(self) -> None:
+        """End-to-end: a config with embedding_scale=32 stores embedding/32."""
+        op = StoreEmbeddingsOperation()
+        session = MagicMock()
+        parent = MagicMock()
+        parent.status = JobStatus.RUNNING
+        parent.embedding_scale = 32.0  # session.get serves both Job + config lookups
+        session.get.return_value = parent
+        session.query.return_value.filter_by.return_value.first.return_value = None
+        row = MagicMock()
+        row.progress_current, row.progress_total = 1, 5
+        session.execute.return_value.fetchone.return_value = row
+
+        payload = {
+            "parent_job_id": str(uuid.uuid4()),
+            "embedding_config_id": str(uuid.uuid4()),
+            "skip_existing": False,
+            "sequences": [
+                {"sequence_id": 1, "chunks": [
+                    {"chunk_index_s": 0, "chunk_index_e": None,
+                     "vector": [32.0, 64.0, -96.0], "embedding_dim": 3}]},
+            ],
+        }
+        op.execute(session, payload, emit=_noop_emit)
+        # The bulk insert is session.execute(pg_insert, rows_to_insert); find that call.
+        insert_rows = next(
+            call.args[1]
+            for call in session.execute.call_args_list
+            if len(call.args) >= 2 and isinstance(call.args[1], list)
+        )
+        assert insert_rows[0]["embedding"] == pytest.approx([1.0, 2.0, -3.0])
+
+    def test_store_path_warns_on_clip(self) -> None:
+        """An over-small scale emits store_embeddings.halfvec_clipped at WARN."""
+        op = StoreEmbeddingsOperation()
+        session = MagicMock()
+        parent = MagicMock()
+        parent.status = JobStatus.RUNNING
+        parent.embedding_scale = 1e-6  # forces every component past fp16 max
+        session.get.return_value = parent
+        session.query.return_value.filter_by.return_value.first.return_value = None
+        row = MagicMock()
+        row.progress_current, row.progress_total = 1, 5
+        session.execute.return_value.fetchone.return_value = row
+
+        events: list = []
+
+        def capture_emit(event, msg, fields, level):
+            events.append((event, level))
+
+        payload = {
+            "parent_job_id": str(uuid.uuid4()),
+            "embedding_config_id": str(uuid.uuid4()),
+            "skip_existing": False,
+            "sequences": [
+                {"sequence_id": 1, "chunks": [
+                    {"chunk_index_s": 0, "chunk_index_e": None,
+                     "vector": [0.1, 0.2, 0.3], "embedding_dim": 3}]},
+            ],
+        }
+        op.execute(session, payload, emit=capture_emit)
+        assert ("store_embeddings.halfvec_clipped", "warning") in events

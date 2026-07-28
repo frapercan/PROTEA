@@ -1,0 +1,24 @@
+name: Pinned-deps guard
+
+# Wires the shared check from frapercan/agent-farm. It refuses an internal git
+# dependency that names a branch instead of a commit.
+#
+# A branch name is not a version. While a consumer pins a branch, that branch
+# is the delivery channel, so urgent work lands on it directly to unblock the
+# consumer and bypasses the gates on the trunk, and the divergence grows by
+# construction rather than by neglect. Sweeping this stack found twelve
+# internal edges pinned to a moving branch and one pinned to a commit.
+#
+# The failure is not only theoretical bookkeeping. A resolver refuses outright
+# to satisfy one dependency pinned to a commit and another pinned to a branch,
+# so a half-migrated stack does not build at all.
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  pinned-deps:
+    uses: frapercan/agent-farm/.github/workflows/pinned-deps-guard.yml@main

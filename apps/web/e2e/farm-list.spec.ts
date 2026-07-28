@@ -109,7 +109,7 @@ test.describe("farm list — mobile (375x667)", () => {
 
   test("renders mobile card list with at least one row", async ({ page }) => {
     await mockFarmApi(page);
-    await page.goto("/en/farm");
+    await page.goto("/en/instrument/farm");
 
     await expect(page.getByRole("heading", { name: "Agent farm" })).toBeVisible();
     // Mobile container is visible, desktop hidden.
@@ -128,7 +128,7 @@ test.describe("farm list — mobile (375x667)", () => {
 
   test("status chip filters the list and persists in the URL", async ({ page }) => {
     await mockFarmApi(page);
-    await page.goto("/en/farm");
+    await page.goto("/en/instrument/farm");
 
     const mobileRows = page
       .getByTestId("farm-list-mobile")
@@ -147,7 +147,7 @@ test.describe("farm list — desktop (1280x800)", () => {
 
   test("renders desktop table with at least one row", async ({ page }) => {
     await mockFarmApi(page);
-    await page.goto("/en/farm");
+    await page.goto("/en/instrument/farm");
 
     await expect(page.getByRole("heading", { name: "Agent farm" })).toBeVisible();
     await expect(page.getByTestId("farm-list-desktop")).toBeVisible();
@@ -168,7 +168,7 @@ test.describe("farm list — desktop (1280x800)", () => {
 
   test("window radio updates the URL parameter", async ({ page }) => {
     await mockFarmApi(page);
-    await page.goto("/en/farm");
+    await page.goto("/en/instrument/farm");
 
     await page.getByRole("button", { name: "Last 7d", exact: true }).click();
     await expect(page).toHaveURL(/[?&]window=7d\b/);

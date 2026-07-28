@@ -250,6 +250,7 @@ def test_canonical_features_are_subset_of_leaf_record_outputs() -> None:
     ``ALL_FEATURES``.
     """
     import protea.core._leaf_record_builder as builder_module
+    from protea.core.features._bindings import _POOL_INJECTED_FEATURES
 
     produced = _string_keys_in_module_dict_literals(builder_module)
     # The emb_pca_query_* family is materialised via an f-string in a
@@ -258,14 +259,19 @@ def test_canonical_features_are_subset_of_leaf_record_outputs() -> None:
     for i in range(EMBEDDING_PCA_DIM):
         produced.add(f"emb_pca_query_{i}")
 
-    missing = set(ALL_FEATURES) - produced
+    # Pool-injected columns are exempt: PROTEA declares them but the lab stamps
+    # them when pooling manifests, so the leaf-record producer must NOT write
+    # them and the export boundary does not ask for them.
+    missing = set(ALL_FEATURES) - produced - set(_POOL_INJECTED_FEATURES)
     assert missing == set(), (
         "Columns in protea_contracts.ALL_FEATURES that the leaf-record "
-        f"producer never writes: {sorted(missing)!r}. Wire a default in "
-        "protea.core._leaf_record_builder._LeafRecordBuilder.make_leaf_record "
-        "(zero-fill defaults are fine; see _lineage_default_fields for an "
-        "example) so the T1.8 canonical-column boundary does not fail "
-        "the next dump after hours of compute."
+        f"producer never writes: {sorted(missing)!r}. Wire a real producer in "
+        "protea.core._leaf_record_builder._LeafRecordBuilder.make_leaf_record, "
+        "or, if the column is genuinely produced elsewhere, add it to "
+        "protea.core.features._bindings._POOL_INJECTED_FEATURES. Do NOT reach "
+        "for a zero-fill default: a constant zero is indistinguishable from a "
+        "measurement, which is the seam ADR-D45 documents. Emit NaN when no "
+        "producer ran, and record the family as declared-absent."
     )
 
 

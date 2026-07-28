@@ -85,12 +85,11 @@ computational efficiency. It is organised around three research questions:
    reference databases, and can a fair temporal holdout protocol be enforced
    at the data model level?
 
-**RQ3.** Feature engineering on top of KNN.
-   Does a learned re-ranker that exploits classical pairwise alignment metrics
-   (Needleman–Wunsch, Smith–Waterman) and taxonomic distance features on top
-   of embedding-based KNN results consistently outperform the baseline
-   embedding similarity score, across the full CAFA NK/LK/PK partitioning and
-   all three GO namespaces?
+**RQ3.** Learned retrieval and re-ranking.
+   Does a learned k-WTA retrieval encoder for candidate generation, followed
+   by a stacked per-category re-ranker, consistently outperform the baseline
+   embedding similarity score of a raw-vector KNN pipeline, across the full
+   CAFA NK/LK/PK partitioning and all three GO namespaces?
 
 Hypotheses
 ----------
@@ -109,24 +108,25 @@ ground-truth annotations of a temporal holdout. This overlap is quantifiable
 and large enough to account for a significant fraction of their apparent
 Fmax advantage over strictly temporal methods.
 
-**H3.** A LightGBM binary classifier trained on 20 numeric and 3 categorical
-features derived from alignment and taxonomy can outperform the baseline
-cosine similarity score of an embedding-only pipeline across all 9 cells of
-the NK/LK/PK × BPO/MFO/CCO grid.
+**H3.** A learned k-WTA retrieval encoder for candidate generation, followed
+by a stacked per-category re-ranker, can outperform the baseline embedding
+similarity score of a raw-vector KNN pipeline across the NK/LK/PK ×
+BPO/MFO/CCO grid, save for the Biological Process cells of the harder
+proteins, where the limit is in the ranking stage and therefore architectural
+(:ref:`insight-bp-wall-is-a-ranking-limit`).
 
 Contributions
 -------------
 
-.. admonition:: Provisional numbers in C2 and C3
-   :class: warning
+.. admonition:: The sealed board lives in one place
+   :class: note
 
-   The specific figures cited below (62.4 % NK leakage in C2, "improves Fmax
-   across all 9 cells" in C3) come from the pre-2026-04-10 experimental run
-   and will be regenerated for the Zenodo deposit accompanying the thesis.
-   The *direction* of the findings (large data-leakage overlap for Pannzer2,
-   and the re-ranker surpassing the heuristic) is stable; only the exact
-   values may move slightly when the chapter is re-rendered. See
-   :doc:`/results` for the full provisional notice.
+   The sealed result (headline metric, frame, and per-cell board) is stated
+   once in :doc:`/results` and its protocol home is
+   :doc:`/architecture/evaluation`. This chapter frames the contributions and
+   does not restate the number. Any specific figure carried over from the
+   earlier pre-v227 frame (for example a leakage percentage) is retained only
+   in :doc:`/historical/pre-v227` and is not a current result.
 
 The thesis makes three contributions, one per research question:
 
@@ -147,16 +147,19 @@ eggNOG-mapper against a GOA 220 → 229 temporal holdout. The analysis measures
 exact-match overlap between each tool's predictions and the ground-truth
 annotations and shows that up to 62.4 % of the NK ground truth is already
 present in the Pannzer2 reference database, fully explaining its apparent
-advantage over temporally strict methods. The chapter :doc:`results` presents
-the full numbers and discusses the interpretation.
+advantage over temporally strict methods. The specific leakage figures come
+from the earlier pre-v227 frame and are retained for provenance in
+:doc:`/historical/pre-v227`; the leakage argument itself is frame-independent.
 
-**C3.** A temporal-holdout re-ranking pipeline trained on 13 historical GOA
-splits (releases 160 through 220) using alignment and taxonomy features on
-top of ESM-C 300M KNN results. The final re-ranker (the iteration with
-full alignment and taxonomy features) is shown to
-improve Fmax over the embedding-only baseline across all 9 evaluation cells
-of the NK/LK/PK × BPO/MFO/CCO grid, while keeping the training signal
-interpretable (per-feature importances are reported in :doc:`results`).
+**C3.** A retrieval-plus-re-ranking pipeline whose champion is a learned k-WTA
+retrieval encoder (which stores GO-aligned codes rather than a raw PLM vector)
+for candidate generation, followed by a stacked per-category re-ranker
+(:doc:`/adr/D43-stacked-meta-reranker`). On the leakage-free temporal frame it
+is first in seven of the nine NK/LK/PK × BPO/MFO/CCO cells; the two Biological
+Process cells not won mark a wall that measurement places in the ranking stage,
+not in the evidence available (:ref:`insight-bp-wall-is-a-ranking-limit`). The
+sealed board and its scoring recipe are reported in :doc:`results` and
+:doc:`architecture/evaluation`.
 
 The PROTEA approach
 -------------------
@@ -252,10 +255,10 @@ The remainder of this thesis is organised as follows.
   two-session job lifecycle (``job_lifecycle``), the versioned data model
   (``data_model``), the operation catalogue (``operations``), and the
   evaluation protocol with formal NK/LK/PK definitions (``evaluation``).
-- :doc:`results` presents the experimental evaluation: ablations over ``k``
-  and the scoring function, the three re-ranker iterations, the external
-  benchmark against Pannzer2 / InterProScan / eggNOG-mapper, and the
-  quantitative data-leakage analysis.
+- :doc:`results` states the sealed board on the leakage-free temporal frame
+  and cross-references the evaluation protocol and the reproduction path. The
+  superseded pre-v227 figures are retained for provenance in
+  :doc:`historical/pre-v227`.
 - :doc:`appendix/index` contains installation and quickstart instructions,
   a configuration reference, how-to guides, operational runbooks, and
   architectural decision records (ADRs) for every non-obvious design choice.

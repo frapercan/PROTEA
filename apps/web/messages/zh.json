@@ -4,6 +4,7 @@
     "description": "蛋白质数据平台 — 任务队列与流水线管理"
   },
   "nav": {
+    "featureRegistry": "特征登记表",
     "proteins": "蛋白质",
     "annotations": "GO 注释",
     "querySets": "查询集",
@@ -19,6 +20,7 @@
     "experimentRuns": "实验运行",
     "maintenance": "维护",
     "home": "首页",
+    "instrument": "仪表台",
     "data": "参考数据",
     "pipelineGroup": "流水线",
     "results": "结果",
@@ -144,6 +146,96 @@
     "annotateQueueWaitingLabel": "等待中的任务",
     "shareCopy": "分享",
     "shareCopied": "链接已复制"
+  },
+  "book": {
+    "eyebrow": "PROTEA · 基于嵌入的蛋白质功能注释",
+    "boardHeading": "封存的九格评测表",
+    "nineCellItalic": "九格中七格居首；未居首的两格，我们予以说明。",
+    "headlineSentence": "连同其评测框架，封存结果为 <value></value>（<metric></metric>），九格中七格居首<note>。</note>",
+    "chaptersHeading": "四大支柱，作为章节",
+    "openInstrument": "打开仪表",
+    "annotate": "注释一条序列",
+    "thesisPdf": "阅读论文",
+    "claim": "论点",
+    "pullHint": "展开标记，查看凭证以及重新生成该数值的操作。",
+    "evidence": "证据",
+    "caveats": "我们的保留说明",
+    "caveatsIntro": "在他人指出之前，我们先行说明。",
+    "chapterNav": "章节导航",
+    "backToArgument": "返回论点",
+    "receipt": "凭证",
+    "receiptAlso": "另有",
+    "reproduce": "复现",
+    "regenerate": "重新生成该数值",
+    "receiptPending": "凭证待补：当前存储快照中未找到。在其重新生成之前，该论点以封存评测表为依据。",
+    "pullReceipt": "显示凭证"
+  },
+  "score": {
+    "eyebrow": "Chapter zero",
+    "title": "How a score is made",
+    "back": "Back to the argument",
+    "proteinLabel": "Protein",
+    "goLabel": "GO term",
+    "setLabel": "Prediction set",
+    "setResolvedFromLatest": "Resolved to the most recent prediction run. Pass ?set=<id> to pin a specific run.",
+    "setPinned": "Pinned by the ?set query parameter.",
+    "grounding": "The steps below are a real pipeline order: retrieval, candidate, evidence, fusion, probability. They are grounded in a measured fact from chapter one: sixteen of the sixty-four features carry ninety-five percent of the gain, and the single largest driver is a base-rate prior, which we discuss rather than hide.",
+    "groundingLink": "Read chapter one",
+    "noSet": {
+      "heading": "No prediction run is available",
+      "body": "This page reads a real prediction run from GET /embeddings/prediction-sets. None was returned, so there is no retrieval to walk for this pair. Run a prediction from the instrument, then reopen this page. Nothing on this page is fabricated to fill the gap."
+    },
+    "retrieval": {
+      "heading": "1. The retrieval",
+      "lede": "A k-nearest-neighbour search over protein-language-model embeddings finds the reference proteins closest to the query, and each neighbour that already carries this GO term casts a vote. These are the neighbours that voted for {go} on {accession}, nearest first.",
+      "caption": "kNN neighbours voting for this GO term (prediction set {set})",
+      "thNeighbour": "Neighbour",
+      "thDistance": "Distance",
+      "thIdentity": "Identity (NW)",
+      "thKPosition": "k position",
+      "thVoteCount": "Vote count",
+      "empty": {
+        "heading": "No neighbour voted for this pair",
+        "body": "This prediction run has no candidate row for {accession} carrying {go}. Either the protein is not in this run, or no retrieved neighbour carried this term. This empty state is the honest answer, not a zero."
+      }
+    },
+    "evidence": {
+      "heading": "2. The evidence",
+      "lede": "Each candidate carries a row of typed feature columns, the same columns the reranker consumes. Their meaning is pulled from the explainability registry (GET /features/registry), the one source the thesis and the Sphinx docs also cite. The columns shown are those stored on the prediction row; the export-time families (anc2vec, lineage, InterPro, embedding PCA) are computed downstream and are not on this endpoint.",
+      "caption": "Per-candidate features on the nearest voting neighbour, {neighbour}",
+      "thFeature": "Feature",
+      "thValue": "Value",
+      "thMeaning": "Meaning",
+      "meaningPending": "Meaning not found in the feature registry.",
+      "registryPending": "The feature registry (GET /features/registry) did not return, so the columns below are shown without their registry meaning. The values themselves are the real feature columns on the prediction row.",
+      "baseRateNote": "The base-rate prior. This is the single largest driver of the sealed booster's gain, about twenty-five percent. We surface it rather than hide it.",
+      "registryLink": "See the full feature registry",
+      "noCandidate": "No candidate row for this pair, so there are no feature columns to show."
+    },
+    "fusion": {
+      "heading": "3. The fusion and the score",
+      "lede": "Calibrated evidence scorers put every signal on one scale, and a shallow per-category combiner (a LightGBM booster) fuses them into one probability. That final probability is the score.",
+      "gap": {
+        "heading": "The single-pair probability is not exposed by a JSON endpoint",
+        "body": "PROTEA computes the fused probability, but serves it only in bulk, as a TSV stream, not as a per-(accession, GO) JSON field. Rather than invent a number, this page names the contract and stops. Closing this gap needs a small backend endpoint that returns the fused score for one pair."
+      },
+      "rerankersHeading": "Rerankers registered for inference",
+      "rerankersEmpty": "No reranker model is registered (GET /scoring/rerankers returned none). Until a booster is imported, the fusion step falls back to the scoring-config weighted average.",
+      "thReranker": "Model",
+      "thCategory": "Category",
+      "thAspect": "Aspect",
+      "openInstrument": "Open the scoring instrument"
+    },
+    "caveats": {
+      "heading": "Our caveats",
+      "intro": "We state these before anyone states them for us.",
+      "items": [
+        "The single largest driver of the score is go_term_frequency, a base-rate prior. A frequent GO term scores partly because it is frequent, not only because the evidence is strong.",
+        "Retrieval proposes candidates; it does not discriminate between them. A near neighbour is a hypothesis, not a conclusion, and homology alone does not settle the term.",
+        "The final probability depends on which reranker and scoring config are selected in the instrument. There is no single canonical number for a pair outside a named run.",
+        "A pair with no voting neighbour has no score. The empty states on this page are the honest answer, never a fabricated value."
+      ]
+    }
   },
   "benchmark": {
     "loadingTitle": "正在加载基准…",
@@ -1795,5 +1887,67 @@
       "backHome": "返回首页",
       "goSignIn": "前往登录"
     }
+  },
+  "errors": {
+    "title": "无法加载此视图",
+    "body": "界面在构建此页面时遇到错误。应用报告的信息如下。",
+    "unauthorizedTitle": "您尚未登录",
+    "unauthorizedBody": "由于请求没有有效会话，服务器拒绝返回这些数据。请登录后重试。",
+    "forbiddenTitle": "您没有查看此内容的权限",
+    "forbiddenBody": "您的账户缺少此页面所需的角色。请让管理员授予该角色后重试。",
+    "networkTitle": "无法连接服务器",
+    "networkBody": "请求未能完成。请确认后端正在运行且可访问，然后重试。",
+    "endpointLabel": "接口",
+    "statusLabel": "状态",
+    "messageLabel": "详情",
+    "referenceLabel": "参考编号",
+    "retry": "重试",
+    "signIn": "前往登录",
+    "home": "返回首页",
+    "notFound": {
+      "title": "该页面不存在",
+      "body": "该地址未匹配任何路由。请检查链接，或返回首页。",
+      "home": "返回首页"
+    },
+    "predictionSetNotFound": {
+      "title": "该预测集不存在",
+      "body": "没有与此 id 匹配的预测集。它可能已被删除，或 id 有误。",
+      "back": "返回预测集列表"
+    }
+  },
+  "featureRegistry": {
+    "title": "特征登记表",
+    "subtitle": "每个重排器特征都只有一份规范说明，文档、论文和本页面共用同一来源。你可以在此了解每个特征的含义、由谁产生，以及在默认导出中是否带有真实值。",
+    "provenance": "来源于 protea-contracts {version}。共 {total} 个特征，分属 {families} 个族。",
+    "legendHeading": "状态标记的含义",
+    "countSuffix": "{count} 个处于此状态",
+    "familyCount": "{count} 个特征",
+    "producerLabel": "产生者",
+    "rangeLabel": "取值范围",
+    "notApplicable": "不适用",
+    "caveatLabel": "注意",
+    "status": {
+      "PRODUCED": {
+        "label": "已产生",
+        "help": "在默认导出中填入了真实值。"
+      },
+      "DECLARED_ABSENT": {
+        "label": "声明缺失",
+        "help": "默认导出未填充该列，因为其产生者未接入导出路径（ADR-D45）。你在原始导出中看到的值并不是模型的信号。"
+      },
+      "POOL_INJECTED": {
+        "label": "池阶段注入",
+        "help": "由实验室的多清单池化加载器在池化阶段写入。它不会出现在原始 parquet 导出中。"
+      },
+      "BROKEN": {
+        "label": "损坏",
+        "help": "产生者已接入，但其数据源为空或有误，因此该列不携带信号。"
+      }
+    }
+  },
+  "instrument": {
+    "eyebrow": "运维面板",
+    "title": "仪表台",
+    "subtitle": "论证背后的全部数据、流水线、结果与运维界面，按流水线运行顺序分组。书保留在顶层；这是你打开以进行操作的标签页。"
   }
 }

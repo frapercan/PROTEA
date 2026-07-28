@@ -191,6 +191,45 @@ def _association_producer() -> Callable[..., Any]:
     return apply_association
 
 
+def _protst_text_producer() -> Callable[..., Any]:
+    """Reference for the ProtST text-to-GO transfer family (protst_text lever).
+
+    ``protst_text_score`` / ``protst_vote_fraction`` / ``protst_present`` are
+    filled in by the native compute in
+    :func:`protea.core.operations.predict_go_terms._protst_text.apply_protst_text`,
+    gated by the ``compute_protst`` payload flag (predict) / the ``protst_text``
+    export flag. When the flag is off (default) every record keeps the NaN
+    declared-absent default emitted by
+    ``_leaf_record_builder._protst_default_fields`` so the canonical-column
+    boundary holds without a compute pass. The marker keeps the registry's
+    producer coverage complete.
+    """
+    from protea.core.operations.predict_go_terms._protst_text import apply_protst_text
+
+    return apply_protst_text
+
+
+#: Declared by the contracts, stamped by the lab when pooling manifests.
+#: PROTEA emits neither, so they get an explicit not-produced-here marker.
+_POOL_INJECTED_FEATURES: tuple[str, ...] = ("plm_id", "k_context")
+
+
+def _pool_injected_producer() -> Callable[..., Any]:
+    """Reference for columns PROTEA declares but does not produce.
+
+    ``plm_id`` and ``k_context`` identify which PLM and which K a row came
+    from. They are meaningless for a single manifest and are stamped by the
+    lab's pooled multi-manifest loader when several sources are combined to
+    train a universal booster. PROTEA never writes them: they are absent from
+    every raw parquet dump this platform emits.
+
+    The marker records that absence explicitly rather than binding a fake
+    producer, which is the mistake ADR-D45 exists to prevent. A declared
+    column with no producer must say so, not quietly resolve to something.
+    """
+    return _pool_injected_producer
+
+
 def _annotation_metadata_producer() -> Callable[..., Any]:
     """Reference for categorical metadata columns sourced from annotation rows.
 
@@ -287,6 +326,12 @@ _ASSOCIATION_FEATURES: tuple[str, ...] = (
     "association_present",
 )
 
+_PROTST_TEXT_FEATURES: tuple[str, ...] = (
+    "protst_text_score",
+    "protst_vote_fraction",
+    "protst_present",
+)
+
 _ANNOTATION_METADATA_FEATURES: tuple[str, ...] = tuple(
     name for name in CATEGORICAL_FEATURES if name != "taxonomic_relation"
 )
@@ -317,8 +362,12 @@ def _build_feature_to_producer() -> dict[str, tuple[Callable[..., Any], str]]:
         mapping[name] = (_self_prior_producer, "lafa_self_prior")
     for name in _ASSOCIATION_FEATURES:
         mapping[name] = (_association_producer, "lafa_association")
+    for name in _PROTST_TEXT_FEATURES:
+        mapping[name] = (_protst_text_producer, "protst_text")
     for name in _ANNOTATION_METADATA_FEATURES:
         mapping[name] = (_annotation_metadata_producer, "annotation_metadata")
+    for name in _POOL_INJECTED_FEATURES:
+        mapping[name] = (_pool_injected_producer, "pool_injected")
     missing = [name for name in ALL_FEATURES if name not in mapping]
     if missing:
         raise KeyError(

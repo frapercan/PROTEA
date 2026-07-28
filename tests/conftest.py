@@ -182,9 +182,9 @@ def _resolve_db_targets() -> list[tuple[str, str, str, str]]:
     ``system.yaml`` (the 2026-06-10 wipe went through the latter, bypassing the
     fixture guard).
     """
-    from sqlalchemy.engine import make_url
-
     from pathlib import Path
+
+    from sqlalchemy.engine import make_url
 
     urls: list[str] = []
     env_url = os.getenv("PROTEA_DB_URL")

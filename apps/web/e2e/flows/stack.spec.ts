@@ -65,7 +65,7 @@ test.describe("stack flow", () => {
     mockApi.override("/stack/pulls", PULLS_RESPONSE);
     mockApi.override("/stack", STACK_RESPONSE);
 
-    await page.goto("/en/stack/");
+    await page.goto("/en/instrument/stack/");
 
     await expect(
       page.getByRole("heading", { name: "PROTEA stack", level: 1 }),
@@ -83,7 +83,7 @@ test.describe("stack flow", () => {
     mockApi.override("/stack/pulls", PULLS_RESPONSE);
     mockApi.override("/stack", STACK_RESPONSE);
 
-    await page.goto("/en/stack/");
+    await page.goto("/en/instrument/stack/");
 
     await expect(
       page.getByRole("heading", { name: "PROTEA thesis", level: 2 }),
@@ -102,7 +102,7 @@ test.describe("stack flow", () => {
     mockApi.override("/stack/pulls", PULLS_RESPONSE);
     mockApi.override("/stack", STACK_RESPONSE);
 
-    await page.goto("/en/stack/");
+    await page.goto("/en/instrument/stack/");
 
     const prLink = page.getByRole("link", {
       name: /#379 Playwright E2E scaffolding/,
@@ -123,7 +123,7 @@ test.describe("stack flow", () => {
     mockApi.override("/stack/pulls", PULLS_RESPONSE);
     mockApi.override("/stack", STACK_RESPONSE);
 
-    await page.goto("/en/stack/");
+    await page.goto("/en/instrument/stack/");
 
     const refresh = page.getByRole("button", { name: /Refresh/ });
     await expect(refresh).toBeEnabled();

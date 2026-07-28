@@ -56,6 +56,9 @@ jobs:
       - name: smell budget (master plan v3.2 §3)
         run: poetry run python scripts/check_smells.py
 
+      - name: row alignment (no join may lose rows silently)
+        run: poetry run python scripts/check_row_alignment.py
+
       - name: em-dash check (no em-dashes in publishable prose)
         run: python scripts/check_no_em_dashes.py
 
@@ -67,6 +70,9 @@ jobs:
 
       - name: doc ref drift gate (DS.2)
         run: poetry run python scripts/check_doc_refs.py
+
+      - name: feature-docs drift gate (feature registry vs installed schema)
+        run: poetry run python scripts/check_feature_docs.py
 
       - name: autodoc coverage gate (DR.1)
         run: python scripts/check_autodoc_coverage.py

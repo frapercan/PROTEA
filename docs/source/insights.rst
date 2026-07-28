@@ -19,8 +19,8 @@ that closed each issue.
 
 .. seealso::
 
-   - :doc:`/appendix/reproduction_guide` for the ordered procedure that
-     regenerates every figure from a clean database.
+   - :doc:`/operate/reproduce-0.40765` for the ordered path that reproduces
+     the sealed board.
    - :doc:`/adr/index` for the full decision log.
    - :doc:`/runbooks/index` for on-call operational procedures.
 
@@ -439,5 +439,165 @@ aggregate across multiple snapshot pairs). The ``EvaluationSet`` row in PROTEA
 captures (1), (2), (3), and (4). The training dataset manifest captures the
 snapshot pair list. Cross-checking that the eval snapshot pair does not
 overlap with any training pair is enforced by the ``export_research_dataset``
-payload validator. See :doc:`/appendix/reproduction_guide` for the full
-ordered procedure.
+payload validator. See :doc:`/operate/reproduce-0.40765` for the ordered
+reproduction path.
+
+The served last layer is a weak retrieval base, and standardisation is the lever
+--------------------------------------------------------------------------------
+
+PROTEA's retrieval encoder stores learned, GO-aligned codes rather than a raw
+protein-language-model vector. A controlled ablation on the ankh-base substrate
+motivates that choice, and its lesson is not the one a reader expects.
+
+**The finding.**
+Scored board-faithfully (cosine top-30 KNN GO transfer into the 15,000-protein
+reference, ``f_micro_w`` over the nine cells), the learned k-WTA encoder
+``d8979601`` reaches mean 0.21500, versus 0.14597 for the best fixed
+representation (a standardised mid layer, L10, k-WTA) and 0.13356 for the served
+last-layer dense baseline. That is plus 47.3 percent over the best fixed choice
+and plus 61.0 percent over the served baseline, winning all nine cells, with the
+largest gains on molecular function.
+
+**Why the last layer is a poor base.**
+Mean-pooled activations of ankh-base's final layer are compressed to a peak
+absolute value near 0.6 by the model's closing LayerNorm, while the mid layers
+reach magnitudes above 400,000. The final layer's flattened geometry is a weak
+substrate for cosine retrieval, which is one reason the served last layer sat at
+the bottom of the ranking.
+
+**The lever is standardisation, not depth.**
+Among fixed representations the dominant lever is per-dimension standardisation
+(z-score, statistics fit on the reference pool only, non-transductive), not the
+index of the layer. Choosing a different raw layer does not beat the served base;
+standardising a mid layer does. A rerun at the champion's declared 100,000
+protein pool confirms this at scale with high significance: a standardised L10
+beats both the raw L10 and the served last layer, while the raw layer choice is
+statistically null. The same rerun shows that training-pool size, the
+hard-negative objective, and a learned multi-layer mixture are all null in this
+harness, so standardisation is the single lever the fixed-representation family
+exposes.
+
+**The caveat, and what resolved it.**
+A controlled re-training of the encoder inside the offline lab harness, on a
+local mean-pool of the ankh-base last layer, reaches only the fixed-representation
+band (about 0.14 to 0.16). The resolution is the base embedding, not the training
+procedure: the identical head recipe, trained on the production-stored embedding
+for this backbone, reproduces the served encoder (mean 0.220 against 0.215). The
+lab arms fell short only because their local extraction is a weaker base than the
+production one. The precise extraction difference (pooling, normalisation, or which
+tensor is read as the last layer) is the one detail still to pin down. These are all KNN-only retrieval numbers and are
+distinct from the sealed 0.40765 reranked board in :doc:`results`; they explain
+why the champion stores learned GO-aligned codes. See
+:doc:`/adr/D35-canonical-8plm-embedding-configs` for the embedding config
+registry and :doc:`/adr/D38-neural-head-deferred-dataset-pack-pivot` for the
+neural-head decision this evidence informs.
+
+.. _insight-bp-wall-is-a-ranking-limit:
+
+The BP wall is a ranking limit, not an evidence ceiling
+-------------------------------------------------------
+
+The sealed board (:doc:`results`) is first in seven of nine cells. The two it does
+not win are LK-BPO and PK-BPO, the Biological Process branch for the proteins with
+limited or no prior knowledge. This section locates that limit. Every figure below is
+measured on one harness, against the full ground truth, on the PK-BPO cell.
+
+**The evidence is present.**
+97.0 percent of the true protein to Biological Process term pairs the pipeline misses
+use a term that some protein in the same cohort already carried before the target
+window opened. Weighted by information accretion, which is what the metric scores,
+the figure is 95.2 percent. Only 3 percent of the pairs, and 4.8 percent of the
+weight, are genuinely novel. Nothing is missing from the vocabulary.
+
+**Retrieval is not the binding constraint.**
+Candidate recall is 0.322. Submitting every pool cell that belongs to the propagated
+ground truth, which is what a perfect ordering of the candidates already retrieved
+would be worth, yields ``f_micro_w`` **0.7519** at precision 1.000, verified through
+the evaluator itself. Allowing that ordering to also keep the pool cells whose own
+ancestors are true, which a real ranker may do and an oracle has no reason to refuse,
+reaches **0.7764**, and the ceiling of the pool lies in [0.7764, 0.8326]. The deployed
+re-ranker delivers **0.2131** on that same pool: **27.4 percent** of what its own
+shortlist allows.
+
+**So adding candidates does not pay.**
+A co-occurrence expansion lifting recall from 0.322 to 0.480 moves the score by a
+small fraction of the gap. More candidates do not help a ranker that cannot order the
+ones it already holds.
+
+**Nor is it where the list is cut.**
+A global threshold cannot express a per-protein term count: every protein is cut at
+the same ``tau`` whether it deserves three terms or thirty. Freezing the pipeline's
+own ordering and granting each protein its true count, an oracle no method could
+have, moves ``f_micro_w`` from 0.2017 to 0.2379. That is plus 0.036 of a 0.406 gap,
+**about a tenth**. The other nine tenths is ordering.
+
+**It is ordering, and no feature carries it.**
+On PK-BPO no feature the pipeline carries exceeds AUC 0.68 (``classifier_present``;
+then ``protst_text`` at 0.64 on 41 percent coverage, ``classifier_score`` 0.63,
+alignment near 0.60) against a 2.47 percent positive rate.
+
+**The deployed recipe is the best technique we have.**
+Every variation tested scores below it:
+
+.. list-table:: PK-BPO, one harness, full ground truth
+   :header-rows: 1
+   :widths: 60 20 20
+
+   * - Recipe
+     - ``f_micro_w``
+     - vs deployed
+   * - **deployed: per-category ``lambdarank``, aspects pooled**
+     - **0.2131**
+     - reference
+   * - trained per cell instead of pooling aspects
+     - 0.2017
+     - minus 0.011
+   * - ``binary`` objective instead of ``lambdarank``
+     - 0.1518
+     - minus 0.061
+   * - plus within-protein rank and z-score features
+     - 0.1465
+     - minus 0.067
+   * - plus class weighting
+     - 0.1441
+     - minus 0.069
+   * - classifier-proposed candidates dropped from the pool
+     - flat
+     - coverage 0.978 to 0.846
+
+The ``binary`` result is worth stating twice, because it is counterintuitive: it
+carries a **better** AUC than the deployed recipe (0.8227 against 0.7903) and a
+**worse** ``f_micro_w``. AUC ranks these recipes in the opposite order to the metric
+that decides. Do not triage ranking levers by AUC.
+
+**Ruled out by measurement.**
+GO-DAG hierarchical proximity as a feature (AUC 0.5501, decorrelated from the
+re-ranker yet adding plus 0.0002 when blended); a text-aligned scorer as a re-ranker
+feature (plus 0.0016); an InterPro graft (negative on BP); and a larger base
+representation, which reorders the same candidates and so cannot help where recall is
+not the constraint.
+
+**Where that leaves the two cells.**
+The gap to the leading external method is plus 0.072 (LK-BPO) and plus 0.076
+(PK-BPO). The ranking headroom inside the pool already retrieved is several times
+that, so the work is a ranker and not a retriever. The technique levers available are
+exhausted: the deployed recipe sits at their optimum. The signal that would close the
+gap is not identified, and the two structural candidates testable with these
+resources, term co-occurrence and ontology proximity, are both dead. "Improve the
+ranker" is a direction, not yet a plan.
+
+**Method note.**
+Two rules this cell earned, both cheap to apply and both load-bearing here. A recall
+number does not identify what binds a pipeline; the ceiling of the pool does, and
+obtaining it costs one evaluation with the labels used as the score. And a monotone
+rescaling of a score is **not** free under a threshold-swept metric: ``f_micro_w``
+sweeps ``tau`` on a fixed grid, so remapping the score distribution changes which
+cuts the sweep can reach. Scoring one booster with its raw output and with a global
+rank-percentile of that output differs by 0.088 on this cell. Any transform applied
+before evaluation is part of the measurement.
+
+.. note::
+   These figures come from a retrained booster on an exported dataset rather than the
+   sealed board, and they track it closely: the deployed recipe measures 0.2131 here
+   against the board's 0.2181 for PK-BPO. Every figure shares one ground truth and one
+   harness.

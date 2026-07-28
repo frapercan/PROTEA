@@ -29,6 +29,7 @@ import pytest
 
 from protea.core import disk_cache as _dc
 from protea.core.disk_cache import (
+    RefPoolKey,
     _is_cache_fresh,
     _load_reference_pool_cached,
     _save_to_disk_cache,
@@ -105,8 +106,7 @@ class TestLoadReferencePoolCachedFreshnessSkip:
 
         events: list[tuple[str, dict]] = []
         out_accs, out_emb = _load_reference_pool_cached(
-            cfg_id,
-            ann_id,
+            RefPoolKey(cfg_id, ann_id),
             db_loader,
             expected_count=None,
             emit=lambda ev, fields: events.append((ev, fields)),
@@ -133,8 +133,7 @@ class TestLoadReferencePoolCachedFreshnessSkip:
 
         events: list[tuple[str, dict]] = []
         _load_reference_pool_cached(
-            cfg_id,
-            ann_id,
+            RefPoolKey(cfg_id, ann_id),
             db_loader,
             expected_count=len(accs),
             emit=lambda ev, fields: events.append((ev, fields)),
@@ -158,8 +157,7 @@ class TestLoadReferencePoolCachedFreshnessSkip:
             return accs, emb
 
         out_accs, out_emb = _load_reference_pool_cached(
-            cfg_id,
-            ann_id,
+            RefPoolKey(cfg_id, ann_id),
             db_loader,
             expected_count=None,
             freshness_seconds=300,

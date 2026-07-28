@@ -29,7 +29,7 @@ from protea.core.operations.export_minijobs._export_write import (
     ExportWriteOperation,
     ExportWritePayload,
     _ShardEntry,
-    _stage_concat,
+    _stream_assemble,
 )
 
 # ---------------------------------------------------------------------------
@@ -153,16 +153,21 @@ class TestPayloadValidation:
             ExportWritePayload.model_validate({})
 
 
-class TestStageConcat:
-    """Pure helper test: deterministic concat + train/eval split."""
+class TestStreamAssemble:
+    """Streaming assembler: deterministic stream + train/eval split.
 
-    def test_concat_preserves_row_count_and_splits(self) -> None:
-        store = _StubStore()
+    Replaces the legacy ``pd.concat`` helper. Asserts the streamed
+    ``train.parquet`` / ``eval.parquet`` carry the right rows, the
+    ``snapshot_pair`` stamp on every row, and the canonical column set
+    plus the trailing ``snapshot_pair`` (no schema drift, no whole-split
+    concat).
+    """
+
+    def _stage(self, store: _StubStore) -> list[_ShardEntry]:
         store._data["temp/coordinator/abc/features/train-220.parquet"] = _make_shard(3, label=1)
         store._data["temp/coordinator/abc/features/train-221.parquet"] = _make_shard(5, label=1)
         store._data["temp/coordinator/abc/features/eval-222.parquet"] = _make_shard(2, label=0)
-
-        shards = [
+        return [
             _ShardEntry(
                 pair_id="train-220",
                 temp_uri="s3://test-bucket/temp/coordinator/abc/features/train-220.parquet",
@@ -183,15 +188,47 @@ class TestStageConcat:
             ),
         ]
 
-        train_df, eval_df, train_pairs, eval_pair = _stage_concat(store, shards)
+    def test_stream_preserves_row_count_and_splits(self, tmp_path: Path) -> None:
+        store = _StubStore()
+        shards = self._stage(store)
 
+        asm = _stream_assemble(store, shards, tmp_path)
+
+        assert asm.n_train_rows == 8
+        assert asm.n_eval_rows == 2
+        assert asm.train_pairs == ["train-220", "train-221"]
+        assert asm.eval_pair == "eval-222"
+        assert asm.train_path == tmp_path / "train.parquet"
+        assert asm.eval_path == tmp_path / "eval.parquet"
+
+        train_df = pd.read_parquet(asm.train_path)
+        eval_df = pd.read_parquet(asm.eval_path)
         assert len(train_df) == 8
         assert len(eval_df) == 2
-        assert train_pairs == ["train-220", "train-221"]
-        assert eval_pair == "eval-222"
-        # snapshot_pair stamped on every row
+        # snapshot_pair stamped on every row, as the trailing column.
+        assert train_df.columns[-1] == "snapshot_pair"
         assert set(train_df["snapshot_pair"].unique()) == {"train-220", "train-221"}
         assert set(eval_df["snapshot_pair"].unique()) == {"eval-222"}
+
+    def test_empty_split_writes_no_file(self, tmp_path: Path) -> None:
+        store = _StubStore()
+        # Only an empty sentinel shard: no file should be produced.
+        from protea.core.operations.export_minijobs._export_features_batch import (
+            _EMPTY_SHARD_URI,
+        )
+
+        shards = [
+            _ShardEntry(pair_id="eval-222", temp_uri=_EMPTY_SHARD_URI, is_eval=True, n_rows=0)
+        ]
+        asm = _stream_assemble(store, shards, tmp_path)
+        assert asm.train_path is None
+        assert asm.eval_path is None
+        assert asm.n_train_rows == 0
+        assert asm.n_eval_rows == 0
+        # The pair is still recorded for the manifest contract.
+        assert asm.eval_pair == "eval-222"
+        assert not (tmp_path / "train.parquet").exists()
+        assert not (tmp_path / "eval.parquet").exists()
 
 
 class TestNonTerminalDelivery:

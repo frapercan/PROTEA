@@ -291,6 +291,7 @@ class PredictGOTermsOperation:
             "compute_taxonomy": p.compute_taxonomy,
             "compute_reranker_features": p.compute_reranker_features,
             "compute_v6_features": p.compute_v6_features,
+            "compute_lineage_features": p.compute_lineage_features,
             "compute_classifier": p.compute_classifier,
             "compute_self_prior": p.compute_self_prior,
             "compute_association": p.compute_association,
@@ -336,15 +337,11 @@ class PredictGOTermsOperation:
         schema validation as the single-booster resolver so a misconfigured
         per-category model fails loudly at coordination time, not mid-batch.
         """
-        ids = {
-            cat: getattr(p, f"reranker_model_id_{cat}", None)
-            for cat in ("nk", "lk", "pk")
-        }
+        ids = {cat: getattr(p, f"reranker_model_id_{cat}", None) for cat in ("nk", "lk", "pk")}
         if not all(ids.values()):
             return {}
         bindings = {
-            cat.upper(): self._binding_for_model(session, model_id)
-            for cat, model_id in ids.items()
+            cat.upper(): self._binding_for_model(session, model_id) for cat, model_id in ids.items()
         }
         emit(
             "predict_go_terms.per_category_reranker_bound",

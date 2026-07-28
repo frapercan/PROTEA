@@ -125,6 +125,51 @@ def test_flags_off_is_a_noop_zeros_preserved() -> None:
         assert rec["classifier_present"] == 0.0
 
 
+def _nan_records() -> list[dict]:
+    """Two candidates whose LAFA columns start at the leaf builder's NaN default.
+
+    Mirrors the ADR-D45 default (declared absent -> NaN); the applier must reset
+    a PRODUCED family to the true-zero baseline before its producer marks hits.
+    """
+    nan = float("nan")
+    return [
+        {
+            "protein_accession": "Q1",
+            "go_term_id": 99,
+            "self_prior_score": nan,
+            "association_total": nan,
+            "association_cross": nan,
+            "association_present": nan,
+            "classifier_score": nan,
+            "classifier_present": nan,
+        },
+        {
+            "protein_accession": "Q1",
+            "go_term_id": 10,
+            "self_prior_score": nan,
+            "association_total": nan,
+            "association_cross": nan,
+            "association_present": nan,
+            "classifier_score": nan,
+            "classifier_present": nan,
+        },
+    ]
+
+
+def test_produced_family_zero_baselines_nan_non_hits() -> None:
+    """ADR-D45: with the self_prior flag on, a NaN-initialised non-hit becomes a
+    true zero (the producer ran and did not fire), while an UNFLAGGED family
+    stays NaN (declared absent, no producer)."""
+    out = _run_export(_nan_records(), ExportParityFlags(self_prior=True))
+    by_term = {r["go_term_id"]: r for r in out}
+    # self_prior is PRODUCED: hit -> 1.0, non-hit -> true zero (not NaN).
+    assert by_term[10]["self_prior_score"] == 1.0
+    assert by_term[99]["self_prior_score"] == 0.0
+    # association is DECLARED ABSENT (flag off): stays NaN, never zero-baselined.
+    assert np.isnan(by_term[10]["association_total"])
+    assert np.isnan(by_term[99]["association_present"])
+
+
 def test_self_prior_marks_own_nonexp_known_term() -> None:
     out = _run_export(_records(), ExportParityFlags(self_prior=True))
     by_term = {r["go_term_id"]: r for r in out}

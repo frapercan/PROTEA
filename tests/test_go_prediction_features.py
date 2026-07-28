@@ -1,18 +1,19 @@
-"""Tests for the ``GOPrediction`` JSONB dual-write helper (T3.1a).
+"""Tests for the ``GOPrediction`` feature writer + JSONB helper.
 
 Two tiers:
 
-1. Pure-function tests of ``build_feature_jsonb`` and ``from_json`` —
-   stable shape, identity-key exclusion, NaN-safety (caller's job;
-   helper just mirrors), round-trip equivalence.
-2. End-to-end integration through ``StorePredictionsOperation`` against
-   a real Postgres container, asserting that every typed feature column
-   on the inserted ``GOPrediction`` row has a matching value in the
-   ``features`` JSONB blob (gated by ``--with-postgres``).
+1. Pure-function tests of ``build_feature_jsonb`` and ``from_json`` — stable
+   shape, identity-key exclusion, NaN-safety, round-trip equivalence. These
+   helpers are retained for legacy blob rows; the live writer no longer calls
+   them.
+2. Writer-site + end-to-end integration through ``StorePredictionsOperation``,
+   asserting that after the signal-store code-switch every feature (base +
+   LAFA + IA) lands in a typed ``GOPrediction`` column and the redundant
+   ``features`` JSONB blob is no longer written (gated by ``--with-postgres``
+   for the DB round-trip).
 
-The integration test is the load-bearing one: it catches any future
-writer site that bypasses ``_row_from_prediction`` (which is the only
-path through which the dual-write runs).
+The integration test is the load-bearing one: it catches any future writer
+site that bypasses ``_row_from_prediction`` (the only path that builds the row).
 """
 
 from __future__ import annotations
@@ -21,7 +22,6 @@ import math
 import uuid
 from unittest.mock import MagicMock
 
-import numpy as np
 import pytest
 
 from protea.core.operations.predict_go_terms import (
@@ -195,12 +195,12 @@ class TestFromJson:
 # ---------------------------------------------------------------------------
 
 
-class TestRowFromPredictionDualWrite:
-    """``_row_from_prediction`` is the canonical writer; it must always
-    attach a ``features`` blob whose values mirror the typed columns.
+class TestRowFromPredictionTypedWrite:
+    """Signal-store code-switch: ``_row_from_prediction`` writes every feature
+    to a typed column and no longer emits the redundant ``features`` JSONB blob.
     """
 
-    def test_row_includes_features_blob(self) -> None:
+    def test_row_has_no_features_blob(self) -> None:
         pred_set_id = uuid.uuid4()
         pred = {
             "protein_accession": "P12345",
@@ -216,33 +216,22 @@ class TestRowFromPredictionDualWrite:
             "emb_pca_query_0": 0.1,
         }
         row = _row_from_prediction(pred, pred_set_id)
-        assert "features" in row
-        blob = row["features"]
-        assert isinstance(blob, dict)
-        # Mirror invariant: every feature key the row carries must
-        # match the blob exactly. Identity keys must NOT leak in.
-        for k in (
-            "prediction_set_id",
-            "protein_accession",
-            "go_term_id",
-            "ref_protein_accession",
-        ):
-            assert k not in blob
-        assert blob["distance"] == row["distance"]
-        assert blob["vote_count"] == row["vote_count"]
-        assert blob["k_position"] == row["k_position"]
-        assert blob["neighbor_min_distance"] == row["neighbor_min_distance"]
-        assert blob["anc2vec_neighbor_cos"] == row["anc2vec_neighbor_cos"]
-        assert blob["emb_pca_query_0"] == row["emb_pca_query_0"]
-        # Unset features mirror as None in both row and blob.
+        assert "features" not in row
+        # Typed columns carry the values.
+        assert row["distance"] == 0.15
         assert row["vote_count"] == 3
+        assert row["k_position"] == 1
+        assert row["neighbor_min_distance"] == 0.05
+        assert row["anc2vec_neighbor_cos"] == 0.8
+        assert row["emb_pca_query_0"] == 0.1
+        # Unset feature -> None typed column.
         assert row["alignment_score_nw"] is None
-        assert blob["alignment_score_nw"] is None
 
-    def test_nan_cleaned_in_blob(self) -> None:
-        """NaN / inf are scrubbed by ``_clean_float`` BEFORE the blob is
-        built, so the JSONB never carries a non-finite float (would
-        break Postgres JSONB serialisation in some clients)."""
+    def test_nan_cleaned_in_typed_columns(self) -> None:
+        """NaN / inf are scrubbed by ``_clean_float`` before the row lands in
+        Postgres. (The typed float8 columns could hold NaN, but ``_clean_float``
+        keeps them out so LightGBM's native missing branch is used downstream.)
+        """
         pred_set_id = uuid.uuid4()
         pred = {
             "protein_accession": "P12345",
@@ -255,25 +244,23 @@ class TestRowFromPredictionDualWrite:
         row = _row_from_prediction(pred, pred_set_id)
         assert row["neighbor_distance_std"] is None
         assert row["anc2vec_neighbor_cos"] is None
-        blob = row["features"]
-        assert blob["neighbor_distance_std"] is None
-        assert blob["anc2vec_neighbor_cos"] is None
-        # ``math.isnan`` guard to make the intent unmistakable.
-        assert not isinstance(blob["neighbor_distance_std"], float) or not math.isnan(
-            blob["neighbor_distance_std"]
-        )
+        assert "features" not in row
+        # No non-finite float survives anywhere in the row.
+        for value in row.values():
+            assert not (isinstance(value, float) and not math.isfinite(value))
 
 
 class TestLafaFeaturePersistence:
-    """LAFA per-category families (classifier / self_prior / association)
-    have no typed ``GOPrediction`` column; they must ride the ``features``
-    JSONB blob, and ONLY when the prediction dict carries them (i.e. the
-    matching compute flag was on at predict time).
+    """LAFA per-category families (classifier / self_prior / association) + IA
+    now write to typed ``GOPrediction`` columns (signal-store code-switch), and
+    ONLY when the prediction dict carries them (the matching compute flag was on
+    at predict time). IA maps the predict-dict ``IA`` key to the typed ``ia``
+    column.
     """
 
-    def test_lafa_keys_persisted_when_present(self) -> None:
+    def test_lafa_columns_persisted_when_present(self) -> None:
         from protea.core.operations.predict_go_terms._common import (
-            _LAFA_JSONB_FEATURE_KEYS,
+            _LAFA_TYPED_FEATURE_KEYS,
         )
 
         pred_set_id = uuid.uuid4()
@@ -291,15 +278,17 @@ class TestLafaFeaturePersistence:
             "association_present": 1.0,
             "IA": 7.5,
         }
-        blob = _row_from_prediction(pred, pred_set_id)["features"]
-        for key in _LAFA_JSONB_FEATURE_KEYS:
-            assert blob[key] == pred[key], f"mismatch on {key}"
+        row = _row_from_prediction(pred, pred_set_id)
+        for key in _LAFA_TYPED_FEATURE_KEYS:
+            assert row[key] == pred[key], f"mismatch on {key}"
+        assert row["ia"] == 7.5
+        assert "features" not in row
 
-    def test_default_run_writes_no_lafa_keys(self) -> None:
-        """Flags off: the dict carries no LAFA keys, so the blob keeps its
-        canonical shape exactly (golden / parity stay unchanged)."""
+    def test_default_run_leaves_lafa_columns_none(self) -> None:
+        """Flags off: the dict carries no LAFA/IA keys, so those typed columns
+        are NULL (LightGBM missing branch), the same as legacy rows."""
         from protea.core.operations.predict_go_terms._common import (
-            _LAFA_JSONB_FEATURE_KEYS,
+            _LAFA_TYPED_FEATURE_KEYS,
         )
 
         pred_set_id = uuid.uuid4()
@@ -310,15 +299,14 @@ class TestLafaFeaturePersistence:
             "distance": 0.15,
             "vote_count": 3,
         }
-        blob = _row_from_prediction(pred, pred_set_id)["features"]
-        # No LAFA key leaked in; the canonical key set is unchanged.
-        assert set(blob.keys()) == set(FEATURE_JSONB_KEYS)
-        for key in _LAFA_JSONB_FEATURE_KEYS:
-            assert key not in blob
+        row = _row_from_prediction(pred, pred_set_id)
+        for key in _LAFA_TYPED_FEATURE_KEYS:
+            assert row[key] is None
+        assert row["ia"] is None
 
-    def test_lafa_keys_partial_presence(self) -> None:
-        """Only the families whose flag was on are written; the rest stay
-        absent (a self_prior-only run carries just ``self_prior_score``)."""
+    def test_lafa_columns_partial_presence(self) -> None:
+        """Only the families whose flag was on are set; the rest stay None
+        (a self_prior-only run carries just ``self_prior_score``)."""
         pred_set_id = uuid.uuid4()
         pred = {
             "protein_accession": "P1",
@@ -327,14 +315,15 @@ class TestLafaFeaturePersistence:
             "distance": 0.2,
             "self_prior_score": 1.0,
         }
-        blob = _row_from_prediction(pred, pred_set_id)["features"]
-        assert blob["self_prior_score"] == 1.0
-        assert "classifier_score" not in blob
-        assert "association_total" not in blob
+        row = _row_from_prediction(pred, pred_set_id)
+        assert row["self_prior_score"] == 1.0
+        assert row["classifier_score"] is None
+        assert row["association_total"] is None
+        assert row["ia"] is None
 
     def test_lafa_nan_cleaned(self) -> None:
-        """Non-finite LAFA values are scrubbed to ``None`` like the typed
-        dual-write, so the JSONB never carries a non-finite float."""
+        """Non-finite LAFA / IA values are scrubbed to ``None`` by
+        ``_clean_float`` before the row is inserted."""
         pred_set_id = uuid.uuid4()
         pred = {
             "protein_accession": "P1",
@@ -342,9 +331,11 @@ class TestLafaFeaturePersistence:
             "ref_protein_accession": "Q1",
             "distance": 0.2,
             "association_total": float("nan"),
+            "IA": float("inf"),
         }
-        blob = _row_from_prediction(pred, pred_set_id)["features"]
-        assert blob["association_total"] is None
+        row = _row_from_prediction(pred, pred_set_id)
+        assert row["association_total"] is None
+        assert row["ia"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -352,14 +343,13 @@ class TestLafaFeaturePersistence:
 # ---------------------------------------------------------------------------
 
 
-class TestStorePredictionsDualWriteSurface:
-    """At the ORM-call level, the rows passed to the bulk insert must
-    each carry the ``features`` JSONB blob alongside the typed columns.
-    Catches regressions where a future writer bypasses
-    ``_row_from_prediction``.
+class TestStorePredictionsTypedWriteSurface:
+    """At the ORM-call level, the rows passed to the bulk insert carry the
+    typed feature columns and no longer carry a ``features`` JSONB blob.
+    Catches regressions where a future writer bypasses ``_row_from_prediction``.
     """
 
-    def test_bulk_insert_rows_carry_features_blob(self) -> None:
+    def test_bulk_insert_rows_carry_typed_columns(self) -> None:
         op = StorePredictionsOperation()
         session = MagicMock()
         parent = MagicMock()
@@ -389,9 +379,9 @@ class TestStorePredictionsDualWriteSurface:
         first_call = session.execute.call_args_list[0]
         rows = first_call.args[1]
         assert len(rows) == 1
-        assert "features" in rows[0]
-        assert rows[0]["features"]["distance"] == 0.15
-        assert rows[0]["features"]["vote_count"] == 3
+        assert "features" not in rows[0]
+        assert rows[0]["distance"] == 0.15
+        assert rows[0]["vote_count"] == 3
 
 
 # ---------------------------------------------------------------------------
@@ -400,10 +390,10 @@ class TestStorePredictionsDualWriteSurface:
 
 
 @pytest.mark.integration
-def test_dual_write_roundtrip_features_blob_matches_typed(postgres_url: str):
-    """End-to-end: feed ``StorePredictionsOperation`` real rows, verify
-    the persisted ``features`` JSONB blob matches every typed column
-    value on the same row."""
+def test_typed_write_roundtrip_no_features_blob(postgres_url: str):
+    """End-to-end: feed ``StorePredictionsOperation`` real rows, verify the
+    feature values (base + LAFA + IA) land in typed columns and the ``features``
+    JSONB blob is NOT written (signal-store code-switch)."""
     from sqlalchemy import create_engine
     from sqlalchemy.orm import Session
 
@@ -422,9 +412,6 @@ def test_dual_write_roundtrip_features_blob_matches_typed(postgres_url: str):
     )
     from protea.infrastructure.orm.models.embedding.go_prediction import (
         GOPrediction,
-    )
-    from protea.infrastructure.orm.models.embedding.go_prediction_features import (
-        FEATURE_JSONB_KEYS,
     )
     from protea.infrastructure.orm.models.embedding.prediction_set import (
         PredictionSet,
@@ -513,6 +500,14 @@ def test_dual_write_roundtrip_features_blob_matches_typed(postgres_url: str):
                 "tax_voters_same_frac": 0.25,
                 "emb_pca_query_0": 0.1,
                 "emb_pca_query_15": -0.2,
+                # LAFA + IA now land in typed columns.
+                "classifier_score": 0.73,
+                "classifier_present": 1.0,
+                "self_prior_score": 1.0,
+                "association_total": 0.4,
+                "association_cross": 0.1,
+                "association_present": 1.0,
+                "IA": 7.5,
             },
         ],
     }
@@ -527,22 +522,25 @@ def test_dual_write_roundtrip_features_blob_matches_typed(postgres_url: str):
         assert len(rows) == 1
         row = rows[0]
 
-        # JSONB blob is populated.
-        assert row.features is not None
-        blob = row.features
+        # Signal-store code-switch: the redundant JSONB blob is NOT written.
+        assert row.features is None
 
-        # Stable shape: every canonical key present.
-        assert set(blob.keys()) == set(FEATURE_JSONB_KEYS)
+        # Base features landed in their typed columns.
+        assert row.distance == pytest.approx(0.15)
+        assert row.identity_nw == pytest.approx(0.42)
+        assert row.vote_count == 4
+        assert row.taxonomic_distance == 3
+        assert row.anc2vec_neighbor_cos == pytest.approx(0.77)
+        assert row.emb_pca_query_0 == pytest.approx(0.1)
+        assert row.emb_pca_query_15 == pytest.approx(-0.2)
 
-        # Each typed column value matches the JSONB mirror.
-        for key in FEATURE_JSONB_KEYS:
-            typed = getattr(row, key)
-            mirrored = blob[key]
-            if typed is None:
-                assert mirrored is None, f"{key}: typed is None but JSONB has {mirrored}"
-            elif isinstance(typed, float):
-                np.testing.assert_allclose(
-                    mirrored, typed, atol=1e-9, err_msg=f"{key}: typed={typed} blob={mirrored}"
-                )
-            else:
-                assert mirrored == typed, f"{key}: typed={typed} blob={mirrored}"
+        # LAFA families landed in their typed columns.
+        assert row.classifier_score == pytest.approx(0.73)
+        assert row.classifier_present == pytest.approx(1.0)
+        assert row.self_prior_score == pytest.approx(1.0)
+        assert row.association_total == pytest.approx(0.4)
+        assert row.association_cross == pytest.approx(0.1)
+        assert row.association_present == pytest.approx(1.0)
+
+        # IA landed in the typed ``ia`` column (predict-dict ``IA`` key).
+        assert row.ia == pytest.approx(7.5)

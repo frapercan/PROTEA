@@ -56,8 +56,15 @@ EVAL_FIXTURE = FIXTURE_DIR / "parquet_export_golden_eval.parquet"
 # 11-column interpro feature family (67 columns total), superseding
 # the prior ``"6d97a624b8a7"``. lafa-integrate adds the 6 classifier /
 # self_prior / association columns (73 columns total), superseding
-# the prior ``"ebb8af49befd"``.
-_LEGACY_FIXTURE_SHA = "775611822dd9"
+# the prior ``"ebb8af49befd"``. contracts v1.5.0 adds the 3 protst_text
+# columns (76 feature columns total), superseding the prior
+# ``"775611822dd9"``. The eef6cf4 legacy oracle predates the
+# pool-injected (``plm_id`` / ``k_context``) exclusion that the current
+# canonical output applies (ADR-D45), so from the v1.4.0 reconciliation
+# onward the roll-forward reference is captured from the current
+# canonical writer (which drops pool-injected) rather than the raw
+# legacy path; the gate still guards dtype / order / compression drift.
+_LEGACY_FIXTURE_SHA = "e9981e263df6"
 
 
 def _full_feature_row() -> dict[str, object]:

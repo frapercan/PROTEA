@@ -278,3 +278,68 @@ def test_export_union_byte_identical_with_vs_without_cache(tmp_path: Path) -> No
         with_cache = _union(base_records, _FakeSession(["Q1", "Q2"]), snapshot_id, gid_by_go)
 
     assert no_cache == with_cache
+
+
+# --------------------------------------------------------------------------- #
+# per-cut GO codes: cache-key isolation + impl-guarded resolution
+# --------------------------------------------------------------------------- #
+def test_clf_cache_key_isolates_go_codes() -> None:
+    """Distinct go_codes shas (distinct cuts) key distinct entries; same -> same."""
+    from protea.core.classifier_producer import _clf_cache_key
+
+    k_v227 = _clf_cache_key("Q1", "ckpt", "codes227")
+    k_v230 = _clf_cache_key("Q1", "ckpt", "codes230")
+    assert k_v227 != k_v230  # different t0 -> different key
+    assert k_v227 == _clf_cache_key("Q1", "ckpt", "codes227")  # same t0 -> same key
+    # Empty codes sha (M2 / single-artifact two-tower) keeps today's 3-part key.
+    assert _clf_cache_key("Q1", "ckpt") == _clf_cache_key("Q1", "ckpt", "")
+    assert "codes227" not in _clf_cache_key("Q1", "ckpt")
+
+
+def _spec_with_t0(t0: Any) -> Any:
+    import uuid
+
+    from protea.core.training_dump._export_features import ClassifierUnionSpec
+
+    return ClassifierUnionSpec(ontology_snapshot_id=uuid.uuid4(), t0_annotation_set_id=t0)
+
+
+def test_resolve_per_cut_go_codes_noop_for_m2() -> None:
+    """The M2 impl never selects per-cut codes even with a t0 on the spec."""
+    import uuid
+
+    from protea.core.training_dump._export_features import _resolve_per_cut_go_codes
+
+    spec = _spec_with_t0(uuid.uuid4())
+    assert _resolve_per_cut_go_codes(object(), spec, "m2") is None
+
+
+def test_resolve_per_cut_go_codes_two_tower(tmp_path: Path, monkeypatch: Any) -> None:
+    """Two-tower impl + configured dir resolves this cut's t0 to its codes file."""
+    import uuid
+
+    from protea.core import two_tower_classifier as tt
+    from protea.core.training_dump._export_features import _resolve_per_cut_go_codes
+
+    codes_dir = tmp_path / "per_cut"
+    codes_dir.mkdir()
+    target = codes_dir / "go_sparse_codes_v227.npz"
+    target.write_bytes(b"x")
+    monkeypatch.setenv(tt._GO_CODES_DIR_ENV, str(codes_dir))
+
+    spec = _spec_with_t0(uuid.uuid4())
+
+    def _fake_resolve(_session: Any, t0: Any) -> str:
+        assert t0 == spec.t0_annotation_set_id
+        return str(target)
+
+    monkeypatch.setattr(tt, "resolve_per_cut_go_codes_path", _fake_resolve)
+    assert _resolve_per_cut_go_codes(object(), spec, "two_tower_sparse") == str(target)
+
+
+def test_resolve_per_cut_go_codes_none_without_t0() -> None:
+    """No t0 on the spec -> no per-cut selection (single fixed artifact)."""
+    from protea.core.training_dump._export_features import _resolve_per_cut_go_codes
+
+    spec = _spec_with_t0(None)
+    assert _resolve_per_cut_go_codes(object(), spec, "two_tower_sparse") is None

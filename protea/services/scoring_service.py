@@ -94,6 +94,7 @@ class SignalCoverageError(ScoringServiceError):
 # router/CLI imports keep working unchanged.
 from protea.services._scoring_models import (  # noqa: E402,F401
     PRESET_CONFIGS,
+    RerankedPairResponse,
     RerankerResponse,
     ScoringConfigCreate,
     ScoringConfigResponse,
@@ -303,6 +304,7 @@ from protea.services._scoring_metrics_helpers import (  # noqa: E402,F401
 )
 from protea.services._scoring_pipeline_helpers import (  # noqa: E402,F401
     score_predictions_with_reranker,
+    score_single_pair_with_reranker,
 )
 
 # compute_prediction_metrics lives in _scoring_prediction_metrics_helpers and
@@ -324,6 +326,7 @@ __all__ = [
     "PRESET_CONFIGS",
     "BoosterUnavailableError",
     "EntityNotFoundError",
+    "RerankedPairResponse",
     "RerankerResponse",
     "ScoringConfigCreate",
     "ScoringConfigResponse",
@@ -338,6 +341,7 @@ __all__ = [
     "load_booster",
     "prepare_training_data_request",
     "score_predictions_with_reranker",
+    "score_single_pair_with_reranker",
     "snapshot_config",
     "to_reranker_response",
     "to_response",

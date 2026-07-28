@@ -7,8 +7,6 @@ T2B.6. Behaviour is unchanged.
 from __future__ import annotations
 
 import gc
-import shutil
-import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -38,6 +36,15 @@ from protea.core.training_dump._data_loaders import (
     _preload_all_embeddings,
 )
 from protea.core.training_dump._payload import TrainRerankerAutoPayload
+from protea.core.training_dump._resume import (
+    ResumeSession,
+    config_fingerprint,
+    open_resume_session,
+    record_to_test_files,
+    record_to_train_outcome,
+    test_files_to_record,
+    train_outcome_to_record,
+)
 from protea.core.training_dump._test_split import _run_test_split
 from protea.core.training_dump._train_split import _run_train_split
 from protea.infrastructure.orm.models.embedding.embedding_config import EmbeddingConfig
@@ -70,17 +77,33 @@ class _DumpRunner:
         self._resolve_setup()
         self._load_inputs()
         self._init_accumulators()
-        self.tmp_dir = Path(tempfile.mkdtemp(prefix="protea_reranker_"))
-        try:
-            self._run_train_splits()
-            if not any(self.split_files[c] for c in _CATEGORIES):
-                raise ValueError("No training data produced from any split")
-            self._run_test_split()
-            del self.all_embeddings, self.all_accessions, self.acc_to_idx
-            gc.collect()
-            return self._dump()
-        finally:
-            shutil.rmtree(self.tmp_dir, ignore_errors=True)
+        # F-EXP-RESET: stable, resumable staging dir keyed by the dataset
+        # name + a fingerprint of the cut-affecting config. Replaces the
+        # ephemeral ``tempfile.mkdtemp`` that was wiped in a ``finally`` (a
+        # cancel / kill / reboot then restarted from cut 1, losing ~10h).
+        self._resume: ResumeSession = open_resume_session(
+            self.p.name, config_fingerprint(self.p)
+        )
+        self.tmp_dir = self._resume.dir
+        self.emit(
+            "dump_helper.resume_dir",
+            None,
+            {"staging_dir": str(self.tmp_dir)},
+            "info",
+        )
+        self._run_train_splits()
+        if not any(self.split_files[c] for c in _CATEGORIES):
+            raise ValueError("No training data produced from any split")
+        self._run_test_split()
+        del self.all_embeddings, self.all_accessions, self.acc_to_idx
+        gc.collect()
+        result = self._dump()
+        # Success only: the consolidated dataset is assembled, so the
+        # staging shards + markers are safe to discard. A failure (or a
+        # kill) above intentionally leaves the directory in place so the
+        # next run resumes from the first unfinished cut, not cut 1.
+        self._resume.cleanup()
+        return result
 
     def _resolve_setup(self) -> None:
         """Phase 1: validate IDs, resolve annotation sets, emit start."""
@@ -171,7 +194,7 @@ class _DumpRunner:
     def _run_train_splits(self) -> None:
         train_ctx = self._train_split_context()
         for i in range(len(self.p.train_versions) - 1):
-            outcome = _run_train_split(self.session, train_ctx, i, self.emit)
+            outcome = self._train_split_or_resume(train_ctx, i)
             for cat, path in outcome.split_files.items():
                 self.split_files[cat].append(path)
             if not outcome.skipped:
@@ -180,10 +203,34 @@ class _DumpRunner:
                 )
             self.per_split_stats.append(outcome.stats)
 
+    def _train_split_or_resume(self, train_ctx: _TrainSplitContext, i: int) -> Any:
+        """Run train cut ``i`` or restore it from a completed done-marker."""
+        if self._resume.is_complete("train", i):
+            outcome = record_to_train_outcome(self._resume.read_record("train", i))
+            self.emit(
+                "dump_helper.split_resumed",
+                None,
+                {"split": i + 1, "skipped": outcome.skipped},
+                "info",
+            )
+            return outcome
+        outcome = _run_train_split(self.session, train_ctx, i, self.emit)
+        self._resume.write_record("train", i, train_outcome_to_record(outcome))
+        return outcome
+
     def _run_test_split(self) -> None:
         _eset, test_eval_data, self.test_old_v, self.test_new_v = _resolve_test_eval_inputs(
             self.session, self.p.train_versions, self.p.test_versions, self.version_to_set
         )
+        if self._resume.is_complete("test", 0):
+            self.test_files = record_to_test_files(self._resume.read_record("test", 0))
+            self.emit(
+                "dump_helper.test_resumed",
+                None,
+                {"test_old": self.test_old_v, "test_new": self.test_new_v},
+                "info",
+            )
+            return
         test_old_set_id = self.version_to_set[self.test_old_v]
         self.emit(
             "dump_helper.test_knn",
@@ -214,6 +261,7 @@ class _DumpRunner:
             ),
             self.emit,
         )
+        self._resume.write_record("test", 0, test_files_to_record(self.test_files))
 
     def _dump(self) -> OperationResult:
         return _perform_dataset_dump(

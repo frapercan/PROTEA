@@ -150,6 +150,48 @@ def to_reranker_response(m: RerankerModel, dataset: Dataset | None = None) -> Re
     )
 
 
+class RerankedPairResponse(BaseModel):
+    """Single ``(accession, go_term)`` reranked-score lookup result.
+
+    Field names and semantics mirror the ``rerank.tsv`` columns exactly
+    so the value returned here is the same number the bulk stream emits
+    for the corresponding row. Produced by
+    :func:`score_single_pair_with_reranker`, which reuses the identical
+    :func:`score_predictions_with_reranker` scoring pass the bulk TSV
+    uses and selects the one matching row.
+    """
+
+    protein_accession: str = Field(
+        ..., description="Query protein accession the score belongs to."
+    )
+    go_id: str = Field(..., description="GO term the score was computed for.")
+    aspect: str | None = Field(
+        default=None,
+        description="GO aspect (``F`` / ``P`` / ``C``) of the term; empty when unknown.",
+    )
+    reranker_score: float = Field(
+        ...,
+        description=(
+            "Fused/reranked probability in [0, 1] for this pair. Byte-for-byte "
+            "the same value the bulk ``rerank.tsv`` produces for this row "
+            "(same booster pass over the full prediction set)."
+        ),
+    )
+    distance: float | None = Field(
+        default=None, description="KNN embedding distance of the backing neighbour."
+    )
+    ref_protein_accession: str | None = Field(
+        default=None,
+        description="Reference (neighbour) protein the annotation was transferred from.",
+    )
+    evidence_code: str | None = Field(
+        default=None, description="GO evidence code of the transferred annotation."
+    )
+    qualifier: str | None = Field(
+        default=None, description="GO qualifier of the transferred annotation."
+    )
+
+
 class ScoringConfigCreate(BaseModel):
     """Request body for ``POST /scoring/configs``.
 

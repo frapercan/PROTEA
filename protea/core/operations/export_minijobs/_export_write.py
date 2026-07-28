@@ -11,11 +11,12 @@ message per snapshot pair onto ``protea.training.write``. The
    every shard URI without a second cross-stage payload.
 2. Atomically increments the parent's ``progress_current``. The
    delivery that wins the race to bring ``progress_current ==
-   progress_total`` becomes the *assembler*: it concatenates every
-   per-pair feature parquet into ``train.parquet`` + ``eval.parquet``,
-   builds + uploads ``manifest.json``, inserts the ``Dataset`` row,
-   emits ``dataset.created`` + ``pair_write_done``, and transitions
-   the parent job to ``SUCCEEDED``.
+   progress_total`` becomes the *assembler*: it STREAMS every per-pair
+   feature parquet into ``train.parquet`` + ``eval.parquet`` (one batch
+   resident via a ``pyarrow`` ``ParquetWriter``, not a whole-split
+   ``pd.concat``), builds + uploads ``manifest.json``, inserts the
+   ``Dataset`` row, emits ``dataset.created`` + ``pair_write_done``,
+   and transitions the parent job to ``SUCCEEDED``.
 3. Best-effort cleans up the temp shards after a successful upload.
 
 The assembled layout mirrors the monolithic
@@ -33,7 +34,8 @@ import uuid
 from pathlib import Path
 from typing import Any, NamedTuple
 
-import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 from sqlalchemy import select
 from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session
@@ -54,6 +56,12 @@ from protea.infrastructure.storage import get_artifact_store
 _LOG = logging.getLogger(__name__)
 
 _PAIR_RECEIVED_EVENT = "pair_write_received"
+
+#: Rows materialised at once while streaming a per-pair shard into the
+#: consolidated split parquet. Only one batch is resident, so the
+#: assembler RSS stays bounded instead of the old whole-split
+#: ``pd.concat`` that spiked to ~54 GB and forced ``PROTEA_EXPORT_MINIJOBS=0``.
+_STREAM_BATCH_ROWS = 200_000
 
 
 class ExportWritePayload(ProteaPayload, frozen=True):
@@ -231,58 +239,137 @@ def _load_all_pair_shards(session: Session, parent_id: uuid.UUID) -> list[_Shard
     return list(by_pair.values())
 
 
-def _load_shard_df(store: Any, temp_uri: str) -> pd.DataFrame:
-    """Download a per-pair parquet shard and return it as a DataFrame."""
-    if not temp_uri or temp_uri == _EMPTY_SHARD_URI:
-        return pd.DataFrame()
-    raw = store.get(_uri_to_key(temp_uri))
+class _StreamShardWriter:
+    """Streaming writer for one consolidated split parquet.
+
+    Opens a single :class:`pyarrow.parquet.ParquetWriter` lazily on the
+    first non-empty batch (so an all-empty split leaves no file, matching
+    the legacy ``if not df.empty`` guard) and appends ``snapshot_pair``
+    to each batch. Only one ~200k-row batch is ever resident, replacing
+    the whole-split ``pd.concat`` that spiked to ~54 GB.
+    """
+
+    def __init__(self, out_path: Path) -> None:
+        self.out_path = out_path
+        self.n_rows = 0
+        self.schema: pa.Schema | None = None
+        self._writer: pq.ParquetWriter | None = None
+
+    @property
+    def wrote(self) -> bool:
+        return self.schema is not None
+
+    def write_table(self, table: pa.Table) -> None:
+        if table.num_rows == 0:
+            return
+        if self._writer is None:
+            self.schema = table.schema
+            self._writer = pq.ParquetWriter(
+                str(self.out_path), table.schema, compression="snappy"
+            )
+        self._writer.write_table(table)
+        self.n_rows += table.num_rows
+
+    def close(self) -> None:
+        if self._writer is not None:
+            self._writer.close()
+            self._writer = None
+
+
+class _StreamAssembly(NamedTuple):
+    """Result of streaming per-pair shards into the consolidated splits."""
+
+    train_path: Path | None
+    eval_path: Path | None
+    train_pairs: list[str]
+    eval_pair: str | None
+    n_train_rows: int
+    n_eval_rows: int
+    schema_sha: str
+
+
+def _stream_shard_into(
+    store: Any, entry: _ShardEntry, writer: _StreamShardWriter
+) -> None:
+    """Stream one per-pair shard into ``writer`` batch by batch.
+
+    Downloads the shard, stamps ``snapshot_pair`` on every batch, and
+    writes through the consolidated-split ``ParquetWriter``. Empty
+    sentinel shards (``_EMPTY_SHARD_URI`` or a zero-column parquet) are
+    skipped without materialising anything.
+    """
+    if not entry.temp_uri or entry.temp_uri == _EMPTY_SHARD_URI:
+        return
+    raw = store.get(_uri_to_key(entry.temp_uri))
     with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as tmp:
         path = Path(tmp.name)
         path.write_bytes(raw)
     try:
-        return pd.read_parquet(str(path))
+        pf = pq.ParquetFile(str(path))
+        if pf.metadata is None or pf.metadata.num_columns == 0:
+            return  # empty-shard sentinel: no columns to consolidate.
+        for batch in pf.iter_batches(batch_size=_STREAM_BATCH_ROWS):
+            if batch.num_rows == 0:
+                continue
+            table = pa.Table.from_batches([batch])
+            snap = pa.array([entry.pair_id] * table.num_rows, type=pa.string())
+            writer.write_table(table.append_column("snapshot_pair", snap))
     finally:
         path.unlink(missing_ok=True)
 
 
-def _stage_concat(store: Any, shards: list[_ShardEntry]) -> tuple[pd.DataFrame, pd.DataFrame, list[str], str | None]:
-    """Concat per-pair shards into ``(train_df, eval_df, train_pairs, eval_pair)``."""
-    train_frames: list[pd.DataFrame] = []
-    eval_frames: list[pd.DataFrame] = []
+def _stream_assemble(
+    store: Any, shards: list[_ShardEntry], stage_dir: Path
+) -> _StreamAssembly:
+    """Stream per-pair shards into ``train.parquet`` / ``eval.parquet``.
+
+    Replaces the whole-split ``pd.concat`` (the ~54 GB write-OOM that
+    forced ``PROTEA_EXPORT_MINIJOBS=0``) with a per-batch
+    ``ParquetWriter`` stream. ``snapshot_pair`` is stamped on every row
+    exactly as the legacy concat did, and the column set / order is the
+    per-pair shard's canonical schema plus the trailing ``snapshot_pair``,
+    so the published schema is unchanged.
+    """
+    train_writer = _StreamShardWriter(stage_dir / "train.parquet")
+    eval_writer = _StreamShardWriter(stage_dir / "eval.parquet")
     train_pairs: list[str] = []
     eval_pair: str | None = None
-    # Sort for deterministic ordering: train-* first by pair_id, then eval-*.
-    for entry in sorted(shards, key=lambda e: (e.is_eval, e.pair_id)):
-        df = _load_shard_df(store, entry.temp_uri)
-        if df.empty:
-            if entry.is_eval and eval_pair is None:
-                eval_pair = entry.pair_id
-            elif not entry.is_eval and entry.pair_id not in train_pairs:
-                train_pairs.append(entry.pair_id)
-            continue
-        df["snapshot_pair"] = entry.pair_id
-        if entry.is_eval:
-            eval_frames.append(df)
-            if eval_pair is None:
-                eval_pair = entry.pair_id
-        else:
-            train_frames.append(df)
-            if entry.pair_id not in train_pairs:
-                train_pairs.append(entry.pair_id)
-    train_df = pd.concat(train_frames, ignore_index=True) if train_frames else pd.DataFrame()
-    eval_df = pd.concat(eval_frames, ignore_index=True) if eval_frames else pd.DataFrame()
-    return train_df, eval_df, train_pairs, eval_pair
+    try:
+        # Sort for deterministic ordering: train-* first by pair_id, then eval-*.
+        for entry in sorted(shards, key=lambda e: (e.is_eval, e.pair_id)):
+            if entry.is_eval:
+                if eval_pair is None:
+                    eval_pair = entry.pair_id
+                _stream_shard_into(store, entry, eval_writer)
+            else:
+                if entry.pair_id not in train_pairs:
+                    train_pairs.append(entry.pair_id)
+                _stream_shard_into(store, entry, train_writer)
+    finally:
+        train_writer.close()
+        eval_writer.close()
+    return _StreamAssembly(
+        train_path=train_writer.out_path if train_writer.wrote else None,
+        eval_path=eval_writer.out_path if eval_writer.wrote else None,
+        train_pairs=train_pairs,
+        eval_pair=eval_pair,
+        n_train_rows=train_writer.n_rows,
+        n_eval_rows=eval_writer.n_rows,
+        schema_sha=_schema_sha_from_writers(train_writer, eval_writer),
+    )
 
 
-def _compute_schema_sha(train_df: pd.DataFrame, eval_df: pd.DataFrame) -> str:
-    """SHA-256 over the canonical column list of the assembled train shard.
+def _schema_sha_from_writers(
+    train_writer: _StreamShardWriter, eval_writer: _StreamShardWriter
+) -> str:
+    """SHA-256 (12 hex) over the sorted column names of the assembled split.
 
     Mirrors :func:`protea.core.parquet_export._compute_schema_sha` shape
-    (12 hex chars) so downstream readers see the same fingerprint
-    format regardless of producer path.
+    so downstream readers see the same fingerprint format regardless of
+    producer path. Prefers the train schema, falling back to eval.
     """
-    frame = train_df if not train_df.empty else eval_df
-    cols = sorted(str(c) for c in frame.columns) if not frame.empty else []
+    schema = train_writer.schema if train_writer.wrote else eval_writer.schema
+    cols = sorted(str(c) for c in schema.names) if schema is not None else []
     return hashlib.sha256(json.dumps(cols, sort_keys=True).encode()).hexdigest()[:12]
 
 
@@ -318,31 +405,32 @@ def _build_manifest(
 def _upload_artefacts(
     store: Any,
     key_prefix: str,
-    train_df: pd.DataFrame,
-    eval_df: pd.DataFrame,
+    asm: _StreamAssembly,
     manifest: dict[str, Any],
+    stage: Path,
 ) -> tuple[str | None, str | None, str, str]:
-    """Write + upload ``train.parquet`` / ``eval.parquet`` / ``manifest.json``.
+    """Upload the streamed ``train``/``eval`` parquets + ``manifest.json``.
 
-    Returns ``(train_uri, eval_uri, manifest_uri, manifest_sha)``.
+    The split parquets were already streamed to disk under ``stage`` by
+    :func:`_stream_assemble`; this only uploads them (no whole-frame
+    ``to_parquet``). Returns ``(train_uri, eval_uri, manifest_uri,
+    manifest_sha)``.
     """
-    with tempfile.TemporaryDirectory(prefix="protea_export_write_") as tmp:
-        stage = Path(tmp)
-        train_uri: str | None = None
-        eval_uri: str | None = None
-        if not train_df.empty:
-            train_path = stage / "train.parquet"
-            train_df.to_parquet(train_path, index=False, compression="snappy")
-            train_uri = store.put(key_prefix + "/train.parquet", train_path)
-        if not eval_df.empty:
-            eval_path = stage / "eval.parquet"
-            eval_df.to_parquet(eval_path, index=False, compression="snappy")
-            eval_uri = store.put(key_prefix + "/eval.parquet", eval_path)
-        manifest_bytes = json.dumps(manifest, indent=2, sort_keys=True).encode()
-        manifest_sha = hashlib.sha256(manifest_bytes).hexdigest()
-        manifest_path = stage / "manifest.json"
-        manifest_path.write_bytes(manifest_bytes)
-        manifest_uri = store.put(key_prefix + "/manifest.json", manifest_path)
+    train_uri = (
+        store.put(key_prefix + "/train.parquet", asm.train_path)
+        if asm.train_path is not None
+        else None
+    )
+    eval_uri = (
+        store.put(key_prefix + "/eval.parquet", asm.eval_path)
+        if asm.eval_path is not None
+        else None
+    )
+    manifest_bytes = json.dumps(manifest, indent=2, sort_keys=True).encode()
+    manifest_sha = hashlib.sha256(manifest_bytes).hexdigest()
+    manifest_path = stage / "manifest.json"
+    manifest_path.write_bytes(manifest_bytes)
+    manifest_uri = store.put(key_prefix + "/manifest.json", manifest_path)
     return train_uri, eval_uri, manifest_uri, manifest_sha
 
 
@@ -392,25 +480,31 @@ def _assemble_and_publish(
     settings = load_settings(Path(__file__).resolve().parents[4])
     store = get_artifact_store(settings)
     shards = _load_all_pair_shards(session, parent_id)
-    train_df, eval_df, train_pairs, eval_pair = _stage_concat(store, shards)
-    schema_sha = _compute_schema_sha(train_df, eval_df)
-    n_train = int(len(train_df))
-    n_eval = int(len(eval_df))
     key_prefix = f"datasets/{p.output_name}"
-    manifest = _build_manifest(p, train_pairs, eval_pair, n_train, n_eval, schema_sha)
-    train_uri, eval_uri, manifest_uri, manifest_sha = _upload_artefacts(
-        store, key_prefix, train_df, eval_df, manifest
-    )
+    with tempfile.TemporaryDirectory(prefix="protea_export_write_") as tmp:
+        stage = Path(tmp)
+        asm = _stream_assemble(store, shards, stage)
+        manifest = _build_manifest(
+            p,
+            asm.train_pairs,
+            asm.eval_pair,
+            asm.n_train_rows,
+            asm.n_eval_rows,
+            asm.schema_sha,
+        )
+        train_uri, eval_uri, manifest_uri, manifest_sha = _upload_artefacts(
+            store, key_prefix, asm, manifest, stage
+        )
     outcome = _AssemblyOutcome(
         train_uri=train_uri,
         eval_uri=eval_uri,
         manifest_uri=manifest_uri,
         manifest_sha=manifest_sha,
-        schema_sha=schema_sha,
-        n_train_rows=n_train,
-        n_eval_rows=n_eval,
-        train_snapshot_pairs=train_pairs,
-        eval_snapshot_pair=eval_pair,
+        schema_sha=asm.schema_sha,
+        n_train_rows=asm.n_train_rows,
+        n_eval_rows=asm.n_eval_rows,
+        train_snapshot_pairs=asm.train_pairs,
+        eval_snapshot_pair=asm.eval_pair,
         key_prefix=key_prefix,
         storage_backend=settings.storage_backend,
     )

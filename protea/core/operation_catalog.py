@@ -9,6 +9,7 @@ metadata looks like.
 from __future__ import annotations
 
 from protea.core.contracts.registry import OperationRegistry
+from protea.core.operations.apply_learned_encoder import ApplyLearnedEncoderOperation
 from protea.core.operations.batch_rescore_evaluation import (
     BatchRescoreEvaluationOperation,
 )
@@ -55,6 +56,7 @@ from protea.core.operations.run_interproscan_batch import RunInterProScanBatchOp
 def build_operation_registry() -> OperationRegistry:
     registry = OperationRegistry()
     registry.register(PingOperation())
+    registry.register(ApplyLearnedEncoderOperation())
     registry.register(InsertProteinsOperation())
     registry.register(FetchUniProtMetadataOperation())
     registry.register(LoadOntologySnapshotOperation())

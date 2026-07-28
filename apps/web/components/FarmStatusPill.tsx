@@ -117,7 +117,7 @@ export function FarmStatusPill() {
 
   return (
     <Link
-      href={`/${locale}/farm`}
+      href={`/${locale}/instrument/farm`}
       title={
         reachable
           ? `${running.length} running · ${recentErrors.length} errors (1h)`

@@ -140,7 +140,7 @@ function HeatmapCell({
                       <span aria-label="leader" className="text-[10px]">🥇</span>
                     )}
                     <Link
-                      href={`/${locale}/evaluation/${r.evaluation_result_id}`}
+                      href={`/${locale}/instrument/evaluation/${r.evaluation_result_id}`}
                       className="text-[11px] font-medium text-slate-700 truncate hover:text-blue-700 hover:underline focus:outline-none focus-visible:underline focus-visible:text-blue-700"
                     >
                       {name}
@@ -171,7 +171,7 @@ function HeatmapCell({
                   </div>
                   <div className="text-right leading-tight">
                     <Link
-                      href={`/${locale}/evaluation/${r.evaluation_result_id}`}
+                      href={`/${locale}/instrument/evaluation/${r.evaluation_result_id}`}
                       className="block text-[11px] tabular-nums font-semibold text-slate-700 hover:text-blue-700 focus:outline-none focus-visible:text-blue-700"
                     >
                       {r.primary.toFixed(3)}

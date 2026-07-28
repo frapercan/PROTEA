@@ -322,129 +322,31 @@ See :doc:`../reference/infrastructure` for the full ORM schema.
 Benchmark: PROTEA vs external tools
 -------------------------------------
 
-.. admonition:: Provisional results, pending final recompute
-   :class: warning
+PROTEA's headline result lives in one place. The sealed board (``f_micro_w``
+= 0.40765 on the leakage-free v227 to v230 frame, first in seven of the nine
+NK/LK/PK by BPO/MFO/CCO cells) is stated once in :doc:`/results`. This page is
+the home of the *protocol* that produces the board, not of the numbers
+themselves.
 
-   The Fmax values in the tables below were produced before the 2026-04-10
-   unification of the embedding-backend slicing convention (see
-   :doc:`operations`, section *Residue-tensor convention*). They will be
-   regenerated end-to-end for the Zenodo deposit accompanying the thesis.
-   The experimental protocol is stable; only the numbers will change. See
-   :doc:`/results` for the full provisional notice.
+The earlier Fmax board on the superseded GOA 220 to 229 window (ESM-C 300M
+embeddings plus a three-generation LightGBM re-ranker), together with its
+external-tool comparison and the quantified data-leakage analysis, is retained
+verbatim under a superseded banner in :doc:`/historical/pre-v227`. Those
+figures were never the sealed board and must not be quoted as a current
+result.
 
-PROTEA was benchmarked against two widely used function annotation tools
-using the temporal holdout GOA 220 → GOA 229 (NK: 2831, LK: 3410,
-PK: 15313 proteins). All evaluations use ``cafaeval`` with Information
-Accretion (IA) weighting from the CAFA6 benchmark.
-
-.. list-table:: Fmax (IA-weighted): GOA 220 → 229
-   :header-rows: 1
-   :widths: 20 9 9 9 9 9 9 9 9 9
-
-   * - Method
-     - NK-BPO
-     - NK-MFO
-     - NK-CCO
-     - LK-BPO
-     - LK-MFO
-     - LK-CCO
-     - PK-BPO
-     - PK-MFO
-     - PK-CCO
-   * - Pannzer2 :sup:`†`
-     - 0.656
-     - 0.717
-     - 0.791
-     - 0.681
-     - 0.729
-     - 0.813
-     - 0.391
-     - 0.574
-     - 0.618
-   * - **PROTEA (re-ranker iteration 3, full features)**
-     - **0.431**
-     - **0.620**
-     - **0.692**
-     - **0.478**
-     - **0.607**
-     - **0.697**
-     - **0.201**
-     - **0.297**
-     - **0.339**
-   * - InterProScan 6 :sup:`†`
-     - 0.312
-     - 0.551
-     - 0.476
-     - 0.479
-     - 0.488
-     - 0.491
-     - 0.208
-     - 0.269
-     - 0.250
-   * - eggNOG-mapper 2.1.13 :sup:`†`
-     - 0.247
-     - 0.359
-     - 0.386
-     - 0.382
-     - 0.334
-     - 0.450
-     - 0.190
-     - 0.199
-     - 0.325
-
-:sup:`†` Subject to temporal data leakage; see below.
-
-Temporal data leakage
-~~~~~~~~~~~~~~~~~~~~~~
-
-Both Pannzer2 and eggNOG-mapper were executed in March 2026 against their
-**current** reference databases, which contain annotations published well
-after GOA 220 (the t0 snapshot). This means they have access to functional
-knowledge that is part of the ground truth.
-
-To quantify this leakage, we measured exact (protein, GO term) matches
-between each tool's predictions and the ground truth:
-
-.. list-table:: Exact match with ground truth
-   :header-rows: 1
-   :widths: 15 12 20 20
-
-   * - Category
-     - GT pairs
-     - Pannzer2 match
-     - eggNOG match
-   * - NK
-     - 6,953
-     - 4,339 (62.4%)
-     - 1,025 (14.7%)
-   * - LK
-     - 5,520
-     - 3,624 (65.7%)
-     - 1,087 (19.7%)
-   * - PK
-     - 27,541
-     - 12,410 (45.1%)
-     - 8,196 (29.8%)
-   * - **Total**
-     - **40,014**
-     - **20,373 (50.9%)**
-     - **10,308 (25.8%)**
-
-Pannzer2 exactly matches 62.4% of NK annotations (proteins that by
-definition had **no** experimental annotations at t0). This confirms that
-its reference database already contains the experimental evidence that
-appeared between GOA 220 and GOA 229.
-
-PROTEA is the only tool in this benchmark that enforces temporal integrity
-by design: the reference set is frozen at t0, the ground truth is computed
-as the delta, and all versions are tracked in the database. Pannzer2 and
-eggNOG-mapper numbers should be interpreted as an **optimistic upper
-bound** under data leakage, not as a fair comparison.
-
-.. note::
-   Running Pannzer2 or eggNOG-mapper against a frozen historical database
-   is not possible: the Pannzer2 web server does not offer version
-   selection, and eggNOG does not publish historical orthology snapshots.
+**Why an external-tool comparison needs a temporal caveat.** Any tool scored
+against its *current* reference database has access to functional knowledge
+published after t0, and that knowledge is part of the ground truth. PROTEA
+enforces temporal integrity by design: the reference set is frozen at t0, the
+ground truth is the delta gained by t1, and every snapshot is versioned in the
+database. Pannzer2, InterProScan, and eggNOG-mapper cannot be pinned to a
+historical release (the Pannzer2 web server offers no version selection,
+eggNOG publishes no historical orthology snapshots, and InterProScan uses the
+latest InterPro release at run time), so their scores are an optimistic upper
+bound under data leakage rather than a fair comparison. The exact
+``(protein, GO term)`` match rates that quantify that leakage are preserved
+with the superseded board in :doc:`/historical/pre-v227`.
 
 Evaluating external tools
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -618,10 +520,12 @@ Implementation reference
 
 .. seealso::
 
-   - :doc:`/results`: the actual numbers obtained on the GOA 220 → 229
-     temporal holdout following this protocol.
-   - :doc:`/appendix/reproduction_guide`: the full ordered command sequence
-     to regenerate every figure end-to-end.
+   - :doc:`/results`: the sealed board (``f_micro_w`` = 0.40765 on the
+     v227 to v230 frame) produced by following this protocol.
+   - :doc:`/historical/pre-v227`: the superseded GOA 220 to 229 Fmax figures,
+     retained for provenance only.
+   - :doc:`/operate/reproduce-0.40765`: the ordered path that reproduces the
+     sealed board.
    - :doc:`operations`: the ``generate_evaluation_set`` and
      ``run_cafa_evaluation`` operations that implement the protocol live.
      Booster training has moved out-of-tree to ``protea-reranker-lab``

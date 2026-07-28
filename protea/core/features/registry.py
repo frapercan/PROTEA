@@ -83,7 +83,12 @@ _PRIMARY_FAMILY_ORDER: tuple[str, ...] = (
     "classifier",
     "self_prior",
     "association",
+    "protst_text",
     "annotation_meta",
+    # Pool-stage-injected context. Absent from raw parquet dumps: the lab's
+    # multi-manifest loader adds them when several sources are pooled.
+    "plm_context",
+    "k_neighborhood",
     "knn",
 )
 
@@ -99,7 +104,11 @@ def _resolve_primary_family(feature_name: str) -> str:
         if feature_name in FEATURE_FAMILIES.get(fam, ()):
             return fam
     raise KeyError(
-        f"feature {feature_name!r} is not listed in any family of protea_contracts.FEATURE_FAMILIES"
+        f"feature {feature_name!r} is declared in protea_contracts.ALL_FEATURES but "
+        f"none of the families this module ranks in _PRIMARY_FAMILY_ORDER claims it. "
+        f"Either the feature belongs to a new family (add it to the tuple, most "
+        f"specific first) or FEATURE_FAMILIES really omits it. Ranked families: "
+        f"{', '.join(_PRIMARY_FAMILY_ORDER)}"
     )
 
 

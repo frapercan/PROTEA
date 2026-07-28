@@ -65,7 +65,7 @@ test.describe("protein detail flow", () => {
   }) => {
     mockApi.override("/proteins/P12345", PROTEIN_DETAIL);
 
-    await page.goto("/en/proteins/P12345");
+    await page.goto("/en/instrument/proteins/P12345");
 
     await expect(
       page.getByRole("heading", { name: "P12345", level: 1 }),
@@ -88,7 +88,7 @@ test.describe("protein detail flow", () => {
     mockApi.override("/proteins/P12345", PROTEIN_DETAIL);
     mockApi.override("/proteins/P12345/annotations", PROTEIN_ANNOTATIONS);
 
-    await page.goto("/en/proteins/P12345");
+    await page.goto("/en/instrument/proteins/P12345");
 
     // Tab label embeds the annotation count from the detail payload.
     const annotationsTab = page.getByRole("button", {
@@ -118,7 +118,7 @@ test.describe("protein detail flow", () => {
       404,
     );
 
-    await page.goto("/en/proteins/GHOST");
+    await page.goto("/en/instrument/proteins/GHOST");
 
     await expect(page.getByRole("heading", { name: /Protein not found/i })).toBeVisible();
   });

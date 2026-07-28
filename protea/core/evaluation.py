@@ -48,7 +48,7 @@ from sqlalchemy.orm import Session
 from protea.core.evidence_codes import ECO_TO_CODE, EXPERIMENTAL
 
 # Parquet column for the bucket each (protein, go_id) row belongs to.
-_GROUNDTRUTH_BUCKETS = ("nk", "lk", "pk", "known", "pk_known")
+_GROUNDTRUTH_BUCKETS = ("nk", "lk", "pk", "known", "pk_known", "removed")
 
 # ---------------------------------------------------------------------------
 # All codes (GO + ECO) that are considered experimental
@@ -89,8 +89,11 @@ class EvaluationData:
     pk: dict[str, set[str]] = field(default_factory=dict)
     # known-terms: ALL experimental annotations from OLD (for reference download)
     known: dict[str, set[str]] = field(default_factory=dict)
-    # pk_known: old terms in PK namespaces only — passed as -known to cafaeval
+    # pk_known: old terms in PK namespaces only, passed as -known to cafaeval
     pk_known: dict[str, set[str]] = field(default_factory=dict)
+    # removed: terms present at the window start and absent at its end.
+    # Reported, never scored. See _classify_protein_deltas.
+    removed: dict[str, set[str]] = field(default_factory=dict)
 
     @property
     def nk_proteins(self) -> int:
@@ -121,6 +124,14 @@ class EvaluationData:
         return sum(len(v) for v in self.known.values())
 
     @property
+    def removed_proteins(self) -> int:
+        return len(self.removed)
+
+    @property
+    def removed_annotations(self) -> int:
+        return sum(len(v) for v in self.removed.values())
+
+    @property
     def delta_proteins(self) -> int:
         return len(set(self.nk) | set(self.lk) | set(self.pk))
 
@@ -134,6 +145,8 @@ class EvaluationData:
             "lk_annotations": self.lk_annotations,
             "pk_annotations": self.pk_annotations,
             "known_terms_count": self.known_terms_count,
+            "removed_proteins": self.removed_proteins,
+            "removed_annotations": self.removed_annotations,
         }
 
 
@@ -278,20 +291,35 @@ def _classify_protein_deltas(
     dict[str, set[str]],
     dict[str, set[str]],
     dict[str, set[str]],
+    dict[str, set[str]],
 ]:
-    """Sort each protein into the (NK, LK, PK, pk_known) buckets.
+    """Sort each protein into the (NK, LK, PK, pk_known, removed) buckets.
 
     Per-(protein, namespace) classification following the CAFA5
     protocol; same protein can be LK in one namespace and PK in
     another. See :func:`compute_evaluation_data` for the full rules.
+
+    ``removed`` holds terms present at the start of the window and absent at
+    its end. It is reported rather than scored: the annotation corpus contracts
+    as well as grows, and a window described only by its additions cannot say
+    whether a drop in recall came from the method or from the corpus.
     """
     nk: dict[str, set[str]] = {}
     lk: dict[str, set[str]] = defaultdict(set)
     pk: dict[str, set[str]] = defaultdict(set)
     pk_known: dict[str, set[str]] = defaultdict(set)
+    removed: dict[str, set[str]] = defaultdict(set)
     for protein in set(old_by_ns) | set(new_by_ns):
         old_ns_map = old_by_ns.get(protein, {})
         new_ns_map = new_by_ns.get(protein, {})
+        # Removals are collected before the additions logic, because a protein
+        # that keeps nothing at the end of the window exits early below. Those
+        # are the proteins that lost the most, so computing removals after the
+        # early exit would make the largest losses the only invisible ones.
+        for ns in _NAMESPACES:
+            gone_ns = old_ns_map.get(ns, set()) - new_ns_map.get(ns, set())
+            if gone_ns:
+                removed[protein] |= gone_ns
         new_all = {go for terms in new_ns_map.values() for go in terms}
         if not new_all:
             continue
@@ -310,7 +338,7 @@ def _classify_protein_deltas(
             else:
                 pk[protein] |= delta_ns
                 pk_known[protein] |= old_ns
-    return nk, dict(lk), dict(pk), dict(pk_known)
+    return nk, dict(lk), dict(pk), dict(pk_known), dict(removed)
 
 
 def compute_evaluation_data(
@@ -349,11 +377,13 @@ def compute_evaluation_data(
     new_by_ns = _load_experimental_annotations_by_ns(
         session, new_annotation_set_id, negative_keys, go_id_map, aspect_map
     )
-    nk, lk, pk, pk_known = _classify_protein_deltas(old_by_ns, new_by_ns)
+    nk, lk, pk, pk_known, removed = _classify_protein_deltas(old_by_ns, new_by_ns)
     known = {
         p: {go for terms in ns_map.values() for go in terms} for p, ns_map in old_by_ns.items()
     }
-    return EvaluationData(nk=nk, lk=lk, pk=pk, pk_known=pk_known, known=known)
+    return EvaluationData(
+        nk=nk, lk=lk, pk=pk, pk_known=pk_known, known=known, removed=removed
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -606,11 +636,13 @@ def compute_evaluation_data_reconciled(
 
     old_by_ns = _apply_negatives(old_exp, merged_neg)
     new_by_ns = _apply_negatives(new_exp, merged_neg)
-    nk, lk, pk, pk_known = _classify_protein_deltas(old_by_ns, new_by_ns)
+    nk, lk, pk, pk_known, removed = _classify_protein_deltas(old_by_ns, new_by_ns)
     known = {
         p: {go for terms in ns_map.values() for go in terms} for p, ns_map in old_by_ns.items()
     }
-    return EvaluationData(nk=nk, lk=lk, pk=pk, pk_known=pk_known, known=known)
+    return EvaluationData(
+        nk=nk, lk=lk, pk=pk, pk_known=pk_known, known=known, removed=removed
+    )
 
 
 def _eval_data_to_dataframe(data: EvaluationData):
@@ -628,6 +660,7 @@ def _eval_data_to_dataframe(data: EvaluationData):
         ("pk", data.pk),
         ("known", data.known),
         ("pk_known", data.pk_known),
+        ("removed", data.removed),
     ):
         for protein, go_ids in bucket_dict.items():
             for go_id in go_ids:
@@ -646,8 +679,13 @@ def _dataframe_to_eval_data(df) -> EvaluationData:
     pk: dict[str, set[str]] = defaultdict(set)
     known: dict[str, set[str]] = defaultdict(set)
     pk_known: dict[str, set[str]] = defaultdict(set)
+    removed: dict[str, set[str]] = defaultdict(set)
+    # Files written before the removed bucket existed simply carry no such
+    # rows, so an older artifact deserializes with removed empty rather than
+    # failing.
     bucket_to_dict = {
-        "nk": nk, "lk": lk, "pk": pk, "known": known, "pk_known": pk_known,
+        "nk": nk, "lk": lk, "pk": pk, "known": known,
+        "pk_known": pk_known, "removed": removed,
     }
     for protein, go_id, bucket in df[["protein_accession", "go_id", "bucket"]].itertuples(
         index=False, name=None
@@ -655,7 +693,7 @@ def _dataframe_to_eval_data(df) -> EvaluationData:
         bucket_to_dict[str(bucket)][str(protein)].add(str(go_id))
     return EvaluationData(
         nk=dict(nk), lk=dict(lk), pk=dict(pk),
-        known=dict(known), pk_known=dict(pk_known),
+        known=dict(known), pk_known=dict(pk_known), removed=dict(removed),
     )
 
 

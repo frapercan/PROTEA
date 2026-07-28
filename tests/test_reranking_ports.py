@@ -104,7 +104,8 @@ def test_registry_unknown_name_raises() -> None:
 
 def test_default_registry_order_and_membership() -> None:
     reg = default_scorer_registry()
-    # canonical score-vector order: base evidence first, then the original four.
+    # canonical score-vector order: base evidence first, then the original four,
+    # then the ProtST text lever.
     assert reg.names() == [
         "alignment",
         "taxonomy",
@@ -115,8 +116,9 @@ def test_default_registry_order_and_membership() -> None:
         "classifier",
         "self_prior",
         "association",
+        "protst_text",
     ]
-    assert len(reg) == 9
+    assert len(reg) == 10
 
 
 def test_registry_for_category_excludes_priors_on_nk() -> None:
@@ -134,8 +136,10 @@ def test_registry_for_category_excludes_priors_on_nk() -> None:
         "knn_similarity",
         "classifier",
     ]
-    assert nk_names == base_plus_seq
-    assert pk_names == [*base_plus_seq, "self_prior", "association"]
+    # protst_text applies to every category (registered last), so it trails the
+    # per-category vector on both NK and PK.
+    assert nk_names == [*base_plus_seq, "protst_text"]
+    assert pk_names == [*base_plus_seq, "self_prior", "association", "protst_text"]
 
 
 def test_scorers_satisfy_the_port_protocol() -> None:
@@ -348,7 +352,9 @@ def test_classifier_adapter_matches_producer() -> None:
             return_value={"GO:0000011": 11},
         ),
     ):
-        out_dicts = pkp.apply_classifier(MagicMock(), MagicMock(), ["Q1"], [knn_rec], _emit)
+        from protea.core.operations.predict_go_terms._classifier import apply_classifier
+
+        out_dicts = apply_classifier(MagicMock(), MagicMock(), ["Q1"], [knn_rec], _emit)
 
     out = ClassifierScorer().score(_ctx(out_dicts), out_dicts)
     assert out == {"GO:0000011": pytest.approx(0.9)}
