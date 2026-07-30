@@ -33,7 +33,6 @@ parquet round-trip and the GT/OBO/IA re-staging within a single batch job.
 
 from __future__ import annotations
 
-import os
 import tempfile
 import uuid
 from dataclasses import dataclass
@@ -287,10 +286,12 @@ class BatchRescoreEvaluationOperation:
         cafaeval ``f_micro_w`` IA weighting.
         """
         base_payload, inputs = ctx.base_payload, ctx.inputs
-        obo_path = os.path.join(str(tmpdir), "go.obo")
-        emit("batch_rescore_evaluation.downloading_obo", None, {"url": inputs.snapshot.obo_url},
-             "info")
-        _artifacts.download_obo(inputs.snapshot.obo_url, obo_path)
+        # Delegate to the single-run resolver rather than refetching from
+        # obo_url: it prefers the archived copy in the artifact store and
+        # verifies its sha256 (ADR-D47). Duplicating the download here is what
+        # made a batch silently score against upstream bytes while the
+        # equivalent single run scored against the archive.
+        obo_path = self._single._resolve_obo(str(tmpdir), inputs.snapshot, emit)
         ia_path = self._single._resolve_ia_file(
             str(tmpdir), inputs.snapshot, base_payload.ia_file, emit,
             session, base_payload.information_accretion_set_id,
