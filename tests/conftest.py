@@ -174,41 +174,101 @@ def _guard_external_db(user: str, host: str, port: str, db: str) -> None:
         )
 
 
-def _resolve_db_targets() -> list[tuple[str, str, str, str]]:
-    """Best-effort (user, host, port, db) for every DB this process might hit.
+def _resolve_db_urls() -> list[str]:
+    """Every database URL this process might actually connect to.
 
-    Covers BOTH paths that have wiped the live DB: the ``postgres_url`` fixture
-    (PROTEA_PG_* env) and direct ``load_settings().db_url`` access from a tracked
-    ``system.yaml`` (the 2026-06-10 wipe went through the latter, bypassing the
-    fixture guard).
+    The 2026-07-30 wipe went through the one path this function used to skip.
+    It previously resolved ``load_settings().db_url`` ONLY when a tracked
+    ``system.yaml`` existed, on the reasoning that "CI and agent worktrees
+    without a system.yaml are not falsely flagged". But ``_DEFAULT_DB_URL`` is
+    a real DSN, and on a developer box it is the live store: with no
+    ``system.yaml`` and no ``PROTEA_DB_URL`` the guard resolved ZERO targets,
+    passed, and the suite dropped the production schema. The exemption written
+    to avoid false positives created the false negative that mattered.
+
+    Resolve unconditionally. A disposable target is cheap to whitelist through
+    ``PROTEA_ALLOW_DESTRUCTIVE_TESTS=1``; an unguarded live one is not.
     """
     from pathlib import Path
-
-    from sqlalchemy.engine import make_url
 
     urls: list[str] = []
     env_url = os.getenv("PROTEA_DB_URL")
     if env_url:
         urls.append(env_url)
-    # Only an EXPLICIT system.yaml counts, never the hard-coded default db_url, so
-    # CI and agent worktrees without a system.yaml are not falsely flagged.
     root = Path(__file__).resolve().parents[1]
-    if (root / "protea" / "config" / "system.yaml").exists():
-        try:
-            from protea.infrastructure.settings import load_settings
+    try:
+        from protea.infrastructure.settings import load_settings
 
-            urls.append(load_settings(root).db_url)
-        except Exception:
-            pass
+        urls.append(load_settings(root).db_url)
+    except Exception:
+        pass
+    return urls
+
+
+def _resolve_db_targets() -> list[tuple[str, str, str, str]]:
+    """Best-effort (user, host, port, db) for every DB this process might hit."""
+    from sqlalchemy.engine import make_url
 
     out: list[tuple[str, str, str, str]] = []
-    for url in urls:
+    for url in _resolve_db_urls():
         try:
             u = make_url(url)
             out.append((u.username or "", u.host or "", str(u.port or ""), u.database or ""))
         except Exception:
             continue
     return out
+
+
+def _populated_target(url: str) -> str | None:
+    """Ask the database whether it already holds a schema. Do not infer it.
+
+    Every previous version of this guard decided "is this production?" from the
+    DSN: the database NAME, the HOST, the PORT. Each of those is an identifier,
+    and an identifier can be wrong, absent, or coincidentally innocent. Five
+    wipes went through gaps in exactly that reasoning.
+
+    This asks the only authority that cannot be mistaken about it: the server.
+    A disposable test database is EMPTY before the suite runs, because the suite
+    is what creates the schema. So a target that already has user tables is, by
+    construction, not disposable, whatever it happens to be called.
+
+    Returns a human-readable reason when the target is populated, else ``None``.
+    Connection failures return ``None``: a database we cannot reach is one we
+    cannot destroy.
+    """
+    try:
+        from sqlalchemy import create_engine, text
+    except Exception:
+        return None
+    engine = None
+    try:
+        engine = create_engine(url, connect_args={"connect_timeout": 3})
+        with engine.connect() as conn:
+            n_tables = conn.execute(
+                text(
+                    "select count(*) from information_schema.tables "
+                    "where table_schema not in ('pg_catalog', 'information_schema')"
+                )
+            ).scalar_one()
+            if not n_tables:
+                return None
+            stamped = conn.execute(
+                text("select to_regclass('public.alembic_version') is not null")
+            ).scalar_one()
+        return (
+            f"it already holds {n_tables} user table(s)"
+            + (" and an alembic_version stamp" if stamped else "")
+            + " — a disposable test database is empty before the suite runs, so "
+            "this one is not disposable"
+        )
+    except Exception:
+        return None
+    finally:
+        if engine is not None:
+            try:
+                engine.dispose()
+            except Exception:
+                pass
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:
@@ -221,6 +281,27 @@ def pytest_sessionstart(session: pytest.Session) -> None:
     """
     if os.getenv("PROTEA_ALLOW_DESTRUCTIVE_TESTS") == "1":
         return
+
+    # Gate 1, by content. Authoritative: it asks the server what is in there.
+    for url in _resolve_db_urls():
+        reason = _populated_target(url)
+        if reason:
+            from sqlalchemy.engine import make_url
+
+            try:
+                shown = make_url(url).render_as_string(hide_password=True)
+            except Exception:
+                shown = "<unparseable url>"
+            raise pytest.UsageError(
+                f"Refusing to start: {shown} is not safe to run against because "
+                f"{reason}. PROTEA's suite calls Base.metadata.drop_all() and has "
+                "wiped the live store five times. Point PROTEA_DB_URL at an empty "
+                "Postgres (or use --with-postgres), or set "
+                "PROTEA_ALLOW_DESTRUCTIVE_TESTS=1 to override."
+            )
+
+    # Gate 2, by name/host. Kept as a backstop for a live store that happens to
+    # be empty right now, which gate 1 cannot see.
     for user, host, port, db in _resolve_db_targets():
         live = (
             db.strip().lower() in _PROTECTED_DB_NAMES
