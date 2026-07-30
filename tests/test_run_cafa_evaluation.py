@@ -64,11 +64,23 @@ def _make_ann_old():
     return ann
 
 
-def _make_snapshot(obo_url="https://example.com/go.obo", ia_url=None, obo_version=None):
+def _make_snapshot(
+    obo_url="https://example.com/go.obo",
+    ia_url=None,
+    obo_version=None,
+    obo_uri=None,
+    obo_sha256=None,
+):
     snap = MagicMock()
     snap.obo_url = obo_url
     snap.ia_url = ia_url
     snap.obo_version = obo_version
+    # ADR-D47 archive fields. These MUST be set explicitly: on a bare MagicMock
+    # every attribute is truthy, so _resolve_obo would take the archive branch
+    # for a snapshot that has none and compare the downloaded bytes against a
+    # mock hash. Default None matches a snapshot loaded before archival.
+    snap.obo_uri = obo_uri
+    snap.obo_sha256 = obo_sha256
     return snap
 
 

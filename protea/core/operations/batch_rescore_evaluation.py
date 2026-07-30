@@ -73,6 +73,11 @@ class BatchRescoreEvaluationPayload(ProteaPayload, frozen=True):
     scoring_config_ids: list[str] = Field(min_length=1)
     max_distance: float | None = Field(default=None, ge=0.0, le=2.0)
     ia_file: str | None = Field(default=None)
+    #: Preferred over ``ia_file``: resolves the IA table through the artifact
+    #: store and verifies its recorded sha256, so every config in the batch is
+    #: scored against a table whose corpus and evidence regime are pinned
+    #: (ADR-D46). Mutually exclusive with ``ia_file``.
+    information_accretion_set_id: str | None = Field(default=None)
     restrict_gt_to_predicted: bool = Field(default=True)
     th_step: float = Field(default=0.01, gt=0.0, le=1.0)
     max_terms: int | None = Field(default=None, ge=1)
@@ -235,6 +240,7 @@ class BatchRescoreEvaluationOperation:
             prediction_set_id=p.prediction_set_id,
             max_distance=p.max_distance,
             ia_file=p.ia_file,
+            information_accretion_set_id=p.information_accretion_set_id,
             restrict_gt_to_predicted=p.restrict_gt_to_predicted,
             th_step=p.th_step,
             max_terms=p.max_terms,
@@ -286,7 +292,8 @@ class BatchRescoreEvaluationOperation:
              "info")
         _artifacts.download_obo(inputs.snapshot.obo_url, obo_path)
         ia_path = self._single._resolve_ia_file(
-            str(tmpdir), inputs.snapshot, base_payload.ia_file, emit
+            str(tmpdir), inputs.snapshot, base_payload.ia_file, emit,
+            session, base_payload.information_accretion_set_id,
         )
         self._single._enforce_band(base_payload.band, inputs.snapshot, base_payload.ia_file, emit)
 
