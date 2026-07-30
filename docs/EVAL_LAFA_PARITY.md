@@ -128,7 +128,12 @@ PROTEA computes its own Information Accretion rather than importing LAFA's
 `IA.tsv`, but the two must agree on shared terms within max abs diff `1e-3`,
 otherwise the IA-weighting on `f_micro_w` is not comparable. The computation
 lives in `protea/core/ia.py` (pure, unit-tested) and is driven over an
-`OntologySnapshot` + corpus by `scripts/compute_ia_for_snapshot.py`.
+`OntologySnapshot` + corpus + evidence regime by the
+`compute_information_accretion` operation (ADR-D46), which publishes the table
+to the artifact store as an `InformationAccretionSet`. The former driver,
+`scripts/compute_ia_for_snapshot.py`, was removed: it produced a table outside
+the operation registry, pinned only the snapshot, and had no evidence
+predicate.
 
 It is a faithful reimplementation of LAFA's reference `calc_ia`
 (`protea-lafa-knn/ontology.py`):
@@ -154,8 +159,9 @@ requires the Sep_2025 OBO + SwissProt-exp corpus loaded as an
 work (intentionally paused) and is tracked as the FIX-METRIC-IA.b follow-up
 (grid re-eval). The algorithm-level gate above is the load-bearing
 correctness check; the DB-level reproduction is mechanical once the corpus is
-ingested (run `compute_ia_for_snapshot.py --update-snapshot`, then diff its
-output against `IA.tsv` on the term intersection).
+ingested (dispatch `compute_information_accretion` with the snapshot, the
+corpus and `evidence_regime: "lafa"`, then diff the published artifact against
+`IA.tsv` on the term intersection).
 
 ## Persisted metrics
 

@@ -95,13 +95,22 @@ def download_obo(url: str, dest: str) -> None:
 def download_tsv(url: str, dest: str) -> None:
     """Copy or download a plain-text TSV file (gzip-transparent) to dest.
 
-    Accepts both HTTP(S) URLs and local filesystem paths (absolute or
-    ``file://`` scheme).  Local paths are resolved without any network
-    request, which is useful during development when the IA file lives
-    inside the repository (``data/benchmarks/IA_cafa6.tsv``) and
-    ``ia_url`` is set to its absolute path.  Once the file is pushed to
-    GitHub the URL can be switched to the raw.githubusercontent.com
-    address and the same code path handles it transparently.
+    Accepts HTTP(S) URLs, ``s3://bucket/key`` artifact-store URIs, and local
+    filesystem paths (absolute or ``file://`` scheme).  Local paths are
+    resolved without any network request, which is useful during development
+    when the IA file lives inside the repository
+    (``data/benchmarks/IA_cafa6.tsv``) and ``ia_url`` is set to its absolute
+    path.  Once the file is pushed to GitHub the URL can be switched to the
+    raw.githubusercontent.com address and the same code path handles it
+    transparently.
+
+    ``s3://`` is resolved through the configured ``ArtifactStore`` rather than
+    over HTTP, which is what makes an artifact published by
+    ``compute_information_accretion`` readable from any machine that shares the
+    object store.  The bucket in the URI must match the configured bucket: a
+    mismatch means the URI was produced against a different deployment, and
+    silently reading the same key out of the local bucket would hand back a
+    different file under the right-looking name.
     """
     local_path: str | None = None
     if url.startswith("file://"):
@@ -115,6 +124,30 @@ def download_tsv(url: str, dest: str) -> None:
                 shutil.copyfileobj(src, f)
         else:
             shutil.copy2(local_path, dest)
+        return
+
+    if url.startswith("s3://"):
+        from pathlib import Path as _Path
+
+        from protea.infrastructure.settings import load_settings
+        from protea.infrastructure.storage import get_artifact_store
+
+        bucket, _, key = url[len("s3://") :].partition("/")
+        if not key:
+            raise ValueError(f"malformed s3 URI (no key): {url}")
+        store = get_artifact_store(load_settings(_Path(__file__).resolve().parents[3]))
+        configured = getattr(store, "bucket", None)
+        if configured is not None and configured != bucket:
+            raise ValueError(
+                f"s3 URI bucket {bucket!r} does not match the configured "
+                f"artifact-store bucket {configured!r}; refusing to read a "
+                f"same-named key out of a different bucket"
+            )
+        blob = store.get(key)
+        if url.endswith(".gz"):
+            blob = gzip.decompress(blob)
+        with open(dest, "wb") as f:
+            f.write(blob)
         return
 
     resp = requests.get(url, stream=True, timeout=300)
