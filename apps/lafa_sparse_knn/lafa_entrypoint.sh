@@ -38,6 +38,17 @@ if [ ! -d "${OUT_DIR}" ]; then
     echo "[protea-sparse-knn] output dir not bind-mounted at ${OUT_DIR}" >&2
     exit 66
 fi
+# Check writability here rather than discovering it at the end. The container
+# runs as uid 1000, and a host directory owned by another uid is readable but
+# not writable, so without this the run embeds, retrieves and transfers before
+# failing on the last line with a bare PermissionError.
+if ! touch "${OUT_DIR}/.protea-write-test" 2>/dev/null; then
+    echo "[protea-sparse-knn] ${OUT_DIR} is not writable by uid $(id -u)." >&2
+    echo "[protea-sparse-knn] Mount a directory this uid can write, or run with" >&2
+    echo "[protea-sparse-knn] --user \$(id -u):\$(id -g)." >&2
+    exit 68
+fi
+rm -f "${OUT_DIR}/.protea-write-test"
 
 echo "[protea-sparse-knn] bundle=${BUNDLE} query=${QUERY} obo=${OBO} output=${OUTPUT}"
 exec python -m apps.lafa_sparse_knn.sparse_driver \

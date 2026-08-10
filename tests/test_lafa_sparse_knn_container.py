@@ -149,6 +149,45 @@ def test_transfer_weights_a_closer_neighbour_more(ontology: Path) -> None:
     assert scored["Q1"]["GO:0000003"] == pytest.approx(0.9)
 
 
+def test_an_unannotated_neighbour_does_not_dilute_the_score(ontology: Path) -> None:
+    """A neighbour with no GO terms must not lower the other neighbours' scores.
+
+    About 3 percent of the bank has an embedding and no annotation. If
+    those entered the denominator, a query whose retrieval happened to
+    return three of them would see every score fall by a tenth, which is
+    a property of the reference set and not of the evidence for the call.
+    """
+    parents, _, alt = driver.parse_obo(ontology)
+    donors = {"D1": ["GO:0000003"], "D2": []}
+
+    with_silent = driver.transfer(["Q1"], [[("D1", 1.0), ("D2", 1.0)]], donors, parents, alt)
+    without = driver.transfer(["Q1"], [[("D1", 1.0)]], donors, parents, alt)
+
+    assert with_silent["Q1"]["GO:0000003"] == pytest.approx(1.0)
+    assert with_silent["Q1"] == without["Q1"]
+
+
+def test_a_neighbour_absent_from_the_donor_table_is_also_silent(ontology: Path) -> None:
+    """Absent from the donor file and present but empty must behave alike."""
+    parents, _, alt = driver.parse_obo(ontology)
+
+    scored = driver.transfer(
+        ["Q1"], [[("D1", 1.0), ("UNKNOWN", 1.0)]], {"D1": ["GO:0000003"]}, parents, alt
+    )
+
+    assert scored["Q1"]["GO:0000003"] == pytest.approx(1.0)
+
+
+def test_transfer_yields_nothing_when_no_neighbour_can_vote(ontology: Path) -> None:
+    """Every neighbour unannotated is not the same as a weak call: it is no
+    call at all, so the query gets an empty prediction rather than zeros."""
+    parents, _, alt = driver.parse_obo(ontology)
+
+    scored = driver.transfer(["Q1"], [[("D1", 0.9), ("D2", 0.8)]], {}, parents, alt)
+
+    assert scored["Q1"] == {}
+
+
 def test_transfer_yields_nothing_when_every_neighbour_is_orthogonal(ontology: Path) -> None:
     """Non-positive similarity carries no evidence, so the query gets no
     calls rather than a uniform prior."""

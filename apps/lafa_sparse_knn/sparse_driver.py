@@ -23,7 +23,7 @@ the bank and degrade silently. The bank is the contract; the producer
 comes with it.
 
 Memory is bounded on purpose. The bank stays a CSR matrix (about 540 MB
-for 528k proteins at 128 non-zeros) and queries are scored in chunks, so
+for 575k proteins at 128 non-zeros) and queries are scored in chunks, so
 the dense similarity block never exceeds one chunk by the bank size.
 Retrieval is exact brute force, not an approximate index.
 """
@@ -42,8 +42,8 @@ from typing import Any
 
 import numpy as np
 
-#: Queries scored per similarity block. 256 x 528k x 4 bytes is about
-#: 540 MB, which keeps the container inside a modest memory budget
+#: Queries scored per similarity block. 256 x 575k x 4 bytes is about
+#: 590 MB, which keeps the container inside a modest memory budget
 #: regardless of how many sequences the evaluator sends.
 QUERY_CHUNK = int(os.environ.get("PROTEA_SPARSE_QUERY_CHUNK", "256"))
 
@@ -362,29 +362,40 @@ def transfer(
 ) -> dict[str, dict[str, float]]:
     """Turn neighbours into scored GO terms, propagated to ancestors.
 
-    A term's score is the similarity-weighted fraction of neighbours
-    carrying it, so it lands in ``[0, 1]`` by construction rather than by
-    a rescaling after the fact. Propagation takes the maximum over
-    descendants, which keeps an ancestor at least as confident as
-    anything implying it and satisfies the true path rule.
+    A term's score is the similarity-weighted fraction of the neighbours
+    that could vote at all, so it lands in ``[0, 1]`` by construction
+    rather than by a rescaling after the fact. Propagation takes the
+    maximum over descendants, which keeps an ancestor at least as
+    confident as anything implying it and satisfies the true path rule.
+
+    Only neighbours carrying annotations enter the denominator. About 3%
+    of the bank has an embedding but no GO term, and counting those in
+    the total would scale every score for that query down by however many
+    of them the retrieval happened to return, which is a property of the
+    reference set rather than of the evidence for the call. The symptom
+    was unmistakable once measured: the three ontology roots, which every
+    annotated neighbour carries by construction, were scoring around 0.66
+    instead of 1.0.
     """
     cache: dict[str, set[str]] = {}
     out: dict[str, dict[str, float]] = {}
 
     for accession, hits in zip(query_accessions, neighbours, strict=True):
-        weights = [max(0.0, similarity) for _, similarity in hits]
-        total = sum(weights)
+        voters = [
+            (donor, similarity)
+            for donor, similarity in hits
+            if similarity > 0.0 and donors.get(donor)
+        ]
+        total = sum(similarity for _, similarity in voters)
         if total <= 0.0:
             out[accession] = {}
             continue
 
         scores: dict[str, float] = {}
-        for (donor, _), weight in zip(hits, weights, strict=True):
-            if weight <= 0.0:
-                continue
-            share = weight / total
+        for donor, similarity in voters:
+            share = similarity / total
             propagated: set[str] = set()
-            for leaf in donors.get(donor, ()):
+            for leaf in donors[donor]:
                 propagated |= ancestors_of(alt_ids.get(leaf, leaf), parents, cache)
             for term in propagated:
                 scores[term] = scores.get(term, 0.0) + share

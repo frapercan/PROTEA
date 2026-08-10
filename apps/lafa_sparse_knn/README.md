@@ -11,7 +11,7 @@ which ontology. This file covers building and running it.
 One backbone, one retrieval pass, all three aspects. The query is
 embedded with Ankh-base, projected through a learned linear map to a
 2048-dimensional dictionary, sparsified to its 128 largest components,
-and matched against a frozen bank of 528,294 reference proteins by exact
+and matched against a frozen bank of 575,503 reference proteins by exact
 cosine. The neighbours' GO terms are transferred by
 similarity-weighted agreement and propagated to ancestors.
 
