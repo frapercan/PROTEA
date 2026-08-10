@@ -1,0 +1,71 @@
+name: LAFA sparse-knn Container
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/sparse-knn
+
+jobs:
+  build-lafa-sparse-knn:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v6
+
+      # The image installs protea-backends, which is what produced the frozen
+      # bank the container retrieves against. Reading the commit out of
+      # pyproject rather than repeating it here is the point: a second copy
+      # would let the image pin a different backend from the platform, and the
+      # symptom would be a quiet loss of accuracy rather than a build failure.
+      - name: Resolve the pinned protea-backends commit
+        id: backends
+        run: |
+          set -euo pipefail
+          ref="$(sed -n 's/.*protea-backends *= *{.*rev *= *"\([0-9a-f]\{40\}\)".*/\1/p' pyproject.toml)"
+          if [ -z "${ref}" ]; then
+            echo "no 40-character protea-backends commit pinned in pyproject.toml" >&2
+            exit 1
+          fi
+          echo "ref=${ref}" >> "$GITHUB_OUTPUT"
+          echo "protea-backends pinned at ${ref}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-,format=short
+
+      - name: Build and push sparse-knn image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/lafa_sparse_knn/Dockerfile
+          push: true
+          build-args: |
+            PROTEA_BACKENDS_REF=${{ steps.backends.outputs.ref }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=lafa-sparse-knn
+          cache-to: type=gha,mode=max,scope=lafa-sparse-knn
