@@ -50,10 +50,11 @@ inference.
 | --- | --- |
 | annotation release | GOA 227, published 2025-09-04 |
 | ontology | `releases/2025-07-22` |
-| reference sequences | 528,294 |
+| bank rows | 575,503 canonical proteins, over 528,294 distinct sequences |
 | donor annotations | GOA 227, 5,880,402 over 557,071 proteins |
 | encoder training pool | 60,000 proteins, strided over the annotated set |
 | seed | 42 |
+| published bundle | `XaxiPiruli/protea-sparse-knn` on the HuggingFace Hub |
 
 The ontology snapshot is the last one at or before the annotation
 release, and the training driver refuses to run if that ordering is
@@ -85,10 +86,14 @@ crowd out the molecular function calls.
 
 ## Resources
 
-The bank is held as a CSR matrix, about 540 MB for 528,294 proteins at
-128 non-zeros each. Queries are scored in blocks of 256, so the dense
-similarity buffer stays near 540 MB whatever the query count. Peak
+The bank is held as a CSR matrix, about 295 MB for 575,503 rows at 128
+non-zeros each. Queries are scored in blocks of 256, so the dense
+similarity buffer stays near 590 MB whatever the query count. Peak
 resident memory is therefore roughly 1.5 GB plus the backbone.
+
+Measured end to end on one RTX 3060, 20 queries of 150 to 400 residues:
+11 seconds including loading the bank, the donors, the ontology and the
+backbone. Retrieval itself was under a second.
 
 The backbone runs in bfloat16 on CUDA and float32 on the processor, which
 is the backend's own rule: FP16 LayerNorm collapses to NaN on this
@@ -108,3 +113,17 @@ family. Retrieval never moves to the GPU.
   characters after mapping `[UZOB]` to `X`, and a lookalike encoder that
   tokenises the raw string would place queries in a different geometry
   and degrade silently.
+- The bank is keyed by protein, not by sequence. Accessions sharing a
+  sequence are separate rows carrying their own annotations, so they are
+  distinct donors but also exact ties in retrieval: a query matching a
+  sequence held by five accessions fills five neighbour slots with the
+  same vector.
+
+## Parity check
+
+Embedding a protein that is already in the bank must return that protein
+first at cosine 0.99 or above. On 20 held proteins, 19 returned
+themselves and the twentieth returned an accession sharing its exact
+sequence, so parity is 20 of 20. A consumer seeing lower has drifted from
+`EMBEDDING_RECIPE.json` and should not trust the output. This is the
+cheapest way to catch the failure that would otherwise be silent.
