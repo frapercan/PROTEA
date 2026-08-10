@@ -50,7 +50,7 @@ inference.
 | --- | --- |
 | annotation release | GOA 227, published 2025-09-04 |
 | ontology | `releases/2025-07-22` |
-| bank rows | 575,503 canonical proteins, over 528,294 distinct sequences |
+| bank rows | 575,503 canonical proteins, over 487,237 distinct sequences |
 | donor annotations | GOA 227, 5,880,402 over 557,071 proteins |
 | encoder training pool | 60,000 proteins, strided over the annotated set |
 | seed | 42 |
