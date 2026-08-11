@@ -82,9 +82,12 @@ output, 67 ontology.
 ## Output
 
 One TSV, `EntryID<TAB>GO_ID<TAB>score`, no header, scores in `[0, 1]` at
-three decimals. Capped at 500 terms per query and aspect. The cap is per
-aspect rather than global so a large biological process closure cannot
-crowd out the molecular function calls.
+three decimals. Capped at 1500 terms per query for biological process and
+500 for the other two. The cap is per aspect so a large biological process
+closure cannot crowd out the molecular function calls, and larger for BP
+because its closures are far deeper: at a flat 500, of the terms a protein
+already carried at the cutoff and lost, 4,287 of 4,291 went to the cap
+rather than to a missing vote, and 4,288 of those were biological process.
 
 ## Resources
 
@@ -106,8 +109,10 @@ family. Retrieval never moves to the GPU.
 - No runtime downloads beyond the backbone, which can be pre-seeded into
   the cache mount.
 - Deterministic: retrieval is exact, not an approximate index.
-- Sequences are truncated at 2048 residues, which touches about twenty
-  proteins in a Swiss-Prot-sized set.
+- Sequences are truncated at 2048 residues. On the 7,401 targets of one
+  release window that touched 216 proteins, 2.9 percent, and the longest
+  lost 77 percent of itself. Chunking is supported by the recipe but
+  disabled, because the bank was built without it.
 - Any target can be scored. Coverage does not depend on the query having
   been seen at training time.
 - The queries are embedded with `protea-backends`, the same code that
