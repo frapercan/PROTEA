@@ -228,7 +228,7 @@ def test_write_predictions_caps_each_aspect_independently(
     }
     out = tmp_path / "predictions.tsv"
 
-    written = driver.write_predictions(scored, aspect, ["Q1"], out, max_per_aspect=2)
+    written = driver.write_predictions(scored, aspect, ["Q1"], out, {"P": 2, "F": 2, "C": 2})
 
     lines = out.read_text().strip().split("\n")
     assert written == 3
@@ -242,7 +242,7 @@ def test_output_is_the_three_column_contract(ontology: Path, tmp_path: Path) -> 
     _, aspect, _ = driver.parse_obo(ontology)
     out = tmp_path / "predictions.tsv"
 
-    driver.write_predictions({"Q1": {"GO:0000001": 0.5}}, aspect, ["Q1"], out, 500)
+    driver.write_predictions({"Q1": {"GO:0000001": 0.5}}, aspect, ["Q1"], out, {"P": 500, "F": 500, "C": 500})
 
     assert out.read_text() == "Q1\tGO:0000001\t0.500\n"
 
