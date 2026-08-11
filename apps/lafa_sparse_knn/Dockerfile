@@ -70,12 +70,20 @@ RUN pip install --no-cache-dir \
 # does. Ankh-base is well under the 5 GB the guide asks us to keep out of the
 # image, and baking it removes a mount, a seeding step and the failure mode where
 # a container with no network reaches for the internet and hangs.
-ENV HF_HOME=/opt/hf-cache
-RUN mkdir -p /opt/hf-cache \
-    && python -c "from transformers import AutoTokenizer, T5EncoderModel; \
-       AutoTokenizer.from_pretrained('ElnaggarLab/ankh-base'); \
-       T5EncoderModel.from_pretrained('ElnaggarLab/ankh-base')" \
-    && chown -R protea:protea /opt/hf-cache
+# Optional because it is the one step that must reach the network, about 1.8 GB.
+# It bakes into /hf-cache, the same path a mounted cache uses, so both modes
+# share one contract: baked, nothing needs mounting; not baked, a host cache
+# mounted at that path supplies it, and a mount always takes precedence.
+ARG BAKE_BACKBONE=1
+ENV HF_HOME=/hf-cache
+RUN if [ "${BAKE_BACKBONE}" = "1" ]; then \
+         python -c "from transformers import AutoTokenizer, T5EncoderModel; \
+           AutoTokenizer.from_pretrained('ElnaggarLab/ankh-base'); \
+           T5EncoderModel.from_pretrained('ElnaggarLab/ankh-base')"; \
+       else \
+         echo "backbone not baked; a cache must be mounted at /hf-cache"; \
+       fi \
+    && chown -R protea:protea /hf-cache
 
 WORKDIR /app
 RUN mkdir -p /app/apps/lafa_sparse_knn
@@ -110,15 +118,13 @@ LABEL org.opencontainers.image.title="protea-sparse-knn" \
       net.functionbench.lafa.cutoff="2025-09-04" \
       net.functionbench.lafa.backbone="ElnaggarLab/ankh-base"
 
-# HF_HOME is the variable transformers actually reads. Setting only HF_CACHE
-# leaves the mount ignored: the backbone is re-downloaded into the container's
-# own home on every run, which is slow with a network and fatal without one.
-# HF_CACHE is kept because the entrypoint and the sibling containers use it.
-# HF_HOME points at the baked cache. Mounting a host cache at /hf-cache still
-# works and takes precedence, but nothing needs it any more.
-ENV HF_HOME=/opt/hf-cache \
-    HF_HUB_CACHE=/opt/hf-cache/hub \
-    HF_CACHE=/opt/hf-cache \
+# HF_HOME is the variable transformers actually reads; setting only HF_CACHE
+# leaves the mount ignored and the backbone re-downloaded on every run, which is
+# slow with a network and fatal without one. HF_CACHE is kept because the
+# entrypoint and the sibling containers use it.
+ENV HF_HOME=/hf-cache \
+    HF_HUB_CACHE=/hf-cache/hub \
+    HF_CACHE=/hf-cache \
     PROTEA_SPARSE_BUNDLE=/bundle \
     PROTEA_SPARSE_QUERY=/input/queries.fasta \
     PROTEA_SPARSE_OBO=/input/go-basic.obo \
