@@ -578,10 +578,26 @@ def write_predictions(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="PROTEA sparse-code KNN GO transfer")
-    parser.add_argument("--query_file", required=True)
+
+    # The LAFA container guide names these arguments, and its own baselines are
+    # invoked with them, so the guide's spelling is accepted alongside ours. It
+    # also asks that paths arrive as arguments rather than being hard-coded, so
+    # every path here can be overridden on the command line even though the
+    # entrypoint supplies a default.
+    parser.add_argument("--query_file", "-q", required=True)
     parser.add_argument("--bundle", required=True)
-    parser.add_argument("--obo", required=True)
-    parser.add_argument("--output", required=True)
+    parser.add_argument("--obo", "--graph", "-g", dest="obo", required=True)
+    parser.add_argument("--output", "--output_file", "-o", dest="output", required=True)
+
+    # Inputs the harness passes to every method and this one does not read. They
+    # are declared rather than ignored, so an unexpected argument is still an
+    # error and a supplied-but-unused one is reported instead of silently
+    # dropped.
+    parser.add_argument("--train_sequences", default=None)
+    parser.add_argument("--annot_file", "-a", dest="annot_file", default=None)
+    parser.add_argument("--train_terms", default=None)
+    parser.add_argument("--train_taxonomy", default=None)
+    parser.add_argument("--num_threads", type=int, default=None)
     parser.add_argument("--k", type=int, default=DEFAULT_K)
     parser.add_argument("--max_bpo", type=int, default=1500)
     parser.add_argument("--max_mfo", type=int, default=500)
@@ -594,6 +610,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--also_score", choices=("vote", "maxsim"), default=None,
                         help="write a second file scored the other way, for comparison")
     args = parser.parse_args(argv)
+
+    unused = [n for n in ("train_sequences", "annot_file", "train_terms", "train_taxonomy")
+              if getattr(args, n) is not None]
+    if unused:
+        log(f"accepted but not used by this method: {', '.join(unused)}")
+    if args.num_threads:
+        import torch
+        torch.set_num_threads(args.num_threads)
+        log(f"torch threads set to {args.num_threads}")
 
     bundle = Path(args.bundle)
     started = time.time()

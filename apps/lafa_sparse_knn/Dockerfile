@@ -18,12 +18,16 @@
 # Run example (matches the LAFA evaluator harness)::
 #
 #     docker run --rm \
-#         -v /path/to/protea-sparse-knn-bundle:/bundle:ro \
-#         -v $HOME/.cache/huggingface:/hf-cache \
-#         -v $PWD/queries.fasta:/input/queries.fasta:ro \
-#         -v $PWD/go-basic.obo:/input/go-basic.obo:ro \
-#         -v $PWD/out:/output \
-#         ghcr.io/frapercan/protea/sparse-knn:latest
+#         -v /path/to/bundle:/bundle:ro \
+#         -v $PWD/data:/app/data:ro \
+#         -v $PWD/out:/app/output:rw \
+#         ghcr.io/frapercan/protea/sparse-knn:latest \
+#         --query_file /app/data/test_sequences.fasta \
+#         --graph /app/data/go-basic.obo \
+#         --output_file /app/output/predictions.tsv
+#
+# The backbone is baked in, so no cache mount is needed. Paths are arguments,
+# as the LAFA container guide asks, and its argument names are accepted.
 
 ARG METHOD_RUNTIME_REF=latest
 FROM ghcr.io/frapercan/protea/method-runtime:${METHOD_RUNTIME_REF} AS runtime
@@ -62,6 +66,17 @@ RUN pip install --no-cache-dir \
     "protea-backends @ git+https://github.com/frapercan/protea-backends@${PROTEA_BACKENDS_REF}" \
     "scipy>=1.11"
 
+# Pre-download the backbone during the build, as the guide's own ProtT5 baseline
+# does. Ankh-base is well under the 5 GB the guide asks us to keep out of the
+# image, and baking it removes a mount, a seeding step and the failure mode where
+# a container with no network reaches for the internet and hangs.
+ENV HF_HOME=/opt/hf-cache
+RUN mkdir -p /opt/hf-cache \
+    && python -c "from transformers import AutoTokenizer, T5EncoderModel; \
+       AutoTokenizer.from_pretrained('ElnaggarLab/ankh-base'); \
+       T5EncoderModel.from_pretrained('ElnaggarLab/ankh-base')" \
+    && chown -R protea:protea /opt/hf-cache
+
 WORKDIR /app
 RUN mkdir -p /app/apps/lafa_sparse_knn
 COPY apps/lafa_sparse_knn/__init__.py /app/apps/lafa_sparse_knn/__init__.py
@@ -99,9 +114,11 @@ LABEL org.opencontainers.image.title="protea-sparse-knn" \
 # leaves the mount ignored: the backbone is re-downloaded into the container's
 # own home on every run, which is slow with a network and fatal without one.
 # HF_CACHE is kept because the entrypoint and the sibling containers use it.
-ENV HF_HOME=/hf-cache \
-    HF_HUB_CACHE=/hf-cache/hub \
-    HF_CACHE=/hf-cache \
+# HF_HOME points at the baked cache. Mounting a host cache at /hf-cache still
+# works and takes precedence, but nothing needs it any more.
+ENV HF_HOME=/opt/hf-cache \
+    HF_HUB_CACHE=/opt/hf-cache/hub \
+    HF_CACHE=/opt/hf-cache \
     PROTEA_SPARSE_BUNDLE=/bundle \
     PROTEA_SPARSE_QUERY=/input/queries.fasta \
     PROTEA_SPARSE_OBO=/input/go-basic.obo \

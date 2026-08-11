@@ -50,8 +50,8 @@ if [ ! -f "${OBO}" ]; then
     echo "[protea-sparse-knn] ontology not bind-mounted at ${OBO}" >&2
     exit 67
 fi
-# The backbone is not in the image. Without the cache it would be fetched, and
-# with no network it would hang until something times out, so say so here.
+# The backbone is baked into the image, so this should never fire. It stays as a
+# guard in case someone mounts over the cache directory with an empty one.
 HF_DIR="${HF_HOME:-/hf-cache}"
 if [ ! -d "${HF_DIR}/hub" ]; then
     echo "[protea-sparse-knn] no HuggingFace cache at ${HF_DIR}." >&2
