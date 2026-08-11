@@ -314,3 +314,59 @@ def test_search_without_query_accessions_is_unchanged() -> None:
     hits = driver.search(sparse.csr_matrix(np.array([[1.0, 0.0]], dtype=np.float32)), bank, ["A", "B"], k=1)
 
     assert [a for a, _ in hits[0]] == ["A"]
+
+
+class _FakeTorch:
+    """Minimal stand-in exposing the two torch attributes _embed_block uses."""
+
+    class OutOfMemoryError(Exception):
+        pass
+
+    class cuda:  # noqa: N801
+        @staticmethod
+        def empty_cache() -> None:
+            return None
+
+
+class _OomBackend:
+    """Backend that refuses blocks larger than ``limit`` with an OOM."""
+
+    def __init__(self, limit: int) -> None:
+        self.limit = limit
+        self.calls: list[int] = []
+
+    def embed_chunks(self, model, tokenizer, seqs, config, dev):  # noqa: ANN001
+        self.calls.append(len(seqs))
+        if len(seqs) > self.limit:
+            raise _FakeTorch.OutOfMemoryError("out of memory")
+        return [[type("C", (), {"vector": np.ones(4, dtype=np.float32)})()] for _ in seqs]
+
+
+def test_a_block_that_does_not_fit_is_halved_until_it_does() -> None:
+    """A fixed batch size dies on the worst block; splitting survives it.
+
+    Attention is quadratic in length, so memory depends on the block's
+    contents and on whatever else is resident on the card. A run died at
+    1,248 of 7,401 queries because another process held 4.4 GB.
+    """
+    backend = _OomBackend(limit=2)
+    seqs = {f"P{i}": "MKV" for i in range(8)}
+
+    out = driver._embed_block(
+        backend, None, None, seqs, list(seqs), None, "cuda", _FakeTorch
+    )
+
+    assert [a for a, _ in out] == list(seqs)
+    assert max(backend.calls) == 8
+    assert min(backend.calls) <= 2
+
+
+def test_a_single_sequence_that_never_fits_is_skipped_not_fatal() -> None:
+    """Losing one protein beats losing the run."""
+    backend = _OomBackend(limit=0)
+
+    out = driver._embed_block(
+        backend, None, None, {"P1": "MKV"}, ["P1"], None, "cuda", _FakeTorch
+    )
+
+    assert out == []

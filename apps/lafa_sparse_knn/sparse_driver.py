@@ -274,14 +274,9 @@ def embed_queries(
     kept: list[str] = []
     for start in range(0, len(order), batch_size):
         block = order[start : start + batch_size]
-        chunked = backend.embed_chunks(
-            model, tokenizer, [sequences[a] for a in block], config, dev
-        )
-        for accession, chunks in zip(block, chunked, strict=True):
-            vector = _collapse_chunks(chunks)
-            if vector is None:
-                log(f"  no embedding for {accession}, skipped")
-                continue
+        for accession, vector in _embed_block(
+            backend, model, tokenizer, sequences, block, config, dev, torch
+        ):
             kept.append(accession)
             vectors.append(vector)
         log(f"  embedded {min(start + batch_size, len(order)):,}/{len(order):,}")
@@ -289,6 +284,57 @@ def embed_queries(
     if not vectors:
         return [], np.empty((0, 0), dtype=np.float32)
     return kept, np.stack(vectors)
+
+
+def _embed_block(
+    backend: Any,
+    model: Any,
+    tokenizer: Any,
+    sequences: dict[str, str],
+    block: list[str],
+    config: Any,
+    dev: str,
+    torch: Any,
+) -> list[tuple[str, np.ndarray]]:
+    """Embed one block, halving it whenever the device runs out of memory.
+
+    Attention is quadratic in sequence length, so a block of long
+    proteins can need several times the memory of a block of short ones.
+    A fixed batch size therefore either wastes the device or dies on the
+    worst block, and which it does depends on what else is resident:
+    this failed at 1,248 of 7,401 queries because another process held
+    4.4 GB of the same card.
+
+    Splitting on failure keeps a fixed batch size as the fast path and
+    falls back only where it is needed. A single sequence that still does
+    not fit is reported and skipped, because losing one protein is a
+    better outcome than losing the run.
+    """
+    try:
+        chunked = backend.embed_chunks(
+            model, tokenizer, [sequences[a] for a in block], config, dev
+        )
+    except torch.OutOfMemoryError:
+        torch.cuda.empty_cache()
+        if len(block) == 1:
+            log(f"  {block[0]} does not fit on the device on its own, skipped")
+            return []
+        half = len(block) // 2
+        log(f"  out of memory on {len(block)} sequences, splitting into {half} and {len(block)-half}")
+        return _embed_block(
+            backend, model, tokenizer, sequences, block[:half], config, dev, torch
+        ) + _embed_block(
+            backend, model, tokenizer, sequences, block[half:], config, dev, torch
+        )
+
+    out: list[tuple[str, np.ndarray]] = []
+    for accession, chunks in zip(block, chunked, strict=True):
+        vector = _collapse_chunks(chunks)
+        if vector is None:
+            log(f"  no embedding for {accession}, skipped")
+            continue
+        out.append((accession, vector))
+    return out
 
 
 def _collapse_chunks(chunks: list[Any]) -> np.ndarray | None:

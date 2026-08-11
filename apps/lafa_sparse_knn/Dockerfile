@@ -71,11 +71,29 @@ RUN touch /app/apps/__init__.py \
     && chmod 0755 /app/lafa_entrypoint.sh \
     && chown -R protea:protea /app/apps /app/lafa_entrypoint.sh
 
+# The base image sets created, revision and version for itself, and they are
+# inherited unless overridden. Left alone the registry page advertises the base
+# image's build date and commit as if they were this image's, which is worse
+# than saying nothing. They are passed in at build time instead.
+ARG IMAGE_VERSION=dev
+ARG IMAGE_REVISION=unknown
+ARG IMAGE_CREATED=unknown
+
 LABEL org.opencontainers.image.title="protea-sparse-knn" \
-      org.opencontainers.image.description="PROTEA LAFA submission: Ankh-base embeddings projected through a learned sparse encoder, nearest-neighbour GO transfer against a frozen bank." \
+      org.opencontainers.image.description="Protein function prediction by nearest-neighbour GO transfer in the space of a learned sparse encoder. Ankh-base embeddings projected to a 2048-dimensional dictionary, top 128 components kept, matched against a frozen bank of 575,503 proteins. One retrieval pass covers all three GO aspects. Frozen at the GOA release of 2025-09-04." \
       org.opencontainers.image.source="https://github.com/frapercan/PROTEA" \
+      org.opencontainers.image.url="https://github.com/frapercan/PROTEA/tree/develop/apps/lafa_sparse_knn" \
+      org.opencontainers.image.documentation="https://huggingface.co/XaxiPiruli/protea-sparse-knn" \
+      org.opencontainers.image.authors="Francisco Miguel Perez Canales <frapercan1@alum.us.es>" \
+      org.opencontainers.image.vendor="PROTEA" \
       org.opencontainers.image.licenses="Unlicense" \
-      net.functionbench.lafa.method="protea-sparse-knn"
+      org.opencontainers.image.version="${IMAGE_VERSION}" \
+      org.opencontainers.image.revision="${IMAGE_REVISION}" \
+      org.opencontainers.image.created="${IMAGE_CREATED}" \
+      org.opencontainers.image.base.name="ghcr.io/frapercan/protea/method-runtime:latest" \
+      net.functionbench.lafa.method="protea-sparse-knn" \
+      net.functionbench.lafa.cutoff="2025-09-04" \
+      net.functionbench.lafa.backbone="ElnaggarLab/ankh-base"
 
 # HF_HOME is the variable transformers actually reads. Setting only HF_CACHE
 # leaves the mount ignored: the backbone is re-downloaded into the container's
