@@ -41,6 +41,23 @@ RUN mkdir -p /input /output /bundle /hf-cache \
 ARG PROTEA_BACKENDS_REF
 RUN test -n "${PROTEA_BACKENDS_REF}" \
     || (echo "PROTEA_BACKENDS_REF build arg is required" >&2 && exit 2)
+
+# Pin torch to a CUDA build the evaluator's driver can actually load. The base
+# image installs `torch>=2.0` from the default index, which resolves to the
+# newest CUDA available on the day it was built; that currently means CUDA 13.0,
+# which needs an NVIDIA driver of 580 or later. Clusters routinely run older
+# drivers, and the failure is at load time on their machine rather than at build
+# time on ours. CUDA 12.1 loads on driver 525 and later, which covers everything
+# from 2022 onward, and this method has no CUDA-specific code to lose by it.
+ARG TORCH_VERSION=2.5.1
+ARG TORCH_CUDA=cu121
+# The wheel is around 2.5 GB, so the default socket timeout is not generous
+# enough to be reliable on a domestic link.
+RUN pip install --no-cache-dir --timeout 120 --retries 10 \
+    --index-url "https://download.pytorch.org/whl/${TORCH_CUDA}" \
+    --extra-index-url https://pypi.org/simple \
+    "torch==${TORCH_VERSION}+${TORCH_CUDA}"
+
 RUN pip install --no-cache-dir \
     "protea-backends @ git+https://github.com/frapercan/protea-backends@${PROTEA_BACKENDS_REF}" \
     "scipy>=1.11"

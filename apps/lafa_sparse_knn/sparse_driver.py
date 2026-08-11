@@ -485,4 +485,13 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    code = main()
+    # Leave immediately rather than through the interpreter's shutdown. The
+    # torch and tokenizer stacks leave non-daemon threads behind, and the
+    # process was observed sitting idle for half an hour after writing its
+    # output, which an orchestrator reads as a hung job rather than a finished
+    # one. The work is done and the file is closed, so there is nothing left to
+    # tear down gracefully.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(code)
