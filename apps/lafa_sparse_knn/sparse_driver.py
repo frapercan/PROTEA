@@ -253,6 +253,15 @@ def embed_queries(
     import torch
     from protea_backends.ankh import AnkhBackend
 
+    # Fail here rather than silently reaching for the network. The backend loads
+    # the checkpoint through the HuggingFace cache, and if the mount is absent or
+    # the cache variables point elsewhere it downloads instead, which is slow
+    # with a network and fatal without one. An evaluator running offline should
+    # see the reason, not a timeout.
+    cache = Path(os.environ.get("HF_HOME", ""))
+    if cache.name and not (cache / "hub").is_dir():
+        log(f"warning: {cache}/hub is not present, the backbone will be fetched")
+
     backend = AnkhBackend()
     config = _BundleEmbeddingConfig(recipe)
     dev = device or ("cuda" if torch.cuda.is_available() else "cpu")

@@ -77,7 +77,13 @@ LABEL org.opencontainers.image.title="protea-sparse-knn" \
       org.opencontainers.image.licenses="Unlicense" \
       net.functionbench.lafa.method="protea-sparse-knn"
 
-ENV HF_CACHE=/hf-cache \
+# HF_HOME is the variable transformers actually reads. Setting only HF_CACHE
+# leaves the mount ignored: the backbone is re-downloaded into the container's
+# own home on every run, which is slow with a network and fatal without one.
+# HF_CACHE is kept because the entrypoint and the sibling containers use it.
+ENV HF_HOME=/hf-cache \
+    HF_HUB_CACHE=/hf-cache/hub \
+    HF_CACHE=/hf-cache \
     PROTEA_SPARSE_BUNDLE=/bundle \
     PROTEA_SPARSE_QUERY=/input/queries.fasta \
     PROTEA_SPARSE_OBO=/input/go-basic.obo \
