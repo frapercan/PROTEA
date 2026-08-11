@@ -438,8 +438,25 @@ def transfer(
     donors: dict[str, list[str]],
     parents: dict[str, list[str]],
     alt_ids: dict[str, str],
+    scheme: str = "vote",
 ) -> dict[str, dict[str, float]]:
     """Turn neighbours into scored GO terms, propagated to ancestors.
+
+    Two scoring schemes, because they disagree about what a score means
+    and the disagreement is load-bearing:
+
+    ``vote``
+        The similarity-weighted fraction of the neighbours that carry the
+        term. Rewards consensus. A term only the query itself carries
+        scores about 1/k, so a curated annotation the protein already
+        holds is ranked like a guess.
+    ``maxsim``
+        The similarity of the closest neighbour carrying the term, which
+        is the classic nearest-neighbour transfer score. Rewards
+        proximity, and cannot tell one donor from thirty.
+
+    Neither is universally better, so the choice is measured rather than
+    argued.
 
     A term's score is the similarity-weighted fraction of the neighbours
     that could vote at all, so it lands in ``[0, 1]`` by construction
@@ -477,7 +494,10 @@ def transfer(
             for leaf in donors[donor]:
                 propagated |= ancestors_of(alt_ids.get(leaf, leaf), parents, cache)
             for term in propagated:
-                scores[term] = scores.get(term, 0.0) + share
+                if scheme == "vote":
+                    scores[term] = scores.get(term, 0.0) + share
+                else:  # "maxsim"
+                    scores[term] = max(scores.get(term, 0.0), similarity)
         out[accession] = {term: min(1.0, value) for term, value in scores.items()}
     return out
 
@@ -534,6 +554,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max_cco", type=int, default=500)
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--device", default=None)
+    parser.add_argument("--score", choices=("vote", "maxsim"), default="vote")
+    parser.add_argument("--also_score", choices=("vote", "maxsim"), default=None,
+                        help="write a second file scored the other way, for comparison")
     args = parser.parse_args(argv)
 
     bundle = Path(args.bundle)
@@ -563,9 +586,20 @@ def main(argv: list[str] | None = None) -> int:
 
     codes = encode_sparse(embeddings, encoder, top_k, int(bank_meta["dict_dim"]))
     neighbours = search(codes, bank, accessions, args.k, query_accessions=kept)
-    scored = transfer(kept, neighbours, donors, parents, alt_ids)
+    scored = transfer(kept, neighbours, donors, parents, alt_ids, scheme=args.score)
     caps = {"P": args.max_bpo, "F": args.max_mfo, "C": args.max_cco}
     written = write_predictions(scored, aspect, kept, Path(args.output), caps)
+
+    # A second scoring scheme costs one more pass over the neighbours, which
+    # is negligible next to the embedding, and saves repeating the whole run
+    # to compare them.
+    if args.also_score:
+        other = transfer(kept, neighbours, donors, parents, alt_ids, scheme=args.also_score)
+        second = Path(args.output).with_name(
+            Path(args.output).stem + f".{args.also_score}" + Path(args.output).suffix
+        )
+        n = write_predictions(other, aspect, kept, second, caps)
+        log(f"also wrote {n:,} predictions scored by {args.also_score} to {second.name}")
 
     log(f"wrote {written:,} predictions for {len(kept):,} queries in {time.time()-started:.0f}s")
     return 0
