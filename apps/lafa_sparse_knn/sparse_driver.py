@@ -340,25 +340,49 @@ def encode_sparse(
 # --- retrieval and transfer -------------------------------------------
 
 
-def search(queries: Any, bank: Any, accessions: list[str], k: int) -> list[list[tuple[str, float]]]:
+def search(
+    queries: Any,
+    bank: Any,
+    accessions: list[str],
+    k: int,
+    query_accessions: list[str] | None = None,
+) -> list[list[tuple[str, float]]]:
     """Exact cosine top-k of every query against the bank.
 
     Both sides are already row-normalised, so the sparse product is the
     cosine directly. Queries are processed in blocks to bound the dense
     similarity buffer.
+
+    A query that is itself in the bank is always kept among its own
+    neighbours. Without that, a heavily duplicated protein is evicted
+    from its own list by its twins: the acyl carrier protein of E. coli
+    has 41 canonical accessions carrying its exact sequence, so all 30
+    slots tie at cosine 1.0 and which one is dropped is decided by the
+    sort's tie-break. The effect is that a protein the reference set
+    knows about stops donating what is known about it, which is an
+    accident rather than a decision.
     """
+    position = {accession: index for index, accession in enumerate(accessions)}
     hits: list[list[tuple[str, float]]] = []
     n_queries = queries.shape[0]
     effective_k = min(k, bank.shape[0])
+    forced = 0
     for start in range(0, n_queries, QUERY_CHUNK):
         block = queries[start : start + QUERY_CHUNK]
         similarity = np.asarray((block @ bank.T).todense(), dtype=np.float32)
         top = np.argpartition(-similarity, effective_k - 1, axis=1)[:, :effective_k]
         for row in range(similarity.shape[0]):
             columns = top[row]
+            if query_accessions is not None:
+                own = position.get(query_accessions[start + row])
+                if own is not None and own not in set(columns.tolist()):
+                    columns = np.append(columns[:-1], own)
+                    forced += 1
             ordered = columns[np.argsort(-similarity[row, columns])]
             hits.append([(accessions[int(c)], float(similarity[row, int(c)])) for c in ordered])
         log(f"  searched {min(start + QUERY_CHUNK, n_queries):,}/{n_queries:,}")
+    if forced:
+        log(f"  kept {forced:,} queries in their own neighbour list, evicted by exact ties")
     return hits
 
 
@@ -492,7 +516,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     codes = encode_sparse(embeddings, encoder, top_k, int(bank_meta["dict_dim"]))
-    neighbours = search(codes, bank, accessions, args.k)
+    neighbours = search(codes, bank, accessions, args.k, query_accessions=kept)
     scored = transfer(kept, neighbours, donors, parents, alt_ids)
     caps = {"P": args.max_bpo, "F": args.max_mfo, "C": args.max_cco}
     written = write_predictions(scored, aspect, kept, Path(args.output), caps)

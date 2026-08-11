@@ -284,3 +284,33 @@ def test_load_donors_groups_by_accession(tmp_path: Path) -> None:
 
     assert donors["A"] == ["GO:0000001", "GO:0000002"]
     assert donors["B"] == ["GO:0000003"]
+
+
+def test_a_query_is_never_evicted_from_its_own_neighbour_list() -> None:
+    """A protein tied with many identical twins must still be its own donor.
+
+    The acyl carrier protein of E. coli has 41 canonical accessions
+    carrying its exact sequence. Every one ties at cosine 1.0, so with
+    k=30 the query itself can be dropped by the sort's tie-break and
+    stops donating what the reference set already knows about it.
+    """
+    from scipy import sparse
+
+    vector = np.array([[1.0, 0.0]], dtype=np.float32)
+    twins = np.repeat(vector, 5, axis=0)
+    bank = sparse.csr_matrix(twins)
+    names = ["TWIN1", "TWIN2", "SELF", "TWIN3", "TWIN4"]
+
+    hits = driver.search(sparse.csr_matrix(vector), bank, names, k=2, query_accessions=["SELF"])
+
+    assert "SELF" in [accession for accession, _ in hits[0]]
+
+
+def test_search_without_query_accessions_is_unchanged() -> None:
+    """The guarantee is opt-in, so the plain call keeps its old behaviour."""
+    from scipy import sparse
+
+    bank = sparse.csr_matrix(np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32))
+    hits = driver.search(sparse.csr_matrix(np.array([[1.0, 0.0]], dtype=np.float32)), bank, ["A", "B"], k=1)
+
+    assert [a for a, _ in hits[0]] == ["A"]
