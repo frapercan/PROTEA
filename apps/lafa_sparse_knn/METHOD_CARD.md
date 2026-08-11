@@ -15,9 +15,11 @@ what they are.
    a 2048-dimensional dictionary and keep the 128 largest components.
 3. Retrieve the 30 nearest reference proteins by cosine in that sparse
    code space, exact brute force on the processor.
-4. Transfer the neighbours' GO terms. A term scores as the
-   similarity-weighted fraction of neighbours carrying it, so it lands in
-   `[0, 1]` by construction.
+4. Transfer the neighbours' GO terms. A term scores as
+   `agreement ** 0.33 * proximity ** 0.67`, where agreement is the
+   similarity-weighted fraction of neighbours carrying it and proximity is
+   the similarity of the closest one that does. Both are in `[0, 1]`, so
+   the product is too, with no rescaling.
 5. Propagate to ancestors under the true path rule, taking the maximum
    over descendants.
 
@@ -127,3 +129,25 @@ themselves and the twentieth returned an accession sharing its exact
 sequence, so parity is 20 of 20. A consumer seeing lower has drifted from
 `EMBEDDING_RECIPE.json` and should not trust the output. This is the
 cheapest way to catch the failure that would otherwise be silent.
+
+## The scoring weight
+
+A term's score mixes two quantities that disagree about what evidence is:
+how close the nearest donor carrying it is, and how many donors agree. They
+are combined geometrically, `agreement ** (1-w) * proximity ** w`, with
+`w = 0.67`.
+
+That number is not fitted here. It is PROTEA's own `composite` scoring
+configuration, which weights embedding similarity 0.4 against neighbour vote
+fraction 0.2, renormalised over the two signals this container has; the other
+0.4 there belongs to alignment identity and taxonomic proximity, which this
+image does not compute.
+
+Swept over one release window it held up. The optimum landed at 0.70 in four
+of the nine cells, more than any other value, and pure agreement won none.
+The published 0.67 is kept rather than the swept 0.70, because a constant
+confirmed from elsewhere is worth more than one fitted on the window it is
+then reported against.
+
+Both ends remain reachable: `--score vote` is pure agreement, `--score maxsim`
+pure proximity, `--blend` moves the dial.

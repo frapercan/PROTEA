@@ -50,6 +50,17 @@ QUERY_CHUNK = int(os.environ.get("PROTEA_SPARSE_QUERY_CHUNK", "256"))
 #: Neighbours retrieved per query before the vote is taken.
 DEFAULT_K = 30
 
+#: Weight on donor similarity against donor agreement in the default score.
+#: Taken from PROTEA's own ``composite`` scoring configuration, which weights
+#: embedding similarity 0.4 against neighbour vote fraction 0.2. Renormalised
+#: over the two signals this container has, that is 2/3. A sweep on one release
+#: window put the optimum at 0.70 in four of nine cells, more than any other
+#: value, and pure agreement won none: the platform's ratio survives losing the
+#: alignment and taxonomy signals it was chosen alongside. The published figure
+#: is kept rather than the swept one, because a constant confirmed from
+#: elsewhere is worth more than one fitted here.
+DEFAULT_BLEND = 0.67
+
 
 def log(message: str) -> None:
     """Emit a timestamped progress line on stderr."""
@@ -438,7 +449,8 @@ def transfer(
     donors: dict[str, list[str]],
     parents: dict[str, list[str]],
     alt_ids: dict[str, str],
-    scheme: str = "vote",
+    scheme: str = "blend",
+    blend: float = DEFAULT_BLEND,
 ) -> dict[str, dict[str, float]]:
     """Turn neighbours into scored GO terms, propagated to ancestors.
 
@@ -454,9 +466,21 @@ def transfer(
         The similarity of the closest neighbour carrying the term, which
         is the classic nearest-neighbour transfer score. Rewards
         proximity, and cannot tell one donor from thirty.
+    ``blend``
+        ``vote ** (1 - w) * maxsim ** w``. A term needs both a close
+        donor and agreement among donors, and neither alone carries it.
+        The geometric form is scale free and keeps the result in [0, 1]
+        without a rescaling; ``w = 0`` is pure vote and ``w = 1`` pure
+        maxsim, so the two pure schemes are the ends of one dial.
 
-    Neither is universally better, so the choice is measured rather than
-    argued.
+    These are the same two quantities PROTEA's own pipeline emits as
+    ``neighbor_vote_fraction`` and ``min_distance``, where a per-aspect
+    booster learns the weighting. This container carries no booster, so
+    the weighting is fixed and measured instead of learned.
+
+    Neither pure scheme is universally better: on one release window vote
+    won seven of nine cells and maxsim the two no-knowledge cells where
+    the answer was largely already stated at t0.
 
     A term's score is the similarity-weighted fraction of the neighbours
     that could vote at all, so it lands in ``[0, 1]`` by construction
@@ -487,18 +511,28 @@ def transfer(
             out[accession] = {}
             continue
 
-        scores: dict[str, float] = {}
+        vote_score: dict[str, float] = {}
+        max_score: dict[str, float] = {}
         for donor, similarity in voters:
             share = similarity / total
             propagated: set[str] = set()
             for leaf in donors[donor]:
                 propagated |= ancestors_of(alt_ids.get(leaf, leaf), parents, cache)
             for term in propagated:
-                if scheme == "vote":
-                    scores[term] = scores.get(term, 0.0) + share
-                else:  # "maxsim"
-                    scores[term] = max(scores.get(term, 0.0), similarity)
-        out[accession] = {term: min(1.0, value) for term, value in scores.items()}
+                vote_score[term] = vote_score.get(term, 0.0) + share
+                max_score[term] = max(max_score.get(term, 0.0), similarity)
+
+        if scheme == "vote":
+            merged = vote_score
+        elif scheme == "maxsim":
+            merged = max_score
+        else:  # "blend"
+            w = blend
+            merged = {
+                term: min(1.0, value) ** (1.0 - w) * min(1.0, max_score[term]) ** w
+                for term, value in vote_score.items()
+            }
+        out[accession] = {term: min(1.0, value) for term, value in merged.items()}
     return out
 
 
@@ -554,7 +588,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max_cco", type=int, default=500)
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--device", default=None)
-    parser.add_argument("--score", choices=("vote", "maxsim"), default="vote")
+    parser.add_argument("--score", choices=("vote", "maxsim", "blend"), default="blend")
+    parser.add_argument("--blend", type=float, default=DEFAULT_BLEND,
+                        help="weight on maxsim in the blend; 0 is pure vote, 1 pure maxsim")
     parser.add_argument("--also_score", choices=("vote", "maxsim"), default=None,
                         help="write a second file scored the other way, for comparison")
     args = parser.parse_args(argv)
@@ -586,7 +622,8 @@ def main(argv: list[str] | None = None) -> int:
 
     codes = encode_sparse(embeddings, encoder, top_k, int(bank_meta["dict_dim"]))
     neighbours = search(codes, bank, accessions, args.k, query_accessions=kept)
-    scored = transfer(kept, neighbours, donors, parents, alt_ids, scheme=args.score)
+    scored = transfer(kept, neighbours, donors, parents, alt_ids,
+                      scheme=args.score, blend=args.blend)
     caps = {"P": args.max_bpo, "F": args.max_mfo, "C": args.max_cco}
     written = write_predictions(scored, aspect, kept, Path(args.output), caps)
 

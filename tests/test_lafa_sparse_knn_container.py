@@ -112,13 +112,17 @@ def test_read_fasta_keeps_file_order_and_takes_the_first_token(tmp_path: Path) -
 
 
 def test_transfer_scores_by_similarity_weighted_agreement(ontology: Path) -> None:
-    """A term every neighbour carries must reach 1.0; a term one of two
-    carries at equal similarity must reach 0.5."""
+    """Under pure agreement: a term every neighbour carries reaches 1.0, and
+    a term one of two carries at equal similarity reaches 0.5.
+
+    Stated against ``vote`` explicitly, since the container's default is the
+    blend and this test is about what the agreement channel means.
+    """
     parents, _, alt = driver.parse_obo(ontology)
     donors = {"D1": ["GO:0000003"], "D2": ["GO:0000002"]}
     neighbours = [[("D1", 1.0), ("D2", 1.0)]]
 
-    scored = driver.transfer(["Q1"], neighbours, donors, parents, alt)
+    scored = driver.transfer(["Q1"], neighbours, donors, parents, alt, scheme="vote")
 
     # Both donors imply the root and the middle term, only D1 the leaf.
     assert scored["Q1"]["GO:0000001"] == pytest.approx(1.0)
@@ -370,3 +374,35 @@ def test_a_single_sequence_that_never_fits_is_skipped_not_fatal() -> None:
     )
 
     assert out == []
+
+
+def test_the_default_score_is_the_platform_blend(ontology: Path) -> None:
+    """The container's default must be the blend at PROTEA's own ratio.
+
+    Pure agreement won none of the nine cells of a release window; the
+    blend at 0.70 won four, and 0.67 is that ratio as the platform's
+    composite configuration already stated it.
+    """
+    parents, _, alt = driver.parse_obo(ontology)
+    donors = {"D1": ["GO:0000003"], "D2": ["GO:0000002"]}
+    hits = [[("D1", 0.9), ("D2", 0.3)]]
+
+    default = driver.transfer(["Q1"], hits, donors, parents, alt)
+    explicit = driver.transfer(["Q1"], hits, donors, parents, alt,
+                               scheme="blend", blend=0.67)
+
+    assert driver.DEFAULT_BLEND == 0.67
+    assert default == explicit
+
+
+def test_the_blend_ends_are_the_two_pure_schemes(ontology: Path) -> None:
+    """w=0 must reproduce vote exactly and w=1 must reproduce maxsim."""
+    parents, _, alt = driver.parse_obo(ontology)
+    donors = {"D1": ["GO:0000003"], "D2": ["GO:0000002"]}
+    hits = [[("D1", 0.9), ("D2", 0.3)]]
+
+    for w, scheme in ((0.0, "vote"), (1.0, "maxsim")):
+        blended = driver.transfer(["Q1"], hits, donors, parents, alt, scheme="blend", blend=w)
+        pure = driver.transfer(["Q1"], hits, donors, parents, alt, scheme=scheme)
+        for term, value in pure["Q1"].items():
+            assert blended["Q1"][term] == pytest.approx(value), f"{scheme} at w={w}, {term}"
