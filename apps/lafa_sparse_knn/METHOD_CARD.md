@@ -137,12 +137,34 @@ family. Retrieval never moves to the GPU.
 
 ## Parity check
 
-Embedding a protein that is already in the bank must return that protein
-first at cosine 0.99 or above. On 20 held proteins, 19 returned
-themselves and the twentieth returned an accession sharing its exact
-sequence, so parity is 20 of 20. A consumer seeing lower has drifted from
-`EMBEDDING_RECIPE.json` and should not trust the output. This is the
-cheapest way to catch the failure that would otherwise be silent.
+Pass `--self_check` and the container reports it for you:
+
+```
+self-check: 20 queries are in the bank; 20 are their own nearest
+neighbour; 0 were not retrieved at all; lowest self-cosine 0.9845
+self-check: passed. Query and bank are in the same geometry.
+```
+
+A protein already in the bank must come back as its own nearest
+neighbour. If it does not, the queries were embedded by a recipe that
+differs from the one the bank was built with, every retrieval is against
+the wrong geometry, and the output is still a well formed file of
+plausible and worthless scores. Nothing else in the run would say so,
+which is why this exists.
+
+**The criterion is rank, not a cosine threshold.** An earlier version of
+this document asked for cosine 0.99 or above, and that bar is wrong. The
+bank ships float16 and was built with the backbone in bfloat16 on a
+graphics card, while a processor run embeds in float32, so the exact
+self-cosine moves with the runtime path. Measured on the twenty reference
+proteins with the network disabled and no graphics card, every one of them
+ranks first and the lowest self-cosine is 0.9845, which the old bar would
+have failed. A threshold that rejects a correctly configured run is worse
+than no check, because it sends a working setup back to debug itself.
+
+Accessions sharing a sequence share a code exactly, so a query is often
+preceded by its own twins at an identical cosine. Those are ties and
+count as rank one.
 
 ## The scoring weight
 
