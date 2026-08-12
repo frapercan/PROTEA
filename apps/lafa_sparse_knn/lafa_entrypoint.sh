@@ -32,12 +32,23 @@ for arg in "$@"; do
 done
 
 # Which paths did the caller supply? Both our spelling and the guide's.
+#
+# The output VALUE is captured too, not just its presence. The writability
+# check below needs a directory whichever way the path arrived, and a check
+# that reads a variable only one of the two branches assigns is how this
+# script came to abort on its own first line under `set -u`.
 has_query=0; has_obo=0; has_output=0; has_bundle=0
+OUT_ARG=""
+take_output=0
 for arg in "$@"; do
+    if [ "${take_output}" -eq 1 ]; then
+        OUT_ARG="${arg}"; take_output=0; continue
+    fi
     case "${arg}" in
         --query_file|-q)                    has_query=1 ;;
         --obo|--graph|-g)                   has_obo=1 ;;
-        --output|--output_file|-o)          has_output=1 ;;
+        --output|--output_file|-o)          has_output=1; take_output=1 ;;
+        --output=*|--output_file=*)         has_output=1; OUT_ARG="${arg#*=}" ;;
         --bundle)                           has_bundle=1 ;;
     esac
 done
@@ -61,18 +72,6 @@ if [ "${has_bundle}" -eq 0 ]; then
     fi
     set -- "$@" --bundle "${BUNDLE}"
 fi
-# Check writability here rather than discovering it at the end. The container
-# runs as uid 1000, and a host directory owned by another uid is readable but
-# not writable, so without this the run embeds, retrieves and transfers before
-# failing on the last line with a bare PermissionError.
-if ! touch "${OUT_DIR}/.protea-write-test" 2>/dev/null; then
-    echo "[protea-sparse-knn] ${OUT_DIR} is not writable by uid $(id -u)." >&2
-    echo "[protea-sparse-knn] Mount a directory this uid can write, or run with" >&2
-    echo "[protea-sparse-knn] --user \$(id -u):\$(id -g)." >&2
-    exit 68
-fi
-rm -f "${OUT_DIR}/.protea-write-test"
-
 if [ "${has_query}" -eq 0 ]; then
     if [ ! -f "${QUERY}" ]; then
         echo "[protea-sparse-knn] no queries at ${QUERY}, and --query_file was not given." >&2
@@ -112,6 +111,25 @@ if [ "${has_output}" -eq 0 ]; then
     fi
     rm -f "${OUT_DIR}/.protea-write-test"
     set -- "$@" --output "${OUTPUT}"
+else
+    # The caller supplied the path, so the bind-mount question does not apply:
+    # they chose where it goes. Writability still does, and it is checked here
+    # rather than left to the driver's final line, because the container runs
+    # as uid 1000 and a host directory owned by another uid is readable but not
+    # writable. Without this the run embeds, retrieves and transfers first and
+    # dies on a bare PermissionError with the whole computation thrown away.
+    OUT_DIR="$(dirname "${OUT_ARG:-${OUTPUT}}")"
+    if [ ! -d "${OUT_DIR}" ]; then
+        echo "[protea-sparse-knn] output dir missing at ${OUT_DIR}" >&2
+        exit 66
+    fi
+    if ! touch "${OUT_DIR}/.protea-write-test" 2>/dev/null; then
+        echo "[protea-sparse-knn] ${OUT_DIR} is not writable by uid $(id -u)." >&2
+        echo "[protea-sparse-knn] Mount a directory this uid can write, or run with" >&2
+        echo "[protea-sparse-knn] --user \$(id -u):\$(id -g)." >&2
+        exit 68
+    fi
+    rm -f "${OUT_DIR}/.protea-write-test"
 fi
 
 # The backbone is baked into the image, so this is a guard for the case where
