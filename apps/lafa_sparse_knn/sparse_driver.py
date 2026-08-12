@@ -443,6 +443,69 @@ def search(
     return hits
 
 
+def report_self_check(
+    query_accessions: list[str],
+    neighbours: list[list[tuple[str, float]]],
+    bank_accessions: set[str],
+) -> dict[str, float]:
+    """Report, per query already in the bank, its own rank and cosine.
+
+    The failure this catches is silent and total: if the queries are embedded
+    by a recipe that differs from the one the bank was built with, every
+    retrieval is against the wrong geometry, the output is still a well formed
+    TSV of plausible scores, and nothing anywhere says so.
+
+    A protein that is in the bank is its own nearest neighbour under any
+    faithful recipe, so its rank is the diagnostic. **Rank is the criterion
+    here, not a cosine threshold.** The bank ships float16 and was built with
+    the backbone in bfloat16 on a graphics card, while a processor run embeds
+    in float32, so the exact self-cosine moves with the runtime path by more
+    than a tight threshold would tolerate. A fixed bar like 0.99 fails
+    correctly configured processor runs, which is worse than no check at all
+    because it sends a working setup back to debug itself.
+
+    Ties are ordinary rather than exceptional: accessions sharing a sequence
+    share a code exactly, so a query can be preceded by its own twins at an
+    identical cosine. Those count as rank 1.
+    """
+    ranks: list[int] = []
+    cosines: list[float] = []
+    for accession, hits in zip(query_accessions, neighbours, strict=True):
+        if accession not in bank_accessions:
+            continue
+        own = next((i for i, (donor, _) in enumerate(hits) if donor == accession), None)
+        if own is None:
+            ranks.append(0)  # not retrieved at all, the worst outcome
+            cosines.append(float("nan"))
+            continue
+        own_cosine = hits[own][1]
+        # Anything ahead of it at the same cosine is a tie, not a miss.
+        ahead = sum(1 for _, sim in hits[:own] if sim > own_cosine)
+        ranks.append(ahead + 1)
+        cosines.append(own_cosine)
+
+    if not ranks:
+        log("self-check: no query is in the bank, nothing to check")
+        return {}
+
+    first = sum(1 for r in ranks if r == 1)
+    missing = sum(1 for r in ranks if r == 0)
+    finite = [c for c in cosines if c == c]
+    low = min(finite) if finite else float("nan")
+    log(
+        f"self-check: {len(ranks):,} queries are in the bank; "
+        f"{first:,} are their own nearest neighbour; "
+        f"{missing:,} were not retrieved at all; "
+        f"lowest self-cosine {low:.4f}"
+    )
+    if first != len(ranks):
+        log("self-check: FAILED. The query recipe has drifted from EMBEDDING_RECIPE.json")
+        log("self-check: and the predictions should not be trusted.")
+    else:
+        log("self-check: passed. Query and bank are in the same geometry.")
+    return {"checked": len(ranks), "rank_one": first, "missing": missing, "lowest_cosine": low}
+
+
 def transfer(
     query_accessions: list[str],
     neighbours: list[list[tuple[str, float]]],
@@ -613,6 +676,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--device", default=None)
     parser.add_argument("--score", choices=("vote", "maxsim", "blend"), default="blend")
     parser.add_argument(
+        "--self_check",
+        action="store_true",
+        help=(
+            "report, for every query already in the bank, whether it is its own "
+            "nearest neighbour. Catches a query recipe that has drifted from the "
+            "one the bank was built with, which is otherwise silent: the output "
+            "stays well formed and every score is wrong."
+        ),
+    )
+    parser.add_argument(
         "--blend",
         type=float,
         default=DEFAULT_BLEND,
@@ -666,6 +739,8 @@ def main(argv: list[str] | None = None) -> int:
 
     codes = encode_sparse(embeddings, encoder, top_k, int(bank_meta["dict_dim"]))
     neighbours = search(codes, bank, accessions, args.k, query_accessions=kept)
+    if args.self_check:
+        report_self_check(kept, neighbours, set(accessions))
     scored = transfer(
         kept, neighbours, donors, parents, alt_ids, scheme=args.score, blend=args.blend
     )

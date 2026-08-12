@@ -137,9 +137,7 @@ def test_transfer_resolves_an_alternate_identifier(ontology: Path) -> None:
     container did not map alt ids it would drop those votes silently.
     """
     parents, _, alt = driver.parse_obo(ontology)
-    scored = driver.transfer(
-        ["Q1"], [[("D1", 1.0)]], {"D1": ["GO:0000099"]}, parents, alt
-    )
+    scored = driver.transfer(["Q1"], [[("D1", 1.0)]], {"D1": ["GO:0000099"]}, parents, alt)
 
     assert scored["Q1"]["GO:0000003"] == pytest.approx(1.0)
 
@@ -212,9 +210,7 @@ def test_scores_never_leave_the_unit_interval(ontology: Path) -> None:
     assert all(0.0 <= v <= 1.0 for v in scored["Q1"].values())
 
 
-def test_write_predictions_caps_each_aspect_independently(
-    ontology: Path, tmp_path: Path
-) -> None:
+def test_write_predictions_caps_each_aspect_independently(ontology: Path, tmp_path: Path) -> None:
     """The cap is per aspect on purpose.
 
     A global cap lets a large biological process closure crowd out the
@@ -246,7 +242,9 @@ def test_output_is_the_three_column_contract(ontology: Path, tmp_path: Path) -> 
     _, aspect, _ = driver.parse_obo(ontology)
     out = tmp_path / "predictions.tsv"
 
-    driver.write_predictions({"Q1": {"GO:0000001": 0.5}}, aspect, ["Q1"], out, {"P": 500, "F": 500, "C": 500})
+    driver.write_predictions(
+        {"Q1": {"GO:0000001": 0.5}}, aspect, ["Q1"], out, {"P": 500, "F": 500, "C": 500}
+    )
 
     assert out.read_text() == "Q1\tGO:0000001\t0.500\n"
 
@@ -315,7 +313,9 @@ def test_search_without_query_accessions_is_unchanged() -> None:
     from scipy import sparse
 
     bank = sparse.csr_matrix(np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32))
-    hits = driver.search(sparse.csr_matrix(np.array([[1.0, 0.0]], dtype=np.float32)), bank, ["A", "B"], k=1)
+    hits = driver.search(
+        sparse.csr_matrix(np.array([[1.0, 0.0]], dtype=np.float32)), bank, ["A", "B"], k=1
+    )
 
     assert [a for a, _ in hits[0]] == ["A"]
 
@@ -356,9 +356,7 @@ def test_a_block_that_does_not_fit_is_halved_until_it_does() -> None:
     backend = _OomBackend(limit=2)
     seqs = {f"P{i}": "MKV" for i in range(8)}
 
-    out = driver._embed_block(
-        backend, None, None, seqs, list(seqs), None, "cuda", _FakeTorch
-    )
+    out = driver._embed_block(backend, None, None, seqs, list(seqs), None, "cuda", _FakeTorch)
 
     assert [a for a, _ in out] == list(seqs)
     assert max(backend.calls) == 8
@@ -369,9 +367,7 @@ def test_a_single_sequence_that_never_fits_is_skipped_not_fatal() -> None:
     """Losing one protein beats losing the run."""
     backend = _OomBackend(limit=0)
 
-    out = driver._embed_block(
-        backend, None, None, {"P1": "MKV"}, ["P1"], None, "cuda", _FakeTorch
-    )
+    out = driver._embed_block(backend, None, None, {"P1": "MKV"}, ["P1"], None, "cuda", _FakeTorch)
 
     assert out == []
 
@@ -388,8 +384,7 @@ def test_the_default_score_is_the_platform_blend(ontology: Path) -> None:
     hits = [[("D1", 0.9), ("D2", 0.3)]]
 
     default = driver.transfer(["Q1"], hits, donors, parents, alt)
-    explicit = driver.transfer(["Q1"], hits, donors, parents, alt,
-                               scheme="blend", blend=0.67)
+    explicit = driver.transfer(["Q1"], hits, donors, parents, alt, scheme="blend", blend=0.67)
 
     assert driver.DEFAULT_BLEND == 0.67
     assert default == explicit
@@ -406,3 +401,58 @@ def test_the_blend_ends_are_the_two_pure_schemes(ontology: Path) -> None:
         pure = driver.transfer(["Q1"], hits, donors, parents, alt, scheme=scheme)
         for term, value in pure["Q1"].items():
             assert blended["Q1"][term] == pytest.approx(value), f"{scheme} at w={w}, {term}"
+
+
+def test_the_self_check_passes_when_every_query_is_its_own_neighbour() -> None:
+    """The parity report the method card tells a recipient to run.
+
+    It has to exist for that instruction to be honest: before this, the sheet
+    prescribed a check the delivered container could not perform, because the
+    driver never emitted a neighbour identity or a cosine.
+    """
+    from apps.lafa_sparse_knn.sparse_driver import report_self_check
+
+    hits = [
+        [("P1", 1.0), ("P2", 0.8)],
+        [("P2", 0.97), ("P1", 0.5)],
+    ]
+    out = report_self_check(["P1", "P2"], hits, {"P1", "P2", "P3"})
+    assert out["checked"] == 2
+    assert out["rank_one"] == 2
+    assert out["missing"] == 0
+
+
+def test_an_exact_tie_ahead_of_a_query_still_counts_as_rank_one() -> None:
+    """Accessions sharing a sequence share a code exactly, so a query is often
+    preceded by its own twins at an identical cosine. That is not a failure."""
+    from apps.lafa_sparse_knn.sparse_driver import report_self_check
+
+    hits = [[("TWIN", 1.0), ("P1", 1.0), ("OTHER", 0.4)]]
+    out = report_self_check(["P1"], hits, {"P1", "TWIN", "OTHER"})
+    assert out["rank_one"] == 1, "an equal cosine ahead of it is a tie, not a miss"
+
+
+def test_a_query_outranked_by_a_strictly_closer_donor_fails_the_check() -> None:
+    """This is the drift the check exists to catch: something genuinely nearer
+    than the protein's own bank row means the two are in different geometries."""
+    from apps.lafa_sparse_knn.sparse_driver import report_self_check
+
+    hits = [[("OTHER", 0.99), ("P1", 0.60)]]
+    out = report_self_check(["P1"], hits, {"P1", "OTHER"})
+    assert out["rank_one"] == 0
+    assert out["lowest_cosine"] == 0.60
+
+
+def test_a_query_absent_from_its_own_neighbours_is_counted_as_missing() -> None:
+    from apps.lafa_sparse_knn.sparse_driver import report_self_check
+
+    out = report_self_check(["P1"], [[("A", 0.9), ("B", 0.8)]], {"P1", "A", "B"})
+    assert out["missing"] == 1
+    assert out["rank_one"] == 0
+
+
+def test_a_query_not_in_the_bank_is_not_checked() -> None:
+    """Only proteins the bank knows can be checked, and most queries are not."""
+    from apps.lafa_sparse_knn.sparse_driver import report_self_check
+
+    assert report_self_check(["NEW"], [[("A", 0.7)]], {"A", "B"}) == {}
