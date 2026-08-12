@@ -112,13 +112,17 @@ def test_read_fasta_keeps_file_order_and_takes_the_first_token(tmp_path: Path) -
 
 
 def test_transfer_scores_by_similarity_weighted_agreement(ontology: Path) -> None:
-    """A term every neighbour carries must reach 1.0; a term one of two
-    carries at equal similarity must reach 0.5."""
+    """Under pure agreement: a term every neighbour carries reaches 1.0, and
+    a term one of two carries at equal similarity reaches 0.5.
+
+    Stated against ``vote`` explicitly, since the container's default is the
+    blend and this test is about what the agreement channel means.
+    """
     parents, _, alt = driver.parse_obo(ontology)
     donors = {"D1": ["GO:0000003"], "D2": ["GO:0000002"]}
     neighbours = [[("D1", 1.0), ("D2", 1.0)]]
 
-    scored = driver.transfer(["Q1"], neighbours, donors, parents, alt)
+    scored = driver.transfer(["Q1"], neighbours, donors, parents, alt, scheme="vote")
 
     # Both donors imply the root and the middle term, only D1 the leaf.
     assert scored["Q1"]["GO:0000001"] == pytest.approx(1.0)
@@ -228,7 +232,7 @@ def test_write_predictions_caps_each_aspect_independently(
     }
     out = tmp_path / "predictions.tsv"
 
-    written = driver.write_predictions(scored, aspect, ["Q1"], out, max_per_aspect=2)
+    written = driver.write_predictions(scored, aspect, ["Q1"], out, {"P": 2, "F": 2, "C": 2})
 
     lines = out.read_text().strip().split("\n")
     assert written == 3
@@ -242,7 +246,7 @@ def test_output_is_the_three_column_contract(ontology: Path, tmp_path: Path) -> 
     _, aspect, _ = driver.parse_obo(ontology)
     out = tmp_path / "predictions.tsv"
 
-    driver.write_predictions({"Q1": {"GO:0000001": 0.5}}, aspect, ["Q1"], out, 500)
+    driver.write_predictions({"Q1": {"GO:0000001": 0.5}}, aspect, ["Q1"], out, {"P": 500, "F": 500, "C": 500})
 
     assert out.read_text() == "Q1\tGO:0000001\t0.500\n"
 
@@ -284,3 +288,121 @@ def test_load_donors_groups_by_accession(tmp_path: Path) -> None:
 
     assert donors["A"] == ["GO:0000001", "GO:0000002"]
     assert donors["B"] == ["GO:0000003"]
+
+
+def test_a_query_is_never_evicted_from_its_own_neighbour_list() -> None:
+    """A protein tied with many identical twins must still be its own donor.
+
+    The acyl carrier protein of E. coli has 41 canonical accessions
+    carrying its exact sequence. Every one ties at cosine 1.0, so with
+    k=30 the query itself can be dropped by the sort's tie-break and
+    stops donating what the reference set already knows about it.
+    """
+    from scipy import sparse
+
+    vector = np.array([[1.0, 0.0]], dtype=np.float32)
+    twins = np.repeat(vector, 5, axis=0)
+    bank = sparse.csr_matrix(twins)
+    names = ["TWIN1", "TWIN2", "SELF", "TWIN3", "TWIN4"]
+
+    hits = driver.search(sparse.csr_matrix(vector), bank, names, k=2, query_accessions=["SELF"])
+
+    assert "SELF" in [accession for accession, _ in hits[0]]
+
+
+def test_search_without_query_accessions_is_unchanged() -> None:
+    """The guarantee is opt-in, so the plain call keeps its old behaviour."""
+    from scipy import sparse
+
+    bank = sparse.csr_matrix(np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32))
+    hits = driver.search(sparse.csr_matrix(np.array([[1.0, 0.0]], dtype=np.float32)), bank, ["A", "B"], k=1)
+
+    assert [a for a, _ in hits[0]] == ["A"]
+
+
+class _FakeTorch:
+    """Minimal stand-in exposing the two torch attributes _embed_block uses."""
+
+    class OutOfMemoryError(Exception):
+        pass
+
+    class cuda:  # noqa: N801
+        @staticmethod
+        def empty_cache() -> None:
+            return None
+
+
+class _OomBackend:
+    """Backend that refuses blocks larger than ``limit`` with an OOM."""
+
+    def __init__(self, limit: int) -> None:
+        self.limit = limit
+        self.calls: list[int] = []
+
+    def embed_chunks(self, model, tokenizer, seqs, config, dev):  # noqa: ANN001
+        self.calls.append(len(seqs))
+        if len(seqs) > self.limit:
+            raise _FakeTorch.OutOfMemoryError("out of memory")
+        return [[type("C", (), {"vector": np.ones(4, dtype=np.float32)})()] for _ in seqs]
+
+
+def test_a_block_that_does_not_fit_is_halved_until_it_does() -> None:
+    """A fixed batch size dies on the worst block; splitting survives it.
+
+    Attention is quadratic in length, so memory depends on the block's
+    contents and on whatever else is resident on the card. A run died at
+    1,248 of 7,401 queries because another process held 4.4 GB.
+    """
+    backend = _OomBackend(limit=2)
+    seqs = {f"P{i}": "MKV" for i in range(8)}
+
+    out = driver._embed_block(
+        backend, None, None, seqs, list(seqs), None, "cuda", _FakeTorch
+    )
+
+    assert [a for a, _ in out] == list(seqs)
+    assert max(backend.calls) == 8
+    assert min(backend.calls) <= 2
+
+
+def test_a_single_sequence_that_never_fits_is_skipped_not_fatal() -> None:
+    """Losing one protein beats losing the run."""
+    backend = _OomBackend(limit=0)
+
+    out = driver._embed_block(
+        backend, None, None, {"P1": "MKV"}, ["P1"], None, "cuda", _FakeTorch
+    )
+
+    assert out == []
+
+
+def test_the_default_score_is_the_platform_blend(ontology: Path) -> None:
+    """The container's default must be the blend at PROTEA's own ratio.
+
+    Pure agreement won none of the nine cells of a release window; the
+    blend at 0.70 won four, and 0.67 is that ratio as the platform's
+    composite configuration already stated it.
+    """
+    parents, _, alt = driver.parse_obo(ontology)
+    donors = {"D1": ["GO:0000003"], "D2": ["GO:0000002"]}
+    hits = [[("D1", 0.9), ("D2", 0.3)]]
+
+    default = driver.transfer(["Q1"], hits, donors, parents, alt)
+    explicit = driver.transfer(["Q1"], hits, donors, parents, alt,
+                               scheme="blend", blend=0.67)
+
+    assert driver.DEFAULT_BLEND == 0.67
+    assert default == explicit
+
+
+def test_the_blend_ends_are_the_two_pure_schemes(ontology: Path) -> None:
+    """w=0 must reproduce vote exactly and w=1 must reproduce maxsim."""
+    parents, _, alt = driver.parse_obo(ontology)
+    donors = {"D1": ["GO:0000003"], "D2": ["GO:0000002"]}
+    hits = [[("D1", 0.9), ("D2", 0.3)]]
+
+    for w, scheme in ((0.0, "vote"), (1.0, "maxsim")):
+        blended = driver.transfer(["Q1"], hits, donors, parents, alt, scheme="blend", blend=w)
+        pure = driver.transfer(["Q1"], hits, donors, parents, alt, scheme=scheme)
+        for term, value in pure["Q1"].items():
+            assert blended["Q1"][term] == pytest.approx(value), f"{scheme} at w={w}, {term}"

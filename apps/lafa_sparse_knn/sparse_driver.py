@@ -50,6 +50,17 @@ QUERY_CHUNK = int(os.environ.get("PROTEA_SPARSE_QUERY_CHUNK", "256"))
 #: Neighbours retrieved per query before the vote is taken.
 DEFAULT_K = 30
 
+#: Weight on donor similarity against donor agreement in the default score.
+#: Taken from PROTEA's own ``composite`` scoring configuration, which weights
+#: embedding similarity 0.4 against neighbour vote fraction 0.2. Renormalised
+#: over the two signals this container has, that is 2/3. A sweep on one release
+#: window put the optimum at 0.70 in four of nine cells, more than any other
+#: value, and pure agreement won none: the platform's ratio survives losing the
+#: alignment and taxonomy signals it was chosen alongside. The published figure
+#: is kept rather than the swept one, because a constant confirmed from
+#: elsewhere is worth more than one fitted here.
+DEFAULT_BLEND = 0.67
+
 
 def log(message: str) -> None:
     """Emit a timestamped progress line on stderr."""
@@ -184,7 +195,9 @@ def load_bank(bundle: Path) -> tuple[Any, list[str], dict[str, Any]]:
         (val.ravel(), idx.ravel().astype(np.int32), indptr),
         shape=(n_rows, int(meta["dict_dim"])),
     )
-    log(f"bank {bank.shape[0]:,} x {bank.shape[1]} at {k} non-zeros, {bank.data.nbytes/1e6:.0f} MB")
+    log(
+        f"bank {bank.shape[0]:,} x {bank.shape[1]} at {k} non-zeros, {bank.data.nbytes / 1e6:.0f} MB"
+    )
     return bank, accessions, meta
 
 
@@ -253,6 +266,15 @@ def embed_queries(
     import torch
     from protea_backends.ankh import AnkhBackend
 
+    # Fail here rather than silently reaching for the network. The backend loads
+    # the checkpoint through the HuggingFace cache, and if the mount is absent or
+    # the cache variables point elsewhere it downloads instead, which is slow
+    # with a network and fatal without one. An evaluator running offline should
+    # see the reason, not a timeout.
+    cache = Path(os.environ.get("HF_HOME", ""))
+    if cache.name and not (cache / "hub").is_dir():
+        log(f"warning: {cache}/hub is not present, the backbone will be fetched")
+
     backend = AnkhBackend()
     config = _BundleEmbeddingConfig(recipe)
     dev = device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -265,14 +287,9 @@ def embed_queries(
     kept: list[str] = []
     for start in range(0, len(order), batch_size):
         block = order[start : start + batch_size]
-        chunked = backend.embed_chunks(
-            model, tokenizer, [sequences[a] for a in block], config, dev
-        )
-        for accession, chunks in zip(block, chunked, strict=True):
-            vector = _collapse_chunks(chunks)
-            if vector is None:
-                log(f"  no embedding for {accession}, skipped")
-                continue
+        for accession, vector in _embed_block(
+            backend, model, tokenizer, sequences, block, config, dev, torch
+        ):
             kept.append(accession)
             vectors.append(vector)
         log(f"  embedded {min(start + batch_size, len(order)):,}/{len(order):,}")
@@ -280,6 +297,55 @@ def embed_queries(
     if not vectors:
         return [], np.empty((0, 0), dtype=np.float32)
     return kept, np.stack(vectors)
+
+
+def _embed_block(
+    backend: Any,
+    model: Any,
+    tokenizer: Any,
+    sequences: dict[str, str],
+    block: list[str],
+    config: Any,
+    dev: str,
+    torch: Any,
+) -> list[tuple[str, np.ndarray]]:
+    """Embed one block, halving it whenever the device runs out of memory.
+
+    Attention is quadratic in sequence length, so a block of long
+    proteins can need several times the memory of a block of short ones.
+    A fixed batch size therefore either wastes the device or dies on the
+    worst block, and which it does depends on what else is resident:
+    this failed at 1,248 of 7,401 queries because another process held
+    4.4 GB of the same card.
+
+    Splitting on failure keeps a fixed batch size as the fast path and
+    falls back only where it is needed. A single sequence that still does
+    not fit is reported and skipped, because losing one protein is a
+    better outcome than losing the run.
+    """
+    try:
+        chunked = backend.embed_chunks(model, tokenizer, [sequences[a] for a in block], config, dev)
+    except torch.OutOfMemoryError:
+        torch.cuda.empty_cache()
+        if len(block) == 1:
+            log(f"  {block[0]} does not fit on the device on its own, skipped")
+            return []
+        half = len(block) // 2
+        log(
+            f"  out of memory on {len(block)} sequences, splitting into {half} and {len(block) - half}"
+        )
+        return _embed_block(
+            backend, model, tokenizer, sequences, block[:half], config, dev, torch
+        ) + _embed_block(backend, model, tokenizer, sequences, block[half:], config, dev, torch)
+
+    out: list[tuple[str, np.ndarray]] = []
+    for accession, chunks in zip(block, chunked, strict=True):
+        vector = _collapse_chunks(chunks)
+        if vector is None:
+            log(f"  no embedding for {accession}, skipped")
+            continue
+        out.append((accession, vector))
+    return out
 
 
 def _collapse_chunks(chunks: list[Any]) -> np.ndarray | None:
@@ -331,25 +397,49 @@ def encode_sparse(
 # --- retrieval and transfer -------------------------------------------
 
 
-def search(queries: Any, bank: Any, accessions: list[str], k: int) -> list[list[tuple[str, float]]]:
+def search(
+    queries: Any,
+    bank: Any,
+    accessions: list[str],
+    k: int,
+    query_accessions: list[str] | None = None,
+) -> list[list[tuple[str, float]]]:
     """Exact cosine top-k of every query against the bank.
 
     Both sides are already row-normalised, so the sparse product is the
     cosine directly. Queries are processed in blocks to bound the dense
     similarity buffer.
+
+    A query that is itself in the bank is always kept among its own
+    neighbours. Without that, a heavily duplicated protein is evicted
+    from its own list by its twins: the acyl carrier protein of E. coli
+    has 41 canonical accessions carrying its exact sequence, so all 30
+    slots tie at cosine 1.0 and which one is dropped is decided by the
+    sort's tie-break. The effect is that a protein the reference set
+    knows about stops donating what is known about it, which is an
+    accident rather than a decision.
     """
+    position = {accession: index for index, accession in enumerate(accessions)}
     hits: list[list[tuple[str, float]]] = []
     n_queries = queries.shape[0]
     effective_k = min(k, bank.shape[0])
+    forced = 0
     for start in range(0, n_queries, QUERY_CHUNK):
         block = queries[start : start + QUERY_CHUNK]
         similarity = np.asarray((block @ bank.T).todense(), dtype=np.float32)
         top = np.argpartition(-similarity, effective_k - 1, axis=1)[:, :effective_k]
         for row in range(similarity.shape[0]):
             columns = top[row]
+            if query_accessions is not None:
+                own = position.get(query_accessions[start + row])
+                if own is not None and own not in set(columns.tolist()):
+                    columns = np.append(columns[:-1], own)
+                    forced += 1
             ordered = columns[np.argsort(-similarity[row, columns])]
             hits.append([(accessions[int(c)], float(similarity[row, int(c)])) for c in ordered])
         log(f"  searched {min(start + QUERY_CHUNK, n_queries):,}/{n_queries:,}")
+    if forced:
+        log(f"  kept {forced:,} queries in their own neighbour list, evicted by exact ties")
     return hits
 
 
@@ -359,14 +449,45 @@ def transfer(
     donors: dict[str, list[str]],
     parents: dict[str, list[str]],
     alt_ids: dict[str, str],
+    scheme: str = "blend",
+    blend: float = DEFAULT_BLEND,
 ) -> dict[str, dict[str, float]]:
     """Turn neighbours into scored GO terms, propagated to ancestors.
 
-    A term's score is the similarity-weighted fraction of the neighbours
-    that could vote at all, so it lands in ``[0, 1]`` by construction
-    rather than by a rescaling after the fact. Propagation takes the
-    maximum over descendants, which keeps an ancestor at least as
-    confident as anything implying it and satisfies the true path rule.
+    Three scoring schemes, because the first two disagree about what a
+    score means and the disagreement is load-bearing:
+
+    ``vote``
+        The similarity-weighted fraction of the neighbours that carry the
+        term. Rewards consensus. A term only the query itself carries
+        scores about 1/k, so a curated annotation the protein already
+        holds is ranked like a guess.
+    ``maxsim``
+        The similarity of the closest neighbour carrying the term, which
+        is the classic nearest-neighbour transfer score. Rewards
+        proximity, and cannot tell one donor from thirty.
+    ``blend``
+        ``vote ** (1 - w) * maxsim ** w``. A term needs both a close
+        donor and agreement among donors, and neither alone carries it.
+        The geometric form is scale free and keeps the result in [0, 1]
+        without a rescaling; ``w = 0`` is pure vote and ``w = 1`` pure
+        maxsim, so the two pure schemes are the ends of one dial.
+
+    These are the same two quantities PROTEA's own pipeline emits as
+    ``neighbor_vote_fraction`` and ``min_distance``, where a per-aspect
+    booster learns the weighting. This container carries no booster, so
+    the weighting is fixed and measured instead of learned.
+
+    Neither pure scheme is universally better: on one release window vote
+    won seven of nine cells and maxsim the two no-knowledge cells where
+    the answer was largely already stated at t0.
+
+    The vote component is the similarity-weighted fraction of the
+    neighbours that could vote at all, so it lands in ``[0, 1]`` by
+    construction rather than by a rescaling after the fact, and the other
+    two schemes inherit that range. Propagation takes the maximum over
+    descendants, which keeps an ancestor at least as confident as
+    anything implying it and satisfies the true path rule.
 
     Only neighbours carrying annotations enter the denominator. About 3%
     of the bank has an embedding but no GO term, and counting those in
@@ -391,15 +512,28 @@ def transfer(
             out[accession] = {}
             continue
 
-        scores: dict[str, float] = {}
+        vote_score: dict[str, float] = {}
+        max_score: dict[str, float] = {}
         for donor, similarity in voters:
             share = similarity / total
             propagated: set[str] = set()
             for leaf in donors[donor]:
                 propagated |= ancestors_of(alt_ids.get(leaf, leaf), parents, cache)
             for term in propagated:
-                scores[term] = scores.get(term, 0.0) + share
-        out[accession] = {term: min(1.0, value) for term, value in scores.items()}
+                vote_score[term] = vote_score.get(term, 0.0) + share
+                max_score[term] = max(max_score.get(term, 0.0), similarity)
+
+        if scheme == "vote":
+            merged = vote_score
+        elif scheme == "maxsim":
+            merged = max_score
+        else:  # "blend"
+            w = blend
+            merged = {
+                term: min(1.0, value) ** (1.0 - w) * min(1.0, max_score[term]) ** w
+                for term, value in vote_score.items()
+            }
+        out[accession] = {term: min(1.0, value) for term, value in merged.items()}
     return out
 
 
@@ -408,13 +542,20 @@ def write_predictions(
     aspect: dict[str, str],
     order: list[str],
     path: Path,
-    max_per_aspect: int,
+    caps: dict[str, int],
 ) -> int:
     """Write ``EntryID<TAB>GO_ID<TAB>score``, capped per query and aspect.
 
     The cap is per aspect rather than global so a query with a large
     biological process closure cannot crowd out its molecular function
     calls, which is the failure mode a single global cap produces.
+
+    Biological process gets a larger allowance than the other two because
+    its closures are far deeper. Measured on a 7,401-query run at a flat
+    500: of the terms a protein already carried at the cutoff and did not
+    survive into the output, 4,287 of 4,291 were lost to the cap rather
+    than to a missing vote, and 4,288 of those were biological process
+    while cellular component lost none.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     written = 0
@@ -425,7 +566,7 @@ def write_predictions(
                 per_aspect[aspect.get(term, "")].append((term, score))
             for letter in ("P", "F", "C"):
                 rows = sorted(per_aspect.get(letter, []), key=lambda r: (-r[1], r[0]))
-                for term, score in rows[:max_per_aspect]:
+                for term, score in rows[: caps[letter]]:
                     if score <= 0.0:
                         continue
                     handle.write(f"{accession}\t{term}\t{score:.3f}\n")
@@ -438,15 +579,59 @@ def write_predictions(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="PROTEA sparse-code KNN GO transfer")
-    parser.add_argument("--query_file", required=True)
+
+    # The LAFA container guide names these arguments, and its own baselines are
+    # invoked with them, so the guide's spelling is accepted alongside ours. It
+    # also asks that paths arrive as arguments rather than being hard-coded, so
+    # every path here can be overridden on the command line even though the
+    # entrypoint supplies a default.
+    parser.add_argument("--query_file", "-q", required=True)
     parser.add_argument("--bundle", required=True)
-    parser.add_argument("--obo", required=True)
-    parser.add_argument("--output", required=True)
+    parser.add_argument("--obo", "--graph", "-g", dest="obo", required=True)
+    parser.add_argument("--output", "--output_file", "-o", dest="output", required=True)
+
+    # Inputs the harness passes to every method and this one does not read. They
+    # are declared rather than ignored, so an unexpected argument is still an
+    # error and a supplied-but-unused one is reported instead of silently
+    # dropped.
+    parser.add_argument("--train_sequences", default=None)
+    parser.add_argument("--annot_file", "-a", dest="annot_file", default=None)
+    parser.add_argument("--train_terms", default=None)
+    parser.add_argument("--train_taxonomy", default=None)
+    parser.add_argument("--num_threads", type=int, default=None)
     parser.add_argument("--k", type=int, default=DEFAULT_K)
-    parser.add_argument("--max_per_aspect", type=int, default=500)
+    parser.add_argument("--max_bpo", type=int, default=1500)
+    parser.add_argument("--max_mfo", type=int, default=500)
+    parser.add_argument("--max_cco", type=int, default=500)
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--device", default=None)
+    parser.add_argument("--score", choices=("vote", "maxsim", "blend"), default="blend")
+    parser.add_argument(
+        "--blend",
+        type=float,
+        default=DEFAULT_BLEND,
+        help="weight on maxsim in the blend; 0 is pure vote, 1 pure maxsim",
+    )
+    parser.add_argument(
+        "--also_score",
+        choices=("vote", "maxsim"),
+        default=None,
+        help="write a second file scored the other way, for comparison",
+    )
     args = parser.parse_args(argv)
+
+    unused = [
+        n
+        for n in ("train_sequences", "annot_file", "train_terms", "train_taxonomy")
+        if getattr(args, n) is not None
+    ]
+    if unused:
+        log(f"accepted but not used by this method: {', '.join(unused)}")
+    if args.num_threads:
+        import torch
+
+        torch.set_num_threads(args.num_threads)
+        log(f"torch threads set to {args.num_threads}")
 
     bundle = Path(args.bundle)
     started = time.time()
@@ -474,15 +659,36 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     codes = encode_sparse(embeddings, encoder, top_k, int(bank_meta["dict_dim"]))
-    neighbours = search(codes, bank, accessions, args.k)
-    scored = transfer(kept, neighbours, donors, parents, alt_ids)
-    written = write_predictions(
-        scored, aspect, kept, Path(args.output), args.max_per_aspect
+    neighbours = search(codes, bank, accessions, args.k, query_accessions=kept)
+    scored = transfer(
+        kept, neighbours, donors, parents, alt_ids, scheme=args.score, blend=args.blend
     )
+    caps = {"P": args.max_bpo, "F": args.max_mfo, "C": args.max_cco}
+    written = write_predictions(scored, aspect, kept, Path(args.output), caps)
 
-    log(f"wrote {written:,} predictions for {len(kept):,} queries in {time.time()-started:.0f}s")
+    # A second scoring scheme costs one more pass over the neighbours, which
+    # is negligible next to the embedding, and saves repeating the whole run
+    # to compare them.
+    if args.also_score:
+        other = transfer(kept, neighbours, donors, parents, alt_ids, scheme=args.also_score)
+        second = Path(args.output).with_name(
+            Path(args.output).stem + f".{args.also_score}" + Path(args.output).suffix
+        )
+        n = write_predictions(other, aspect, kept, second, caps)
+        log(f"also wrote {n:,} predictions scored by {args.also_score} to {second.name}")
+
+    log(f"wrote {written:,} predictions for {len(kept):,} queries in {time.time() - started:.0f}s")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    code = main()
+    # Leave immediately rather than through the interpreter's shutdown. The
+    # torch and tokenizer stacks leave non-daemon threads behind, and the
+    # process was observed sitting idle for half an hour after writing its
+    # output, which an orchestrator reads as a hung job rather than a finished
+    # one. The work is done and the file is closed, so there is nothing left to
+    # tear down gracefully.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(code)

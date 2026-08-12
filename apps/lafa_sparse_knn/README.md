@@ -12,8 +12,9 @@ One backbone, one retrieval pass, all three aspects. The query is
 embedded with Ankh-base, projected through a learned linear map to a
 2048-dimensional dictionary, sparsified to its 128 largest components,
 and matched against a frozen bank of 575,503 reference proteins by exact
-cosine. The neighbours' GO terms are transferred by
-similarity-weighted agreement and propagated to ancestors.
+cosine. A term is scored by how close the nearest donor carrying it is and
+by how many donors agree, weighted 2 to 1 in favour of proximity, then
+propagated to ancestors.
 
 There is no reranker and no per-aspect model in this image. It is the
 retrieval core on its own.
