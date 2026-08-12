@@ -122,8 +122,19 @@ LABEL org.opencontainers.image.title="protea-sparse-knn" \
 # leaves the mount ignored and the backbone re-downloaded on every run, which is
 # slow with a network and fatal without one. HF_CACHE is kept because the
 # entrypoint and the sibling containers use it.
+#
+# HF_HUB_OFFLINE stops the hub being contacted at all. Without it every run
+# issues HTTP requests for config.json and tokenizer_config.json before falling
+# back to the cache: on a connected machine that is outbound traffic some
+# evaluation clusters forbid, and on an air-gapped one it is a minute of DNS
+# failures and retry backoff before any work starts. The cache mount is already
+# mandatory, enforced by the entrypoint's exit 70, so there is nothing the
+# network could usefully supply and refusing to ask for it is the honest
+# setting. It also makes "the container does not reach the network" true, which
+# it was not.
 ENV HF_HOME=/hf-cache \
     HF_HUB_CACHE=/hf-cache/hub \
+    HF_HUB_OFFLINE=1 \
     HF_CACHE=/hf-cache \
     PROTEA_SPARSE_BUNDLE=/bundle \
     PROTEA_SPARSE_QUERY=/input/queries.fasta \
