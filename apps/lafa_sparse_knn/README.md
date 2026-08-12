@@ -45,9 +45,12 @@ docker run --rm \
     protea-sparse-knn:latest
 ```
 
-Positional arguments are forwarded to the driver, so `--k`,
-`--max_per_aspect`, `--batch_size` and `--device` can be swept without
-rebuilding.
+Arguments are forwarded to the driver, so `--k`, `--max_bpo`, `--max_mfo`,
+`--max_cco`, `--score`, `--blend`, `--batch_size` and `--device` can be
+swept without rebuilding. There is no `--max_per_aspect`: the cap is three
+separate flags because biological process needs a larger allowance than the
+other two. Run the image with `--help` for the full list rather than
+trusting this one.
 
 ## The bundle
 

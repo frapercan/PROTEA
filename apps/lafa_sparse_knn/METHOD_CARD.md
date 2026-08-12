@@ -74,10 +74,12 @@ choosing hyperparameters and is not used to fit the delivered artefact.
 | `/input/queries.fasta` | read-only | query FASTA |
 | `/input/go-basic.obo` | read-only | the ontology at the cutoff |
 | `/output` | writable | `predictions.tsv` |
-| `/hf-cache` | read-write | backbone weights |
+| `/hf-cache` | read-only | backbone weights |
 
-Missing mounts exit with distinct codes: 64 bundle, 65 queries, 66
-output, 67 ontology.
+Missing or unusable mounts exit with distinct codes: 64 bundle, 65
+queries, 66 output directory absent, 67 ontology, 68 output not writable
+by the container's uid, 69 output not a bind mount so the predictions
+would be discarded, 70 no backbone cache.
 
 ## Output
 
@@ -85,9 +87,16 @@ One TSV, `EntryID<TAB>GO_ID<TAB>score`, no header, scores in `[0, 1]` at
 three decimals. Capped at 1500 terms per query for biological process and
 500 for the other two. The cap is per aspect so a large biological process
 closure cannot crowd out the molecular function calls, and larger for BP
-because its closures are far deeper: at a flat 500, of the terms a protein
-already carried at the cutoff and lost, 4,287 of 4,291 went to the cap
-rather than to a missing vote, and 4,288 of those were biological process.
+because its closures are far deeper: under a flat 500 the terms a protein
+already carried at the cutoff were lost to the cap rather than to a missing
+vote, and the loss fell on biological process while cellular component lost
+none.
+
+The counts that used to stand here have been struck. They were internally
+impossible, claiming a subset larger than the set it came from, and the run
+that produced them is not reproducible from what ships. A number a reader
+cannot check is worth less than the mechanism, which is checkable: compare
+the per-aspect closure depths.
 
 ## Resources
 

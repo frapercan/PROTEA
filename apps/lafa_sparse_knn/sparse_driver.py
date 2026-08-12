@@ -552,10 +552,16 @@ def write_predictions(
 
     Biological process gets a larger allowance than the other two because
     its closures are far deeper. Measured on a 7,401-query run at a flat
-    500: of the terms a protein already carried at the cutoff and did not
-    survive into the output, 4,287 of 4,291 were lost to the cap rather
-    than to a missing vote, and 4,288 of those were biological process
-    while cellular component lost none.
+    500, the terms a protein already carried at the cutoff and did not
+    survive into the output were lost to the cap rather than to a missing
+    vote, and the loss fell on biological process while cellular component
+    lost none.
+
+    The three counts that used to stand here are struck rather than
+    corrected. Two of them were mutually impossible, one being a subset
+    larger than the set it was drawn from, and the run that produced them
+    cannot be reproduced from what this container ships. The mechanism is
+    the part a reader can check anyway: compare closure depths per aspect.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     written = 0

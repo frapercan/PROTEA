@@ -88,52 +88,58 @@ if [ "${has_obo}" -eq 0 ]; then
     set -- "$@" --obo "${OBO}"
 fi
 
-if [ "${has_output}" -eq 0 ]; then
-    OUT_DIR="$(dirname "${OUTPUT}")"
-    if [ ! -d "${OUT_DIR}" ]; then
-        echo "[protea-sparse-knn] output dir missing at ${OUT_DIR}" >&2
-        exit 66
-    fi
-    # The image creates /output, so an unmounted output directory is writable
-    # and the run succeeds: the predictions are then discarded with the
-    # container. That is worse than an error, so refuse it.
-    if ! grep -q " ${OUT_DIR} " /proc/mounts 2>/dev/null; then
-        echo "[protea-sparse-knn] ${OUT_DIR} is not a bind mount, so anything written" >&2
-        echo "[protea-sparse-knn] there is discarded when the container exits." >&2
-        echo "[protea-sparse-knn] Mount a host directory: -v \$PWD/out:${OUT_DIR}" >&2
-        exit 69
-    fi
-    if ! touch "${OUT_DIR}/.protea-write-test" 2>/dev/null; then
-        echo "[protea-sparse-knn] ${OUT_DIR} is not writable by uid $(id -u)." >&2
-        echo "[protea-sparse-knn] Mount a directory this uid can write, or run with" >&2
-        echo "[protea-sparse-knn] --user \$(id -u):\$(id -g)." >&2
-        exit 68
-    fi
-    rm -f "${OUT_DIR}/.protea-write-test"
-    set -- "$@" --output "${OUTPUT}"
-else
-    # The caller supplied the path, so the bind-mount question does not apply:
-    # they chose where it goes. Writability still does, and it is checked here
-    # rather than left to the driver's final line, because the container runs
-    # as uid 1000 and a host directory owned by another uid is readable but not
-    # writable. Without this the run embeds, retrieves and transfers first and
-    # dies on a bare PermissionError with the whole computation thrown away.
-    OUT_DIR="$(dirname "${OUT_ARG:-${OUTPUT}}")"
-    if [ ! -d "${OUT_DIR}" ]; then
-        echo "[protea-sparse-knn] output dir missing at ${OUT_DIR}" >&2
-        exit 66
-    fi
-    if ! touch "${OUT_DIR}/.protea-write-test" 2>/dev/null; then
-        echo "[protea-sparse-knn] ${OUT_DIR} is not writable by uid $(id -u)." >&2
-        echo "[protea-sparse-knn] Mount a directory this uid can write, or run with" >&2
-        echo "[protea-sparse-knn] --user \$(id -u):\$(id -g)." >&2
-        exit 68
-    fi
-    rm -f "${OUT_DIR}/.protea-write-test"
+# Where the output will go, whichever way it arrived, and then ONE set of
+# checks on it. The two branches used to check different things: the
+# caller-supplied path was exempted from the bind-mount test on the reasoning
+# that somebody who names a path has chosen where it goes. That reasoning is
+# wrong, and the guide's own calling style is where it bites. Running with
+# `--output_file /output/predictions.tsv` and no `-v` for /output completes,
+# logs "wrote 5,625 predictions", and exits 0 with the file discarded inside
+# the container. A silent success that produces nothing is the worst failure
+# this script can have, and it was reachable through the documented interface.
+OUT_DIR="$(dirname "${OUT_ARG:-${OUTPUT}}")"
+
+if [ ! -d "${OUT_DIR}" ]; then
+    echo "[protea-sparse-knn] output dir missing at ${OUT_DIR}" >&2
+    exit 66
+fi
+# Writability first, then whether it is a mount at all. Both orders are
+# defensible; this one is chosen because an unwritable directory has a specific
+# remedy the caller can act on, while "not a mount" is the diagnosis you want
+# once the obvious thing is ruled out. It also keeps each refusal reachable on
+# its own, which the reverse order does not: an unmounted directory inside the
+# image is always writable, so a mount-first check would answer 69 for a
+# permissions problem too.
+#
+# Checked here rather than left to the driver's final line: the container runs
+# as uid 1000, a host directory owned by another uid is readable but not
+# writable, and without this the run embeds, retrieves and transfers first and
+# dies on a bare PermissionError with the whole computation thrown away.
+if ! touch "${OUT_DIR}/.protea-write-test" 2>/dev/null; then
+    echo "[protea-sparse-knn] ${OUT_DIR} is not writable by uid $(id -u)." >&2
+    echo "[protea-sparse-knn] Mount a directory this uid can write, or run with" >&2
+    echo "[protea-sparse-knn] --user \$(id -u):\$(id -g)." >&2
+    exit 68
+fi
+rm -f "${OUT_DIR}/.protea-write-test"
+# The image creates /output, so an unmounted output directory is writable and
+# the run succeeds: the predictions are then discarded with the container.
+if ! grep -q " ${OUT_DIR} " /proc/mounts 2>/dev/null; then
+    echo "[protea-sparse-knn] ${OUT_DIR} is not a bind mount, so anything written" >&2
+    echo "[protea-sparse-knn] there is discarded when the container exits." >&2
+    echo "[protea-sparse-knn] Mount a host directory: -v \$PWD/out:${OUT_DIR}" >&2
+    exit 69
 fi
 
-# The backbone is baked into the image, so this is a guard for the case where
-# someone mounts an empty directory over the cache.
+if [ "${has_output}" -eq 0 ]; then
+    set -- "$@" --output "${OUTPUT}"
+fi
+
+# The backbone is NOT in the image unless it was built with BAKE_BACKBONE=1,
+# and the published image is not, so for a caller this is not an edge case: the
+# cache mount is mandatory and this is the check that says so. The comment here
+# used to claim the backbone was baked, which is the kind of false statement
+# that survives because nobody runs the path it describes.
 HF_DIR="${HF_HOME:-/hf-cache}"
 if [ ! -d "${HF_DIR}/hub" ]; then
     echo "[protea-sparse-knn] no HuggingFace cache at ${HF_DIR}." >&2
